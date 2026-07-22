@@ -4,6 +4,7 @@ export type JobSummary = components['schemas']['JobSummaryResponse']
 export type JobNodeSummary = components['schemas']['JobNodeSummaryResponse']
 export type JobDetail = components['schemas']['JobDetailResponse']
 export type JobNode = components['schemas']['JobNodeResponse']
+export type ExecutorKind = NonNullable<JobNode['executor_kind']>
 export type NodeRun = components['schemas']['NodeRunResponse']
 export type JobsResponse = components['schemas']['JobsResponse']
 export type JobBatchResponse = components['schemas']['JobBatchResponse']

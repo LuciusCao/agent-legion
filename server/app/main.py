@@ -6,16 +6,19 @@ from typing import Any
 
 from fastapi import FastAPI
 
+from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_catalog import sync_agent_definitions
+from server.app.agent_completion import AgentCompletionHandler
+from server.app.agent_dispatch import AgentDispatchService
+from server.app.agent_workers import AgentWorkerRegistry
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.db.connection import close_database_pools
 from server.app.db.notifications import NotificationHub
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
-from server.app.executors.config import RemoteExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
-from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.runtime_factory import build_execution_runtime
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
@@ -23,7 +26,6 @@ from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
-from server.app.remote_wiring import register_remote_completion
 from server.app.routes import create_router
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
@@ -32,11 +34,11 @@ from server.app.services.job_packages import JobPackageService
 from server.app.services.package_deletion import PackageDeletionService
 from server.app.services.package_stats_backfill import backfill_package_stats
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
-from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.skills.manager import SkillManager
 from server.app.spa import mount_spa
@@ -48,7 +50,6 @@ from server.app.workflow_worker_thread import WorkflowWorkerThread
 def build_executor_registry(
     settings: Settings,
     job_db: Any | None = None,
-    remote_broker: RemoteExecutionBroker | None = None,
     artifact_store: ArtifactStore | None = None,
 ) -> ExecutorRegistry:
     """Build the application-wide executor registry from settings.
@@ -70,7 +71,6 @@ def build_executor_registry(
         settings_config=settings.config,
         job_db=job_db,
         cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
-        remote_broker=remote_broker,
         artifact_store=artifact_store,
     )
     return ExecutorRegistry.build(settings.executor_definitions, runtime)
@@ -90,30 +90,34 @@ def create_app(
     hub = NotificationHub()
     db = Database(settings.database_url, hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
+    sync_agent_definitions(settings.database_url, settings.agent_definitions)
+    WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
-    # capability -> requires_labels from every remote executor definition,
-    # for label-affinity filtering at dequeue time.
-    label_requirements = {
-        capability: capability_config.requires_labels
-        for definition in settings.executor_definitions.values()
-        if isinstance(definition, RemoteExecutorConfig)
-        for capability, capability_config in definition.capabilities.items()
-        if capability_config.requires_labels
-    }
-    remote_broker = RemoteExecutionBroker(
-        job_db.path,
-        settings.data_dir / "remote_bundles",
-        claim_timeout_seconds=settings.executor_runtime.remote.claim_timeout_seconds,
-        requeue_limit=settings.executor_runtime.remote.requeue_limit,
-        capability_label_requirements=label_requirements or None,
-    )
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
-    executor_registry = build_executor_registry(
-        settings, job_db, remote_broker=remote_broker, artifact_store=artifact_store
+    agent_broker = AgentExecutionBroker(
+        job_db.path,
+        lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
+        bundle_dir=settings.data_dir / "agent_bundles",
     )
+    agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
+    executor_registry = build_executor_registry(settings, job_db, artifact_store=artifact_store)
 
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
+    )
+    executor_leases = ExecutorLeaseRepository(
+        job_db.path,
+        job_db=job_db,
+        data_dir=settings.data_dir,
+        job_event_manager=job_event_manager,
+        job_event_buffer=job_event_buffer,
+    )
+    agent_worker_registry = AgentWorkerRegistry(job_db.path)
+    agent_completion = AgentCompletionHandler(
+        executor_leases,
+        artifact_store,
+        settings.jobs_dir,
+        settings.data_dir / "agent_bundles",
     )
     backfill_package_stats(db, settings)
     workflow_worker_thread: WorkflowWorkerThread | None = None
@@ -131,31 +135,17 @@ def create_app(
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
-            sync_workspace_pi_agents(job_db, settings, agent_manager)
-            executor_leases = ExecutorLeaseRepository(
-                job_db.path,
-                job_db=job_db,
-                data_dir=settings.data_dir,
-                job_event_manager=job_event_manager,
-                job_event_buffer=job_event_buffer,
-            )
-            register_remote_completion(
-                remote_broker,
-                executor_leases,
-                settings.jobs_dir,
-                artifact_store,
-            )
             if WorkflowWorkerThread.is_enabled(settings):
                 execution_runtime = build_execution_runtime(
                     executor_leases, executor_registry, settings.executor_runtime
                 )
                 # The sweeper owns all lease hygiene (startup + interval sweeps,
-                # remote lease renewal). With sweeper_enabled=False an external
+                # Agent claim recovery). With sweeper_enabled=False an external
                 # sweeper process must run instead (multi-replica deployments).
                 if settings.executor_runtime.sweeper_enabled:
                     sweeper_thread = SweeperThread(
                         executor_leases,
-                        remote_broker,
+                        agent_broker,
                         interval_seconds=settings.executor_runtime.sweeper_interval_seconds,
                         lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
                     )
@@ -172,6 +162,7 @@ def create_app(
                     settings=settings,
                     workspace_worker_control=workspace_worker_control,
                     agent_manager=agent_manager,
+                    agent_dispatch=agent_dispatch,
                 )
                 try:
                     workflow_worker_thread.start()
@@ -181,12 +172,11 @@ def create_app(
         try:
             yield
         finally:
-            background_tasks.stop(app)
+            await background_tasks.stop(app)
             if sweeper_thread is not None:
                 sweeper_thread.stop()
             if workflow_worker_thread is not None:
                 workflow_worker_thread.stop()
-            remote_broker.close()
             close_database_pools()
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
@@ -195,7 +185,11 @@ def create_app(
     app.state.db = db
     app.state.job_db = job_db
     app.state.executor_registry = executor_registry
-    app.state.remote_broker = remote_broker
+    app.state.agent_broker = agent_broker
+    app.state.agent_dispatch = agent_dispatch
+    app.state.agent_worker_registry = agent_worker_registry
+    app.state.agent_completion = agent_completion
+    app.state.executor_leases = executor_leases
     app.state.artifact_store = artifact_store
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
@@ -226,8 +220,10 @@ def create_app(
             job_packages=job_packages,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
-            remote_broker=remote_broker,
             artifact_store=artifact_store,
+            agent_broker=agent_broker,
+            agent_worker_registry=agent_worker_registry,
+            agent_completion=agent_completion,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")

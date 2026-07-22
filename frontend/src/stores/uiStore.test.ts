@@ -177,5 +177,26 @@ describe('uiStore', () => {
       expect(useUiStore.getState().agents).toEqual([])
       cleanup()
     })
+
+    it('ignores a snapshot envelope without an agents array', () => {
+      const cleanup = useUiStore.getState().connectAgentsWs()
+      WebSocketMock.instances[0].emitMessage(
+        JSON.stringify({ type: 'snapshot' })
+      )
+      WebSocketMock.instances[0].emitMessage(
+        JSON.stringify({ type: 'snapshot', agents: 'oops' })
+      )
+      expect(useUiStore.getState().agents).toEqual([])
+      cleanup()
+    })
+
+    it('ignores an agent_busy envelope without an agent object', () => {
+      const cleanup = useUiStore.getState().connectAgentsWs()
+      WebSocketMock.instances[0].emitMessage(
+        JSON.stringify({ type: 'agent_busy' })
+      )
+      expect(useUiStore.getState().agents).toEqual([])
+      cleanup()
+    })
   })
 })

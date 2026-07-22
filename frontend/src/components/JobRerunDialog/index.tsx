@@ -64,6 +64,9 @@ export function JobRerunDialog({
       } else {
         await onConfirm(effectiveNodeKey, false)
       }
+    } catch {
+      // Keep the dialog open on failure; the store already surfaced a toast.
+      return
     } finally {
       setLoading(false)
     }

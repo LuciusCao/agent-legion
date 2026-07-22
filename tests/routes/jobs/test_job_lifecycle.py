@@ -154,14 +154,8 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
             ws_id,
             allocations=[
                 {"executor_id": "local-default", "concurrency_limit": 1},
-                {"executor_id": "pi", "concurrency_limit": 1},
             ],
             bindings=[
-                {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "review_key_info",
-                    "executor_id": "pi",
-                },
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "assemble_comprehension_info",
@@ -174,8 +168,9 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
 
     assert response.status_code == 200
     nodes = {node["node_key"]: node for node in response.json()["nodes"]}
-    assert nodes["review_key_info"]["executor_id"] == "pi"
-    assert nodes["review_key_info"]["executor_kind"] == "pi"
+    assert nodes["review_key_info"]["executor_id"] is None
+    assert nodes["review_key_info"]["executor_kind"] is None
+    assert nodes["review_key_info"]["agent_id"] == "question-key-info-review-v1"
     assert nodes["assemble_comprehension_info"]["executor_id"] == "local-default"
     assert nodes["assemble_comprehension_info"]["executor_kind"] == "local"
 

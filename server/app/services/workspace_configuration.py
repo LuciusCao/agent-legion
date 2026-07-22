@@ -9,7 +9,6 @@ from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
 from server.app.services.workspace_executor_warnings import configuration_with_warnings
-from server.app.services.workspace_pi_agents import sync_pi_agents_for_workspace
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
@@ -154,12 +153,6 @@ class WorkspaceConfigurationService:
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
         WorkflowRevisionService(self.job_db).ensure_active_revision(workspace_id, workflow)
-        sync_pi_agents_for_workspace(
-            workspace_id,
-            executor_allocations,
-            self.settings.executor_definitions,
-            self.agent_manager,
-        )
         executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,

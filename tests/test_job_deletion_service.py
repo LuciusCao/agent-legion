@@ -186,7 +186,8 @@ def test_delete_cleans_artifact_refs_and_unreferenced_files(
 ) -> None:
     settings = _create_settings(tmp_path)
     lease_repo = ExecutorLeaseRepository(job_db.path)
-    store = _create_artifact_store(job_db, tmp_path)
+    # Grace-free store so the test exercises physical GC of just-created blobs.
+    store = ArtifactStore(tmp_path / "artifacts", job_db.path, gc_grace_seconds=0)
     service = JobDeletionService(job_db, lease_repo, settings, artifact_store=store)
 
     job_a = _create_job(job_db, "ws-gc", "Q100", status="completed")

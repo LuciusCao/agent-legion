@@ -369,6 +369,52 @@ describe('useWorkspaceEvents', () => {
     expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
+  it('resyncs instead of dropping events when the pending queue overflows', async () => {
+    let snapshotCalls = 0
+    mockFetchJobsSnapshot.mockImplementation(() => {
+      snapshotCalls += 1
+      if (snapshotCalls === 1) {
+        // First snapshot load hangs so events keep queuing behind it.
+        return new Promise(() => {})
+      }
+      return Promise.resolve({
+        workspace_id: 'ws1',
+        revision: 5,
+        stats: {},
+        jobs: [],
+        next_cursor: null,
+      })
+    })
+
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+    })
+    await waitFor(() => {
+      expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(1)
+    })
+
+    await act(async () => {
+      for (let i = 0; i < 1001; i += 1) {
+        source.onmessage?.(
+          new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'job_updated',
+              workspace_id: 'ws1',
+              job_id: `job${i}`,
+            }),
+          })
+        )
+      }
+    })
+
+    await waitFor(() => {
+      expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(2)
+    })
+  })
+
   it('resyncs snapshot when backend requests resync', async () => {
     mockFetchJobsSnapshot.mockResolvedValueOnce({
       workspace_id: 'ws1',

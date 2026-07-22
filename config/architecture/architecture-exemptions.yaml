@@ -1,4 +1,14 @@
 exemptions:
+- check: architecture.route_response_model
+  path: server/app/routes/agent_workers.py:heartbeat
+  reason: Agent Worker heartbeat returns an empty 204 response by protocol.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+- check: architecture.route_response_model
+  path: server/app/routes/agent_workers.py:result
+  reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
 - check: architecture.scheduler_threadpool
   path: server/app/workflow_worker_thread.py:self._pools[executor_id]
   reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor
@@ -6,27 +16,13 @@ exemptions:
     global capacity and keyed by executor_id, not workspace.
   owner: workspace-executor
   remove_when: issues/open/032-P2-event-driven-worker.md
-- check: architecture.scheduler_threadpool
-  path: server/app/workflow_worker_thread.py:self._submit_pool
-  reason: Remote submit-only claims share one configurable ThreadPoolExecutor;
-    its default derives from the largest remote executor capacity to keep bundle
-    construction queue time below the lease TTL.
-  owner: workspace-executor
-  remove_when: issues/open/032-P2-event-driven-worker.md
 - check: architecture.file_budget
   path: server/app/main.py
   reason: Task 9 of the phase1 event-bus plan converges the six route service
     constructions from routes/__init__.py into create_app; extracting an
     AppContainer composition module will bring main.py back under budget.
-    Task 6 of the phase3 execution-decoupling plan wires the
-    RemoteCompletionHandler callback registration into the lifespan, and
-    task 8 wires the SweeperThread lifecycle into the lifespan.
-    Task 2 of the phase4 agent-collaboration plan assembles the ArtifactStore
-    next to the RemoteExecutionBroker and mounts the artifacts router.
-    Task 3 of the phase4 agent-collaboration plan injects the ArtifactStore
-    into RuntimeDependencies and the RemoteCompletionHandler callback.
-    Task 5 of the phase4 agent-collaboration plan extracts capability
-    requires_labels from the remote executor definitions into the broker.
+    Agent Worker composition now wires the PostgreSQL broker, catalog sync,
+    artifact store, completion handler, and Host scheduler in one lifecycle.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
   ceiling: 237
@@ -68,10 +64,12 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/jobs/queries/workflow_revisions.py
   reason: Task 1 of the workflow-studio-ux-refinement plan adds the get_workflow_revision
-    query; the file will be split once the plan is complete.
+    query; Agent Legion now atomically materializes Agent routes and node capacities
+    with revision publication, pruning rows absent from the new projection. Extract
+    the projection write helper after rollout.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
-  ceiling: 110
+  ceiling: 253
 - check: architecture.file_budget
   path: server/app/routes/workflow_revisions.py
   reason: Task 1 of the workflow-studio-ux-refinement plan adds the revision detail
@@ -86,83 +84,6 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
   ceiling: 40
-- check: architecture.file_budget
-  path: server/app/executors/config.py
-  reason: Task 4 of the distributed-agent-execution plan adds the remote executor
-    config models; Task 5 of the phase3 execution-decoupling plan adds the
-    agent_id field and its openclaw-payload validator to RemoteExecutorConfig;
-    the models will be split into a separate module once the feature is complete.
-    Task 5 of the phase4 agent-collaboration plan adds the requires_labels field
-    and its constraint-value validator to RemoteCapabilityConfig.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
-  ceiling: 195
-- check: architecture.file_budget
-  path: server/app/executors/runtime_config.py
-  reason: Task 4 of the distributed-agent-execution plan adds RemoteRuntimeConfig
-    and remote worker-token startup validation; the remote runtime section will be
-    split into a separate module once the feature is complete.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
-  ceiling: 267
-- check: architecture.route_response_model
-  path: server/app/routes/remote.py:heartbeat
-  reason: Task 6 of the distributed-agent-execution plan returns an empty 204 for worker
-    heartbeats; no response body contract exists to model.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
-- check: architecture.route_response_model
-  path: server/app/routes/remote.py:report_result
-  reason: Task 6 of the distributed-agent-execution plan returns an empty 204 for result
-    reports; no response body contract exists to model.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
-- check: architecture.route_response_model
-  path: server/app/routes/remote.py:revoke_worker_token
-  reason: Task 4 of the phase4 agent-collaboration plan returns an empty 204 for worker
-    token revocation; no response body contract exists to model.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-4
-- check: architecture.file_budget
-  path: server/app/routes/remote.py
-  reason: Task 3 of the runner-audit plan adds the read-only GET /workers endpoint and
-    its response models, and task 7 of the phase3 execution-decoupling plan adds
-    the ClaimResponse command_spec field; the workers section will be split into
-    a separate module once the feature is complete. Task 2 of the phase4
-    agent-collaboration plan extracts the _authorize helper into
-    routes/remote_auth.py, shrinking this module. Task 3 of the phase4
-    agent-collaboration plan validates output_artifacts hashes in report_result.
-    Task 4 adds the workers/register and workers/{id}/revoke management endpoints.
-    Task 5 adds the ClaimRequest.labels field and its claim-time registry upsert.
-    Task 9 turns GET /workers into the page-facing read-only registry
-    (RemoteWorkerSummaryResponse with labels/revoked, no worker token).
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
-  ceiling: 237
-- check: architecture.file_budget
-  path: server/app/executors/_remote_queue_store.py
-  reason: Task 5 of the phase4 agent-collaboration plan adds the labels_satisfy
-    constraint evaluator and extends claim_next with in-memory requires_labels
-    candidate filtering inside the claim transaction (the limit-1 fast path is
-    kept when no constraints are configured); the claim path will be extracted
-    into its own module if the store keeps growing.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-5
-  ceiling: 285
-- check: architecture.file_budget
-  path: scripts/remote/worker.py
-  reason: Task 3 of the phase4 agent-collaboration plan adds artifact upload/download
-    to WorkerClient and the bundle_mode=refs input pull / outputs upload to
-    run_execution; the single-file stdlib worker cannot be split without
-    breaking its copy-to-any-machine deployment, so the ceiling tracks growth
-    until the artifact section is extracted into a generated bundle. Task 4
-    adds the --register-token startup exchange for per-worker tokens. Task 5
-    adds the repeatable --label flag and label reporting on register/claim.
-    The final-review fix adds the early --worker-id dotted-name rejection
-    (parser.error before any server call).
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-3
-  ceiling: 552
 - check: architecture.file_budget
   path: server/app/workflows/schema.py
   reason: Task 6 of the phase4 agent-collaboration plan adds the frozen
@@ -184,11 +105,11 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/routes/job_view_contracts.py
   reason: Task 9 of the phase4 agent-collaboration plan adds the JobNodeResponse
-    worker_id field (claimed remote worker projection); the contract module
+    worker_id field; Agent Legion adds the separate logical agent_id field. The contract module
     stays cohesive and the budget will be re-ratcheted if the module shrinks.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-9
-  ceiling: 113
+  ceiling: 114
 - check: architecture.file_budget
   path: server/app/db/connection.py
   reason: The PostgreSQL-only migration introduces the typed DB-API facade,
@@ -223,8 +144,46 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/settings.py
   reason: PostgreSQL-only configuration adds a validated database URL and its
-    explicit environment override. Extract database settings into the
+    explicit environment override. Agent Worker secret-file configuration is
+    resolved at the same trusted boundary. Extract database settings into the
     configuration package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 182
+  ceiling: 196
+- check: architecture.file_budget
+  path: server/app/executors/runtime_config.py
+  reason: Agent Worker registration protocol settings live beside execution lease settings during rollout.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 250
+- check: architecture.file_budget
+  path: server/app/routes/__init__.py
+  reason: Composition adds the Agent Worker control-plane router and artifact authentication dependency.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 105
+- check: architecture.file_budget
+  path: server/app/routes/artifacts.py
+  reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 61
+- check: architecture.file_budget
+  path: server/app/services/workflow_drafts.py
+  reason: Publish validation resolves Agent capabilities through the Agent Catalog.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 69
+- check: architecture.file_budget
+  path: server/app/services/workflow_revisions.py
+  reason: Active revisions reconcile Agent routes and Workflow Node capacity projections
+    at Host startup, warning and skipping revisions whose capability mapping is ambiguous.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 123
+- check: architecture.file_budget
+  path: server/app/workflow_worker_schedule.py
+  reason: Scheduler dispatches Agent nodes to the persistent queue while retaining Host-local handler claims.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 242

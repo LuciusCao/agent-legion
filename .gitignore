@@ -19,3 +19,5 @@ coverage/
 config/workflow.yaml.bak-*
 tools/comprehension-uploader/config.dev.yaml
 stress-results/
+deploy/secrets/
+deploy/worker.home.yaml

@@ -345,6 +345,40 @@ describe('JobRerunDialog', () => {
     expect(screen.getByText(/重跑 0 个失败任务/)).toBeDisabled()
   })
 
+  it('keeps the dialog open and does not call onClose when onConfirm rejects', async () => {
+    const onConfirm = vi.fn().mockRejectedValue(new Error('rerun failed'))
+    const onClose = vi.fn()
+    render(
+      <JobRerunDialog
+        open
+        allowFailedNodeMode
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'failed',
+            workflow_key: 'question_content',
+          }),
+        ]}
+        workflowDefinition={workflow}
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />
+    )
+
+    act(() => {
+      screen.getByTestId('rerun-chip-failed-node').click()
+    })
+
+    await act(async () => {
+      screen.getByText(/重跑 1 个失败任务/).click()
+    })
+
+    expect(onConfirm).toHaveBeenCalledWith(null, true)
+    expect(onClose).not.toHaveBeenCalled()
+    // Dialog stays open with the confirm button re-enabled.
+    expect(screen.getByText(/重跑 1 个失败任务/)).toBeEnabled()
+  })
+
   it('does not render failed-node chip when allowFailedNodeMode is false', () => {
     render(
       <JobRerunDialog

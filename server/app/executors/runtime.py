@@ -41,8 +41,6 @@ class ExecutionRuntime:
 
     def run(self, claim: ClaimedExecution, context: ExecutionContext) -> ExecutionResult | None:
         executor = self.registry.require(claim.executor_id, claim.capability)
-        if getattr(executor, "submit_only", False):
-            return self._run_submit_only(claim, executor, context)
         token = CancellationToken()
         with self._lock:
             self._active[claim.execution_id] = token
@@ -82,36 +80,6 @@ class ExecutionRuntime:
 
         self.leases.finish(claim.lease_id, result)
         return result
-
-    def _run_submit_only(
-        self, claim: ClaimedExecution, executor: Executor, context: ExecutionContext
-    ) -> ExecutionResult | None:
-        """Submit-only path: no heartbeat thread, no lease finish here.
-
-        Completion is driven later by out-of-band callbacks (e.g. the remote
-        broker's completion notification), which finish the lease themselves.
-        A non-None return violates the submit-only contract and is treated as
-        a pre-submission failure so the lease never hangs.
-        """
-        try:
-            result = executor.execute(context)
-        except Exception as exc:
-            logger.exception(
-                "Executor adapter %s failed for execution %s",
-                claim.executor_id,
-                claim.execution_id,
-            )
-            result = _failed_result(context, str(exc))
-        if result is None:
-            return None
-        logger.error(
-            "submit-only executor %s returned a result for execution %s; finishing as failed",
-            claim.executor_id,
-            claim.execution_id,
-        )
-        message = result.error_message or "submit-only executor returned a result"
-        self.leases.finish(claim.lease_id, _failed_result(context, message))
-        return None
 
     def cancel(self, execution_id: str) -> None:
         with self._lock:

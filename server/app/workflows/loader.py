@@ -208,10 +208,14 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
+        max_concurrency = raw_node.get("max_concurrency")
+        if max_concurrency is not None:
+            max_concurrency = _positive_int(max_concurrency, "max_concurrency", node_key)
         nodes[node_key] = WorkflowNode(
             key=node_key,
             label=node_label,
             capability=capability,
+            max_concurrency=max_concurrency,
             after=_string_list(raw_node.get("after"), "after", node_key),
             inputs=inputs,
             outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),

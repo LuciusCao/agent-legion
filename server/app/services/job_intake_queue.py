@@ -15,6 +15,7 @@ from server.app.workflows.definition import workflow_definition_from_dict
 
 logger = logging.getLogger(__name__)
 INTAKE_QUEUE_CHUNK_SIZE = 25
+MAX_CHUNK_ERRORS = 20
 
 
 class JobIntakeQueue:
@@ -59,11 +60,65 @@ class JobIntakeQueue:
         entity = str(payload["entity"])
         resolver = RESOLVER_MAP[(entity, mode.key)]
         workspace = get_workspace(self.job_db, str(batch["workspace_id"]))
+        try:
+            self._create_chunk_jobs(
+                batch,
+                payload,
+                definition,
+                mode,
+                entity,
+                resolver,
+                workspace,
+                revision,
+                input_values[start:end],
+            )
+        except Exception as exc:
+            # A bad chunk (CMS outage, malformed value, ...) must not fail the
+            # whole batch: record the error, skip these values, and let the
+            # remaining chunks proceed. Jobs already committed by earlier
+            # chunks stay; the failed chunk's values can be re-submitted in a
+            # new batch (dedup keys filter already-created jobs).
+            logger.exception("async intake batch %s chunk [%s:%s] failed", batch["id"], start, end)
+            chunk_errors = queue_state.setdefault("chunk_errors", [])
+            if len(chunk_errors) < MAX_CHUNK_ERRORS:
+                chunk_errors.append(
+                    {
+                        "chunk_start": start,
+                        "values": input_values[start : min(end, start + 5)],
+                        "error": str(exc)[:300],
+                    }
+                )
+        queue_state["next_index"] = end
+        chunk_errors = queue_state.get("chunk_errors") or []
+        error_message = "; ".join(
+            f"chunk {error['chunk_start']}: {error['error']}" for error in chunk_errors[-5:]
+        )[:1000]
+        status = "completed" if end >= len(input_values) else "queued"
+        self.job_db.update_intake_batch(
+            str(batch["id"]),
+            source_payload=payload,
+            created_count=self.job_db.count_jobs_in_batch(str(batch["id"])),
+            status=status,
+            error_message=error_message,
+        )
+
+    def _create_chunk_jobs(
+        self,
+        batch: dict[str, Any],
+        payload: dict[str, Any],
+        definition: Any,
+        mode: Any,
+        entity: str,
+        resolver: str,
+        workspace: dict[str, Any],
+        revision: dict[str, Any],
+        values: list[str],
+    ) -> None:
         existing_keys = self.job_db.list_job_dedup_keys(str(batch["workspace_id"]))
         candidates, _ = resolve_fresh_candidates(
             resolver,
             entity,
-            input_values[start:end],
+            values,
             str(batch["source_kind"]),
             dict(payload.get("cms_config") or {}),
             mode,
@@ -87,11 +142,3 @@ class JobIntakeQueue:
             self.job_event_buffer.record_jobs_created(
                 str(batch["workspace_id"]), [str(job["id"]) for job in jobs]
             )
-        queue_state["next_index"] = end
-        status = "completed" if end >= len(input_values) else "queued"
-        self.job_db.update_intake_batch(
-            str(batch["id"]),
-            source_payload=payload,
-            created_count=self.job_db.count_jobs_in_batch(str(batch["id"])),
-            status=status,
-        )

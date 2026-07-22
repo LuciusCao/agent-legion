@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
 import pytest
 
 from server.app.db.schema import init_db
-from server.app.db.transaction import write_transaction
+from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.artifact_store import (
+    GC_GRACE_SECONDS,
     ArtifactNotFoundError,
     ArtifactStore,
 )
@@ -86,6 +90,47 @@ def test_refs_lifecycle(store, tmp_path):
     assert orphaned == []  # job-2 仍引用
     orphaned = store.delete_refs_for_job("job-2")
     assert orphaned == [h]
-    assert store.delete_unreferenced([h]) == 1
+    # Just-created blobs are inside the GC grace window; age past it.
+    past_grace = datetime.now(UTC) + timedelta(seconds=GC_GRACE_SECONDS + 60)
+    assert store.delete_unreferenced([h], now=past_grace) == 1
     with pytest.raises(ArtifactNotFoundError):
         store.open(h)
+
+
+def test_put_reasserts_catalog_row_for_existing_blob(store):
+    _make_job(TEST_DATABASE_URL, "job-1")
+    h = store.put(b"content")
+    # Simulate the crash window: blob on disk, catalog row missing.
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from artifacts where hash = ?", (h,))
+    assert store.put(b"content") == h
+    # artifact_refs.hash FK is satisfied again, so add_ref must not fail.
+    store.add_ref("job-1", "node-a", "out.json", h)
+    assert [ref["hash"] for ref in store.refs_for_job("job-1")] == [h]
+
+
+def test_delete_unreferenced_skips_young_artifacts(store):
+    h = store.put(b"fresh")
+    assert store.delete_unreferenced([h]) == 0
+    assert store.open(h).read_bytes() == b"fresh"
+    past_grace = datetime.now(UTC) + timedelta(seconds=GC_GRACE_SECONDS + 60)
+    assert store.delete_unreferenced([h], now=past_grace) == 1
+    with pytest.raises(ArtifactNotFoundError):
+        store.open(h)
+
+
+def test_delete_unreferenced_tolerates_unlink_failure(store, monkeypatch):
+    h = store.put(b"doomed-blob")
+    past_grace = datetime.now(UTC) + timedelta(seconds=GC_GRACE_SECONDS + 60)
+
+    def boom(self, *args, **kwargs):
+        raise OSError("simulated unlink failure")
+
+    monkeypatch.setattr(Path, "unlink", boom)
+    assert store.delete_unreferenced([h], now=past_grace) == 1
+    monkeypatch.undo()
+    # The committed row deletion stands; the blob file remains as an orphan.
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute("select hash from artifacts where hash = ?", (h,)).fetchone()
+    assert row is None
+    assert (store.root / h[:2] / h).is_file()

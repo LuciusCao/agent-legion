@@ -30,30 +30,35 @@ nodes:
   generate_key_info:
     label: 生成关键信息
     capability: generate_key_info
+    max_concurrency: 20
     after: [clean_and_parse]
     inputs: [questions_parsed_lean.json]
     outputs: [key_info_raw.json, key_info_report.json]
   review_key_info:
     label: 审核关键信息
     capability: review_key_info
+    max_concurrency: 20
     after: [generate_key_info]
     inputs: [questions_parsed.json, key_info_raw.json]
     outputs: [key_info_reviewed.json, key_info_reviewed_lean.json, key_info_review_report.json]
   generate_possible_errors:
     label: 生成可能审题错误
     capability: generate_possible_errors
+    max_concurrency: 20
     after: [review_key_info]
     inputs: [questions_parsed_lean.json, key_info_reviewed_lean.json]
     outputs: [possible_errors_raw.json, possible_errors_report.json]
   review_possible_errors:
     label: 审核可能审题错误
     capability: review_possible_errors
+    max_concurrency: 20
     after: [generate_possible_errors]
     inputs: [questions_parsed_lean.json, key_info_reviewed_lean.json, possible_errors_raw.json]
     outputs: [possible_errors_reviewed.json, possible_errors_review_report.json]
   assess_comprehension_difficulty:
     label: 评估审题难度
     capability: assess_comprehension_difficulty
+    max_concurrency: 20
     after: [review_key_info, review_possible_errors]
     inputs: [questions_parsed_lean.json, key_info_reviewed_lean.json, possible_errors_reviewed.json]
     outputs: [comprehension_difficulty.json, comprehension_difficulty_report.json]

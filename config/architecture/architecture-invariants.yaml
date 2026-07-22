@@ -137,7 +137,7 @@ invariants:
         target: tests/db/test_postgres_runtime.py::test_schema_initialization_is_idempotent
         gate: quick
       - kind: integration
-        target: tests/full/test_postgres_agent_concurrency.py
+        target: tests/full/test_agent_worker_control_plane.py::test_postgres_agent_schema_initialization_is_idempotent
         gate: full
 
   - id: RECOVERY-BACKUP-001
@@ -256,7 +256,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/executors/test_remote_broker_persistence.py
+        target: tests/test_agent_broker.py
         gate: quick
       - kind: integration
         target: tests/test_job_event_buffer_db.py
@@ -268,22 +268,34 @@ invariants:
         target: tests/ci/test_postgres_only_runtime.py
         gate: ci_extended
 
-  - id: EXEC-REMOTE-001
-    statement: "Remote execution completion must be driven by broker completion callbacks; blocking a local thread waiting for a remote result (e.g. wait_result polling) is forbidden on the executor path."
+  - id: EXEC-AGENTCLAIM-001
+    statement: "An Agent Node may enter running only when a compatible Worker atomically claims it under both the Workflow Node workspace capacity and the Worker machine-wide capacity; queued requests consume neither capacity."
     owner: workspace-executor
     risk: critical
     evidence:
       - kind: integration
-        target: tests/executors/test_remote_nonblocking.py::test_execute_returns_immediately_without_waiting
+        target: tests/test_agent_broker.py
         gate: quick
       - kind: integration
-        target: tests/executors/test_remote_nonblocking.py::test_completion_callback_finishes_lease_and_backfills
-        gate: quick
-      - kind: contract
-        target: tests/test_architecture_execution_decoupling.py
+        target: tests/routes/test_agent_workers.py
         gate: quick
       - kind: integration
-        target: tests/full/test_remote_completion_e2e.py
+        target: tests/full/test_agent_worker_control_plane.py::test_agent_capacity_matrix_across_workers
+        gate: full
+
+  - id: EXEC-AGENTDEF-001
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared only by the Agent Catalog; Workers declare only runtimes, labels, protocol version, and machine-wide max_concurrency."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_agent_catalog.py
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
         gate: full
 
   - id: EXEC-KIND-001
@@ -299,15 +311,18 @@ invariants:
         gate: quick
 
   - id: SECURITY-WORKER-001
-    statement: "Remote worker credentials must be per-worker and revocable: per-worker tokens are persisted only as sha256 hashes of the secret part, revocation takes effect immediately (and beats the static-token fallback window), and management endpoints accept only the global management token. New shared-credential paths on worker-facing endpoints are forbidden."
+    statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
     owner: security
     risk: critical
     evidence:
       - kind: integration
-        target: tests/remote/test_worker_tokens.py
+        target: tests/routes/test_agent_workers.py
         gate: quick
       - kind: integration
-        target: tests/full/test_worker_token_security.py
+        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_revocable
         gate: full
 
   - id: EXEC-SHARD-001

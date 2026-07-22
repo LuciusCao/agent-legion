@@ -7,18 +7,17 @@ export function shortWorkerId(workerId: string): string {
 }
 
 export function DagNodeExecutorBadge({ data }: { data: DagNodeData }) {
-  const { executorId, workerId } = data
-  if (!workerId && !executorId) return null
-  const title = workerId
-    ? [executorId, workerId].filter(Boolean).join(' / ')
-    : (executorId ?? undefined)
+  const { agentId, executorId, workerId } = data
+  if (!agentId && !workerId && !executorId) return null
+  const title = [agentId, executorId, workerId].filter(Boolean).join(' / ')
+  const label = workerId ? shortWorkerId(workerId) : (agentId ?? executorId)
   return (
     <span
       data-testid="dag-node-executor-badge"
       className={styles.workerTag}
       title={title}
     >
-      {workerId ? shortWorkerId(workerId) : executorId}
+      {label}
     </span>
   )
 }

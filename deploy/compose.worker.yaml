@@ -1,0 +1,34 @@
+name: agent-legion-worker
+
+services:
+  worker:
+    build:
+      context: ..
+      target: worker
+    image: agent-legion-worker:local
+    restart: unless-stopped
+    secrets: [agent_worker_register_token]
+    volumes:
+      - ${AGENT_WORKER_CONFIG:-./worker.home.yaml}:/etc/agent-legion/worker.yaml:ro
+      - ${PI_CONFIG_DIR:-../pi-config}:/root/.pi/agent:ro
+      - worker-data:/var/lib/agent-legion-worker
+    environment:
+      # Optional shared token for the tailnet-bound LLM gateway; the worker
+      # supervisor passes it through to Pi subprocesses. Set it in deploy/.env
+      # (git- and docker-ignored) or the shell environment — never inline here.
+      LLM_GATEWAY_TOKEN: ${LLM_GATEWAY_TOKEN:-}
+      AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE_VERSION:-agent-legion-worker:local}
+    stop_grace_period: 30s
+    healthcheck:
+      test: [CMD-SHELL, "pgrep -f agent_worker.py > /dev/null"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+secrets:
+  agent_worker_register_token:
+    file: ${AGENT_WORKER_REGISTER_TOKEN_FILE:-./secrets/agent_worker_register_token}
+
+volumes:
+  worker-data:

@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette import concurrency
 
-from server.app.routes.remote_auth import WorkerAuthenticator, create_worker_authorizer
+from server.app.agent_workers import AgentWorkerRegistry
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
 from server.app.settings import Settings
 
@@ -15,25 +15,43 @@ class ArtifactUploadResponse(BaseModel):
 
 
 def create_artifacts_router(
-    store: ArtifactStore, settings: Settings, broker: WorkerAuthenticator | None = None
+    store: ArtifactStore,
+    settings: Settings,
+    agent_worker_registry: AgentWorkerRegistry | None = None,
 ) -> APIRouter:
     """Worker-facing artifact upload/download; auth + forwarding only (no storage logic)."""
     router = APIRouter(prefix="/artifacts", tags=["artifacts"])
-    remote_config = settings.executor_runtime.remote
-    authorize = create_worker_authorizer(remote_config, broker)
+    agent_config = settings.executor_runtime.agent_workers
+
+    def authorize_artifact(request: Request) -> None:
+        agent_token = request.headers.get("x-agent-worker-token", "")
+        if agent_token and agent_worker_registry is not None:
+            if agent_worker_registry.authenticate(agent_token) is not None:
+                return
+            raise HTTPException(status_code=401, detail="invalid Agent Worker token")
+        if not agent_config.register_token:
+            raise HTTPException(status_code=503, detail="Agent Worker execution is disabled")
+        raise HTTPException(status_code=401, detail="missing Agent Worker token")
 
     @router.post("", status_code=201, response_model=ArtifactUploadResponse)
     async def upload_artifact(request: Request) -> ArtifactUploadResponse:
-        authorize(request, require_worker_id=False)
+        authorize_artifact(request)
+        declared = request.headers.get("content-length")
+        if (
+            declared is not None
+            and declared.isdigit()
+            and int(declared) > agent_config.max_archive_bytes
+        ):
+            raise HTTPException(status_code=413, detail="artifact too large")
         body = await request.body()
-        if len(body) > remote_config.max_archive_bytes:
+        if len(body) > agent_config.max_archive_bytes:
             raise HTTPException(status_code=413, detail="artifact too large")
         digest = await concurrency.run_in_threadpool(store.put, body)
         return ArtifactUploadResponse(hash=digest)
 
     @router.get("/{hash}")
     def download_artifact(hash: str, request: Request) -> FileResponse:
-        authorize(request, require_worker_id=False)
+        authorize_artifact(request)
         try:
             path = store.open(hash)
         except ArtifactNotFoundError as exc:

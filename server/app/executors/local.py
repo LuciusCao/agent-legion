@@ -118,8 +118,6 @@ class LocalExecutor:
     """Adapter that runs repository-owned local handlers inside the workspace runtime."""
 
     kind = "local"
-    # Run-to-completion adapter; submit_only is the remote-executor opt-out.
-    submit_only = False
 
     def __init__(
         self,
