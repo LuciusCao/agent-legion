@@ -1,6 +1,8 @@
 # Agent Legion Host 与 Worker 部署
 
-Agent Legion 把服务拆成两个角色：Host 负责工作流、数据库与任务调度；Worker 负责运行 Agent。即使同一台公司电脑同时承担两个角色，也运行两个独立服务。
+Agent Legion 把服务拆成两个角色：Host 负责工作流、数据库与任务调度；Worker Service 负责本机配置、状态查询和运行 Agent。即使同一台公司电脑同时承担两个角色，也运行两个独立服务。
+
+Worker Service 宿主机发布面默认只绑定 `127.0.0.1:8787`（控制台和查询 API）；compose 网络内其它容器可以到达该端口，但除 `GET /api/health` 外所有端点都要求本地 control token 鉴权。首次启动会把现有只读 YAML 导入独立的可写控制卷；此后可以直接在页面中修改配置，不再需要编辑 YAML。注册密钥仍然只通过 Docker secret 提供，页面和 API 都不会读取或返回密钥内容。
 
 LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容器通过挂载自己的 Pi 配置访问它。
 
@@ -59,16 +61,15 @@ curl http://192.0.2.1:8000/api/health
 
 该命令启动 PostgreSQL、Host 和公司电脑本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。
 
-## 4. Mac mini 准备 Worker 配置
+## 4. Mac mini 准备 Worker
 
-将同一版本的仓库放到 Mac mini，并复制示例配置：
+将同一版本的仓库放到 Mac mini，并准备注册密钥目录：
 
 ```bash
-cp deploy/worker.home.example.yaml deploy/worker.home.yaml
 mkdir -p deploy/secrets
 ```
 
-确认 `deploy/worker.home.yaml` 中的 `host_url` 是公司电脑可通过 Tailscale 访问的地址。
+无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有 `deploy/worker.home.yaml` 的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./worker.home.yaml`，Worker Service 会在首次启动时导入它。
 
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
 
@@ -114,11 +115,69 @@ make stack-worker-up
 make stack-logs STACK=worker
 ```
 
-Worker 启动后会向 Host 注册，然后按本机配置的 `max_concurrency` 拉取任务。
+打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写公司电脑可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker_ui/index.html` 静态文件不可用。页面可以看到：
+
+- Worker 执行进程是否运行；
+- 当前配置的 Host 地址以及 Host 是否可达；
+- 当前 `worker_id` 是否已在该 Host 登记、最后在线时间；
+- 注册令牌允许接入的 Workspace 范围；
+- 运行时、并发数、标签和最近日志。
+
+页面保存配置后会原子写入控制卷并重启执行进程，新的配置立即生效。Worker 启动后会向 Host 注册，然后按本机配置的 `max_concurrency` 拉取任务。
+
+### 控制面鉴权
+
+Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-worker-control/control_token`（权限 0600）。除 `GET /api/health` 外，所有 `/api/*` 端点都要求 `Authorization: Bearer <token>`。`workerctl` 按以下顺序取 token：`--token` 参数 > `AGENT_WORKER_CONTROL_TOKEN` 环境变量 > 状态目录下的 `control_token` 文件（容器内执行时自动命中）。
+
+如果需要从终端查询或自动化，可使用容器内 CLI：
+
+```bash
+docker compose -f deploy/compose.worker.yaml exec worker workerctl status
+docker compose -f deploy/compose.worker.yaml exec worker workerctl config
+docker compose -f deploy/compose.worker.yaml exec worker workerctl logs --limit 100
+docker compose -f deploy/compose.worker.yaml exec worker workerctl --json logs --limit 100
+docker compose -f deploy/compose.worker.yaml exec worker workerctl restart
+```
+
+`--json logs` 输出机器可解析的 JSON；读操作超时 5 秒，`configure`/`restart` 等变更操作超时 60 秒（服务端停止预算约 25 秒）。
+
+也可以直接访问仅限本机的查询接口（先取出 token）：
+
+```bash
+TOKEN=$(docker compose -f deploy/compose.worker.yaml exec worker cat /var/lib/agent-legion-worker-control/control_token)
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/status
+curl -H "Authorization: Bearer $TOKEN" http://127.0.0.1:8787/api/config
+curl -H "Authorization: Bearer $TOKEN" 'http://127.0.0.1:8787/api/logs?limit=100'
+```
+
+CLI 修改配置的示例（`configure` 是部分更新：只覆盖显式传入的字段，未指定的字段保持现状，`--host-url`/`--worker-id` 均非必填）：
+
+```bash
+docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
+  --host-url http://192.0.2.1:8000 \
+  --worker-id home-mac-mini-1 \
+  --name 'Home Mac mini' \
+  --runtime pi \
+  --max-concurrency 10 \
+  --label os=linux --label arch=arm64
+```
+
+### 崩溃重启与失败状态
+
+执行进程崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 拒绝注册或 Worker 已被吊销）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
+
+### 挂载配置与状态副本不一致
+
+首次启动把 `--config` 挂载的 YAML 导入状态卷后，再修改挂载文件不会自动生效。`status` 的 `mounted_config_diverged` 为 true 表示两者内容已分叉，处理路径二选一：
+
+- 用 `workerctl configure`（或控制台）把新值写入状态副本并重启执行进程；
+- 或删除状态卷中的 `worker.yaml` 后重启容器，重新导入挂载配置。
+
+默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。
 
 ## 6. 验证两个 Worker
 
-在公司电脑执行：
+可以直接查看 Worker 控制台，也可以在公司电脑执行：
 
 ```bash
 curl http://192.0.2.1:8000/api/agent-workers

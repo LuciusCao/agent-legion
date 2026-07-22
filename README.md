@@ -81,6 +81,7 @@ Configuration is split by domain into files under `config/`:
 - `config/video_hive.yaml`: ASR, CMS, resource providers, cleanup, and OpenClaw settings.
 - `config/workflow.yaml`: workspace executors, workflow runtime, and Pi agent settings.
 - `config/skills.yaml` / `config/skills.lock`: skill source declarations and resolved versions for Pi agent nodes.
+- `config/agent-worker.example.yaml`: Worker Service 首次启动引导配置；启动后通过本机 `http://127.0.0.1:8787` 控制台或 `workerctl` 管理（控制台自动注入 control token，API 端点除 `/api/health` 外均需该 token）。
 
 Edit `config/video_hive.yaml` for:
 

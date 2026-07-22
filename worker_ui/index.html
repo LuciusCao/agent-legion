@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Agent Worker</title>
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <main>
+      <header>
+        <div>
+          <p class="eyebrow">AGENT LEGION</p>
+          <h1>Worker 控制台</h1>
+          <p class="subtitle">配置本机执行节点，并确认它实际连接到了哪一台 Host。</p>
+        </div>
+        <button id="restart" class="secondary">重启 Worker</button>
+      </header>
+
+      <section class="status-card" aria-live="polite">
+        <div class="status-main">
+          <span id="status-dot" class="dot"></span>
+          <div>
+            <p id="status-title" class="status-title">正在检查…</p>
+            <p id="status-detail" class="muted">读取本地服务与 Host 状态</p>
+          </div>
+        </div>
+        <dl>
+          <div><dt>执行进程</dt><dd id="process-state">—</dd></div>
+          <div><dt>Host</dt><dd id="host-state">—</dd></div>
+          <div><dt>Host 登记</dt><dd id="registered-state">—</dd></div>
+          <div><dt>允许工作区</dt><dd id="workspace-scope">—</dd></div>
+          <div><dt>最后在线</dt><dd id="last-seen">—</dd></div>
+        </dl>
+      </section>
+
+      <div class="grid">
+        <section class="panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">CONFIGURATION</p><h2>连接与能力</h2></div>
+            <span id="save-state" class="muted"></span>
+          </div>
+          <form id="config-form">
+            <label class="wide">Host 地址<input name="host_url" type="url" placeholder="http://100.64.0.10:8000" required /></label>
+            <label>Worker ID<input name="worker_id" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" title="以字母或数字开头，只能包含字母、数字、_、-，最长 64 字符" required /></label>
+            <label>显示名称<input name="name" /></label>
+            <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
+            <fieldset>
+              <legend>运行时</legend>
+              <label class="check"><input name="runtimes" type="checkbox" value="pi" /> Pi</label>
+              <label class="check"><input name="runtimes" type="checkbox" value="openclaw" /> OpenClaw</label>
+            </fieldset>
+            <label class="wide">标签 <span class="hint">每行一个 key=value</span><textarea name="labels" rows="4" placeholder="os=linux&#10;arch=arm64"></textarea></label>
+            <details class="wide">
+              <summary>高级选项</summary>
+              <div class="advanced">
+                <label>拉取间隔（秒）<input name="poll_interval_seconds" type="number" min="0.2" step="0.1" /></label>
+                <label>心跳间隔（秒）<input name="heartbeat_interval_seconds" type="number" min="0.2" step="0.1" /></label>
+                <label>停止宽限（秒）<input name="shutdown_grace_seconds" type="number" min="0.2" step="0.1" /></label>
+              </div>
+            </details>
+            <div id="form-error" class="error wide" role="alert"></div>
+            <button class="primary wide" type="submit">保存并应用</button>
+          </form>
+        </section>
+
+        <section class="panel log-panel">
+          <div class="panel-heading">
+            <div><p class="eyebrow">RUNTIME</p><h2>最近日志</h2></div>
+            <button id="refresh-logs" class="text-button">刷新</button>
+          </div>
+          <pre id="logs">暂无日志</pre>
+          <p class="cli-hint">本机命令：<code>workerctl status</code></p>
+        </section>
+      </div>
+    </main>
+    <script>
+      // 由 Worker Service 在 serve 时注入真实令牌；未注入时页面会明确报错而不是静默失败。
+      window.__WORKER_CONTROL_TOKEN__ = "__WORKER_CONTROL_TOKEN__";
+    </script>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>

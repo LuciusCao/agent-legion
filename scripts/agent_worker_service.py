@@ -1,0 +1,115 @@
+#!/usr/bin/env python3
+"""Local HTTP control plane and status UI for an Agent Legion Worker."""
+
+from __future__ import annotations
+
+import argparse
+import secrets
+from contextlib import asynccontextmanager
+from pathlib import Path
+from typing import Any
+
+import uvicorn
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi.responses import FileResponse, HTMLResponse
+from pydantic import BaseModel
+
+from scripts.agent_worker_service_state import WorkerConfigStore, WorkerSupervisor, public_config
+
+
+class WorkerConfigPayload(BaseModel):
+    """Partial update：仅提交的字段会被更新，未提供的字段保持现状。"""
+
+    host_url: str | None = None
+    worker_id: str | None = None
+    name: str | None = None
+    runtimes: list[str] | None = None
+    max_concurrency: int | None = None
+    labels: dict[str, str] | None = None
+    poll_interval_seconds: float | None = None
+    heartbeat_interval_seconds: float | None = None
+    shutdown_grace_seconds: float | None = None
+
+
+def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
+    token = supervisor.store.control_token()
+
+    async def require_token(request: Request) -> None:
+        header = request.headers.get("authorization", "")
+        if not secrets.compare_digest(header, f"Bearer {token}"):
+            raise HTTPException(status_code=401, detail="missing or invalid control token")
+
+    guarded = [Depends(require_token)]
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        supervisor.start()
+        try:
+            yield
+        finally:
+            supervisor.stop()
+
+    app = FastAPI(title="Agent Legion Worker Service", version="1.0", lifespan=lifespan)
+
+    @app.get("/", include_in_schema=False)
+    def index() -> HTMLResponse:
+        html = (ui_dir / "index.html").read_text(encoding="utf-8")
+        return HTMLResponse(html.replace('= "__WORKER_CONTROL_TOKEN__"', f'= "{token}"'))
+
+    @app.get("/assets/{name}", include_in_schema=False)
+    def asset(name: str) -> FileResponse:
+        if name not in {"app.js", "styles.css"}:
+            raise HTTPException(status_code=404, detail="asset not found")
+        media_type = "text/javascript" if name.endswith(".js") else "text/css"
+        return FileResponse(ui_dir / name, media_type=media_type)
+
+    @app.get("/api/health")
+    def health() -> dict[str, str]:
+        return {"status": "ok"}
+
+    @app.get("/api/status", dependencies=guarded)
+    def status() -> dict[str, Any]:
+        return supervisor.status()
+
+    @app.get("/api/config", dependencies=guarded)
+    def get_config() -> dict[str, Any]:
+        return public_config(supervisor.store.read(require_identity=False))
+
+    @app.put("/api/config", dependencies=guarded)
+    def put_config(payload: WorkerConfigPayload) -> dict[str, Any]:
+        try:
+            config = supervisor.store.update_public(payload.model_dump(exclude_none=True))
+            supervisor.restart()
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return {"config": public_config(config), "status": supervisor.status()}
+
+    @app.post("/api/restart", dependencies=guarded)
+    def restart() -> dict[str, Any]:
+        supervisor.restart()
+        return supervisor.status()
+
+    @app.get("/api/logs", dependencies=guarded)
+    def logs(limit: int = Query(default=200, ge=1, le=500)) -> dict[str, list[str]]:
+        return {"lines": supervisor.logs(limit)}
+
+    return app
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run the Agent Legion Worker Service")
+    parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
+    parser.add_argument("--state-dir", type=Path, default=Path("data/agent-worker-service"))
+    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--port", type=int, default=8787)
+    args = parser.parse_args()
+    scripts_dir = Path(__file__).resolve().parent
+    store = WorkerConfigStore(args.state_dir.resolve(), args.config.resolve())
+    supervisor = WorkerSupervisor(store, scripts_dir / "agent_worker.py")
+    app = create_app(supervisor, scripts_dir.parent / "worker_ui")
+    uvicorn.run(app, host=args.host, port=args.port)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
