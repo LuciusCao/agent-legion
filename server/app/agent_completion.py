@@ -19,15 +19,31 @@ class AgentOutcome:
     error_message: str = ""
     command: tuple[str, ...] = ()
     output_artifacts: dict[str, str] = field(default_factory=dict)
+    # Worker run dir relative to the job dir (e.g. "runs/<node>/worker"); its
+    # events.jsonl is promoted for log display and token usage only — never
+    # for success/failure decisions.
+    run_dir: str = ""
 
 
-def _unpack_result(archive_path: Path, job_dir: Path, expected: tuple[str, ...]) -> None:
-    """Extract into a staging dir, then promote only declared expected outputs.
+def _safe_relative_dir(value: str) -> PurePosixPath | None:
+    if not value:
+        return None
+    relative = PurePosixPath(value)
+    if relative.is_absolute() or ".." in relative.parts:
+        return None
+    return relative
 
-    Worker archives are untrusted: nothing outside ``expected`` lands in the
-    job dir, so a Worker cannot clobber other nodes' inputs/outputs or plant a
-    ``runs/.../events.jsonl`` to spoof Pi model-error detection (which this
-    handler deliberately does not perform on Worker-supplied files)."""
+
+def _unpack_result(
+    archive_path: Path, job_dir: Path, expected: tuple[str, ...], run_dir: str = ""
+) -> None:
+    """Extract into a staging dir, then promote declared expected outputs plus
+    the Worker run dir's ``events.jsonl``.
+
+    Worker archives are untrusted: nothing outside ``expected`` and that single
+    log file lands in the job dir, so a Worker cannot clobber other nodes'
+    inputs/outputs or plant files to spoof server-side decisions (log display
+    and token parsing are read-only consumers)."""
     with tempfile.TemporaryDirectory(prefix=".result-staging-", dir=job_dir) as staging:
         staging_dir = Path(staging)
         extract_agent_result(archive_path, staging_dir)
@@ -40,6 +56,13 @@ def _unpack_result(archive_path: Path, job_dir: Path, expected: tuple[str, ...])
                 target = job_dir / relative
                 target.parent.mkdir(parents=True, exist_ok=True)
                 shutil.move(str(source), str(target))
+        run_dir_relative = _safe_relative_dir(run_dir)
+        if run_dir_relative is not None:
+            events_source = staging_dir / run_dir_relative / "events.jsonl"
+            if events_source.is_file():
+                events_target = job_dir / run_dir_relative / "events.jsonl"
+                events_target.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(events_source), str(events_target))
 
 
 class AgentCompletionHandler:
@@ -77,7 +100,7 @@ class AgentCompletionHandler:
         expected = tuple(str(name) for name in manifest.get("expected_outputs", ()))
         if outcome.status != "cancelled" and archive_name:
             try:
-                _unpack_result(self.bundle_dir / archive_name, job_dir, expected)
+                _unpack_result(self.bundle_dir / archive_name, job_dir, expected, outcome.run_dir)
             except Exception as exc:
                 return self.leases.finish(
                     lease_id,
@@ -107,13 +130,26 @@ class AgentCompletionHandler:
                 exit_code=exit_code,
                 error_message=error,
                 command=outcome.command,
-                # Worker-side run dirs (events.jsonl, session) are not promoted
-                # to the host: they are Worker-controlled and must not feed
-                # server-side success/failure decisions.
-                run_dir="",
+                # The promoted events.jsonl feeds log display and token usage
+                # only; success/failure decisions above never read it.
+                run_dir=self._stored_run_dir(job_dir, outcome.run_dir),
                 session_dir="",
                 skill_version=str(manifest.get("skill_version", "")),
                 produced_artifacts=produced,
                 runner=worker_id,
             ),
         )
+
+    def _stored_run_dir(self, job_dir: Path, run_dir: str) -> str:
+        """Data-dir-relative path of the promoted Worker run dir, or "".
+
+        Empty when the Worker did not declare one or nothing was promoted, so
+        older Workers and cancelled runs behave exactly as before."""
+        run_dir_relative = _safe_relative_dir(run_dir)
+        if run_dir_relative is None or not (job_dir / run_dir_relative).is_dir():
+            return ""
+        base = self.leases.data_dir or self.jobs_dir.parent
+        try:
+            return (job_dir / run_dir_relative).resolve().relative_to(base.resolve()).as_posix()
+        except ValueError:
+            return ""

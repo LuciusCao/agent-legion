@@ -112,14 +112,14 @@ class AgentStatusManager:
             return list(self.agents)
 
     def ensure_workspace_agent(
-        self, agent_id: str, workspace_id: str, *, max_tasks: int = 1
+        self, agent_id: str, workspace_id: str, *, max_tasks: int = 1, name: str = ""
     ) -> None:
-        """Idempotently upsert a workspace-scoped Agent row for status display.
+        """Idempotently upsert a workspace-scoped status row for the panel.
 
         Distributed executions (broker claims by remote Agent Workers) have no
-        in-process runner to discover, so the broker registers the logical
-        Agent here on first claim; ``max_tasks`` mirrors the workspace-level
-        Agent capacity so the panel shows the governing limit.
+        in-process runner to discover, so the broker registers one row per
+        (Worker, workspace) here; ``max_tasks`` mirrors the Worker's machine
+        capacity so the panel shows "name busy/capacity" per Worker.
         """
         should_broadcast = False
         with self._lock:
@@ -133,7 +133,7 @@ class AgentStatusManager:
                 self.agents.append(
                     AgentStatus(
                         id=agent_id,
-                        name=agent_id,
+                        name=name or agent_id,
                         busy=False,
                         task_count=0,
                         max_tasks=max_tasks,

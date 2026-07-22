@@ -23,8 +23,11 @@ def _persist_pause(db_path: str, scope: str, paused: bool, process_id: str) -> N
 
 class WorkspaceWorkerControl:
     """Per-workspace worker pause/resume control. With ``db_path`` the state
-    persists in ``worker_control_state`` across processes/restarts; without it
-    the control is in-memory only. Unknown workspaces default to paused."""
+    persists in ``worker_control_state`` so every control-plane process sees
+    the same value; unknown workspaces default to paused. Resume state must
+    NOT survive a restart — auto-dispatch coming back on its own after a
+    reboot produces uncontrolled runs — so the app calls
+    :meth:`reset_all_to_paused` once at startup."""
 
     def __init__(self, db_path: str | None = None, *, process_id: str | None = None) -> None:
         self._db_path = db_path
@@ -48,6 +51,19 @@ class WorkspaceWorkerControl:
                 (f"workspace:{workspace_id}",),
             ).fetchone()
         return True if row is None else bool(row["paused"])
+
+    def reset_all_to_paused(self) -> None:
+        """Reset every scope to paused; called once at control-plane startup.
+
+        Rows are deleted rather than set to paused=1: unknown workspaces
+        default to paused anyway, and a fresh row keeps ``updated_by``
+        attribution honest for the next explicit operator action."""
+        if self._db_path is None:
+            with self._lock:
+                self._paused.clear()
+            return
+        with write_transaction(self._db_path) as conn:
+            conn.execute("delete from worker_control_state")
 
     def _set(self, workspace_id: str, paused: bool) -> None:
         if self._db_path is None:

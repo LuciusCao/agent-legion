@@ -167,10 +167,11 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
         assert heartbeat.status_code == 204
 
         manager = app.state.agent_manager
-        (busy_agent,) = [a for a in manager.get_all() if a.workspace_id == "test-workspace"]
-        assert busy_agent.busy is True
-        assert busy_agent.task_count == 1
-        assert busy_agent.max_tasks == 2
+        (busy_row,) = [a for a in manager.get_all() if a.workspace_id == "test-workspace"]
+        assert busy_row.id == "e2e-worker"
+        assert busy_row.busy is True
+        assert busy_row.task_count == 1
+        assert busy_row.max_tasks == 4
 
         buffer = io.BytesIO()
         with tarfile.open(fileobj=buffer, mode="w:gz"):
@@ -201,6 +202,6 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
     assert active_leases["c"] == 0
     assert app.state.job_db.get_job_node("job-e2e", "generate")["status"] == "completed"
 
-    (agent,) = [a for a in manager.get_all() if a.workspace_id == "test-workspace"]
-    assert agent.busy is False
-    assert agent.task_count == 0
+    (row,) = [a for a in manager.get_all() if a.workspace_id == "test-workspace"]
+    assert row.busy is False
+    assert row.task_count == 0

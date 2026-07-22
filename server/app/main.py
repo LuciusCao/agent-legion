@@ -93,6 +93,9 @@ def create_app(
     sync_agent_definitions(settings.database_url, settings.agent_definitions)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
+    # Resume state must not survive a restart: dispatch stays off until an
+    # operator explicitly resumes it in this process lifetime.
+    workspace_worker_control.reset_all_to_paused()
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
     agent_broker = AgentExecutionBroker(
         job_db.path,

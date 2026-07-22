@@ -439,7 +439,7 @@ def _register_worker(registry: AgentWorkerRegistry, worker_id: str = "worker-1")
     )
 
 
-def test_claim_and_done_mirror_agent_status_panel(job_db) -> None:
+def test_claim_and_done_mirror_worker_status_panel(job_db) -> None:
     _seed_request(job_db, job_id="job-1", limit=3)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
@@ -448,22 +448,38 @@ def test_claim_and_done_mirror_agent_status_panel(job_db) -> None:
 
     claimed = broker.claim("worker-1")
     assert claimed is not None
-    (agent,) = manager.get_all()
-    assert agent.id == "generator-v1"
-    assert agent.workspace_id == "test-workspace"
-    assert agent.busy is True
-    assert agent.task_count == 1
-    # max_tasks mirrors the workspace-level Agent capacity.
-    assert agent.max_tasks == 3
+    (row,) = [a for a in manager.get_all() if a.workspace_id == "test-workspace"]
+    assert row.id == "worker-1"
+    assert row.name == "worker"
+    assert row.busy is True
+    assert row.task_count == 1
+    # max_tasks mirrors the Worker's machine capacity, not the workspace cap.
+    assert row.max_tasks == 10
 
     broker.mark_done(claimed.execution_id, "worker-1", claimed.lease_id, {"status": "succeeded"})
 
-    (agent,) = manager.get_all()
-    assert agent.busy is False
-    assert agent.task_count == 0
+    (row,) = [a for a in manager.get_all() if a.workspace_id == "test-workspace"]
+    assert row.busy is False
+    assert row.task_count == 0
 
 
-def test_swept_expired_claim_releases_agent_status_panel(job_db) -> None:
+def test_idle_claim_poll_registers_worker_panel_rows(job_db) -> None:
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    manager = AgentStatusManager()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, agent_status=manager)
+
+    assert broker.claim("worker-1") is None
+
+    # A global-scope Worker appears in every workspace's panel with 0/cap,
+    # including ones where nothing is queued.
+    rows = [a for a in manager.get_all() if a.id == "worker-1"]
+    assert rows
+    assert all(row.busy is False and row.task_count == 0 for row in rows)
+    assert all(row.max_tasks == 10 for row in rows)
+
+
+def test_swept_expired_claim_releases_worker_status_panel(job_db) -> None:
     _seed_request(job_db, job_id="job-1")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
@@ -479,6 +495,8 @@ def test_swept_expired_claim_releases_agent_status_panel(job_db) -> None:
 
     assert broker.sweep_expired_claims() == [claimed.execution_id]
 
-    (agent,) = manager.get_all()
-    assert agent.busy is False
-    assert agent.task_count == 0
+    (row,) = [
+        a for a in manager.get_all() if a.id == "worker-1" and a.workspace_id == "test-workspace"
+    ]
+    assert row.busy is False
+    assert row.task_count == 0
