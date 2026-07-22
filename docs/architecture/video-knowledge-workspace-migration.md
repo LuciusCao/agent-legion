@@ -25,6 +25,8 @@ This layer keeps generic Workspace scheduler, lease, executor, and job services 
 
 ### Migration CLI
 
+> **Stale paths (2026-07-22):** `scripts/migrate-video-hive-to-agent-legion.py` 不存在（从未落地或已删除），以下 Migration CLI 小节内容已失效，保留仅作历史参考。
+
 `scripts/migrate-video-hive-to-agent-legion.py` performs local single-user upgrades:
 
 ```bash

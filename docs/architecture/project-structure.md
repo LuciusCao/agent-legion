@@ -80,8 +80,6 @@ video-hive/
 │   ├── ratchet_architecture_budgets.py # 架构预算基线更新
 │   ├── generate_architecture.py # 自动生成架构文档表格
 │   ├── generate-api-types.sh   # 生成前端 API 类型
-│   ├── finalize-workspace-executor-migration.py # Phase 6 迁移最终化
-│   ├── migrate-video-hive-to-agent-legion.py # Video Hive 旧数据迁移
 │   ├── migrate-skills-to-external-repos.py # Skill 外迁 helper
 │   └── install-git-hooks.sh    # 预提交钩子安装
 ├── tests/                      # pytest 测试套件

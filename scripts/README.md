@@ -38,6 +38,11 @@
 | `export_openapi.py` | 不启动 Worker 导出 OpenAPI 模式。 |
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
+| `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 |
+| `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为。 |
+| `import-sqlite-to-postgres.py` | 一次性离线迁移：从最终版 SQLite schema 导入 PostgreSQL。 |
+
+一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；历史用法见 git 历史。
 
 ## 运行方式
 
