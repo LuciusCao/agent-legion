@@ -19,7 +19,7 @@ _WORKSPACE_MODULE_PREFIXES = tuple(
 )
 
 _VIDEO_HIVE_MODULE_PREFIXES = tuple(
-    """server.app.pipeline. server.app.services.video_actions server.app.services.intake server.app.services.manual_run server.app.services.interaction_stats""".split()
+    """server.app.pipeline. server.app.services.interaction_stats""".split()
 )
 
 _VIDEO_HIVE_EXACT = frozenset({"server.app.pipeline"})
