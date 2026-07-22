@@ -4,6 +4,7 @@ import hmac
 import json
 import re
 import uuid
+from pathlib import PurePosixPath
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -23,6 +24,7 @@ _LEASE_HEADER = "x-agent-lease-id"
 _MAX_COMMAND_PARTS = 64
 _MAX_OUTPUT_ARTIFACTS = 128
 _MAX_ERROR_MESSAGE_CHARS = 4000
+_MAX_RUN_DIR_CHARS = 256
 
 
 class RegisterAgentWorkerRequest(BaseModel):
@@ -136,18 +138,29 @@ def _parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     if any(not _ARTIFACT_REF.fullmatch(ref) for ref in output_artifacts.values()):
         raise ValueError("invalid output artifact reference")
     error_message = str(metadata.get("error_message", ""))[:_MAX_ERROR_MESSAGE_CHARS]
+    run_dir_raw = metadata.get("run_dir", "")
+    if not isinstance(run_dir_raw, str) or len(run_dir_raw) > _MAX_RUN_DIR_CHARS:
+        raise ValueError("invalid run_dir")
+    run_dir_relative = PurePosixPath(run_dir_raw)
+    run_dir = ""
+    if run_dir_raw:
+        if run_dir_relative.is_absolute() or ".." in run_dir_relative.parts:
+            raise ValueError("invalid run_dir")
+        run_dir = run_dir_relative.as_posix()
     outcome = AgentOutcome(
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
         error_message=error_message,
         command=tuple(str(part) for part in command_raw),
         output_artifacts=output_artifacts,
+        run_dir=run_dir,
     )
     record = {
         "status": status,
         "exit_code": exit_code,
         "error_message": error_message,
         "output_artifacts": output_artifacts,
+        "run_dir": run_dir,
     }
     return outcome, record
 

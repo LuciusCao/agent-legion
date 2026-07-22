@@ -352,6 +352,10 @@ def run_execution(
                     "error_message": error,
                     "command": command,
                     "output_artifacts": outputs,
+                    # Host-side observability (DAG log view + token usage) reads
+                    # events.jsonl from this dir after the archive is unpacked;
+                    # it never feeds success/failure decisions.
+                    "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
                 }
     except Exception as exc:
         metadata["error_message"] = str(exc)

@@ -333,3 +333,73 @@ def test_worker_online_flag_tracks_last_seen(tmp_path: Path) -> None:
         assert response.status_code == 204
         workers = client.get("/api/agent-workers").json()["workers"]
         assert workers[0]["online"] is True
+
+
+def _archive_with_events(events_lines: list[str]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        payload = ("\n".join(events_lines) + "\n").encode()
+        info = tarfile.TarInfo("runs/generate/worker/events.jsonl")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def test_result_run_dir_promotes_events_for_logs_and_token_usage(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        claimed = _claim(client, token)
+        execution_id = claimed["execution_id"]
+        auth = {"X-Agent-Worker-Token": token, "X-Agent-Lease-Id": claimed["lease_id"]}
+
+        unsafe = client.post(
+            f"/api/agent-executions/{execution_id}/result",
+            headers={
+                **auth,
+                "X-Agent-Result": json.dumps({"status": "completed", "run_dir": "../escape"}),
+            },
+            content=_empty_archive(),
+        )
+        assert unsafe.status_code == 400
+
+        # The scheduler normally creates the job dir; the seeded job went
+        # straight to the broker, so create it here.
+        (app.state.settings.jobs_dir / "job-1").mkdir(parents=True, exist_ok=True)
+        events = [
+            json.dumps(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "provider": "gateway",
+                        "model": "test-model",
+                        "usage": {"input": 120, "output": 34, "cacheRead": 5},
+                    },
+                }
+            )
+        ]
+        ok = client.post(
+            f"/api/agent-executions/{execution_id}/result",
+            headers={
+                **auth,
+                "X-Agent-Result": json.dumps(
+                    {"status": "completed", "run_dir": "runs/generate/worker"}
+                ),
+            },
+            content=_archive_with_events(events),
+        )
+        assert ok.status_code == 204, ok.text
+
+    run_dir = app.state.settings.data_dir / "jobs" / "job-1" / "runs" / "generate" / "worker"
+    assert (run_dir / "events.jsonl").is_file() or (run_dir / "events.jsonl.gz").is_file()
+    with app.state.job_db._connect_read() as conn:
+        node_run = conn.execute("select id, run_dir from node_runs where job_id='job-1'").fetchone()
+        usage = conn.execute(
+            "select input_tokens, output_tokens from node_run_token_usage where node_run_id=?",
+            (node_run["id"],),
+        ).fetchone()
+    assert node_run["run_dir"] == "jobs/job-1/runs/generate/worker"
+    assert usage is not None
+    assert (usage["input_tokens"], usage["output_tokens"]) == (120, 34)

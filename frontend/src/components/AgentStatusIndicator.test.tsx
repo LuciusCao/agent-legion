@@ -117,6 +117,28 @@ describe('AgentStatusIndicator', () => {
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 
+  it('shows worker busy count over capacity', () => {
+    mockAgents = [
+      makeAgentStatus({
+        id: 'mac-mini',
+        name: 'MacMini',
+        workspace_id: 'ws1',
+        busy: true,
+        task_count: 3,
+        max_tasks: 16,
+      }),
+    ]
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(screen.getByText('MacMini')).toBeInTheDocument()
+    expect(screen.getByText('忙碌 3/16')).toBeInTheDocument()
+  })
+
+  it('shows empty state when no worker is available', () => {
+    mockAgents = []
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(screen.getByText('暂无可用 Worker')).toBeInTheDocument()
+  })
+
   it('shows a disconnected status dot when the agents channel is closed', () => {
     useExecutorsStore.setState({ connectionStatus: { agents: 'closed' } })
     render(<AgentStatusIndicator workspaceId="ws1" />)
