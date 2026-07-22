@@ -9,12 +9,15 @@ from collections.abc import Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from psycopg import IntegrityError
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
+
+if TYPE_CHECKING:
+    from server.app.agents import AgentStatusManager
 
 _CANDIDATE_WINDOW = 256
 _CANDIDATES_PER_WORKSPACE = 8
@@ -66,11 +69,16 @@ class AgentExecutionBroker:
         lease_ttl_seconds: int = 90,
         bundle_dir: Path | None = None,
         requeue_limit: int = 3,
+        agent_status: AgentStatusManager | None = None,
     ) -> None:
         self.database_dsn = database_dsn
         self.lease_ttl_seconds = lease_ttl_seconds
         self.bundle_dir = bundle_dir
         self.requeue_limit = requeue_limit
+        # Optional status-panel sink: when wired, claim/finish transitions are
+        # mirrored into the /api/agents feed so the workspace panel shows
+        # distributed executions, not only in-process runners.
+        self.agent_status = agent_status
         # Rotating cursor for bounded cross-workspace fairness (EXEC-FAIRNESS
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
@@ -156,9 +164,31 @@ class AgentExecutionBroker:
     def claim(self, worker_id: str) -> AgentClaim | None:
         try:
             with write_transaction(self.database_dsn) as conn:
-                return self._claim_in_transaction(conn, worker_id)
+                claimed = self._claim_in_transaction(conn, worker_id)
         except _ClaimRacedError:
             return None
+        if claimed is not None:
+            self._notify_agent_claimed(claimed)
+        return claimed
+
+    def _notify_agent_claimed(self, claimed: AgentClaim) -> None:
+        manager = self.agent_status
+        if manager is None:
+            return
+        max_tasks = 1
+        with read_connection(self.database_dsn) as conn:
+            capacity = conn.execute(
+                "select max_concurrency from workspace_agent_capacities where workspace_id=?",
+                (claimed.workspace_id,),
+            ).fetchone()
+        if capacity is not None:
+            max_tasks = int(capacity["max_concurrency"])
+        manager.ensure_workspace_agent(claimed.agent_id, claimed.workspace_id, max_tasks=max_tasks)
+        manager.set_busy(claimed.agent_id, "", workspace_id=claimed.workspace_id)
+
+    def _notify_agent_released(self, agent_id: str, workspace_id: str) -> None:
+        if self.agent_status is not None:
+            self.agent_status.set_idle(agent_id, workspace_id=workspace_id)
 
     def _claim_in_transaction(self, conn: Any, worker_id: str) -> AgentClaim | None:
         worker = conn.execute(
@@ -409,7 +439,7 @@ class AgentExecutionBroker:
         worker's lease_id (header or metadata) and pass it through."""
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
-                "select lease_id from agent_execution_requests"
+                "select lease_id, agent_id, workspace_id from agent_execution_requests"
                 " where execution_id=? and worker_id=? and lease_id=? and state='claimed'"
                 " for update",
                 (execution_id, worker_id, lease_id),
@@ -422,12 +452,16 @@ class AgentExecutionBroker:
                 (json.dumps(dict(outcome), ensure_ascii=False), execution_id),
             )
             self._touch_worker(conn, worker_id)
-            return str(row["lease_id"])
+        self._notify_agent_released(str(row["agent_id"]), str(row["workspace_id"]))
+        return str(row["lease_id"])
 
     def sweep_expired_claims(self) -> list[str]:
         """Requeue Worker-lost claims without leaving the workflow node running."""
         cutoff = datetime.now(UTC) - timedelta(seconds=self.lease_ttl_seconds)
         requeued: list[str] = []
+        # (agent_id, workspace_id) pairs whose execution left the claimed
+        # state in this sweep, for the status panel.
+        released: list[tuple[str, str]] = []
         with write_transaction(self.database_dsn) as conn:
             rows = conn.execute(
                 "select * from agent_execution_requests"
@@ -453,6 +487,7 @@ class AgentExecutionBroker:
                         " where execution_id=? and state='claimed'",
                         (row["execution_id"],),
                     )
+                    released.append((str(row["agent_id"]), str(row["workspace_id"])))
                     continue
                 if lease is None:
                     continue
@@ -462,6 +497,7 @@ class AgentExecutionBroker:
                     " error_message='Agent Worker heartbeat expired' where id=?",
                     (node_run_id,),
                 )
+                released.append((str(row["agent_id"]), str(row["workspace_id"])))
                 if int(row["attempt"]) <= self.requeue_limit:
                     reset = conn.execute(
                         "update job_nodes set status='pending', started_at=null,"
@@ -502,6 +538,8 @@ class AgentExecutionBroker:
                         " where id=?",
                         (outcome["error_message"], row["job_id"]),
                     )
+        for agent_id, workspace_id in released:
+            self._notify_agent_released(agent_id, workspace_id)
         return requeued
 
     def fail_stale_definition_requests(self) -> list[str]:

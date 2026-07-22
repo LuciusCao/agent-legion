@@ -86,6 +86,9 @@ class AgentWorkerSummary(BaseModel):
     allowed_workspaces: list[str]
     registered_at: str
     last_seen_at: str
+    # True while the Worker's last authenticated call is within the online
+    # threshold; registered-but-silent Workers show as offline.
+    online: bool
     revoked: bool
 
 

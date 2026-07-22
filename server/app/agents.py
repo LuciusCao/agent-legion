@@ -111,6 +111,39 @@ class AgentStatusManager:
         with self._lock:
             return list(self.agents)
 
+    def ensure_workspace_agent(
+        self, agent_id: str, workspace_id: str, *, max_tasks: int = 1
+    ) -> None:
+        """Idempotently upsert a workspace-scoped Agent row for status display.
+
+        Distributed executions (broker claims by remote Agent Workers) have no
+        in-process runner to discover, so the broker registers the logical
+        Agent here on first claim; ``max_tasks`` mirrors the workspace-level
+        Agent capacity so the panel shows the governing limit.
+        """
+        should_broadcast = False
+        with self._lock:
+            for agent in self.agents:
+                if agent.id == agent_id and agent.workspace_id == workspace_id:
+                    if agent.max_tasks != max_tasks:
+                        agent.max_tasks = max_tasks
+                        should_broadcast = True
+                    break
+            else:
+                self.agents.append(
+                    AgentStatus(
+                        id=agent_id,
+                        name=agent_id,
+                        busy=False,
+                        task_count=0,
+                        max_tasks=max_tasks,
+                        workspace_id=workspace_id,
+                    )
+                )
+                should_broadcast = True
+        if should_broadcast:
+            self._broadcast_snapshot()
+
     def add_pi_agent_for_workspace(self, workspace_id: str, max_tasks: int = 1) -> None:
         should_broadcast = False
         with self._lock:

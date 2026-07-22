@@ -108,10 +108,10 @@ export function AgentRoutingSection() {
         编辑并重新发布。Worker 由 Broker 在执行时动态分配，无需绑定。
       </p>
 
-      <h3 style={headingStyle}>在线 Worker</h3>
+      <h3 style={headingStyle}>已注册 Worker</h3>
       {workers.length === 0 ? (
         <p style={{ fontSize: 13, color: '#74777f', margin: 0 }}>
-          暂无在线 Worker
+          暂无已注册 Worker
         </p>
       ) : (
         <ul
@@ -147,6 +147,16 @@ export function AgentRoutingSection() {
                 }}
               >
                 {worker.name || worker.worker_id}
+              </span>
+              <span
+                style={{
+                  ...chipStyle,
+                  background: worker.online ? '#e6f4ea' : '#f0f0f0',
+                  color: worker.online ? '#1e7e34' : '#74777f',
+                }}
+                title={`最近心跳 ${worker.last_seen_at}`}
+              >
+                {worker.online ? '在线' : '离线'}
               </span>
               <span style={chipStyle}>{worker.runtimes.join(', ')}</span>
               <span style={chipStyle}>并发上限 {worker.max_concurrency}</span>

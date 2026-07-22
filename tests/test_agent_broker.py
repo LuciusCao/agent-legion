@@ -10,6 +10,7 @@ import pytest
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
 from server.app.agent_workers import AgentWorkerRegistry
+from server.app.agents import AgentStatusManager
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -426,3 +427,58 @@ def test_scoped_worker_claims_only_its_workspace(job_db) -> None:
     claimed = broker.claim("global-worker")
     assert claimed is not None
     assert claimed.workspace_id == "other-workspace"
+
+
+def _register_worker(registry: AgentWorkerRegistry, worker_id: str = "worker-1") -> None:
+    registry.issue_token(
+        worker_id=worker_id,
+        name="worker",
+        runtimes=["pi"],
+        max_concurrency=10,
+        labels={"arch": "arm64"},
+    )
+
+
+def test_claim_and_done_mirror_agent_status_panel(job_db) -> None:
+    _seed_request(job_db, job_id="job-1", limit=3)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    manager = AgentStatusManager()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, agent_status=manager)
+
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    (agent,) = manager.get_all()
+    assert agent.id == "generator-v1"
+    assert agent.workspace_id == "test-workspace"
+    assert agent.busy is True
+    assert agent.task_count == 1
+    # max_tasks mirrors the workspace-level Agent capacity.
+    assert agent.max_tasks == 3
+
+    broker.mark_done(claimed.execution_id, "worker-1", claimed.lease_id, {"status": "succeeded"})
+
+    (agent,) = manager.get_all()
+    assert agent.busy is False
+    assert agent.task_count == 0
+
+
+def test_swept_expired_claim_releases_agent_status_panel(job_db) -> None:
+    _seed_request(job_db, job_id="job-1")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    manager = AgentStatusManager()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1, agent_status=manager)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            (datetime.now(UTC) - timedelta(seconds=10), claimed.execution_id),
+        )
+
+    assert broker.sweep_expired_claims() == [claimed.execution_id]
+
+    (agent,) = manager.get_all()
+    assert agent.busy is False
+    assert agent.task_count == 0
