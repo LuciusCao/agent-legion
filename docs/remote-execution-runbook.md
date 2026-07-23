@@ -114,7 +114,7 @@ machine, provide the same token to the Worker container via `deploy/.env` or
 the shell environment (`LLM_GATEWAY_TOKEN=...`; see the deployment doc, §2) and
 set the pi provider's `apiKey` to `"$LLM_GATEWAY_TOKEN"` in the mounted
 `models.json` — the pi CLI interpolates the variable and sends it as
-`Authorization: Bearer`, which the gateway accepts. `scripts/agent_worker.py`
+`Authorization: Bearer`, which the gateway accepts. `worker/executor.py`
 passes the variable through to the pi subprocess environment unchanged.
 
 Verify from a worker device (host OS first, then from inside the container per

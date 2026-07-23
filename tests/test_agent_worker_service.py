@@ -11,10 +11,10 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-import scripts.agent_worker_service as service_module
-import scripts.agent_worker_service_state as state_module
-from scripts.agent_worker_service import create_app
-from scripts.agent_worker_service_state import (
+import worker.service as service_module
+import worker.supervisor as state_module
+from worker.service import create_app
+from worker.supervisor import (
     WorkerConfigStore,
     WorkerSupervisor,
     public_config,
@@ -30,6 +30,14 @@ mode = os.environ.get("FAKE_WORKER_MODE", "sleep")
 if mode == "sleep":
     time.sleep(30)
 sys.exit(2 if mode == "exit2" else 1)
+"""
+
+FAKE_WORKER_WITH_STATUS = """
+import json, os, time
+path = os.environ["AGENT_WORKER_STATUS_FILE"]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump({"pid": os.getpid(), "executions": {"exec-1": {"execution_id": "exec-1", "job_id": "job-1", "node_key": "node_a", "phase": "running", "started_at": "2026-07-23T00:00:00+00:00"}}}, handle)
+time.sleep(30)
 """
 
 
@@ -85,6 +93,7 @@ class FakeSupervisor:
             "host_reachable": True,
             "registered": True,
             "connected": True,
+            "current_executions": [],
         }
 
     def logs(self, limit: int = 200) -> list[str]:
@@ -418,3 +427,36 @@ def test_compose_keeps_control_api_local_and_state_separate_from_executions() ->
         assert "worker-control:/var/lib/agent-legion-worker-control" in compose
         assert "worker-data:/var/lib/agent-legion-worker" in compose
     assert "server/app/workflows/pi_protocol.py" in dockerfile
+
+
+def test_supervisor_injects_status_file_and_cleans_it_on_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "fake_worker.py"
+    script.write_text(FAKE_WORKER_WITH_STATUS, encoding="utf-8")
+    token_file = tmp_path / "register-token"
+    token_file.write_text("secret", encoding="utf-8")
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
+    monkeypatch.setattr(state_module, "_query_remote_status", lambda config: {})
+    supervisor = WorkerSupervisor(store, script)
+    supervisor.start()
+    try:
+        _wait_for(lambda: supervisor.status()["current_executions"] != [])
+        executions = supervisor.status()["current_executions"]
+        assert [item["execution_id"] for item in executions] == ["exec-1"]
+        assert executions[0]["phase"] == "running"
+    finally:
+        supervisor.stop()
+    _wait_for(lambda: supervisor.status()["current_executions"] == [])
+    assert not (tmp_path / "state" / "current_executions.json").exists()
+
+
+def test_status_endpoint_exposes_current_executions(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    app = create_app(FakeSupervisor(store), tmp_path)
+    with TestClient(app) as client:
+        response = client.get("/api/status", headers=_auth(store))
+    assert response.status_code == 200
+    assert response.json()["current_executions"] == []

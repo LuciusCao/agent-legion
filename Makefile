@@ -32,7 +32,7 @@ AGENT_WORKER_UI_HOST ?= 127.0.0.1
 AGENT_WORKER_UI_PORT ?= 8787
 .PHONY: dev-worker
 dev-worker: ## 启动本机 Worker Service 与控制台
-	$(UV) run python -m scripts.agent_worker_service \
+	$(UV) run python -m worker.service \
 		--config "$(AGENT_WORKER_CONFIG)" --state-dir "$(AGENT_WORKER_STATE_DIR)" \
 		--host "$(AGENT_WORKER_UI_HOST)" --port "$(AGENT_WORKER_UI_PORT)"
 
@@ -74,11 +74,11 @@ stack-status: ## 查看 stack 容器与健康状态（STACK=host 或 worker，�
 
 .PHONY: worker-status
 worker-status: ## 通过本地 Worker Service 查看连接与运行状态
-	$(UV) run python scripts/agent_workerctl.py status
+	$(UV) run python -m worker.cli status
 
 .PHONY: worker-logs
 worker-logs: ## 通过本地 Worker Service 查看最近日志
-	$(UV) run python scripts/agent_workerctl.py logs
+	$(UV) run python -m worker.cli logs
 
 # 质量门
 .PHONY: check-quick

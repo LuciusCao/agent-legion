@@ -7,6 +7,8 @@ production:
       extensions: [.ts, .tsx, .css]
     - path: scripts
       extensions: [.py]
+    - path: worker
+      extensions: [.py]
   exclude:
     - frontend/src/generated/**
   buffer_lines: 10

@@ -1,9 +1,10 @@
-"""Process supervision for the Agent Worker Service (config lives in agent_worker_config_store)."""
+"""Process supervision for the Agent Worker Service (config lives in worker/config_store)."""
 
 from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import sys
 import threading
@@ -15,7 +16,8 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from scripts.agent_worker_config_store import WorkerConfigStore, public_config, validate_config
+from worker.config_store import WorkerConfigStore, public_config, validate_config
+from worker.status import ENV_VAR, STATUS_FILENAME, read_current_executions
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
@@ -73,10 +75,13 @@ class WorkerSupervisor:
                 )
             self._generation += 1
             generation = self._generation
+            status_file = self.store.state_dir / STATUS_FILENAME
+            status_file.unlink(missing_ok=True)
             self._process = subprocess.Popen(
                 [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
+                env={**os.environ, ENV_VAR: str(status_file)},
                 text=True,
                 bufsize=1,
             )
@@ -132,6 +137,8 @@ class WorkerSupervisor:
         exit_code = process.wait()
         with self._lock:
             self._logs.append(f"Worker 执行进程已退出，退出码 {exit_code}")
+            if generation == self._generation:
+                (self.store.state_dir / STATUS_FILENAME).unlink(missing_ok=True)
             if generation != self._generation or self._shutdown:
                 return
             self._exit_code = exit_code
@@ -197,6 +204,7 @@ class WorkerSupervisor:
             "bootstrap_error": self.store.bootstrap_error,
             "mounted_config_diverged": self._mounted_config_diverged(),
             **snapshot,
+            "current_executions": read_current_executions(self.store.state_dir / STATUS_FILENAME),
             **remote,
         }
 

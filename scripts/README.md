@@ -28,14 +28,9 @@
 
 ## Agent Worker 子系统
 
-| 脚本 | 用途 |
-|------|------|
-| `agent_worker.py` | Worker 客户端 supervisor：并发拉取并执行 Pi/OpenClaw Agent 任务。Docker worker 镜像以单文件方式部署它。 |
-| `agent_worker_service.py` | 本机 Worker Service：HTTP 控制面与状态 UI（`make dev-worker`）。 |
-| `agent_worker_client.py` | Worker Service 的 HTTP client 与 control-token 解析。 |
-| `agent_worker_config_store.py` | Worker 配置持久化：原子写入与校验。 |
-| `agent_worker_service_state.py` | Worker Service 进程监管（配置存储在 `agent_worker_config_store`）。 |
-| `agent_workerctl.py` | 查询与配置本机 Worker Service 的 CLI（`make worker-status` / `worker-logs`）。 |
+Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁至顶层 `worker/` 包
+（`worker/executor.py`、`worker/service.py`、`worker/supervisor.py`、`worker/config_store.py`、
+`worker/client.py`、`worker/cli.py`、`worker/cleanup.py`），控制台静态资源在 `worker/ui/`。
 
 ## Spec / Skill 治理
 
@@ -74,7 +69,7 @@
 - 新脚本统一使用下划线命名（`check_xxx.py`）；连字符命名（`check-skills-shared.py` 等）为存量，不强改。
 - 包内可导入的脚本通过 `uv run python -m scripts.<name>` 运行，不再复制 `sys.path` bootstrap；
   同包共享逻辑直接 `from scripts._xxx import ...`。
-- 以下存量场景保留 `sys.path` bootstrap：`agent_worker.py`（Docker 单文件部署）、
+- 以下存量场景保留 `sys.path` bootstrap：`worker/executor.py`（Docker 已改为整体拷贝 `worker/` 包，bootstrap 仅为兼容直接以脚本方式运行）、
   连字符脚本（`import-sqlite-to-postgres.py`、`migrate-config-layout.py`，无法作为模块运行）、
   `stress/`（非包目录，按路径直接执行）。
 
