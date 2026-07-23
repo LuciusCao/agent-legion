@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 from fastapi.testclient import TestClient
 
@@ -158,134 +156,6 @@ def test_workspace_package_download_rejects_subdirectory(workspace_client, tmp_p
     assert response.status_code == 404
 
 
-def test_delete_package_rejects_locked_package(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "locked-package.zip"), name="Locked Package", locked=1)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.delete(f"/api/packages/{pkg['id']}")
-    assert response.status_code == 400
-    assert "locked" in response.json()["detail"].lower()
-
-
-def test_patch_package_updates_locked(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "patchable-package.zip"), name="Patchable", locked=0)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.patch(f"/api/packages/{pkg['id']}", json={"locked": True})
-    assert response.status_code == 200
-    assert response.json()["locked"] is True
-
-    updated = db.list_packages(limit=1)[0]
-    assert updated["locked"] == 1
-
-
-def test_patch_package_unlocks(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "locked-package.zip"), name="Locked", locked=1)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.patch(f"/api/packages/{pkg['id']}", json={"locked": False})
-    assert response.status_code == 200
-    assert response.json()["locked"] is False
-
-    updated = db.list_packages(limit=1)[0]
-    assert updated["locked"] == 0
-
-
-def test_patch_package_unknown_field_ignored(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "another-package.zip"), name="Original", locked=0)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.patch(
-        f"/api/packages/{pkg['id']}",
-        json={"locked": True, "unknown": "x"},
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result == {"id": pkg["id"], "locked": True}
-    assert "unknown" not in result
-
-
-def test_list_packages_skips_escaping_path(client, settings):
-    # Insert a valid relative package record and an escaping one.
-    client.app.state.db.insert_package(
-        "packages/valid.zip", name="Valid Package", video_count=1, size_bytes=100
-    )
-    client.app.state.db.insert_package(
-        "../escaped.zip", name="Escaped Package", video_count=1, size_bytes=100
-    )
-
-    response = client.get("/api/packages")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["packages"]) == 1
-    assert data["packages"][0]["name"] == "Valid Package"
-    returned_path = Path(data["packages"][0]["path"])
-    assert returned_path.is_absolute()
-    assert returned_path.is_relative_to(settings.packages_dir)
-
-
-def test_package_download_rejects_path_traversal(client):
-    response = client.get("/api/packages/%2e%2e/%2e%2e/%2e%2e/etc/passwd")
-    assert response.status_code == 404
-
-
-def test_package_download_rejects_empty_and_directory(client):
-    # Empty filename should 404
-    response = client.get("/api/packages/")
-    assert response.status_code == 404
-
-    # Leading slash should 404
-    response = client.get("/api/packages/%2fetc%2fpasswd")
-    assert response.status_code == 404
-
-    # Directory traversal via dot-dot should 404
-    response = client.get("/api/packages/foo/bar/../baz")
-    assert response.status_code == 404
-
-
-def test_package_download_rejects_backslash_traversal(client):
-    response = client.get("/api/packages/foo\\..\\..\\etc\\passwd")
-    assert response.status_code == 404
-
-
-def test_package_download_rejects_subdirectory(client, settings):
-    nested = settings.packages_dir / "foo" / "bar.zip"
-    nested.parent.mkdir(parents=True, exist_ok=True)
-    nested.write_text("fake", encoding="utf-8")
-    response = client.get("/api/packages/foo/bar.zip")
-    assert response.status_code == 404
-
-
-def test_package_download_runtime_error(client, monkeypatch):
-    def boom(self):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(Path, "resolve", boom)
-    response = client.get("/api/packages/test.zip")
-    assert response.status_code == 404
-
-
-def test_delete_package_rejects_path_outside_packages_dir(tmp_path, client):
-    outside_path = tmp_path / "outside-package.zip"
-    outside_path.write_bytes(b"outside")
-    client.app.state.db.insert_package(str(outside_path), name="Outside Package")
-    package = client.app.state.db.list_packages(limit=1)[0]
-
-    response = client.delete(f"/api/packages/{package['id']}")
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Package not found"
-    assert outside_path.exists()
-    assert any(
-        item["id"] == package["id"] for item in client.app.state.db.list_packages(limit=1000)
-    )
-
-
-def test_delete_package_not_found(client):
-    response = client.delete("/api/packages/99999")
-    assert response.status_code == 404
-
-
 def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
@@ -330,29 +200,6 @@ def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
 
     list_resp = workspace_client.get(f"/api/workspaces/{ws_id}/packages")
     assert list_resp.json()["packages"] == []
-
-
-def test_package_download_missing_file_returns_404(client):
-    response = client.get("/api/packages/nope.zip")
-    assert response.status_code == 404
-
-
-def test_package_download_success(client, settings):
-    zip_path = settings.packages_dir / "real.zip"
-    zip_path.write_bytes(b"fake-zip-content")
-
-    response = client.get("/api/packages/real.zip")
-    assert response.status_code == 200
-    assert response.content == b"fake-zip-content"
-
-
-def test_package_download_rejects_symlink_escape(client, settings, tmp_path):
-    outside = tmp_path / "secret.txt"
-    outside.write_text("secret", encoding="utf-8")
-    (settings.packages_dir / "evil.zip").symlink_to(outside)
-
-    response = client.get("/api/packages/evil.zip")
-    assert response.status_code == 404
 
 
 def test_workspace_package_download_missing_file_returns_404(client):

@@ -32,7 +32,6 @@ def build_workspace_dag(
                 "key": node.key,
                 "label": node.label,
                 "capability": node.capability,
-                "max_concurrency": node.max_concurrency,
                 "after": node.after,
                 "inputs": node.inputs,
                 "outputs": node.outputs,

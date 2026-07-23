@@ -3,12 +3,10 @@ from pathlib import Path
 import pytest
 
 from server.app.cms.knowledge import _extract_knowledge_video_url, _parse_knowledge_payload
-from server.app.pipeline.common import get_video_id, parse_srt, parse_srt_file, resolve_video_dir
+from server.app.pipeline.common import parse_srt, parse_srt_file
 
 
-def test_parse_srt_and_video_id():
-    assert get_video_id("https://cdn.example.com/videos/g02060101.mp4?x=1") == "g02060101"
-
+def test_parse_srt():
     subtitles = parse_srt(
         "1\n00:00:00,000 --> 00:00:01,500\n你好\n\n2\n00:00:01,500 --> 00:00:03,000\n继续\n"
     )
@@ -37,19 +35,6 @@ def test_extract_knowledge_url_accepts_source_v2():
     data = _parse_knowledge_payload(payload)
     assert data is not None
     assert _extract_knowledge_video_url(data) == ("https://example.com/k001.mp4", "")
-
-
-def test_resolve_video_dir_prefers_storage_dir(tmp_path: Path) -> None:
-    videos_dir = tmp_path / "videos"
-    videos_dir.mkdir()
-    custom_dir = videos_dir / "custom" / "dir"
-    custom_dir.mkdir(parents=True)
-
-    assert resolve_video_dir({"id": "v1", "storage_dir": str(custom_dir)}, videos_dir) == (
-        custom_dir.resolve()
-    )
-    assert resolve_video_dir({"id": "v1", "storage_dir": ""}, videos_dir) == (videos_dir / "v1")
-    assert resolve_video_dir({"id": "v1"}, videos_dir) == (videos_dir / "v1")
 
 
 def test_parse_time_unknown_format():

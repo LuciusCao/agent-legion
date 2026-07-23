@@ -8,7 +8,6 @@ from server.app.storage_paths import (
     resolve_data_path,
     resolve_job_dir,
     resolve_managed_path,
-    resolve_video_dir,
 )
 
 
@@ -310,46 +309,6 @@ class TestResolveDataPath:
 
         with pytest.raises(ManagedPathError):
             resolve_data_path("link/file.txt", data_dir, allow_missing=True)
-
-
-class TestResolveVideoDir:
-    def test_uses_storage_dir_when_set(self, managed_root: Path) -> None:
-        video = {"id": "v1", "storage_dir": str(managed_root / "v1")}
-
-        with pytest.warns(DeprecationWarning):
-            result = resolve_video_dir(video, managed_root)
-
-        assert result == (managed_root / "v1").resolve()
-
-    def test_uses_relative_storage_dir_when_set(self, managed_root: Path) -> None:
-        # managed_root acts as videos_dir in this fixture, so its name is the
-        # canonical managed-category prefix relative to data_dir.
-        video = {"id": "v1", "storage_dir": f"{managed_root.name}/v1"}
-
-        result = resolve_video_dir(video, managed_root)
-
-        assert result == (managed_root / "v1").resolve()
-
-    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
-    def test_rejects_escape(self, managed_root: Path) -> None:
-        outside = managed_root.parent / "outside"
-        outside.mkdir()
-        video = {"id": "v2", "storage_dir": str(outside / "v2")}
-
-        with pytest.raises(ManagedPathError) as exc_info:
-            resolve_video_dir(video, managed_root)
-
-        assert "video" in str(exc_info.value)
-        assert "v2" in str(exc_info.value)
-
-    def test_rejects_other_managed_category(self, managed_root: Path) -> None:
-        # A path valid inside data_dir but outside the narrower videos_dir.
-        video = {"id": "v1", "storage_dir": "jobs/j1"}
-
-        with pytest.raises(ManagedPathError) as exc_info:
-            resolve_video_dir(video, managed_root)
-
-        assert "video" in str(exc_info.value)
 
 
 class TestResolveJobDir:

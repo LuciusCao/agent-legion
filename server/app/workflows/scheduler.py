@@ -9,18 +9,8 @@ from server.app.workflows.workflow_branching import (
     RUNNABLE_STATUSES,
     _incoming_edges,
 )
-from server.app.workflows.workflow_branching import (
-    downstream_nodes as _downstream_nodes,
-)
-from server.app.workflows.workflow_branching import (
-    evaluate_branches as _evaluate_branches,
-)
 
 TERMINAL_SUCCESS_STATUSES = {"completed", "not_applicable"}
-
-# Backwards-compatible re-exports for consumers that pre-date the split.
-evaluate_branches = _evaluate_branches
-downstream_nodes = _downstream_nodes
 
 
 def _inputs_exist(node: WorkflowNode, artifact_dir: Path) -> bool:

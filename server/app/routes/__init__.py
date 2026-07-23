@@ -6,13 +6,11 @@ from ..agent_broker import AgentExecutionBroker
 from ..agent_completion import AgentCompletionHandler
 from ..agent_workers import AgentWorkerRegistry
 from ..agents import AgentStatusManager
-from ..db import Database
 from ..events import JobEventManager
 from ..jobs import JobQueries
 from ..services.artifact_store import ArtifactStore
 from ..services.executor_catalog import ExecutorCatalogService
 from ..services.job_packages import JobPackageService
-from ..services.package_service import PackageService
 from ..services.workflow_catalog import WorkflowCatalogService
 from ..services.workspace_configuration import WorkspaceConfigurationService
 from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
@@ -36,7 +34,6 @@ from .workspaces import create_workspaces_router
 
 
 def create_router(
-    db: Database,
     job_db: JobQueries,
     settings: Settings,
     agent_manager: AgentStatusManager,
@@ -46,7 +43,6 @@ def create_router(
     executor_catalog: ExecutorCatalogService,
     workspace_executor_configuration: WorkspaceExecutorConfigurationService,
     workspace_configuration: WorkspaceConfigurationService,
-    package_service: PackageService,
     job_packages: JobPackageService,
     job_event_manager: JobEventManager | None = None,
     job_event_buffer: Any | None = None,
@@ -59,9 +55,7 @@ def create_router(
 
     router.include_router(create_common_router())
     router.include_router(create_agents_router(agent_manager))
-    router.include_router(
-        create_packages_router(db, job_db, settings, package_service, job_packages)
-    )
+    router.include_router(create_packages_router(job_db, settings, job_packages))
     router.include_router(create_worker_router(workspace_worker_control))
     if (
         agent_broker is not None

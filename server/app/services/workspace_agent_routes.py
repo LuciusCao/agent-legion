@@ -3,8 +3,7 @@
 Routes are materialized projections of the currently published workflow
 revision; this service only reads them for settings-page display. Agent
 capacity is workspace-level (``workspace_agent_capacities``, exposed via the
-workspace configuration payload), so per-node ``max_concurrency`` is always
-null here and kept only for response-shape compatibility.
+workspace configuration payload).
 """
 
 from __future__ import annotations
@@ -65,7 +64,6 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
                 "capability": str(row["capability"]),
                 "agent_id": str(row["agent_id"]),
                 "agent_skill": skill,
-                "max_concurrency": None,
             }
         )
     return routes

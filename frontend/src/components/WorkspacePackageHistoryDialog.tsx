@@ -12,7 +12,6 @@ export function WorkspacePackageHistoryDialog({ workspaceId }: Props) {
     <PackageHistoryDialog
       open={workspacePackageDialogOpen}
       onClose={() => setWorkspacePackageDialogOpen(false)}
-      scope="workspace"
       workspaceId={workspaceId}
     />
   )

@@ -1,34 +1,5 @@
 import re
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
-
-
-def resolve_video_dir(video: Any, videos_dir: Path) -> Path:
-    """Return the video directory, resolving storage_dir safely against videos_dir."""
-    from server.app.storage_paths import resolve_video_dir as _resolve_video_dir
-
-    return _resolve_video_dir(video, videos_dir)
-
-
-def get_video_id(url: str) -> str:
-    path = urlparse(url).path
-    name = Path(path).name or "video"
-    stem = Path(name).stem or name
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or "video"
-
-
-def normalize_identifier(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip()).strip("_")
-
-
-def make_record_id(source_url: str, content_type: str, external_id: str) -> str:
-    normalized = normalize_identifier(external_id)
-    if normalized:
-        return f"{content_type}_{normalized}"
-    if source_url:
-        return get_video_id(source_url)
-    return "video"
 
 
 def parse_time(value: str) -> float:

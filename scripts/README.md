@@ -38,7 +38,6 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 |------|------|
 | `verify_specs.py` | 检查 design specs 的引用健康，自动分类到 `specs/`、`completed/`、`archive/`，并生成 `SPEC_HEALTH.md`。 |
 | `check-skills-shared.py` | 校验外部 Pi skill 仓库与项目共享引用文件的一致性。 |
-| `migrate-skills-to-external-repos.py` | 将当前源码树中的 skill 迁移到外部 git 仓库。 |
 
 ## 迁移与工具
 
@@ -50,10 +49,8 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
 | `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 |
 | `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为（共享逻辑在 `_skill_cost_core.py`）。 |
-| `import-sqlite-to-postgres.py` | 一次性离线迁移：从最终版 SQLite schema 导入 PostgreSQL（共享逻辑在 `sqlite_import_support.py`）。 |
-| `migrate-config-layout.py` | 一次性配置迁移：按域拆分 Video Hive 运行时配置（`--check` / `--apply`）。 |
 
-一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；历史用法见 git 历史。
+一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；历史用法见 git 历史。
 
 ## 子目录
 
@@ -70,7 +67,6 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 - 包内可导入的脚本通过 `uv run python -m scripts.<name>` 运行，不再复制 `sys.path` bootstrap；
   同包共享逻辑直接 `from scripts._xxx import ...`。
 - 以下存量场景保留 `sys.path` bootstrap：`worker/executor.py`（Docker 已改为整体拷贝 `worker/` 包，bootstrap 仅为兼容直接以脚本方式运行）、
-  连字符脚本（`import-sqlite-to-postgres.py`、`migrate-config-layout.py`，无法作为模块运行）、
   `stress/`（非包目录，按路径直接执行）。
 
 ## 运行方式

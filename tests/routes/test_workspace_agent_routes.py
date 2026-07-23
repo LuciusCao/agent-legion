@@ -35,7 +35,6 @@ def test_agent_routes_returns_materialized_routes(client: TestClient) -> None:
     assert entry["agent_id"] == "question-key-info-v1"
     assert entry["capability"] == "generate_key_info"
     assert entry["agent_skill"] == "question_comprehension_info/generate_key_info"
-    assert entry["max_concurrency"] is None  # workspace-level now, see configuration payload
     assert entry["node_label"]
 
 
