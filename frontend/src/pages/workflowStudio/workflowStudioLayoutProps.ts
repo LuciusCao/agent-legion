@@ -1,5 +1,5 @@
 import type { useWorkflowStudio } from './useWorkflowStudio'
-import type { ExecutorDefinition } from '../../executorTypes'
+import type { ExecutorDefinition } from '../../types/executorTypes'
 
 type StudioLayoutState = Omit<
   ReturnType<typeof useWorkflowStudio>,

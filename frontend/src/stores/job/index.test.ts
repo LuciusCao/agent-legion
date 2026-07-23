@@ -2,9 +2,9 @@ import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { useJobStore } from './index'
 import { createJobSummary } from './actions/testHelpers'
 import { createOptionAccumulator } from './filterLogic/optionAccumulator'
-import { upgradeJobWorkflow } from '../../jobWorkflowUpgradeApi'
+import { upgradeJobWorkflow } from '../../api/jobWorkflowUpgradeApi'
 
-vi.mock('../../jobWorkflowUpgradeApi', () => ({
+vi.mock('../../api/jobWorkflowUpgradeApi', () => ({
   upgradeJobWorkflow: vi.fn(),
 }))
 

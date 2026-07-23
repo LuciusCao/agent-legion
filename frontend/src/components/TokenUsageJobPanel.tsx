@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { fetchJobTokenUsage } from '../jobApi'
-import type { TokenUsageJobResponse } from '../tokenUsageTypes'
+import { fetchJobTokenUsage } from '../api/jobApi'
+import type { TokenUsageJobResponse } from '../types/tokenUsageTypes'
 import styles from './TokenUsageJobPanel.module.css'
 
 interface Props {

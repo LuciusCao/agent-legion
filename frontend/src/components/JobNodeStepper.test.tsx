@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { JobNodeStepper } from './JobNodeStepper'
 import styles from './JobNodeStepper.module.css'
-import type { JobNodeSummary } from '../jobTypes'
+import type { JobNodeSummary } from '../types/jobTypes'
 
 const summaries: JobNodeSummary[] = [
   {

@@ -1,6 +1,6 @@
 import type { JobFilterConfig } from '../state'
 import { normalizeJobStatus } from '../state'
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 import type { FilterCounts } from './types'
 import { passesFilters } from './passesFilters'
 

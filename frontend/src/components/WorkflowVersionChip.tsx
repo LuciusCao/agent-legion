@@ -1,4 +1,4 @@
-import type { JobSummary } from '../jobTypes'
+import type { JobSummary } from '../types/jobTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './WorkflowVersionChip.module.css'
 

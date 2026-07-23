@@ -31,6 +31,14 @@ class PackageQueriesMixin(VideoQueriesBase):
                 )
             ]
 
+    def get_package(self, package_id: int) -> dict[str, Any] | None:
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select * from packages where id = ?",
+                (package_id,),
+            ).fetchone()
+            return cast(dict[str, Any], dict(row)) if row is not None else None
+
     def delete_package(self, package_id: int) -> None:
         with self.connect() as conn:
             conn.execute("delete from packages where id = ?", (package_id,))

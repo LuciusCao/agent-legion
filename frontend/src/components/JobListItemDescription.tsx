@@ -1,5 +1,5 @@
 import { JOB_SOURCE_TYPE_LABELS } from '../labels'
-import type { JobSummary } from '../jobTypes'
+import type { JobSummary } from '../types/jobTypes'
 import { WorkflowVersionChip } from './WorkflowVersionChip'
 import styles from './JobListItem.module.css'
 

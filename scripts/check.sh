@@ -63,6 +63,11 @@ echo "=== Combined Coverage Report ==="
 cd "$ROOT_DIR"
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run coverage report
 
+echo "=== Exemption Age Check (non-blocking) ==="
+if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_exemption_age; then
+  echo "WARNING: exemption age check reported overdue exemptions (non-blocking)." >&2
+fi
+
 echo "=== Dependency Vulnerability Audit (non-blocking) ==="
 if ! "$ROOT_DIR/scripts/check-deps-audit.sh"; then
   echo "WARNING: dependency audit reported issues or could not complete (non-blocking)." >&2

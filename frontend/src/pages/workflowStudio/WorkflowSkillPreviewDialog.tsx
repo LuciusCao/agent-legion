@@ -8,8 +8,8 @@ import {
   IconButton,
 } from '@mui/material'
 import { useEffect, useState } from 'react'
-import { getSkillDetail } from '../../executorApi'
-import type { SkillDetail, SkillFile } from '../../executorTypes'
+import { getSkillDetail } from '../../api/executorApi'
+import type { SkillDetail, SkillFile } from '../../types/executorTypes'
 import styles from './WorkflowSkillPreviewDialog.module.css'
 
 export function WorkflowSkillPreviewDialog(props: {

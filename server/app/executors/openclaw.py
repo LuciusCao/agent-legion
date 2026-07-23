@@ -3,17 +3,14 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from server.app.executors._shard_contract import read_shard_output, shard_prompt_section
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import OpenClawCapabilityConfig, OpenClawExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.executors.openclaw_runner import OpenClawRunner, SkillSafetyConfig
 from server.app.executors.runtime_config import OpenClawRuntimeConfig
-
-if TYPE_CHECKING:
-    from server.app.pipeline.openclaw import OpenClawRunner
 
 logger = logging.getLogger(__name__)
 
@@ -24,10 +21,6 @@ def build_openclaw_executor(
     config: OpenClawExecutorConfig,
 ) -> OpenClawExecutor:
     """Build an OpenClawExecutor with the executor's agent_id injected into the runner."""
-    # Lazy import: server.app.pipeline.openclaw imports executors submodules,
-    # so a module-level import here would create a cycle.
-    from server.app.pipeline.openclaw import OpenClawRunner, SkillSafetyConfig
-
     command_template = _inject_agent_id(list(runtime.command_template), config.agent_id)
     skill_safety = (
         SkillSafetyConfig(

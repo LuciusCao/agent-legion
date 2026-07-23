@@ -1,5 +1,5 @@
 import type { JobState } from '../state'
-import type * as JobTypes from '../../../jobTypes'
+import type * as JobTypes from '../../../types/jobTypes'
 import { createOptionAccumulator } from '../filterLogic/optionAccumulator'
 import {
   computeFilterCounts,

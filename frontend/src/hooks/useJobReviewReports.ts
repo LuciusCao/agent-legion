@@ -22,6 +22,7 @@ export function useJobReviewReports(
   refreshKey = ''
 ): UseJobReviewReportsReturn {
   const [reports, setReports] = useState<ReviewReportMap>({})
+  const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const requestIdRef = useRef(0)
 
@@ -34,6 +35,9 @@ export function useJobReviewReports(
       return
     }
     const requestId = ++requestIdRef.current
+    queueMicrotask(() => {
+      if (requestId === requestIdRef.current) setLoading(true)
+    })
     void Promise.all(
       toFetch.map(async (name) => {
         try {
@@ -49,8 +53,10 @@ export function useJobReviewReports(
           setError(err instanceof Error ? err.message : String(err))
         }
       })
-    )
+    ).finally(() => {
+      if (requestId === requestIdRef.current) setLoading(false)
+    })
   }, [jobId, keyInfoReviewAttempted, possibleErrorsReviewAttempted, refreshKey])
 
-  return { reports, loading: false, error }
+  return { reports, loading, error }
 }

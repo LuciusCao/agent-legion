@@ -4,7 +4,7 @@ import {
   packageJobs,
   batchRunToJobs,
   continueJob as apiContinueJob,
-} from '../../../jobApi'
+} from '../../../api/jobApi'
 import { useUiStore } from '../../uiStore'
 import { deleteSucceededJobs } from './deleteState'
 import {

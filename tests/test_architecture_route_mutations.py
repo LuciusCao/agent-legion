@@ -93,6 +93,22 @@ class TestRouteDagAndDeletionBoundary:
         errors = check_repository(tmp_path)
         assert any(expected_error in error for error in errors)
 
+    def test_rejects_filesystem_deletion_in_any_route_module(self, tmp_path):
+        # Regression: agent_workers.py was not in the checked prefix list, so
+        # deletion calls there slipped past the gate.
+        write(
+            tmp_path / "server/app/routes/agent_workers.py",
+            "from fastapi import APIRouter\n"
+            "from pathlib import Path\n"
+            "router = APIRouter()\n"
+            "@router.post('/agent-executions/{execution_id}/result')\n"
+            "def result(execution_id: str):\n"
+            "    Path('/tmp/archive.tar.gz').unlink()\n",
+        )
+        _empty_budgets(tmp_path)
+        errors = check_repository(tmp_path)
+        assert any("filesystem deletion" in error for error in errors)
+
     def test_allows_deletion_in_services(self, tmp_path):
         write(
             tmp_path / "server/app/services/job_deletion.py",

@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { createRealtimeChannel } from '../lib/realtime'
-import type { WorkspaceStats } from '../workspaceTypes'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 
 interface DashboardStatsPayload {
   type: string

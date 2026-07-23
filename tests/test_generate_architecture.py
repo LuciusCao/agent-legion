@@ -75,12 +75,18 @@ def create_videos_router():
     @router.post("/{video_id}")
     def create_video():
         pass
+
+    @router.post("/upload")
+    async def upload_video():
+        pass
 """)
 
     result = extract_fastapi_routes(tmp_path)
     assert "list_videos" in result
+    assert "upload_video" in result
     assert "`/videos`" in result
     assert "`/videos/{video_id}`" in result
+    assert "`/videos/upload`" in result
     assert "POST" in result
 
 
@@ -126,17 +132,22 @@ def test_extract_frontend_routes(tmp_path: Path):
 
 
 def test_extract_pipeline_phases(tmp_path: Path):
-    pipeline_dir = tmp_path / "server" / "app" / "pipeline"
-    pipeline_dir.mkdir(parents=True)
-    (pipeline_dir / "phases.py").write_text("""
-KNOWLEDGE_PHASES = ["download", "transcribe", "assemble"]
-QUESTION_PHASES = ["download", "transcribe", "assemble"]
+    workflows_dir = tmp_path / "config" / "workflows"
+    workflows_dir.mkdir(parents=True)
+    (workflows_dir / "video_knowledge.yaml").write_text("""
+key: video_knowledge
+nodes:
+  package:
+    after: [assemble]
+  download:
+    after: []
+  assemble:
+    after: [download]
 """)
 
     result = extract_pipeline_phases(tmp_path)
-    assert "`download`" in result
-    assert "知识视频" in result
-    assert "题目解析视频" in result
+    assert "知识视频（3 阶段）" in result
+    assert result.index("`download`") < result.index("`assemble`") < result.index("`package`")
 
 
 # ---------------------------------------------------------------------------

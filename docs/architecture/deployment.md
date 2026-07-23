@@ -8,12 +8,17 @@ Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生�
 
 ```
 config/
-├── app.yaml                # PostgreSQL、应用路径、HTTP 设置、worker 并发
-├── video_hive.yaml         # ASR、CMS、资源提供方、OpenClaw 配置
-└── workflow.yaml           # Workspace 执行器与工作流运行时开关
+├── app.yaml                  # PostgreSQL、应用路径、HTTP 设置、worker 并发
+├── video_hive.yaml           # ASR、CMS、资源提供方、OpenClaw 配置
+├── workflow.yaml             # Workspace 执行器与工作流运行时开关
+├── skills.yaml               # 外部 Pi skill 源声明
+├── skills.lock               # 解析后的 skill commit 锁定
+├── agent-worker.example.yaml # Agent Worker 配置模板
+└── workflows/                # Workflow DAG 定义（video_knowledge、question_comprehension_info）
 
 data/                       # 文件产物（gitignored）
 ├── videos/                 # 下载的视频与产物
+├── jobs/                   # Workspace Job 产物
 ├── packages/               # ZIP 输出
 └── logs/                   # 处理日志
 
@@ -47,20 +52,22 @@ scripts/
 
 ### 顶层配置项
 
+- `agent_workers`
+- `agents`
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
 - `cleanup`
 - `cleanup_video_after_assemble` — 打包后是否清理视频
 - `cms` — CMS 集成配置
 - `data_dir` — 数据目录
+- `database`
 - `executors` — Workspace 执行器定义
 - `heartbeat_failure_threshold`
 - `heartbeat_interval_seconds`
 - `lease_ttl_seconds`
 - `openclaw` — OpenClaw 命令模板与工作目录
 - `resource_providers` — 资源提供方路径映射
-- `server` — HTTP 服务监听地址与端口
+- `server` — HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）
 - `token_usage`
-- `worker` — 后台 worker 并发配置
 - `workflows` — Agent Legion DAG 工作流开关
 
 <!-- END AUTO-GENERATED -->

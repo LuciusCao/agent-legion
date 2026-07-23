@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { DagStepper } from './DagStepper'
-import type { JobNode } from '../jobTypes'
+import type { JobNode } from '../types/jobTypes'
 
 describe('DagStepper', () => {
   const makeNodes = (count: number) =>

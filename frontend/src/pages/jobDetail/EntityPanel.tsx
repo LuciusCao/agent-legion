@@ -1,4 +1,4 @@
-import type { JobDetail } from '../../jobTypes'
+import type { JobDetail } from '../../types/jobTypes'
 import { QuestionContentPanel } from '../../components/QuestionContentPanel'
 import { VideoContentPanel } from '../../components/VideoContentPanel'
 

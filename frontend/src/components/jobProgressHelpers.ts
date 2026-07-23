@@ -1,5 +1,5 @@
 import { formatDuration } from '../lib/formatters'
-import type { JobNode } from '../jobTypes'
+import type { JobNode } from '../types/jobTypes'
 
 export const EXECUTOR_KIND_LABELS: Record<string, string> = {
   local: '本地',

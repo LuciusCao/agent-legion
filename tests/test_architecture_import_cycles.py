@@ -80,6 +80,55 @@ def test_function_body_import_is_lazy(tmp_path: Path, declaration: str) -> None:
     assert _check_import_cycles(tmp_path) == []
 
 
+@pytest.mark.parametrize("declaration", ["def load():", "async def load():"])
+def test_function_body_import_counts_in_executor_workflow_pipeline(
+    tmp_path: Path, declaration: str
+) -> None:
+    _write(tmp_path, "server/app/executors/a.py", "import server.app.workflows.b\n")
+    _write(
+        tmp_path,
+        "server/app/workflows/b.py",
+        f"{declaration}\n    import server.app.executors.a\n",
+    )
+
+    assert _check_import_cycles(tmp_path) == [
+        "import cycle: server.app.executors.a -> server.app.workflows.b"
+    ]
+
+
+def test_scoped_function_body_import_respects_type_checking_guard(tmp_path: Path) -> None:
+    _write(tmp_path, "server/app/pipeline/a.py", "import server.app.executors.b\n")
+    _write(
+        tmp_path,
+        "server/app/executors/b.py",
+        "from typing import TYPE_CHECKING\n"
+        "def load():\n"
+        "    if TYPE_CHECKING:\n"
+        "        import server.app.pipeline.a\n",
+    )
+
+    assert _check_import_cycles(tmp_path) == []
+
+
+def test_function_body_type_import_does_not_mask_module_guard(tmp_path: Path) -> None:
+    # TYPE_CHECKING bound only inside a function body must not mark the
+    # module-level guard as type-only: at runtime the name is undefined and
+    # the guarded import is a real dependency.
+    _write(tmp_path, "server/app/executors/a.py", "import server.app.workflows.b\n")
+    _write(
+        tmp_path,
+        "server/app/workflows/b.py",
+        "def load():\n"
+        "    from typing import TYPE_CHECKING\n"
+        "if TYPE_CHECKING:\n"
+        "    import server.app.executors.a\n",
+    )
+
+    assert _check_import_cycles(tmp_path) == [
+        "import cycle: server.app.executors.a -> server.app.workflows.b"
+    ]
+
+
 @pytest.mark.parametrize(
     "guarded_source",
     [

@@ -1,4 +1,4 @@
-import type { ExecutorDefinition } from '../../executorTypes'
+import type { ExecutorDefinition } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import editorStyles from './components/WorkflowStructuredEditor.module.css'
 import styles from './WorkflowNodeRuntimeSettings.module.css'

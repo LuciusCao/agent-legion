@@ -1,6 +1,7 @@
 import ast
 from pathlib import Path
 
+from scripts.architecture.helpers import FUNCTION_BODY_IMPORT_PACKAGES
 from scripts.architecture.import_guards import (
     bound_names,
     class_global_rebound_names,
@@ -30,10 +31,11 @@ def _candidate_dependencies(module: str, candidate: str, known: set[str]) -> set
 
 
 class _ImportTimeImportVisitor(ast.NodeVisitor):
-    def __init__(self) -> None:
+    def __init__(self, include_function_bodies: bool = False) -> None:
         self.imports: list[ast.Import | ast.ImportFrom] = []
         self.type_checking_names: set[str] = set()
         self.typing_module_names: set[str] = set()
+        self.include_function_bodies = include_function_bodies
 
     def _unbind(self, name: str) -> None:
         self.type_checking_names.discard(name)
@@ -98,21 +100,26 @@ class _ImportTimeImportVisitor(ast.NodeVisitor):
             if node.module == "typing" and alias.name == "TYPE_CHECKING":
                 self.type_checking_names.add(local_name)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+    def _visit_function(self, node: ast.FunctionDef | ast.AsyncFunctionDef) -> None:
         for decorator in node.decorator_list:
             self.visit(decorator)
         self._visit_arguments(node.args)
         if node.returns:
             self.visit(node.returns)
+        if self.include_function_bodies:
+            # Function-local bindings must not leak into the module-level
+            # TYPE_CHECKING bookkeeping, so snapshot and restore the state.
+            saved_state = (set(self.type_checking_names), set(self.typing_module_names))
+            for statement in node.body:
+                self.visit(statement)
+            self.type_checking_names, self.typing_module_names = saved_state
         self._unbind(node.name)
 
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self._visit_function(node)
+
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
-        for decorator in node.decorator_list:
-            self.visit(decorator)
-        self._visit_arguments(node.args)
-        if node.returns:
-            self.visit(node.returns)
-        self._unbind(node.name)
+        self._visit_function(node)
 
     def visit_Lambda(self, node: ast.Lambda) -> None:
         self._visit_arguments(node.args)
@@ -269,7 +276,9 @@ def _dependencies(module: str, path: Path, known: set[str]) -> set[str]:
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     package = module.rsplit(".", 1)[0]
     result: set[str] = set()
-    visitor = _ImportTimeImportVisitor()
+    visitor = _ImportTimeImportVisitor(
+        include_function_bodies=module.startswith(FUNCTION_BODY_IMPORT_PACKAGES)
+    )
     visitor.visit(tree)
     for node in visitor.imports:
         candidates: list[str] = []

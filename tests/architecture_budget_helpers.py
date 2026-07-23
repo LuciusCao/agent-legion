@@ -13,6 +13,7 @@ def write_neutral_budget_governance(root: Path) -> None:
         "      extensions: [.py]\n"
         "  exclude: []\n"
         "  buffer_lines: 5\n"
+        "  max_lines: 800\n"
         "tests:\n  roots:\n"
         "    - path: budget-tests\n"
         "      patterns: ['**/*.py']\n"

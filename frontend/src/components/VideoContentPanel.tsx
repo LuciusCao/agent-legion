@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchJobVideoDetail } from '../videoApi'
-import type { VideoJobDetailResponse } from '../videoApi'
+import { fetchJobVideoDetail } from '../api/videoApi'
+import type { VideoJobDetailResponse } from '../api/videoApi'
 import type {
   InteractionNode,
   InteractionOption,
   VideoArtifacts,
 } from '../types'
+import { useAsync } from '../hooks/useAsync'
 import { VideoPlayer } from './VideoPlayer'
 import { TimelineStrip } from './TimelineStrip'
 import { SubtitlePanel } from './SubtitlePanel'
@@ -72,37 +73,17 @@ export function VideoContentPanel({
   jobId,
   refreshKey,
 }: VideoContentPanelProps) {
-  const [data, setData] = useState<VideoJobDetailResponse | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const { data, loading, error } = useAsync(
+    () => fetchJobVideoDetail(jobId),
+    [jobId, refreshKey],
+    { resetOnRun: true }
+  )
   const [currentTime, setCurrentTime] = useState(0)
   const [dismissedInteractionIndexes, setDismissedInteractionIndexes] =
     useState<Set<number>>(new Set())
   const [interactionSentence, setInteractionSentence] = useState<string[]>([])
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const prevActiveIndexRef = useRef<number | null>(null)
-
-  useEffect(() => {
-    let cancelled = false
-    const run = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const result = await fetchJobVideoDetail(jobId)
-        if (cancelled) return
-        setData(result)
-      } catch (err) {
-        if (cancelled) return
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-    run()
-    return () => {
-      cancelled = true
-    }
-  }, [jobId, refreshKey])
 
   const artifacts = useMemo(() => (data ? buildArtifacts(data) : null), [data])
 

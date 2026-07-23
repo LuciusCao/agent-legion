@@ -1,15 +1,21 @@
 import ast
 
 HTTP_DECORATORS = {"get", "post", "put", "patch", "delete"}
+# Function-body imports count as dependencies in these packages (lazy imports
+# hid the executors/workflows/pipeline tangle from the cycle checker).
+# Dotted prefixes, matched with str.startswith.
+FUNCTION_BODY_IMPORT_PACKAGES = (
+    "server.app.executors.",
+    "server.app.workflows.",
+    "server.app.pipeline.",
+)
 SCHEDULER_FORBIDDEN = (
-    "server.app.pipeline.openclaw",
-    "server.app.workflows.openclaw",
+    "server.app.executors.openclaw_runner",
     "server.app.workflows.pi_runner",
     "server.app.workflows.skills",
     "server.app.workflows.question_comprehension_info",
     "server.app.workflows.question_content",
-    "pipeline.openclaw",
-    "workflows.openclaw",
+    "executors.openclaw_runner",
     "workflows.pi_runner",
     "workflows.skills",
     "workflows.question_comprehension_info",

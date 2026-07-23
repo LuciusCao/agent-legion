@@ -24,6 +24,7 @@ def complete_policy() -> BudgetPolicy:
         ),
         production_exclude=("frontend/src/generated/**",),
         buffer_lines=100,
+        production_max_lines=500,
         test_roots=(
             TestRoot(path="tests", patterns=("**/*.py",)),
             TestRoot(path="frontend/src", patterns=("**/*.test.tsx", "**/*.test.ts")),
@@ -61,6 +62,7 @@ def test_test_first_beats_production_extension(tmp_path: Path) -> None:
         production_roots=(ProductionRoot(path="frontend/src", extensions=(".tsx",)),),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=100,
         test_roots=(TestRoot(path="frontend/src", patterns=("**/*.test.tsx",)),),
         test_max_lines=100,
     )
@@ -82,6 +84,7 @@ def test_root_level_and_nested_test_patterns(tmp_path: Path) -> None:
         production_roots=(ProductionRoot(path="frontend/src", extensions=(".tsx", ".ts")),),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=100,
         test_roots=(TestRoot(path="frontend/src", patterns=("**/*.test.tsx", "**/*.test.ts")),),
         test_max_lines=100,
     )
@@ -103,6 +106,7 @@ def test_duplicate_production_roots_reported(tmp_path: Path) -> None:
         ),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=100,
         test_roots=(),
         test_max_lines=100,
     )
@@ -116,6 +120,7 @@ def test_missing_root_directory_is_rejected(tmp_path: Path) -> None:
         production_roots=(ProductionRoot(path="does/not/exist", extensions=(".py",)),),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=100,
         test_roots=(TestRoot(path="also/missing", patterns=("**/*.py",)),),
         test_max_lines=100,
     )
@@ -133,6 +138,7 @@ def test_exclusion_glob_matching_nothing_reported(tmp_path: Path) -> None:
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=("server/app/missing/**",),
         buffer_lines=10,
+        production_max_lines=100,
         test_roots=(),
         test_max_lines=100,
     )
@@ -158,6 +164,7 @@ def test_output_order_is_stable(tmp_path: Path) -> None:
         ),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=100,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=100,
     )
@@ -205,6 +212,7 @@ def test_directory_symlink_not_followed(tmp_path: Path) -> None:
         ),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=100,
         test_roots=(),
         test_max_lines=100,
     )

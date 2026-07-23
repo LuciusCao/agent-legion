@@ -8,11 +8,11 @@ import {
   cleanup,
 } from '@testing-library/react'
 import { JobLogDialog } from './JobLogDialog'
-import * as jobApi from '../jobApi'
-import type { JobLogResponse } from '../jobTypes'
+import * as jobApi from '../api/jobApi'
+import type { JobLogResponse } from '../types/jobTypes'
 import styles from './JobLogDialog.module.css'
 
-vi.mock('../jobApi')
+vi.mock('../api/jobApi')
 
 const mockFetchJobLog = vi.mocked(jobApi.fetchJobLog)
 

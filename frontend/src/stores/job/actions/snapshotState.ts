@@ -1,4 +1,4 @@
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 import type { JobState } from '../state'
 import { normalizeJobs } from './fetchStateHelpers'
 import {

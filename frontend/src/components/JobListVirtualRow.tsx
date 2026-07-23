@@ -1,5 +1,5 @@
 import type { VirtualItem } from '@tanstack/react-virtual'
-import type { JobSummary } from '../jobTypes'
+import type { JobSummary } from '../types/jobTypes'
 import { JobListItem } from './JobListItem'
 import styles from './JobList.module.css'
 

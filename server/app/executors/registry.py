@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from server.app.executors import registration as _registration  # noqa: F401
 from server.app.executors.config import ExecutorConfig
 from server.app.executors.kinds import ExecutorKindError, RuntimeDependencies, build_executor
 from server.app.executors.protocol import Executor

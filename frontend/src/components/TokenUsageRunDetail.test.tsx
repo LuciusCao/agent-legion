@@ -1,9 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { TokenUsageRunDetail } from './TokenUsageRunDetail'
-import * as jobApi from '../jobApi'
+import * as jobApi from '../api/jobApi'
 
-vi.mock('../jobApi', () => ({
+vi.mock('../api/jobApi', () => ({
   fetchRunTokenUsage: vi.fn(),
 }))
 

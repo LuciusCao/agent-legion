@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { fetchJobArtifact } from '../api'
+import { useAsync } from './useAsync'
+import { fetchJobArtifactJson } from './jobArtifactJson'
 import {
   buildComprehensionInfo,
   extractComprehensionInfo,
@@ -14,86 +14,73 @@ export interface UseJobComprehensionInfoReturn {
   error: string
 }
 
+async function fetchKeyInfoArtifact(
+  jobId: string
+): Promise<KeyInfoArtifact | null> {
+  try {
+    return await fetchJobArtifactJson<KeyInfoArtifact>(
+      jobId,
+      'key_info_reviewed.json'
+    )
+  } catch {
+    try {
+      return await fetchJobArtifactJson<KeyInfoArtifact>(
+        jobId,
+        'key_info_raw.json'
+      )
+    } catch {
+      return null
+    }
+  }
+}
+
+async function fetchPossibleErrorsArtifact(
+  jobId: string
+): Promise<PossibleErrorsArtifact | null> {
+  try {
+    return await fetchJobArtifactJson<PossibleErrorsArtifact>(
+      jobId,
+      'possible_errors_reviewed.json'
+    )
+  } catch {
+    try {
+      return await fetchJobArtifactJson<PossibleErrorsArtifact>(
+        jobId,
+        'possible_errors_raw.json'
+      )
+    } catch {
+      return null
+    }
+  }
+}
+
+async function loadComprehensionInfo(
+  jobId: string
+): Promise<ComprehensionInfo | null> {
+  try {
+    const data = await fetchJobArtifactJson<Record<string, unknown>>(
+      jobId,
+      'comprehension_info.json'
+    )
+    const extracted = extractComprehensionInfo(data)
+    if (extracted) return extracted
+  } catch {
+    // Fall back to intermediate artifacts below.
+  }
+  const keyInfoArtifact = await fetchKeyInfoArtifact(jobId)
+  const possibleErrorsArtifact = await fetchPossibleErrorsArtifact(jobId)
+  return buildComprehensionInfo(keyInfoArtifact, possibleErrorsArtifact)
+}
+
 export function useJobComprehensionInfo(
   jobId: string,
   refreshKey = ''
 ): UseJobComprehensionInfoReturn {
-  const [info, setInfo] = useState<ComprehensionInfo | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-
-    fetchJobArtifact(jobId, 'comprehension_info.json')
-      .then((artifact) => {
-        if (cancelled) return
-        const data = JSON.parse(artifact.content)
-        const extracted = extractComprehensionInfo(data)
-        if (extracted) {
-          setInfo(extracted)
-          setError('')
-          setLoading(false)
-          return
-        }
-        return loadFromIntermediateArtifacts()
-      })
-      .catch(() => {
-        if (cancelled) return
-        return loadFromIntermediateArtifacts()
-      })
-
-    async function loadFromIntermediateArtifacts() {
-      const keyInfoArtifact = await fetchKeyInfoArtifact()
-      const possibleErrorsArtifact = await fetchPossibleErrorsArtifact()
-      if (cancelled) return
-      const extracted = buildComprehensionInfo(
-        keyInfoArtifact,
-        possibleErrorsArtifact
-      )
-      setInfo(extracted)
-      setError('')
-      setLoading(false)
-    }
-
-    async function fetchKeyInfoArtifact(): Promise<KeyInfoArtifact | null> {
-      try {
-        const artifact = await fetchJobArtifact(jobId, 'key_info_reviewed.json')
-        return JSON.parse(artifact.content) as KeyInfoArtifact
-      } catch {
-        try {
-          const artifact = await fetchJobArtifact(jobId, 'key_info_raw.json')
-          return JSON.parse(artifact.content) as KeyInfoArtifact
-        } catch {
-          return null
-        }
-      }
-    }
-
-    async function fetchPossibleErrorsArtifact(): Promise<PossibleErrorsArtifact | null> {
-      try {
-        const artifact = await fetchJobArtifact(
-          jobId,
-          'possible_errors_reviewed.json'
-        )
-        return JSON.parse(artifact.content) as PossibleErrorsArtifact
-      } catch {
-        try {
-          const artifact = await fetchJobArtifact(
-            jobId,
-            'possible_errors_raw.json'
-          )
-          return JSON.parse(artifact.content) as PossibleErrorsArtifact
-        } catch {
-          return null
-        }
-      }
-    }
-
-    return () => {
-      cancelled = true
-    }
-  }, [jobId, refreshKey])
+  const {
+    data: info,
+    loading,
+    error,
+  } = useAsync(() => loadComprehensionInfo(jobId), [jobId, refreshKey])
 
   return { info, loading, error }
 }

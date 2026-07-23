@@ -1,4 +1,4 @@
-import type { ExecutorDefinition } from '../../executorTypes'
+import type { ExecutorDefinition } from '../../types/executorTypes'
 import type { WorkflowDefinitionRecord } from '../../types'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import styles from './WorkflowStudioRightPanel.module.css'

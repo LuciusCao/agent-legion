@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 from server.app.db import Database
 from server.app.routes.packages import create_packages_router
 from server.app.services.job_packages import JobPackageService, WorkspacePackageLockedError
-from server.app.services.package_deletion import PackageDeletionService
+from server.app.services.package_service import PackageService
 from server.app.storage_paths import resolve_job_dir
 
 
@@ -305,7 +305,7 @@ def test_create_packages_router_builds_default_job_package_service(db, job_db, s
         db,
         job_db,
         settings,
-        PackageDeletionService(db, settings.packages_dir),
+        PackageService(db, settings.packages_dir),
     )
     assert any(getattr(route, "path", "") == "/packages" for route in router.routes)
 
