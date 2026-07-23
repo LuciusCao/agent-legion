@@ -23,7 +23,7 @@
   top: calc(100% + 4px);
   right: 0;
   display: none;
-  min-width: 240px;
+  min-width: 320px;
   padding: 12px;
   border-radius: 12px;
   background-color: #ffffff;
@@ -53,22 +53,4 @@
   height: 1px;
   margin: 8px 0;
   background: #e5e7eb;
-}
-
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 6px 0;
-  color: #1a1c1e;
-  white-space: nowrap;
-}
-
-.status {
-  color: #43474e;
-}
-
-.empty {
-  color: #43474e;
-  white-space: nowrap;
 }

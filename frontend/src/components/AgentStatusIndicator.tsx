@@ -56,20 +56,6 @@ export function AgentStatusIndicator({
         </div>
         <div className={styles.divider} />
         <AgentWorkerStatusList workspaceId={workspaceId} />
-        <div className={styles.divider} />
-        {agents.length === 0 ? (
-          <div className={styles.empty}>暂无可用 Worker</div>
-        ) : (
-          agents.map((agent) => (
-            <div className={styles.row} key={agent.id}>
-              <span>{agent.name || agent.id}</span>
-              <span className={styles.status}>
-                {agent.busy ? '忙碌' : '空闲'} {agent.task_count}/
-                {agent.max_tasks}
-              </span>
-            </div>
-          ))
-        )}
       </div>
     </div>
   )

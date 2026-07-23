@@ -207,13 +207,11 @@ describe('AgentStatusIndicator', () => {
     expect(screen.getByText('已注册 Worker')).toBeInTheDocument()
     expect(screen.getByText('Online Mac')).toBeInTheDocument()
     expect(screen.getByText('Offline Mac')).toBeInTheDocument()
-    expect(screen.getByText('在线')).toHaveAttribute(
-      'title',
-      '最近心跳 2026-07-22 02:15:31'
+    expect(screen.getByTitle('最近心跳 2026-07-22 02:15:31')).toHaveTextContent(
+      '在线'
     )
-    expect(screen.getByText('离线')).toHaveAttribute(
-      'title',
-      '最近心跳 2026-07-22 01:00:00'
+    expect(screen.getByTitle('最近心跳 2026-07-22 01:00:00')).toHaveTextContent(
+      '离线'
     )
   })
 
@@ -251,11 +249,51 @@ describe('AgentStatusIndicator', () => {
     })
     render(<AgentStatusIndicator workspaceId="ws1" />)
     expect(screen.queryByText('Revoked Mac')).not.toBeInTheDocument()
-    expect(screen.getByText('暂无已注册 Worker')).toBeInTheDocument()
+    // Local agent rows without a registered Worker still render.
+    expect(screen.getByText('Main')).toBeInTheDocument()
   })
 
-  it('shows empty state when no registered worker matches', () => {
+  it('merges registered worker info and workspace workload into one row', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({
+          worker_id: 'mac-air',
+          name: 'MacbookAir',
+          online: true,
+          max_concurrency: 30,
+        }),
+      ],
+    })
+    mockAgents = [
+      makeAgentStatus({
+        id: 'mac-air',
+        name: 'MacbookAir',
+        workspace_id: 'ws1',
+        busy: true,
+        task_count: 3,
+        max_tasks: 30,
+      }),
+    ]
     render(<AgentStatusIndicator workspaceId="ws1" />)
-    expect(screen.getByText('暂无已注册 Worker')).toBeInTheDocument()
+    expect(screen.getAllByText('MacbookAir')).toHaveLength(1)
+    expect(screen.getByText('忙碌 3/30')).toBeInTheDocument()
+    expect(screen.getByText('在线')).toBeInTheDocument()
+  })
+
+  it('falls back to worker capacity when no workload row exists yet', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({
+          worker_id: 'w-idle',
+          name: 'Idle Mac',
+          online: true,
+          max_concurrency: 10,
+        }),
+      ],
+    })
+    mockAgents = []
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(screen.getByText('Idle Mac')).toBeInTheDocument()
+    expect(screen.getByText('空闲 0/10')).toBeInTheDocument()
   })
 })
