@@ -1,4 +1,4 @@
-"""Process supervision for the Agent Worker Service (config lives in agent_worker_config_store)."""
+"""Process supervision for the Agent Worker Service (config lives in worker/config_store)."""
 
 from __future__ import annotations
 

@@ -1,4 +1,4 @@
-// labelsFromText / numberField / NUMBER_DEFAULTS 是纯函数，由 app.test.mjs（node:test）直接 import；
+// labelsFromText / numberField / NUMBER_DEFAULTS / formatExecution 是纯函数，由 app.test.mjs（node:test）直接 import；
 // 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
 const hasDom = typeof document !== "undefined";
 const form = hasDom ? document.querySelector("#config-form") : null;
