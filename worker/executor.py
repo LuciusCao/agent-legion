@@ -35,6 +35,7 @@ from worker.cleanup import (
     sweep_stale_executions,
 )
 from worker.host_client import Client, WorkerAuthError
+from worker.status import ExecutionStatusReporter
 
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
 
@@ -129,6 +130,7 @@ def run_execution(
     heartbeat_interval: float,
     shutdown: threading.Event,
     shutdown_grace: float,
+    status: ExecutionStatusReporter,
 ) -> None:
     execution_id = str(claim["execution_id"])
     lease_id = str(claim["lease_id"])
@@ -148,6 +150,14 @@ def run_execution(
     job_dir.mkdir(parents=True)
     run_dir.mkdir(parents=True)
     session_dir.mkdir(parents=True)
+    status.start(
+        execution_id,
+        job_id=str(claim.get("job_id", "")),
+        node_key=str(claim.get("node_key", "")),
+        workflow_key=str(claim.get("workflow_key", "")),
+        agent_id=str(claim.get("agent_id", "")),
+        run_dir=str(run_dir),
+    )
     stop_heartbeat = threading.Event()
     ownership_lost = threading.Event()
     heartbeat: threading.Thread | None = None
@@ -155,6 +165,7 @@ def run_execution(
     report_result = True
     metadata: dict[str, Any] = {"status": "failed", "exit_code": 1}
     try:
+        status.set_phase(execution_id, "downloading")
         client.download(str(claim["bundle_url"]), bundle)
         manifest = safe_extract(bundle, extracted)
         for name, ref in manifest.get("input_artifacts", {}).items():
@@ -203,6 +214,7 @@ def run_execution(
                 env["LLM_GATEWAY_TOKEN"] = gateway_token
             else:
                 env.pop("LLM_GATEWAY_TOKEN", None)
+            status.set_phase(execution_id, "running")
             with events.open("wb") as output:
                 proc = subprocess.Popen(
                     command,
@@ -217,6 +229,7 @@ def run_execution(
                     proc, timeout, shutdown, shutdown_grace, ownership_lost
                 )
             if report_result:
+                status.set_phase(execution_id, "uploading")
                 # Scan for model errors before compression rewrites the events
                 # file; then drop streaming deltas so both the local copy and
                 # the uploaded archive stay small (raw events reach 100MB+).
@@ -239,15 +252,15 @@ def run_execution(
                     # scan it here and report the real failure instead of a
                     # misleading "missing outputs".
                     if model_error:
-                        status, error = "failed", model_error
+                        result_status, error = "failed", model_error
                     else:
-                        status, error = "completed", ""
+                        result_status, error = "completed", ""
                 elif shutdown.is_set():
-                    status, error = "cancelled", "Agent Worker is shutting down"
+                    result_status, error = "cancelled", "Agent Worker is shutting down"
                 else:
-                    status, error = "failed", f"Agent process exited {exit_code}"
+                    result_status, error = "failed", f"Agent process exited {exit_code}"
                 metadata = {
-                    "status": status,
+                    "status": result_status,
                     "exit_code": exit_code,
                     "error_message": error,
                     "command": command,
@@ -273,6 +286,7 @@ def run_execution(
             client.report(execution_id, lease_id, metadata, archive)
     except Exception as exc:
         print(f"Agent result report failed for {execution_id}: {exc}", flush=True)
+    status.finish(execution_id)
     shutil.rmtree(execution_dir, ignore_errors=True)
 
 
@@ -304,6 +318,7 @@ def main() -> int:
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     active: set[Future[None]] = set()
     backoff = poll_interval
+    status = ExecutionStatusReporter.from_env()
     pool = ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="agent-execution")
     next_sweep = time.monotonic()
     try:
@@ -338,6 +353,7 @@ def main() -> int:
                             interval,
                             stop,
                             shutdown_grace,
+                            status,
                         )
                     )
             except WorkerAuthError as exc:

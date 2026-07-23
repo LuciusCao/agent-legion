@@ -744,9 +744,10 @@
     "worker/cli.py": 135,
     "worker/client.py": 80,
     "worker/config_store.py": 189,
-    "worker/executor.py": 375,
+    "worker/executor.py": 391,
     "worker/host_client.py": 139,
     "worker/service.py": 149,
+    "worker/status.py": 103,
     "worker/supervisor.py": 241
   }
 }
