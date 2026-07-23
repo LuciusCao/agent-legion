@@ -115,7 +115,7 @@ make stack-worker-up
 make stack-logs STACK=worker
 ```
 
-打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写公司电脑可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker_ui/index.html` 静态文件不可用。页面可以看到：
+打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写公司电脑可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
 
 - Worker 执行进程是否运行；
 - 当前配置的 Host 地址以及 Host 是否可达；

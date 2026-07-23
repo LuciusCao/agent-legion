@@ -10,8 +10,8 @@ from typing import Any
 
 try:
     from agent_worker_client import MUTATE_TIMEOUT, LocalClient, resolve_control_token
-except ModuleNotFoundError:  # 作为 scripts 包的一部分被导入时（如测试）
-    from scripts.agent_worker_client import MUTATE_TIMEOUT, LocalClient, resolve_control_token
+except ModuleNotFoundError:  # 作为 worker 包的一部分被导入时（如测试、python -m worker.cli）
+    from worker.client import MUTATE_TIMEOUT, LocalClient, resolve_control_token
 
 
 def _labels(values: list[str]) -> dict[str, str]:

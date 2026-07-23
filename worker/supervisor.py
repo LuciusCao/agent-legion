@@ -15,7 +15,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from scripts.agent_worker_config_store import WorkerConfigStore, public_config, validate_config
+from worker.config_store import WorkerConfigStore, public_config, validate_config
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 

@@ -11,10 +11,10 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
-import scripts.agent_worker_service as service_module
-import scripts.agent_worker_service_state as state_module
-from scripts.agent_worker_service import create_app
-from scripts.agent_worker_service_state import (
+import worker.service as service_module
+import worker.supervisor as state_module
+from worker.service import create_app
+from worker.supervisor import (
     WorkerConfigStore,
     WorkerSupervisor,
     public_config,

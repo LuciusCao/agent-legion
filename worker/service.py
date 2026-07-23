@@ -15,8 +15,8 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
-from scripts.agent_worker import Client
-from scripts.agent_worker_service_state import WorkerConfigStore, WorkerSupervisor, public_config
+from worker.host_client import Client
+from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 
 logger = logging.getLogger(__name__)
 
@@ -127,10 +127,10 @@ def main() -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8787)
     args = parser.parse_args()
-    scripts_dir = Path(__file__).resolve().parent
+    worker_dir = Path(__file__).resolve().parent
     store = WorkerConfigStore(args.state_dir.resolve(), args.config.resolve())
-    supervisor = WorkerSupervisor(store, scripts_dir / "agent_worker.py")
-    app = create_app(supervisor, scripts_dir.parent / "worker_ui")
+    supervisor = WorkerSupervisor(store, worker_dir / "executor.py")
+    app = create_app(supervisor, worker_dir / "ui")
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

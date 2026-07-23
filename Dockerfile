@@ -32,20 +32,17 @@ RUN pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35
     && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && pi --version
 WORKDIR /app
-COPY scripts/__init__.py /app/scripts/__init__.py
-COPY scripts/agent_worker.py /app/scripts/agent_worker.py
-COPY scripts/agent_worker_service.py /app/scripts/agent_worker_service.py
-COPY scripts/agent_worker_service_state.py /app/scripts/agent_worker_service_state.py
-COPY scripts/agent_worker_config_store.py /app/scripts/agent_worker_config_store.py
-COPY scripts/agent_worker_client.py /usr/local/bin/agent_worker_client.py
-COPY --chmod=755 scripts/agent_workerctl.py /usr/local/bin/workerctl
+COPY worker /app/worker
 COPY server/__init__.py /app/server/__init__.py
 COPY server/app/__init__.py /app/server/app/__init__.py
 COPY server/app/workflows/__init__.py /app/server/app/workflows/__init__.py
 COPY server/app/workflows/pi_protocol.py /app/server/app/workflows/pi_protocol.py
+COPY server/app/services/__init__.py /app/server/app/services/__init__.py
+COPY server/app/services/pi_event_compression.py /app/server/app/services/pi_event_compression.py
 COPY config/agent-worker.example.yaml /app/config/agent-worker.example.yaml
-COPY worker_ui /app/worker_ui
+COPY worker/client.py /usr/local/bin/agent_worker_client.py
+COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8787
-ENTRYPOINT ["python3", "-m", "scripts.agent_worker_service"]
+ENTRYPOINT ["python3", "-m", "worker.service"]
 CMD ["--config", "/etc/agent-legion/worker.yaml", "--state-dir", "/var/lib/agent-legion-worker-control", "--host", "0.0.0.0", "--port", "8787"]

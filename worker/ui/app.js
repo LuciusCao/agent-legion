@@ -5,7 +5,7 @@ const form = hasDom ? document.querySelector("#config-form") : null;
 const errorBox = hasDom ? document.querySelector("#form-error") : null;
 const CONTROL_TOKEN = typeof window !== "undefined" ? window.__WORKER_CONTROL_TOKEN__ : undefined;
 const TOKEN_MISSING = !CONTROL_TOKEN || CONTROL_TOKEN === "__WORKER_CONTROL_TOKEN__";
-// 与 scripts/agent_worker_config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
+// 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
 export const NUMBER_DEFAULTS = { max_concurrency: 1, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
 async function api(path, options = {}) {
