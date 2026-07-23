@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
-import { fetchRunTokenUsage } from '../jobApi'
-import type { NodeRun } from '../jobTypes'
-import type { RunUsage, TokenUsageRunResponse } from '../tokenUsageTypes'
+import { useState } from 'react'
+import { fetchRunTokenUsage } from '../api/jobApi'
+import { useAsync } from '../hooks/useAsync'
+import type { NodeRun } from '../types/jobTypes'
+import type { RunUsage } from '../types/tokenUsageTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './TokenUsageRunDetail.module.css'
 
@@ -14,26 +15,11 @@ function formatCost(value: number, currency: string): string {
 }
 
 export function TokenUsageRunDetail({ jobId, run }: TokenUsageRunDetailProps) {
-  const [response, setResponse] = useState<TokenUsageRunResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: response, loading } = useAsync(
+    () => fetchRunTokenUsage(jobId, run.id),
+    [jobId, run.id, run.status]
+  )
   const [expanded, setExpanded] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetchRunTokenUsage(jobId, run.id)
-      .then((data) => {
-        if (!cancelled) setResponse(data)
-      })
-      .catch(() => {
-        if (!cancelled) setResponse(null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [jobId, run.id, run.status])
 
   const usage = response?.usage ?? null
 

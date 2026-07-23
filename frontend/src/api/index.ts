@@ -1,5 +1,5 @@
-import { api } from './api/core'
-import type { JobDetail } from './jobTypes'
+import { api } from './core'
+import type { JobDetail } from '../types/jobTypes'
 import type {
   ArtifactResponse,
   CreateJobBatchInput,
@@ -8,11 +8,11 @@ import type {
   WorkspaceRecord,
   WorkspaceResponse,
   WorkspacesResponse,
-} from './types'
-import type { WorkspaceStats } from './workspaceTypes'
+} from '../types'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 
-export { api } from './api/core'
-export { fetchJobsSnapshot } from './api/jobSnapshot'
+export { api } from './core'
+export { fetchJobsSnapshot } from './jobSnapshot'
 export {
   deletePackage,
   deleteWorkspacePackage,
@@ -20,15 +20,15 @@ export {
   fetchWorkspacePackages,
   updatePackage,
   updateWorkspacePackage,
-} from './api/packages'
+} from './packages'
 // prettier-ignore
-export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './api/workflow_revisions'
+export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './workflow_revisions'
 export {
   fetchWorkflowDefinition,
   fetchWorkflows,
   publishWorkflowDraft,
   validateWorkflowDraft,
-} from './api/workflows'
+} from './workflows'
 
 export async function fetchJobs(
   workspaceId: string,
@@ -37,35 +37,13 @@ export async function fetchJobs(
   const params = new URLSearchParams()
   if (workflowKey) params.set('workflow_key', workflowKey)
   const query = params.toString()
-  try {
-    return await api(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs${query ? `?${query}` : ''}`
-    )
-  } catch (error) {
-    const status =
-      error && typeof error === 'object' && 'status' in error
-        ? Number((error as { status?: unknown }).status)
-        : undefined
-    throw Object.assign(
-      error instanceof Error ? error : new Error('Failed to fetch jobs'),
-      { status }
-    )
-  }
+  return api(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs${query ? `?${query}` : ''}`
+  )
 }
 
 export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
-  try {
-    return await api('/api/workspaces')
-  } catch (error) {
-    const status =
-      error && typeof error === 'object' && 'status' in error
-        ? Number((error as { status?: unknown }).status)
-        : undefined
-    throw Object.assign(
-      error instanceof Error ? error : new Error('Failed to fetch workspaces'),
-      { status }
-    )
-  }
+  return api('/api/workspaces')
 }
 
 export async function createWorkspace(

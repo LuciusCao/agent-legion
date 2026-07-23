@@ -7,18 +7,18 @@ import { api } from '../api'
 import {
   getExecutorCatalog,
   getWorkspaceExecutorConfiguration,
-} from '../executorApi'
+} from '../api/executorApi'
 import type { WorkspaceSettings } from '../types'
 import type {
   ExecutorDefinition,
   WorkspaceExecutorConfiguration,
-} from '../executorTypes'
+} from '../types/executorTypes'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
-vi.mock('../executorApi', () => ({
+vi.mock('../api/executorApi', () => ({
   getExecutorCatalog: vi.fn(),
   getWorkspaceExecutorConfiguration: vi.fn(),
 }))

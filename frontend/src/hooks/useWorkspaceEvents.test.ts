@@ -5,7 +5,7 @@ import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { EventSourceMock } from '../testing/eventSourceMock'
 import * as api from '../api'
-import type { WorkspaceStats } from '../workspaceTypes'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 import { createJobSummary } from '../stores/job/actions/testHelpers'
 
 vi.mock('../api')

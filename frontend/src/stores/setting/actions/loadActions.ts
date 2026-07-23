@@ -2,7 +2,7 @@ import { api } from '../../../api'
 import {
   getExecutorCatalog,
   getWorkspaceExecutorConfiguration,
-} from '../../../executorApi'
+} from '../../../api/executorApi'
 import type { components } from '../../../generated/api'
 import type {
   WorkspaceSettings,

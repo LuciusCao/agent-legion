@@ -1,4 +1,4 @@
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 import type { JobFilterConfig } from '../state'
 import { normalizeJobStatus } from '../state'
 import type { FilterCounts } from './types'

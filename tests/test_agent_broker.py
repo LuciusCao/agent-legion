@@ -304,6 +304,30 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
     assert not stale_archive.exists()
 
 
+def test_discard_result_archive_and_retire_bundle(tmp_path) -> None:
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    archive = bundle_dir / "exec-1.abc.result.tar.gz"
+    archive.write_bytes(b"archive")
+    bundle = bundle_dir / "bundle.tar.gz"
+    bundle.write_bytes(b"bundle")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir)
+
+    broker.discard_result_archive(archive.name)
+    broker.retire_bundle(bundle.name)
+
+    assert not archive.exists()
+    assert not bundle.exists()
+
+    # Missing files and unsafe bundle names are no-ops; a broker without
+    # bundle storage tolerates both calls.
+    broker.discard_result_archive("missing.result.tar.gz")
+    broker.retire_bundle("../escape.tar.gz")
+    storageless = AgentExecutionBroker(TEST_DATABASE_URL)
+    storageless.discard_result_archive(archive.name)
+    storageless.retire_bundle(bundle.name)
+
+
 def test_scoped_register_token_lifecycle(job_db) -> None:
     """Issue stores only a sha256 hash and returns the plaintext once; list
     exposes no secret material; revoke makes the token unresolvable."""

@@ -10,7 +10,7 @@ import { ChipList } from './DagNodeChips'
 import { MaterialIcon } from './MaterialIcon'
 import { DagNodeDefinitionMeta } from './DagNodeDefinitionMeta'
 import { DagNodeExecutorBadge } from './DagNodeExecutorBadge'
-import type { ExecutorKind } from '../jobTypes'
+import type { ExecutorKind } from '../types/jobTypes'
 import styles from './DagNode.module.css'
 
 export interface DagNodeData extends Record<string, unknown> {

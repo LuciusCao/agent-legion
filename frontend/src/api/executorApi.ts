@@ -1,9 +1,9 @@
-import { api } from './api'
+import { api } from './core'
 import type {
   ExecutorCatalogResponse,
   SkillDetail,
   WorkspaceExecutorConfiguration,
-} from './executorTypes'
+} from '../types/executorTypes'
 
 export const getExecutorCatalog = () =>
   api<ExecutorCatalogResponse>('/api/executors')

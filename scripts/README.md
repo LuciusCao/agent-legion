@@ -9,8 +9,10 @@
 | `check-quick.sh` | 日常快速质量门：先并行 backend/frontend 静态检查，再并行 pytest/Vitest，避免静态检查与两套测试 runner 同时争抢 CPU。 |
 | `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。 |
 | `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage` 选择 Vitest 模式。 |
+| `check-fast.sh` | pre-commit 实际调用的 fast gate：ruff/mypy/前端 lint，不跑测试。 |
 | `check.sh` | 完整质量门（提交前）：coverage 模式 quick gate + 并行的 full backend evidence/前端 bundle，避免重复 Vitest 与 typecheck。 |
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
+| `check-deps-audit.sh` | 依赖漏洞审计（pip-audit + npm audit）；非阻塞，需网络。 |
 | `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |
 
 ## 架构治理
@@ -21,6 +23,19 @@
 | `check_invariants.py` | 校验 `config/architecture/architecture-invariants.yaml` 与 `architecture-exemptions.yaml`。 |
 | `ratchet_architecture_budgets.py` | 更新 `config/architecture/architecture-budgets.json` 基线；拒绝抬高 ceiling。 |
 | `generate_architecture.py` | 从代码 AST 自动生成 `docs/architecture/backend.md`、`frontend.md`、`pipeline.md`、`deployment.md` 的表格章节。 |
+| `generate_architecture_frontend.py` | `generate_architecture.py` 的前端路由提取 helper。 |
+| `generate_architecture_pipeline.py` | `generate_architecture.py` 的视频 pipeline 节点提取 helper。 |
+
+## Agent Worker 子系统
+
+| 脚本 | 用途 |
+|------|------|
+| `agent_worker.py` | Worker 客户端 supervisor：并发拉取并执行 Pi/OpenClaw Agent 任务。Docker worker 镜像以单文件方式部署它。 |
+| `agent_worker_service.py` | 本机 Worker Service：HTTP 控制面与状态 UI（`make dev-worker`）。 |
+| `agent_worker_client.py` | Worker Service 的 HTTP client 与 control-token 解析。 |
+| `agent_worker_config_store.py` | Worker 配置持久化：原子写入与校验。 |
+| `agent_worker_service_state.py` | Worker Service 进程监管（配置存储在 `agent_worker_config_store`）。 |
+| `agent_workerctl.py` | 查询与配置本机 Worker Service 的 CLI（`make worker-status` / `worker-logs`）。 |
 
 ## Spec / Skill 治理
 
@@ -39,10 +54,29 @@
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
 | `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 |
-| `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为。 |
-| `import-sqlite-to-postgres.py` | 一次性离线迁移：从最终版 SQLite schema 导入 PostgreSQL。 |
+| `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为（共享逻辑在 `_skill_cost_core.py`）。 |
+| `import-sqlite-to-postgres.py` | 一次性离线迁移：从最终版 SQLite schema 导入 PostgreSQL（共享逻辑在 `sqlite_import_support.py`）。 |
+| `migrate-config-layout.py` | 一次性配置迁移：按域拆分 Video Hive 运行时配置（`--check` / `--apply`）。 |
 
 一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；历史用法见 git 历史。
+
+## 子目录
+
+| 目录 | 用途 |
+|------|------|
+| `architecture/` | `check_architecture.py` / `ratchet_architecture_budgets.py` 的检查实现（预算盘点、边界、路由契约、import 环等各 phase 模块）。 |
+| `git-hooks/` | 版本化的 pre-commit / pre-push 钩子 dispatcher，由 `install-git-hooks.sh` 安装到 Git common directory，再转发到 worktree 根的 `.githooks/`。 |
+| `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
+| `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |
+
+## 约定
+
+- 新脚本统一使用下划线命名（`check_xxx.py`）；连字符命名（`check-skills-shared.py` 等）为存量，不强改。
+- 包内可导入的脚本通过 `uv run python -m scripts.<name>` 运行，不再复制 `sys.path` bootstrap；
+  同包共享逻辑直接 `from scripts._xxx import ...`。
+- 以下存量场景保留 `sys.path` bootstrap：`agent_worker.py`（Docker 单文件部署）、
+  连字符脚本（`import-sqlite-to-postgres.py`、`migrate-config-layout.py`，无法作为模块运行）、
+  `stress/`（非包目录，按路径直接执行）。
 
 ## 运行方式
 
@@ -62,5 +96,5 @@ make architecture-ratchet
 直接运行 Python 脚本时，建议使用项目虚拟环境：
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python scripts/<script>.py
+UV_CACHE_DIR=.uv-cache uv run python -m scripts.<name>
 ```

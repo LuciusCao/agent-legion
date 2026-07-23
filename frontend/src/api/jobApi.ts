@@ -1,14 +1,14 @@
-import { api } from './api'
+import { api } from './core'
 import type {
   ContinueJobRequest,
   JobLogResponse,
   JobMutationResult,
   RunToRequest,
-} from './jobTypes'
+} from '../types/jobTypes'
 import type {
   TokenUsageJobResponse,
   TokenUsageRunResponse,
-} from './tokenUsageTypes'
+} from '../types/tokenUsageTypes'
 
 export async function fetchJobLog(
   jobId: string,

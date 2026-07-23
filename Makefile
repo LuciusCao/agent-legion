@@ -105,11 +105,11 @@ skills-lock: ## 刷新 config/skills.lock
 # 架构预算与契约
 .PHONY: architecture-ratchet
 architecture-ratchet: ## 更新架构预算基线
-	$(UV) run python scripts/ratchet_architecture_budgets.py
+	$(UV) run python -m scripts.ratchet_architecture_budgets
 
 .PHONY: architecture-check
 architecture-check: ## 检查架构契约
-	$(UV) run python scripts/check_architecture.py
+	$(UV) run python -m scripts.check_architecture
 
 # 前端 API 类型生成
 .PHONY: api-generate

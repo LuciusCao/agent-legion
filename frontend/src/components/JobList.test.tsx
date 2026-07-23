@@ -4,7 +4,7 @@ import { Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { JobList } from './JobList'
 import { useJobStore } from '../stores/jobStore'
-import type { JobSummary } from '../jobTypes'
+import type { JobSummary } from '../types/jobTypes'
 
 vi.mock('../api', () => ({
   fetchJobs: vi.fn(),

@@ -19,10 +19,10 @@ from server.app.executors.config import OpenClawCapabilityConfig, PiCapabilityCo
 from server.app.executors.local import LocalExecutor
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.openclaw import OpenClawExecutor
+from server.app.executors.openclaw_runner import OpenClawRunner
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_runner import PiConfig
 

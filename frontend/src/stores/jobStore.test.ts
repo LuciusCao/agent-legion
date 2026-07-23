@@ -8,7 +8,7 @@ vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
-vi.mock('../jobApi', () => ({
+vi.mock('../api/jobApi', () => ({
   batchRerunJobs: vi.fn(),
   batchDeleteJobs: vi.fn(),
   packageJobs: vi.fn(),
@@ -32,7 +32,7 @@ import {
   runToJob,
   continueJob,
   batchRunToJobs,
-} from '../jobApi'
+} from '../api/jobApi'
 import { useUiStore } from './uiStore'
 
 const mockFetchJobs = vi.mocked(fetchJobs)

@@ -1,4 +1,4 @@
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 import type { WorkflowVersionOptions } from './types'
 
 export interface JobFilterOptionAccumulator {

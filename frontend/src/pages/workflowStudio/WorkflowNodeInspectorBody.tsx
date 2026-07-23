@@ -1,4 +1,4 @@
-import type { ExecutorDefinition } from '../../executorTypes'
+import type { ExecutorDefinition } from '../../types/executorTypes'
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { findCapabilityBindings } from './WorkflowExecutorBindingList'
 import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSection'

@@ -1,4 +1,4 @@
-import type { JobNodeSummary } from '../jobTypes'
+import type { JobNodeSummary } from '../types/jobTypes'
 import styles from './JobNodeStepper.module.css'
 
 export interface JobNodeStepperProps {

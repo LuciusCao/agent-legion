@@ -1,4 +1,4 @@
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 import type { JobStoreSet } from '../state'
 import * as fetchState from './fetchState'
 import { getOrStartFetch } from './fetchInflight'

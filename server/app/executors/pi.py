@@ -3,14 +3,17 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 
+from server.app.executors._pi_result import to_execution_result
 from server.app.executors._pi_skill import get_skill_version, prepare_execution, resolve_skill_dir
 from server.app.executors._shard_contract import shard_prompt_section
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.config import PiCapabilityConfig, PiExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.executors.pi_node_execution import resolve_node_pi_config
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.skills.manager import SkillManager
+from server.app.workflows.pi_runner import PiConfig, PiRunner
 
 logger = logging.getLogger(__name__)
 
@@ -27,11 +30,6 @@ class PiExecutor:
         skill_manager: SkillManager,
         capabilities: dict[str, PiCapabilityConfig],
     ) -> None:
-        # Lazy imports: workflows.pi_runner (via _pi_result / pi_node_execution)
-        # imports executors submodules, so module-level imports here would
-        # create an import cycle once the package __init__ registers this kind.
-        from server.app.workflows.pi_runner import PiConfig, PiRunner
-
         self.id = id
         self.config = PiConfig.from_runtime(config)
         self.skill_manager = skill_manager
@@ -44,10 +42,6 @@ class PiExecutor:
         return capability in self.capabilities
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
-        # See __init__ for why these imports are function-local.
-        from server.app.executors._pi_result import to_execution_result
-        from server.app.executors.pi_node_execution import resolve_node_pi_config
-
         capability_config, early_result = prepare_execution(
             self._cancelled,
             self.capabilities,

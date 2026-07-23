@@ -4,7 +4,7 @@ import { DagStepper } from './DagStepper'
 import { MaterialIcon } from './MaterialIcon'
 import { durationSeconds, filterRelevantRuns } from '../helpers'
 import { formatDuration } from '../lib/formatters'
-import type { JobNode, NodeRun } from '../jobTypes'
+import type { JobNode, NodeRun } from '../types/jobTypes'
 import { JOB_STATUS_LABELS } from '../labels'
 import { JobLogDialog } from './JobLogDialog'
 import {

@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import {
   Button,
   Dialog,
@@ -10,11 +10,10 @@ import {
 } from '@mui/material'
 import { useUiStore } from '../stores/uiStore'
 import { api, fetchWorkflowDefinition } from '../api'
+import { useAsync } from '../hooks/useAsync'
 import type {
-  WorkflowDefinitionRecord,
   WorkflowIntakeModeRecord,
   JobBatchResponse,
-  WorkspaceRecord,
   WorkspaceResponse,
 } from '../types'
 import styles from './AddDialog.module.css'
@@ -34,13 +33,29 @@ export function AddDialog({
 }: AddDialogProps) {
   const { addContentType, setAddContentType, showToast } = useUiStore()
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [workspace, setWorkspace] = useState<WorkspaceRecord | null>(null)
-  const [workflow, setWorkflow] = useState<WorkflowDefinitionRecord | null>(
+  const [selectedModeKeyOverride, setSelectedModeKey] = useState<string | null>(
     null
   )
-  const [selectedModeKey, setSelectedModeKey] = useState('')
-  const [loadingModes, setLoadingModes] = useState(false)
   const [inputValue, setInputValue] = useState('')
+
+  const { data: intakeData, loading: loadingModes } = useAsync(
+    async () => {
+      const { workspace: ws } = await api<WorkspaceResponse>(
+        `/api/workspaces/${encodeURIComponent(workspaceId ?? '')}`
+      )
+      const workflowKey = ws.default_workflow_key
+      if (!workflowKey) return { workspace: ws, workflow: null }
+      const result = await fetchWorkflowDefinition(workflowKey)
+      return { workspace: ws, workflow: result.workflow }
+    },
+    [open, context, workspaceId],
+    {
+      enabled: open && context === 'workspace' && Boolean(workspaceId),
+      resetOnRun: true,
+    }
+  )
+  const workspace = intakeData?.workspace ?? null
+  const workflow = intakeData?.workflow ?? null
 
   const hasInput = inputValue.trim().length > 0
 
@@ -54,6 +69,8 @@ export function AddDialog({
       rawEnabledModes.includes(mode.key)
     )
   }, [workflow, workspace])
+
+  const selectedModeKey = selectedModeKeyOverride ?? modes[0]?.key ?? ''
 
   const submitDisabled =
     !hasInput ||
@@ -71,51 +88,6 @@ export function AddDialog({
     },
     [workspace]
   )
-
-  useEffect(() => {
-    if (!open || context !== 'workspace' || !workspaceId) return
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setLoadingModes(true)
-    let cancelled = false
-    api<WorkspaceResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}`)
-      .then(({ workspace: ws }) => {
-        if (cancelled) return
-        setWorkspace(ws)
-        const workflowKey = ws.default_workflow_key
-        if (!workflowKey) return
-        return fetchWorkflowDefinition(workflowKey).then((result) => ({
-          ws,
-          result,
-        }))
-      })
-      .then((data) => {
-        if (cancelled || !data) return
-        const { ws, result } = data
-        setWorkflow(result.workflow)
-        const availableModes = result.workflow.intake?.modes || []
-        const rawEnabledModes = ws.intake_config?.enabled_modes
-        let filtered: WorkflowIntakeModeRecord[]
-        if (rawEnabledModes === undefined) {
-          filtered = availableModes
-        } else if (
-          !Array.isArray(rawEnabledModes) ||
-          rawEnabledModes.length === 0
-        ) {
-          filtered = []
-        } else {
-          filtered = availableModes.filter((mode) =>
-            rawEnabledModes.includes(mode.key)
-          )
-        }
-        setSelectedModeKey(filtered[0]?.key || '')
-      })
-      .finally(() => {
-        if (!cancelled) setLoadingModes(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [open, context, workspaceId])
 
   const handleSubmit = useCallback(async () => {
     const input = inputValue.trim()
@@ -177,9 +149,7 @@ export function AddDialog({
   ])
 
   const handleClose = useCallback(() => {
-    setWorkspace(null)
-    setWorkflow(null)
-    setSelectedModeKey('')
+    setSelectedModeKey(null)
     setInputValue('')
     onClose()
   }, [onClose])

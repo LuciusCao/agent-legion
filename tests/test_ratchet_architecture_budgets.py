@@ -15,6 +15,7 @@ def _write_policy(root: Path, exclude: list[str] | None = None) -> None:
             "roots": [{"path": "server/app", "extensions": [".py"]}],
             "exclude": exclude if exclude is not None else [],
             "buffer_lines": 10,
+            "max_lines": 800,
         },
         "tests": {
             "roots": [{"path": "tests", "patterns": ["test_*.py"]}],
@@ -238,6 +239,7 @@ def test_unmatched_exclusion_does_not_modify_baseline(tmp_path):
             "roots": [{"path": "server/app", "extensions": [".py"]}],
             "exclude": ["server/app/does_not_exist.py"],
             "buffer_lines": 10,
+            "max_lines": 800,
         },
         "tests": {
             "roots": [{"path": "tests", "patterns": ["test_*.py"]}],

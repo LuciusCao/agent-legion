@@ -1,8 +1,8 @@
 import { create } from 'zustand'
 import { api, fetchPackages } from '../api'
-import type { PackageItem } from '../packageTypes'
+import type { PackageItem } from '../types/packageTypes'
 
-export type { PackageItem } from '../packageTypes'
+export type { PackageItem } from '../types/packageTypes'
 
 interface PackageState {
   packages: PackageItem[]

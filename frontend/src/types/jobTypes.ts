@@ -1,4 +1,4 @@
-import type { components } from './generated/api'
+import type { components } from '../generated/api'
 
 export type JobSummary = components['schemas']['JobSummaryResponse']
 export type JobNodeSummary = components['schemas']['JobNodeSummaryResponse']

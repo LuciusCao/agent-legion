@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import type { JobNodeSummary } from '../../../jobTypes'
+import type { JobNodeSummary } from '../../../types/jobTypes'
 import { createJobSummary } from '../actions/testHelpers'
 import {
   createOptionAccumulator,
