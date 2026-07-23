@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, formatExecution, labelsFromText, numberField } from "./app.js";
+import { NUMBER_DEFAULTS, executionLabel, formatElapsed, labelsFromText, numberField } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -38,16 +38,18 @@ test("numberField 有值时转成数字", () => {
   assert.equal(numberField(formDataLike({ max_concurrency: "4" }), "max_concurrency"), 4);
 });
 
-test("formatExecution 展示 agent、节点、phase 与已运行时长", () => {
+test("formatElapsed 把 started_at 到 now 的间隔格式化为 mm:ss", () => {
   const now = Date.parse("2026-07-23T02:00:00Z");
-  const text = formatExecution(
-    { execution_id: "e1", agent_id: "pi", node_key: "review", phase: "running", started_at: "2026-07-23T01:58:20Z" },
-    now,
-  );
-  assert.equal(text, "pi · review · running · 01:40");
+  assert.equal(formatElapsed("2026-07-23T01:58:20Z", now), "01:40");
 });
 
-test("formatExecution 缺字段时回退 execution_id，坏时间显示 00:00", () => {
-  const text = formatExecution({ execution_id: "e2", phase: "claimed", started_at: "not-a-date" }, 0);
-  assert.equal(text, "e2 · claimed · 00:00");
+test("formatElapsed 坏时间或未来时间显示 00:00", () => {
+  assert.equal(formatElapsed("not-a-date", 0), "00:00");
+  assert.equal(formatElapsed("2026-07-23T02:00:00Z", Date.parse("2026-07-23T01:00:00Z")), "00:00");
+});
+
+test("executionLabel 取 agent · 节点，缺省时回退 execution_id 或 unknown", () => {
+  assert.equal(executionLabel({ agent_id: "pi", node_key: "review" }), "pi · review");
+  assert.equal(executionLabel({ execution_id: "e2" }), "e2");
+  assert.equal(executionLabel({}), "unknown");
 });

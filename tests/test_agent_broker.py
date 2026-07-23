@@ -549,3 +549,26 @@ def test_swept_expired_claim_releases_worker_status_panel(job_db) -> None:
     ]
     assert row.busy is False
     assert row.task_count == 0
+
+
+class _StubJobEventBuffer:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, str]] = []
+
+    def record_job_updated(self, workspace_id: str, job_id: str) -> None:
+        self.records.append((workspace_id, job_id))
+
+
+def test_claim_records_job_update_for_live_list(job_db) -> None:
+    """A Worker claim promotes the job queued -> running; the live job list
+    only learns about it if the broker records a job event (finish already
+    does). Without this the running filter only shrinks, never grows."""
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    buffer = _StubJobEventBuffer()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, job_db=job_db, job_event_buffer=buffer)
+
+    assert broker.claim("worker-1") is not None
+
+    assert buffer.records == [("test-workspace", "job-1")]
