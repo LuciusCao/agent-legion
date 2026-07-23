@@ -109,6 +109,7 @@ server/app/
 | POST | `/agent-register-tokens` | `create_register_token` | routes/agent_workers.py |
 | GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_workers.py |
 | POST | `/agent-register-tokens/{token_id}/revoke` | `revoke_register_token` | routes/agent_workers.py |
+| POST | `/agent-workers/{worker_id}/revoke` | `revoke_worker` | routes/agent_workers.py |
 | GET | `/agent-workers` | `list_workers` | routes/agent_workers.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_workers.py |
 | GET | `/agent-executions/{execution_id}/bundle` | `bundle` | routes/agent_workers.py |
@@ -211,6 +212,7 @@ server/app/
 | ClaimAgentExecutionRequest | BaseModel | worker_id: str | app/routes/agent_workers.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], max_concurrency: int, labels:... | app/routes/agent_workers.py |
 | AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers.py |
+| AgentWorkerRevokeResponse | BaseModel | worker_id: str, revoked: bool | app/routes/agent_workers.py |
 | AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
