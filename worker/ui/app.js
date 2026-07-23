@@ -42,6 +42,7 @@ function renderStatus(status) {
   const scope = status.host_worker?.allowed_workspaces;
   setText("workspace-scope", scope ? (scope.length ? scope.join(", ") : "全部") : "—");
   setText("last-seen", status.host_worker?.last_seen_at || "—");
+  renderExecutions(status.current_executions);
 }
 
 function fillForm(config) {
@@ -53,6 +54,32 @@ function fillForm(config) {
     } else if (form.elements[key]) {
       form.elements[key].value = value;
     }
+  }
+}
+
+export function formatExecution(execution, now = Date.now()) {
+  const started = Date.parse(execution.started_at);
+  const elapsed = Number.isNaN(started) ? 0 : Math.max(0, Math.floor((now - started) / 1000));
+  const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const seconds = String(elapsed % 60).padStart(2, "0");
+  const label = [execution.agent_id, execution.node_key].filter(Boolean).join(" · ") || execution.execution_id || "unknown";
+  return `${label} · ${execution.phase || "?"} · ${minutes}:${seconds}`;
+}
+
+function renderExecutions(executions) {
+  const list = document.querySelector("#executions");
+  list.textContent = "";
+  if (!executions || executions.length === 0) {
+    const idle = document.createElement("li");
+    idle.className = "muted";
+    idle.textContent = "空闲中";
+    list.appendChild(idle);
+    return;
+  }
+  for (const execution of executions) {
+    const item = document.createElement("li");
+    item.textContent = formatExecution(execution);
+    list.appendChild(item);
   }
 }
 
