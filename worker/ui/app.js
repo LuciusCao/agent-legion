@@ -1,11 +1,11 @@
-// labelsFromText / numberField / NUMBER_DEFAULTS 是纯函数，由 app.test.mjs（node:test）直接 import；
+// labelsFromText / numberField / NUMBER_DEFAULTS / formatExecution 是纯函数，由 app.test.mjs（node:test）直接 import；
 // 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
 const hasDom = typeof document !== "undefined";
 const form = hasDom ? document.querySelector("#config-form") : null;
 const errorBox = hasDom ? document.querySelector("#form-error") : null;
 const CONTROL_TOKEN = typeof window !== "undefined" ? window.__WORKER_CONTROL_TOKEN__ : undefined;
 const TOKEN_MISSING = !CONTROL_TOKEN || CONTROL_TOKEN === "__WORKER_CONTROL_TOKEN__";
-// 与 scripts/agent_worker_config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
+// 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
 export const NUMBER_DEFAULTS = { max_concurrency: 1, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
 async function api(path, options = {}) {
@@ -42,6 +42,7 @@ function renderStatus(status) {
   const scope = status.host_worker?.allowed_workspaces;
   setText("workspace-scope", scope ? (scope.length ? scope.join(", ") : "全部") : "—");
   setText("last-seen", status.host_worker?.last_seen_at || "—");
+  renderExecutions(status.current_executions);
 }
 
 function fillForm(config) {
@@ -53,6 +54,32 @@ function fillForm(config) {
     } else if (form.elements[key]) {
       form.elements[key].value = value;
     }
+  }
+}
+
+export function formatExecution(execution, now = Date.now()) {
+  const started = Date.parse(execution.started_at);
+  const elapsed = Number.isNaN(started) ? 0 : Math.max(0, Math.floor((now - started) / 1000));
+  const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
+  const seconds = String(elapsed % 60).padStart(2, "0");
+  const label = [execution.agent_id, execution.node_key].filter(Boolean).join(" · ") || execution.execution_id || "unknown";
+  return `${label} · ${execution.phase || "?"} · ${minutes}:${seconds}`;
+}
+
+function renderExecutions(executions) {
+  const list = document.querySelector("#executions");
+  list.textContent = "";
+  if (!executions || executions.length === 0) {
+    const idle = document.createElement("li");
+    idle.className = "muted";
+    idle.textContent = "空闲中";
+    list.appendChild(idle);
+    return;
+  }
+  for (const execution of executions) {
+    const item = document.createElement("li");
+    item.textContent = formatExecution(execution);
+    list.appendChild(item);
   }
 }
 
