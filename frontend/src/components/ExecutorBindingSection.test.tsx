@@ -23,7 +23,6 @@ const workflowDefinition = {
       key: 'fetch_questions',
       label: '获取题目',
       capability: 'fetch_questions',
-      max_concurrency: null,
       after: [],
       inputs: [],
       outputs: ['questions.json'],
@@ -32,7 +31,6 @@ const workflowDefinition = {
       key: 'review_keywords',
       label: '审核关键词',
       capability: 'review_keywords',
-      max_concurrency: 20,
       after: ['extract_keywords'],
       inputs: ['keywords.json'],
       outputs: ['keywords_review.json'],
@@ -41,7 +39,6 @@ const workflowDefinition = {
       key: 'generate_distractors',
       label: '生成干扰项',
       capability: 'generate_distractors',
-      max_concurrency: 20,
       after: ['review_difficulty'],
       inputs: ['difficulty.json'],
       outputs: ['distractors.json'],
@@ -50,7 +47,6 @@ const workflowDefinition = {
       key: 'unsupported_node',
       label: '未支持节点',
       capability: 'unsupported_capability',
-      max_concurrency: null,
       after: [],
       inputs: [],
       outputs: [],
@@ -106,15 +102,13 @@ describe('ExecutorBindingSection', () => {
     })
   })
 
-  it('shows only local nodes and hides Agent-routed nodes', () => {
+  it('shows a binding select for every workflow node', () => {
     render(<ExecutorBindingSection />)
 
     expect(getSelectInput('fetch_questions')).toBeInTheDocument()
     expect(getSelectInput('unsupported_node')).toBeInTheDocument()
-    expect(screen.queryByTestId('binding-select-review_keywords')).toBeNull()
-    expect(
-      screen.queryByTestId('binding-select-generate_distractors')
-    ).toBeNull()
+    expect(getSelectInput('review_keywords')).toBeInTheDocument()
+    expect(getSelectInput('generate_distractors')).toBeInTheDocument()
   })
 
   it('includes only allocated executors whose capabilities contain the node capability', () => {

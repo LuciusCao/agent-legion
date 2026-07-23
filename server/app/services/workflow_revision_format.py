@@ -50,7 +50,6 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "key": node.key,
                 "label": node.label,
                 "capability": node.capability,
-                "max_concurrency": node.max_concurrency,
                 "after": node.after,
                 "inputs": node.inputs,
                 "outputs": node.outputs,
@@ -106,8 +105,6 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             "inputs": node.inputs,
             "outputs": node.outputs,
         }
-        if node.max_concurrency is not None:
-            raw_node["max_concurrency"] = node.max_concurrency
         if node.terminal is not None:
             raw_node["terminal"] = {"outcome": node.terminal.outcome}
         execution = {key: value for key, value in asdict(node.execution).items() if value}

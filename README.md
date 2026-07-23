@@ -370,11 +370,7 @@ For example:
 ~/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors/
 ```
 
-Skill sources are declared in `config/skills.yaml` and pinned by `config/skills.lock`. To migrate or re-migrate skills from the current source tree, run:
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run python scripts/migrate-skills-to-external-repos.py
-```
+Skill sources are declared in `config/skills.yaml` and pinned by `config/skills.lock`.
 
 Every skill repo must contain:
 
@@ -402,21 +398,6 @@ Rerunning a node deletes that node's and all downstream nodes' declared outputs 
 ### Authentication
 
 Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
-
-## SQLite to PostgreSQL migration
-
-The application no longer has a SQLite runtime mode. For an existing installation, stop all
-writers and import the final SQLite database into a fresh PostgreSQL database once:
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run python scripts/import-sqlite-to-postgres.py \
-  data/video_hive.sqlite \
-  postgresql://127.0.0.1:5432/agent_legion
-```
-
-The target must be empty unless `--truncate-target` is passed explicitly. Keep the SQLite file as
-a rollback snapshot until row counts and application smoke tests have been verified. See
-[the PostgreSQL runbook](docs/postgresql-runbook.md).
 
 ## API Notes
 

@@ -499,58 +499,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/packages': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Packages */
-    get: operations['list_packages_api_packages_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/packages/{filename}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Download Package */
-    get: operations['download_package_api_packages__filename__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/packages/{package_id}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    post?: never
-    /** Delete Package */
-    delete: operations['delete_package_api_packages__package_id__delete']
-    options?: never
-    head?: never
-    /** Update Package */
-    patch: operations['update_package_api_packages__package_id__patch']
-    trace?: never
-  }
   '/api/resource-providers': {
     parameters: {
       query?: never
@@ -1804,49 +1752,6 @@ export interface components {
       /** Status */
       status: string
     }
-    /** PackageDeleteResponse */
-    PackageDeleteResponse: {
-      /** Deleted */
-      deleted: boolean
-    }
-    /** PackageItemResponse */
-    PackageItemResponse: {
-      /** Created At */
-      created_at: string
-      /** Id */
-      id: number
-      /** Locked */
-      locked: number
-      /** Name */
-      name: string
-      /** Path */
-      path: string
-      /** Size Bytes */
-      size_bytes: number
-      /** Video Count */
-      video_count: number
-    }
-    /** PackageUpdate */
-    PackageUpdate: {
-      /** Locked */
-      locked?: boolean | null
-      /** Name */
-      name?: string | null
-    }
-    /** PackageUpdateResponse */
-    PackageUpdateResponse: {
-      /** Id */
-      id: number
-      /** Locked */
-      locked?: boolean | null
-      /** Name */
-      name?: string | null
-    }
-    /** PackagesResponse */
-    PackagesResponse: {
-      /** Packages */
-      packages: components['schemas']['PackageItemResponse'][]
-    }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
       /** Cms Payload */
@@ -2510,8 +2415,6 @@ export interface components {
       key: string
       /** Label */
       label: string
-      /** Max Concurrency */
-      max_concurrency?: number | null
       /** Outputs */
       outputs: string[]
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
@@ -2599,8 +2502,6 @@ export interface components {
       agent_skill: string
       /** Capability */
       capability: string
-      /** Max Concurrency */
-      max_concurrency: number | null
       /** Node Key */
       node_key: string
       /** Node Label */
@@ -3821,123 +3722,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ArtifactResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  list_packages_api_packages_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['PackagesResponse']
-        }
-      }
-    }
-  }
-  download_package_api_packages__filename__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        filename: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/zip': unknown
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  delete_package_api_packages__package_id__delete: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        package_id: number
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['PackageDeleteResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  update_package_api_packages__package_id__patch: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        package_id: number
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['PackageUpdate']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['PackageUpdateResponse']
         }
       }
       /** @description Validation Error */

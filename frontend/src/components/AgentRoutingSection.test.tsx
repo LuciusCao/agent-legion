@@ -13,7 +13,6 @@ const route = {
   capability: 'review_subtitles',
   agent_id: 'video-subtitle-review-v1',
   agent_skill: 'video_knowledge/review_subtitles',
-  max_concurrency: null,
 }
 
 const globalWorker: WorkerSummary = {

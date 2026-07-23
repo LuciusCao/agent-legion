@@ -16,7 +16,6 @@ class WorkflowNodeResponse(BaseModel):
     key: str
     label: str
     capability: str
-    max_concurrency: int | None = None
     after: list[str]
     inputs: list[str]
     outputs: list[str]

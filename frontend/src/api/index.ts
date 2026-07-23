@@ -14,13 +14,10 @@ import type { WorkspaceStats } from '../types/workspaceTypes'
 export { api } from './core'
 export { fetchJobsSnapshot } from './jobSnapshot'
 export {
-  deletePackage,
   deleteWorkspacePackage,
-  fetchPackages,
   fetchWorkspacePackages,
-  updatePackage,
   updateWorkspacePackage,
-} from './packages'
+} from './workspacePackages'
 // prettier-ignore
 export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './workflow_revisions'
 export {
@@ -103,26 +100,12 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
 }
 
 export async function createJobBatch(
+  workspaceId: string,
   input: CreateJobBatchInput
 ): Promise<JobBatchResponse> {
-  const { workspaceId, workflowKey, entity, sourceKind, inputField, values } =
-    input
-  const body: Record<string, unknown> = {
-    workflow_key: workflowKey,
-    source_kind: sourceKind,
-  }
-  if (entity) {
-    body.entity = entity
-  }
-  body[inputField] = values
-  if (inputField === 'question_ids') {
-    body.knowledge_codes = []
-  } else if (inputField === 'knowledge_codes') {
-    body.question_ids = []
-  }
   return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
     method: 'POST',
-    body: JSON.stringify(body),
+    body: JSON.stringify(input),
   })
 }
 

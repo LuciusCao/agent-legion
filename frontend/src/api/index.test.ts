@@ -5,12 +5,15 @@ import {
   api,
   createJobBatch,
   createWorkspace,
+  deleteWorkspacePackage,
   fetchActiveWorkflowRevision,
   fetchJobArtifact,
   fetchJobDetail,
   fetchWorkflowRevisionDetail,
   fetchWorkflowRevisions,
+  fetchWorkspacePackages,
   updateWorkspace,
+  updateWorkspacePackage,
 } from './index'
 import {
   getExecutorCatalog,
@@ -186,7 +189,7 @@ describe('workspace api', () => {
 })
 
 describe('createJobBatch', () => {
-  it('sends question_ids and empty knowledge_codes when inputField is question_ids', async () => {
+  it('posts the batch request body to the workspace endpoint', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -198,12 +201,12 @@ describe('createJobBatch', () => {
     } as Response)
     global.fetch = fetchMock
 
-    await createJobBatch({
-      workspaceId: 'math',
-      workflowKey: 'question_comprehension_info',
-      sourceKind: 'question_ids',
-      inputField: 'question_ids',
-      values: ['q1', 'q2'],
+    await createJobBatch('math', {
+      async_processing: false,
+      workflow_key: 'question_comprehension_info',
+      source_kind: 'question_ids',
+      question_ids: ['q1', 'q2'],
+      knowledge_codes: [],
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -211,6 +214,7 @@ describe('createJobBatch', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
+          async_processing: false,
           workflow_key: 'question_comprehension_info',
           source_kind: 'question_ids',
           question_ids: ['q1', 'q2'],
@@ -220,7 +224,7 @@ describe('createJobBatch', () => {
     )
   })
 
-  it('sends knowledge_codes and empty question_ids when inputField is knowledge_codes', async () => {
+  it('forwards an explicit async_processing flag', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -232,12 +236,12 @@ describe('createJobBatch', () => {
     } as Response)
     global.fetch = fetchMock
 
-    await createJobBatch({
-      workspaceId: 'math',
-      workflowKey: 'question_comprehension_info',
-      sourceKind: 'knowledge_codes',
-      inputField: 'knowledge_codes',
-      values: ['k1'],
+    await createJobBatch('math', {
+      async_processing: true,
+      workflow_key: 'video_knowledge',
+      source_kind: 'knowledge_codes',
+      knowledge_codes: ['k1'],
+      question_ids: [],
     })
 
     expect(fetchMock).toHaveBeenCalledWith(
@@ -245,7 +249,8 @@ describe('createJobBatch', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          workflow_key: 'question_comprehension_info',
+          async_processing: true,
+          workflow_key: 'video_knowledge',
           source_kind: 'knowledge_codes',
           knowledge_codes: ['k1'],
           question_ids: [],
@@ -343,6 +348,54 @@ describe('executor configuration api', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/executors/skills/demo/review',
       expect.objectContaining({ cache: 'no-store' })
+    )
+  })
+})
+
+describe('workspace packages api', () => {
+  function mockFetchJson(response: unknown) {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(response),
+    } as Response)
+  }
+
+  it('fetches workspace package collections', async () => {
+    const fetchMock = mockFetchJson({ packages: [] })
+    global.fetch = fetchMock
+
+    await fetchWorkspacePackages('workspace/one')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/workspace%2Fone/packages',
+      expect.any(Object)
+    )
+  })
+
+  it('deletes workspace packages', async () => {
+    const fetchMock = mockFetchJson({ deleted: true })
+    global.fetch = fetchMock
+
+    await deleteWorkspacePackage('workspace/one', 34)
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/workspace%2Fone/packages/34',
+      expect.objectContaining({ method: 'DELETE' })
+    )
+  })
+
+  it('patches workspace packages', async () => {
+    const fetchMock = mockFetchJson({ id: 34 })
+    global.fetch = fetchMock
+
+    await updateWorkspacePackage('workspace/one', 34, { locked: false })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/workspace%2Fone/packages/34',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ locked: false }),
+      })
     )
   })
 })

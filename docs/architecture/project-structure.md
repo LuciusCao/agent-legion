@@ -57,8 +57,7 @@ video-hive/
 │       ├── main.tsx            # React entry point
 │       ├── App.tsx             # 应用级 Provider
 │       ├── AppRoutes.tsx       # 路由定义
-│       ├── api.ts              # 旧版集中式 API 封装（逐步迁移）
-│       ├── api/                # 按领域拆分的 API 层
+│       ├── api/                # 按领域拆分的 API 层（index.ts barrel 统一导出）
 │       ├── generated/api.ts    # OpenAPI 生成的传输类型
 │       ├── pages/              # 路由级页面
 │       ├── layouts/            # 布局组件
@@ -80,7 +79,6 @@ video-hive/
 │   ├── ratchet_architecture_budgets.py # 架构预算基线更新
 │   ├── generate_architecture.py # 自动生成架构文档表格
 │   ├── generate-api-types.sh   # 生成前端 API 类型
-│   ├── migrate-skills-to-external-repos.py # Skill 外迁 helper
 │   └── install-git-hooks.sh    # 预提交钩子安装
 ├── tests/                      # pytest 测试套件
 │   ├── conftest.py
