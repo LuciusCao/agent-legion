@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import stat
 import subprocess
 import sys
+import tarfile
 import threading
 import time
 import urllib.error
@@ -220,6 +222,53 @@ def test_clean_work_root_removes_dirs_keeps_files(tmp_path: Path) -> None:
     agent_worker.clean_work_root(tmp_path)
     assert not (tmp_path / "exec-stale").exists()
     assert (tmp_path / "note.txt").is_file()
+
+
+def test_run_execution_compresses_events_before_report(tmp_path: Path) -> None:
+    # Streaming deltas are dropped so the uploaded archive (and the local
+    # copy) stay small; snapshots needed by the host log renderer are kept.
+    delta = json.dumps({"type": "message_update", "delta": "thinking_delta", "text": "x"})
+    snapshot = json.dumps({"type": "message_end", "message": {"role": "assistant"}})
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        f"#!/usr/bin/env python3\nprint({delta!r})\nprint({snapshot!r})\n",
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
+    captured: list[str] = []
+    original_report = client.report
+
+    def report_and_capture(execution_id, lease_id, metadata, archive):  # type: ignore[no-untyped-def]
+        with tarfile.open(archive, "r:gz") as tar:
+            member = next(m for m in tar.getmembers() if m.name.endswith("events.jsonl"))
+            extracted = tar.extractfile(member)
+            assert extracted is not None
+            captured.append(extracted.read().decode("utf-8"))
+        original_report(execution_id, lease_id, metadata, archive)
+
+    client.report = report_and_capture  # type: ignore[method-assign]
+    _run(client, tmp_path / "work")
+    assert client.reports[0]["status"] == "completed"
+    assert len(captured) == 1
+    assert "message_end" in captured[0]
+    assert "thinking_delta" not in captured[0]
+
+
+def test_sweep_stale_executions_removes_only_old_dirs(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    old = work_root / "old-exec"
+    fresh = work_root / "fresh-exec"
+    old.mkdir(parents=True)
+    fresh.mkdir(parents=True)
+    (old / "events.jsonl").write_text("{}", encoding="utf-8")
+    past = time.time() - 25 * 3600
+    os.utime(old, (past, past))
+    agent_worker.sweep_stale_executions(work_root)
+    assert not old.exists()
+    assert fresh.exists()
+
+
+def test_sweep_stale_executions_tolerates_missing_work_root(tmp_path: Path) -> None:
+    agent_worker.sweep_stale_executions(tmp_path / "missing")
 
 
 def test_terminate_never_raises_on_stubborn_process() -> None:
