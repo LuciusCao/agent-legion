@@ -97,19 +97,21 @@ def create_app(
     # operator explicitly resumes it in this process lifetime.
     workspace_worker_control.reset_all_to_paused()
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
+    job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
+        job_db, settings, job_event_manager.bus
+    )
     agent_broker = AgentExecutionBroker(
         job_db.path,
         lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
         bundle_dir=settings.data_dir / "agent_bundles",
         agent_status=agent_manager,
         is_workspace_paused=workspace_worker_control.is_paused,
+        job_db=job_db,
+        job_event_buffer=job_event_buffer,
     )
     agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
     executor_registry = build_executor_registry(settings, job_db, artifact_store=artifact_store)
 
-    job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
-        job_db, settings, job_event_manager.bus
-    )
     executor_leases = ExecutorLeaseRepository(
         job_db.path,
         job_db=job_db,
