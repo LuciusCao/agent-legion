@@ -1,4 +1,4 @@
-// labelsFromText / numberField / NUMBER_DEFAULTS / formatExecution 是纯函数，由 app.test.mjs（node:test）直接 import；
+// labelsFromText / numberField / NUMBER_DEFAULTS / formatElapsed / executionLabel 是纯函数，由 app.test.mjs（node:test）直接 import；
 // 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
 const hasDom = typeof document !== "undefined";
 const form = hasDom ? document.querySelector("#config-form") : null;
@@ -57,13 +57,16 @@ function fillForm(config) {
   }
 }
 
-export function formatExecution(execution, now = Date.now()) {
-  const started = Date.parse(execution.started_at);
+export function formatElapsed(started_at, now = Date.now()) {
+  const started = Date.parse(started_at);
   const elapsed = Number.isNaN(started) ? 0 : Math.max(0, Math.floor((now - started) / 1000));
   const minutes = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const seconds = String(elapsed % 60).padStart(2, "0");
-  const label = [execution.agent_id, execution.node_key].filter(Boolean).join(" · ") || execution.execution_id || "unknown";
-  return `${label} · ${execution.phase || "?"} · ${minutes}:${seconds}`;
+  return `${minutes}:${seconds}`;
+}
+
+export function executionLabel(execution) {
+  return [execution.agent_id, execution.node_key].filter(Boolean).join(" · ") || execution.execution_id || "unknown";
 }
 
 function renderExecutions(executions) {
@@ -71,14 +74,39 @@ function renderExecutions(executions) {
   list.textContent = "";
   if (!executions || executions.length === 0) {
     const idle = document.createElement("li");
-    idle.className = "muted";
+    idle.className = "muted executions-empty";
     idle.textContent = "空闲中";
     list.appendChild(idle);
     return;
   }
   for (const execution of executions) {
     const item = document.createElement("li");
-    item.textContent = formatExecution(execution);
+    item.className = "execution-card";
+    const head = document.createElement("div");
+    head.className = "execution-head";
+    const title = document.createElement("span");
+    title.className = "execution-title";
+    title.textContent = executionLabel(execution);
+    const badge = document.createElement("span");
+    const phase = execution.phase || "?";
+    badge.className = `phase-badge phase-${phase}`;
+    badge.textContent = phase;
+    head.append(title, badge);
+    const meta = document.createElement("dl");
+    meta.className = "execution-meta";
+    for (const [label, value] of [
+      ["Job", execution.job_id || "—"],
+      ["已运行", formatElapsed(execution.started_at)],
+    ]) {
+      const cell = document.createElement("div");
+      const term = document.createElement("dt");
+      term.textContent = label;
+      const detail = document.createElement("dd");
+      detail.textContent = value;
+      cell.append(term, detail);
+      meta.appendChild(cell);
+    }
+    item.append(head, meta);
     list.appendChild(item);
   }
 }

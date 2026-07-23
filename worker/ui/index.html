@@ -34,13 +34,6 @@
         </dl>
       </section>
 
-      <section class="panel executions-panel">
-        <div class="panel-heading">
-          <div><p class="eyebrow">EXECUTIONS</p><h2>当前执行</h2></div>
-        </div>
-        <ul id="executions"><li class="muted">空闲中</li></ul>
-      </section>
-
       <div class="grid">
         <section class="panel">
           <div class="panel-heading">
@@ -80,6 +73,13 @@
           <p class="cli-hint">本机命令：<code>workerctl status</code></p>
         </section>
       </div>
+
+      <section class="panel executions-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">EXECUTIONS</p><h2>当前执行</h2></div>
+        </div>
+        <ul id="executions"><li class="muted executions-empty">空闲中</li></ul>
+      </section>
     </main>
     <script>
       // 由 Worker Service 在 serve 时注入真实令牌；未注入时页面会明确报错而不是静默失败。

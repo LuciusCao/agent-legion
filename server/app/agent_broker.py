@@ -28,9 +28,11 @@ from server.app._agent_broker_claim import (
 from server.app._agent_broker_reaper import _SAFE_BUNDLE_NAME
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.job_events import record_job_update
 
 if TYPE_CHECKING:
     from server.app.agents import AgentStatusManager
+    from server.app.jobs import JobQueries
 
 _ACTIVE_LEASE_CONSTRAINT = "idx_agent_requests_one_active_node"
 
@@ -62,6 +64,8 @@ class AgentExecutionBroker:
         requeue_limit: int = 3,
         agent_status: AgentStatusManager | None = None,
         is_workspace_paused: Callable[[str], bool] | None = None,
+        job_db: JobQueries | None = None,
+        job_event_buffer: Any | None = None,
     ) -> None:
         self.database_dsn = database_dsn
         self.lease_ttl_seconds = lease_ttl_seconds
@@ -75,6 +79,11 @@ class AgentExecutionBroker:
         # paused workspace stay queued (never claimed) until resume, matching
         # the job-level pause re-check below.
         self.is_workspace_paused = is_workspace_paused
+        # Live job-list events: claim promotes jobs queued -> running, so the
+        # broker must record updates just like the lease finish path does;
+        # otherwise filtered views only shrink, never grow.
+        self.job_db = job_db
+        self.job_event_buffer = job_event_buffer
         # Rotating cursor for bounded cross-workspace fairness (EXEC-FAIRNESS
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
@@ -163,6 +172,9 @@ class AgentExecutionBroker:
                 claimed = claim_in_transaction(self, conn, worker_id)
         except ClaimRacedError:
             return None
+        # Record only after the commit has succeeded, never inside the tx.
+        if claimed is not None:
+            record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
         self._notify_worker_poll(worker_id, claimed)
         return claimed
 
