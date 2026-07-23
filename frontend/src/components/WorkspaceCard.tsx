@@ -1,6 +1,6 @@
 import { Button } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
-import type { ExecutorRuntimeStatus } from '../workspaceTypes'
+import type { ExecutorRuntimeStatus } from '../types/workspaceTypes'
 
 type WorkspaceCardProps = {
   name: string

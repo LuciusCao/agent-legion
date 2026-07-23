@@ -55,7 +55,7 @@ def test_rejects_route_importing_cms_client(tmp_path):
             "scheduler boundary",
         ),
         (
-            "from server.app.pipeline.openclaw import OpenClawRunner\n",
+            "from server.app.executors.openclaw_runner import OpenClawRunner\n",
             "scheduler boundary",
         ),
         (

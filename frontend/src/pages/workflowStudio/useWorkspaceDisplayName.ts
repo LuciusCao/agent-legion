@@ -1,31 +1,20 @@
-import { useEffect, useState } from 'react'
 import { api } from '../../api'
+import { useAsync } from '../../hooks/useAsync'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import type { WorkspaceResponse } from '../../types'
 
 export function useWorkspaceDisplayName(workspaceId: string | undefined) {
-  const [loaded, setLoaded] = useState<{
-    workspaceId: string
-    name: string | null
-  } | null>(null)
   const workspaceName = useWorkspaceStore((state) => {
     return state.workspaces.find((workspace) => workspace.id === workspaceId)
       ?.name
   })
 
-  useEffect(() => {
-    if (!workspaceId || workspaceName) return
-    let cancelled = false
-    api<WorkspaceResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}`)
-      .then((result) => {
-        if (!cancelled) {
-          setLoaded({ workspaceId, name: result.workspace.name || null })
-        }
-      })
-      .catch(() => undefined)
-    return () => {
-      cancelled = true
-    }
+  const { data: loaded } = useAsync(async () => {
+    if (!workspaceId || workspaceName) return null
+    const result = await api<WorkspaceResponse>(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}`
+    )
+    return { workspaceId, name: result.workspace.name || null }
   }, [workspaceId, workspaceName])
 
   const loadedName =

@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { WorkspaceRecord } from '../types'
-import type { WorkspaceStats } from '../workspaceTypes'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 import {
   fetchWorkspaces,
   createWorkspace as apiCreateWorkspace,

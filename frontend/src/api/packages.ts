@@ -7,7 +7,7 @@ import type {
   WorkspacePackagesResponse,
   WorkspacePackageUpdate,
   WorkspacePackageUpdateResponse,
-} from '../packageTypes'
+} from '../types/packageTypes'
 import { api } from './core'
 
 export async function fetchPackages(): Promise<PackagesResponse> {

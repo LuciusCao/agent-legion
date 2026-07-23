@@ -4,7 +4,7 @@ import threading
 from pathlib import Path
 
 from server.app.agents import AgentStatus, AgentStatusManager
-from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.executors.openclaw_runner import OpenClawRunner
 from server.app.pipeline.runners import list_openclaw_agents
 
 

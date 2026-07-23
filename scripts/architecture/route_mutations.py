@@ -3,9 +3,9 @@ from pathlib import Path
 
 # ruff: noqa: SIM905
 
-_WORKSPACE_ROUTE_PREFIXES = tuple(
-    """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/packages.py server/app/routes/workspace_""".split()
-)
+# Every route module is checked: a prefix allowlist would silently stop
+# covering new routes (agent_workers.py grew deletion calls while unlisted).
+_ROUTES_PREFIX = "server/app/routes/"
 _DAG_TRAVERSAL_NAMES = frozenset(
     {"downstream_nodes", "ancestor_closure", "find_ready_nodes", "allowed_nodes"}
 )
@@ -15,10 +15,8 @@ _FILESYSTEM_DELETION_IMPORTS = {
 }
 
 
-def _is_workspace_route(rel_path: str) -> bool:
-    return any(
-        rel_path == prefix or rel_path.startswith(prefix) for prefix in _WORKSPACE_ROUTE_PREFIXES
-    )
+def _is_checked_route(rel_path: str) -> bool:
+    return rel_path.startswith(_ROUTES_PREFIX)
 
 
 def _source_files(root: Path, *globs: str) -> list[Path]:
@@ -113,7 +111,7 @@ def check_route_dag_and_deletion(root: Path) -> list[str]:
     errors: list[str] = []
     for path in _source_files(root, "server/app/**/*.py"):
         rel_path = path.relative_to(root).as_posix()
-        if not _is_workspace_route(rel_path):
+        if not _is_checked_route(rel_path):
             continue
         try:
             source = path.read_text(encoding="utf-8")

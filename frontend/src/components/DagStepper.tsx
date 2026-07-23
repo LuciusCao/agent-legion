@@ -1,4 +1,4 @@
-import type { JobNode } from '../jobTypes'
+import type { JobNode } from '../types/jobTypes'
 import styles from './DagStepper.module.css'
 
 type StepState = 'completed' | 'running' | 'failed' | 'stale' | 'pending'

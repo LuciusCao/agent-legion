@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { useJobStore } from '../../stores/jobStore'
-import type { JobDetail } from '../../jobTypes'
+import type { JobDetail } from '../../types/jobTypes'
 
 type RefreshDetail = () => Promise<JobDetail | null>
 

@@ -1,7 +1,8 @@
 import pytest
 from pydantic import ValidationError
 
-from server.app.executors.config import load_executor_definitions
+from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
+from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.kinds import UnknownExecutorKindError
 
 

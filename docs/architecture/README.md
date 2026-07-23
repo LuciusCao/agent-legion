@@ -15,3 +15,4 @@
 | 本地质量门 | [local-quality-gates.md](local-quality-gates.md) | 无 GitLab Runner 时的 hooks、精确提交凭证与分支策略 |
 | 项目结构 | [project-structure.md](project-structure.md) | 完整目录树 |
 | 架构风险 | [risk-review-2026-06-13.md](risk-review-2026-06-13.md) | 当前架构问题、风险与处理优先级 |
+| 架构风险 | [risk-review-2026-07-18.md](risk-review-2026-07-18.md) | 2026-07-18 架构 Review：扩展性、可维护性与分布式演进路线 |

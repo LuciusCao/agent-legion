@@ -4,7 +4,7 @@ import { TokenUsageJobPanel } from './TokenUsageJobPanel'
 
 const mockFetchJobTokenUsage = vi.fn()
 
-vi.mock('../jobApi', () => ({
+vi.mock('../api/jobApi', () => ({
   fetchJobTokenUsage: (...args: [string]) => mockFetchJobTokenUsage(...args),
 }))
 

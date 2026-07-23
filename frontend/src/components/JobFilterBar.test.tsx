@@ -5,7 +5,7 @@ import { createJobSummary } from '../stores/job/actions/testHelpers'
 import { useJobStore } from '../stores/jobStore'
 import { createOptionAccumulator } from '../stores/job/filterLogic/optionAccumulator'
 import type { WorkflowDefinitionRecord } from '../types'
-import type { JobSummary } from '../jobTypes'
+import type { JobSummary } from '../types/jobTypes'
 
 const workflowDefinition: WorkflowDefinitionRecord = {
   key: 'question_content',

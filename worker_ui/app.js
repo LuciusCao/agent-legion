@@ -1,9 +1,12 @@
-const form = document.querySelector("#config-form");
-const errorBox = document.querySelector("#form-error");
-const CONTROL_TOKEN = window.__WORKER_CONTROL_TOKEN__;
+// labelsFromText / numberField / NUMBER_DEFAULTS 是纯函数，由 app.test.mjs（node:test）直接 import；
+// 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
+const hasDom = typeof document !== "undefined";
+const form = hasDom ? document.querySelector("#config-form") : null;
+const errorBox = hasDom ? document.querySelector("#form-error") : null;
+const CONTROL_TOKEN = typeof window !== "undefined" ? window.__WORKER_CONTROL_TOKEN__ : undefined;
 const TOKEN_MISSING = !CONTROL_TOKEN || CONTROL_TOKEN === "__WORKER_CONTROL_TOKEN__";
 // 与 scripts/agent_worker_config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
-const NUMBER_DEFAULTS = { max_concurrency: 1, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
+export const NUMBER_DEFAULTS = { max_concurrency: 1, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
 async function api(path, options = {}) {
   const headers = { Authorization: `Bearer ${CONTROL_TOKEN}`, ...(options.headers || {}) };
@@ -53,7 +56,7 @@ function fillForm(config) {
   }
 }
 
-function labelsFromText(text) {
+export function labelsFromText(text) {
   return Object.fromEntries(text.split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
     const separator = line.indexOf("=");
     if (separator < 1) throw new Error(`标签必须使用 key=value 格式：${line}`);
@@ -61,7 +64,7 @@ function labelsFromText(text) {
   }));
 }
 
-function numberField(data, key) {
+export function numberField(data, key) {
   const raw = data.get(key);
   return raw === null || raw === "" ? NUMBER_DEFAULTS[key] : Number(raw);
 }
@@ -81,36 +84,38 @@ async function loadConfig() {
   try { fillForm(await api("/api/config")); } catch (error) { errorBox.textContent = `加载配置失败：${error.message}`; }
 }
 
-form.addEventListener("submit", async (event) => {
-  event.preventDefault();
-  errorBox.textContent = "";
-  setText("save-state", "正在应用…");
-  try {
-    const data = new FormData(form);
-    const payload = {
-      host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
-      max_concurrency: numberField(data, "max_concurrency"), runtimes: data.getAll("runtimes"),
-      labels: labelsFromText(data.get("labels")), poll_interval_seconds: numberField(data, "poll_interval_seconds"),
-      heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
-      shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
-    };
-    const result = await api("/api/config", { method: "PUT", body: JSON.stringify(payload) });
-    renderStatus(result.status);
-    setText("save-state", "已保存并生效");
-    await loadLogs();
-  } catch (error) { errorBox.textContent = error.message; setText("save-state", "保存失败"); }
-});
+if (hasDom) {
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    errorBox.textContent = "";
+    setText("save-state", "正在应用…");
+    try {
+      const data = new FormData(form);
+      const payload = {
+        host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
+        max_concurrency: numberField(data, "max_concurrency"), runtimes: data.getAll("runtimes"),
+        labels: labelsFromText(data.get("labels")), poll_interval_seconds: numberField(data, "poll_interval_seconds"),
+        heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
+        shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
+      };
+      const result = await api("/api/config", { method: "PUT", body: JSON.stringify(payload) });
+      renderStatus(result.status);
+      setText("save-state", "已保存并生效");
+      await loadLogs();
+    } catch (error) { errorBox.textContent = error.message; setText("save-state", "保存失败"); }
+  });
 
-document.querySelector("#restart").addEventListener("click", async () => {
-  try { renderStatus(await api("/api/restart", { method: "POST" })); await loadLogs(); } catch (error) { errorBox.textContent = error.message; }
-});
-document.querySelector("#refresh-logs").addEventListener("click", loadLogs);
+  document.querySelector("#restart").addEventListener("click", async () => {
+    try { renderStatus(await api("/api/restart", { method: "POST" })); await loadLogs(); } catch (error) { errorBox.textContent = error.message; }
+  });
+  document.querySelector("#refresh-logs").addEventListener("click", loadLogs);
 
-if (TOKEN_MISSING) {
-  setText("status-title", "控制令牌未注入");
-  setText("status-detail", "请通过 Worker Service（默认 http://127.0.0.1:8787/）访问本页面，静态打开 index.html 无法鉴权");
-  errorBox.textContent = "控制令牌未注入，页面不可用";
-} else {
-  Promise.all([loadConfig(), loadStatus(), loadLogs()]);
-  setInterval(loadStatus, 5000);
+  if (TOKEN_MISSING) {
+    setText("status-title", "控制令牌未注入");
+    setText("status-detail", "请通过 Worker Service（默认 http://127.0.0.1:8787/）访问本页面，静态打开 index.html 无法鉴权");
+    errorBox.textContent = "控制令牌未注入，页面不可用";
+  } else {
+    Promise.all([loadConfig(), loadStatus(), loadLogs()]);
+    setInterval(loadStatus, 5000);
+  }
 }

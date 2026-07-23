@@ -1,5 +1,5 @@
 import type { JobState } from '../state'
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 import { passesFilters } from './passesFilters'
 
 export function getVisibleJobs(state: JobState): JobSummary[] {

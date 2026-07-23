@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { JobListItem } from './JobListItem'
-import type { JobSummary } from '../jobTypes'
+import type { JobSummary } from '../types/jobTypes'
 
 const mockJob: JobSummary = {
   id: 'j1',

@@ -12,7 +12,7 @@ run_static_checks() {
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff format --check .
 
   echo "=== Architecture Invariant Registry ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_invariants.py
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_invariants
 
   echo "=== Skill Shared Content Sync ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check-skills-shared.py
@@ -21,7 +21,10 @@ run_static_checks() {
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app
 
   echo "=== Architecture Contracts ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_architecture.py
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_architecture
+
+  echo "=== Architecture Docs Freshness ==="
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.generate_architecture --check
 
   echo "=== Spec Health Check ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/verify_specs.py --check

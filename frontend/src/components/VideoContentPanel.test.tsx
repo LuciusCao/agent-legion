@@ -4,8 +4,8 @@ import { VideoContentPanel } from './VideoContentPanel'
 
 const mockFetchJobVideoDetail = vi.fn()
 
-vi.mock('../videoApi', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../videoApi')>()
+vi.mock('../api/videoApi', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../api/videoApi')>()
   return {
     ...mod,
     fetchJobVideoDetail: (...args: unknown[]) =>

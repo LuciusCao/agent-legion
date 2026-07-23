@@ -34,7 +34,7 @@ _DEFAULTS: dict[str, Any] = {
     "max_concurrency": 1,
     "labels": {},
     "register_token_file": "/run/secrets/agent_worker_register_token",
-    "work_root": "/var/lib/agent-legion-worker/executions",
+    "work_root": "/var/lib/agent-legion-worker",
     "poll_interval_seconds": 2,
     "heartbeat_interval_seconds": 15,
     "shutdown_grace_seconds": 25,

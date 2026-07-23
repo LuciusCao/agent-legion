@@ -8,10 +8,9 @@ from urllib.parse import urlencode
 from server.app.agent_catalog import AgentDefinition, load_agent_definitions
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
-from server.app.executors.config import (
-    ExecutorConfig,
-    load_executor_definitions,
-)
+from server.app.executors import registration as _registration  # noqa: F401
+from server.app.executors.config import ExecutorConfig
+from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,

@@ -1,4 +1,4 @@
-import type { JobDetail } from '../../jobTypes'
+import type { JobDetail } from '../../types/jobTypes'
 import type { WorkflowDefinitionRecord } from '../../types'
 import { toDagEdges, toDagNodes } from './jobNodeHelpers'
 function toWorkflowDefinition(

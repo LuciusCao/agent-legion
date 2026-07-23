@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { deriveJobDetailPresentation } from './deriveJobDetailPresentation'
 import { toDagNodes } from './jobNodeHelpers'
-import type { JobDetail } from '../../jobTypes'
+import type { JobDetail } from '../../types/jobTypes'
 
 function makeNode(
   nodeKey: string,

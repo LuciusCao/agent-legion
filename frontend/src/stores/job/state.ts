@@ -2,7 +2,7 @@ import type {
   BatchJobMutationResult,
   JobSummary,
   WorkspacePackageResult,
-} from '../../jobTypes'
+} from '../../types/jobTypes'
 import type { ContinueJobResult } from './stateTypes'
 export {
   countMutationResults,

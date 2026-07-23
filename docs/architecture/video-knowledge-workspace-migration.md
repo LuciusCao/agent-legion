@@ -16,10 +16,10 @@ Knowledge videos (`content_type=knowledge`) are produced by a dedicated Workspac
 
 The `video_capabilities` package provides execution-neutral contracts and adapters between video-facing application code and Workspace nodes:
 
-- `contracts.py` — input, context, result, and error types.
-- `artifact_contract.py` — declared artifact ownership and semantic normalization.
+- `contracts.py` — knowledge-video input contract types (`VideoKnowledgeInput`).
 - `response_contracts.py` — stable response shapes for video-facing routes.
 - `projection.py` — read projections over Workspace job artifacts for the video UI.
+- `_video_paths.py` — canonical video path/URL resolution helpers.
 
 This layer keeps generic Workspace scheduler, lease, executor, and job services free of video-specific branches.
 

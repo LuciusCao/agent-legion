@@ -18,10 +18,10 @@ import {
   batchDeleteJobs,
   packageJobs,
   batchRunToJobs,
-} from '../jobApi'
-import { upgradeJobWorkflow } from '../jobWorkflowUpgradeApi'
+} from '../api/jobApi'
+import { upgradeJobWorkflow } from '../api/jobWorkflowUpgradeApi'
 import { EventSourceMock } from '../testing/eventSourceMock'
-import type { WorkspaceStats } from '../workspaceTypes'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 import type { JobSummary } from '../types'
 import { makeJob } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
@@ -55,7 +55,7 @@ vi.mock('../api', () => ({
   ) => mockFetchWorkflowDefinition(...args),
 }))
 
-vi.mock('../jobApi', () => ({
+vi.mock('../api/jobApi', () => ({
   batchRerunJobs: (...args: Parameters<typeof batchRerunJobs>) =>
     mockBatchRerunJobs(...args),
   batchDeleteJobs: (...args: Parameters<typeof batchDeleteJobs>) =>
@@ -66,7 +66,7 @@ vi.mock('../jobApi', () => ({
     mockBatchRunToJobs(...args),
 }))
 
-vi.mock('../jobWorkflowUpgradeApi', () => ({
+vi.mock('../api/jobWorkflowUpgradeApi', () => ({
   upgradeJobWorkflow: (...args: Parameters<typeof upgradeJobWorkflow>) =>
     mockUpgradeJobWorkflow(...args),
 }))

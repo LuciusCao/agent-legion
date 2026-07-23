@@ -125,9 +125,7 @@ def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypa
 def _write_split_config(root: Path) -> None:
     config_dir = root / "config"
     config_dir.mkdir()
-    (config_dir / "app.yaml").write_text(
-        "data_dir: data\nserver: {}\nworker: {}\n", encoding="utf-8"
-    )
+    (config_dir / "app.yaml").write_text("data_dir: data\nserver: {}\n", encoding="utf-8")
     (config_dir / "video_hive.yaml").write_text(
         "cms:\n"
         "  token: yaml-token\n"
@@ -178,9 +176,7 @@ def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "app.yaml").write_text(
-        "data_dir: runtime\nworker: {phase_concurrency: {download: 3}}\n", encoding="utf-8"
-    )
+    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
     (config_dir / "video_hive.yaml").write_text(
         "cms: {base_url: 'https://cms.example/v2'}\n"
         "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
@@ -192,7 +188,6 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     settings = load_settings()
     assert settings.data_dir == tmp_path / "runtime"
-    assert settings.config["worker"]["phase_concurrency"]["download"] == 3
     assert settings.config["cms"]["question_url"].startswith("https://cms.example/v2")
 
 

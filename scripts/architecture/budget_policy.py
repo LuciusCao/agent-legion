@@ -35,6 +35,7 @@ class BudgetPolicy:
     production_roots: tuple[ProductionRoot, ...]
     production_exclude: tuple[str, ...]
     buffer_lines: int
+    production_max_lines: int
     test_roots: tuple[TestRoot, ...]
     test_max_lines: int
 
@@ -60,13 +61,14 @@ def load_budget_policy(path: Path) -> BudgetPolicy:
 
     production = _require_mapping(raw, "production")
     tests = _require_mapping(raw, "tests")
-    _check_keys(production, {"roots", "exclude", "buffer_lines"}, "production")
+    _check_keys(production, {"roots", "exclude", "buffer_lines", "max_lines"}, "production")
     _check_keys(tests, {"roots", "max_lines"}, "tests")
 
     return BudgetPolicy(
         production_roots=_parse_production_roots(production),
         production_exclude=_parse_exclude(production),
         buffer_lines=_parse_positive_int(production, "buffer_lines"),
+        production_max_lines=_parse_positive_int(production, "max_lines"),
         test_roots=_parse_test_roots(tests),
         test_max_lines=_parse_positive_int(tests, "max_lines"),
     )

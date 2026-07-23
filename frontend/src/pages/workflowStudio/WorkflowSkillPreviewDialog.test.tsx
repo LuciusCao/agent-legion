@@ -1,9 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, expect, it, vi } from 'vitest'
-import { getSkillDetail } from '../../executorApi'
+import { getSkillDetail } from '../../api/executorApi'
 import { WorkflowSkillPreviewDialog } from './WorkflowSkillPreviewDialog'
 
-vi.mock('../../executorApi', () => ({ getSkillDetail: vi.fn() }))
+vi.mock('../../api/executorApi', () => ({ getSkillDetail: vi.fn() }))
 
 beforeEach(() => {
   vi.mocked(getSkillDetail).mockResolvedValue({

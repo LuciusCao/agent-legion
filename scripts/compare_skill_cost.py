@@ -1,33 +1,27 @@
 #!/usr/bin/env python3
 """Compare token cost and retry behavior by skill version.
 
-Usage: python scripts/compare_skill_cost.py --jobs jobs.txt [--node NODE] [--version VER] ...
+Usage: uv run python -m scripts.compare_skill_cost --jobs jobs.txt [--node NODE] [--version VER] ...
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import sys
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-_core_path = Path(__file__).with_name("_skill_cost_core.py")
-_spec = importlib.util.spec_from_file_location("_skill_cost_core", _core_path)
-if _spec is None or _spec.loader is None:
-    raise ImportError(f"Failed to load skill cost core from {_core_path}")
-_core = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(_core)
-
-ZERO_STATS = _core.ZERO_STATS
-aggregate_job = _core.aggregate_job
-compute_costs = _core.compute_costs
-fmt_cny = _core.fmt_cny
-fmt_num = _core.fmt_num
-load_pricing = _core.load_pricing
-pct_change = _core.pct_change
-resolve_job_paths = _core.resolve_job_paths
+from scripts._skill_cost_core import (
+    ZERO_STATS,
+    aggregate_job,
+    compute_costs,
+    fmt_cny,
+    fmt_num,
+    load_pricing,
+    pct_change,
+    resolve_job_paths,
+)
 
 
 def _row(*cells: str) -> str:

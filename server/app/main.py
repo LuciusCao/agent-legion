@@ -19,7 +19,7 @@ from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
-from server.app.executors.runtime_factory import build_execution_runtime
+from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.job_events import build_workspace_event_aggregator
@@ -31,7 +31,7 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
-from server.app.services.package_deletion import PackageDeletionService
+from server.app.services.package_service import PackageService
 from server.app.services.package_stats_backfill import backfill_package_stats
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -141,8 +141,13 @@ def create_app(
             validate_settings(settings)
             agent_manager.discover()
             if WorkflowWorkerThread.is_enabled(settings):
-                execution_runtime = build_execution_runtime(
-                    executor_leases, executor_registry, settings.executor_runtime
+                execution_runtime = ExecutionRuntime(
+                    executor_leases,
+                    executor_registry,
+                    heartbeat_interval_seconds=settings.executor_runtime.heartbeat_interval_seconds,
+                    lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
+                    heartbeat_failure_threshold=settings.executor_runtime.heartbeat_failure_threshold,
+                    cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
                 )
                 # The sweeper owns all lease hygiene (startup + interval sweeps,
                 # Agent claim recovery). With sweeper_enabled=False an external
@@ -210,7 +215,7 @@ def create_app(
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, workflow_catalog
     )
-    package_deletion = PackageDeletionService(db, settings.packages_dir)
+    package_service = PackageService(db, settings.packages_dir)
     job_packages = JobPackageService(job_db, settings)
     app.include_router(
         create_router(
@@ -223,7 +228,7 @@ def create_app(
             executor_catalog=executor_catalog,
             workspace_executor_configuration=workspace_executor_configuration,
             workspace_configuration=workspace_configuration,
-            package_deletion=package_deletion,
+            package_service=package_service,
             job_packages=job_packages,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,

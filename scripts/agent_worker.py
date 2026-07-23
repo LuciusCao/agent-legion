@@ -411,7 +411,7 @@ def main() -> int:
     client = Client(str(config["host_url"]))
     client.register(config, management_token)
     max_concurrency = int(config["max_concurrency"])
-    work_root = Path(str(config.get("work_root", "data/agent-worker"))).resolve()
+    work_root = Path(str(config.get("work_root", "/var/lib/agent-legion-worker"))).resolve()
     clean_work_root(work_root)
     environment = {str(key): str(value) for key, value in config.get("environment", {}).items()}
     interval = float(config.get("heartbeat_interval_seconds", 15))

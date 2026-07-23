@@ -183,9 +183,11 @@ invariants:
       Every governed production file has a ceiling no more than ten lines above
       its current size. New, removed, or unclassified files, stale ceilings, test
       files over 1000 lines, and growth above the ceiling fail the quick gate.
-      Budget exemptions freeze an explicit ceiling and must include a tracked
-      removal condition; affected modules must be split rather than indefinitely
-      exempted.
+      Production files also have an absolute limit of 800 lines that exemptions
+      cannot override. Budget exemptions freeze an explicit ceiling and must
+      include a tracked removal condition; affected modules must be split rather
+      than indefinitely exempted. Exemptions whose removal reference is older
+      than 30 days are reported by the full gate.
     owner: architecture
     risk: high
     evidence:
@@ -200,6 +202,9 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/test_ratchet_architecture_budgets.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_exemption_age.py
         gate: quick
 
   - id: BOUNDARY-VIDEO-001
@@ -227,7 +232,7 @@ invariants:
         gate: quick
 
   - id: BOUNDARY-VIDEO-003
-    statement: "New Workspace code must not import server.app.pipeline.phases or legacy phase executor modules; workflow capabilities must be used instead."
+    statement: "Legacy server.app.pipeline.phases and phase executor modules have been removed; new Workspace code must not reintroduce imports of these legacy modules and must use workflow capabilities instead."
     owner: workspace-executor
     risk: high
     evidence:
