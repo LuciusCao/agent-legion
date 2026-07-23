@@ -18,6 +18,7 @@ import pytest
 
 from server.app.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
+from worker.status import ExecutionStatusReporter, read_current_executions
 
 
 def _make_bundle(tmp_path: Path, manifest: dict) -> Path:
@@ -87,6 +88,7 @@ def _run(client: FakeClient, work_root: Path, shutdown: threading.Event | None =
         0.05,
         shutdown or threading.Event(),
         1,
+        ExecutionStatusReporter(None),
     )
 
 
@@ -421,3 +423,122 @@ def test_main_exits_cleanly_on_revoked_worker(
     thread.join(timeout=10)
     assert result == [2]
     assert "re-register required" in capsys.readouterr().out
+
+
+def test_status_reporter_tracks_concurrent_executions(tmp_path: Path) -> None:
+    path = tmp_path / "current_executions.json"
+    reporter = ExecutionStatusReporter(path)
+    reporter.start(
+        "exec-1",
+        job_id="job-1",
+        node_key="node_a",
+        workflow_key="wf",
+        agent_id="pi",
+        run_dir="/tmp/1",
+    )
+    reporter.start(
+        "exec-2",
+        job_id="job-2",
+        node_key="node_b",
+        workflow_key="wf",
+        agent_id="pi",
+        run_dir="/tmp/2",
+    )
+    reporter.set_phase("exec-1", "running")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["pid"] == os.getpid()
+    assert payload["executions"]["exec-1"]["phase"] == "running"
+    assert payload["executions"]["exec-1"]["started_at"]
+    assert payload["executions"]["exec-2"]["phase"] == "claimed"
+    reporter.finish("exec-1")
+    reporter.finish("exec-2")
+    assert json.loads(path.read_text(encoding="utf-8"))["executions"] == {}
+
+
+def test_status_reporter_without_env_path_is_noop(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("AGENT_WORKER_STATUS_FILE", raising=False)
+    reporter = ExecutionStatusReporter.from_env()
+    reporter.start(
+        "exec-1",
+        job_id="job-1",
+        node_key="node_a",
+        workflow_key="wf",
+        agent_id="pi",
+        run_dir="/tmp/1",
+    )
+    reporter.set_phase("exec-1", "running")
+    reporter.finish("exec-1")
+    assert not (tmp_path / "current_executions.json").exists()
+
+
+def test_read_current_executions_returns_empty_for_dead_writer(tmp_path: Path) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text(
+        json.dumps({"pid": 99999999, "executions": {"exec-1": {"execution_id": "exec-1"}}}),
+        encoding="utf-8",
+    )
+    assert read_current_executions(path) == []
+
+
+def test_read_current_executions_returns_empty_for_corrupt_or_missing_file(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text("not json", encoding="utf-8")
+    assert read_current_executions(path) == []
+    assert read_current_executions(tmp_path / "missing.json") == []
+
+
+def test_read_current_executions_sorts_by_started_at(tmp_path: Path) -> None:
+    path = tmp_path / "current_executions.json"
+    path.write_text(
+        json.dumps(
+            {
+                "pid": os.getpid(),
+                "executions": {
+                    "b": {"execution_id": "b", "started_at": "2026-07-23T02:00:00+00:00"},
+                    "a": {"execution_id": "a", "started_at": "2026-07-23T01:00:00+00:00"},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert [item["execution_id"] for item in read_current_executions(path)] == ["a", "b"]
+
+
+def test_run_execution_publishes_status_and_clears_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("LLM_GATEWAY_TOKEN", raising=False)
+    status_path = tmp_path / "state" / "current_executions.json"
+    status_path.parent.mkdir(parents=True)
+    captured = tmp_path / "captured.json"
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        "#!/usr/bin/env python3\n"
+        "import shutil, sys\n"
+        "from pathlib import Path\n"
+        "shutil.copy(sys.argv[1], sys.argv[2])\n"
+        "Path('output.json').write_text('{}', encoding='utf-8')\n",
+    )
+    client = FakeClient(
+        _make_bundle(tmp_path, _manifest([script, str(status_path), str(captured)]))
+    )
+    reporter = ExecutionStatusReporter(status_path)
+    agent_worker.run_execution(
+        client,
+        _claim(),
+        tmp_path / "work",
+        {},
+        0.05,
+        threading.Event(),
+        1,
+        reporter,
+    )
+    snapshot = json.loads(captured.read_text(encoding="utf-8"))
+    assert snapshot["executions"]["exec-1"]["phase"] == "running"
+    assert snapshot["executions"]["exec-1"]["node_key"] == "node_a"
+    assert snapshot["executions"]["exec-1"]["started_at"]
+    assert read_current_executions(status_path) == []
