@@ -448,7 +448,7 @@
     "server/app/_agent_broker_sweepers.py": 166,
     "server/app/agent_artifacts.py": 29,
     "server/app/agent_broadcast.py": 42,
-    "server/app/agent_broker.py": 306,
+    "server/app/agent_broker.py": 318,
     "server/app/agent_bundle.py": 60,
     "server/app/agent_catalog.py": 163,
     "server/app/agent_completion.py": 165,
