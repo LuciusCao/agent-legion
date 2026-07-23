@@ -29,6 +29,12 @@ _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
+from scripts.agent_worker_cleanup import (
+    SWEEP_INTERVAL_SECONDS,
+    clean_work_root,
+    sweep_stale_executions,
+)
+from server.app.services.pi_event_compression import compress_pi_events
 from server.app.workflows.pi_protocol import detect_model_error
 
 PROTOCOL_VERSION = 1
@@ -321,6 +327,11 @@ def run_execution(
                     proc, timeout, shutdown, shutdown_grace, ownership_lost
                 )
             if report_result:
+                # Scan for model errors before compression rewrites the events
+                # file; then drop streaming deltas so both the local copy and
+                # the uploaded archive stay small (raw events reach 100MB+).
+                model_error = detect_model_error(events) if exit_code == 0 else None
+                compress_pi_events(events)
                 outputs: dict[str, str] = {}
                 for name in manifest.get("expected_outputs", []):
                     output_path = job_dir / PurePosixPath(str(name))
@@ -337,7 +348,6 @@ def run_execution(
                     # 401). The events file is worker-local and trustworthy, so
                     # scan it here and report the real failure instead of a
                     # misleading "missing outputs".
-                    model_error = detect_model_error(events)
                     if model_error:
                         status, error = "failed", model_error
                     else:
@@ -383,14 +393,6 @@ def load_config(path: Path) -> dict[str, Any]:
     return config
 
 
-def clean_work_root(work_root: Path) -> None:
-    """Drop execution dirs left behind by a crashed supervisor."""
-    work_root.mkdir(parents=True, exist_ok=True)
-    for child in work_root.iterdir():
-        if child.is_dir():
-            shutil.rmtree(child, ignore_errors=True)
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run an Agent Legion Worker")
     parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
@@ -413,8 +415,12 @@ def main() -> int:
     active: set[Future[None]] = set()
     backoff = poll_interval
     pool = ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="agent-execution")
+    next_sweep = time.monotonic()
     try:
         while not stop.is_set():
+            if time.monotonic() >= next_sweep:
+                sweep_stale_executions(work_root)
+                next_sweep = time.monotonic() + SWEEP_INTERVAL_SECONDS
             completed = {future for future in active if future.done()}
             active -= completed
             for future in completed:
