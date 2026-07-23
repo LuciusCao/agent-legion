@@ -1,11 +1,11 @@
-import { api } from './api'
+import { api } from './core'
 import type {
   BatchJobIdsRequest,
   BatchJobMutationResult,
   BatchRunToRequest,
   JobBatchRerunRequest,
   WorkspacePackageResult,
-} from './jobTypes'
+} from '../types/jobTypes'
 
 export async function batchRunToJobs(
   workspaceId: string,

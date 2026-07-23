@@ -1,5 +1,5 @@
-import { api } from './api'
-import type { components } from './generated/api'
+import { api } from './core'
+import type { components } from '../generated/api'
 
 export type VideoJobDetailResponse =
   components['schemas']['VideoJobDetailResponse']

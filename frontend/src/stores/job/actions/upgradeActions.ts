@@ -1,5 +1,5 @@
-import { upgradeJobWorkflow } from '../../../jobWorkflowUpgradeApi'
-import type { JobMutationResult } from '../../../jobTypes'
+import { upgradeJobWorkflow } from '../../../api/jobWorkflowUpgradeApi'
+import type { JobMutationResult } from '../../../types/jobTypes'
 import { useUiStore } from '../../uiStore'
 import {
   countMutationResults,

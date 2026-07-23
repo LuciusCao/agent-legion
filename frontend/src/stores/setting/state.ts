@@ -7,7 +7,7 @@ import type {
 import type {
   ExecutorDefinition,
   WorkspaceExecutorConfiguration,
-} from '../../executorTypes'
+} from '../../types/executorTypes'
 import type { components } from '../../generated/api'
 
 export type WorkspaceAgentRouteEntry =

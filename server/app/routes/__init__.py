@@ -12,7 +12,7 @@ from ..jobs import JobQueries
 from ..services.artifact_store import ArtifactStore
 from ..services.executor_catalog import ExecutorCatalogService
 from ..services.job_packages import JobPackageService
-from ..services.package_deletion import PackageDeletionService
+from ..services.package_service import PackageService
 from ..services.workflow_catalog import WorkflowCatalogService
 from ..services.workspace_configuration import WorkspaceConfigurationService
 from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
@@ -46,7 +46,7 @@ def create_router(
     executor_catalog: ExecutorCatalogService,
     workspace_executor_configuration: WorkspaceExecutorConfigurationService,
     workspace_configuration: WorkspaceConfigurationService,
-    package_deletion: PackageDeletionService,
+    package_service: PackageService,
     job_packages: JobPackageService,
     job_event_manager: JobEventManager | None = None,
     job_event_buffer: Any | None = None,
@@ -57,10 +57,10 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
-    router.include_router(create_common_router(db, settings))
+    router.include_router(create_common_router())
     router.include_router(create_agents_router(agent_manager))
     router.include_router(
-        create_packages_router(db, job_db, settings, package_deletion, job_packages)
+        create_packages_router(db, job_db, settings, package_service, job_packages)
     )
     router.include_router(create_worker_router(workspace_worker_control))
     if (

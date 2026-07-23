@@ -1,6 +1,6 @@
 # Agent Legion
 
-Local processing console for educational videos. It queues knowledge videos and question explanation videos, downloads and transcribes them, runs the applicable openclaw content stages, previews partial/final artifacts, and packages completed JSON for handoff. (Formerly Video Hive.)
+Local processing console for educational videos. It processes knowledge videos through the `video_knowledge` workspace workflow — download, transcribe, review, and package completed JSON for handoff — and runs other workspace-scoped DAG workflows such as `question_comprehension_info`. (Formerly Video Hive.)
 
 ## Technology Stack
 
@@ -17,7 +17,7 @@ Local processing console for educational videos. It queues knowledge videos and 
 - Python tooling: `uv` for dependency/runtime management, `ruff` for lint/format, `mypy` for type checking.
 - Frontend: Vite + TypeScript, ESLint + Prettier.
 - Storage: PostgreSQL control plane plus `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
-- Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
+- Knowledge videos are processed as `video_knowledge` workspace jobs (see Video Intake below).
 - Agent Legion workflow model: workspace-scoped DAG jobs with configurable workflow definitions (`config/workflows/`).
 
 For the full directory tree, see [docs/architecture/project-structure.md](docs/architecture/project-structure.md).
@@ -100,32 +100,42 @@ In `auto` ASR mode, Agent Legion tries whisper.cpp first and falls back to Sense
 >
 > You must also configure `config/skills.yaml` (and commit the generated `config/skills.lock`) for Agent Legion / Pi workflows to resolve skills. See the Pi section below.
 
-## Video Types
+## Video Intake
 
-Agent Legion treats knowledge videos and question explanation videos differently.
+Knowledge videos are processed as workspace jobs running the `video_knowledge` workflow (see [Workflows](#workflows)). The legacy video queue intake (`content_type` / `external_id` JSON items) has been removed; there is no `/api/videos` endpoint anymore.
 
-| Type | Required ID | URL | Pipeline |
-| --- | --- | --- | --- |
-| `knowledge` | knowledge code | optional at intake | download → transcribe → subtitle review → chapter generation → interaction generation → content review → assemble → package |
-| `question` | question ID | optional at intake | download → transcribe → subtitle review → chapter generation → assemble → package |
+Create a batch through `POST /api/workspaces/{workspace_id}/job-batches` with `workflow_key: video_knowledge` and one of the intake modes declared in `config/workflows/video_knowledge.yaml`:
 
-If a knowledge code or question ID currently has no video URL, add it anyway with an empty URL. The record is stored with:
+- `batch_by_urls`: intake field `video_urls`, submit video URLs directly; each URL becomes one job.
+- `batch_by_knowledge`: intake field `knowledge_codes`, resolve video URLs from CMS by knowledge code; each resolved video becomes one job.
 
-- `status`: `missing_url`
-- `current_phase`: `waiting_for_url`
-
-The worker skips `missing_url` records until a URL is supplied later.
-
-Compatibility with the existing `~/CatPuru/projects/cms-extensions/engineering/llm_claude` fetch flow:
-
-- knowledge rows: `tag_code -> knowledge_code`, `url -> source_url`
-- question rows: `question_uuid -> question_id`, `url -> source_url`
-
-Question explanation videos do not produce interactive nodes. Their assembled `metadata.json` keeps `nodes: []`, and the deterministic assemble path can create an empty `interactions.json`.
+Each video job runs the DAG: download → transcribe → subtitle review → chapter generation → interaction generation → content review → assemble → package.
 
 ## Workflows
 
-In addition to the video pipelines above, Agent Legion runs workspace-scoped DAG workflows defined in `config/workflows/`.
+Agent Legion runs workspace-scoped DAG workflows defined in `config/workflows/`.
+
+### `video_knowledge`
+
+The `video_knowledge` workflow is the runtime entry point for knowledge videos. It downloads the source video, transcribes subtitles, and runs the content stages, ending with a packaged artifact for handoff.
+
+Intake modes (declared in `config/workflows/video_knowledge.yaml`):
+
+- `batch_by_urls`: intake field `video_urls`, submit video URLs directly.
+- `batch_by_knowledge`: intake field `knowledge_codes`, resolve video URLs from CMS by knowledge code.
+
+Node DAG:
+
+1. `download`: download the source video.
+2. `transcribe`: generate subtitles (`subtitles.srt`, `transcription.json`).
+3. `subtitle_review`: review machine-transcribed subtitles and fix recognition errors.
+4. `chapter_generate`: segment the video into instructionally meaningful chapters.
+5. `interaction_generate`: design interaction questions for the chapters.
+6. `content_review`: review chapters and interactions against content standards.
+7. `assemble`: merge artifacts into `metadata.json`, `report.md`, and `upload_params.json`.
+8. `package`: produce the final package manifest.
+
+Agent nodes in this workflow execute through the Pi agent runner using external skills declared in `config/skills.yaml`.
 
 ### `question_comprehension_info`
 
@@ -231,8 +241,8 @@ Architecture source budgets are governed by `config/architecture/architecture-bu
 baseline). Update the baseline and verify it with:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python scripts/ratchet_architecture_budgets.py
-UV_CACHE_DIR=.uv-cache uv run python scripts/check_architecture.py
+UV_CACHE_DIR=.uv-cache uv run python -m scripts.ratchet_architecture_budgets
+UV_CACHE_DIR=.uv-cache uv run python -m scripts.check_architecture
 ```
 
 The ratchet script refuses to raise ceilings; over-budget files must be split or reverted.
@@ -332,7 +342,7 @@ workflows:
   enabled: true
   pi:
     binary: pi
-    provider: deepseek
+    provider: gateway
     model: your-model-b
     thinking: low
     timeout_seconds: 900
@@ -409,36 +419,6 @@ a rollback snapshot until row counts and application smoke tests have been verif
 [the PostgreSQL runbook](docs/postgresql-runbook.md).
 
 ## API Notes
-
-Add a knowledge video with URL:
-
-```json
-{
-  "items": [
-    {
-      "content_type": "knowledge",
-      "external_id": "K001",
-      "title": "知识点标题",
-      "url": "https://example.com/k001.mp4"
-    }
-  ]
-}
-```
-
-Add a question explanation record before its URL is available:
-
-```json
-{
-  "items": [
-    {
-      "content_type": "question",
-      "external_id": "Q001",
-      "title": "题目解析标题",
-      "url": ""
-    }
-  ]
-}
-```
 
 Agent Legion workflow (workspace / job) endpoints:
 

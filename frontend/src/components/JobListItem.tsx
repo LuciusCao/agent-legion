@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { JOB_STATUS_LABELS } from '../labels'
-import type { JobSummary, JobNodeSummary } from '../jobTypes'
+import type { JobSummary, JobNodeSummary } from '../types/jobTypes'
 import { JobListItemDescription } from './JobListItemDescription'
 import { JobNodeStepper } from './JobNodeStepper'
 import styles from './JobListItem.module.css'

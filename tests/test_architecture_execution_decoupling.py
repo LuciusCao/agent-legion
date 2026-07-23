@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import server.app.executors  # noqa: F401  # 触发内建 kind 注册
+from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
 from server.app.executors.kinds import registered_kind_names
 
 ROOT = Path(__file__).resolve().parents[1]

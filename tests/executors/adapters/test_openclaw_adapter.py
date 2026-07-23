@@ -7,7 +7,7 @@ from server.app.executors.config import (
 )
 from server.app.executors.models import ExecutionContext
 from server.app.executors.openclaw import OpenClawExecutor
-from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.executors.openclaw_runner import OpenClawRunner
 
 
 def test_openclaw_executor_supports_capability(tmp_path: Path) -> None:

@@ -1,8 +1,23 @@
-import type { components } from './generated/api'
+import type { components } from '../generated/api'
 
 type ApiSchemas = components['schemas']
 
-export type JobSummary = ApiSchemas['JobSummaryResponse']
+// Job domain types live in ./jobTypes (single source of truth, e.g.
+// JobSummary); this barrel only re-exports them for '../types' consumers.
+export type {
+  JobSummary,
+  JobNodeSummary,
+  JobDetail,
+  JobNode,
+  NodeRun,
+  JobsResponse,
+  JobBatchResponse,
+} from './jobTypes'
+export type {
+  TokenUsageRunResponse,
+  TokenUsageJobResponse,
+  TokenUsageWorkspaceResponse,
+} from './tokenUsageTypes'
 
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
@@ -65,34 +80,6 @@ export type VideoArtifacts = {
   metadata: Record<string, unknown> | null
   review: Record<string, unknown> | null
   checklist: Record<string, unknown> | null
-}
-
-import type {
-  JobNodeSummary,
-  JobDetail,
-  JobNode,
-  NodeRun,
-  JobsResponse,
-  JobBatchResponse,
-} from './jobTypes'
-import type {
-  TokenUsageRunResponse,
-  TokenUsageJobResponse,
-  TokenUsageWorkspaceResponse,
-} from './tokenUsageTypes'
-
-export type {
-  JobNodeSummary,
-  JobDetail,
-  JobNode,
-  NodeRun,
-  JobsResponse,
-  JobBatchResponse,
-}
-export type {
-  TokenUsageRunResponse,
-  TokenUsageJobResponse,
-  TokenUsageWorkspaceResponse,
 }
 
 export type WorkspaceRecord = ApiSchemas['WorkspaceRecord']

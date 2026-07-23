@@ -8,15 +8,12 @@ import logging
 import sys
 from pathlib import Path
 
-# Allow running the script directly from the repository root.
+import yaml
+
+from server.app.quality.exemptions import load_exemptions, validate_exemptions
+from server.app.quality.invariants import load_registry, validate_registry
+
 project_root = Path(__file__).resolve().parents[1]
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
-import yaml  # noqa: E402
-
-from server.app.quality.exemptions import load_exemptions, validate_exemptions  # noqa: E402
-from server.app.quality.invariants import load_registry, validate_registry  # noqa: E402
 
 logger = logging.getLogger(__name__)
 

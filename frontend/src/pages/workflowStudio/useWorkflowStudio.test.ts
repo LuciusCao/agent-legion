@@ -58,7 +58,7 @@ vi.mock('../../api', () => ({
     mocks.validateWorkflowDraft(...args),
 }))
 
-vi.mock('../../executorApi', () => ({
+vi.mock('../../api/executorApi', () => ({
   getExecutorCatalog: (...args: unknown[]) => mocks.getExecutorCatalog(...args),
 }))
 

@@ -1,5 +1,5 @@
 import type { JobFilterConfig } from '../state'
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 import { normalizeJobStatus } from '../state'
 import type { FilterDimension } from './types'
 import { matchesSearch } from './matchesSearch'

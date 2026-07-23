@@ -61,8 +61,10 @@ After changing any Pydantic response model in the backend, regenerate and commit
 
 - **Pages**: route-level components live in `src/pages/`.
 - **Layouts**: `src/layouts/AppShell.tsx` and `src/layouts/WorkspaceLayout.tsx`.
-- **API layer**: new code should use `src/api/` modules (`core.ts`, `workflows.ts`, `workflow_revisions.ts`, ...). The top-level `src/api.ts` is legacy and gradually being migrated.
-- **State**: Zustand stores in `src/stores/`; nested domain state under `src/stores/job/` and `src/stores/setting/`.
+- **API layer**: all API modules live in `src/api/` (`core.ts` is the low-level fetch wrapper; `index.ts` is the workspace/job client entry re-exporting the focused modules). Do not add API modules at the `src/` root.
+- **Types**: shared types live in `src/types/` (`index.ts` is the barrel re-exporting `jobTypes.ts` etc.); derive transport types from `src/generated/api.ts`, do not hand-write duplicates. `JobSummary` is defined only in `src/types/jobTypes.ts`.
+- **State**: Zustand stores in `src/stores/`. Two layouts exist: directory-style (`stores/job/`, `stores/setting/`, split into `state`/`actions`/`selectors`) and single-file (`workspaceStore.ts`, `uiStore.ts`, ...). Directory-style is the extension paradigm — use it for new domains or when a store grows actions/selectors; keep small UI-only stores single-file.
+  Data that must go through a store: shared server state read by more than one component or updated by WS events (jobs, workspaces, agents, settings, executors). One-shot, single-consumer fetches local to a dialog/panel (e.g. job log, token usage, artifacts) may call `src/api/` functions directly from the component/hook.
 - **Styles**: MUI v6 theme in `src/theme.ts`; component-level styles in CSS Modules (`*.module.css`); global styles in `src/styles.css`.
 - **Helpers**: pure utility functions in `src/lib/`.
 - **Hooks**: React custom hooks in `src/hooks/`.

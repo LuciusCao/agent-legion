@@ -1,6 +1,7 @@
-import { useEffect, useState } from 'react'
-import { fetchRunTokenUsage } from '../jobApi'
-import type { RunUsage, TokenUsageRunResponse } from '../tokenUsageTypes'
+import { useState } from 'react'
+import { fetchRunTokenUsage } from '../api/jobApi'
+import { useAsync } from '../hooks/useAsync'
+import type { RunUsage } from '../types/tokenUsageTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './TokenUsageRunDetail.module.css'
 
@@ -16,26 +17,11 @@ export function TokenUsageRunDetail({
   jobId,
   runId,
 }: TokenUsageRunDetailProps) {
-  const [response, setResponse] = useState<TokenUsageRunResponse | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { data: response, loading } = useAsync(
+    () => fetchRunTokenUsage(jobId, runId),
+    [jobId, runId]
+  )
   const [expanded, setExpanded] = useState(false)
-
-  useEffect(() => {
-    let cancelled = false
-    fetchRunTokenUsage(jobId, runId)
-      .then((data) => {
-        if (!cancelled) setResponse(data)
-      })
-      .catch(() => {
-        if (!cancelled) setResponse(null)
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [jobId, runId])
 
   const usage = response?.usage ?? null
 

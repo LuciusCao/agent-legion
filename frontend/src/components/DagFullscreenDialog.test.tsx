@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { DagFullscreenDialog } from './DagFullscreenDialog'
 import type { DagGraphNode, DagGraphEdge } from './DagGraph'
-import * as jobApi from '../jobApi'
+import * as jobApi from '../api/jobApi'
 
-vi.mock('../jobApi')
+vi.mock('../api/jobApi')
 
 const mockFetchJobLog = vi.mocked(jobApi.fetchJobLog)
 

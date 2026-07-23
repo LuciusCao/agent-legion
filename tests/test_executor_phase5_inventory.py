@@ -23,7 +23,8 @@ REPLACEMENTS: dict[str, str] = {
 PROTECTED_VIDEO_HIVE_PATHS: set[str] = {
     "server/app/routes/agents.py",
     "server/app/agents.py",
-    "server/app/pipeline/openclaw.py",
+    # OpenClawRunner 自 pipeline/openclaw.py 迁入 executors（issues/closed/057）。
+    "server/app/executors/openclaw_runner.py",
 }
 
 

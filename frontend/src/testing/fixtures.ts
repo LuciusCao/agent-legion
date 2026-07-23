@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import type { UiState } from '../stores/uiStore'
-import type { JobSummary } from '../jobTypes'
+import type { JobSummary } from '../types/jobTypes'
 
 export function createMockUiState(partial: Partial<UiState> = {}): UiState {
   return {

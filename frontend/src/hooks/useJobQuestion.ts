@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { fetchJobArtifact } from '../api'
+import { useAsync } from './useAsync'
+import { fetchJobArtifactJson } from './jobArtifactJson'
 import type { QuestionArtifactNormalized } from '../types'
 
 export interface UseJobQuestionReturn {
@@ -33,34 +33,16 @@ export function useJobQuestion(
   jobId: string,
   refreshKey = ''
 ): UseJobQuestionReturn {
-  const [question, setQuestion] = useState<QuestionArtifactNormalized | null>(
-    null
-  )
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-
-    fetchJobArtifact(jobId, 'questions.json')
-      .then((artifact) => {
-        if (cancelled) return
-        const data = JSON.parse(artifact.content) as QuestionsArtifact
-        setQuestion(extractFirstQuestion(data))
-        setError('')
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setQuestion(null)
-        setError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
+  const {
+    data: question,
+    loading,
+    error,
+  } = useAsync(async () => {
+    const data = await fetchJobArtifactJson<QuestionsArtifact>(
+      jobId,
+      'questions.json'
+    )
+    return extractFirstQuestion(data)
   }, [jobId, refreshKey])
 
   return { question, loading, error }

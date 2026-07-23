@@ -10,9 +10,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from server.app.executors.agent_workspace import cleanup_agent_workspace_files
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
-from server.app.pipeline.agent_workspace import cleanup_agent_workspace_files
 
 logger = logging.getLogger(__name__)
 

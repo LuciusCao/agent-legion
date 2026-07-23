@@ -160,6 +160,14 @@ def check_file_budgets(
             )
 
     for path in inventory.production:
+        actual = count_source_lines(root / path)
+        if actual > policy.production_max_lines:
+            errors.append(
+                f"{path}: {actual} lines exceeds absolute production limit "
+                f"{policy.production_max_lines}; exemptions do not apply; split the file"
+            )
+
+    for path in inventory.production:
         effective_ceiling = frozen_ceilings.get(path, baseline_files.get(path))
         if effective_ceiling is None:
             continue

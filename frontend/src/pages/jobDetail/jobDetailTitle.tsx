@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import type { JobDetail } from '../../jobTypes'
+import type { JobDetail } from '../../types/jobTypes'
 import { WorkflowVersionChip } from '../../components/WorkflowVersionChip'
 
 export function pageSubtitle(job: JobDetail['job']): ReactNode | null {

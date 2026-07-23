@@ -377,15 +377,13 @@ def create_agent_workers_router(
             succeeded = True
         finally:
             # The archive name is unique to this attempt — always reclaim it.
-            archive_path.unlink(missing_ok=True)
+            broker.discard_result_archive(archive_name)
             if succeeded:
                 # Only a fully committed result retires the shared execution
                 # bundle. On 409/500 paths the bundle must survive for
                 # re-queued attempts; terminal-request bundles are reaped by
                 # the sweeper (AgentExecutionBroker.reap_terminal_bundles).
-                bundle_name = str(payload["manifest"].get("bundle_name", ""))
-                if _SAFE_NAME.fullmatch(bundle_name):
-                    (broker.bundle_dir / bundle_name).unlink(missing_ok=True)
+                broker.retire_bundle(str(payload["manifest"].get("bundle_name", "")))
         return Response(status_code=204)
 
     return router

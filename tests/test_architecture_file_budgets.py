@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -34,6 +35,7 @@ def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, B
         "      extensions: [.py]\n"
         "  exclude: []\n"
         "  buffer_lines: 10\n"
+        "  max_lines: 800\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -46,6 +48,7 @@ def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, B
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=1000,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -113,6 +116,7 @@ def test_stale_baseline_entry_for_excluded_file_fails(tmp_path: Path) -> None:
         "  exclude:\n"
         "    - server/app/generated.py\n"
         "  buffer_lines: 10\n"
+        "  max_lines: 800\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -124,6 +128,7 @@ def test_stale_baseline_entry_for_excluded_file_fails(tmp_path: Path) -> None:
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=("server/app/generated.py",),
         buffer_lines=10,
+        production_max_lines=1000,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -210,6 +215,7 @@ def test_test_file_at_limit_passes(tmp_path: Path) -> None:
         "      extensions: [.py]\n"
         "  exclude: []\n"
         "  buffer_lines: 10\n"
+        "  max_lines: 800\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -221,6 +227,7 @@ def test_test_file_at_limit_passes(tmp_path: Path) -> None:
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=1000,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -245,6 +252,7 @@ def test_test_file_over_limit_fails(tmp_path: Path) -> None:
         "      extensions: [.py]\n"
         "  exclude: []\n"
         "  buffer_lines: 10\n"
+        "  max_lines: 800\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -256,6 +264,7 @@ def test_test_file_over_limit_fails(tmp_path: Path) -> None:
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=(),
         buffer_lines=10,
+        production_max_lines=1000,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -286,6 +295,7 @@ def test_generated_code_excluded_not_required_in_baseline(tmp_path: Path) -> Non
         "  exclude:\n"
         "    - server/app/generated/**\n"
         "  buffer_lines: 10\n"
+        "  max_lines: 800\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -297,6 +307,7 @@ def test_generated_code_excluded_not_required_in_baseline(tmp_path: Path) -> Non
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=("server/app/generated/**",),
         buffer_lines=10,
+        production_max_lines=1000,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -357,3 +368,38 @@ def test_count_source_lines_counts_newlines(tmp_path: Path) -> None:
     path = tmp_path / "file.py"
     path.write_text("a\nb\nc", encoding="utf-8")
     assert count_source_lines(path) == 3
+
+
+def test_absolute_production_limit_rejects_growth_even_with_exemption(tmp_path: Path) -> None:
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=60)
+    policy = replace(policy, production_max_lines=50)
+    write_baseline(root, {})
+    exemption = ArchitectureExemption(
+        check="architecture.file_budget",
+        path="server/app/example.py",
+        reason="Oversized module needs staged split.",
+        owner="video-hive",
+        remove_when="issues/open/001.md",
+        ceiling=60,
+    )
+    assert check_file_budgets(root, policy, (exemption,)) == [
+        "server/app/example.py: 60 lines exceeds absolute production limit 50; "
+        "exemptions do not apply; split the file"
+    ]
+
+
+def test_absolute_production_limit_rejects_growth_within_ceiling(tmp_path: Path) -> None:
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=60)
+    policy = replace(policy, production_max_lines=50)
+    write_baseline(root, {"server/app/example.py": 65})
+    assert check_file_budgets(root, policy, ()) == [
+        "server/app/example.py: 60 lines exceeds absolute production limit 50; "
+        "exemptions do not apply; split the file"
+    ]
+
+
+def test_file_at_absolute_production_limit_passes(tmp_path: Path) -> None:
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=50)
+    policy = replace(policy, production_max_lines=50)
+    write_baseline(root, {"server/app/example.py": 55})
+    assert check_file_budgets(root, policy, ()) == []

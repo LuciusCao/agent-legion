@@ -1,4 +1,4 @@
-import type { ExecutorDefinition } from '../../executorTypes'
+import type { ExecutorDefinition } from '../../types/executorTypes'
 import styles from './WorkflowExecutorBindingList.module.css'
 
 export type CapabilityBinding = {

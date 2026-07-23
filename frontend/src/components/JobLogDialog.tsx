@@ -6,8 +6,8 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material'
-import { fetchJobLog } from '../jobApi'
-import type { JobLogResponse } from '../jobTypes'
+import { fetchJobLog } from '../api/jobApi'
+import type { JobLogResponse } from '../types/jobTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './JobLogDialog.module.css'
 

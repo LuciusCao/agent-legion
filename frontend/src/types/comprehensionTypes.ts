@@ -1,4 +1,4 @@
-import type { components } from './generated/api'
+import type { components } from '../generated/api'
 
 // The types below model job artifact JSON (questions_parsed / comprehension
 // info files), which is not covered by any OpenAPI response schema, so they

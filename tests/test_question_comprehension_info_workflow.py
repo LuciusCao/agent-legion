@@ -4,7 +4,8 @@ from pathlib import Path
 
 import yaml
 
-from server.app.executors.config import load_executor_definitions
+from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
+from server.app.executors.definitions import load_executor_definitions
 from server.app.jobs.queries import JobQueries
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.question_comprehension_info import (

@@ -1,8 +1,8 @@
 import subprocess
 from unittest.mock import patch
 
-from server.app.pipeline.agent_workspace import cleanup_agent_workspace_files
-from server.app.pipeline.openclaw import (
+from server.app.executors.agent_workspace import cleanup_agent_workspace_files
+from server.app.executors.openclaw_runner import (
     AgentPhase,
     OpenClawRunner,
     SkillSafetyConfig,
@@ -288,7 +288,7 @@ def test_openclaw_runner_calls_restore_before_run(tmp_path):
     )
     (tmp_path / "reference.md").write_text("Generate interactions.", encoding="utf-8")
 
-    with patch("server.app.pipeline.openclaw.restore_skill_repos") as mock_restore:
+    with patch("server.app.executors.openclaw_runner.restore_skill_repos") as mock_restore:
         result = runner.run(
             phase=phase,
             video_id="a",

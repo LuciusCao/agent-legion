@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { JobProgressPanel } from './JobProgressPanel'
-import * as jobApi from '../jobApi'
-import type { JobNode, NodeRun } from '../jobTypes'
+import * as jobApi from '../api/jobApi'
+import type { JobNode, NodeRun } from '../types/jobTypes'
 
-vi.mock('../jobApi', () => ({
+vi.mock('../api/jobApi', () => ({
   fetchJobLog: vi.fn(),
   fetchRunTokenUsage: vi.fn(),
 }))

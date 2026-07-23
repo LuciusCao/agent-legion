@@ -1,5 +1,5 @@
-import { api } from './api'
-import type { JobMutationResult } from './jobTypes'
+import { api } from './core'
+import type { JobMutationResult } from '../types/jobTypes'
 
 export async function upgradeJobWorkflow(
   jobId: string

@@ -1,6 +1,6 @@
 import type { DagGraphEdge, DagGraphNode } from '../../components/DagGraph'
 import type { WorkflowDefinitionRecord } from '../../types'
-import type { ExecutorDefinition } from '../../executorTypes'
+import type { ExecutorDefinition } from '../../types/executorTypes'
 import { conditionLabel } from './workflowStudioModel'
 import { topologyBadges } from './workflowStudioDagBadges'
 

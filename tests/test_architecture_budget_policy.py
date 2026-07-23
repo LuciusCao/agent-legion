@@ -24,6 +24,7 @@ VALID_POLICY = {
         ],
         "exclude": [],
         "buffer_lines": 5,
+        "max_lines": 800,
     },
     "tests": {
         "roots": [
@@ -49,6 +50,7 @@ class TestBudgetPolicyLoader:
             production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
             production_exclude=(),
             buffer_lines=5,
+            production_max_lines=800,
             test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
             test_max_lines=1000,
         )
@@ -107,6 +109,15 @@ class TestBudgetPolicyLoader:
         write_policy(policy_path, data)
 
         with pytest.raises(BudgetConfigurationError, match="unknown field"):
+            load_budget_policy(policy_path)
+
+    def test_missing_production_max_lines_raises(self, tmp_path: Path) -> None:
+        policy_path = tmp_path / "policy.yaml"
+        data = copy.deepcopy(VALID_POLICY)
+        del data["production"]["max_lines"]
+        write_policy(policy_path, data)
+
+        with pytest.raises(BudgetConfigurationError, match="max_lines is required"):
             load_budget_policy(policy_path)
 
     @pytest.mark.parametrize("field", ["buffer_lines", "max_lines"])

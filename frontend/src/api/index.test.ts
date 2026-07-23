@@ -11,7 +11,7 @@ import {
   fetchWorkflowRevisionDetail,
   fetchWorkflowRevisions,
   updateWorkspace,
-} from './api'
+} from './index'
 import {
   getExecutorCatalog,
   getSkillDetail,

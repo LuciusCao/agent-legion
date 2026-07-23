@@ -24,7 +24,7 @@ vi.mock('../api/tokenUsage', () => ({
   ),
 }))
 
-vi.mock('../jobApi', () => ({
+vi.mock('../api/jobApi', () => ({
   fetchJobTokenUsage: vi.fn(() =>
     Promise.resolve({
       job_id: 'j1',

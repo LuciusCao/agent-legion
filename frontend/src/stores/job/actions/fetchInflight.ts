@@ -1,5 +1,5 @@
 import { fetchJobs as apiFetchJobs } from '../../../api'
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 
 const inflight = new Map<string, Promise<{ jobs: JobSummary[] }>>()
 

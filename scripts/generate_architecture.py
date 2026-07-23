@@ -102,7 +102,7 @@ def extract_fastapi_routes(root: Path) -> str:
                 continue
             prefix = _find_router_prefix(node.body, "router")
             for child in ast.walk(node):
-                if not isinstance(child, ast.FunctionDef) or child is node:
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) or child is node:
                     continue
                 for dec in child.decorator_list:
                     if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
@@ -198,49 +198,11 @@ def extract_frontend_routes(root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _extract_str_list(node: ast.AST) -> list[str]:
-    """Extract list of string constants from an AST node."""
-    if not isinstance(node, ast.List):
-        return []
-    result = []
-    for elt in node.elts:
-        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-            result.append(elt.value)
-    return result
-
-
 def extract_pipeline_phases(root: Path) -> str:
-    """Extract video pipeline phase sequences from pipeline/phases.py."""
-    phases_file = root / "server" / "app" / "pipeline" / "phases.py"
-    if not phases_file.exists():
-        return "_No phases.py found._\n"
+    """Extract video pipeline node sequence from config/workflows/video_knowledge.yaml."""
+    from scripts.generate_architecture_pipeline import extract_pipeline_phases as _extract
 
-    try:
-        tree = ast.parse(phases_file.read_text(encoding="utf-8"))
-    except SyntaxError:
-        return "_Could not parse phases.py._\n"
-
-    knowledge_phases: list[str] = []
-    question_phases: list[str] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    if target.id == "KNOWLEDGE_PHASES":
-                        knowledge_phases = _extract_str_list(node.value)
-                    elif target.id == "QUESTION_PHASES":
-                        question_phases = _extract_str_list(node.value)
-
-    lines = []
-    if knowledge_phases:
-        lines.append("**知识视频（8 阶段）：**")
-        lines.append(" → ".join(f"`{p}`" for p in knowledge_phases))
-    if question_phases:
-        lines.append("**题目解析视频（6 阶段）：**")
-        lines.append(" → ".join(f"`{p}`" for p in question_phases))
-
-    return "\n".join(lines) + "\n" if lines else "_No phase sequences found._\n"
+    return _extract(root)
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +213,6 @@ def extract_pipeline_phases(root: Path) -> str:
 def extract_config(root: Path) -> str:
     """Extract top-level config keys from the composed domain configuration."""
     project_root = root.resolve()
-    if str(project_root) not in sys.path:
-        sys.path.insert(0, str(project_root))
 
     try:
         from server.app.configuration.loader import load_application_config
@@ -329,11 +289,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate architecture doc sections")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="Repository root")
     parser.add_argument("--module", choices=list(MODULES.keys()), help="Only generate one module")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not write; fail if generated sections drift from the docs",
+    )
     args = parser.parse_args()
 
     root = args.root.resolve()
     modules = [args.module] if args.module else list(MODULES.keys())
 
+    drifted: list[str] = []
     for name in modules:
         rel_path, generator = MODULES[name]
         doc_path = root / rel_path
@@ -344,8 +310,24 @@ def main() -> int:
         content = doc_path.read_text(encoding="utf-8")
         new_section = generator(root)
         new_content = replace_section(content, new_section)
+        if args.check:
+            if new_content != content:
+                drifted.append(rel_path)
+            continue
         doc_path.write_text(new_content, encoding="utf-8")
         print(f"Updated {rel_path}")
+
+    if args.check:
+        if drifted:
+            print(
+                "Architecture docs drift detected; regenerate with "
+                "`uv run python scripts/generate_architecture.py`:",
+                file=sys.stderr,
+            )
+            for rel_path in drifted:
+                print(f"  - {rel_path}", file=sys.stderr)
+            return 1
+        print("Architecture docs are up to date.")
 
     return 0
 

@@ -7,14 +7,6 @@ server:
       - http://localhost:5173
       - http://127.0.0.1:5173
     allow_credentials: false
-worker:
-  poll_batch_size: 100
-  phase_concurrency:
-    download: 10
-    transcribe: 1
-    assemble: 10
-    package: 10
-    waiting_for_url: 10
 
 cleanup:
   log_retention_days: 7

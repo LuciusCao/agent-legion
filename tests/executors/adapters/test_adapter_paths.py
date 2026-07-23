@@ -10,9 +10,9 @@ from server.app.executors.config import (
 from server.app.executors.local import LocalExecutor
 from server.app.executors.models import ExecutionContext
 from server.app.executors.openclaw import OpenClawExecutor
+from server.app.executors.openclaw_runner import OpenClawRunner
 from server.app.executors.pi import PiExecutor
 from server.app.executors.runtime_config import PiRuntimeConfig
-from server.app.pipeline.openclaw import OpenClawRunner
 from tests.executors.adapters.helpers import (
     _make_skill_manager,
     write_output_handler,

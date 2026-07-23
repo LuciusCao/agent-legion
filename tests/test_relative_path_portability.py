@@ -12,7 +12,7 @@ from server.app.pipeline.common import resolve_video_dir
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_logs import JobLogService
 from server.app.services.job_queries import JobQueryService
-from server.app.services.package_deletion import PackageDeletionService
+from server.app.services.package_service import PackageService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
@@ -79,7 +79,7 @@ def _seed_old_root(old_root: Path) -> None:
         "node run complete from old_root\n", encoding="utf-8"
     )
 
-    # Package used by PackageDeletionService.
+    # Package used by PackageService.
     (package_dir / PACKAGE_NAME).write_bytes(b"fake package bytes")
 
     with write_transaction(db_path) as conn:
@@ -267,9 +267,9 @@ def test_cross_root_path_portability(portable_roots: tuple[Path, Path]) -> None:
     assert resolved_run["run_dir"] == str(resolved_run_dir)
     assert resolved_run["session_dir"] == str(resolved_run_dir / "session")
 
-    package_deletion = PackageDeletionService(db, settings.packages_dir)
+    package_service = PackageService(db, settings.packages_dir)
     package_id = int(packages[0]["id"])
     assert (settings.packages_dir / PACKAGE_NAME).exists()
-    package_deletion.delete(package_id)
+    package_service.delete(package_id)
     assert not (settings.packages_dir / PACKAGE_NAME).exists()
     assert db.list_packages(limit=10) == []

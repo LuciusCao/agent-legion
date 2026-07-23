@@ -1,5 +1,5 @@
 import type { WorkflowDefinitionRecord } from '../../types'
-import type { ExecutorDefinition } from '../../executorTypes'
+import type { ExecutorDefinition } from '../../types/executorTypes'
 import { WorkflowInspectorEmptyState } from './WorkflowInspectorOverviewFallback'
 import { selectedNodeDetails } from './workflowStudioModel'
 import { WorkflowNodeInspectorBody } from './WorkflowNodeInspectorBody'

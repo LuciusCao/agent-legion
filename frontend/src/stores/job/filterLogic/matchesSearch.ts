@@ -1,4 +1,4 @@
-import type { JobSummary } from '../../../jobTypes'
+import type { JobSummary } from '../../../types/jobTypes'
 
 export function matchesSearch(job: JobSummary, query: string): boolean {
   if (!query) return true
