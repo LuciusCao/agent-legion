@@ -73,7 +73,6 @@ def _seed_request(
             node_key=node_key,
             agent_id="generator-v1",
             agent_definition_hash=definition.definition_hash(),
-            node_concurrency_limit=0,
             manifest={"job_id": job_id, "log_path": f"logs/{job_id}.log"},
         )
     )

@@ -57,7 +57,6 @@ class WorkflowNode:
     key: str
     label: str
     capability: str
-    max_concurrency: int | None = None
     after: list[str] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)

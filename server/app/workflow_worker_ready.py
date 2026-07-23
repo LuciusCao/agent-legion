@@ -19,9 +19,9 @@ from server.app.services.workflow_revision_format import definition_from_job_sna
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
-from server.app.workflows.scheduler import evaluate_branches, find_ready_nodes
+from server.app.workflows.scheduler import find_ready_nodes
 from server.app.workflows.sharding import has_pending_shards
-from server.app.workflows.workflow_branching import RUNNABLE_STATUSES
+from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, evaluate_branches
 
 if TYPE_CHECKING:
     from server.app.workflow_worker_thread import WorkflowWorkerThread

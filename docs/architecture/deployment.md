@@ -56,7 +56,6 @@ scripts/
 - `agents`
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
 - `cleanup`
-- `cleanup_video_after_assemble` — 打包后是否清理视频
 - `cms` — CMS 集成配置
 - `data_dir` — 数据目录
 - `database`

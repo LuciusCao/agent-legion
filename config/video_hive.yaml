@@ -26,7 +26,6 @@ resource_providers:
     path: /question/detail
   cms.question.list_by_knowledge:
     path: /question/list
-cleanup_video_after_assemble: false
 openclaw:
   cwd: .
   timeout_seconds: 600
@@ -55,18 +54,3 @@ openclaw:
   - --message
   - '{prompt_text}'
   - --json
-  runners:
-  - command_template:
-    - openclaw
-    - agent
-    - --local
-    - --agent
-    - main
-    - --session-id
-    - '{video_id}-{timestamp}'
-    - --thinking
-    - 'on'
-    - --message
-    - '{prompt_text}'
-    - --json
-    count: 8

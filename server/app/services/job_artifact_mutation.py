@@ -8,7 +8,7 @@ from typing import Any
 
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.scheduler import downstream_nodes
+from server.app.workflows.workflow_branching import downstream_nodes
 
 logger = logging.getLogger(__name__)
 

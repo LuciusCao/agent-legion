@@ -35,16 +35,6 @@ export function WorkflowNodeRuntimeSettings(props: {
     )
   return (
     <div className={styles.fields}>
-      {props.node.max_concurrency != null && (
-        <div
-          className={editorStyles.fieldHint}
-          data-testid="agent-node-summary"
-          style={{ marginBottom: 4 }}
-        >
-          Agent 节点 · capability {props.node.capability}
-          （并发上限为 workspace 级，在设置页配置）
-        </div>
-      )}
       <WorkflowRuntimeInheritedField
         label="Provider"
         value={execution.provider ?? ''}

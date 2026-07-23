@@ -20,12 +20,13 @@ frontend/src/
 ├── main.tsx                # React 入口
 ├── App.tsx                 # 应用壳（ThemeProvider、Query 层）
 ├── AppRoutes.tsx           # React Router v6 路由定义
-├── api.ts                  # 旧版集中式 API 封装（逐步迁移到 api/）
 ├── api/                    # 按领域拆分的 API 层
+│   ├── index.ts            # barrel：统一 re-export 各领域模块
 │   ├── core.ts             # 通用请求封装
-│   ├── workflows.ts
-│   ├── workflow_revisions.ts
-│   └── workflow_draft_compare.ts
+│   ├── jobApi.ts / jobBatchApi.ts / jobSnapshot.ts
+│   ├── videoApi.ts         # Job Detail 视频面板 API
+│   ├── workflows.ts / workflow_revisions.ts / workflow_draft_compare.ts
+│   └── ...                 # executorApi、packages、tokenUsage 等
 ├── generated/
 │   └── api.ts              # OpenAPI 生成的传输类型
 ├── pages/                  # 路由级页面
@@ -45,9 +46,13 @@ frontend/src/
 │   ├── JobListItem.tsx
 │   ├── DagGraph.tsx
 │   ├── DagStepper.tsx
-│   ├── ArtifactDrawer.tsx
+│   ├── ArtifactListDialog.tsx    # 产物列表对话框
+│   ├── ArtifactPopover.tsx       # 产物快捷预览
+│   ├── ArtifactPreviewDialog.tsx # 产物预览对话框
 │   ├── VideoPlayer.tsx
-│   ├── ChapterPanel.tsx
+│   ├── VideoContentPanel.tsx     # Job Detail 视频内容面板
+│   ├── TimelineStrip.tsx         # 视频章节时间轴
+│   ├── RichText.tsx              # CMS 富文本（HTML + LaTeX）统一渲染
 │   └── ...
 ├── stores/                 # Zustand 状态管理
 │   ├── workspaceStore.ts
@@ -55,7 +60,6 @@ frontend/src/
 │   ├── job/                # Job 领域子状态
 │   ├── setting/
 │   ├── artifactStore.ts
-│   ├── packageStore.ts
 │   └── ...
 ├── hooks/                  # React 自定义 Hooks
 │   ├── useWorkspaceEvents.ts
@@ -81,7 +85,7 @@ frontend/src/
 
 - Workspace / Job 状态变更通过 SSE 推送。
 - Agent 状态通过 WebSocket (`/api/agents`) 推送。
-- 前端 `api/` 层负责按领域组织请求；新代码优先使用 `api/` 目录而非顶层 `api.ts`。
+- 前端 `api/` 层负责按领域组织请求，经 `api/index.ts` barrel 统一导出。
 
 ## Key Decisions
 

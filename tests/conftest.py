@@ -22,7 +22,6 @@ with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as _bootstrap_conn:
 from server.app.agent_catalog import load_agent_definitions, sync_agent_definitions
 from server.app.agents import AgentStatusManager
 from server.app.configuration import load_application_config
-from server.app.db import Database
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 from server.app.jobs import JobQueries
@@ -145,11 +144,6 @@ def _fake_cms_question_item(question_id: str) -> dict[str, object]:
 @pytest.fixture
 def settings(tmp_path):
     return load_settings(data_dir=tmp_path)
-
-
-@pytest.fixture
-def db(settings):
-    return Database(TEST_DATABASE_URL)
 
 
 @pytest.fixture

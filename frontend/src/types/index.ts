@@ -20,8 +20,6 @@ export type {
 } from './tokenUsageTypes'
 
 export type ContentType = 'knowledge' | 'question'
-export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
-export type RunToMode = 'continue' | 'rerun'
 
 export type InteractionStats = {
   passed: number
@@ -108,16 +106,7 @@ export type WorkflowRevisionDetailResponse =
   ApiSchemas['WorkflowRevisionDetailResponse']
 export type ArtifactResponse = ApiSchemas['ArtifactResponse']
 
-export type CreateJobBatchInput = {
-  workspaceId: string
-  workflowKey: string
-  entity?: string
-  sourceKind: string
-  inputField: string
-  values: string[]
-}
-
-export type QuestionOption = Record<string, unknown>
+export type CreateJobBatchInput = ApiSchemas['JobBatchRequest']
 
 export type {
   SocraticOption,

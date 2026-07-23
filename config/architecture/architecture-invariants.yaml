@@ -131,18 +131,6 @@ invariants:
         target: tests/full/test_agent_worker_control_plane.py::test_postgres_agent_schema_initialization_is_idempotent
         gate: full
 
-  - id: RECOVERY-BACKUP-001
-    statement: "The offline SQLite importer refuses populated targets and preserves source IDs in PostgreSQL."
-    owner: database
-    risk: critical
-    evidence:
-      - kind: integration
-        target: tests/db/test_sqlite_import.py
-        gate: quick
-      - kind: integration
-        target: tests/full/test_sqlite_import_recovery.py
-        gate: full
-
   - id: CONFIG-STARTUP-001
     statement: "Secrets use environment overrides, enabled runtime dependencies fail validation at startup, and the split configuration layout is detected, validated for owned keys, and composed before settings are built."
     owner: config

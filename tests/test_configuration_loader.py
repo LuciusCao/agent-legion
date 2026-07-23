@@ -1,4 +1,3 @@
-import logging
 from pathlib import Path
 
 import pytest
@@ -19,23 +18,17 @@ def _write(path: Path, text: str = "{}\n") -> None:
     path.write_text(text, encoding="utf-8")
 
 
-@pytest.mark.parametrize(
-    ("present", "expected"),
-    [
-        (set(), ConfigLayout.LEGACY),
-        ({"workflow.yaml"}, ConfigLayout.LEGACY),
-        ({"app.yaml", "video_hive.yaml", "workflow.yaml"}, ConfigLayout.SPLIT),
-    ],
-)
-def test_detect_layout_accepts_complete_states(tmp_path: Path, present: set[str], expected):
-    for name in present:
+def test_detect_layout_accepts_complete_split(tmp_path: Path):
+    for name in ("app.yaml", "video_hive.yaml", "workflow.yaml"):
         _write(tmp_path / name)
-    assert detect_layout(tmp_path).layout is expected
+    assert detect_layout(tmp_path).layout is ConfigLayout.SPLIT
 
 
 @pytest.mark.parametrize(
     "present",
     [
+        set(),
+        {"workflow.yaml"},
         {"app.yaml"},
         {"video_hive.yaml"},
         {"app.yaml", "workflow.yaml"},
@@ -53,7 +46,7 @@ def test_detect_layout_rejects_partial_split(tmp_path: Path, present: set[str]):
     assert "missing=" in message
 
 
-def test_split_layout_merges_owned_keys(tmp_path: Path, caplog):
+def test_split_layout_merges_owned_keys(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write(config_dir / "app.yaml", "data_dir: data\nserver: {port: 8000}\n")
     _write(config_dir / "video_hive.yaml", "asr: {provider: auto}\n")
@@ -66,7 +59,6 @@ def test_split_layout_merges_owned_keys(tmp_path: Path, caplog):
         "asr": {"provider": "auto"},
         "workflows": {"enabled": True},
     }
-    assert "legacy" not in caplog.text.lower()
 
 
 def test_split_layout_rejects_key_in_wrong_file(tmp_path: Path):
@@ -94,17 +86,9 @@ def test_explicit_path_accepts_flat_legacy_keys(tmp_path: Path):
     assert loaded.config["cms"]["token"] == "value"
 
 
-def test_missing_legacy_file_returns_empty_defaults(tmp_path: Path):
-    assert load_application_config(tmp_path).config == {}
-
-
-def test_legacy_warning_is_emitted_once(tmp_path: Path, caplog, monkeypatch):
-    caplog.set_level(logging.WARNING)
-    _write(tmp_path / "config/workflow.yaml", "data_dir: data\n")
-    monkeypatch.setattr("server.app.configuration.loader._legacy_warning_emitted", False)
-    load_application_config(tmp_path)
-    load_application_config(tmp_path)
-    assert caplog.text.count("legacy single-file configuration") == 1
+def test_missing_config_files_rejected(tmp_path: Path):
+    with pytest.raises(ConfigurationLoadError, match="partial configuration layout"):
+        load_application_config(tmp_path)
 
 
 def test_load_yaml_mapping_reports_invalid_yaml(tmp_path: Path):

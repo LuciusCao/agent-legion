@@ -9,22 +9,19 @@ import {
   TextField,
 } from '@mui/material'
 import {
-  deletePackage,
   deleteWorkspacePackage,
   fetchWorkspacePackages,
-  updatePackage,
   updateWorkspacePackage,
 } from '../api'
 import { triggerDownload } from '../lib/download'
-import { usePackageStore, type PackageItem } from '../stores/packageStore'
+import type { WorkspacePackageItem } from '../types/packageTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './PackageHistoryDialog.module.css'
 
 interface Props {
   open: boolean
   onClose: () => void
-  scope?: 'global' | 'workspace'
-  workspaceId?: string
+  workspaceId: string
 }
 
 function formatSize(bytes: number): string {
@@ -49,92 +46,58 @@ function formatRelativeTime(iso: string): string {
   return date.toLocaleDateString('zh-CN')
 }
 
-export function PackageHistoryDialog({
-  open,
-  onClose,
-  scope = 'global',
-  workspaceId,
-}: Props) {
-  const packages = usePackageStore((state) => state.packages)
-  const loading = usePackageStore((state) => state.loading)
-  const fetchPackagesList = usePackageStore((state) => state.fetchPackagesList)
-  const removePackage = usePackageStore((state) => state.removePackage)
-  const renamePackage = usePackageStore((state) => state.renamePackage)
-  const toggleLockStore = usePackageStore((state) => state.toggleLock)
-
-  const [workspacePackages, setWorkspacePackages] = useState<PackageItem[]>([])
-  const [wsLoading, setWsLoading] = useState(false)
+export function PackageHistoryDialog({ open, onClose, workspaceId }: Props) {
+  const [packages, setPackages] = useState<WorkspacePackageItem[]>([])
+  const [loading, setLoading] = useState(false)
 
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
 
-  const isWorkspace = scope === 'workspace'
-  const displayPackages = isWorkspace ? workspacePackages : packages
-  const displayLoading = isWorkspace ? wsLoading : loading
-
   useEffect(() => {
     if (!open) return
-    if (isWorkspace && workspaceId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setWsLoading(true)
-      fetchWorkspacePackages(workspaceId)
-        .then((data) => {
-          setWorkspacePackages(data.packages || [])
-        })
-        .catch(() => setWorkspacePackages([]))
-        .finally(() => setWsLoading(false))
-    } else if (!isWorkspace) {
-      fetchPackagesList()
-    }
-  }, [open, isWorkspace, workspaceId, fetchPackagesList])
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true)
+    fetchWorkspacePackages(workspaceId)
+      .then((data) => {
+        setPackages(data.packages || [])
+      })
+      .catch(() => setPackages([]))
+      .finally(() => setLoading(false))
+  }, [open, workspaceId])
 
-  const handleDownload = (pkg: PackageItem) => {
+  const handleDownload = (pkg: WorkspacePackageItem) => {
     const filename = pkg.path.split('/').pop() || ''
     if (!filename) return
-    if (isWorkspace && workspaceId) {
-      triggerDownload(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/packages/${filename}`
-      )
-    } else {
-      triggerDownload(`/api/packages/${filename}`)
-    }
+    triggerDownload(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/packages/${filename}`
+    )
   }
 
   const handleDelete = async (id: number) => {
     if (!window.confirm('确定要删除这个包吗？')) return
     try {
-      if (isWorkspace && workspaceId) {
-        await deleteWorkspacePackage(workspaceId, id)
-        setWorkspacePackages((prev) => prev.filter((p) => p.id !== id))
-      } else {
-        await deletePackage(id)
-        removePackage(id)
-      }
+      await deleteWorkspacePackage(workspaceId, id)
+      setPackages((prev) => prev.filter((p) => p.id !== id))
     } catch (err) {
       alert('删除失败: ' + (err instanceof Error ? err.message : String(err)))
     }
   }
 
-  const handleToggleLock = async (pkg: PackageItem) => {
+  const handleToggleLock = async (pkg: WorkspacePackageItem) => {
     const newLocked = !pkg.locked
     try {
-      if (isWorkspace && workspaceId) {
-        await updateWorkspacePackage(workspaceId, pkg.id, { locked: newLocked })
-        setWorkspacePackages((prev) =>
-          prev.map((p) =>
-            p.id === pkg.id ? { ...p, locked: newLocked ? 1 : 0 } : p
-          )
+      await updateWorkspacePackage(workspaceId, pkg.id, { locked: newLocked })
+      setPackages((prev) =>
+        prev.map((p) =>
+          p.id === pkg.id ? { ...p, locked: newLocked ? 1 : 0 } : p
         )
-      } else {
-        await updatePackage(pkg.id, { locked: newLocked })
-        toggleLockStore(pkg.id, newLocked)
-      }
+      )
     } catch (err) {
       alert('操作失败: ' + (err instanceof Error ? err.message : String(err)))
     }
   }
 
-  const startEdit = (pkg: PackageItem) => {
+  const startEdit = (pkg: WorkspacePackageItem) => {
     setEditingId(pkg.id)
     setEditValue(pkg.name)
   }
@@ -145,17 +108,12 @@ export function PackageHistoryDialog({
       return
     }
     try {
-      if (isWorkspace && workspaceId) {
-        await updateWorkspacePackage(workspaceId, id, {
-          name: editValue.trim(),
-        })
-        setWorkspacePackages((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, name: editValue.trim() } : p))
-        )
-      } else {
-        await updatePackage(id, { name: editValue.trim() })
-        renamePackage(id, editValue.trim())
-      }
+      await updateWorkspacePackage(workspaceId, id, {
+        name: editValue.trim(),
+      })
+      setPackages((prev) =>
+        prev.map((p) => (p.id === id ? { ...p, name: editValue.trim() } : p))
+      )
     } catch (err) {
       alert('重命名失败: ' + (err instanceof Error ? err.message : String(err)))
     }
@@ -166,16 +124,13 @@ export function PackageHistoryDialog({
     <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
       <DialogTitle>包历史</DialogTitle>
       <DialogContent className={styles.dialogContent}>
-        {isWorkspace && !workspaceId && (
-          <div className={styles.empty}>未提供工作区 ID</div>
-        )}
-        {displayLoading && <div className={styles.empty}>加载中...</div>}
-        {!displayLoading && displayPackages.length === 0 && (
+        {loading && <div className={styles.empty}>加载中...</div>}
+        {!loading && packages.length === 0 && (
           <div className={styles.empty}>暂无打包记录</div>
         )}
-        {!displayLoading && displayPackages.length > 0 && (
+        {!loading && packages.length > 0 && (
           <div className={styles.list}>
-            {displayPackages.map((pkg) => (
+            {packages.map((pkg) => (
               <div key={pkg.id} className={styles.item}>
                 <div className={styles.itemInfo}>
                   {editingId === pkg.id ? (
@@ -212,10 +167,8 @@ export function PackageHistoryDialog({
                         {pkg.name || '未命名'}
                       </span>
                       <span className={styles.itemMeta}>
-                        {isWorkspace
-                          ? `${pkg.video_count}个任务`
-                          : `${pkg.video_count}个视频`}{' '}
-                        · {formatSize(pkg.size_bytes)} ·{' '}
+                        {`${pkg.video_count}个任务`} ·{' '}
+                        {formatSize(pkg.size_bytes)} ·{' '}
                         {formatRelativeTime(pkg.created_at)}
                       </span>
                     </>

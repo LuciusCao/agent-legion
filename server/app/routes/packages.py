@@ -1,7 +1,6 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
-from ..db import Database
 from ..jobs import JobQueries
 from ..security import validate_package_filename
 from ..services.job_packages import (
@@ -9,26 +8,14 @@ from ..services.job_packages import (
     WorkspacePackageLockedError,
     WorkspacePackageNotFoundError,
 )
-from ..services.package_service import (
-    PackageLockedError,
-    PackageNotFoundError,
-    PackageService,
-    resolve_package_file,
-    resolve_package_path,
-)
 from ..settings import Settings
-from ..storage_paths import ManagedPathError, resolve_data_path
+from ..storage_paths import ManagedPathError, resolve_data_path, resolve_package_file
 from .package_contracts import (
     WorkspacePackageRequest,
     WorkspacePackageResponse,
     WorkspacePackageResultResponse,
 )
 from .package_history_contracts import (
-    PackageDeleteResponse,
-    PackageItemResponse,
-    PackagesResponse,
-    PackageUpdate,
-    PackageUpdateResponse,
     WorkspacePackageDeleteResponse,
     WorkspacePackageItemResponse,
     WorkspacePackagesResponse,
@@ -38,73 +25,13 @@ from .package_history_contracts import (
 
 
 def create_packages_router(
-    db: Database,
     job_db: JobQueries,
     settings: Settings,
-    package_service: PackageService,
     job_packages: JobPackageService | None = None,
 ) -> APIRouter:
     if job_packages is None:
         job_packages = JobPackageService(job_db, settings)
     router = APIRouter(tags=["packages"])
-
-    @router.get("/packages", response_model=PackagesResponse)
-    def list_packages() -> PackagesResponse:
-        packages = db.list_packages(limit=10)
-        result: list[PackageItemResponse] = []
-        for pkg in packages:
-            stored_path = pkg.get("path") or ""
-            pkg_out = dict(pkg)
-            if stored_path:
-                try:
-                    resolved_path = resolve_package_path(
-                        stored_path,
-                        settings.data_dir,
-                        settings.packages_dir,
-                        record_id=str(pkg.get("id", "")),
-                    )
-                except ManagedPathError:
-                    continue
-                pkg_out["path"] = str(resolved_path)
-            result.append(PackageItemResponse.model_validate(pkg_out))
-        return PackagesResponse(packages=result)
-
-    @router.delete("/packages/{package_id:int}", response_model=PackageDeleteResponse)
-    def delete_package(package_id: int) -> PackageDeleteResponse:
-        try:
-            package_service.delete(package_id)
-        except (PackageNotFoundError, ManagedPathError):
-            raise HTTPException(status_code=404, detail="Package not found") from None
-        except PackageLockedError:
-            raise HTTPException(status_code=400, detail="Package is locked") from None
-        return PackageDeleteResponse(deleted=True)
-
-    @router.patch(
-        "/packages/{package_id:int}",
-        response_model=PackageUpdateResponse,
-        response_model_exclude_none=True,
-    )
-    def update_package(package_id: int, body: PackageUpdate) -> PackageUpdateResponse:
-        try:
-            package_service.update(package_id, name=body.name, locked=body.locked)
-        except PackageNotFoundError:
-            raise HTTPException(status_code=404, detail="Package not found") from None
-        return PackageUpdateResponse(id=package_id, name=body.name, locked=body.locked)
-
-    @router.get(
-        "/packages/{filename:path}",
-        response_class=FileResponse,
-        responses={200: {"content": {"application/zip": {}}}},
-    )
-    def download_package(filename: str) -> FileResponse:
-        try:
-            validate_package_filename(filename)
-            package_path = resolve_package_file(settings.packages_dir, filename)
-        except (ValueError, RuntimeError):
-            raise HTTPException(status_code=404, detail="Package not found") from None
-        if not package_path.exists() or not package_path.is_file():
-            raise HTTPException(status_code=404, detail="Package not found")
-        return FileResponse(package_path, media_type="application/zip", filename=filename)
 
     @router.get("/workspaces/{workspace_id}/packages", response_model=WorkspacePackagesResponse)
     def list_workspace_packages(workspace_id: str) -> WorkspacePackagesResponse:

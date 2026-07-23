@@ -45,9 +45,6 @@ class AgentExecutionRequest:
     node_key: str
     agent_id: str
     agent_definition_hash: str
-    # Legacy node-level limit declared by the workflow (0 = unset). Enforcement
-    # is workspace-level; the broker only stores an audit snapshot.
-    node_concurrency_limit: int
     manifest: Mapping[str, Any]
     execution_id: str = ""
 
@@ -99,8 +96,6 @@ class AgentExecutionBroker:
         return row is not None
 
     def enqueue(self, request: AgentExecutionRequest) -> str | None:
-        if request.node_concurrency_limit < 0:
-            raise ValueError("node_concurrency_limit must not be negative")
         execution_id = request.execution_id or str(uuid.uuid4())
         try:
             with write_transaction(self.database_dsn) as conn:
@@ -128,13 +123,10 @@ class AgentExecutionBroker:
                     "select max_concurrency from workspace_agent_capacities where workspace_id=?",
                     (request.workspace_id,),
                 ).fetchone()
-                # Audit-only snapshot of the governing limit at enqueue time:
-                # the legacy node-level value when the workflow still declares
-                # one, else the current workspace-level cap; 1 records "no
-                # configured limit (unlimited)". Never used for enforcement.
-                stored_limit = request.node_concurrency_limit
-                if stored_limit <= 0:
-                    stored_limit = int(capacity["max_concurrency"]) if capacity is not None else 1
+                # Audit-only snapshot of the governing workspace-level limit
+                # at enqueue time; 1 records "no configured limit
+                # (unlimited)". Never used for enforcement.
+                stored_limit = int(capacity["max_concurrency"]) if capacity is not None else 1
                 conn.execute(
                     """
                     insert into agent_execution_requests(
