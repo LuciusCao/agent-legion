@@ -392,6 +392,7 @@
     "scripts/__init__.py": 11,
     "scripts/_skill_cost_core.py": 146,
     "scripts/agent_worker.py": 479,
+    "scripts/agent_worker_cleanup.py": 60,
     "scripts/agent_worker_client.py": 80,
     "scripts/agent_worker_config_store.py": 189,
     "scripts/agent_worker_service.py": 115,
