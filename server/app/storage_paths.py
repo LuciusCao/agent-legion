@@ -93,6 +93,15 @@ def resolve_managed_path(
     return resolved_candidate
 
 
+def resolve_package_file(packages_dir: Path, filename: str) -> Path:
+    """Resolve ``filename`` inside ``packages_dir``, rejecting escapes (non-strict)."""
+    resolved = (packages_dir / filename).resolve()
+    resolved_root = packages_dir.resolve()
+    if resolved == resolved_root or not resolved.is_relative_to(resolved_root):
+        raise ManagedPathError("Path escapes package root", root_kind="package")
+    return resolved
+
+
 def make_data_relative(path: Path, data_dir: Path) -> str:
     """Return the canonical POSIX path of ``path`` relative to ``data_dir``.
 
@@ -215,15 +224,6 @@ def _resolve_record_dir(
             root_kind=root_kind,
         )
     return resolved
-
-
-def resolve_video_dir(video: Any, videos_dir: Path) -> Path:
-    """Return the video directory, resolving storage_dir safely against videos_dir.
-
-    ``videos_dir`` is expected to be a direct child of the project ``data_dir``
-    (typically ``data/videos``).
-    """
-    return _resolve_record_dir(video, "id", videos_dir, "video")
 
 
 def resolve_job_dir(job: Any, jobs_dir: Path) -> Path:

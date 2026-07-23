@@ -151,30 +151,4 @@ describe('WorkflowNodeExecutionSection', () => {
 
     expect(screen.getByText('未匹配到 executor capability')).toBeInTheDocument()
   })
-
-  it('shows the agent summary for nodes with a declared concurrency cap', () => {
-    render(
-      <WorkflowNodeExecutionSection
-        node={{ ...node, max_concurrency: 20 }}
-        executorCatalog={executorCatalog}
-        {...editorProps}
-      />
-    )
-
-    const summary = screen.getByTestId('agent-node-summary')
-    expect(summary.textContent).toContain('generate_key_info')
-    expect(summary.textContent).toContain('并发上限为 workspace 级')
-  })
-
-  it('hides the agent summary for local handler nodes', () => {
-    render(
-      <WorkflowNodeExecutionSection
-        node={node}
-        executorCatalog={executorCatalog}
-        {...editorProps}
-      />
-    )
-
-    expect(screen.queryByTestId('agent-node-summary')).not.toBeInTheDocument()
-  })
 })

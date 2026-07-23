@@ -4,9 +4,6 @@ import pytest
 @pytest.mark.parametrize(
     ("path", "method", "schema_name"),
     [
-        ("/api/packages", "get", "PackagesResponse"),
-        ("/api/packages/{package_id}", "delete", "PackageDeleteResponse"),
-        ("/api/packages/{package_id}", "patch", "PackageUpdateResponse"),
         (
             "/api/workspaces/{workspace_id}/packages",
             "get",

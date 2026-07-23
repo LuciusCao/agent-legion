@@ -16,22 +16,6 @@ The server creates the current schema under a PostgreSQL advisory migration
 lock. The configured role needs permission to connect and to create/alter
 objects in its application schema.
 
-## Import an existing SQLite database
-
-Stop the old application first so the source file cannot change during the
-read transaction. Import into a fresh target:
-
-```bash
-uv run python scripts/import-sqlite-to-postgres.py \
-  data/video_hive.sqlite \
-  postgresql://127.0.0.1:5432/agent_legion
-```
-
-The importer copies tables in foreign-key order, preserves identity IDs, resets
-identity sequences, and refuses a populated target. `--truncate-target` is an
-explicit destructive retry option. Retain the SQLite file until the printed row
-counts and an application smoke test have been checked.
-
 ## Capacity for 200–300 agents
 
 Agent count and database connection count are deliberately decoupled. Each API

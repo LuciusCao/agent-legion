@@ -41,7 +41,6 @@ class WorkspaceAgentRouteEntry(BaseModel):
     capability: str
     agent_id: str
     agent_skill: str
-    max_concurrency: int | None
 
 
 class WorkspaceAgentRoutesResponse(BaseModel):

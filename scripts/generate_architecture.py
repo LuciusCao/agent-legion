@@ -235,7 +235,6 @@ def extract_config(root: Path) -> str:
         "asr": "ASR 提供商配置（whisper / SenseVoice）",
         "cms": "CMS 集成配置",
         "resource_providers": "资源提供方路径映射",
-        "cleanup_video_after_assemble": "打包后是否清理视频",
         "openclaw": "OpenClaw 命令模板与工作目录",
         "executors": "Workspace 执行器定义",
         "workflows": "Agent Legion DAG 工作流开关",

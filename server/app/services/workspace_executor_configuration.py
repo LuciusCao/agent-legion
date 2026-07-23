@@ -4,7 +4,6 @@ from server.app.executors.config import ExecutorConfig
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
 from server.app.services.workspace_executor_filter import filter_known_executors
-from server.app.services.workspace_executor_warnings import configuration_with_warnings
 
 
 class WorkspaceExecutorConfigurationService:
@@ -21,6 +20,6 @@ class WorkspaceExecutorConfigurationService:
             raise NotFoundError("Workspace not found")
         configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         configuration = filter_known_executors(configuration, self.executor_definitions)
-        result = configuration_with_warnings(self.job_db, workspace_id, configuration)
+        result: dict[str, Any] = {**configuration, "migration_warnings": []}
         result["agent_capacity"] = self.job_db.get_workspace_agent_capacity(workspace_id)
         return result

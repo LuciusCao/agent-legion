@@ -1,14 +1,10 @@
-import json
-import zipfile
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app.db import Database
 from server.app.routes.packages import create_packages_router
 from server.app.services.job_packages import JobPackageService, WorkspacePackageLockedError
-from server.app.services.package_service import PackageService
 from server.app.storage_paths import resolve_job_dir
 
 
@@ -164,96 +160,6 @@ def test_workspace_package_download_rejects_subdirectory(workspace_client, tmp_p
     assert response.status_code == 404
 
 
-def test_delete_package_rejects_locked_package(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "locked-package.zip"), name="Locked Package", locked=1)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.delete(f"/api/packages/{pkg['id']}")
-    assert response.status_code == 400
-    assert "locked" in response.json()["detail"].lower()
-
-
-def test_patch_package_updates_locked(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "patchable-package.zip"), name="Patchable", locked=0)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.patch(f"/api/packages/{pkg['id']}", json={"locked": True})
-    assert response.status_code == 200
-    assert response.json()["locked"] is True
-
-    updated = db.list_packages(limit=1)[0]
-    assert updated["locked"] == 1
-
-
-def test_patch_package_unlocks(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "locked-package.zip"), name="Locked", locked=1)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.patch(f"/api/packages/{pkg['id']}", json={"locked": False})
-    assert response.status_code == 200
-    assert response.json()["locked"] is False
-
-    updated = db.list_packages(limit=1)[0]
-    assert updated["locked"] == 0
-
-
-def test_patch_package_unknown_field_ignored(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "another-package.zip"), name="Original", locked=0)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.patch(
-        f"/api/packages/{pkg['id']}",
-        json={"locked": True, "unknown": "x"},
-    )
-    assert response.status_code == 200
-    result = response.json()
-    assert result == {"id": pkg["id"], "locked": True}
-    assert "unknown" not in result
-
-
-def test_list_packages_skips_escaping_path(client, settings):
-    # Insert a valid relative package record and an escaping one.
-    client.app.state.db.insert_package(
-        "packages/valid.zip", name="Valid Package", video_count=1, size_bytes=100
-    )
-    client.app.state.db.insert_package(
-        "../escaped.zip", name="Escaped Package", video_count=1, size_bytes=100
-    )
-
-    response = client.get("/api/packages")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["packages"]) == 1
-    assert data["packages"][0]["name"] == "Valid Package"
-    returned_path = Path(data["packages"][0]["path"])
-    assert returned_path.is_absolute()
-    assert returned_path.is_relative_to(settings.packages_dir)
-
-
-def test_list_packages_does_not_write_stats_back(client, db, settings, monkeypatch):
-    # Regression: GET /packages must be read-only. Legacy rows missing stats
-    # are healed at app startup (see test_package_stats_backfill.py), not here.
-    zip_path = settings.packages_dir / "legacy-no-stats.zip"
-    with zipfile.ZipFile(zip_path, "w") as zf:
-        zf.writestr("manifest.json", json.dumps({"videos": [{"id": "v1"}, {"id": "v2"}]}))
-    db.insert_package("packages/legacy-no-stats.zip")
-
-    def forbidden_write(*args, **kwargs):
-        raise AssertionError("GET /packages must not write package stats")
-
-    monkeypatch.setattr(Database, "update_package_stats", forbidden_write)
-
-    response = client.get("/api/packages")
-    assert response.status_code == 200
-    packages = response.json()["packages"]
-    assert len(packages) == 1
-    assert packages[0]["name"] == ""
-    assert packages[0]["video_count"] == 0
-
-    row = db.list_packages(limit=1)[0]
-    assert (row["name"], row["video_count"], row["size_bytes"]) == ("", 0, 0)
-
-
 def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
@@ -300,57 +206,12 @@ def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
     assert list_resp.json()["packages"] == []
 
 
-def test_create_packages_router_builds_default_job_package_service(db, job_db, settings):
-    router = create_packages_router(
-        db,
-        job_db,
-        settings,
-        PackageService(db, settings.packages_dir),
+def test_create_packages_router_builds_default_job_package_service(job_db, settings):
+    router = create_packages_router(job_db, settings)
+    assert any(
+        getattr(route, "path", "") == "/workspaces/{workspace_id}/packages"
+        for route in router.routes
     )
-    assert any(getattr(route, "path", "") == "/packages" for route in router.routes)
-
-
-def test_list_packages_skips_package_root_itself(client, settings):
-    # A stored path that resolves to the packages dir itself must be skipped.
-    client.app.state.db.insert_package("packages", name="Root Entry")
-    client.app.state.db.insert_package(
-        "packages/valid.zip", name="Valid Package", video_count=1, size_bytes=100
-    )
-
-    response = client.get("/api/packages")
-    assert response.status_code == 200
-    data = response.json()
-    assert [pkg["name"] for pkg in data["packages"]] == ["Valid Package"]
-
-
-def test_delete_package_success(client, db, settings):
-    zip_path = settings.packages_dir / "deletable.zip"
-    zip_path.write_bytes(b"fake-zip")
-    db.insert_package("packages/deletable.zip", name="Deletable")
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.delete(f"/api/packages/{pkg['id']}")
-    assert response.status_code == 200
-    assert response.json() == {"deleted": True}
-    assert not zip_path.exists()
-    assert db.list_packages(limit=10) == []
-
-
-def test_patch_package_not_found(client):
-    response = client.patch("/api/packages/99999", json={"name": "New"})
-    assert response.status_code == 404
-
-
-def test_patch_package_updates_name(client, db, tmp_path):
-    db.insert_package(str(tmp_path / "rename-me.zip"), name="Old Name", locked=0)
-    pkg = db.list_packages(limit=1)[0]
-
-    response = client.patch(f"/api/packages/{pkg['id']}", json={"name": "New Name"})
-    assert response.status_code == 200
-    assert response.json()["name"] == "New Name"
-
-    updated = db.list_packages(limit=1)[0]
-    assert updated["name"] == "New Name"
 
 
 def test_list_workspace_packages_skips_bad_paths(workspace_client):

@@ -8,10 +8,12 @@ from server.app.workflows.definition import (
     load_workflow_definition,
 )
 from server.app.workflows.scheduler import (
-    downstream_nodes,
-    evaluate_branches,
     find_ready_nodes,
     summarize_job_status,
+)
+from server.app.workflows.workflow_branching import (
+    downstream_nodes,
+    evaluate_branches,
 )
 
 

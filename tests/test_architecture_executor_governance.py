@@ -33,8 +33,6 @@ WHITELIST: set[str] = {
     str(ROOT / "server" / "app" / "workflows" / "loader.py"),
     # Video pipeline runner uses openclaw command template strings.
     str(ROOT / "server" / "app" / "pipeline" / "runners.py"),
-    # Comment-only reference to the removed table.
-    str(ROOT / "server" / "app" / "services" / "workspace_executor_warnings.py"),
     # AgentStatusManager payloads key incremental WS envelopes by "agent" (Decision 8
     # of the phase4 agent-collaboration plan); the literal is its own status domain.
     str(ROOT / "server" / "app" / "agents.py"),

@@ -54,8 +54,7 @@ server/app/
 │   └── ...
 ├── db/                     # 数据库层
 │   ├── schema.py           # 表结构定义
-│   ├── queries/            # 共享查询构造
-│   └── notifications.py    # SSE 通知
+│   └── queries/            # 共享查询构造
 ├── jobs/                   # Job 领域查询与类型
 │   └── queries/            # JobQueries、WorkspaceQueries 等
 ├── cms/                    # CMS 客户端
@@ -137,10 +136,6 @@ server/app/
 | POST | `/jobs/{job_id}/run-to` | `run_to` | routes/jobs.py |
 | POST | `/jobs/{job_id}/continue` | `continue_job` | routes/jobs.py |
 | POST | `/workspaces/{workspace_id}/jobs/batch-run-to` | `batch_run_to` | routes/jobs.py |
-| GET | `/packages` | `list_packages` | routes/packages.py |
-| DELETE | `/packages/{package_id:int}` | `delete_package` | routes/packages.py |
-| PATCH | `/packages/{package_id:int}` | `update_package` | routes/packages.py |
-| GET | `/packages/{filename:path}` | `download_package` | routes/packages.py |
 | GET | `/workspaces/{workspace_id}/packages` | `list_workspace_packages` | routes/packages.py |
 | DELETE | `/workspaces/{workspace_id}/packages/{package_id:int}` | `delete_workspace_package_route` | routes/packages.py |
 | PATCH | `/workspaces/{workspace_id}/packages/{package_id:int}` | `update_workspace_package_route` | routes/packages.py |
@@ -200,8 +195,6 @@ server/app/
 | WorkflowsRuntimeConfig | BaseModel | enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
 | AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
-| VideoRecord | TypedDict | id: str, source_url: str, title: str, content_type: str, external_id: str, kn... | app/records.py |
-| PhaseRunRecord | TypedDict | id: int, video_id: str, phase_key: str, status: str, started_at: str, finishe... | app/records.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], max_concurrency: int, labels:... | app/routes/agent_workers.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, allowed_workspaces: list[str] | app/routes/agent_workers.py |
 | CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers.py |
@@ -273,13 +266,9 @@ server/app/
 | WorkspacePackageRequest | BaseModel | job_ids: list[str] | app/routes/package_contracts.py |
 | WorkspacePackageResultResponse | BaseModel | job_id: str, status: Literal['succeeded', 'failed'], reason_code: str | None,... | app/routes/package_contracts.py |
 | WorkspacePackageResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |
-| PackageUpdate | BaseModel | name: str | None, locked: bool | None | app/routes/package_history_contracts.py |
 | WorkspacePackageUpdate | BaseModel | name: str | None, locked: bool | None | app/routes/package_history_contracts.py |
-| PackageItemResponse | BaseModel | id: int, name: str, path: str, video_count: int, size_bytes: int, locked: int... | app/routes/package_history_contracts.py |
-| PackagesResponse | BaseModel | packages: list[PackageItemResponse] | app/routes/package_history_contracts.py |
+| WorkspacePackageItemResponse | BaseModel | id: int, name: str, path: str, video_count: int, size_bytes: int, locked: int... | app/routes/package_history_contracts.py |
 | WorkspacePackagesResponse | BaseModel | packages: list[WorkspacePackageItemResponse] | app/routes/package_history_contracts.py |
-| PackageDeleteResponse | BaseModel | deleted: bool | app/routes/package_history_contracts.py |
-| PackageUpdateResponse | BaseModel | id: int, name: str | None, locked: bool | None | app/routes/package_history_contracts.py |
 | WorkspacePackageDeleteResponse | BaseModel | deleted: bool | app/routes/package_history_contracts.py |
 | WorkspacePackageUpdateResponse | BaseModel | id: int, name: str | None, locked: bool | None | app/routes/package_history_contracts.py |
 | QuestionNormalized | BaseModel | stem: str | None, options: list[dict[str, Any]] | None, answer: Any | None, a... | app/routes/questions.py |
@@ -316,7 +305,7 @@ server/app/
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
-| WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, max_concurrency: int | None, after: li... | app/routes/workflow_node_contracts.py |
+| WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, after: list[str], inputs: list[str], o... | app/routes/workflow_node_contracts.py |
 | WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, workflow_key: str, version: int, status: str, def... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionsResponse | BaseModel | revisions: list[WorkflowRevisionSummary] | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftRequest | BaseModel | definition_yaml: str | app/routes/workflow_revisions_contracts.py |
@@ -464,10 +453,8 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
 - `resource_providers`: CMS 资源路径映射（如 `cms.question.detail`）
-- `cleanup_video_after_assemble`: 打包后是否清理视频
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒
-- `openclaw.runners`: 显式 runner 定义列表，每项可含 `count` 以横向扩展
 - `openclaw.skill_safety`: OpenClaw skill 安全校验配置
 
 `config/app.yaml` 额外配置项：

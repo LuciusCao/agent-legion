@@ -8,7 +8,6 @@ from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
-from server.app.services.workspace_executor_warnings import configuration_with_warnings
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
@@ -167,9 +166,7 @@ class WorkspaceConfigurationService:
         return {
             "workspace": saved_workspace,
             "settings": workspace_settings_payload(saved_workspace),
-            "executor_configuration": configuration_with_warnings(
-                self.job_db, workspace_id, executor_configuration
-            ),
+            "executor_configuration": {**executor_configuration, "migration_warnings": []},
             "agent_capacity": self.job_db.get_workspace_agent_capacity(workspace_id),
         }
 

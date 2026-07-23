@@ -12,9 +12,7 @@ from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_dispatch import AgentDispatchService
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.agents import AgentStatusManager
-from server.app.db import Database
 from server.app.db.connection import close_database_pools
-from server.app.db.notifications import NotificationHub
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -31,8 +29,6 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
-from server.app.services.package_service import PackageService
-from server.app.services.package_stats_backfill import backfill_package_stats
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -87,8 +83,6 @@ def create_app(
         discover_agents=lambda: list_openclaw_agents(timeout=10),
     )
     job_event_manager = JobEventManager(event_bus)
-    hub = NotificationHub()
-    db = Database(settings.database_url, hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
     sync_agent_definitions(settings.database_url, settings.agent_definitions)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
@@ -126,7 +120,6 @@ def create_app(
         settings.jobs_dir,
         settings.data_dir / "agent_bundles",
     )
-    backfill_package_stats(db, settings)
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
     background_tasks = BackgroundTasks(
@@ -194,7 +187,6 @@ def create_app(
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)
     app.state.settings = settings
-    app.state.db = db
     app.state.job_db = job_db
     app.state.executor_registry = executor_registry
     app.state.agent_broker = agent_broker
@@ -217,11 +209,9 @@ def create_app(
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, workflow_catalog
     )
-    package_service = PackageService(db, settings.packages_dir)
     job_packages = JobPackageService(job_db, settings)
     app.include_router(
         create_router(
-            db,
             job_db,
             settings,
             agent_manager,
@@ -230,7 +220,6 @@ def create_app(
             executor_catalog=executor_catalog,
             workspace_executor_configuration=workspace_executor_configuration,
             workspace_configuration=workspace_configuration,
-            package_service=package_service,
             job_packages=job_packages,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
