@@ -1,7 +1,7 @@
 """Work-root hygiene for the Agent Worker supervisor.
 
-Kept separate from scripts/agent_worker.py to respect that file's size
-ceiling; agent_worker re-exports these helpers.
+Kept separate from worker/executor.py to respect that file's size
+ceiling; the executor re-exports these helpers.
 """
 
 from __future__ import annotations

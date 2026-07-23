@@ -1,4 +1,4 @@
-"""Unit tests for the Agent Worker client supervisor (scripts/agent_worker.py)."""
+"""Unit tests for the Agent Worker executor (worker/executor.py)."""
 
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from scripts import agent_worker
 from server.app.agent_bundle import build_agent_bundle
+from worker import executor as agent_worker
 
 
 def _make_bundle(tmp_path: Path, manifest: dict) -> Path:
