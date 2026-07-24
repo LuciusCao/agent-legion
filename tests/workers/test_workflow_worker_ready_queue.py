@@ -8,6 +8,7 @@ import pytest
 from server.app import workflow_worker_ready
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
+from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.worker_control import WorkspaceWorkerControl
 from tests.helpers.executor_worker import (
     allocate,
@@ -60,6 +61,8 @@ def _setup(
         {"local-default": local_def(capacity, set(node_keys))},
     )
     definition = make_definition([local_node(key) for key in node_keys])
+    snapshot_json = serialize_definition(definition)
+    snapshot_hash = definition_hash(snapshot_json)
     for i in range(job_count):
         job_db.create_job(
             workflow_key="test",
@@ -69,6 +72,8 @@ def _setup(
             title=f"Q{i}",
             node_keys=node_keys,
             workspace_id=ws["id"],
+            workflow_definition_hash=snapshot_hash,
+            workflow_definition_snapshot_json=snapshot_json,
         )
     for key in node_keys:
         bind(job_db, ws["id"], "test", key, "local-default")
@@ -90,7 +95,11 @@ def _count_calls(monkeypatch: pytest.MonkeyPatch, obj: object, attr: str) -> dic
 
 
 def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """One pass claims 3 nodes while each job is evaluated at most once."""
+    """One pass claims 3 nodes while each job is evaluated at most once.
+
+    Snapshot parsing is cached by workflow_definition_hash, so the three jobs
+    (sharing one definition) trigger exactly one parse per pass.
+    """
     worker, _ws, block_event = _setup(
         tmp_path, ["fetch"], capacity=3, workspace_limit=3, job_count=3
     )
@@ -104,7 +113,7 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
     assert worker.leases.active_counts("local-default")["global"] == 3
     assert len(worker._futures) == 3
     assert loader_calls["count"] == 1
-    assert snapshot_calls["count"] == 3
+    assert snapshot_calls["count"] == 1
 
     block_event.set()
     worker.stop()

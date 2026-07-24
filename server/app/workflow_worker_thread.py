@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import Any
 
@@ -50,12 +51,22 @@ class WorkflowWorkerThread:
         self.agent_manager = agent_manager
         self.agent_dispatch = agent_dispatch
         self.stop_event = threading.Event()
+        # Set whenever a claimed execution finishes; the poll loop waits on
+        # this so freed capacity is refilled immediately instead of after the
+        # idle backoff.
+        self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._definitions: list[WorkflowDefinition] = []
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
+        # Per-poll-pass caches: parsed workflow definitions keyed by
+        # workflow_definition_hash, and ready-node evaluations keyed by job
+        # id for jobs whose state has not changed since the previous pass.
+        self._definition_cache: dict[str, WorkflowDefinition | None] = {}
+        self._ready_cache: dict[str, tuple[tuple[Any, ...], list[str], frozenset[str]]] = {}
+        self._last_ready_stats: dict[str, int] = {"hit": 0, "miss": 0}
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
@@ -85,7 +96,11 @@ class WorkflowWorkerThread:
                 except Exception:
                     logger.exception("workflow worker poll failed")
                     processed = False
-                self.stop_event.wait(0.2 if processed else 3)
+                # Wait on the wake event (set by finishing executions and by
+                # stop()) so freed capacity is refilled without waiting out
+                # the full idle backoff.
+                self._wake_event.wait(0.2 if processed else 3)
+                self._wake_event.clear()
 
         self._thread = threading.Thread(target=_loop, name="workflow-worker", daemon=True)
         self._thread.start()
@@ -111,8 +126,11 @@ class WorkflowWorkerThread:
         # preserving round-robin fairness without re-scanning jobs. The
         # capacity snapshot is refreshed on the next poll.
         claimed_any = False
+        scan_started = time.monotonic()
         runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
         workspaces, queues = build_ready_queues(self, runnable_workspaces, jobs_by_workspace)
+        scan_seconds = time.monotonic() - scan_started
+        claims = 0
         while queues:
             round_claimed = False
             for workspace_id in self._round_robin.order(list(queues)):
@@ -122,11 +140,25 @@ class WorkflowWorkerThread:
                 if claim_next_candidate(self, workspaces[workspace_id], queue, snapshot):
                     round_claimed = True
                     claimed_any = True
+                    claims += 1
                     self._round_robin.complete_pass(workspace_id)
                 if not queue:
                     del queues[workspace_id]
             if not round_claimed:
                 break
+        eval_stats = getattr(self, "_last_ready_stats", {})
+        pass_stats = (
+            "scan=%.2fs jobs=%d ready_cache hit=%d miss=%d running_jobs=%d claims=%d",
+            scan_seconds,
+            sum(len(v) for v in jobs_by_workspace.values()),
+            eval_stats.get("hit", 0),
+            eval_stats.get("miss", 0),
+            eval_stats.get("running", 0),
+            claims,
+        )
+        logger.info("workflow worker pass: " + pass_stats[0], *pass_stats[1:])
+        if scan_seconds > 15:
+            logger.warning("slow workflow worker pass: " + pass_stats[0], *pass_stats[1:])
         return claimed_any
 
     def _is_paused(self, workspace_id: str) -> bool:
@@ -154,6 +186,20 @@ class WorkflowWorkerThread:
                     jobs_by_workspace[workspace_id] = []
                 jobs_by_workspace[workspace_id].append((definition, job))
         return workspace_ids, jobs_by_workspace
+
+    def _submit_claim(
+        self, executor_id: str, claim: ClaimedExecution, context: ExecutionContext
+    ) -> None:
+        """Submit a claimed execution to the executor pool and register it.
+
+        The done callback wakes the poll loop so capacity freed by this
+        execution is refilled on the next pass instead of after the idle
+        backoff.
+        """
+        pool = self._pool_for(executor_id)
+        future = pool.submit(self._run_claim, claim, context)
+        future.add_done_callback(lambda _f: self._wake_event.set())
+        self._futures[claim.execution_id] = future
 
     def _run_claim(
         self, claim: ClaimedExecution, context: ExecutionContext
@@ -184,6 +230,7 @@ class WorkflowWorkerThread:
 
     def stop(self, timeout: float = 3) -> None:
         self.stop_event.set()
+        self._wake_event.set()
         if self._thread is not None:
             self._thread.join(timeout=timeout)
         # Request cancellation for any still-active executions so adapters can
