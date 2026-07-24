@@ -108,11 +108,13 @@ describe('useWorkspaceEvents', () => {
       await vi.advanceTimersByTimeAsync(750)
     })
 
-    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    // Job list changes arrive via job_patch_batch; legacy job_updated only
+    // triggers a stats refresh, never a full jobs refetch.
     expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
+    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
-  it('coalesces rapid job update messages into one jobs refresh', async () => {
+  it('coalesces rapid job update messages into one stats refresh', async () => {
     vi.useFakeTimers()
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
@@ -136,14 +138,14 @@ describe('useWorkspaceEvents', () => {
       }
     })
 
-    expect(mockFetchJobs).not.toHaveBeenCalled()
+    expect(mockFetchWorkspaceStats).not.toHaveBeenCalled()
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(750)
     })
 
-    expect(mockFetchJobs).toHaveBeenCalledTimes(1)
     expect(mockFetchWorkspaceStats).toHaveBeenCalledTimes(1)
+    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('closes the EventSource on cleanup', () => {
