@@ -34,7 +34,7 @@ _EDITABLE_FIELDS = {
     "shutdown_grace_seconds",
 }
 _DEFAULTS: dict[str, Any] = {
-    "claim_enabled": True,
+    "claim_enabled": False,
     "capabilities": [],
     "host_url": "",
     "worker_id": "",

@@ -1,5 +1,9 @@
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type {
+  AgentDefinition,
+  ExecutorDefinition,
+} from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
+import { WorkflowAgentDefinitionCard } from './WorkflowAgentDefinitionCard'
 import { WorkflowAgentExecutionDetails } from './WorkflowAgentExecutionDetails'
 import {
   findCapabilityBindings,
@@ -10,32 +14,36 @@ import inspectorStyles from './WorkflowNodeInspector.module.css'
 type Props = {
   node: WorkflowNodeRecord
   executorCatalog: ExecutorDefinition[]
+  agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
 }
-
 export function WorkflowNodeExecutionSection(props: Props) {
   const bindings = findCapabilityBindings(
     props.executorCatalog,
     props.node.capability
   )
-  const agentBinding = bindings.find(({ executor }) => executor.kind === 'pi')
+  const agent = props.agentCatalog.find(
+    (definition) => definition.capability === props.node.capability
+  )
   return (
     <section className={inspectorStyles.section} aria-label="节点执行能力">
       <div className={inspectorStyles.sectionTitle}>
-        {agentBinding ? 'Agent 配置' : '本地执行'}
+        {agent ? 'Agent 配置' : '本地执行'}
       </div>
-      {bindings.length === 0 ? (
+      {agent ? (
+        <WorkflowAgentDefinitionCard definition={agent} />
+      ) : bindings.length === 0 ? (
         <div className={inspectorStyles.empty}>
           未匹配到 executor capability
         </div>
       ) : (
         <WorkflowExecutorBindingList bindings={bindings} />
       )}
-      {agentBinding && (
+      {agent && (
         <WorkflowAgentExecutionDetails
-          binding={agentBinding}
+          definition={agent}
           node={props.node}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}

@@ -137,6 +137,12 @@ def test_malformed_bootstrap_keeps_control_service_configurable(tmp_path: Path) 
     assert store.read(require_identity=False)["runtimes"] == ["pi"]
 
 
+def test_unconfigured_worker_defaults_to_claim_disabled(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+
+    assert store.read(require_identity=False)["claim_enabled"] is False
+
+
 def test_public_update_preserves_secret_paths_and_environment(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
@@ -403,12 +409,18 @@ def test_supervisor_starts_and_stops_worker_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     supervisor = _make_supervisor(tmp_path, monkeypatch, "sleep")
+    supervisor.store.update_public({"claim_enabled": True})
 
     supervisor.start()
     _wait_for(lambda: supervisor.running())
     _wait_for(lambda: any("fake worker ready" in line for line in supervisor.logs()))
     pid = supervisor.status()["pid"]
     assert isinstance(pid, int)
+    assert supervisor.status()["claim_enabled"] is False
+    supervisor.store.update_public({"claim_enabled": True})
+    supervisor.restart()
+    _wait_for(lambda: supervisor.running())
+    assert supervisor.status()["claim_enabled"] is False
 
     supervisor.stop()
     _wait_for(lambda: not supervisor.running())
@@ -485,6 +497,7 @@ def test_compose_keeps_control_api_local_and_state_separate_from_executions() ->
         assert "worker-control:/var/lib/agent-legion-worker-control" in compose
         assert "worker-data:/var/lib/agent-legion-worker" in compose
     assert "server/app/workflows/pi_protocol.py" in dockerfile
+    assert "worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py" in dockerfile
 
 
 def test_supervisor_injects_status_file_and_cleans_it_on_exit(

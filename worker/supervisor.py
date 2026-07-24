@@ -25,8 +25,7 @@ _EXIT_REFUSED = 2  # Host 拒绝注册 / Worker 被吊销：不自动重启，�
 _RESTART_BACKOFF_INITIAL = 5.0
 _RESTART_BACKOFF_MAX = 300.0
 _STABLE_AFTER = 60.0  # 稳定运行超过该时长后重置退避
-# 优雅停止宽限 clamp 到 22s、kill 后最多再等 3s，总预算 25s，低于 compose stop_grace_period 30s。
-_STOP_GRACE_MAX = 22.0
+_STOP_GRACE_MAX = 22.0  # kill 后再等 3s，总预算 25s，低于 compose 的 30s
 _KILL_WAIT = 3.0
 
 
@@ -62,6 +61,7 @@ class WorkerSupervisor:
         with self._lock:
             if self.running() or not self.store.configured():
                 return
+            self.store.update_public({"claim_enabled": False})
             config = self.store.read()
             token_file = Path(str(config["register_token_file"]))
             if not token_file.is_file():
@@ -183,7 +183,7 @@ class WorkerSupervisor:
         return mounted != current
 
     def status(self) -> dict[str, Any]:
-        """本地与 Host 状态。connected 表示"已在 Host 登记且未被吊销"，不代表实时连接。"""
+        """本地与 Host 状态；connected 表示已登记且未被吊销，不代表实时连接。"""
         configured = self.store.configured()
         config = self.store.read(require_identity=False)
         with self._lock:

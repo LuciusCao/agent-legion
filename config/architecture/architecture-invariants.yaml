@@ -254,12 +254,15 @@ invariants:
         gate: ci_extended
 
   - id: CONFIG-WORKER-001
-    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network)."
+    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API/CLI, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, disables new-task claiming before every Worker execution-process start or restart until an operator explicitly enables it, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network)."
     owner: agent-worker
     risk: high
     evidence:
       - kind: integration
         target: tests/test_agent_worker_service.py
+        gate: quick
+      - kind: integration
+        target: tests/test_worker_cli.py
         gate: quick
 
   - id: EXEC-AGENTCLAIM-001
@@ -278,12 +281,15 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the Agent Catalog; Workers separately declare the node capabilities and provider/model pairs they can execute, alongside runtimes, labels, protocol version, and machine-wide max_concurrency."
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the Agent Catalog; the Host exposes that catalog and runtime defaults so Workflow Studio resolves Agent nodes by capability and edits provider/model overrides without treating Agents as legacy executors. Workers separately declare the node capabilities and provider/model pairs they can execute, alongside runtimes, labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:
       - kind: integration
         target: tests/test_agent_catalog.py
+        gate: quick
+      - kind: integration
+        target: tests/test_executor_catalog_service.py::test_catalog_exposes_agent_definitions_with_runtime_defaults
         gate: quick
       - kind: integration
         target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity

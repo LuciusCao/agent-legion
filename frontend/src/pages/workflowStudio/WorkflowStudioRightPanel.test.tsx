@@ -41,6 +41,7 @@ describe('WorkflowStudioRightPanel', () => {
       <WorkflowStudioRightPanel
         workflow={workflow}
         executorCatalog={executorCatalog}
+        agentCatalog={[]}
         selectedNodeKey="fetch_questions"
         readOnly={false}
         definitionYaml="key: video_knowledge\n"

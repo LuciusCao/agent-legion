@@ -67,3 +67,19 @@ def test_executor_catalog_does_not_expose_agent_runtimes(
     assert "pi-default" not in executors_by_id
     assert "pi" not in executors_by_id
     assert set(executors_by_id) == {"local-default"}
+
+
+def test_catalog_exposes_agent_definitions_with_runtime_defaults(
+    service: ExecutorCatalogService,
+) -> None:
+    result = service.catalog()
+    agents_by_id = {agent["id"]: agent for agent in result["agents"]}
+
+    agent = agents_by_id["video-content-review-v1"]
+    assert agent["runtime"] == "pi"
+    assert agent["capability"] == "review_video_content"
+    assert agent["skill"] == "video_knowledge/review_video_content"
+    assert agent["tools"] == ["read", "write", "bash"]
+    assert agent["provider"] == "gateway"
+    assert agent["model"] == "your-model-b"
+    assert agent["thinking"] == "low"
