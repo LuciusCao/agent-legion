@@ -1,4 +1,3 @@
-import type { ExecutorDefinition } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import editorStyles from './components/WorkflowStructuredEditor.module.css'
 import styles from './WorkflowNodeRuntimeSettings.module.css'
@@ -6,13 +5,15 @@ import { patchWorkflowNodeExecution } from './workflowStudioYamlDraft.execution'
 import { parseWorkflowNode } from './workflowStudioYamlDraft.parse'
 import { WorkflowRuntimeInheritedField } from './WorkflowRuntimeInheritedField'
 
-type CapabilityDetail = NonNullable<
-  ExecutorDefinition['capability_details']
->[number]
+type RuntimeDefaults = {
+  provider?: string | null
+  model?: string | null
+  thinking?: string | null
+}
 
 export function WorkflowNodeRuntimeSettings(props: {
   node: WorkflowNodeRecord
-  defaults: CapabilityDetail
+  defaults: RuntimeDefaults
   definitionYaml: string
   setDefinitionYaml: (yaml: string) => void
   readOnly?: boolean

@@ -31,6 +31,6 @@ def load_config(path: Path) -> dict[str, Any]:
 def load_claim_controls(path: Path) -> tuple[int, bool]:
     config = load_config(path)
     capacity = config.get("max_concurrency")
-    enabled = config.get("claim_enabled", True)
+    enabled = config.get("claim_enabled", False)
     validate_claim_controls(capacity, enabled)
     return capacity, enabled

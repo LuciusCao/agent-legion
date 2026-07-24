@@ -376,6 +376,12 @@ def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path
         agent_worker.load_claim_controls(config_path)
 
 
+def test_load_claim_controls_defaults_to_disabled(tmp_path: Path) -> None:
+    config_path = _write_main_config(tmp_path)
+
+    assert agent_worker.load_claim_controls(config_path) == (1, False)
+
+
 def _run_main(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -421,7 +427,7 @@ def test_main_survives_transient_claim_errors(
         return None
 
     fake.claim = flaky_claim  # type: ignore[attr-defined]
-    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake)
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": True})
     deadline = time.monotonic() + 10
     while claim_calls < 5 and time.monotonic() < deadline:
         time.sleep(0.02)
@@ -480,7 +486,7 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
 
     fake.claim = claim  # type: ignore[attr-defined]
     monkeypatch.setattr(agent_worker, "run_execution", block_execution)
-    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake)
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": True})
     deadline = time.monotonic() + 2
     while claim_calls < 1 and time.monotonic() < deadline:
         time.sleep(0.02)
@@ -515,7 +521,7 @@ def test_main_exits_cleanly_on_revoked_worker(
         raise agent_worker.WorkerAuthError("HTTP 409: unknown or revoked")
 
     fake.claim = revoked  # type: ignore[attr-defined]
-    thread, _, result = _run_main(monkeypatch, tmp_path, fake)
+    thread, _, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": True})
     thread.join(timeout=10)
     assert result == [2]
     assert "re-register required" in capsys.readouterr().out

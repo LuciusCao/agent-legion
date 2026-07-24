@@ -1,4 +1,7 @@
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type {
+  AgentDefinition,
+  ExecutorDefinition,
+} from '../../types/executorTypes'
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { findCapabilityBindings } from './WorkflowExecutorBindingList'
 import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSection'
@@ -11,6 +14,7 @@ import styles from './WorkflowNodeInspector.module.css'
 type Props = {
   details: SelectedWorkflowNodeDetails
   executorCatalog: ExecutorDefinition[]
+  agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -40,6 +44,7 @@ export function WorkflowNodeInspectorBody(props: Props) {
         <WorkflowNodeExecutionSection
           node={node}
           executorCatalog={props.executorCatalog}
+          agentCatalog={props.agentCatalog}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
           readOnly={props.readOnly}
