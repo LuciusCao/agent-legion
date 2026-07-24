@@ -21,12 +21,8 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.jobs.queries.workspace_node_bindings import (
-    get_binding,
-    get_local_node_limit,
-    has_local_node_limit,
-)
 from server.app.workflow_worker_execution import submit_claim
+from server.app.workflow_worker_routing import resolve_node_route
 from server.app.workflow_worker_shards import assemble_reduce_inputs, claim_shard_node
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 
@@ -115,68 +111,15 @@ def try_claim_and_submit(
     log_path = worker.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with worker.job_db._connect_read() as conn:
-        route = conn.execute(
-            """
-            select target_kind, target_id from workspace_node_routes
-            where workspace_id=? and workflow_key=? and node_key=?
-            """,
-            (workspace_id, workflow_key, node_key),
-        ).fetchone()
-        # Agent routing is decided by the materialized workspace_node_routes
-        # projection, not by any node-level declaration.
-        if route is not None and route["target_kind"] == "agent":
-            agent_id = str(route["target_id"])
-            definition_config = worker.settings.agent_definitions.get(agent_id)
-            if definition_config is None or definition_config.capability != node.capability:
-                return _fail_node_config(
-                    worker,
-                    workspace_id,
-                    job,
-                    workflow_key,
-                    node,
-                    log_path,
-                    f"Invalid Agent route {agent_id!r}",
-                )
-            if worker.agent_dispatch is None:
-                raise RuntimeError("Agent dispatch service is not configured")
-            try:
-                return worker.agent_dispatch.enqueue(
-                    agent_id=agent_id,
-                    definition=definition_config,
-                    workspace=workspace,
-                    job=job,
-                    workflow_key=workflow_key,
-                    node=node,
-                    job_dir=job_dir,
-                    log_path=log_path,
-                    inputs=inputs,
-                )
-            except ValueError as exc:
-                # Route/definition/capacity drift must fail THIS node, not
-                # abort the whole poll pass and starve every workspace.
-                return _fail_node_config(
-                    worker, workspace_id, job, workflow_key, node, log_path, str(exc)
-                )
-
-        binding = get_binding(conn, workspace_id, workflow_key, node_key)
-        if binding is None:
-            return _fail_node_config(
-                worker, workspace_id, job, workflow_key, node, log_path, "No Executor binding"
-            )
-
-        executor_id = binding["executor_id"]
-        try:
-            executor = worker.registry.require(executor_id, node.capability)
-        except Exception as exc:
-            return _fail_node_config(
-                worker, workspace_id, job, workflow_key, node, log_path, str(exc)
-            )
-
-        local_node_limit: int | None = None
-        if executor.kind == "local":
-            local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
-        elif has_local_node_limit(conn, workspace_id, workflow_key, node_key):
+    resolved = resolve_node_route(worker, workspace_id, workflow_key, node_key, node.capability)
+    if resolved.kind == "error":
+        return _fail_node_config(
+            worker, workspace_id, job, workflow_key, node, log_path, resolved.error_message
+        )
+    if resolved.kind == "agent":
+        agent_id = resolved.target_id
+        definition_config = worker.settings.agent_definitions.get(agent_id)
+        if definition_config is None:  # resolve_node_route already validated this
             return _fail_node_config(
                 worker,
                 workspace_id,
@@ -184,8 +127,31 @@ def try_claim_and_submit(
                 workflow_key,
                 node,
                 log_path,
-                "Node limits are not supported for agent executors",
+                f"Invalid Agent route {agent_id!r}",
             )
+        if worker.agent_dispatch is None:
+            raise RuntimeError("Agent dispatch service is not configured")
+        try:
+            return worker.agent_dispatch.enqueue(
+                agent_id=agent_id,
+                definition=definition_config,
+                workspace=workspace,
+                job=job,
+                workflow_key=workflow_key,
+                node=node,
+                job_dir=job_dir,
+                log_path=log_path,
+                inputs=inputs,
+            )
+        except ValueError as exc:
+            # Route/definition/capacity drift must fail THIS node, not
+            # abort the whole poll pass and starve every workspace.
+            return _fail_node_config(
+                worker, workspace_id, job, workflow_key, node, log_path, str(exc)
+            )
+
+    executor_id = resolved.target_id
+    local_node_limit = resolved.local_node_limit
 
     global_capacity = worker.registry.global_capacity(executor_id)
     if global_capacity is None:

@@ -7,6 +7,7 @@ from server.app.jobs.queries.batch import BatchQueriesMixin
 from server.app.jobs.queries.job_bulk import JobBulkQueriesMixin
 from server.app.jobs.queries.job_keys import JobKeyQueriesMixin
 from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
+from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
 from server.app.jobs.queries.workspace import WorkspaceQueriesMixin
@@ -20,6 +21,7 @@ class JobQueries(
     WorkflowRevisionQueriesMixin,
     JobBulkQueriesMixin,
     JobNodeQueriesMixin,
+    JobScanMarksMixin,
     JobStatusQueriesMixin,
     JobKeyQueriesMixin,
     AtomicJobMutationsMixin,
