@@ -31,6 +31,39 @@ class JobPackageService(WorkspacePackageLifecycleMixin):
     def list_workspace_packages(self, workspace_id: str, limit: int = 10) -> list[dict[str, Any]]:
         return self.job_db.list_workspace_packages(workspace_id, limit=limit)
 
+    def clear_packed_status(
+        self, workspace_id: str, job_ids: list[str]
+    ) -> list[JobPackageItemResult]:
+        results: list[JobPackageItemResult] = []
+        eligible_job_ids: list[str] = []
+        seen: set[str] = set()
+
+        for job_id in job_ids:
+            normalized = job_id.strip()
+            if not normalized or normalized in seen:
+                continue
+            seen.add(normalized)
+
+            job = self.job_db.get_job(normalized)
+            if job is None:
+                results.append(self._result(normalized, "failed", "not_found", "Job not found"))
+                continue
+            if job["workspace_id"] != workspace_id:
+                results.append(
+                    self._result(
+                        normalized,
+                        "failed",
+                        "wrong_workspace",
+                        f"Job does not belong to workspace {workspace_id}",
+                    )
+                )
+                continue
+            eligible_job_ids.append(normalized)
+            results.append(self._result(normalized, "succeeded"))
+
+        self.job_db.set_jobs_packed(eligible_job_ids, packed=0)
+        return results
+
     def package(self, workspace_id: str, job_ids: list[str]) -> JobPackageResult:
         results: list[JobPackageItemResult] = []
         eligible_jobs: list[dict[str, Any]] = []

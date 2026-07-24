@@ -28,6 +28,7 @@ export default function JobDetailPage() {
     handleContinue,
     handleUpgradeWorkflow,
     handlePackage,
+    handleClearPacked,
     handleDelete,
   } = useJobDetail(workspaceId, jobId)
   const [artifactListOpen, setArtifactListOpen] = useState(false)
@@ -98,6 +99,7 @@ export default function JobDetailPage() {
         onContinue={handleContinue}
         onUpgradeWorkflow={handleUpgradeWorkflow}
         onPackage={handlePackage}
+        onClearPacked={handleClearPacked}
         onDelete={handleDelete}
         onOpenArtifacts={() => setArtifactListOpen(true)}
       />
@@ -113,6 +115,7 @@ export default function JobDetailPage() {
     handleContinue,
     handleUpgradeWorkflow,
     handlePackage,
+    handleClearPacked,
     handleDelete,
   ])
 

@@ -11,6 +11,7 @@ vi.mock('../api', () => ({
 vi.mock('../api/jobApi', () => ({
   batchRerunJobs: vi.fn(),
   batchDeleteJobs: vi.fn(),
+  clearJobsPackedStatus: vi.fn(),
   packageJobs: vi.fn(),
   runToJob: vi.fn(),
   continueJob: vi.fn(),
@@ -28,6 +29,7 @@ import { fetchJobs } from '../api'
 import {
   batchRerunJobs,
   batchDeleteJobs,
+  clearJobsPackedStatus,
   packageJobs,
   runToJob,
   continueJob,
@@ -38,6 +40,7 @@ import { useUiStore } from './uiStore'
 const mockFetchJobs = vi.mocked(fetchJobs)
 const mockBatchRerunJobs = vi.mocked(batchRerunJobs)
 const mockBatchDeleteJobs = vi.mocked(batchDeleteJobs)
+const mockClearJobsPackedStatus = vi.mocked(clearJobsPackedStatus)
 const mockPackageJobs = vi.mocked(packageJobs)
 const mockRunToJob = vi.mocked(runToJob)
 const mockContinueJob = vi.mocked(continueJob)
@@ -65,6 +68,7 @@ describe('jobStore', () => {
     mockFetchJobs.mockReset()
     mockBatchRerunJobs.mockReset()
     mockBatchDeleteJobs.mockReset()
+    mockClearJobsPackedStatus.mockReset()
     mockPackageJobs.mockReset()
     mockRunToJob.mockReset()
     mockContinueJob.mockReset()
@@ -375,13 +379,44 @@ describe('jobStore', () => {
     )
   })
 
+  it('clears packed status and refreshes jobs without changing selection', async () => {
+    useJobStore.setState({
+      ...normalizeJobs([
+        makeJob({ id: 'j1', status: 'completed', packed: 1 }),
+        makeJob({ id: 'j2', status: 'completed', packed: 1 }),
+      ]),
+      selectedIds: new Set(['j1', 'j2']),
+      selectMode: true,
+    })
+    mockClearJobsPackedStatus.mockResolvedValueOnce({
+      succeeded_count: 2,
+      failed_count: 0,
+      results: [
+        { job_id: 'j1', status: 'succeeded' },
+        { job_id: 'j2', status: 'succeeded' },
+      ],
+    })
+
+    await useJobStore.getState().batchClearPacked('ws1')
+
+    expect(mockClearJobsPackedStatus).toHaveBeenCalledWith('ws1', ['j1', 'j2'])
+    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    expect(useJobStore.getState().selectedIds).toEqual(new Set(['j1', 'j2']))
+    expect(mockShowToast).toHaveBeenCalledWith(
+      '已清空打包状态：成功 2 项，失败 0 项',
+      'success'
+    )
+  })
+
   it('does nothing when batch actions are invoked with empty selection', async () => {
     await useJobStore.getState().batchRerun('ws1', 'extract')
     await useJobStore.getState().batchDelete('ws1')
     await useJobStore.getState().batchPackage('ws1')
+    await useJobStore.getState().batchClearPacked('ws1')
     expect(mockBatchRerunJobs).not.toHaveBeenCalled()
     expect(mockBatchDeleteJobs).not.toHaveBeenCalled()
     expect(mockPackageJobs).not.toHaveBeenCalled()
+    expect(mockClearJobsPackedStatus).not.toHaveBeenCalled()
   })
 
   it('exits select mode when batch rerun succeeds for all selected jobs', async () => {

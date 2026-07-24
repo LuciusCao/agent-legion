@@ -123,6 +123,38 @@ def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
     assert body["results"][0]["reason_code"] == "not_completed"
 
 
+def test_clear_workspace_jobs_packed_status_preserves_package(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={
+            "name": "Clear Package Status WS",
+            "default_workflow_key": "question_comprehension_info",
+        },
+    )
+    ws_id = ws.json()["workspace"]["id"]
+    job_id = _create_completed_job(workspace_client, ws_id, "Q301")
+    workspace_client.post(f"/api/workspaces/{ws_id}/jobs/package", json={"job_ids": [job_id]})
+
+    response = workspace_client.post(
+        f"/api/workspaces/{ws_id}/jobs/clear-packed",
+        json={"job_ids": [job_id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["succeeded_count"] == 1
+    assert response.json()["failed_count"] == 0
+    assert workspace_client.app.state.job_db.get_job(job_id)["packed"] == 0
+    assert len(workspace_client.get(f"/api/workspaces/{ws_id}/packages").json()["packages"]) == 1
+
+
+def test_clear_workspace_jobs_packed_status_rejects_no_job_ids(workspace_client):
+    response = workspace_client.post(
+        "/api/workspaces/ws-empty/jobs/clear-packed", json={"job_ids": []}
+    )
+    assert response.status_code == 400
+    assert "job_ids" in response.json()["detail"].lower()
+
+
 def test_workspace_package_download_rejects_path_traversal(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",

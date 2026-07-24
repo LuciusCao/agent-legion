@@ -2,6 +2,7 @@ import type {
   BatchJobMutationResult,
   JobSummary,
   WorkspacePackageResult,
+  WorkspacePackageStatusResetResult,
 } from '../../types/jobTypes'
 import type { ContinueJobResult } from './stateTypes'
 export {
@@ -31,6 +32,7 @@ export interface JobState {
   selectMode: boolean
   batchDeleteLoading: boolean
   batchPackageLoading: boolean
+  batchClearPackedLoading: boolean
   batchRerunLoading: boolean
   batchRunToLoading: boolean
   continueLoading: boolean
@@ -70,6 +72,9 @@ export interface JobState {
   ) => Promise<BatchJobMutationResult>
   batchDelete: (workspaceId: string) => Promise<BatchJobMutationResult>
   batchPackage: (workspaceId: string) => Promise<WorkspacePackageResult>
+  batchClearPacked: (
+    workspaceId: string
+  ) => Promise<WorkspacePackageStatusResetResult>
   batchRunTo: (
     workspaceId: string,
     targetNodeKey: string,

@@ -29,6 +29,7 @@ export type JobActionBarProps = {
   onRunTo?: (targetKey: string, startKey?: string) => void | Promise<void>
   onContinue?: () => void | Promise<void>
   onPackage: () => void | Promise<void>
+  onClearPacked?: () => void | Promise<void>
   onDelete: () => void | Promise<void>
   onUpgradeWorkflow?: (jobIds: string[]) => void | Promise<void>
   itemLabel?: string
@@ -66,6 +67,7 @@ export function JobActionBar({
   onRunTo,
   onContinue,
   onPackage,
+  onClearPacked,
   onDelete,
   onUpgradeWorkflow,
   itemLabel = '任务',
@@ -90,6 +92,9 @@ export function JobActionBar({
 
   const packageDisabled =
     jobs.length === 0 || loading || jobs.every((job) => !canPackageJob(job))
+
+  const clearPackedDisabled =
+    jobs.length === 0 || loading || jobs.every((job) => !job.packed)
 
   const deleteDisabled = jobs.length === 0 || loading
   const handleRunTo = (targetKey: string, startKey?: string) =>
@@ -155,6 +160,15 @@ export function JobActionBar({
         >
           打包
         </Button>
+        {onClearPacked && (
+          <Button
+            variant="outlined"
+            onClick={onClearPacked}
+            disabled={clearPackedDisabled}
+          >
+            清空打包状态
+          </Button>
+        )}
         <Button
           variant="outlined"
           color="error"

@@ -167,6 +167,47 @@ def test_package_creates_workspace_package_record_and_marks_jobs_packed(
     assert job_db.get_job(completed_b["id"])["packed"] == 1
 
 
+def test_clear_packed_status_keeps_package_history(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-clear-status"
+    completed = _create_job(job_db, workspace_id, "Q350", status="completed")
+    _write_artifact(completed, settings)
+    service.package(workspace_id, [completed["id"]])
+    packages_before = job_db.list_workspace_packages(workspace_id)
+
+    results = service.clear_packed_status(workspace_id, [completed["id"]])
+
+    assert results == [
+        {
+            "job_id": completed["id"],
+            "status": "succeeded",
+            "reason_code": None,
+            "message": None,
+        }
+    ]
+    assert job_db.get_job(completed["id"])["packed"] == 0
+    assert job_db.list_workspace_packages(workspace_id) == packages_before
+
+
+def test_clear_packed_status_rejects_jobs_outside_workspace(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+    job = _create_job(job_db, "other-workspace", "Q351", status="completed")
+    job_db.set_jobs_packed([job["id"]], packed=1)
+
+    results = service.clear_packed_status("target-workspace", [job["id"], "missing"])
+
+    assert [result["reason_code"] for result in results] == [
+        "wrong_workspace",
+        "not_found",
+    ]
+    assert job_db.get_job(job["id"])["packed"] == 1
+
+
 def test_workspace_package_lifecycle_respects_locked(job_db: JobQueries, tmp_path: Path) -> None:
     settings = _create_settings(tmp_path)
     service = JobPackageService(job_db, settings)

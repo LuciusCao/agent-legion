@@ -49,6 +49,7 @@ import SyncIcon from '@mui/icons-material/Sync'
 import TextFieldsIcon from '@mui/icons-material/TextFields'
 import TimerIcon from '@mui/icons-material/Timer'
 import ToggleOnIcon from '@mui/icons-material/ToggleOn'
+import UnarchiveIcon from '@mui/icons-material/Unarchive'
 import WarningIcon from '@mui/icons-material/Warning'
 
 export type MaterialIconName =
@@ -103,6 +104,7 @@ export type MaterialIconName =
   | 'text_fields'
   | 'timer'
   | 'toggle_on'
+  | 'unarchive'
   | 'warning'
 
 export const ICON_MAP = {
@@ -157,5 +159,6 @@ export const ICON_MAP = {
   text_fields: TextFieldsIcon,
   timer: TimerIcon,
   toggle_on: ToggleOnIcon,
+  unarchive: UnarchiveIcon,
   warning: WarningIcon,
 }

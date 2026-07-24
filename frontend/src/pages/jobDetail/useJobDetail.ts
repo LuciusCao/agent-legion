@@ -1,7 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchJobDetail, deleteJob } from '../../api'
-import { rerunJob, runToJob, packageJobs } from '../../api/jobApi'
+import {
+  clearJobsPackedStatus,
+  rerunJob,
+  runToJob,
+  packageJobs,
+} from '../../api/jobApi'
 import { usePageHeaderStore } from '../../stores/pageHeaderStore'
 import { useExecutorsStore } from '../../stores/executorsStore'
 import type { JobDetail } from '../../types/jobTypes'
@@ -143,6 +148,19 @@ export function useJobDetail(
     }
   }, [workspaceId, jobId, refreshDetail])
 
+  const handleClearPacked = useCallback(async () => {
+    if (!workspaceId || !jobId) return
+    setActionLoading(true)
+    try {
+      await clearJobsPackedStatus(workspaceId, [jobId])
+      await refreshDetail()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionLoading(false)
+    }
+  }, [workspaceId, jobId, refreshDetail])
+
   const handleDelete = useCallback(async () => {
     if (!jobId || !workspaceId) return
     setActionLoading(true)
@@ -166,6 +184,7 @@ export function useJobDetail(
     handleContinue,
     handleUpgradeWorkflow,
     handlePackage,
+    handleClearPacked,
     handleDelete,
   }
 }

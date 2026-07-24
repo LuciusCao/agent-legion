@@ -174,6 +174,27 @@ describe('JobActionBar', () => {
     expect(onPackage).toHaveBeenCalledTimes(1)
   })
 
+  it('clears packed status for selected packed jobs', async () => {
+    const onClearPacked = vi.fn()
+    render(
+      <JobActionBar
+        jobs={[makeJob({ id: 'j1', status: 'completed', packed: 1 })]}
+        workflowDefinition={workflow}
+        mode="batch"
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onClearPacked={onClearPacked}
+        onDelete={vi.fn()}
+      />
+    )
+
+    await act(async () => {
+      screen.getByText('清空打包状态').click()
+    })
+
+    expect(onClearPacked).toHaveBeenCalledTimes(1)
+  })
+
   it('calls onDelete for delete navigation', async () => {
     const onDelete = vi.fn()
     render(
