@@ -739,6 +739,7 @@
     "worker/config_store.py": 189,
     "worker/executor.py": 391,
     "worker/host_client.py": 139,
+    "worker/registration_retry.py": 55,
     "worker/registration_token.py": 27,
     "worker/runtime_controls.py": 46,
     "worker/service.py": 149,

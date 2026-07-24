@@ -162,7 +162,8 @@ raising `max_concurrency`, and keep OS headroom:
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
-| Worker container never becomes healthy / restarts in a loop | Host unreachable or registration token mismatch | `make stack-logs STACK=worker`; verify `host_url` in the worker YAML, the token file, and the §3 smoke test |
+| Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
+| Worker becomes unhealthy with registration rejected | Registration token mismatch or Worker revoked | `make stack-logs STACK=worker`; verify the token file and registration status |
 | Registration returns 401 | `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` on the Host does not match the worker's token file | Re-copy `deploy/secrets/agent_worker_register_token` to the worker machine (deployment doc §4) |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's declared `runtimes` / `labels` |

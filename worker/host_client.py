@@ -64,6 +64,10 @@ class Client:
                 "X-Agent-Worker-Register-Token": management_token,
             },
         )
+        if status in (400, 401, 403, 409, 422):
+            raise WorkerAuthError(
+                f"Agent Worker registration rejected: HTTP {status}: {body[:300]!r}"
+            )
         if status != 201:
             raise RuntimeError(f"Agent Worker registration failed: HTTP {status}: {body[:300]!r}")
         self.token = str(json.loads(body)["worker_token"])
