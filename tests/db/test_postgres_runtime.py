@@ -36,6 +36,15 @@ def test_schema_initialization_is_idempotent() -> None:
         "workspace_node_capacities",
         "workspace_agent_capacities",
     } <= names
+    with read_connection(TEST_DATABASE_URL) as conn:
+        columns = {
+            row["column_name"]
+            for row in conn.execute(
+                "select column_name from information_schema.columns"
+                " where table_schema=current_schema() and table_name='agent_workers'"
+            ).fetchall()
+        }
+    assert {"capabilities_json", "models_json"} <= columns
 
 
 def test_write_transaction_rolls_back() -> None:

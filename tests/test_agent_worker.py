@@ -18,6 +18,7 @@ import pytest
 
 from server.app.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
+from worker.registration_retry import register_with_retry
 from worker.status import ExecutionStatusReporter, read_current_executions
 
 
@@ -332,6 +333,38 @@ def test_client_heartbeat_returns_status() -> None:
     client = agent_worker.Client("http://unused")
     client.request = lambda *a, **k: (409, b"")  # type: ignore[method-assign]
     assert client.heartbeat("exec-1", "lease-1") == 409
+
+
+def test_client_registration_rejects_permanent_http_errors() -> None:
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (401, b"bad token")  # type: ignore[method-assign]
+    with pytest.raises(agent_worker.WorkerAuthError, match="registration rejected"):
+        client.register(
+            {"worker_id": "w1", "runtimes": ["pi"], "max_concurrency": 1},
+            "bad-token",
+        )
+
+
+def test_registration_retries_transient_host_errors_without_traceback(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    client = agent_worker.Client("http://unused")
+    calls = 0
+
+    def flaky_register(config: dict, token: str) -> str:
+        nonlocal calls
+        del config, token
+        calls += 1
+        if calls < 3:
+            raise urllib.error.URLError("host unavailable")
+        return "worker-token"
+
+    client.register = flaky_register  # type: ignore[method-assign]
+    assert register_with_retry(client, {}, "token", threading.Event(), 0.001)
+    output = capsys.readouterr().out
+    assert calls == 3
+    assert "retrying" in output
+    assert "Traceback" not in output
 
 
 def test_client_heartbeat_and_report_send_lease_header() -> None:

@@ -37,6 +37,7 @@ from worker.cleanup import (
     sweep_stale_executions,
 )
 from worker.host_client import Client, WorkerAuthError
+from worker.registration_retry import register_from_config
 from worker.status import ExecutionStatusReporter
 
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
@@ -298,20 +299,19 @@ def main() -> int:
     parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
     args = parser.parse_args()
     config = runtime_controls.load_config(args.config)
-    token_file = Path(str(config["register_token_file"]))
-    management_token = token_file.read_text(encoding="utf-8").strip()
     client = Client(str(config["host_url"]))
-    client.register(config, management_token)
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    poll_interval, registration = register_from_config(client, config, stop)
+    if registration is not True:
+        return 2 if registration is False else 0
     max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
     work_root = Path(str(config.get("work_root", "/var/lib/agent-legion-worker"))).resolve()
     clean_work_root(work_root)
     environment = {str(key): str(value) for key, value in config.get("environment", {}).items()}
     interval = float(config.get("heartbeat_interval_seconds", 15))
-    poll_interval = float(config.get("poll_interval_seconds", 2))
     shutdown_grace = float(config.get("shutdown_grace_seconds", 25))
-    stop = threading.Event()
-    signal.signal(signal.SIGTERM, lambda *_: stop.set())
-    signal.signal(signal.SIGINT, lambda *_: stop.set())
     active: set[Future[None]] = set()
     backoff = poll_interval
     status = ExecutionStatusReporter.from_env()
