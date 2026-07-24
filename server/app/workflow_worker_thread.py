@@ -8,18 +8,14 @@ from typing import Any
 
 from server.app.agent_dispatch import AgentDispatchService
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.models import (
-    ClaimedExecution,
-    ExecutionContext,
-    ExecutionResult,
-)
+from server.app.executors.models import ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
-from server.app.workflow_worker_agent_status import agent_status_scope
+from server.app.workflow_worker_execution import reap_futures
 from server.app.workflow_worker_maintenance import WorkflowMaintenance
 from server.app.workflow_worker_ready import build_ready_queues
 from server.app.workflow_worker_schedule import claim_next_candidate
@@ -113,7 +109,7 @@ class WorkflowWorkerThread:
         if not self._pools:
             self._ensure_pools()
 
-        self._reap_futures()
+        reap_futures(self)
 
         # Cheap capacity gate: when every executor is saturated, skip the
         # expensive job scan for this tick (maintenance above still runs).
@@ -186,47 +182,6 @@ class WorkflowWorkerThread:
                     jobs_by_workspace[workspace_id] = []
                 jobs_by_workspace[workspace_id].append((definition, job))
         return workspace_ids, jobs_by_workspace
-
-    def _submit_claim(
-        self, executor_id: str, claim: ClaimedExecution, context: ExecutionContext
-    ) -> None:
-        """Submit a claimed execution to the executor pool and register it.
-
-        The done callback wakes the poll loop so capacity freed by this
-        execution is refilled on the next pass instead of after the idle
-        backoff.
-        """
-        pool = self._pool_for(executor_id)
-        future = pool.submit(self._run_claim, claim, context)
-        future.add_done_callback(lambda _f: self._wake_event.set())
-        self._futures[claim.execution_id] = future
-
-    def _run_claim(
-        self, claim: ClaimedExecution, context: ExecutionContext
-    ) -> ExecutionResult | None:
-        with agent_status_scope(self.agent_manager, self.registry, claim, context):
-            try:
-                return self.runtime.run(claim, context)
-            except Exception as exc:
-                logger.exception("workflow execution %s failed", claim.execution_id)
-                result = ExecutionResult(
-                    status="failed",
-                    exit_code=1,
-                    error_message=str(exc),
-                    log_path=str(context.log_path),
-                )
-                self.leases.finish(claim.lease_id, result)
-                return result
-
-    def _reap_futures(self) -> None:
-        for execution_id in list(self._futures):
-            future = self._futures[execution_id]
-            if future.done():
-                try:
-                    future.result()
-                except Exception:
-                    logger.exception("workflow future %s failed", execution_id)
-                self._futures.pop(execution_id, None)
 
     def stop(self, timeout: float = 3) -> None:
         self.stop_event.set()

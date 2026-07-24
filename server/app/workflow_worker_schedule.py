@@ -26,6 +26,7 @@ from server.app.jobs.queries.workspace_node_bindings import (
     get_local_node_limit,
     has_local_node_limit,
 )
+from server.app.workflow_worker_execution import submit_claim
 from server.app.workflow_worker_shards import assemble_reduce_inputs, claim_shard_node
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 
@@ -234,5 +235,5 @@ def try_claim_and_submit(
         runtime={"node_execution": asdict(node.execution)},
     )
 
-    worker._submit_claim(executor_id, claim, context)
+    submit_claim(worker, executor_id, claim, context)
     return True

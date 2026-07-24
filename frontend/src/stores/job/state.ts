@@ -2,8 +2,8 @@ import type {
   BatchJobMutationResult,
   JobSummary,
   WorkspacePackageResult,
-  WorkspacePackageStatusResetResult,
 } from '../../types/jobTypes'
+import type { ClearPackedActions } from './actions/clearPackedActions'
 import type { ContinueJobResult } from './stateTypes'
 export {
   countMutationResults,
@@ -14,7 +14,7 @@ export {
 export type { JobFilterConfig, JobStatus } from './filterConfig'
 export type { JobFilterOptionAccumulator } from './filterLogic/optionAccumulator'
 export type { FilterCounts } from './filterLogic/types'
-export interface JobState {
+export interface JobState extends ClearPackedActions {
   jobs: JobSummary[]
   jobsById: Record<string, JobSummary>
   jobIds: string[]
@@ -72,9 +72,6 @@ export interface JobState {
   ) => Promise<BatchJobMutationResult>
   batchDelete: (workspaceId: string) => Promise<BatchJobMutationResult>
   batchPackage: (workspaceId: string) => Promise<WorkspacePackageResult>
-  batchClearPacked: (
-    workspaceId: string
-  ) => Promise<WorkspacePackageStatusResetResult>
   batchRunTo: (
     workspaceId: string,
     targetNodeKey: string,

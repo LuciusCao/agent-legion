@@ -1,18 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchJobDetail, deleteJob } from '../../api'
-import {
-  clearJobsPackedStatus,
-  rerunJob,
-  runToJob,
-  packageJobs,
-} from '../../api/jobApi'
+import { rerunJob, runToJob } from '../../api/jobApi'
 import { usePageHeaderStore } from '../../stores/pageHeaderStore'
 import { useExecutorsStore } from '../../stores/executorsStore'
 import type { JobDetail } from '../../types/jobTypes'
 import { useContinueJobAction } from './useContinueJobAction'
 import { pageSubtitle } from './jobDetailTitle'
 import { POLLING_STATUSES } from './jobNodeHelpers'
+import { useClearPackedAction, usePackageAction } from './usePackageAction'
 import { useUpgradeWorkflowAction } from './useUpgradeWorkflowAction'
 
 export function useJobDetail(
@@ -132,34 +128,21 @@ export function useJobDetail(
     setError
   )
 
-  const handlePackage = useCallback(async () => {
-    if (!workspaceId || !jobId) return
-    setActionLoading(true)
-    try {
-      const result = await packageJobs(workspaceId, [jobId])
-      if (result.download_url) {
-        window.open(result.download_url, '_blank')
-      }
-      await refreshDetail()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setActionLoading(false)
-    }
-  }, [workspaceId, jobId, refreshDetail])
+  const handlePackage = usePackageAction(
+    workspaceId,
+    jobId,
+    refreshDetail,
+    setActionLoading,
+    setError
+  )
 
-  const handleClearPacked = useCallback(async () => {
-    if (!workspaceId || !jobId) return
-    setActionLoading(true)
-    try {
-      await clearJobsPackedStatus(workspaceId, [jobId])
-      await refreshDetail()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setActionLoading(false)
-    }
-  }, [workspaceId, jobId, refreshDetail])
+  const handleClearPacked = useClearPackedAction(
+    workspaceId,
+    jobId,
+    refreshDetail,
+    setActionLoading,
+    setError
+  )
 
   const handleDelete = useCallback(async () => {
     if (!jobId || !workspaceId) return

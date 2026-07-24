@@ -38,10 +38,7 @@ export function useWorkspaceEvents(
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
-        // Legacy job_updated events fire on every lease claim/finish. Job
-        // list changes already arrive as incremental job_patch_batch events,
-        // so only stats are refreshed here — re-fetching the full job list
-        // (unpaginated) on each event stalls large workspaces.
+        // Job list changes already arrive as job_patch_batch events; refresh stats only.
         void refresh(false)
         // Worker assignment may change with job updates; refresh alongside
         // the job snapshot (same 750ms debounce tier, inside refreshWorkers).
