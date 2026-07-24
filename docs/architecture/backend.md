@@ -267,6 +267,7 @@ server/app/
 | WorkspacePackageRequest | BaseModel | job_ids: list[str] | app/routes/package_contracts.py |
 | WorkspacePackageResultResponse | BaseModel | job_id: str, status: Literal['succeeded', 'failed'], reason_code: str | None,... | app/routes/package_contracts.py |
 | WorkspacePackageResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |
+| WorkspacePackageStatusResetResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |
 | WorkspacePackageUpdate | BaseModel | name: str | None, locked: bool | None | app/routes/package_history_contracts.py |
 | WorkspacePackageItemResponse | BaseModel | id: int, name: str, path: str, video_count: int, size_bytes: int, locked: int... | app/routes/package_history_contracts.py |
 | WorkspacePackagesResponse | BaseModel | packages: list[WorkspacePackageItemResponse] | app/routes/package_history_contracts.py |

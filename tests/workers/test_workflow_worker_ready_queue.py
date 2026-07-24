@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app import workflow_worker_ready
+from server.app import workflow_worker_ready_cache
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
@@ -106,7 +106,7 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
 
     loader_calls = _count_calls(monkeypatch, worker.job_db, "list_job_nodes_for_jobs")
     snapshot_calls = _count_calls(
-        monkeypatch, workflow_worker_ready, "definition_from_job_snapshot"
+        monkeypatch, workflow_worker_ready_cache, "definition_from_job_snapshot"
     )
 
     assert worker._poll() is True

@@ -76,6 +76,6 @@ export {
   batchDeleteJobs,
   batchRerunJobs,
   batchRunToJobs,
-  clearJobsPackedStatus,
   packageJobs,
 } from './jobBatchApi'
+export { clearJobsPackedStatus } from './jobClearPackedApi'

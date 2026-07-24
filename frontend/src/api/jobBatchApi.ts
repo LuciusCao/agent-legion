@@ -5,7 +5,6 @@ import type {
   BatchRunToRequest,
   JobBatchRerunRequest,
   WorkspacePackageResult,
-  WorkspacePackageStatusResetResult,
 } from '../types/jobTypes'
 
 export async function batchRunToJobs(
@@ -54,20 +53,6 @@ export async function packageJobs(
   const body: BatchJobIdsRequest = { job_ids: jobIds }
   return api<WorkspacePackageResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/package`,
-    {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }
-  )
-}
-
-export async function clearJobsPackedStatus(
-  workspaceId: string,
-  jobIds: string[]
-): Promise<WorkspacePackageStatusResetResult> {
-  const body: BatchJobIdsRequest = { job_ids: jobIds }
-  return api<WorkspacePackageStatusResetResult>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/clear-packed`,
     {
       method: 'POST',
       body: JSON.stringify(body),

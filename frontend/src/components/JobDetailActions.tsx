@@ -5,7 +5,7 @@ import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
 import { MaterialIcon } from './MaterialIcon'
-import { canRerunJob, canPackageJob, canContinueJob } from './JobActionBar'
+import { canContinueJob, computeActionDisabled } from './jobActionEligibility'
 import { JobWorkflowUpgradeButton } from './JobWorkflowUpgradeButton'
 import styles from './JobDetailActions.module.css'
 
@@ -42,23 +42,7 @@ export function JobDetailActions({
   const [runToOpen, setRunToOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
 
-  const rerunDisabled =
-    jobs.length === 0 ||
-    loading ||
-    jobs.every((job) => !canRerunJob(job.status))
-
-  const runToDisabled =
-    jobs.length === 0 ||
-    loading ||
-    jobs.every((job) => !canRerunJob(job.status))
-
-  const continueDisabled =
-    jobs.length === 0 || loading || !jobs.some((job) => canContinueJob(job))
-
-  const packageDisabled =
-    jobs.length === 0 || loading || jobs.every((job) => !canPackageJob(job))
-
-  const deleteDisabled = jobs.length === 0 || loading
+  const disabled = computeActionDisabled(jobs, loading)
 
   const showContinue = jobs.some((job) => canContinueJob(job))
 
@@ -68,7 +52,7 @@ export function JobDetailActions({
         <IconButton
           aria-label="重跑"
           title="重跑"
-          disabled={rerunDisabled}
+          disabled={disabled.rerun}
           onClick={() => setRerunOpen(true)}
         >
           <MaterialIcon name="restart_alt" />
@@ -83,7 +67,7 @@ export function JobDetailActions({
         <IconButton
           aria-label="运行到"
           title="运行到"
-          disabled={runToDisabled}
+          disabled={disabled.runTo}
           onClick={() => setRunToOpen(true)}
         >
           <MaterialIcon name="play_circle" />
@@ -92,7 +76,7 @@ export function JobDetailActions({
           <IconButton
             aria-label="继续完整流程"
             title="继续完整流程"
-            disabled={continueDisabled}
+            disabled={disabled.continue}
             onClick={onContinue}
           >
             <MaterialIcon name="skip_next" />
@@ -101,7 +85,7 @@ export function JobDetailActions({
         <IconButton
           aria-label="打包"
           title="打包"
-          disabled={packageDisabled}
+          disabled={disabled.package}
           onClick={onPackage}
         >
           <MaterialIcon name="inventory_2" />
@@ -120,7 +104,7 @@ export function JobDetailActions({
           aria-label="删除"
           title="删除"
           color="error"
-          disabled={deleteDisabled}
+          disabled={disabled.delete}
           onClick={() => setDeleteOpen(true)}
         >
           <MaterialIcon name="delete" />

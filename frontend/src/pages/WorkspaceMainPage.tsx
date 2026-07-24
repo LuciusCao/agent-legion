@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
+import { useWorkspacePackageActions } from './useWorkspacePackageActions'
 import { JobFilterBar } from '../components/JobFilterBar'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
@@ -34,13 +35,8 @@ export default function WorkspaceMainPage() {
   const selectUnpacked = useJobStore((state) => state.selectUnpacked)
   const clearSelection = useJobStore((state) => state.clearSelection)
   const batchDelete = useJobStore((state) => state.batchDelete)
-  const batchPackage = useJobStore((state) => state.batchPackage)
-  const batchClearPacked = useJobStore((state) => state.batchClearPacked)
   const batchRerun = useJobStore((state) => state.batchRerun)
   const batchRunTo = useJobStore((state) => state.batchRunTo)
-  const batchUpgradeWorkflow = useJobStore(
-    (state) => state.batchUpgradeWorkflow
-  )
   const filteredJobIds = useJobStore(selectFilteredJobIds)
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
@@ -124,21 +120,8 @@ export default function WorkspaceMainPage() {
     if (workspaceId) await batchRunTo(workspaceId, targetKey, startKey)
   }
 
-  const handlePackage = async () => {
-    if (!workspaceId) return
-    const result = await batchPackage(workspaceId)
-    if (result.download_url) window.open(result.download_url, '_blank')
-  }
-
-  const handleUpgradeWorkflow = async (jobIds: string[]) => {
-    if (!workspaceId) return
-    await batchUpgradeWorkflow(workspaceId, jobIds)
-  }
-
-  const handleClearPacked = async () => {
-    if (!workspaceId) return
-    await batchClearPacked(workspaceId)
-  }
+  const { handlePackage, handleClearPacked, handleUpgradeWorkflow } =
+    useWorkspacePackageActions(workspaceId)
 
   const handleDeleteConfirm = async () => {
     if (!workspaceId) return

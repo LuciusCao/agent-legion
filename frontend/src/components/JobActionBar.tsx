@@ -4,7 +4,15 @@ import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobActionBarUpgrade } from './JobActionBarUpgrade'
+import { canContinueJob, computeActionDisabled } from './jobActionEligibility'
 import styles from './JobActionBar.module.css'
+
+export {
+  canRerunJob,
+  canPackageJob,
+  canDeleteJob,
+  canContinueJob,
+} from './jobActionEligibility'
 
 export type JobActionBarFilter = {
   key: string
@@ -35,25 +43,6 @@ export type JobActionBarProps = {
   itemLabel?: string
 }
 
-export function canRerunJob(status: string): boolean {
-  return status !== 'running'
-}
-
-export function canPackageJob(job: JobSummary): boolean {
-  return job.status === 'completed' && !job.packed
-}
-
-export function canDeleteJob(): boolean {
-  return true
-}
-
-export function canContinueJob(job: JobSummary): boolean {
-  return (
-    job.status === 'paused' &&
-    job.execution_control?.pause_reason === 'target_reached'
-  )
-}
-
 export function JobActionBar({
   jobs,
   selectedCount,
@@ -77,26 +66,7 @@ export function JobActionBar({
   const isBatch = mode === 'batch'
   const count = selectedCount ?? jobs.length
 
-  const rerunDisabled =
-    jobs.length === 0 ||
-    loading ||
-    jobs.every((job) => !canRerunJob(job.status))
-
-  const runToDisabled =
-    jobs.length === 0 ||
-    loading ||
-    jobs.every((job) => !canRerunJob(job.status))
-
-  const continueDisabled =
-    jobs.length === 0 || loading || !jobs.some((job) => canContinueJob(job))
-
-  const packageDisabled =
-    jobs.length === 0 || loading || jobs.every((job) => !canPackageJob(job))
-
-  const clearPackedDisabled =
-    jobs.length === 0 || loading || jobs.every((job) => !job.packed)
-
-  const deleteDisabled = jobs.length === 0 || loading
+  const disabled = computeActionDisabled(jobs, loading)
   const handleRunTo = (targetKey: string, startKey?: string) =>
     onRunTo?.(targetKey, startKey)
 
@@ -133,14 +103,14 @@ export function JobActionBar({
         <Button
           variant="outlined"
           onClick={() => setRerunOpen(true)}
-          disabled={rerunDisabled}
+          disabled={disabled.rerun}
         >
           重跑
         </Button>
         <Button
           variant="outlined"
           onClick={() => setRunToOpen(true)}
-          disabled={runToDisabled}
+          disabled={disabled.runTo}
         >
           运行到
         </Button>
@@ -148,7 +118,7 @@ export function JobActionBar({
           <Button
             variant="outlined"
             onClick={onContinue}
-            disabled={continueDisabled}
+            disabled={disabled.continue}
           >
             继续完整流程
           </Button>
@@ -156,7 +126,7 @@ export function JobActionBar({
         <Button
           variant="outlined"
           onClick={onPackage}
-          disabled={packageDisabled}
+          disabled={disabled.package}
         >
           打包
         </Button>
@@ -164,7 +134,7 @@ export function JobActionBar({
           <Button
             variant="outlined"
             onClick={onClearPacked}
-            disabled={clearPackedDisabled}
+            disabled={disabled.clearPacked}
           >
             清空打包状态
           </Button>
@@ -173,7 +143,7 @@ export function JobActionBar({
           variant="outlined"
           color="error"
           onClick={onDelete}
-          disabled={deleteDisabled}
+          disabled={disabled.delete}
         >
           删除
         </Button>

@@ -24,6 +24,7 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflow_worker_execution import reap_futures
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
 
@@ -149,7 +150,7 @@ def _drain(worker: WorkflowWorkerThread, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         worker._poll()
-        worker._reap_futures()
+        reap_futures(worker)
         if not worker._futures and not worker._poll():
             # One more pass to claim any newly-ready nodes.
             break
