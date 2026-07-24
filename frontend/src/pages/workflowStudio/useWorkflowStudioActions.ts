@@ -73,14 +73,14 @@ export function useWorkflowStudioActions(
       setValidationErrors(result.errors)
       if (result.valid) {
         await reload()
-        setValidationMessage('发布成功')
+        setValidationMessage('保存成功')
       } else {
-        setValidationMessage('发布失败')
+        setValidationMessage('保存失败')
       }
     } catch (e) {
       setValidationErrors([])
       setValidationMessage(
-        `发布失败：${(e instanceof Error && e.message) || '网络错误'}`
+        `保存失败：${(e instanceof Error && e.message) || '网络错误'}`
       )
     } finally {
       setActionState('idle')

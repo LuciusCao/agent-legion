@@ -16,6 +16,8 @@ function makeWorker(overrides: Partial<WorkerSummary> = {}): WorkerSummary {
     worker_id: 'worker-1',
     name: 'Company Mac',
     runtimes: ['pi'],
+    capabilities: ['review_subtitles'],
+    models: [{ provider: 'openai', model: 'gpt-5.2' }],
     max_concurrency: 10,
     labels: {},
     protocol_version: 1,

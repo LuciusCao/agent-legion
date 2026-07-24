@@ -7,6 +7,8 @@ const workerA: WorkerSummary = {
   worker_id: 'worker-abc123def456',
   name: 'GPU Box A',
   runtimes: ['pi'],
+  capabilities: ['generate'],
+  models: [{ provider: 'openai', model: 'gpt-5.2' }],
   max_concurrency: 2,
   labels: { gpu: 'true' },
   protocol_version: 1,

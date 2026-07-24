@@ -14,6 +14,7 @@ function makeSummaryResponse(
 ): CompareResponse {
   return {
     valid: true,
+    creates_revision: false,
     base_revision: null,
     draft_workflow: null,
     summary: {

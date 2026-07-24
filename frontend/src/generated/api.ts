@@ -1225,6 +1225,8 @@ export interface components {
     AgentWorkerSummary: {
       /** Allowed Workspaces */
       allowed_workspaces: string[]
+      /** Capabilities */
+      capabilities: string[]
       /** Labels */
       labels: {
         [key: string]: string
@@ -1233,6 +1235,10 @@ export interface components {
       last_seen_at: string
       /** Max Concurrency */
       max_concurrency: number
+      /** Models */
+      models: {
+        [key: string]: string
+      }[]
       /** Name */
       name: string
       /** Online */
@@ -1797,6 +1803,8 @@ export interface components {
     }
     /** RegisterAgentWorkerRequest */
     RegisterAgentWorkerRequest: {
+      /** Capabilities */
+      capabilities?: string[]
       /**
        * Image Version
        * @default
@@ -1808,6 +1816,10 @@ export interface components {
       }
       /** Max Concurrency */
       max_concurrency: number
+      /** Models */
+      models?: {
+        [key: string]: string
+      }[]
       /**
        * Name
        * @default
@@ -2248,6 +2260,11 @@ export interface components {
       base_revision?:
         | components['schemas']['WorkflowRevisionSummaryItem']
         | null
+      /**
+       * Creates Revision
+       * @default false
+       */
+      creates_revision: boolean
       draft_workflow?: components['schemas']['WorkflowDraftSummaryItem'] | null
       /**
        * Errors

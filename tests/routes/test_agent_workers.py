@@ -8,6 +8,8 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
+from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.workflows.definition import workflow_definition_from_mapping
 from tests.test_agent_broker import _seed_request
 
 _MANAGEMENT = {"X-Agent-Worker-Register-Token": "management-secret"}
@@ -27,6 +29,8 @@ def _register(client: TestClient, credential: str = "management-secret", **overr
         "worker_id": "home-mini",
         "name": "Home Mac mini",
         "runtimes": ["pi"],
+        "capabilities": ["generate"],
+        "models": [{"provider": "gateway", "model": "test-model"}],
         "max_concurrency": 10,
         "labels": {"arch": "arm64"},
         "protocol_version": 1,
@@ -71,6 +75,64 @@ def test_agent_worker_register_and_claim_api(tmp_path: Path) -> None:
     assert claimed["agent_id"] == "generator-v1"
     assert claimed["lease_id"]
     assert app.state.job_db.get_job_node("job-1", "generate")["status"] == "running"
+
+
+def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+
+    with TestClient(app) as client:
+        wrong_capability = _register(
+            client, capabilities=["review"], models=[{"provider": "gateway", "model": "test-model"}]
+        )["worker_token"]
+        response = client.post(
+            "/api/agent-executions/claim",
+            headers={"X-Agent-Worker-Token": wrong_capability},
+            json={"worker_id": "home-mini"},
+        )
+        assert response.status_code == 204
+
+        wrong_model = _register(
+            client, capabilities=["generate"], models=[{"provider": "gateway", "model": "other"}]
+        )["worker_token"]
+        response = client.post(
+            "/api/agent-executions/claim",
+            headers={"X-Agent-Worker-Token": wrong_model},
+            json={"worker_id": "home-mini"},
+        )
+        assert response.status_code == 204
+
+
+def test_queued_claim_uses_latest_execution_config_from_same_revision(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+    definition = workflow_definition_from_mapping(
+        {
+            "key": "questions",
+            "label": "Questions",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "execution": {"provider": "gateway", "model": "latest-model"},
+                }
+            },
+        }
+    )
+    revision = WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
+        "test-workspace", definition
+    )
+    with app.state.job_db.connect() as conn:
+        conn.execute("update jobs set workflow_revision_id=? where id='job-1'", (revision["id"],))
+
+    with TestClient(app) as client:
+        token = _register(
+            client,
+            capabilities=["generate"],
+            models=[{"provider": "gateway", "model": "latest-model"}],
+        )["worker_token"]
+        claimed = _claim(client, token)
+
+    assert claimed["manifest"]["pi"]["model"] == "latest-model"
 
 
 def test_heartbeat_requires_and_validates_lease_id(tmp_path: Path) -> None:

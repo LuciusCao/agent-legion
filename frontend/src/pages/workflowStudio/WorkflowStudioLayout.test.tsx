@@ -41,6 +41,7 @@ const baseProps = {
   dirty: false,
   canSubmit: false,
   canPublish: false,
+  createsRevision: true,
   nodes: [],
   edges: [],
   reviewDialogOpen: false,

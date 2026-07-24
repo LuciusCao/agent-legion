@@ -362,8 +362,25 @@ def _write_main_config(tmp_path: Path) -> Path:
     return config_path
 
 
+def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path) -> None:
+    config_path = _write_main_config(tmp_path)
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config.update({"max_concurrency": 7, "claim_enabled": False})
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+
+    assert agent_worker.load_claim_controls(config_path) == (7, False)
+
+    config["max_concurrency"] = True
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    with pytest.raises(ValueError, match="最大并发数"):
+        agent_worker.load_claim_controls(config_path)
+
+
 def _run_main(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, fake: FakeClient
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    fake: FakeClient,
+    config_updates: dict | None = None,
 ) -> tuple[threading.Thread, dict, list]:
     """Run main() in a thread with a stubbed signal module and Client."""
     handlers: dict = {}
@@ -375,6 +392,10 @@ def _run_main(
     monkeypatch.setattr(agent_worker, "Client", lambda host: fake)
     fake.register = lambda config, token: "worker-token"  # type: ignore[attr-defined]
     config_path = _write_main_config(tmp_path)
+    if config_updates:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        config.update(config_updates)
+        config_path.write_text(json.dumps(config), encoding="utf-8")
     monkeypatch.setattr(sys, "argv", ["agent_worker.py", "--config", str(config_path)])
     result: list[int] = []
 
@@ -407,6 +428,81 @@ def test_main_survives_transient_claim_errors(
     handlers[agent_worker.signal.SIGTERM]()
     thread.join(timeout=10)
     assert claim_calls >= 5, "supervisor died on a transient claim error"
+    assert result == [0]
+
+
+def test_main_hot_reloads_claim_switch(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+
+    def no_work(worker_id: str) -> dict | None:
+        nonlocal claim_calls
+        claim_calls += 1
+        return None
+
+    fake.claim = no_work  # type: ignore[attr-defined]
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake, {"claim_enabled": False})
+    time.sleep(0.2)
+    assert claim_calls == 0
+
+    config_path = tmp_path / "worker.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["claim_enabled"] = True
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    deadline = time.monotonic() + 2
+    while claim_calls == 0 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    handlers[agent_worker.signal.SIGTERM]()
+    thread.join(timeout=10)
+    assert claim_calls > 0
+    assert result == [0]
+
+
+def test_main_hot_resizes_capacity_without_cancelling_active_work(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    fake = FakeClient(tmp_path / "unused.tar.gz")
+    claim_calls = 0
+    releases: dict[str, threading.Event] = {}
+
+    def claim(worker_id: str) -> dict:
+        nonlocal claim_calls
+        claim_calls += 1
+        execution_id = f"exec-{claim_calls}"
+        releases[execution_id] = threading.Event()
+        return _claim(execution_id)
+
+    def block_execution(  # type: ignore[no-untyped-def]
+        client, claimed, work_root, environment, interval, stop, grace, status
+    ):
+        while not stop.is_set() and not releases[claimed["execution_id"]].wait(0.01):
+            pass
+
+    fake.claim = claim  # type: ignore[attr-defined]
+    monkeypatch.setattr(agent_worker, "run_execution", block_execution)
+    thread, handlers, result = _run_main(monkeypatch, tmp_path, fake)
+    deadline = time.monotonic() + 2
+    while claim_calls < 1 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert claim_calls == 1
+
+    config_path = tmp_path / "worker.yaml"
+    config = json.loads(config_path.read_text(encoding="utf-8"))
+    config["max_concurrency"] = 3
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    deadline = time.monotonic() + 2
+    while claim_calls < 3 and time.monotonic() < deadline:
+        time.sleep(0.02)
+    assert claim_calls == 3
+
+    config["max_concurrency"] = 1
+    config_path.write_text(json.dumps(config), encoding="utf-8")
+    releases["exec-1"].set()
+    time.sleep(0.2)
+    assert claim_calls == 3
+
+    handlers[agent_worker.signal.SIGTERM]()
+    thread.join(timeout=10)
     assert result == [0]
 
 

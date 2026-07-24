@@ -16,6 +16,7 @@ type Props = {
   workflowKey: string | null
   activeRevision: WorkflowRevisionSummary | null
   nextVersion: number
+  createsRevision?: boolean
   definitionHash: string | null
   summary: ChangeSummaryViewModel | null
   onConfirm: () => void
@@ -27,6 +28,7 @@ export function WorkflowPublishReviewDialog({
   workflowKey,
   activeRevision,
   nextVersion,
+  createsRevision = true,
   definitionHash,
   summary,
   onConfirm,
@@ -36,12 +38,15 @@ export function WorkflowPublishReviewDialog({
 
   return (
     <Dialog open={open} onClose={onCancel} maxWidth="sm" fullWidth>
-      <DialogTitle>发布 workflow revision</DialogTitle>
+      <DialogTitle>
+        {createsRevision ? '发布 workflow revision' : '保存节点运行配置'}
+      </DialogTitle>
       <DialogContent>
         <WorkflowPublishReviewDialogMeta
           workflowKey={workflowKey}
           activeRevision={activeRevision}
           nextVersion={nextVersion}
+          createsRevision={createsRevision}
           definitionHash={definitionHash}
         />
         <WorkflowPublishReviewDialogChanges summary={summary} />
@@ -56,7 +61,7 @@ export function WorkflowPublishReviewDialog({
           color="primary"
           disabled={!hasChanges}
         >
-          确认发布
+          {createsRevision ? '确认发布' : '确认保存'}
         </Button>
       </DialogActions>
     </Dialog>

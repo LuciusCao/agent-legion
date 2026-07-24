@@ -201,6 +201,8 @@ class WorkerSupervisor:
         return {
             "service": "running",
             "configured": configured,
+            "claim_enabled": config["claim_enabled"],
+            "max_concurrency": config["max_concurrency"],
             "bootstrap_error": self.store.bootstrap_error,
             "mounted_config_diverged": self._mounted_config_diverged(),
             **snapshot,

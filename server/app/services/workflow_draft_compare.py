@@ -20,6 +20,7 @@ from server.app.services.workflow_draft_compare_support import (
     yaml_error_to_dict,
 )
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+from server.app.services.workflow_revision_change import structural_revision_changed
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.schema import (
     WorkflowDefinition,
@@ -499,9 +500,13 @@ def compare_workflow_draft(
     risk_level = compute_risk_level(
         node_changes, edge_changes, intake_changes, risk_flags, metadata_changes
     )
+    creates_revision = structural_revision_changed(
+        node_changes, edge_changes, intake_changes, metadata_changes
+    )
 
     return {
         "valid": True,
+        "creates_revision": creates_revision,
         "base_revision": {
             "id": revision["id"],
             "version": revision["version"],

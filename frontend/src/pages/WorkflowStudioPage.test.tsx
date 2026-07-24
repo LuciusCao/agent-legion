@@ -197,7 +197,7 @@ describe('WorkflowStudioPage', () => {
 
     await screen.findByText(/有未发布变更/)
     await user.click(screen.getByRole('button', { name: '关闭' }))
-    const publishButton = screen.getByRole('button', { name: '发布' })
+    const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
 
@@ -218,13 +218,13 @@ describe('WorkflowStudioPage', () => {
 
     await screen.findByText(/有未发布变更/)
     await user.click(screen.getByRole('button', { name: '关闭' }))
-    const publishButton = screen.getByRole('button', { name: '发布' })
+    const publishButton = screen.getByRole('button', { name: '发布新版本' })
     await waitFor(() => expect(publishButton).not.toBeDisabled())
     await user.click(publishButton)
     await screen.findByText('发布 workflow revision')
 
     await user.click(screen.getByRole('button', { name: '确认发布' }))
 
-    expect(await screen.findByText('发布成功')).toBeInTheDocument()
+    expect(await screen.findByText('保存成功')).toBeInTheDocument()
   })
 })

@@ -7,6 +7,14 @@ worker_id: home-mac-mini-1
 name: Home Mac mini
 runtimes: [pi]
 max_concurrency: 10
+# 关闭后不再 claim 新任务，但不会中断已领取的任务。
+claim_enabled: true
+# 必须与 workflow 节点现有的 capability 完全匹配。
+capabilities: [video_generate, subtitle_review]
+# 只有 provider 和 model 都匹配时才会领取任务。
+models:
+  - provider: openai
+    model: gpt-5.2
 labels:
   os: macos
   arch: arm64

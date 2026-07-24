@@ -205,6 +205,8 @@ create table if not exists agent_workers (
   worker_id text primary key,
   name text not null default '',
   runtimes_json text not null,
+  capabilities_json text not null default '[]',
+  models_json text not null default '[]',
   max_concurrency integer not null check(max_concurrency > 0),
   labels_json text not null default '{}',
   protocol_version integer not null,
@@ -219,6 +221,8 @@ create table if not exists agent_workers (
   revoked_at timestamptz
 );
 alter table agent_workers add column if not exists allowed_workspaces_json text not null default '[]';
+alter table agent_workers add column if not exists capabilities_json text not null default '[]';
+alter table agent_workers add column if not exists models_json text not null default '[]';
 
 -- Workspace-scoped Agent Worker registration tokens (EXEC-WORKERACL-001).
 -- workspace_id NULL means the token admits Workers to ALL workspaces; a

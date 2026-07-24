@@ -73,7 +73,11 @@ def _seed_request(
             node_key=node_key,
             agent_id="generator-v1",
             agent_definition_hash=definition.definition_hash(),
-            manifest={"job_id": job_id, "log_path": f"logs/{job_id}.log"},
+            manifest={
+                "job_id": job_id,
+                "log_path": f"logs/{job_id}.log",
+                "pi": {"provider": "gateway", "model": "test-model"},
+            },
         )
     )
     assert execution_id is not None

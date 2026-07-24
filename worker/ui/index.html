@@ -14,7 +14,10 @@
           <h1>Worker 控制台</h1>
           <p class="subtitle">配置本机执行节点，并确认它实际连接到了哪一台 Host。</p>
         </div>
-        <button id="restart" class="secondary">重启 Worker</button>
+        <div class="header-actions">
+          <button id="toggle-claiming" class="secondary">暂停领取</button>
+          <button id="restart" class="secondary">重启 Worker</button>
+        </div>
       </header>
 
       <section class="status-card" aria-live="polite">
@@ -27,6 +30,8 @@
         </div>
         <dl>
           <div><dt>执行进程</dt><dd id="process-state">—</dd></div>
+          <div><dt>任务领取</dt><dd id="claim-state">—</dd></div>
+          <div><dt>动态容量</dt><dd id="capacity-state">—</dd></div>
           <div><dt>Host</dt><dd id="host-state">—</dd></div>
           <div><dt>Host 登记</dt><dd id="registered-state">—</dd></div>
           <div><dt>允许工作区</dt><dd id="workspace-scope">—</dd></div>
@@ -42,6 +47,7 @@
           </div>
           <form id="config-form">
             <label class="wide">Host 地址<input name="host_url" type="url" placeholder="http://100.64.0.10:8000" required /></label>
+            <label class="wide">Host 注册 Token <span id="register-token-state" class="hint">仅写入，不会回显</span><input name="register_token" type="password" autocomplete="new-password" placeholder="留空则保持现有 Token" /></label>
             <label>Worker ID<input name="worker_id" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" title="以字母或数字开头，只能包含字母、数字、_、-，最长 64 字符" required /></label>
             <label>显示名称<input name="name" /></label>
             <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
@@ -50,6 +56,8 @@
               <label class="check"><input name="runtimes" type="checkbox" value="pi" /> Pi</label>
               <label class="check"><input name="runtimes" type="checkbox" value="openclaw" /> OpenClaw</label>
             </fieldset>
+            <label class="wide">Worker 能力 <span class="hint">每行一个，与节点 capability 完全匹配</span><textarea name="capabilities" rows="4" placeholder="generate_key_info&#10;review_key_info"></textarea></label>
+            <label class="wide">可用模型 <span class="hint">每行一个 provider/model</span><textarea name="models" rows="4" placeholder="openai/gpt-5&#10;anthropic/claude-sonnet-4-5"></textarea></label>
             <label class="wide">标签 <span class="hint">每行一个 key=value</span><textarea name="labels" rows="4" placeholder="os=linux&#10;arch=arm64"></textarea></label>
             <details class="wide">
               <summary>高级选项</summary>

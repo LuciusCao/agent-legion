@@ -13,26 +13,23 @@ from typing import Any
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel
 
 from worker.host_client import Client
+from worker.registration_token import registration_token_configured
+from worker.service_models import WorkerConfigPayload
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 
 logger = logging.getLogger(__name__)
 
 
-class WorkerConfigPayload(BaseModel):
-    """Partial update：仅提交的字段会被更新，未提供的字段保持现状。"""
+_HOT_CONFIG_FIELDS = {"claim_enabled", "max_concurrency"}
 
-    host_url: str | None = None
-    worker_id: str | None = None
-    name: str | None = None
-    runtimes: list[str] | None = None
-    max_concurrency: int | None = None
-    labels: dict[str, str] | None = None
-    poll_interval_seconds: float | None = None
-    heartbeat_interval_seconds: float | None = None
-    shutdown_grace_seconds: float | None = None
+
+def _public_config_response(store: WorkerConfigStore, config: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **public_config(config),
+        "register_token_configured": registration_token_configured(config),
+    }
 
 
 def _revoke_previous_worker(config: dict[str, Any]) -> None:
@@ -92,21 +89,30 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
 
     @app.get("/api/config", dependencies=guarded)
     def get_config() -> dict[str, Any]:
-        return public_config(supervisor.store.read(require_identity=False))
+        config = supervisor.store.read(require_identity=False)
+        return _public_config_response(supervisor.store, config)
 
     @app.put("/api/config", dependencies=guarded)
     def put_config(payload: WorkerConfigPayload) -> dict[str, Any]:
         try:
             fields = payload.model_dump(exclude_none=True)
+            registration_token = fields.pop("register_token", None)
             previous = supervisor.store.read(require_identity=False)
             new_worker_id = fields.get("worker_id")
             if new_worker_id is not None and new_worker_id != previous["worker_id"]:
                 _revoke_previous_worker(previous)
-            config = supervisor.store.update_public(fields)
-            supervisor.restart()
+            config = supervisor.store.update_public(fields, registration_token=registration_token)
+            changed = {field for field in fields if previous.get(field) != config.get(field)}
+            restarted = bool(changed - _HOT_CONFIG_FIELDS or registration_token is not None)
+            if restarted:
+                supervisor.restart()
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
-        return {"config": public_config(config), "status": supervisor.status()}
+        return {
+            "config": _public_config_response(supervisor.store, config),
+            "status": supervisor.status(),
+            "restarted": restarted,
+        }
 
     @app.post("/api/restart", dependencies=guarded)
     def restart() -> dict[str, Any]:

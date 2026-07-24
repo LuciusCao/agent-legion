@@ -149,6 +149,8 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
                 "worker_id": "e2e-worker",
                 "name": "E2E Worker",
                 "runtimes": ["pi"],
+                "capabilities": ["generate"],
+                "models": [{"provider": "gateway", "model": "test-model"}],
                 "max_concurrency": 4,
                 "labels": {"arch": "arm64"},
                 "protocol_version": 1,

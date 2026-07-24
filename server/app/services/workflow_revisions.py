@@ -8,6 +8,7 @@ from server.app.services.workflow_revision_format import (
     definition_hash,
     serialize_definition,
 )
+from server.app.services.workflow_revision_runtime import save_revision_runtime_or_publish
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
 
 if TYPE_CHECKING:
@@ -34,6 +35,12 @@ class WorkflowRevisionService:
             definition_json=definition_json,
             definition_hash=definition_hash(definition_json),
             agent_routes=agent_routes,
+        )
+
+    def save_workspace_revision(self, workspace_id: str, definition: WorkflowDefinition) -> dict:
+        """Update runtime settings in-place, or publish a structural revision."""
+        return save_revision_runtime_or_publish(
+            self.job_db, workspace_id, definition, self.publish_workspace_revision
         )
 
     def _agent_routes(self, definition: WorkflowDefinition) -> dict[str, str]:

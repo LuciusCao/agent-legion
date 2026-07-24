@@ -77,7 +77,7 @@ describe('useWorkflowStudioActions', () => {
     })
 
     expect(result.current.actionState).toBe('idle')
-    expect(result.current.validationMessage).toBe('发布失败：network error')
+    expect(result.current.validationMessage).toBe('保存失败：network error')
     expect(result.current.validationErrors).toEqual([])
   })
 

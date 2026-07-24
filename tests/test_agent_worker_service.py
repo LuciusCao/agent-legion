@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 import worker.service as service_module
 import worker.supervisor as state_module
+from worker.registration_token import registration_token_configured
 from worker.service import create_app
 from worker.supervisor import (
     WorkerConfigStore,
@@ -147,6 +148,22 @@ def test_public_update_preserves_secret_paths_and_environment(tmp_path: Path) ->
     assert updated["environment"] == {"PRESERVED": "yes"}
 
 
+def test_registration_token_is_write_only_and_stored_with_private_permissions(
+    tmp_path: Path,
+) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+
+    updated = store.update_public({}, registration_token="host-issued-token")
+    token_path = Path(updated["register_token_file"])
+
+    assert token_path.read_text(encoding="utf-8") == "host-issued-token\n"
+    assert token_path.stat().st_mode & 0o777 == 0o600
+    assert registration_token_configured(updated) is True
+    assert "register_token" not in public_config(updated)
+    assert "register_token_file" not in public_config(updated)
+
+
 def test_concurrent_public_updates_all_succeed_and_leave_readable_state(
     tmp_path: Path,
 ) -> None:
@@ -193,8 +210,49 @@ def test_local_api_returns_status_and_applies_configuration(tmp_path: Path) -> N
     assert response.json()["config"]["max_concurrency"] == 6
     assert "register_token_file" not in response.json()["config"]
     assert "environment" not in response.json()["config"]
-    assert supervisor.restarts == 1
+    assert response.json()["restarted"] is False
+    assert supervisor.restarts == 0
     assert logs.json() == {"lines": ["waiting"]}
+
+
+def test_local_api_stores_registration_token_without_returning_it(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    supervisor = FakeSupervisor(store)
+    app = create_app(supervisor, tmp_path)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={"register_token": "host-issued-token"},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["restarted"] is True
+    assert response.json()["config"]["register_token_configured"] is True
+    assert "host-issued-token" not in response.text
+    assert supervisor.restarts == 1
+
+
+def test_claim_switch_and_capacity_are_hot_updated_without_restart(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    supervisor = FakeSupervisor(store)
+    app = create_app(supervisor, tmp_path)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={"claim_enabled": False, "max_concurrency": 9},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["restarted"] is False
+    assert response.json()["config"]["claim_enabled"] is False
+    assert response.json()["config"]["max_concurrency"] == 9
+    assert supervisor.restarts == 0
 
 
 def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:

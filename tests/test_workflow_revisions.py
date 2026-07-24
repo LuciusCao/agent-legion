@@ -57,6 +57,64 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     assert capacity is None
 
 
+def test_runtime_only_save_updates_active_revision_without_new_version(
+    tmp_path: Path,
+) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("runtime-ws", default_workflow_key="runtime-flow")
+    service = WorkflowRevisionService(queries)
+    original = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                    "execution": {"provider": "gateway", "model": "old-model"},
+                }
+            },
+        }
+    )
+    first = service.publish_workspace_revision(workspace["id"], original)
+    updated = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json"],
+                    "execution": {"provider": "gateway", "model": "new-model"},
+                }
+            },
+        }
+    )
+
+    same = service.save_workspace_revision(workspace["id"], updated)
+
+    assert same["id"] == first["id"]
+    assert same["version"] == 1
+    assert same["definition_hash"] != first["definition_hash"]
+    assert '"new-model"' in same["definition_json"]
+
+    structural = workflow_definition_from_mapping(
+        {
+            "key": "runtime-flow",
+            "label": "Runtime Flow",
+            "nodes": {
+                "generate": {
+                    "capability": "generate",
+                    "outputs": ["result.json", "metadata.json"],
+                }
+            },
+        }
+    )
+    second = service.save_workspace_revision(workspace["id"], structural)
+    assert second["version"] == 2
+    assert second["id"] != first["id"]
+
+
 def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
     # Agent routing is capability-driven: review_as_local gives the node a
     # capability no enabled Agent implements, so it keeps the handler path.

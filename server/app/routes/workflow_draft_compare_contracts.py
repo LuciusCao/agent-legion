@@ -80,6 +80,7 @@ class WorkflowCompareSummary(BaseModel):
 
 class WorkflowDraftCompareResponse(BaseModel):
     valid: bool
+    creates_revision: bool = False
     base_revision: WorkflowRevisionSummaryItem | None = None
     draft_workflow: WorkflowDraftSummaryItem | None = None
     summary: WorkflowCompareSummary | None = None

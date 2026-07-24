@@ -104,6 +104,7 @@ export function WorkflowStudioCommandBar({
           actionState={actionState}
           canSubmit={canSubmit}
           canPublish={canPublish}
+          createsRevision={compareSummary?.createsRevision}
           onValidate={onValidate}
           onPublish={onPublish}
           onReset={onReset}

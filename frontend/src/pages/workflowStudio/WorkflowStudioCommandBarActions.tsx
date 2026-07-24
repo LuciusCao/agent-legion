@@ -6,6 +6,7 @@ type Props = {
   actionState: 'idle' | 'validating' | 'publishing'
   canSubmit: boolean
   canPublish: boolean
+  createsRevision?: boolean
   onValidate: () => void
   onPublish: () => void
   onReset: () => void
@@ -24,7 +25,12 @@ export function WorkflowStudioCommandBarActions(props: Props) {
       ]
     : [
         ['校验', 'outlined', !props.canSubmit || !idle, props.onValidate],
-        ['发布', 'contained', !props.canPublish || !idle, props.onPublish],
+        [
+          props.createsRevision === false ? '保存运行配置' : '发布新版本',
+          'contained',
+          !props.canPublish || !idle,
+          props.onPublish,
+        ],
         ['重置', 'outlined', !props.dirty || !idle, props.onReset],
       ]
   return (

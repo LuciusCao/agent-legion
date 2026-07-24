@@ -195,7 +195,7 @@ server/app/
 | WorkflowsRuntimeConfig | BaseModel | enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
 | AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
-| RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], max_concurrency: int, labels:... | app/routes/agent_workers.py |
+| RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, allowed_workspaces: list[str] | app/routes/agent_workers.py |
 | CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers.py |
 | AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str | None, label: str | app/routes/agent_workers.py |
@@ -203,7 +203,7 @@ server/app/
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers.py |
 | AgentRegisterTokenRevokeResponse | BaseModel | revoked: bool | app/routes/agent_workers.py |
 | ClaimAgentExecutionRequest | BaseModel | worker_id: str | app/routes/agent_workers.py |
-| AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], max_concurrency: int, labels:... | app/routes/agent_workers.py |
+| AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers.py |
 | AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers.py |
 | AgentWorkerRevokeResponse | BaseModel | worker_id: str, revoked: bool | app/routes/agent_workers.py |
 | AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers.py |
@@ -301,7 +301,7 @@ server/app/
 | WorkflowIntakeChange | BaseModel | type: WorkflowIntakeChangeType, mode_key: str, field_key: str | None, risk: W... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowRiskFlag | BaseModel | code: str, severity: WorkflowRiskLevel, message: str | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowCompareSummary | BaseModel | risk_level: WorkflowRiskLevel, node_changes: list[WorkflowNodeChange], edge_c... | app/routes/workflow_draft_compare_contracts.py |
-| WorkflowDraftCompareResponse | BaseModel | valid: bool, base_revision: WorkflowRevisionSummaryItem | None, draft_workflo... | app/routes/workflow_draft_compare_contracts.py |
+| WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
