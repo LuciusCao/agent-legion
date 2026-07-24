@@ -18,6 +18,7 @@ from server.app.settings import Settings
 from server.app.workflow_worker_execution import reap_futures
 from server.app.workflow_worker_maintenance import WorkflowMaintenance
 from server.app.workflow_worker_ready import build_ready_queues
+from server.app.workflow_worker_routing import NodeRoute
 from server.app.workflow_worker_schedule import claim_next_candidate
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import list_registered_workflows
@@ -57,12 +58,15 @@ class WorkflowWorkerThread:
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
-        # Per-poll-pass caches: parsed workflow definitions keyed by
+        # Cross-pass caches: parsed workflow definitions keyed by
         # workflow_definition_hash, and ready-node evaluations keyed by job
-        # id for jobs whose state has not changed since the previous pass.
+        # id, reused while a job's lightweight scan mark is unchanged.
         self._definition_cache: dict[str, WorkflowDefinition | None] = {}
-        self._ready_cache: dict[str, tuple[tuple[Any, ...], list[str], frozenset[str]]] = {}
+        self._job_evals: dict[str, tuple[tuple[Any, ...], list[Any]]] = {}
         self._last_ready_stats: dict[str, int] = {"hit": 0, "miss": 0}
+        # Short-TTL node routing resolutions for the claim path; see
+        # server.app.workflow_worker_routing.
+        self._route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
@@ -167,11 +171,7 @@ class WorkflowWorkerThread:
         workspace_ids: list[str] = []
         jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]] = {}
         for definition in self._definitions:
-            for job in self.job_db.list_jobs(
-                workspace_id=None,
-                workflow_key=definition.key,
-                status_not_in=("completed", "failed"),
-            ):
+            for job in self.job_db.list_active_job_marks(definition.key):
                 if not (workspace_id := job.get("workspace_id")):
                     continue
                 workspace_id = str(workspace_id)
