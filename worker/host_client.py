@@ -83,11 +83,14 @@ class Client:
         if status != 200:
             raise RuntimeError(f"Agent Worker revoke failed: HTTP {status}: {body[:300]!r}")
 
-    def claim(self, worker_id: str) -> dict[str, Any] | None:
+    def claim(self, worker_id: str, max_concurrency: int | None = None) -> dict[str, Any] | None:
+        payload: dict[str, Any] = {"worker_id": worker_id}
+        if max_concurrency is not None:
+            payload["max_concurrency"] = max_concurrency
         status, body = self.request(
             "POST",
             "/api/agent-executions/claim",
-            data=json.dumps({"worker_id": worker_id}).encode(),
+            data=json.dumps(payload).encode(),
             headers={"Content-Type": "application/json"},
         )
         if status == 204:

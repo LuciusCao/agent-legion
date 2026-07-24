@@ -1344,6 +1344,8 @@ export interface components {
     }
     /** ClaimAgentExecutionRequest */
     ClaimAgentExecutionRequest: {
+      /** Max Concurrency */
+      max_concurrency?: number | null
       /** Worker Id */
       worker_id: string
     }

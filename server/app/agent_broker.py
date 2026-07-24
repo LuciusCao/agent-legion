@@ -23,9 +23,9 @@ from server.app._agent_broker_claim import (
     AgentClaim,
     ClaimRacedError,
     claim_in_transaction,
-    touch_worker,
 )
 from server.app._agent_broker_reaper import _SAFE_BUNDLE_NAME
+from server.app.agent_worker_capacity import touch_worker
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.job_events import record_job_update
@@ -158,10 +158,12 @@ class AgentExecutionBroker:
             raise
         return execution_id
 
-    def claim(self, worker_id: str) -> AgentClaim | None:
+    def claim(
+        self, worker_id: str, declared_max_concurrency: int | None = None
+    ) -> AgentClaim | None:
         try:
             with write_transaction(self.database_dsn) as conn:
-                claimed = claim_in_transaction(self, conn, worker_id)
+                claimed = claim_in_transaction(self, conn, worker_id, declared_max_concurrency)
         except ClaimRacedError:
             return None
         # Record only after the commit has succeeded, never inside the tx.

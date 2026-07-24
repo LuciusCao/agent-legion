@@ -16,6 +16,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from server.app import agent_claim_compatibility
+from server.app.agent_worker_capacity import sync_declared_capacity, touch_worker
 
 if TYPE_CHECKING:
     from server.app.agent_broker import AgentExecutionBroker
@@ -44,13 +45,17 @@ class AgentClaim:
 
 
 def claim_in_transaction(
-    broker: AgentExecutionBroker, conn: Any, worker_id: str
+    broker: AgentExecutionBroker,
+    conn: Any,
+    worker_id: str,
+    declared_max_concurrency: int | None = None,
 ) -> AgentClaim | None:
     worker = conn.execute(
         "select * from agent_workers where worker_id=? for update", (worker_id,)
     ).fetchone()
     if worker is None or worker["revoked_at"] is not None:
         raise ValueError("unknown or revoked Agent Worker")
+    max_concurrency = sync_declared_capacity(conn, worker, declared_max_concurrency)
     runtimes = set(json.loads(worker["runtimes_json"]))
     capabilities, models = agent_claim_compatibility.worker_declarations(worker)
     labels = json.loads(worker["labels_json"])
@@ -64,7 +69,7 @@ def claim_in_transaction(
         " where worker_id=? and state='claimed'",
         (worker_id,),
     ).fetchone() or {"cnt": 0}
-    if int(worker_active["cnt"]) >= int(worker["max_concurrency"]):
+    if int(worker_active["cnt"]) >= max_concurrency:
         touch_worker(conn, worker_id)
         return None
     # Candidates are read WITHOUT row locks (a bounded per-workspace window
@@ -252,13 +257,6 @@ def cancel_request(conn: Any, execution_id: str) -> None:
         "update agent_execution_requests set state='cancelled',"
         " finished_at=current_timestamp where execution_id=?",
         (execution_id,),
-    )
-
-
-def touch_worker(conn: Any, worker_id: str) -> None:
-    conn.execute(
-        "update agent_workers set last_seen_at=current_timestamp where worker_id=?",
-        (worker_id,),
     )
 
 

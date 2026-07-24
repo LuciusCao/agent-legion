@@ -203,7 +203,7 @@ server/app/
 | AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers.py |
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers.py |
 | AgentRegisterTokenRevokeResponse | BaseModel | revoked: bool | app/routes/agent_workers.py |
-| ClaimAgentExecutionRequest | BaseModel | worker_id: str | app/routes/agent_workers.py |
+| ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None | app/routes/agent_workers.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers.py |
 | AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers.py |
 | AgentWorkerRevokeResponse | BaseModel | worker_id: str, revoked: bool | app/routes/agent_workers.py |

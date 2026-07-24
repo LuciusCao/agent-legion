@@ -349,7 +349,7 @@ def main() -> int:
                 for _ in range(available):
                     if stop.is_set():
                         break
-                    claim = client.claim(str(config["worker_id"]))
+                    claim = client.claim(str(config["worker_id"]), max_concurrency)
                     if claim is None:
                         break
                     claimed = True

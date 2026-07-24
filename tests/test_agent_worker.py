@@ -335,6 +335,16 @@ def test_client_heartbeat_returns_status() -> None:
     assert client.heartbeat("exec-1", "lease-1") == 409
 
 
+def test_client_claim_declares_live_capacity() -> None:
+    client = agent_worker.Client("http://unused")
+    seen: list[dict] = []
+    client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
+
+    assert client.claim("w1", 70) is None
+
+    assert seen == [{"worker_id": "w1", "max_concurrency": 70}]
+
+
 def test_client_registration_rejects_permanent_http_errors() -> None:
     client = agent_worker.Client("http://unused")
     client.request = lambda *a, **k: (401, b"bad token")  # type: ignore[method-assign]
@@ -452,7 +462,7 @@ def test_main_survives_transient_claim_errors(
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
 
-    def flaky_claim(worker_id: str) -> dict | None:
+    def flaky_claim(worker_id: str, max_concurrency: int | None = None) -> dict | None:
         nonlocal claim_calls
         claim_calls += 1
         if claim_calls <= 3:
@@ -474,7 +484,7 @@ def test_main_hot_reloads_claim_switch(monkeypatch: pytest.MonkeyPatch, tmp_path
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
 
-    def no_work(worker_id: str) -> dict | None:
+    def no_work(worker_id: str, max_concurrency: int | None = None) -> dict | None:
         nonlocal claim_calls
         claim_calls += 1
         return None
@@ -504,7 +514,7 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
     claim_calls = 0
     releases: dict[str, threading.Event] = {}
 
-    def claim(worker_id: str) -> dict:
+    def claim(worker_id: str, max_concurrency: int | None = None) -> dict:
         nonlocal claim_calls
         claim_calls += 1
         execution_id = f"exec-{claim_calls}"
@@ -550,7 +560,7 @@ def test_main_exits_cleanly_on_revoked_worker(
 ) -> None:
     fake = FakeClient(tmp_path / "unused.tar.gz")
 
-    def revoked(worker_id: str) -> dict | None:
+    def revoked(worker_id: str, max_concurrency: int | None = None) -> dict | None:
         raise agent_worker.WorkerAuthError("HTTP 409: unknown or revoked")
 
     fake.claim = revoked  # type: ignore[attr-defined]
