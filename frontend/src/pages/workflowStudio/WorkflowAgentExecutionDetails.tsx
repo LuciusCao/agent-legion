@@ -3,7 +3,7 @@ import FolderOpenOutlinedIcon from '@mui/icons-material/FolderOpenOutlined'
 import { Button } from '@mui/material'
 import { useState } from 'react'
 import type { WorkflowNodeRecord } from '../../types'
-import type { CapabilityBinding } from './WorkflowExecutorBindingList'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { WorkflowNodeRuntimeSettings } from './WorkflowNodeRuntimeSettings'
 import { WorkflowPromptPreviewDialog } from './WorkflowPromptPreviewDialog'
 import { WorkflowSkillPreviewDialog } from './WorkflowSkillPreviewDialog'
@@ -12,7 +12,7 @@ import { parseWorkflowNode } from './workflowStudioYamlDraft.parse'
 import styles from './WorkflowAgentExecutionDetails.module.css'
 
 export function WorkflowAgentExecutionDetails(props: {
-  binding: CapabilityBinding
+  definition: AgentDefinition
   node: WorkflowNodeRecord
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
@@ -23,7 +23,7 @@ export function WorkflowAgentExecutionDetails(props: {
   const additionalPrompt = draft
     ? (draft.execution?.prompt ?? '')
     : (props.node.execution?.prompt ?? '')
-  const skillKey = props.binding.detail.skill ?? ''
+  const skillKey = props.definition.skill
   return (
     <>
       <div className={styles.actions}>
@@ -44,7 +44,7 @@ export function WorkflowAgentExecutionDetails(props: {
       </div>
       <WorkflowNodeRuntimeSettings
         node={props.node}
-        defaults={props.binding.detail}
+        defaults={props.definition}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

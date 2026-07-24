@@ -124,7 +124,7 @@ make stack-logs STACK=worker
 - 注册令牌允许接入的 Workspace 范围；
 - 运行时、并发数、标签和最近日志。
 
-页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和最大并发会热更新。Worker 启动后会向 Host 注册，然后按本机配置的 `max_concurrency` 拉取任务。
+页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和最大并发会热更新。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
 Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capability 与 workflow 节点已有的 `capability` 是同一个值，不存在额外的 `required_worker_capabilities` 字段；只有 capability、provider 和 model 都匹配时，Host 才会把该节点任务交给 Worker。没有兼容 Worker 时任务保持排队，不会被不兼容的机器领取。
 
@@ -138,13 +138,18 @@ Worker Service 启动时在状态卷生成（或复用）`/var/lib/agent-legion-
 
 ```bash
 docker compose -f deploy/compose.worker.yaml exec worker workerctl status
+docker compose -f deploy/compose.worker.yaml exec worker workerctl claim status
+docker compose -f deploy/compose.worker.yaml exec worker workerctl claim enable
+docker compose -f deploy/compose.worker.yaml exec worker workerctl claim disable
+docker compose -f deploy/compose.worker.yaml exec worker workerctl capacity
+docker compose -f deploy/compose.worker.yaml exec worker workerctl capacity 8
 docker compose -f deploy/compose.worker.yaml exec worker workerctl config
 docker compose -f deploy/compose.worker.yaml exec worker workerctl logs --limit 100
 docker compose -f deploy/compose.worker.yaml exec worker workerctl --json logs --limit 100
 docker compose -f deploy/compose.worker.yaml exec worker workerctl restart
 ```
 
-`--json logs` 输出机器可解析的 JSON；读操作超时 5 秒，`configure`/`restart` 等变更操作超时 60 秒（服务端停止预算约 25 秒）。
+`claim enable/disable` 和 `capacity <数量>` 都是热更新，不会重启执行进程，也不会中断已领取任务。所有查询命令均可配合全局 `--json` 输出机器可解析的 JSON；读操作超时 5 秒，`configure`/`restart` 等变更操作超时 60 秒（服务端停止预算约 25 秒）。
 
 也可以直接访问仅限本机的查询接口（先取出 token）：
 
@@ -164,8 +169,13 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
   --name 'Home Mac mini' \
   --runtime pi \
   --max-concurrency 10 \
+  --capability subtitle_review \
+  --model openai/gpt-5.2 \
+  --register-token-file /run/secrets/agent_worker_register_token \
   --label os=linux --label arch=arm64
 ```
+
+`--register-token-file` 在 Worker 本机读取 Host 签发的 token，再通过 loopback 控制 API 写入权限为 0600 的状态文件；不要把 token 明文放进命令参数或 shell 历史。对于树莓派、云服务器等无显示器设备，上述 `workerctl` 命令覆盖初始化、状态检查、能力和模型声明、动态扩容、claim 开关、日志与进程重启，不依赖浏览器。
 
 ### 崩溃重启与失败状态
 

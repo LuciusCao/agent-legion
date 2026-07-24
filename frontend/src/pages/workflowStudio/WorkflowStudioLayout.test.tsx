@@ -29,6 +29,7 @@ const baseProps = {
   activeRevision: revision,
   revisions: [revision],
   executorCatalog: [],
+  agentCatalog: [],
   definitionYaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
   setDefinitionYaml: vi.fn(),
   selectedNodeKey: null,

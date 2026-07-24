@@ -165,6 +165,6 @@ frontend/src/
 - 前端界面语言为中文。
 - Workspace 列表展示 job 统计、最近活动和快速操作。
 - Job Detail 包含 DAG 图、Stepper、产物（Artifact）面板、日志、视频播放器（针对视频 Job）。
-- Workflow Studio 支持可视化编辑 workflow 节点、边与 intake modes，并与修订历史集成。
+- Workflow Studio 支持可视化编辑 workflow 节点、边与 intake modes，并与修订历史集成；Agent 节点按 capability 读取 Agent Catalog，显示 skill/tools 和全局运行默认值，并可编辑 provider/model/thinking/prompt 覆盖。
 - Token Usage 页面展示 workspace / job / run 级别的 token 用量与成本。
 - 全局 `Toast` 组件用于操作反馈。

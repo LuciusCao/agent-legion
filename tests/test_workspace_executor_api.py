@@ -2,6 +2,10 @@ def test_list_executors_endpoint(client):
     response = client.get("/api/executors")
     assert response.status_code == 200
     data = response.json()
+    agent = next(item for item in data["agents"] if item["id"] == "video-content-review-v1")
+    assert agent["capability"] == "review_video_content"
+    assert agent["provider"] == "gateway"
+    assert agent["model"] == "your-model-b"
     executor = data["executors"][0]
     assert executor["id"] == "local-default"
     assert executor["kind"] == "local"

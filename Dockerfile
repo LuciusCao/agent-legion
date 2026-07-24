@@ -41,6 +41,7 @@ COPY server/app/services/__init__.py /app/server/app/services/__init__.py
 COPY server/app/services/pi_event_compression.py /app/server/app/services/pi_event_compression.py
 COPY config/agent-worker.example.yaml /app/config/agent-worker.example.yaml
 COPY worker/client.py /usr/local/bin/agent_worker_client.py
+COPY worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py
 COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8787

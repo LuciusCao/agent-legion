@@ -1166,6 +1166,36 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /** AgentDefinitionResponse */
+    AgentDefinitionResponse: {
+      /** Capability */
+      capability: string
+      /** Id */
+      id: string
+      /** Model */
+      model?: string | null
+      /** Provider */
+      provider?: string | null
+      /** Requires Labels */
+      requires_labels?: {
+        [key: string]: string
+      }
+      /**
+       * Runtime
+       * @enum {string}
+       */
+      runtime: 'pi' | 'openclaw'
+      /** Skill */
+      skill: string
+      /** Skill Commit */
+      skill_commit?: string | null
+      /** Skill Ref */
+      skill_ref?: string | null
+      /** Thinking */
+      thinking?: string | null
+      /** Tools */
+      tools?: string[]
+    }
     /** AgentRegisterTokenCreatedResponse */
     AgentRegisterTokenCreatedResponse: {
       /** Label */
@@ -1412,6 +1442,8 @@ export interface components {
     }
     /** ExecutorCatalogResponse */
     ExecutorCatalogResponse: {
+      /** Agents */
+      agents?: components['schemas']['AgentDefinitionResponse'][]
       /** Executors */
       executors: components['schemas']['ExecutorDefinitionResponse'][]
     }
