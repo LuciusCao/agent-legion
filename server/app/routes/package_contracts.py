@@ -22,3 +22,9 @@ class WorkspacePackageResponse(BaseModel):
     failed_count: int
     package_filename: str | None = None
     download_url: str | None = None
+
+
+class WorkspacePackageStatusResetResponse(BaseModel):
+    results: list[WorkspacePackageResultResponse]
+    succeeded_count: int
+    failed_count: int

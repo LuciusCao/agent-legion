@@ -18,6 +18,7 @@ export type JobDetailActionsProps = {
   onRunTo?: (targetKey: string, startKey?: string) => void | Promise<void>
   onContinue?: () => void | Promise<void>
   onPackage: () => void | Promise<void>
+  onClearPacked?: () => void | Promise<void>
   onDelete: () => void | Promise<void>
   onOpenArtifacts: () => void
   onUpgradeWorkflow?: () => void | Promise<void>
@@ -32,6 +33,7 @@ export function JobDetailActions({
   onRunTo,
   onContinue,
   onPackage,
+  onClearPacked,
   onDelete,
   onOpenArtifacts,
   onUpgradeWorkflow,
@@ -104,6 +106,16 @@ export function JobDetailActions({
         >
           <MaterialIcon name="inventory_2" />
         </IconButton>
+        {onClearPacked && (
+          <IconButton
+            aria-label="清空打包状态"
+            title="清空打包状态"
+            disabled={loading || !jobs.some((job) => job.packed)}
+            onClick={onClearPacked}
+          >
+            <MaterialIcon name="unarchive" />
+          </IconButton>
+        )}
         <IconButton
           aria-label="删除"
           title="删除"

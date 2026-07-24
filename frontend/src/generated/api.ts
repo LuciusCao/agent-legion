@@ -808,6 +808,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/clear-packed': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Clear Workspace Jobs Packed Status */
+    post: operations['clear_workspace_jobs_packed_status_api_workspaces__workspace_id__jobs_clear_packed_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/package': {
     parameters: {
       query?: never
@@ -2676,6 +2693,15 @@ export interface components {
        */
       status: 'succeeded' | 'failed'
     }
+    /** WorkspacePackageStatusResetResponse */
+    WorkspacePackageStatusResetResponse: {
+      /** Failed Count */
+      failed_count: number
+      /** Results */
+      results: components['schemas']['WorkspacePackageResultResponse'][]
+      /** Succeeded Count */
+      succeeded_count: number
+    }
     /** WorkspacePackageUpdate */
     WorkspacePackageUpdate: {
       /** Locked */
@@ -4386,6 +4412,41 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  clear_workspace_jobs_packed_status_api_workspaces__workspace_id__jobs_clear_packed_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkspacePackageRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspacePackageStatusResetResponse']
         }
       }
       /** @description Validation Error */

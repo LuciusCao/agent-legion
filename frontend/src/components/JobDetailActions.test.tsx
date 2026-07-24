@@ -62,6 +62,29 @@ describe('JobDetailActions', () => {
     expect(screen.getByLabelText('产物文件')).toBeInTheDocument()
   })
 
+  it('clears packed status only for a packed job', async () => {
+    const onClearPacked = vi.fn()
+    renderActions({
+      jobs: [makeJob({ id: 'j1', status: 'completed', packed: 1 })],
+      onClearPacked,
+    })
+
+    await act(async () => {
+      screen.getByLabelText('清空打包状态').click()
+    })
+
+    expect(onClearPacked).toHaveBeenCalledTimes(1)
+  })
+
+  it('disables clearing packed status for an unpacked job', () => {
+    renderActions({
+      jobs: [makeJob({ id: 'j1', status: 'completed', packed: 0 })],
+      onClearPacked: vi.fn(),
+    })
+
+    expect(screen.getByLabelText('清空打包状态')).toHaveAttribute('disabled')
+  })
+
   it('calls onUpgradeWorkflow for an outdated job', async () => {
     const onUpgradeWorkflow = vi.fn()
     renderActions({

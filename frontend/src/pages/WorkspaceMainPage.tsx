@@ -35,6 +35,7 @@ export default function WorkspaceMainPage() {
   const clearSelection = useJobStore((state) => state.clearSelection)
   const batchDelete = useJobStore((state) => state.batchDelete)
   const batchPackage = useJobStore((state) => state.batchPackage)
+  const batchClearPacked = useJobStore((state) => state.batchClearPacked)
   const batchRerun = useJobStore((state) => state.batchRerun)
   const batchRunTo = useJobStore((state) => state.batchRunTo)
   const batchUpgradeWorkflow = useJobStore(
@@ -45,6 +46,9 @@ export default function WorkspaceMainPage() {
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
   const batchRerunLoading = useJobStore((state) => state.batchRerunLoading)
   const batchPackageLoading = useJobStore((state) => state.batchPackageLoading)
+  const batchClearPackedLoading = useJobStore(
+    (state) => state.batchClearPackedLoading
+  )
   const batchDeleteLoading = useJobStore((state) => state.batchDeleteLoading)
   const batchRunToLoading = useJobStore((state) => state.batchRunToLoading)
   const batchUpgradeWorkflowLoading = useJobStore(
@@ -131,6 +135,11 @@ export default function WorkspaceMainPage() {
     await batchUpgradeWorkflow(workspaceId, jobIds)
   }
 
+  const handleClearPacked = async () => {
+    if (!workspaceId) return
+    await batchClearPacked(workspaceId)
+  }
+
   const handleDeleteConfirm = async () => {
     if (!workspaceId) return
     await batchDelete(workspaceId)
@@ -172,6 +181,7 @@ export default function WorkspaceMainPage() {
             loading={
               batchRerunLoading ||
               batchPackageLoading ||
+              batchClearPackedLoading ||
               batchDeleteLoading ||
               batchRunToLoading ||
               batchUpgradeWorkflowLoading
@@ -181,6 +191,7 @@ export default function WorkspaceMainPage() {
             onRerun={handleRerun}
             onRunTo={handleRunTo}
             onPackage={handlePackage}
+            onClearPacked={handleClearPacked}
             onDelete={() => setDeleteDialogOpen(true)}
             onUpgradeWorkflow={handleUpgradeWorkflow}
           />

@@ -13,6 +13,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   ...initialJobDataState,
   batchDeleteLoading: false,
   batchPackageLoading: false,
+  batchClearPackedLoading: false,
   batchRerunLoading: false,
   batchRunToLoading: false,
   continueLoading: false,
