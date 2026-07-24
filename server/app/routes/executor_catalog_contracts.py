@@ -2,6 +2,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from server.app.routes.agent_catalog_contracts import AgentDefinitionResponse
+
 
 class ExecutorCapabilityResponse(BaseModel):
     name: str
@@ -25,3 +27,4 @@ class ExecutorDefinitionResponse(BaseModel):
 
 class ExecutorCatalogResponse(BaseModel):
     executors: list[ExecutorDefinitionResponse]
+    agents: list[AgentDefinitionResponse] = Field(default_factory=list)

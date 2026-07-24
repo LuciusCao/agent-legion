@@ -1,4 +1,7 @@
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type {
+  AgentDefinition,
+  ExecutorDefinition,
+} from '../../types/executorTypes'
 import type { WorkflowDefinitionRecord } from '../../types'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import styles from './WorkflowStudioRightPanel.module.css'
@@ -6,6 +9,7 @@ import styles from './WorkflowStudioRightPanel.module.css'
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   executorCatalog: ExecutorDefinition[]
+  agentCatalog: AgentDefinition[]
   selectedNodeKey: string | null
   readOnly: boolean
   definitionYaml: string
@@ -20,6 +24,7 @@ export function WorkflowStudioRightPanel(props: Props) {
         <WorkflowNodeInspector
           workflow={props.workflow}
           executorCatalog={props.executorCatalog}
+          agentCatalog={props.agentCatalog}
           selectedNodeKey={props.selectedNodeKey}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}

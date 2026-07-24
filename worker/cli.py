@@ -5,23 +5,14 @@ from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 from typing import Any
 
 try:
+    from agent_worker_cli_args import build_parser, configure_payload
     from agent_worker_client import MUTATE_TIMEOUT, LocalClient, resolve_control_token
 except ModuleNotFoundError:  # 作为 worker 包的一部分被导入时（如测试、python -m worker.cli）
+    from worker.cli_args import build_parser, configure_payload
     from worker.client import MUTATE_TIMEOUT, LocalClient, resolve_control_token
-
-
-def _labels(values: list[str]) -> dict[str, str]:
-    labels: dict[str, str] = {}
-    for value in values:
-        key, separator, label_value = value.partition("=")
-        if not separator or not key:
-            raise ValueError(f"标签必须使用 key=value 格式: {value!r}")
-        labels[key] = label_value
-    return labels
 
 
 def _print_status(status: dict[str, Any]) -> None:
@@ -44,47 +35,19 @@ def _print_status(status: dict[str, Any]) -> None:
         print(f"连接错误: {error}")
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="workerctl", description="管理本机 Agent Worker")
-    parser.add_argument("--url", default="http://127.0.0.1:8787")
-    parser.add_argument("--json", action="store_true", dest="as_json")
-    parser.add_argument("--token", help="控制令牌，默认读 state dir 或 AGENT_WORKER_CONTROL_TOKEN")
-    parser.add_argument("--state-dir", type=Path, default=Path("data/agent-worker-service"))
-    commands = parser.add_subparsers(dest="command", required=True)
-    commands.add_parser("status", help="查看进程、Host 和登记状态")
-    commands.add_parser("config", help="查看可编辑配置")
-    commands.add_parser("restart", help="重启 Worker 执行进程")
-    logs = commands.add_parser("logs", help="查看最近日志")
-    logs.add_argument("--limit", type=int, default=100)
-    configure = commands.add_parser("configure", help="保存并应用配置（仅更新显式传入的字段）")
-    configure.add_argument("--host-url")
-    configure.add_argument("--worker-id")
-    configure.add_argument("--name")
-    configure.add_argument("--runtime", action="append", choices=["pi", "openclaw"])
-    configure.add_argument("--max-concurrency", type=int)
-    configure.add_argument("--claim-enabled", action=argparse.BooleanOptionalAction, default=None)
-    configure.add_argument("--capability", action="append")
-    configure.add_argument("--label", action="append", default=[])
-    return parser
+def _print_value(
+    args: argparse.Namespace, key: str, value: Any, label: str, display: Any | None = None
+) -> None:
+    output = value if display is None else display
+    print(
+        json.dumps({key: value}, ensure_ascii=False, indent=2)
+        if args.as_json
+        else f"{label}: {output}"
+    )
 
 
-def _configure_payload(args: argparse.Namespace) -> dict[str, Any]:
-    payload: dict[str, Any] = {}
-    for argument, field in (
-        ("host_url", "host_url"),
-        ("worker_id", "worker_id"),
-        ("name", "name"),
-        ("runtime", "runtimes"),
-        ("max_concurrency", "max_concurrency"),
-        ("claim_enabled", "claim_enabled"),
-        ("capability", "capabilities"),
-    ):
-        value = getattr(args, argument)
-        if value is not None:
-            payload[field] = value
-    if args.label:
-        payload["labels"] = _labels(args.label)
-    return payload
+def _update(client: LocalClient, payload: dict[str, Any]) -> dict[str, Any]:
+    return client.request("PUT", "/api/config", payload, timeout=MUTATE_TIMEOUT)
 
 
 def main() -> int:
@@ -112,10 +75,22 @@ def main() -> int:
                 print(json.dumps(result, ensure_ascii=False, indent=2))
             else:
                 print("\n".join(result["lines"]))
+        elif args.command == "claim":
+            if args.action == "status":
+                enabled = bool(client.request("GET", "/api/status").get("claim_enabled"))
+            else:
+                enabled = args.action == "enable"
+                _update(client, {"claim_enabled": enabled})
+            _print_value(args, "claim_enabled", enabled, "任务领取", "开启" if enabled else "关闭")
+        elif args.command == "capacity":
+            if args.value is None:
+                capacity = client.request("GET", "/api/status").get("max_concurrency")
+            else:
+                capacity = args.value
+                _update(client, {"max_concurrency": capacity})
+            _print_value(args, "max_concurrency", capacity, "动态容量")
         else:
-            result = client.request(
-                "PUT", "/api/config", _configure_payload(args), timeout=MUTATE_TIMEOUT
-            )
+            result = _update(client, configure_payload(args))
             print(
                 json.dumps(result, ensure_ascii=False, indent=2)
                 if args.as_json

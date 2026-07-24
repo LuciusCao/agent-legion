@@ -1,6 +1,9 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type {
+  AgentDefinition,
+  ExecutorDefinition,
+} from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
@@ -27,29 +30,28 @@ const executorCatalog: ExecutorDefinition[] = [
       },
     ],
   },
+]
+
+const agentCatalog: AgentDefinition[] = [
   {
-    id: 'pi',
-    kind: 'pi',
-    global_capacity: 12,
-    capabilities: ['generate_key_info'],
-    capability_details: [
-      {
-        name: 'generate_key_info',
-        skill: 'question_comprehension_info/generate_key_info',
-        tools: ['read', 'write', 'bash'],
-        provider: 'deepseek',
-        model: 'your-model-b',
-        thinking: 'low',
-        skill_ref: 'v1.3.8',
-        skill_commit: '5c5eae72064abde37bfc4b07a4b2f7e9637c473d',
-      },
-    ],
+    id: 'question-key-info-v1',
+    runtime: 'pi',
+    capability: 'generate_key_info',
+    skill: 'question_comprehension_info/generate_key_info',
+    tools: ['read', 'write', 'bash'],
+    requires_labels: {},
+    provider: 'deepseek',
+    model: 'your-model-b',
+    thinking: 'low',
+    skill_ref: 'v1.3.8',
+    skill_commit: '5c5eae72064abde37bfc4b07a4b2f7e9637c473d',
   },
 ]
 
 const editorProps = {
   definitionYaml: `nodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
   setDefinitionYaml: () => {},
+  agentCatalog,
 }
 
 describe('WorkflowNodeExecutionSection', () => {
@@ -62,7 +64,8 @@ describe('WorkflowNodeExecutionSection', () => {
       />
     )
 
-    expect(screen.getAllByText('pi')).toHaveLength(1)
+    expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
+    expect(screen.getByText('pi')).toBeInTheDocument()
     expect(
       screen.getByText('question_comprehension_info/generate_key_info')
     ).toBeInTheDocument()
@@ -84,6 +87,7 @@ describe('WorkflowNodeExecutionSection', () => {
       <WorkflowNodeExecutionSection
         node={node}
         executorCatalog={executorCatalog}
+        agentCatalog={agentCatalog}
         definitionYaml={editorProps.definitionYaml}
         setDefinitionYaml={(value) => {
           nextYaml = value
@@ -114,6 +118,7 @@ describe('WorkflowNodeExecutionSection', () => {
       <WorkflowNodeExecutionSection
         node={nodeWithProvider}
         executorCatalog={executorCatalog}
+        agentCatalog={agentCatalog}
         definitionYaml={initialYaml}
         setDefinitionYaml={(value) => {
           nextYaml = value
@@ -130,6 +135,7 @@ describe('WorkflowNodeExecutionSection', () => {
       <WorkflowNodeExecutionSection
         node={nodeWithProvider}
         executorCatalog={executorCatalog}
+        agentCatalog={agentCatalog}
         definitionYaml={nextYaml}
         setDefinitionYaml={(value) => {
           nextYaml = value

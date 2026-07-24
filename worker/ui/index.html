@@ -15,7 +15,7 @@
           <p class="subtitle">配置本机执行节点，并确认它实际连接到了哪一台 Host。</p>
         </div>
         <div class="header-actions">
-          <button id="toggle-claiming" class="secondary">暂停领取</button>
+          <button id="toggle-claiming" class="secondary paused">开始领取</button>
           <button id="restart" class="secondary">重启 Worker</button>
         </div>
       </header>
@@ -30,7 +30,7 @@
         </div>
         <dl>
           <div><dt>执行进程</dt><dd id="process-state">—</dd></div>
-          <div><dt>任务领取</dt><dd id="claim-state">—</dd></div>
+          <div><dt>任务领取</dt><dd id="claim-state">已暂停</dd></div>
           <div><dt>动态容量</dt><dd id="capacity-state">—</dd></div>
           <div><dt>Host</dt><dd id="host-state">—</dd></div>
           <div><dt>Host 登记</dt><dd id="registered-state">—</dd></div>

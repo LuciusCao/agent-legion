@@ -7,8 +7,9 @@ worker_id: home-mac-mini-1
 name: Home Mac mini
 runtimes: [pi]
 max_concurrency: 10
+# Worker 执行进程每次启动/重启都先关闭 claim；需通过控制台或 workerctl 主动开启。
 # 关闭后不再 claim 新任务，但不会中断已领取的任务。
-claim_enabled: true
+claim_enabled: false
 # 必须与 workflow 节点现有的 capability 完全匹配。
 capabilities: [video_generate, subtitle_review]
 # 只有 provider 和 model 都匹配时才会领取任务。
