@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
+from server.app import agent_claim_compatibility
+
 if TYPE_CHECKING:
     from server.app.agent_broker import AgentExecutionBroker
 
@@ -50,6 +52,7 @@ def claim_in_transaction(
     if worker is None or worker["revoked_at"] is not None:
         raise ValueError("unknown or revoked Agent Worker")
     runtimes = set(json.loads(worker["runtimes_json"]))
+    capabilities, models = agent_claim_compatibility.worker_declarations(worker)
     labels = json.loads(worker["labels_json"])
     # Workspace admission scope from the server-side registration snapshot
     # (EXEC-WORKERACL-001): [] means all workspaces; a non-empty list
@@ -72,13 +75,16 @@ def claim_in_transaction(
     candidates = conn.execute(
         """
         select * from (
-          select r.*, d.runtime, d.definition_json,
+          select r.*, d.runtime, d.capability, d.definition_json,
+                 wr.definition_json as revision_definition_json,
                  row_number() over (
                    partition by r.workspace_id
                    order by r.queued_at, r.execution_id
                  ) as workspace_rank
           from agent_execution_requests r
           join agent_definitions d on d.agent_id=r.agent_id and d.definition_hash=r.agent_definition_hash and d.enabled=1
+          join jobs j on j.id=r.job_id
+          left join workflow_revisions wr on wr.id=j.workflow_revision_id
           left join workspace_agent_capacities w on w.workspace_id=r.workspace_id
           where r.state='queued'
             and (
@@ -107,9 +113,13 @@ def claim_in_transaction(
         if pause_cache[selected_workspace]:
             # Paused workspace: keep the request queued for resume.
             continue
+        manifest = agent_claim_compatibility.live_claim_manifest(selected)
         if (
             (allowed_workspaces and selected_workspace not in allowed_workspaces)
             or selected["runtime"] not in runtimes
+            or not agent_claim_compatibility.worker_can_run(
+                selected, manifest, capabilities, models
+            )
             or not _labels_satisfy(
                 labels, json.loads(selected["definition_json"]).get("requires_labels", {})
             )
@@ -170,7 +180,6 @@ def claim_in_transaction(
             cancel_request(conn, selected["execution_id"])
             continue
 
-        manifest = json.loads(selected["manifest_json"])
         log_path = str(manifest.get("log_path", ""))
         run = conn.execute(
             """

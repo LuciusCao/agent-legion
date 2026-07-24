@@ -19,6 +19,8 @@ const globalWorker: WorkerSummary = {
   worker_id: 'company-mac-1',
   name: 'Company Mac',
   runtimes: ['pi'],
+  capabilities: ['review_subtitles'],
+  models: [{ provider: 'openai', model: 'gpt-5.2' }],
   max_concurrency: 10,
   labels: { os: 'macos' },
   protocol_version: 1,

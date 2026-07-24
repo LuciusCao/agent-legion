@@ -82,6 +82,11 @@ class AgentDispatchService:
                     "thinking": node.execution.thinking or pi.thinking,
                     "timeout_seconds": pi.timeout_seconds,
                 },
+                "pi_defaults": {
+                    "provider": pi.provider,
+                    "model": pi.model,
+                    "thinking": pi.thinking,
+                },
             }
             context = ExecutionContext(
                 execution_id=execution_id,

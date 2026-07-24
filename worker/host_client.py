@@ -49,6 +49,8 @@ class Client:
             "worker_id": config["worker_id"],
             "name": config.get("name", config["worker_id"]),
             "runtimes": config["runtimes"],
+            "capabilities": config.get("capabilities", []),
+            "models": config.get("models", []),
             "max_concurrency": config["max_concurrency"],
             "labels": config.get("labels", {}),
             "protocol_version": PROTOCOL_VERSION,

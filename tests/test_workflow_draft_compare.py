@@ -1,3 +1,4 @@
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,7 @@ from server.app.main import create_app
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import load_workflow_definition
+from server.app.workflows.schema import WorkflowNodeExecution
 
 
 @pytest.fixture
@@ -41,6 +43,7 @@ def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
         result = _compare(client, workspace_id, yaml_text)
 
     assert result["valid"] is True
+    assert result["creates_revision"] is False
     assert result["summary"]["risk_level"] == "none"
     assert result["summary"]["node_changes"] == []
     assert result["summary"]["edge_changes"] == []
@@ -68,11 +71,32 @@ def test_compare_node_added_returns_info_change(app_with_workspace):
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is True
+    assert result["creates_revision"] is True
     change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "extra_node")
     assert change["type"] == "added"
     assert change["risk"] == "info"
     assert change["label"] == "额外节点"
     assert any(flag["code"] == "node_added" for flag in result["summary"]["risk_flags"])
+
+
+def test_compare_execution_only_change_does_not_create_revision(app_with_workspace):
+    app, workspace_id = app_with_workspace
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    node = definition.nodes["fetch_questions"]
+    definition.nodes["fetch_questions"] = replace(
+        node,
+        execution=WorkflowNodeExecution(provider="openai", model="gpt-5.2"),
+    )
+
+    with TestClient(app) as client:
+        result = _compare(client, workspace_id, definition_to_yaml(definition))
+
+    assert result["valid"] is True
+    assert result["creates_revision"] is False
+    change = next(
+        c for c in result["summary"]["node_changes"] if c["node_key"] == "fetch_questions"
+    )
+    assert change["fields"] == ["execution"]
 
 
 def test_compare_node_removed_returns_breaking_change(app_with_workspace):

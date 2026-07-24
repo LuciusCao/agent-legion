@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from server.app.agent_worker_declarations import normalize_labels, normalize_worker_declarations
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 
@@ -20,34 +21,11 @@ from server.app.db.transaction import read_connection, write_transaction
 # "<worker_id>.<secret>", so '.' must stay excluded.
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _MAX_NAME_LENGTH = 128
-_MAX_LABELS = 32
-_MAX_LABEL_KEY_LENGTH = 64
-_MAX_LABEL_VALUE_LENGTH = 256
 _MAX_CONCURRENCY = 1024
 _MAX_TOKEN_LABEL_LENGTH = 128
 # A Worker is "online" while its last authenticated call (claim poll every few
 # seconds, or an execution heartbeat) is fresher than this threshold.
 _ONLINE_THRESHOLD_SECONDS = 30
-
-
-def _validate_labels(labels: Mapping[str, Any]) -> dict[str, str]:
-    if len(labels) > _MAX_LABELS:
-        raise ValueError(f"worker labels are capped at {_MAX_LABELS} entries")
-    normalized: dict[str, str] = {}
-    for key, value in labels.items():
-        if not isinstance(key, str) or not key:
-            raise ValueError("worker label keys must be non-empty strings")
-        if len(key) > _MAX_LABEL_KEY_LENGTH:
-            raise ValueError(
-                f"worker label key {key[:16]!r}... exceeds {_MAX_LABEL_KEY_LENGTH} chars"
-            )
-        if not isinstance(value, (str, int, float, bool)):
-            raise ValueError(f"worker label {key!r} must have a scalar value")
-        text = str(value)
-        if len(text) > _MAX_LABEL_VALUE_LENGTH:
-            raise ValueError(f"worker label {key!r} value exceeds {_MAX_LABEL_VALUE_LENGTH} chars")
-        normalized[key] = text
-    return normalized
 
 
 class AgentWorkerRegistry:
@@ -60,6 +38,8 @@ class AgentWorkerRegistry:
         worker_id: str,
         name: str,
         runtimes: list[str],
+        capabilities: Sequence[str] | None = None,
+        models: Sequence[Mapping[str, Any]] | None = None,
         max_concurrency: int,
         labels: Mapping[str, Any] | None = None,
         protocol_version: int = 1,
@@ -79,7 +59,12 @@ class AgentWorkerRegistry:
             runtime not in {"pi", "openclaw"} for runtime in normalized_runtimes
         ):
             raise ValueError("runtimes must contain pi and/or openclaw")
-        normalized_labels = _validate_labels(labels or {})
+        normalized_labels = normalize_labels(labels or {})
+        # None is kept as an internal compatibility mode for older direct
+        # registry callers; the HTTP contract always supplies explicit lists.
+        normalized_capabilities, normalized_models = normalize_worker_declarations(
+            capabilities, models
+        )
         # The workspace scope is ALWAYS resolved server-side from the presented
         # registration credential (route layer), never from Worker fields:
         # global register token -> [] (all workspaces, the pre-v7 behavior);
@@ -101,13 +86,16 @@ class AgentWorkerRegistry:
             conn.execute(
                 """
                 insert into agent_workers(
-                  worker_id, name, runtimes_json, max_concurrency, labels_json,
+                  worker_id, name, runtimes_json, capabilities_json, models_json,
+                  max_concurrency, labels_json,
                   protocol_version, token_hash, allowed_workspaces_json,
                   registered_at, last_seen_at, revoked_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
+                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
                 on conflict(worker_id) do update set
                   name=excluded.name,
                   runtimes_json=excluded.runtimes_json,
+                  capabilities_json=excluded.capabilities_json,
+                  models_json=excluded.models_json,
                   max_concurrency=excluded.max_concurrency,
                   labels_json=excluded.labels_json,
                   protocol_version=excluded.protocol_version,
@@ -120,6 +108,8 @@ class AgentWorkerRegistry:
                     worker_id,
                     name,
                     json.dumps(normalized_runtimes),
+                    json.dumps(normalized_capabilities),
+                    json.dumps(normalized_models, sort_keys=True),
                     max_concurrency,
                     json.dumps(normalized_labels, sort_keys=True),
                     protocol_version,
@@ -253,6 +243,8 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "worker_id": row["worker_id"],
         "name": row["name"],
         "runtimes": json.loads(row["runtimes_json"]),
+        "capabilities": json.loads(row["capabilities_json"] or "[]"),
+        "models": json.loads(row["models_json"] or "[]"),
         "max_concurrency": int(row["max_concurrency"]),
         "labels": json.loads(row["labels_json"]),
         "protocol_version": int(row["protocol_version"]),

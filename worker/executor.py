@@ -21,7 +21,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-import yaml
+from yaml import YAMLError
 
 _PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(_PROJECT_ROOT) not in sys.path:
@@ -29,6 +29,8 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from server.app.services.pi_event_compression import compress_pi_events
 from server.app.workflows.pi_protocol import detect_model_error
+from worker import runtime_controls
+from worker.claim_manifest import apply_live_manifest
 from worker.cleanup import (
     SWEEP_INTERVAL_SECONDS,
     clean_work_root,
@@ -38,6 +40,7 @@ from worker.host_client import Client, WorkerAuthError
 from worker.status import ExecutionStatusReporter
 
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
+load_claim_controls = runtime_controls.load_claim_controls
 
 
 def safe_extract(archive: Path, destination: Path) -> dict[str, Any]:
@@ -167,7 +170,7 @@ def run_execution(
     try:
         status.set_phase(execution_id, "downloading")
         client.download(str(claim["bundle_url"]), bundle)
-        manifest = safe_extract(bundle, extracted)
+        manifest = apply_live_manifest(safe_extract(bundle, extracted), claim)
         for name, ref in manifest.get("input_artifacts", {}).items():
             digest = str(ref).split(":", 1)[-1]
             target = job_dir / PurePosixPath(str(name))
@@ -290,23 +293,16 @@ def run_execution(
     shutil.rmtree(execution_dir, ignore_errors=True)
 
 
-def load_config(path: Path) -> dict[str, Any]:
-    config = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(config, dict):
-        raise ValueError("worker config must be a mapping")
-    return config
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run an Agent Legion Worker")
     parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
     args = parser.parse_args()
-    config = load_config(args.config)
+    config = runtime_controls.load_config(args.config)
     token_file = Path(str(config["register_token_file"]))
     management_token = token_file.read_text(encoding="utf-8").strip()
     client = Client(str(config["host_url"]))
     client.register(config, management_token)
-    max_concurrency = int(config["max_concurrency"])
+    max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
     work_root = Path(str(config.get("work_root", "/var/lib/agent-legion-worker"))).resolve()
     clean_work_root(work_root)
     environment = {str(key): str(value) for key, value in config.get("environment", {}).items()}
@@ -319,8 +315,11 @@ def main() -> int:
     active: set[Future[None]] = set()
     backoff = poll_interval
     status = ExecutionStatusReporter.from_env()
-    pool = ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="agent-execution")
+    pool = ThreadPoolExecutor(
+        runtime_controls.MAX_DYNAMIC_CONCURRENCY, thread_name_prefix="agent-execution"
+    )
     next_sweep = time.monotonic()
+    control_error: str | None = None
     try:
         while not stop.is_set():
             if time.monotonic() >= next_sweep:
@@ -333,7 +332,18 @@ def main() -> int:
                     future.result()
                 except Exception as exc:
                     print(f"Agent execution failed: {exc}", flush=True)
-            available = max_concurrency - len(active)
+            try:
+                max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
+                control_error = None
+            except (OSError, ValueError, YAMLError) as exc:
+                message = str(exc)
+                if message != control_error:
+                    print(
+                        f"Agent dynamic control reload failed; keeping previous values: {message}",
+                        flush=True,
+                    )
+                    control_error = message
+            available = max(0, max_concurrency - len(active)) if claim_enabled else 0
             claimed = False
             try:
                 for _ in range(available):

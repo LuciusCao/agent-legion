@@ -57,6 +57,7 @@ export type RiskFlagGroup = {
 }
 
 export type ChangeSummaryViewModel = {
+  createsRevision: boolean
   riskLevel: ChangeSeverity
   severityLabel: string
   nodeChanges: NodeChangeGroup[]
@@ -175,6 +176,7 @@ export function buildChangeSummary(
 ): ChangeSummaryViewModel {
   if (!response || !response.valid || !response.summary) {
     return {
+      createsRevision: false,
       riskLevel: 'none',
       severityLabel: SEVERITY_META.none.label,
       nodeChanges: [],
@@ -200,6 +202,7 @@ export function buildChangeSummary(
     .sort((a, b) => severityOrder(a.severity, b.severity))
 
   return {
+    createsRevision: response.creates_revision,
     riskLevel: summary.risk_level,
     severityLabel: SEVERITY_META[summary.risk_level].label,
     nodeChanges,

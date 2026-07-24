@@ -37,6 +37,12 @@ function renderStatus(status) {
         ? `等待自动重启（第 ${status.restart_count} 次）`
         : "未运行";
   setText("process-state", processState);
+  setText("claim-state", status.claim_enabled ? "正在领取" : "已暂停");
+  setText("capacity-state", `${status.current_executions?.length || 0} / ${status.max_concurrency ?? "—"}`);
+  const toggle = document.querySelector("#toggle-claiming");
+  toggle.dataset.enabled = String(Boolean(status.claim_enabled));
+  toggle.textContent = status.claim_enabled ? "暂停领取" : "开始领取";
+  toggle.classList.toggle("paused", !status.claim_enabled);
   setText("host-state", status.host_reachable ? "可达" : "不可达");
   setText("registered-state", status.registered ? `${status.host_worker.worker_id} · ${status.host_worker.name}` : "未登记");
   const scope = status.host_worker?.allowed_workspaces;
@@ -49,12 +55,17 @@ function fillForm(config) {
   for (const [key, value] of Object.entries(config)) {
     if (key === "runtimes") {
       form.querySelectorAll('[name="runtimes"]').forEach((input) => { input.checked = value.includes(input.value); });
+    } else if (key === "capabilities") {
+      form.elements.capabilities.value = value.join("\n");
+    } else if (key === "models") {
+      form.elements.models.value = value.map((item) => `${item.provider}/${item.model}`).join("\n");
     } else if (key === "labels") {
       form.elements.labels.value = Object.entries(value).map(([label, item]) => `${label}=${item}`).join("\n");
     } else if (form.elements[key]) {
       form.elements[key].value = value;
     }
   }
+  setText("register-token-state", config.register_token_configured ? "已配置；留空保持不变" : "尚未配置");
 }
 
 export function formatElapsed(started_at, now = Date.now()) {
@@ -119,6 +130,18 @@ export function labelsFromText(text) {
   }));
 }
 
+export function linesFromText(text) {
+  return [...new Set(text.split("\n").map((line) => line.trim()).filter(Boolean))];
+}
+
+export function modelsFromText(text) {
+  return linesFromText(text).map((line) => {
+    const separator = line.indexOf("/");
+    if (separator < 1 || separator === line.length - 1) throw new Error(`模型必须使用 provider/model 格式：${line}`);
+    return { provider: line.slice(0, separator).trim(), model: line.slice(separator + 1).trim() };
+  });
+}
+
 export function numberField(data, key) {
   const raw = data.get(key);
   return raw === null || raw === "" ? NUMBER_DEFAULTS[key] : Number(raw);
@@ -149,19 +172,33 @@ if (hasDom) {
       const payload = {
         host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
         max_concurrency: numberField(data, "max_concurrency"), runtimes: data.getAll("runtimes"),
+        capabilities: linesFromText(data.get("capabilities")), models: modelsFromText(data.get("models")),
         labels: labelsFromText(data.get("labels")), poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
         shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
       };
+      const registerToken = data.get("register_token").trim();
+      if (registerToken) payload.register_token = registerToken;
       const result = await api("/api/config", { method: "PUT", body: JSON.stringify(payload) });
       renderStatus(result.status);
-      setText("save-state", "已保存并生效");
+      form.elements.register_token.value = "";
+      fillForm(result.config);
+      setText("save-state", result.restarted ? "已保存并重启生效" : "已热更新");
       await loadLogs();
     } catch (error) { errorBox.textContent = error.message; setText("save-state", "保存失败"); }
   });
 
   document.querySelector("#restart").addEventListener("click", async () => {
     try { renderStatus(await api("/api/restart", { method: "POST" })); await loadLogs(); } catch (error) { errorBox.textContent = error.message; }
+  });
+  document.querySelector("#toggle-claiming").addEventListener("click", async (event) => {
+    errorBox.textContent = "";
+    const enabled = event.currentTarget.dataset.enabled !== "true";
+    try {
+      const result = await api("/api/config", { method: "PUT", body: JSON.stringify({ claim_enabled: enabled }) });
+      renderStatus(result.status);
+      setText("save-state", enabled ? "已开始领取新任务" : "已暂停领取新任务");
+    } catch (error) { errorBox.textContent = error.message; }
   });
   document.querySelector("#refresh-logs").addEventListener("click", loadLogs);
 

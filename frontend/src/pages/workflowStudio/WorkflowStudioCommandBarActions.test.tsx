@@ -26,3 +26,25 @@ it('uses explicit Chinese labels for historical revision actions', () => {
   expect(backToDraft).toHaveBeenCalledOnce()
   expect(useViewedRevisionAsDraft).toHaveBeenCalledOnce()
 })
+
+it('labels runtime-only changes as a save without a new version', () => {
+  render(
+    <WorkflowStudioCommandBarActions
+      readOnly={false}
+      dirty
+      actionState="idle"
+      canSubmit
+      canPublish
+      createsRevision={false}
+      onValidate={vi.fn()}
+      onPublish={vi.fn()}
+      onReset={vi.fn()}
+      backToDraft={vi.fn()}
+      useViewedRevisionAsDraft={vi.fn()}
+    />
+  )
+
+  expect(
+    screen.getByRole('button', { name: '保存运行配置' })
+  ).toBeInTheDocument()
+})

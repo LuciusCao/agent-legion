@@ -54,6 +54,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     dirty: draft.dirty,
     canSubmit: draft.canSubmit,
     canPublish: actions.canPublish,
+    createsRevision: compare.compareSummary?.createsRevision ?? true,
     validateDraft: actions.validateDraft,
     publishDraft: actions.publishDraft,
     requestPublish: actions.requestPublish,

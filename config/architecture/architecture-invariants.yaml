@@ -254,7 +254,7 @@ invariants:
         gate: ci_extended
 
   - id: CONFIG-WORKER-001
-    statement: "Worker Service keeps registration secrets outside its UI/API, imports legacy YAML into a separate writable control volume, preserves non-public runtime settings on edits, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network)."
+    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network)."
     owner: agent-worker
     risk: high
     evidence:
@@ -263,7 +263,7 @@ invariants:
         gate: quick
 
   - id: EXEC-AGENTCLAIM-001
-    statement: "An Agent Node may enter running only when a compatible Worker atomically claims it under both the Workspace-level Agent capacity (workspace_agent_capacities; a workspace without a row is unlimited) and the Worker machine-wide capacity; queued requests consume neither capacity."
+    statement: "An Agent Node may enter running only when a Worker declaring the same node capability and provider/model pair atomically claims it under both the Workspace-level Agent capacity (workspace_agent_capacities; a workspace without a row is unlimited) and the Worker machine-wide capacity; queued requests consume neither capacity and resolve their revision's latest runtime configuration at claim time."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -278,7 +278,7 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared only by the Agent Catalog; Workers declare only runtimes, labels, protocol version, and machine-wide max_concurrency."
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the Agent Catalog; Workers separately declare the node capabilities and provider/model pairs they can execute, alongside runtimes, labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:

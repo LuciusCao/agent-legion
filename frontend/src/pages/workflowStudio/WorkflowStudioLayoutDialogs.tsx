@@ -10,6 +10,7 @@ export function WorkflowStudioLayoutDialogs(props: StudioLayoutProps) {
         workflowKey={props.workflow?.key ?? null}
         activeRevision={props.revision}
         nextVersion={(props.revision?.version ?? 0) + 1}
+        createsRevision={props.createsRevision}
         definitionHash={props.revision?.definition_hash ?? null}
         summary={props.compareSummary}
         onConfirm={async () => {

@@ -13,6 +13,7 @@ function makeSummaryResponse(
 ): CompareResponse {
   return {
     valid: true,
+    creates_revision: false,
     base_revision: null,
     draft_workflow: null,
     summary: {
@@ -59,6 +60,42 @@ describe('WorkflowPublishReviewDialog', () => {
     expect(screen.getByText(/新 revision v2/)).toBeInTheDocument()
     expect(screen.getByText('demo')).toBeInTheDocument()
     expect(screen.getByText('abcdef12')).toBeInTheDocument()
+  })
+
+  it('explains that runtime-only changes keep the current revision', () => {
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        workflowKey="demo"
+        activeRevision={revision}
+        nextVersion={2}
+        createsRevision={false}
+        definitionHash="abcdef1234567890"
+        summary={buildChangeSummary(
+          makeSummaryResponse({
+            creates_revision: false,
+            summary: {
+              ...makeSummaryResponse().summary!,
+              node_changes: [
+                {
+                  type: 'modified',
+                  node_key: 'generate',
+                  label: '生成',
+                  fields: ['execution'],
+                  risk: 'warning',
+                },
+              ],
+            },
+          })
+        )}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('保存节点运行配置')).toBeInTheDocument()
+    expect(screen.getByText(/不创建新 revision/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '确认保存' })).toBeEnabled()
   })
 
   it('does not call confirm without changes', async () => {

@@ -5,6 +5,7 @@ type Props = {
   workflowKey: string | null
   activeRevision: WorkflowRevisionSummary | null
   nextVersion: number
+  createsRevision?: boolean
   definitionHash: string | null
 }
 
@@ -12,6 +13,7 @@ export function WorkflowPublishReviewDialogMeta({
   workflowKey,
   activeRevision,
   nextVersion,
+  createsRevision = true,
   definitionHash,
 }: Props) {
   return (
@@ -19,8 +21,9 @@ export function WorkflowPublishReviewDialogMeta({
       <div className={styles.metaRow}>
         <span className={styles.metaLabel}>版本</span>
         <span className={styles.metaValue}>
-          当前 active v{activeRevision?.version ?? '-'} → 新 revision v
-          {nextVersion}
+          {createsRevision
+            ? `当前 active v${activeRevision?.version ?? '-'} → 新 revision v${nextVersion}`
+            : `保持 active v${activeRevision?.version ?? '-'}（不创建新 revision）`}
         </span>
       </div>
       <div className={styles.metaRow}>

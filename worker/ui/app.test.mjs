@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, executionLabel, formatElapsed, labelsFromText, numberField } from "./app.js";
+import { NUMBER_DEFAULTS, executionLabel, formatElapsed, labelsFromText, linesFromText, modelsFromText, numberField } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -24,6 +24,18 @@ test("labelsFromText 空输入得到空对象", () => {
 test("labelsFromText 拒绝缺少 = 或 key 为空的行", () => {
   assert.throws(() => labelsFromText("no-separator"), /key=value/);
   assert.throws(() => labelsFromText("=value-only"), /key=value/);
+});
+
+test("linesFromText 去空行并去重", () => {
+  assert.deepEqual(linesFromText("gpu\n\n gpu \nreview"), ["gpu", "review"]);
+});
+
+test("modelsFromText 解析 provider/model 并保留模型路径", () => {
+  assert.deepEqual(modelsFromText("openai/gpt-5\nvertex/google/gemini"), [
+    { provider: "openai", model: "gpt-5" },
+    { provider: "vertex", model: "google/gemini" },
+  ]);
+  assert.throws(() => modelsFromText("missing-model/"), /provider\/model/);
 });
 
 // FormData.get 对缺失键返回 null；用同样语义的桩代替 Map（Map.get 返回 undefined）。

@@ -14,24 +14,34 @@ from typing import Any
 
 import yaml
 
+from worker import worker_declarations
+from worker.registration_token import normalized_registration_token
+from worker.runtime_controls import validate_claim_controls
+
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
+    "claim_enabled",
+    "capabilities",
     "host_url",
     "worker_id",
     "name",
     "runtimes",
     "max_concurrency",
+    "models",
     "labels",
     "poll_interval_seconds",
     "heartbeat_interval_seconds",
     "shutdown_grace_seconds",
 }
 _DEFAULTS: dict[str, Any] = {
+    "claim_enabled": True,
+    "capabilities": [],
     "host_url": "",
     "worker_id": "",
     "name": "",
     "runtimes": ["pi"],
     "max_concurrency": 1,
+    "models": [],
     "labels": {},
     "register_token_file": "/run/secrets/agent_worker_register_token",
     "work_root": "/var/lib/agent-legion-worker",
@@ -72,22 +82,11 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     if not runtimes or any(value not in {"pi", "openclaw"} for value in runtimes):
         raise ValueError("运行时必须至少选择 pi 或 openclaw 之一")
     concurrency = config.get("max_concurrency")
-    if (
-        isinstance(concurrency, bool)
-        or not isinstance(concurrency, int)
-        or not 1 <= concurrency <= 1024
-    ):
-        raise ValueError("最大并发数必须是 1 到 1024 的整数")
-    labels = config.get("labels", {})
-    if not isinstance(labels, dict) or len(labels) > 32:
-        raise ValueError("标签必须是对象且不能超过 32 项")
-    normalized_labels: dict[str, str] = {}
-    for key, value in labels.items():
-        if not isinstance(key, str) or not key or len(key) > 64:
-            raise ValueError("标签名必须是 1 到 64 个字符")
-        if not isinstance(value, (str, int, float, bool)) or len(str(value)) > 256:
-            raise ValueError(f"标签 {key!r} 的值必须是短标量")
-        normalized_labels[key] = str(value)
+    claim_enabled = config.get("claim_enabled")
+    validate_claim_controls(concurrency, claim_enabled)
+    normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
+    capabilities = worker_declarations.normalize_capabilities(config.get("capabilities", []))
+    models = worker_declarations.normalize_models(config.get("models", []))
     for field in (
         "poll_interval_seconds",
         "heartbeat_interval_seconds",
@@ -110,7 +109,10 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "name": name,
         "runtimes": runtimes,
         "max_concurrency": concurrency,
+        "claim_enabled": claim_enabled,
+        "capabilities": capabilities,
         "labels": normalized_labels,
+        "models": models,
     }
 
 
@@ -138,7 +140,9 @@ class WorkerConfigStore:
         raw = yaml.safe_load(self.path.read_text(encoding="utf-8"))
         return validate_config(raw, require_identity=require_identity)
 
-    def update_public(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def update_public(
+        self, payload: dict[str, Any], *, registration_token: str | None = None
+    ) -> dict[str, Any]:
         # 写锁包住整个 read-modify-write，避免并发 PUT 互相覆盖。
         with self._write_lock:
             unknown = set(payload) - _EDITABLE_FIELDS
@@ -146,6 +150,11 @@ class WorkerConfigStore:
                 raise ValueError(f"不支持的配置项: {', '.join(sorted(unknown))}")
             current = self.read(require_identity=False)
             updated = validate_config({**current, **payload})
+            if registration_token is not None:
+                token = normalized_registration_token(registration_token)
+                token_path = self.state_dir / "register_token"
+                self._atomic_write(token_path, token + "\n")
+                updated["register_token_file"] = str(token_path)
             self.write(updated)
             return updated
 

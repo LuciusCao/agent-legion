@@ -31,6 +31,8 @@ class RegisterAgentWorkerRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
     name: str = Field(default="", max_length=128)
     runtimes: list[str] = Field(min_length=1)
+    capabilities: list[str] = Field(default_factory=list)
+    models: list[dict[str, str]] = Field(default_factory=list)
     max_concurrency: int = Field(gt=0, le=1024)
     labels: dict[str, Any] = Field(default_factory=dict)
     protocol_version: int = Field(default=1, ge=1)
@@ -81,6 +83,8 @@ class AgentWorkerSummary(BaseModel):
     worker_id: str
     name: str
     runtimes: list[str]
+    capabilities: list[str]
+    models: list[dict[str, str]]
     max_concurrency: int
     labels: dict[str, str]
     protocol_version: int

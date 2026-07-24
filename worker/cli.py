@@ -29,6 +29,8 @@ def _print_status(status: dict[str, Any]) -> None:
     print(f"Worker: {state}")
     print(f"服务: {status.get('service', 'unknown')}")
     print(f"执行进程: {'运行中' if status.get('worker_running') else '未运行'}")
+    print(f"任务领取: {'开启' if status.get('claim_enabled') else '关闭'}")
+    print(f"动态容量: {status.get('max_concurrency', 'unknown')}")
     print(f"Host 可达: {'是' if status.get('host_reachable') else '否'}")
     if failed := status.get("failed"):
         print(f"故障: {failed}")
@@ -54,12 +56,14 @@ def build_parser() -> argparse.ArgumentParser:
     commands.add_parser("restart", help="重启 Worker 执行进程")
     logs = commands.add_parser("logs", help="查看最近日志")
     logs.add_argument("--limit", type=int, default=100)
-    configure = commands.add_parser("configure", help="保存配置并立即重启（仅更新显式传入的字段）")
+    configure = commands.add_parser("configure", help="保存并应用配置（仅更新显式传入的字段）")
     configure.add_argument("--host-url")
     configure.add_argument("--worker-id")
     configure.add_argument("--name")
     configure.add_argument("--runtime", action="append", choices=["pi", "openclaw"])
     configure.add_argument("--max-concurrency", type=int)
+    configure.add_argument("--claim-enabled", action=argparse.BooleanOptionalAction, default=None)
+    configure.add_argument("--capability", action="append")
     configure.add_argument("--label", action="append", default=[])
     return parser
 
@@ -72,6 +76,8 @@ def _configure_payload(args: argparse.Namespace) -> dict[str, Any]:
         ("name", "name"),
         ("runtime", "runtimes"),
         ("max_concurrency", "max_concurrency"),
+        ("claim_enabled", "claim_enabled"),
+        ("capability", "capabilities"),
     ):
         value = getattr(args, argument)
         if value is not None:

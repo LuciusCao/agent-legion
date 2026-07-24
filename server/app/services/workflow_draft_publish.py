@@ -31,5 +31,5 @@ def publish_workflow_draft(
     )
     if errors:
         return False, errors
-    WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
+    WorkflowRevisionService(job_db).save_workspace_revision(workspace_id, definition)
     return True, []

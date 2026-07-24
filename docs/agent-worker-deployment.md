@@ -2,7 +2,7 @@
 
 Agent Legion 把服务拆成两个角色：Host 负责工作流、数据库与任务调度；Worker Service 负责本机配置、状态查询和运行 Agent。即使同一台公司电脑同时承担两个角色，也运行两个独立服务。
 
-Worker Service 宿主机发布面默认只绑定 `127.0.0.1:8787`（控制台和查询 API）；compose 网络内其它容器可以到达该端口，但除 `GET /api/health` 外所有端点都要求本地 control token 鉴权。首次启动会把现有只读 YAML 导入独立的可写控制卷；此后可以直接在页面中修改配置，不再需要编辑 YAML。注册密钥仍然只通过 Docker secret 提供，页面和 API 都不会读取或返回密钥内容。
+Worker Service 宿主机发布面默认只绑定 `127.0.0.1:8787`（控制台和查询 API）；compose 网络内其它容器可以到达该端口，但除 `GET /api/health` 外所有端点都要求本地 control token 鉴权。首次启动会把现有只读 YAML 导入独立的可写控制卷；此后可以直接在页面中修改配置，不再需要编辑 YAML。注册密钥既可以通过 Docker secret 提供，也可以在本机控制台中填写；页面和 API 只接受写入、不回显明文，托管副本以 `0600` 权限保存在控制卷中。
 
 LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容器通过挂载自己的 Pi 配置访问它。
 
@@ -120,10 +120,15 @@ make stack-logs STACK=worker
 - Worker 执行进程是否运行；
 - 当前配置的 Host 地址以及 Host 是否可达；
 - 当前 `worker_id` 是否已在该 Host 登记、最后在线时间；
+- 是否允许主动 claim 新任务，以及当前运行数 / 动态容量；
 - 注册令牌允许接入的 Workspace 范围；
 - 运行时、并发数、标签和最近日志。
 
-页面保存配置后会原子写入控制卷并重启执行进程，新的配置立即生效。Worker 启动后会向 Host 注册，然后按本机配置的 `max_concurrency` 拉取任务。
+页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和最大并发会热更新。Worker 启动后会向 Host 注册，然后按本机配置的 `max_concurrency` 拉取任务。
+
+Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capability 与 workflow 节点已有的 `capability` 是同一个值，不存在额外的 `required_worker_capabilities` 字段；只有 capability、provider 和 model 都匹配时，Host 才会把该节点任务交给 Worker。没有兼容 Worker 时任务保持排队，不会被不兼容的机器领取。
+
+节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 
 ### 控制面鉴权
 
@@ -185,7 +190,7 @@ curl http://192.0.2.1:8000/api/agent-workers
 
 响应中应同时看到 `company-local-1` 和 `home-mac-mini-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示用全局 token 注册、可承接所有 workspace 的任务；否则列出 scoped token 授权的唯一 workspace。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
 
-并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。
+并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。
 
 ## 7. Tailnet 冒烟验证（上线前必须执行）
 
