@@ -129,6 +129,28 @@ def test_worker_machine_capacity_is_shared_across_nodes(job_db) -> None:
     assert broker.claim("worker-1") is None
 
 
+def test_claim_redeclares_live_worker_capacity(job_db) -> None:
+    """A capacity re-declared on claim updates the Host-side worker record."""
+    _seed_request(job_db, job_id="job-1", node_key="generate-a", limit=20)
+    _seed_request(job_db, job_id="job-2", node_key="generate-b", limit=20)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    token = registry.issue_token(
+        worker_id="worker-1",
+        name="worker",
+        runtimes=["pi"],
+        max_concurrency=1,
+        labels={"arch": "arm64"},
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert broker.claim("worker-1", 3) is not None
+    # Registered capacity was 1; the live re-declaration raised it to 3.
+    assert broker.claim("worker-1", 3) is not None
+    worker = registry.authenticate(token)
+    assert worker is not None
+    assert worker["max_concurrency"] == 3
+
+
 def test_workspace_capacity_is_shared_across_nodes(job_db) -> None:
     """One workspace-level cap governs all agent nodes of that workspace."""
     _seed_request(job_db, job_id="job-a1", node_key="generate-a", limit=1)

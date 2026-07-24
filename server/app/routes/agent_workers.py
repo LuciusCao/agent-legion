@@ -77,6 +77,10 @@ class AgentRegisterTokenRevokeResponse(BaseModel):
 
 class ClaimAgentExecutionRequest(BaseModel):
     worker_id: str = Field(min_length=1, max_length=64)
+    # Live re-declaration of the worker's machine-wide capacity: the Host
+    # records it as the enforced max_concurrency, so dynamic resizes on the
+    # worker take effect without re-registration.
+    max_concurrency: int | None = Field(default=None, gt=0, le=1024)
 
 
 class AgentWorkerSummary(BaseModel):
@@ -308,7 +312,7 @@ def create_agent_workers_router(
     ) -> Response | AgentClaimResponse:
         authorize_worker(request, payload.worker_id)
         try:
-            claimed = broker.claim(payload.worker_id)
+            claimed = broker.claim(payload.worker_id, payload.max_concurrency)
         except ValueError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         if claimed is None:
