@@ -723,6 +723,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/failed-node-runs': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Failed Node Runs */
+    get: operations['list_failed_node_runs_api_workspaces__workspace_id__failed_node_runs_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/job-batches': {
     parameters: {
       query?: never
@@ -836,6 +853,23 @@ export interface paths {
     put?: never
     /** Package Workspace Jobs */
     post: operations['package_workspace_jobs_api_workspaces__workspace_id__jobs_package_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/rerun-by-failure': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Rerun Jobs By Failure Category */
+    post: operations['rerun_jobs_by_failure_category_api_workspaces__workspace_id__jobs_rerun_by_failure_post']
     delete?: never
     options?: never
     head?: never
@@ -1487,6 +1521,30 @@ export interface components {
       /** Executors */
       executors: components['schemas']['ExecutorRuntimeStatus'][]
     }
+    /** FailedNodeRunItem */
+    FailedNodeRunItem: {
+      /** Error Message */
+      error_message: string
+      /** Failure Category */
+      failure_category: string
+      /** Failure Detail */
+      failure_detail: string
+      /** Finished At */
+      finished_at?: string | null
+      /** Job Id */
+      job_id: string
+      /** Node Key */
+      node_key: string
+      /** Node Run Id */
+      node_run_id: number
+      /** Workflow Key */
+      workflow_key: string
+    }
+    /** FailedNodeRunsResponse */
+    FailedNodeRunsResponse: {
+      /** Runs */
+      runs: components['schemas']['FailedNodeRunItem'][]
+    }
     /** GlobalServicesResponse */
     GlobalServicesResponse: {
       cms: components['schemas']['CmsServiceStatus']
@@ -1646,6 +1704,58 @@ export interface components {
       node_key: string
       /** Status */
       status: string
+    }
+    /** JobRerunByFailureRequest */
+    JobRerunByFailureRequest: {
+      /**
+       * Category
+       * @enum {string}
+       */
+      category: 'technical' | 'business' | 'unknown'
+      /** Job Ids */
+      job_ids?: string[]
+      /**
+       * Strategy
+       * @default auto
+       * @enum {string}
+       */
+      strategy: 'auto' | 'rerun_self' | 'rerun_upstream'
+      /** Workflow Key */
+      workflow_key?: string | null
+    }
+    /** JobRerunByFailureResponse */
+    JobRerunByFailureResponse: {
+      /** Results */
+      results: components['schemas']['JobRerunByFailureResultResponse'][]
+    }
+    /** JobRerunByFailureResultResponse */
+    JobRerunByFailureResultResponse: {
+      /** Job Id */
+      job_id: string
+      /** Message */
+      message?: string | null
+      /** Node Key */
+      node_key?: string | null
+      /**
+       * Operation
+       * @enum {string}
+       */
+      operation:
+        | 'rerun'
+        | 'run_to'
+        | 'continue'
+        | 'delete'
+        | 'package'
+        | 'upgrade_workflow'
+      /** Reason Code */
+      reason_code?: string | null
+      /** Rerun Nodes */
+      rerun_nodes?: string[]
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'succeeded' | 'skipped' | 'failed'
     }
     /** JobSummaryResponse */
     JobSummaryResponse: {
@@ -4285,6 +4395,42 @@ export interface operations {
       }
     }
   }
+  list_failed_node_runs_api_workspaces__workspace_id__failed_node_runs_get: {
+    parameters: {
+      query?: {
+        category?: string | null
+        detail?: string | null
+        workflow_key?: string | null
+        since?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['FailedNodeRunsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   create_workspace_job_batch_api_workspaces__workspace_id__job_batches_post: {
     parameters: {
       query?: never
@@ -4516,6 +4662,41 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspacePackageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  rerun_jobs_by_failure_category_api_workspaces__workspace_id__jobs_rerun_by_failure_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['JobRerunByFailureRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobRerunByFailureResponse']
         }
       }
       /** @description Validation Error */

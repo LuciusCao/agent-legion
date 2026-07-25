@@ -39,6 +39,10 @@ class ExecutionResult:
     skill_version: str = ""
     produced_artifacts: tuple[str, ...] = ()
     runner: str = ""
+    # Explicit failure classification; the lease finish path falls back to
+    # rule-based classification when these are empty.
+    failure_category: str = ""
+    failure_detail: str = ""
     # Shard executions return their per-shard output payload here; the lease
     # finish path persists it into node_shards.output_json for reduce fan-in.
     output_json: str = ""

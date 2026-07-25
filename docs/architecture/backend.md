@@ -120,6 +120,8 @@ server/app/
 | GET | `/artifacts/{hash}` | `download_artifact` | routes/artifacts.py |
 | GET | `/health` | `health` | routes/common.py |
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
+| GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
+| POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
@@ -225,6 +227,10 @@ server/app/
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
+| FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
+| FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
+| JobRerunByFailureRequest | BaseModel | category: Literal['technical', 'business', 'unknown'], strategy: Literal['aut... | app/routes/failed_node_run_contracts.py |
+| JobRerunByFailureResponse | BaseModel | results: list[JobRerunByFailureResultResponse] | app/routes/failed_node_run_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
 | WorkspaceCreateRequest | BaseModel | name: str, default_workflow_key: str, default_entity: str, cms_config: dict[s... | app/routes/job_contracts.py |

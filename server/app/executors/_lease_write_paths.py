@@ -166,6 +166,8 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
         update node_runs
         set status='failed',
             error_message='orphaned recovery',
+            failure_category='technical',
+            failure_detail='worker_orphaned',
             finished_at=?
         where job_id=? and status='running'
           and not exists (

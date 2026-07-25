@@ -355,3 +355,11 @@ select workspace_id, concurrency_limit
 from workspace_executor_allocations
 where executor_id = 'pi'
 on conflict(workspace_id) do nothing;
+
+-- Failure classification (schema v9): persisted category/detail for failed
+-- node runs, mirrored onto job_nodes so detail views read them directly.
+alter table node_runs add column if not exists failure_category text not null default '';
+alter table node_runs add column if not exists failure_detail text not null default '';
+alter table job_nodes add column if not exists failure_category text not null default '';
+alter table job_nodes add column if not exists failure_detail text not null default '';
+create index if not exists idx_node_runs_failure on node_runs(status, failure_category);
