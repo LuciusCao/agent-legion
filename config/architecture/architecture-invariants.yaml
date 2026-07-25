@@ -343,6 +343,18 @@ invariants:
         target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_revocable
         gate: full
 
+  - id: DB-FAILURE-001
+    statement: "node_runs/job_nodes failure_category is restricted to {'', 'technical', 'business', 'unknown'} (empty for non-failures); unrecognized failures classify as unknown and never default to technical; orphan recovery assigns (technical, worker_orphaned) directly at its write path."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_failure_classification.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/leases/test_failure_classification_persistence.py
+        gate: quick
+
   - id: EXEC-SHARD-001
     statement: "Shard executions must go through ExecutorLeaseRepository.try_claim with one lease per shard; fan-out paths that bypass the capacity system are forbidden."
     owner: architecture
