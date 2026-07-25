@@ -23,12 +23,14 @@ CATEGORY_UNKNOWN = "unknown"
 FAILURE_CATEGORIES = (CATEGORY_TECHNICAL, CATEGORY_BUSINESS, CATEGORY_UNKNOWN)
 
 _REVIEW_REJECTED_PREFIX = "review_rejected:"
+_SKILL_VALIDATOR_REJECTED = "content review rejected by skill"
 _PI_MODEL_CALL_PREFIX = "Pi model call failed:"
 _MISSING_OUTPUTS_PREFIX = "Missing outputs:"
 _NO_OUTPUT_ARTIFACTS_PREFIX = "Agent Worker did not report output artifacts"
 _UNPACK_FAILURE = "failed to unpack Agent result"
 _PROCESS_EXITED_RE = re.compile(r"^Agent process exited (\d+)$")
 _TERMINATED_WORD_RE = re.compile(r"\bterminated\b")
+_EXECUTOR_NOT_REGISTERED_RE = re.compile(r"^Executor '.+' is not registered$")
 
 TIMEOUT_EXIT_CODE = 124
 
@@ -37,12 +39,23 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     """Map one failed run's exit code and message to (category, detail)."""
     message = error_message or ""
 
-    if message.startswith(_REVIEW_REJECTED_PREFIX):
+    if message.startswith(_REVIEW_REJECTED_PREFIX) or message.startswith(_SKILL_VALIDATOR_REJECTED):
         return CATEGORY_BUSINESS, "review_rejected"
 
     exited = _PROCESS_EXITED_RE.match(message)
     if exit_code == TIMEOUT_EXIT_CODE or (exited is not None and exited.group(1) == "124"):
         return CATEGORY_TECHNICAL, "timeout"
+
+    if "timed out" in message:
+        return CATEGORY_TECHNICAL, "timeout"
+
+    if _EXECUTOR_NOT_REGISTERED_RE.match(message):
+        return CATEGORY_TECHNICAL, "executor_unregistered"
+
+    if message.startswith("worker interrupted before restart") or message.startswith(
+        "lease expired"
+    ):
+        return CATEGORY_TECHNICAL, "worker_orphaned"
 
     # Provider stream interruptions, raw (Worker-reported) or Pi-runner-wrapped.
     if _TERMINATED_WORD_RE.search(message) or "Connection error" in message:
@@ -54,7 +67,12 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     if "CmsClientError" in message or "CMS token" in message:
         return CATEGORY_TECHNICAL, "cms_auth"
 
-    if "[Errno 24]" in message or "Too many open files" in message:
+    if (
+        "[Errno 24]" in message
+        or "Too many open files" in message
+        or "[Errno 28]" in message
+        or "No space left on device" in message
+    ):
         return CATEGORY_TECHNICAL, "resource_limit"
 
     if message.startswith((_MISSING_OUTPUTS_PREFIX, _NO_OUTPUT_ARTIFACTS_PREFIX)):

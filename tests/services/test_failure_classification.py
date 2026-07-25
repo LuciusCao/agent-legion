@@ -115,6 +115,45 @@ def test_rule_priority_timeout_beats_generic_exit():
     assert classify_failure(124, "Agent process exited 124") == ("technical", "timeout")
 
 
+def test_skill_validator_rejection_is_business():
+    assert classify_failure(
+        1,
+        "content review rejected by skill v1.0.2 validator: "
+        "review_status/recommendation did not pass",
+    ) == ("business", "review_rejected")
+
+
+def test_timed_out_message_is_timeout():
+    assert classify_failure(1, "openclaw command timed out") == ("technical", "timeout")
+    assert classify_failure(1, "timed out") == ("technical", "timeout")
+
+
+def test_executor_not_registered_is_technical():
+    assert classify_failure(None, "Executor 'pi' is not registered") == (
+        "technical",
+        "executor_unregistered",
+    )
+
+
+def test_worker_interrupted_and_lease_expired_are_worker_orphaned():
+    assert classify_failure(-1, "worker interrupted before restart") == (
+        "technical",
+        "worker_orphaned",
+    )
+    assert classify_failure(None, "lease expired") == ("technical", "worker_orphaned")
+
+
+def test_disk_full_is_resource_limit():
+    assert classify_failure(1, "[Errno 28] No space left on device: '/data/jobs/x'") == (
+        "technical",
+        "resource_limit",
+    )
+    assert classify_failure(1, "No space left on device") == (
+        "technical",
+        "resource_limit",
+    )
+
+
 def test_resolve_failure_fields_only_classifies_failed_runs():
     assert resolve_failure_fields("completed", 0, "") == ("", "")
     assert resolve_failure_fields("cancelled", 1, "terminated") == ("", "")
