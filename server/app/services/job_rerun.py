@@ -5,6 +5,7 @@ from typing import Any
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.services._job_rerun_by_failure import rerun_by_failure_category as _rerun_by_failure
 from server.app.services._job_rerun_single import execute_rerun, resolve_rerun_node
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -85,6 +86,11 @@ class JobRerunService:
         assert actual_node_key is not None
 
         return execute_rerun(self, job, job_id, actual_node_key)
+
+    def rerun_by_failure_category(
+        self, workspace_id: str, category: str, **kwargs: Any
+    ) -> list[dict[str, Any]]:
+        return _rerun_by_failure(self, workspace_id, category, **kwargs)
 
     def batch_rerun(
         self,
