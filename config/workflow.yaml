@@ -82,7 +82,7 @@ workflows:
     provider: gateway
     model: your-model-b
     thinking: low
-    timeout_seconds: 900
+    timeout_seconds: 1800
     environment:
       PI_SKIP_VERSION_CHECK: '1'
       PI_TELEMETRY: '0'
