@@ -59,6 +59,11 @@ def _incoming_edges(definition: WorkflowDefinition) -> dict[str, list[WorkflowEd
     return incoming
 
 
+def upstream_nodes(definition: WorkflowDefinition, node_key: str) -> list[str]:
+    """Direct upstream (parent) nodes of node_key, in edge declaration order."""
+    return list(dict.fromkeys(edge.source for edge in definition.edges if edge.target == node_key))
+
+
 def downstream_nodes(definition: WorkflowDefinition, node_key: str) -> list[str]:
     children: dict[str, list[str]] = {key: [] for key in definition.nodes}
     for edge in definition.edges:

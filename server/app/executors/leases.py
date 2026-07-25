@@ -10,8 +10,8 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
 from server.app.executors import _lease_write_paths
+from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
-from server.app.executors._lease_lifecycle import fail_without_lease
 from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,

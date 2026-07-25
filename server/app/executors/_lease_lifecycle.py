@@ -12,11 +12,9 @@ from server.app.executors._lease_control import (
 )
 from server.app.executors._lease_shards import finish_shard_execution
 from server.app.executors._lease_transactions import _database_timestamp
-from server.app.executors._path_canonicalization import (
-    canonicalize_data_path,
-    canonicalize_finish_paths,
-)
-from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
+from server.app.executors._path_canonicalization import canonicalize_finish_paths
+from server.app.executors.models import ExecutionResult
+from server.app.services import failure_classification
 from server.app.workflows.sharding import (
     failed_shard_error,
     on_shard_finished,
@@ -65,10 +63,11 @@ def finish_lease(
         lease["node_key"],
         lease["job_id"],
     )
+    failure_category, failure_detail = failure_classification.classify_execution_result(result)
     conn.execute(
         """
         update node_runs
-        set status=?, exit_code=?, error_message=?,
+        set status=?, exit_code=?, error_message=?, failure_category=?, failure_detail=?,
             command_json=?, log_path=?, run_dir=?, session_dir=?,
             skill_version=?, finished_at=?, runner=?
         where id=?
@@ -77,6 +76,8 @@ def finish_lease(
             result.status,
             result.exit_code,
             result.error_message,
+            failure_category,
+            failure_detail,
             json.dumps(list(result.command)),
             effective_log_path,
             run_dir,
@@ -93,13 +94,15 @@ def finish_lease(
     conn.execute(
         """
         update job_nodes
-        set status=?, error_message=?, finished_at=?
+        set status=?, error_message=?, finished_at=?, failure_category=?, failure_detail=?
         where job_id=? and node_key=?
         """,
         (
             "completed" if result.status == "completed" else "failed",
             result.error_message,
             now_str,
+            failure_category,
+            failure_detail,
             lease["job_id"],
             lease["node_key"],
         ),
@@ -110,55 +113,6 @@ def finish_lease(
         _pause_job_on_target_completion(conn, lease["job_id"], lease["node_key"], now_str)
 
     return True
-
-
-def fail_without_lease(
-    conn: DatabaseConnection,
-    request: ConfigurationFailureRequest,
-    error_message: str,
-    data_dir: Path | None = None,
-) -> int | None:
-    """Record a failed node run without claiming a lease."""
-    now = datetime.now(UTC)
-    now_str = _database_timestamp(now)
-    cursor = conn.execute(
-        """
-        update job_nodes
-        set status='failed', stale_reason='', error_message=?, finished_at=?
-        where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
-        """,
-        (error_message, now_str, request.job_id, request.node_key),
-    )
-    if cursor.rowcount == 0:
-        return None
-
-    log_path = canonicalize_data_path(request.log_path, data_dir, "logs")
-    cursor = conn.execute(
-        """
-        insert into node_runs(
-            job_id, node_key, status, command_json, log_path,
-            run_dir, session_dir, started_at, finished_at, error_message
-        )
-        values (?, ?, 'failed', ?, ?, '', '', ?, ?, ?)
-        returning id
-        """,
-        (
-            request.job_id,
-            request.node_key,
-            json.dumps([]),
-            log_path,
-            now_str,
-            now_str,
-            error_message,
-        ),
-    )
-    inserted = cursor.fetchone()
-    if inserted is None:
-        raise RuntimeError("node_runs insert did not return a row id")
-    node_run_id = int(inserted["id"])
-
-    _sync_job_status(conn, request.job_id)
-    return node_run_id
 
 
 def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
