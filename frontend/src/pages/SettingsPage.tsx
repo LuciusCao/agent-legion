@@ -13,6 +13,7 @@ import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { DangerZone } from '../components/settings/DangerZone'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
+import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
 import styles from './SettingsPage.module.css'
 
 export function SettingsPage() {
@@ -74,6 +75,7 @@ export function SettingsPage() {
       { id: 'workflow', label: '工作流' },
       { id: 'executor-allocation', label: '执行器分配' },
       { id: 'executor-binding', label: '节点绑定' },
+      { id: 'worker-tokens', label: 'Worker Token' },
       ...(hasLocalNodes
         ? [{ id: 'local-node-concurrency', label: '本地节点并发' }]
         : []),
@@ -196,6 +198,11 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>Agent 执行</h2>
             <hr className={styles.sectionDivider} />
             <AgentRoutingSection />
+          </section>
+          <section id="worker-tokens" className={styles.section}>
+            <h2 className={styles.sectionTitle}>Worker Token</h2>
+            <hr className={styles.sectionDivider} />
+            <WorkerTokensSection />
           </section>
           {hasLocalNodes && (
             <section id="local-node-concurrency" className={styles.section}>

@@ -27,6 +27,10 @@ export {
   publishWorkflowDraft,
   validateWorkflowDraft,
 } from './workflows'
+// prettier-ignore
+export { createRegisterToken, isManagementAuthError, listAgentWorkers, listRegisterTokens, revokeAgentWorker, revokeRegisterToken } from './workerTokens'
+// prettier-ignore
+export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary, AgentWorkerSummary } from './workerTokens'
 
 export async function fetchJobs(
   workspaceId: string,

@@ -74,7 +74,11 @@ mkdir -p deploy/secrets
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
 
 - **全局 token**：把公司电脑的 `deploy/secrets/agent_worker_register_token` 安全复制到 Mac mini 的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
-- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：在公司电脑上用全局管理 token 签发，明文只返回一次：
+- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：输入全局管理 token（`deploy/secrets/agent_worker_register_token`，仅存浏览器会话）解锁后，填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Mac mini 上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
+
+  该 Worker 注册后只能看到并 claim 对应 workspace 的任务。
+
+  也可以用 curl 在公司电脑上签发（备选方式，同样用全局管理 token 鉴权）：
 
 ```bash
 curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
@@ -83,10 +87,6 @@ curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
   -d '{"workspace_id": "video_knowledge", "label": "home-mac-mini"}'
 # => {"token_id": "...", "register_token": "<明文，只返回这一次>", "workspace_id": "video_knowledge", "label": "home-mac-mini"}
 ```
-
-把返回的明文保存为 Mac mini 上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该 Worker 注册后只能看到并 claim `video_knowledge` 的任务。
-
-管理已签发的 scoped token（同样用全局管理 token 鉴权）：
 
 ```bash
 # 列表（不含明文与 hash，含吊销状态）
