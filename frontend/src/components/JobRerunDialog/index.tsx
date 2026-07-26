@@ -3,6 +3,11 @@ import { Dialog } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
 import { type WorkflowNodesByKey } from '../../lib/workflowNodes'
 import { useJobRerunDialog } from './useJobRerunDialog'
+import { useFailureCategories } from './useFailureCategories'
+import type {
+  FailureCategoryContext,
+  JobRerunConfirmArgs,
+} from './useFailureCategories'
 import { JobRerunDialogContent } from './JobRerunDialogContent'
 
 export type { WorkflowNodesByKey }
@@ -14,11 +19,8 @@ export type JobRerunDialogProps = {
   workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   allowFailedNodeMode?: boolean
-  onConfirm: (
-    nodeKey: string | null,
-    fromFailedNode: boolean,
-    jobIds?: string[]
-  ) => void | Promise<void>
+  failureContext?: FailureCategoryContext
+  onConfirm: (...args: JobRerunConfirmArgs) => void | Promise<void>
   onClose: () => void
 }
 
@@ -29,6 +31,7 @@ export function JobRerunDialog({
   workflowNodesByKey,
   itemLabel = '任务',
   allowFailedNodeMode = false,
+  failureContext,
   onConfirm,
   onClose,
 }: JobRerunDialogProps) {
@@ -44,6 +47,7 @@ export function JobRerunDialog({
     notStartedJobs,
     runningJobs,
   } = useJobRerunDialog({ jobs, workflowDefinition, workflowNodesByKey })
+  const failure = useFailureCategories(failedMode, failureContext, failedJobs)
 
   const [loading, setLoading] = useState(false)
 
@@ -54,7 +58,7 @@ export function JobRerunDialog({
     setLoading(true)
     try {
       if (failedMode) {
-        await onConfirm(null, true)
+        await onConfirm(...failure.confirmArgs())
       } else if (allowFailedNodeMode) {
         await onConfirm(
           effectiveNodeKey,
@@ -74,7 +78,7 @@ export function JobRerunDialog({
   }
 
   const canConfirm = failedMode
-    ? failedJobs.length > 0
+    ? failure.canConfirm
     : !!effectiveNodeKey && (!allowFailedNodeMode || runnableJobs.length > 0)
 
   return (
@@ -105,6 +109,7 @@ export function JobRerunDialog({
         runnableJobs={runnableJobs}
         notStartedJobs={notStartedJobs}
         runningJobs={runningJobs}
+        failure={failure}
         canConfirm={canConfirm}
         loading={loading}
         onConfirm={handleConfirm}

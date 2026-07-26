@@ -12,6 +12,9 @@ import {
 } from '../../lib/workflowNodes'
 import { JobRerunExcludedLists } from './JobRerunExcludedLists'
 import { JobRerunSelectionSummary } from './JobRerunSelectionSummary'
+import { JobRerunFailureCategoryRow } from './JobRerunFailureCategoryRow'
+import { failedModeSummaryText } from './failureCategoryCounts'
+import type { FailureCategoryState } from './useFailureCategories'
 import styles from './JobRerunDialog.module.css'
 
 export type JobRerunDialogContentProps = {
@@ -30,6 +33,7 @@ export type JobRerunDialogContentProps = {
   runnableJobs: JobSummary[]
   notStartedJobs: JobSummary[]
   runningJobs: JobSummary[]
+  failure: FailureCategoryState
   canConfirm: boolean
   loading: boolean
   onConfirm: () => void | Promise<void>
@@ -52,6 +56,7 @@ export function JobRerunDialogContent({
   runnableJobs,
   notStartedJobs,
   runningJobs,
+  failure,
   canConfirm,
   loading,
   onConfirm,
@@ -101,6 +106,7 @@ export function JobRerunDialogContent({
             </div>
           )}
 
+          {failedMode && <JobRerunFailureCategoryRow failure={failure} />}
           <JobRerunExcludedLists
             failedMode={failedMode}
             effectiveNodeKey={effectiveNodeKey}
@@ -119,7 +125,7 @@ export function JobRerunDialogContent({
           ) : (
             <div className={styles.summary}>
               {failedMode
-                ? `已选择 ${jobs.length} 个${itemLabel}，其中 ${failedJobs.length} 个失败任务将从各自失败节点重跑`
+                ? failedModeSummaryText(failure, jobs.length, itemLabel)
                 : `已选择 ${jobs.length} 个${itemLabel}${effectiveNodeKey ? `，重跑节点：${orderedNodes.find((n) => n.key === effectiveNodeKey)?.label || effectiveNodeKey}` : ''}`}
             </div>
           )}
@@ -140,7 +146,7 @@ export function JobRerunDialogContent({
           disabled={!canConfirm || loading}
         >
           {failedMode
-            ? `重跑 ${failedJobs.length} 个失败任务`
+            ? failure.confirmLabel
             : allowFailedNodeMode
               ? `重跑 ${runnableJobs.length} 个${itemLabel}`
               : '确认重跑'}

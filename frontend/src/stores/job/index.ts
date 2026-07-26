@@ -6,6 +6,7 @@ import { appendActions } from './actions/appendActions'
 import { patchActions } from './actions/patchActions'
 import { selectionActions } from './actions/selectionActions'
 import { batchActions } from './actions/batchActions'
+import { rerunByFailureActions } from './actions/rerunByFailureActions'
 import { clearPackedActions } from './actions/clearPackedActions'
 import { upgradeActions } from './actions/upgradeActions'
 import { initialJobDataState } from './initialState'
@@ -25,6 +26,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   ...patchActions(set),
   ...selectionActions(set, get),
   ...batchActions(set, get),
+  ...rerunByFailureActions(set, get),
   ...clearPackedActions(set, get),
   ...upgradeActions(set, get),
 }))

@@ -4,6 +4,7 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
 import { useWorkspacePackageActions } from './useWorkspacePackageActions'
+import { useWorkspaceRerunActions } from './useWorkspaceRerunActions'
 import { JobFilterBar } from '../components/JobFilterBar'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
@@ -35,7 +36,6 @@ export default function WorkspaceMainPage() {
   const selectUnpacked = useJobStore((state) => state.selectUnpacked)
   const clearSelection = useJobStore((state) => state.clearSelection)
   const batchDelete = useJobStore((state) => state.batchDelete)
-  const batchRerun = useJobStore((state) => state.batchRerun)
   const batchRunTo = useJobStore((state) => state.batchRunTo)
   const filteredJobIds = useJobStore(selectFilteredJobIds)
   const selectMode = useJobStore((state) => state.selectMode)
@@ -107,14 +107,7 @@ export default function WorkspaceMainPage() {
     { key: 'clear', label: '取消选择', onClick: clearSelection },
   ]
 
-  const handleRerun = async (
-    nodeKey: string | null,
-    fromFailedNode?: boolean,
-    jobIds?: string[]
-  ) => {
-    if (workspaceId)
-      await batchRerun(workspaceId, nodeKey, fromFailedNode, jobIds)
-  }
+  const { handleRerun, failureContext } = useWorkspaceRerunActions(workspaceId)
 
   const handleRunTo = async (targetKey: string, startKey?: string) => {
     if (workspaceId) await batchRunTo(workspaceId, targetKey, startKey)
@@ -171,6 +164,7 @@ export default function WorkspaceMainPage() {
             }
             filters={filters}
             onExitSelectMode={toggleSelectMode}
+            failureContext={failureContext}
             onRerun={handleRerun}
             onRunTo={handleRunTo}
             onPackage={handlePackage}

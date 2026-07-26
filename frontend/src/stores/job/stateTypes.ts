@@ -1,3 +1,5 @@
+import type { RerunByFailureCategoryAction } from '../../types/failureTypes'
+
 export type ContinueJobResult = Promise<{
   job_id: string
   operation: string
@@ -6,3 +8,7 @@ export type ContinueJobResult = Promise<{
   node_key?: string | null
   reason_code?: string | null
 }>
+
+export interface RerunByFailureActions {
+  rerunByFailureCategory: RerunByFailureCategoryAction
+}

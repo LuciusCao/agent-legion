@@ -72,6 +72,7 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     toggleExpand: () => {},
     getFilteredJobs: () => [],
     batchRerun: async () => ({ results: [] }),
+    rerunByFailureCategory: async () => ({ results: [] }),
     batchDelete: async () => ({ results: [] }),
     batchPackage: async () => emptyBatch,
     batchClearPacked: async () => emptyBatch,
