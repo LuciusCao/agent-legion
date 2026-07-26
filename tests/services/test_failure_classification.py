@@ -154,6 +154,36 @@ def test_disk_full_is_resource_limit():
     )
 
 
+def test_output_validation_rejected_is_business():
+    assert classify_failure(
+        1, "Output validation failed: Review rejected key_info items: ki_04858a24"
+    ) == ("business", "review_rejected")
+
+
+def test_missing_outputs_after_pi_run_is_output_missing():
+    assert classify_failure(1, "Missing outputs after Pi run: key_info_raw.json") == (
+        "unknown",
+        "output_missing",
+    )
+    assert classify_failure(1, "missing outputs: subtitles_reviewed.srt") == (
+        "unknown",
+        "output_missing",
+    )
+
+
+def test_heartbeat_expired_is_worker_orphaned():
+    assert classify_failure(None, "Agent Worker heartbeat expired") == (
+        "technical",
+        "worker_orphaned",
+    )
+
+
+def test_http_502_is_provider_request():
+    assert classify_failure(
+        1, "HTTPError: 502 Server Error: Bad Gateway for url: http://account.internal/x"
+    ) == ("technical", "provider_request")
+
+
 def test_resolve_failure_fields_only_classifies_failed_runs():
     assert resolve_failure_fields("completed", 0, "") == ("", "")
     assert resolve_failure_fields("cancelled", 1, "terminated") == ("", "")
