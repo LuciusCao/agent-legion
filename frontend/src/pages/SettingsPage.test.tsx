@@ -24,6 +24,11 @@ vi.mock('../api', () => ({
   api: vi.fn(),
   fetchWorkflows: vi.fn(),
   fetchWorkspaces: vi.fn(),
+  listRegisterTokens: vi.fn().mockResolvedValue([]),
+  listAgentWorkers: vi.fn().mockResolvedValue([]),
+  createRegisterToken: vi.fn(),
+  revokeRegisterToken: vi.fn(),
+  revokeAgentWorker: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)

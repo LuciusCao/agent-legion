@@ -288,15 +288,20 @@ def test_agent_register_token_management_api(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
-        # Management endpoints require the global management token.
-        unauthenticated = client.post("/api/agent-register-tokens", json={})
-        assert unauthenticated.status_code == 401
-        wrong = client.post(
+        # Management endpoints are currently open (trusted-network deployment,
+        # see TODO in authorize_management): no header works, and calls still
+        # carrying the legacy management header are accepted too.
+        unauthenticated = client.post(
+            "/api/agent-register-tokens",
+            json={"workspace_id": "test-workspace", "label": "no header"},
+        )
+        assert unauthenticated.status_code == 201, unauthenticated.text
+        legacy = client.post(
             "/api/agent-register-tokens",
             headers={"X-Agent-Worker-Register-Token": "nope"},
-            json={},
+            json={"label": "legacy header"},
         )
-        assert wrong.status_code == 401
+        assert legacy.status_code == 201, legacy.text
 
         created = client.post(
             "/api/agent-register-tokens",
@@ -348,18 +353,16 @@ def test_agent_worker_revoke_api(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
-        # Management endpoints require the global management token.
-        unauthenticated = client.post("/api/agent-workers/home-mini/revoke")
-        assert unauthenticated.status_code == 401
-        wrong = client.post(
-            "/api/agent-workers/home-mini/revoke",
+        # Management endpoints are currently open (trusted-network deployment,
+        # see TODO in authorize_management): no header works, and calls still
+        # carrying the legacy management header are accepted too.
+        unauthenticated = client.post("/api/agent-workers/no-such/revoke")
+        assert unauthenticated.status_code == 404
+        legacy = client.post(
+            "/api/agent-workers/no-such/revoke",
             headers={"X-Agent-Worker-Register-Token": "nope"},
         )
-        assert wrong.status_code == 401
-
-        # Unknown worker_id is a 404.
-        unknown = client.post("/api/agent-workers/no-such/revoke", headers=_MANAGEMENT)
-        assert unknown.status_code == 404
+        assert legacy.status_code == 404
 
         token = _register(client)["worker_token"]
         revoked = client.post("/api/agent-workers/home-mini/revoke", headers=_MANAGEMENT)

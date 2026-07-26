@@ -28,7 +28,7 @@ export {
   validateWorkflowDraft,
 } from './workflows'
 // prettier-ignore
-export { createRegisterToken, isManagementAuthError, listAgentWorkers, listRegisterTokens, revokeAgentWorker, revokeRegisterToken } from './workerTokens'
+export { createRegisterToken, listAgentWorkers, listRegisterTokens, revokeAgentWorker, revokeRegisterToken } from './workerTokens'
 // prettier-ignore
 export type { AgentRegisterTokenCreatedResponse, AgentRegisterTokenSummary, AgentWorkerSummary } from './workerTokens'
 

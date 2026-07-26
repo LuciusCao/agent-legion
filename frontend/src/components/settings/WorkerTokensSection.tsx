@@ -1,7 +1,6 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   createRegisterToken,
-  isManagementAuthError,
   listAgentWorkers,
   listRegisterTokens,
   revokeAgentWorker,
@@ -14,24 +13,22 @@ import type {
 } from '../../api'
 import styles from './WorkerTokensSection.module.css'
 
-const SESSION_KEY = 'agentWorkerMgmtToken'
-
 function formatTime(iso: string): string {
   const date = new Date(iso)
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
 /**
  * Worker register token management (issue / list / revoke) plus revocation of
- * already-registered workers. Management endpoints are guarded by the global
- * management token; the UI asks for it once per tab and keeps it in
- * sessionStorage only. A 401 from any call clears it and asks again.
+ * already-registered workers. Management endpoints are currently open
+ * (trusted-network deployment, same as the rest of the Host API); access
+ * control arrives with the login/permission system.
  */
 export function WorkerTokensSection() {
-  const [managementToken, setManagementToken] = useState<string>(
-    () => sessionStorage.getItem(SESSION_KEY) ?? ''
-  )
-  const [tokenInput, setTokenInput] = useState('')
   const [tokens, setTokens] = useState<AgentRegisterTokenSummary[]>([])
   const [workers, setWorkers] = useState<AgentWorkerSummary[]>([])
   const [label, setLabel] = useState('')
@@ -42,54 +39,21 @@ export function WorkerTokensSection() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
 
-  const clearManagementToken = useCallback((message: string) => {
-    sessionStorage.removeItem(SESSION_KEY)
-    setManagementToken('')
-    setTokenInput('')
-    setError(message)
-  }, [])
-
   useEffect(() => {
-    if (!managementToken) return
     let cancelled = false
-    Promise.all([listRegisterTokens(managementToken), listAgentWorkers()])
+    Promise.all([listRegisterTokens(), listAgentWorkers()])
       .then(([tokenList, workerList]) => {
         if (cancelled) return
         setTokens(tokenList)
         setWorkers(workerList)
       })
       .catch((err: unknown) => {
-        if (cancelled) return
-        if (isManagementAuthError(err)) {
-          clearManagementToken('管理口令不正确或已失效，请重新输入')
-        } else {
-          setError(err instanceof Error ? err.message : String(err))
-        }
+        if (!cancelled) setError(errorMessage(err))
       })
     return () => {
       cancelled = true
     }
-  }, [managementToken, clearManagementToken])
-
-  async function handleUnlock() {
-    const candidate = tokenInput.trim()
-    if (!candidate) return
-    setError('')
-    setLoading(true)
-    try {
-      await listRegisterTokens(candidate)
-      sessionStorage.setItem(SESSION_KEY, candidate)
-      setManagementToken(candidate)
-    } catch (err) {
-      if (isManagementAuthError(err)) {
-        setError('管理口令不正确，请重新输入')
-      } else {
-        setError(err instanceof Error ? err.message : String(err))
-      }
-    } finally {
-      setLoading(false)
-    }
-  }
+  }, [])
 
   async function handleCreate() {
     const trimmedLabel = label.trim()
@@ -97,7 +61,7 @@ export function WorkerTokensSection() {
     setError('')
     setLoading(true)
     try {
-      const created = await createRegisterToken(managementToken, {
+      const created = await createRegisterToken({
         label: trimmedLabel,
         workspace_id: workspaceId.trim() || null,
       })
@@ -105,13 +69,9 @@ export function WorkerTokensSection() {
       setCopied(false)
       setLabel('')
       setWorkspaceId('')
-      setTokens(await listRegisterTokens(managementToken))
+      setTokens(await listRegisterTokens())
     } catch (err) {
-      if (isManagementAuthError(err)) {
-        clearManagementToken('管理口令已失效，请重新输入')
-      } else {
-        setError(err instanceof Error ? err.message : String(err))
-      }
+      setError(errorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -131,14 +91,10 @@ export function WorkerTokensSection() {
     if (!window.confirm(`确定要吊销 token「${token.label}」吗？`)) return
     setError('')
     try {
-      await revokeRegisterToken(managementToken, token.token_id)
-      setTokens(await listRegisterTokens(managementToken))
+      await revokeRegisterToken(token.token_id)
+      setTokens(await listRegisterTokens())
     } catch (err) {
-      if (isManagementAuthError(err)) {
-        clearManagementToken('管理口令已失效，请重新输入')
-      } else {
-        setError(err instanceof Error ? err.message : String(err))
-      }
+      setError(errorMessage(err))
     }
   }
 
@@ -152,53 +108,11 @@ export function WorkerTokensSection() {
       return
     setError('')
     try {
-      await revokeAgentWorker(managementToken, worker.worker_id)
+      await revokeAgentWorker(worker.worker_id)
       setWorkers(await listAgentWorkers())
     } catch (err) {
-      if (isManagementAuthError(err)) {
-        clearManagementToken('管理口令已失效，请重新输入')
-      } else {
-        setError(err instanceof Error ? err.message : String(err))
-      }
+      setError(errorMessage(err))
     }
-  }
-
-  if (!managementToken) {
-    return (
-      <div className={styles.card}>
-        <h3 className={styles.heading}>管理口令</h3>
-        <div className={styles.row}>
-          <input
-            type="password"
-            className={styles.input}
-            placeholder="输入全局管理 token（agent_worker_register_token）"
-            aria-label="管理口令"
-            value={tokenInput}
-            onChange={(event) => setTokenInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter') void handleUnlock()
-            }}
-          />
-          <button
-            type="button"
-            className={styles.button}
-            onClick={() => void handleUnlock()}
-            disabled={loading || tokenInput.trim() === ''}
-          >
-            解锁
-          </button>
-        </div>
-        <p className={styles.hint}>
-          口令来自 Host 上的
-          deploy/secrets/agent_worker_register_token，仅保存在当前标签页会话中，关闭页面即失效。
-        </p>
-        {error && (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
-        )}
-      </div>
-    )
   }
 
   return (

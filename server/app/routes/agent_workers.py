@@ -188,11 +188,11 @@ def create_agent_workers_router(
     config = settings.executor_runtime.agent_workers
 
     def authorize_management(request: Request) -> None:
-        if not config.register_token:
-            raise HTTPException(status_code=503, detail="Agent Worker registration is disabled")
-        supplied = request.headers.get("x-agent-worker-register-token", "")
-        if not hmac.compare_digest(supplied, config.register_token):
-            raise HTTPException(status_code=401, detail="invalid Agent Worker registration token")
+        # TODO(auth): 管理端点（签发/列表/吊销 register token、吊销 Worker）
+        # 暂与 Host 现有无鉴权模型一致（可信内网/Tailscale 部署），任何调用
+        # 直接放行，带管理 token 的旧客户端亦不受影响。待登录/权限体系落地后
+        # 在此恢复校验。Worker 注册鉴权不受影响，见 resolve_registration_scope。
+        _ = request
 
     def resolve_registration_scope(request: Request) -> list[str]:
         """Resolve the presented registration credential to a workspace scope.

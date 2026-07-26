@@ -11,9 +11,6 @@ import {
 
 vi.mock('../../api', () => ({
   createRegisterToken: vi.fn(),
-  isManagementAuthError: (error: unknown) =>
-    error instanceof Error &&
-    (error as Error & { status?: number }).status === 401,
   listAgentWorkers: vi.fn(),
   listRegisterTokens: vi.fn(),
   revokeAgentWorker: vi.fn(),
@@ -50,12 +47,7 @@ const sampleWorker = {
   runtimes: ['local'],
 }
 
-function authError() {
-  return Object.assign(new Error('Unauthorized'), { status: 401 })
-}
-
 beforeEach(() => {
-  sessionStorage.clear()
   vi.clearAllMocks()
   window.confirm = vi.fn(() => true)
   mockListRegisterTokens.mockResolvedValue([sampleToken])
@@ -63,68 +55,28 @@ beforeEach(() => {
 })
 
 describe('WorkerTokensSection', () => {
-  it('asks for the management token when the session has none', () => {
+  it('loads token and worker lists on mount without any credential', async () => {
     render(<WorkerTokensSection />)
-
-    expect(screen.getByLabelText('管理口令')).toBeTruthy()
-    expect(mockListRegisterTokens).not.toHaveBeenCalled()
-  })
-
-  it('rejects a wrong management token and shows an error', async () => {
-    mockListRegisterTokens.mockRejectedValue(authError())
-    render(<WorkerTokensSection />)
-
-    fireEvent.change(screen.getByLabelText('管理口令'), {
-      target: { value: 'wrong' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '解锁' }))
-
-    await waitFor(() => {
-      expect(screen.getByRole('alert').textContent).toContain('管理口令不正确')
-    })
-    expect(sessionStorage.getItem('agentWorkerMgmtToken')).toBeNull()
-  })
-
-  it('stores a valid management token in sessionStorage and loads lists', async () => {
-    render(<WorkerTokensSection />)
-
-    fireEvent.change(screen.getByLabelText('管理口令'), {
-      target: { value: 'mgmt-secret' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '解锁' }))
 
     await waitFor(() => {
       expect(screen.getByText('home-mac-mini')).toBeTruthy()
     })
-    expect(sessionStorage.getItem('agentWorkerMgmtToken')).toBe('mgmt-secret')
+    expect(mockListRegisterTokens).toHaveBeenCalledWith()
+    expect(mockListAgentWorkers).toHaveBeenCalledWith()
     expect(screen.getByText('mac-mini')).toBeTruthy()
     expect(screen.getByText('video_knowledge')).toBeTruthy()
   })
 
-  it('loads lists directly when the session already holds the token', async () => {
-    sessionStorage.setItem('agentWorkerMgmtToken', 'mgmt-secret')
+  it('shows an error when loading fails', async () => {
+    mockListRegisterTokens.mockRejectedValue(new Error('HTTP 500'))
     render(<WorkerTokensSection />)
 
     await waitFor(() => {
-      expect(screen.getByText('home-mac-mini')).toBeTruthy()
+      expect(screen.getByRole('alert').textContent).toContain('HTTP 500')
     })
-    expect(mockListRegisterTokens).toHaveBeenCalledWith('mgmt-secret')
-  })
-
-  it('clears the session token when the backend returns 401', async () => {
-    sessionStorage.setItem('agentWorkerMgmtToken', 'expired')
-    mockListRegisterTokens.mockRejectedValue(authError())
-    render(<WorkerTokensSection />)
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('管理口令')).toBeTruthy()
-    })
-    expect(sessionStorage.getItem('agentWorkerMgmtToken')).toBeNull()
-    expect(screen.getByRole('alert').textContent).toContain('请重新输入')
   })
 
   it('creates a token and shows the plaintext once with a copy button', async () => {
-    sessionStorage.setItem('agentWorkerMgmtToken', 'mgmt-secret')
     mockCreateRegisterToken.mockResolvedValue({
       token_id: 't2',
       register_token: 'plain-secret',
@@ -147,7 +99,7 @@ describe('WorkerTokensSection', () => {
     await waitFor(() => {
       expect(screen.getByTestId('created-token')).toBeTruthy()
     })
-    expect(mockCreateRegisterToken).toHaveBeenCalledWith('mgmt-secret', {
+    expect(mockCreateRegisterToken).toHaveBeenCalledWith({
       label: 'new-worker',
       workspace_id: null,
     })
@@ -161,7 +113,6 @@ describe('WorkerTokensSection', () => {
   })
 
   it('revokes a register token after confirmation', async () => {
-    sessionStorage.setItem('agentWorkerMgmtToken', 'mgmt-secret')
     mockRevokeRegisterToken.mockResolvedValue({ revoked: true })
     render(<WorkerTokensSection />)
     await waitFor(() => screen.getByText('home-mac-mini'))
@@ -170,13 +121,12 @@ describe('WorkerTokensSection', () => {
     fireEvent.click(item.querySelector('button') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(mockRevokeRegisterToken).toHaveBeenCalledWith('mgmt-secret', 't1')
+      expect(mockRevokeRegisterToken).toHaveBeenCalledWith('t1')
     })
     expect(window.confirm).toHaveBeenCalled()
   })
 
   it('revokes a worker after confirmation', async () => {
-    sessionStorage.setItem('agentWorkerMgmtToken', 'mgmt-secret')
     mockRevokeAgentWorker.mockResolvedValue({ worker_id: 'w1', revoked: true })
     render(<WorkerTokensSection />)
     await waitFor(() => screen.getByText('mac-mini'))
@@ -185,7 +135,7 @@ describe('WorkerTokensSection', () => {
     fireEvent.click(item.querySelector('button') as HTMLButtonElement)
 
     await waitFor(() => {
-      expect(mockRevokeAgentWorker).toHaveBeenCalledWith('mgmt-secret', 'w1')
+      expect(mockRevokeAgentWorker).toHaveBeenCalledWith('w1')
     })
     expect(window.confirm).toHaveBeenCalled()
   })

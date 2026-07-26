@@ -74,15 +74,16 @@ mkdir -p deploy/secrets
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
 
 - **全局 token**：把公司电脑的 `deploy/secrets/agent_worker_register_token` 安全复制到 Mac mini 的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
-- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：输入全局管理 token（`deploy/secrets/agent_worker_register_token`，仅存浏览器会话）解锁后，填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Mac mini 上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
+- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Mac mini 上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
 
   该 Worker 注册后只能看到并 claim 对应 workspace 的任务。
 
-  也可以用 curl 在公司电脑上签发（备选方式，同样用全局管理 token 鉴权）：
+  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）当前**不做鉴权**，与 Host 现有无鉴权模型一致，依赖可信内网/Tailscale 部署保护；待登录/权限体系落地后会恢复校验。Worker 注册本身仍必须凭 register token（全局或 scoped），不受影响。
+
+  也可以用 curl 在公司电脑上签发（备选方式，无需任何鉴权 header）：
 
 ```bash
 curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
-  -H "X-Agent-Worker-Register-Token: $(cat deploy/secrets/agent_worker_register_token)" \
   -H 'Content-Type: application/json' \
   -d '{"workspace_id": "video_knowledge", "label": "home-mac-mini"}'
 # => {"token_id": "...", "register_token": "<明文，只返回这一次>", "workspace_id": "video_knowledge", "label": "home-mac-mini"}
@@ -90,12 +91,10 @@ curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
 
 ```bash
 # 列表（不含明文与 hash，含吊销状态）
-curl -sS http://192.0.2.1:8000/api/agent-register-tokens \
-  -H "X-Agent-Worker-Register-Token: $(cat deploy/secrets/agent_worker_register_token)"
+curl -sS http://192.0.2.1:8000/api/agent-register-tokens
 
 # 吊销
-curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens/<token_id>/revoke \
-  -H "X-Agent-Worker-Register-Token: $(cat deploy/secrets/agent_worker_register_token)"
+curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens/<token_id>/revoke
 ```
 
 注意：吊销 scoped token 只影响后续注册；已注册 Worker 落库的 scope 在重新注册前不变。需要立即收缩时，吊销后让该 Worker 重新注册（换用新 token）。
