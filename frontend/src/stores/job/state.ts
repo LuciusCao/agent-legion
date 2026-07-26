@@ -4,7 +4,7 @@ import type {
   WorkspacePackageResult,
 } from '../../types/jobTypes'
 import type { ClearPackedActions } from './actions/clearPackedActions'
-import type { ContinueJobResult } from './stateTypes'
+import type { ContinueJobResult, RerunByFailureActions } from './stateTypes'
 export {
   countMutationResults,
   makeMutationToast,
@@ -14,7 +14,7 @@ export {
 export type { JobFilterConfig, JobStatus } from './filterConfig'
 export type { JobFilterOptionAccumulator } from './filterLogic/optionAccumulator'
 export type { FilterCounts } from './filterLogic/types'
-export interface JobState extends ClearPackedActions {
+export interface JobState extends ClearPackedActions, RerunByFailureActions {
   jobs: JobSummary[]
   jobsById: Record<string, JobSummary>
   jobIds: string[]

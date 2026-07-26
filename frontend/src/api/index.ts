@@ -13,6 +13,7 @@ import type { WorkspaceStats } from '../types/workspaceTypes'
 
 export { api } from './core'
 export { fetchJobsSnapshot } from './jobSnapshot'
+export { fetchFailedNodeRuns, rerunJobsByFailure } from './failureApi'
 export {
   deleteWorkspacePackage,
   fetchWorkspacePackages,

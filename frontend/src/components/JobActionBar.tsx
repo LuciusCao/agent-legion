@@ -1,7 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
+import type { FailureCategory } from '../types/failureTypes'
 import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
+import type { FailureCategoryContext } from './JobRerunDialog/useFailureCategories'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobActionBarUpgrade } from './JobActionBarUpgrade'
 import { canContinueJob, computeActionDisabled } from './jobActionEligibility'
@@ -29,10 +31,12 @@ export type JobActionBarProps = {
   loading?: boolean
   filters?: JobActionBarFilter[]
   onExitSelectMode?: () => void
+  failureContext?: FailureCategoryContext
   onRerun: (
     nodeKey: string | null,
     fromFailedNode?: boolean,
-    jobIds?: string[]
+    jobIds?: string[],
+    failureCategory?: FailureCategory
   ) => void
   onRunTo?: (targetKey: string, startKey?: string) => void | Promise<void>
   onContinue?: () => void | Promise<void>
@@ -52,6 +56,7 @@ export function JobActionBar({
   loading = false,
   filters,
   onExitSelectMode,
+  failureContext,
   onRerun,
   onRunTo,
   onContinue,
@@ -161,6 +166,7 @@ export function JobActionBar({
         workflowNodesByKey={workflowNodesByKey}
         itemLabel={itemLabel}
         allowFailedNodeMode={mode === 'batch'}
+        failureContext={failureContext}
         onClose={() => setRerunOpen(false)}
         onConfirm={onRerun}
       />
