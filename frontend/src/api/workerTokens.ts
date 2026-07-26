@@ -15,56 +15,31 @@ type RevokeTokenResponse =
   components['schemas']['AgentRegisterTokenRevokeResponse']
 type RevokeWorkerResponse = components['schemas']['AgentWorkerRevokeResponse']
 
-const MANAGEMENT_HEADER = 'X-Agent-Worker-Register-Token'
-
-function managementInit(
-  managementToken: string,
-  init?: RequestInit
-): RequestInit {
-  return {
-    ...init,
-    headers: { [MANAGEMENT_HEADER]: managementToken, ...(init?.headers ?? {}) },
-  }
-}
-
-/** True when the backend rejected the management token (401). */
-export function isManagementAuthError(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    (error as Error & { status?: number }).status === 401
-  )
-}
-
-export async function listRegisterTokens(
-  managementToken: string
-): Promise<AgentRegisterTokenSummary[]> {
-  const data = await api<TokensResponse>(
-    '/api/agent-register-tokens',
-    managementInit(managementToken)
-  )
+// Management endpoints are currently unauthenticated (trusted-network
+// deployment); the backend TODO in authorize_management tracks restoring
+// checks once the login/permission system lands.
+export async function listRegisterTokens(): Promise<
+  AgentRegisterTokenSummary[]
+> {
+  const data = await api<TokensResponse>('/api/agent-register-tokens')
   return data.tokens ?? []
 }
 
 export async function createRegisterToken(
-  managementToken: string,
   input: CreateTokenRequest
 ): Promise<AgentRegisterTokenCreatedResponse> {
-  return api<AgentRegisterTokenCreatedResponse>(
-    '/api/agent-register-tokens',
-    managementInit(managementToken, {
-      method: 'POST',
-      body: JSON.stringify(input),
-    })
-  )
+  return api<AgentRegisterTokenCreatedResponse>('/api/agent-register-tokens', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  })
 }
 
 export async function revokeRegisterToken(
-  managementToken: string,
   tokenId: string
 ): Promise<RevokeTokenResponse> {
   return api<RevokeTokenResponse>(
     `/api/agent-register-tokens/${encodeURIComponent(tokenId)}/revoke`,
-    managementInit(managementToken, { method: 'POST' })
+    { method: 'POST' }
   )
 }
 
@@ -74,11 +49,10 @@ export async function listAgentWorkers(): Promise<AgentWorkerSummary[]> {
 }
 
 export async function revokeAgentWorker(
-  managementToken: string,
   workerId: string
 ): Promise<RevokeWorkerResponse> {
   return api<RevokeWorkerResponse>(
     `/api/agent-workers/${encodeURIComponent(workerId)}/revoke`,
-    managementInit(managementToken, { method: 'POST' })
+    { method: 'POST' }
   )
 }

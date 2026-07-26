@@ -2,7 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   createRegisterToken,
-  isManagementAuthError,
   listAgentWorkers,
   listRegisterTokens,
   revokeAgentWorker,
@@ -16,31 +15,29 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-function mockFetchJson(response: unknown, ok = true, status = 200) {
+function mockFetchJson(response: unknown) {
   return vi.fn().mockResolvedValue({
-    ok,
-    status,
+    ok: true,
+    status: 200,
     json: () => Promise.resolve(response),
     text: () => Promise.resolve(JSON.stringify(response)),
   } as Response)
 }
 
 describe('worker tokens api', () => {
-  it('lists register tokens with the management header', async () => {
+  it('lists register tokens without a management header', async () => {
     const fetchMock = mockFetchJson({ tokens: [] })
     global.fetch = fetchMock
 
-    const tokens = await listRegisterTokens('mgmt-secret')
+    const tokens = await listRegisterTokens()
 
     expect(tokens).toEqual([])
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/agent-register-tokens',
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          'X-Agent-Worker-Register-Token': 'mgmt-secret',
-        }),
-      })
+      expect.objectContaining({ cache: 'no-store' })
     )
+    const init = fetchMock.mock.calls[0][1] as RequestInit
+    expect(init.headers).not.toHaveProperty('X-Agent-Worker-Register-Token')
   })
 
   it('creates a register token with label and optional workspace scope', async () => {
@@ -52,7 +49,7 @@ describe('worker tokens api', () => {
     })
     global.fetch = fetchMock
 
-    const created = await createRegisterToken('mgmt-secret', {
+    const created = await createRegisterToken({
       label: 'home-mac-mini',
       workspace_id: 'video_knowledge',
     })
@@ -62,9 +59,6 @@ describe('worker tokens api', () => {
       '/api/agent-register-tokens',
       expect.objectContaining({
         method: 'POST',
-        headers: expect.objectContaining({
-          'X-Agent-Worker-Register-Token': 'mgmt-secret',
-        }),
         body: JSON.stringify({
           label: 'home-mac-mini',
           workspace_id: 'video_knowledge',
@@ -77,53 +71,32 @@ describe('worker tokens api', () => {
     const fetchMock = mockFetchJson({ revoked: true })
     global.fetch = fetchMock
 
-    await revokeRegisterToken('mgmt-secret', 'token/1')
+    await revokeRegisterToken('token/1')
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/agent-register-tokens/token%2F1/revoke',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'X-Agent-Worker-Register-Token': 'mgmt-secret',
-        }),
-      })
+      expect.objectContaining({ method: 'POST' })
     )
   })
 
-  it('lists agent workers without a management header', async () => {
+  it('lists agent workers', async () => {
     const fetchMock = mockFetchJson({ workers: [{ worker_id: 'w1' }] })
     global.fetch = fetchMock
 
     const workers = await listAgentWorkers()
 
     expect(workers).toEqual([{ worker_id: 'w1' }])
-    const init = fetchMock.mock.calls[0][1] as RequestInit
-    expect(init.headers).not.toHaveProperty('X-Agent-Worker-Register-Token')
   })
 
-  it('revokes an agent worker with the management header', async () => {
+  it('revokes an agent worker', async () => {
     const fetchMock = mockFetchJson({ worker_id: 'w1', revoked: true })
     global.fetch = fetchMock
 
-    await revokeAgentWorker('mgmt-secret', 'w1')
+    await revokeAgentWorker('w1')
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/agent-workers/w1/revoke',
-      expect.objectContaining({
-        method: 'POST',
-        headers: expect.objectContaining({
-          'X-Agent-Worker-Register-Token': 'mgmt-secret',
-        }),
-      })
+      expect.objectContaining({ method: 'POST' })
     )
-  })
-
-  it('recognizes 401 errors as management auth errors', async () => {
-    global.fetch = mockFetchJson({ detail: 'Unauthorized' }, false, 401)
-
-    const error = await listRegisterTokens('bad').catch((err: unknown) => err)
-
-    expect(isManagementAuthError(error)).toBe(true)
-    expect(isManagementAuthError(new Error('other'))).toBe(false)
   })
 })
