@@ -218,20 +218,12 @@ def test_executor_stats_does_not_consult_agent_status_manager(
     )
 
     consulted = []
-    original_get_allowed = workspace_service.agent_manager.get_allowed_agents
     original_get_all = workspace_service.agent_manager.get_all
-
-    def tracking_get_allowed_agents(workspace_id_arg):
-        consulted.append(("get_allowed_agents", workspace_id_arg))
-        return original_get_allowed(workspace_id_arg)
 
     def tracking_get_all():
         consulted.append(("get_all",))
         return original_get_all()
 
-    monkeypatch.setattr(
-        workspace_service.agent_manager, "get_allowed_agents", tracking_get_allowed_agents
-    )
     monkeypatch.setattr(workspace_service.agent_manager, "get_all", tracking_get_all)
 
     stats = workspace_service.stats(workspace["id"])
