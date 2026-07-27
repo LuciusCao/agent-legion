@@ -51,6 +51,20 @@ def test_parse_time_with_single_part():
         parse_time("1")
 
 
+def test_parse_time_empty_string():
+    from server.app.pipeline.common import parse_time
+
+    with pytest.raises(ValueError, match="Unknown timestamp"):
+        parse_time("")
+
+
+def test_parse_time_non_numeric_parts():
+    from server.app.pipeline.common import parse_time
+
+    with pytest.raises(ValueError, match="Unknown timestamp"):
+        parse_time("ab:cd")
+
+
 def test_format_srt_time():
     from server.app.pipeline.common import format_srt_time
 

@@ -122,6 +122,21 @@ describe('createRealtimeChannel', () => {
     expect(WebSocketMock.instances.length).toBe(3)
   })
 
+  it('ws error closes the socket so reconnect can proceed via onclose', () => {
+    createRealtimeChannel({
+      url: 'ws://example/socket',
+      protocol: 'ws',
+      onEvent: vi.fn(),
+    })
+
+    WebSocketMock.instances[0].onerror?.()
+    expect(WebSocketMock.instances[0].close).toHaveBeenCalledTimes(1)
+
+    WebSocketMock.instances[0].onclose?.()
+    vi.advanceTimersByTime(1000)
+    expect(WebSocketMock.instances.length).toBe(2)
+  })
+
   it('does not reconnect after close()', () => {
     const channel = createRealtimeChannel({
       url: 'ws://example/socket',

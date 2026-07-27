@@ -25,9 +25,12 @@ def create_workspace_package(
     artifact_names: list[str] | None = None,
 ) -> tuple[Path, int]:
     packages_dir.mkdir(parents=True, exist_ok=True)
-    package_path = (
-        packages_dir / f"workspace-jobs-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}.zip"
-    )
+    stamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
+    package_path = packages_dir / f"workspace-jobs-{stamp}.zip"
+    suffix = 1
+    while package_path.exists():
+        package_path = packages_dir / f"workspace-jobs-{stamp}-{suffix}.zip"
+        suffix += 1
     manifest = {
         "created_at": datetime.now(UTC).isoformat(),
         "jobs": [

@@ -4,13 +4,16 @@ from pathlib import Path
 
 def parse_time(value: str) -> float:
     parts = value.strip().replace(",", ".").split(":")
-    if len(parts) == 2:
-        minutes, seconds = parts
-        return int(minutes) * 60 + float(seconds)
-    if len(parts) == 3:
-        hours, minutes, seconds = parts
-        return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-    raise ValueError(f"Unknown timestamp: {value}")
+    try:
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return int(minutes) * 60 + float(seconds)
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except ValueError:
+        pass
+    raise ValueError(f"Unknown timestamp: {value}") from None
 
 
 def _parse_srt_block(lines: list[str], subtitles: list[dict]) -> None:
@@ -23,11 +26,16 @@ def _parse_srt_block(lines: list[str], subtitles: list[dict]) -> None:
     )
     if not match:
         return
+    try:
+        start = parse_time(match.group(1))
+        end = parse_time(match.group(2))
+    except ValueError:
+        return
     subtitles.append(
         {
             "index": int(lines[0]) if lines[0].isdigit() else len(subtitles) + 1,
-            "start": parse_time(match.group(1)),
-            "end": parse_time(match.group(2)),
+            "start": start,
+            "end": end,
             "text": "\n".join(lines[2:]),
         }
     )

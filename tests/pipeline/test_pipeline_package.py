@@ -204,3 +204,31 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
         assert manifest["jobs"][0]["id"] == "job_1"
         assert manifest["jobs"][0]["source_id"] == "S1"
         assert manifest["jobs"][0]["workflow_key"] == "question_comprehension_info"
+
+
+def test_create_workspace_package_human_readable_name_and_collision_suffix(tmp_path, monkeypatch):
+    from datetime import UTC, datetime
+
+    import server.app.pipeline.workspace_package as wp
+
+    class _FixedDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(2026, 7, 27, 12, 0, 0, tzinfo=tz or UTC)
+
+    monkeypatch.setattr(wp, "datetime", _FixedDatetime)
+
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    job_dir = jobs_dir / "job_1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "result.json").write_text(json.dumps({"answer": 42}), encoding="utf-8")
+
+    jobs = [{"id": "job_1", "source_id": "S1", "workflow_key": "wf", "status": "completed"}]
+
+    first, _ = create_workspace_package(jobs, packages_dir, jobs_dir)
+    second, _ = create_workspace_package(jobs, packages_dir, jobs_dir)
+
+    assert first.name == "workspace-jobs-20260727_120000.zip"
+    assert second.name == "workspace-jobs-20260727_120000-1.zip"
+    assert first.exists() and second.exists()

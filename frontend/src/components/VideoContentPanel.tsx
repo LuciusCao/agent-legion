@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { fetchJobVideoDetail } from '../api/videoApi'
-import type { VideoJobDetailResponse } from '../api/videoApi'
+import { fetchJobVideoDetail } from '../api/jobVideoApi'
+import type { VideoJobDetailResponse } from '../api/jobVideoApi'
 import type {
   InteractionNode,
   InteractionOption,
