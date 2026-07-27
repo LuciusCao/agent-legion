@@ -21,6 +21,7 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.executors.scheduling.capacity import CapacitySnapshot
+from server.app.services.node_config import batch_source_payload, dispatch_effective_config
 from server.app.workflow_worker_execution import submit_claim
 from server.app.workflow_worker_routing import resolve_node_route
 from server.app.workflow_worker_shards import assemble_reduce_inputs, claim_shard_node
@@ -132,6 +133,13 @@ def try_claim_and_submit(
         if worker.agent_dispatch is None:
             raise RuntimeError("Agent dispatch service is not configured")
         try:
+            node_config = dispatch_effective_config(
+                definition_config.config_schema,
+                node,
+                workflow_key,
+                workspace,
+                batch_source_payload(worker.job_db, job),
+            )
             return worker.agent_dispatch.enqueue(
                 agent_id=agent_id,
                 definition=definition_config,
@@ -142,6 +150,7 @@ def try_claim_and_submit(
                 job_dir=job_dir,
                 log_path=log_path,
                 inputs=inputs,
+                node_config=node_config,
             )
         except ValueError as exc:
             # Route/definition/capacity drift must fail THIS node, not

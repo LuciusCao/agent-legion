@@ -54,6 +54,7 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                 "inputs": node.inputs,
                 "outputs": node.outputs,
                 "execution": asdict(node.execution),
+                "config": node.config,
                 "terminal": (
                     {"outcome": node.terminal.outcome} if node.terminal is not None else None
                 ),
@@ -110,6 +111,8 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         execution = {key: value for key, value in asdict(node.execution).items() if value}
         if execution:
             raw_node["execution"] = execution
+        if node.config:
+            raw_node["config"] = node.config
         payload["nodes"][key] = raw_node
     for edge in definition.edges:
         raw_edge: dict[str, Any] = {"from": edge.source, "to": edge.target}

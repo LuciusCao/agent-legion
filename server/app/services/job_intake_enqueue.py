@@ -13,6 +13,7 @@ def enqueue_intake_batch(
     resource_config: dict[str, Any],
     mode: Any,
     revision: dict[str, Any],
+    node_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     workflow_key = str(payload["workflow_key"])
     source_kind = str(payload["source_kind"])
@@ -25,6 +26,7 @@ def enqueue_intake_batch(
             "knowledge_codes": input_values if input_field == "knowledge_codes" else [],
             "cms_config": cms_config,
             "resource_config": resource_config,
+            "node_config": node_config or {},
             "intake_mode": {
                 "key": mode.key,
                 "label": mode.label,

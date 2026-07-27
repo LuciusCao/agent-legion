@@ -40,3 +40,16 @@ def test_database_initialization_records_postgres_schema():
             for row in conn.execute("select version from schema_migrations").fetchall()
         }
     assert versions == {SCHEMA_VERSION}
+
+
+def test_workspaces_table_has_node_config_column():
+    """Schema v14: workspaces carry per-node config overrides (spec D8)."""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        columns = {
+            row["column_name"]
+            for row in conn.execute(
+                "select column_name from information_schema.columns"
+                " where table_name='workspaces' and table_schema=current_schema()"
+            ).fetchall()
+        }
+    assert "node_config_json" in columns

@@ -53,6 +53,9 @@
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.local` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
+- 节点可调参数经 `AgentDefinition.config_schema` 声明（`server/app/config_schema.py`
+  子集），解析链 defaults → 节点 `config` → workspace 覆盖，intake 冻结；
+  manifest 仅携带白名单非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`。
 
 典型反例：
 

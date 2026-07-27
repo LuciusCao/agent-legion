@@ -230,3 +230,62 @@ def test_load_question_comprehension_info_capabilities():
     assert definition.nodes["finalize_non_uploadable"].capability == "finalize_non_uploadable"
     assert definition.nodes["finalize_non_uploadable"].terminal is not None
     assert definition.nodes["finalize_non_uploadable"].terminal.outcome == "non_uploadable"
+
+
+def test_workflow_node_loads_config_mapping(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_questions\noutputs: [out.json]\n"
+            "config:\n      page_size: 20\n      subject_id: math"
+        ),
+    )
+    node = load_workflow_definition(path).nodes["one"]
+    assert node.config == {"page_size": 20, "subject_id": "math"}
+
+
+def test_workflow_node_config_defaults_to_empty(tmp_path: Path) -> None:
+    path = write_workflow(tmp_path, node_body="capability: fetch_questions\noutputs: [out.json]")
+    assert load_workflow_definition(path).nodes["one"].config == {}
+
+
+def test_workflow_node_rejects_non_mapping_config(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body="capability: fetch_questions\noutputs: [out.json]\nconfig: [page_size]",
+    )
+    with pytest.raises(WorkflowDefinitionError, match="config must be a mapping"):
+        load_workflow_definition(path)
+
+
+def test_node_config_round_trips_through_job_snapshot(tmp_path: Path) -> None:
+    from server.app.services.workflow_revision_format import (
+        definition_from_job_snapshot,
+        serialize_definition,
+    )
+
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_questions\noutputs: [out.json]\nconfig:\n      page_size: 20"
+        ),
+    )
+    definition = load_workflow_definition(path)
+    snapshot = serialize_definition(definition)
+    restored = definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
+    assert restored is not None
+    assert restored.nodes["one"].config == {"page_size": 20}
+
+
+def test_legacy_snapshot_without_node_config_still_loads() -> None:
+    from server.app.services.workflow_revision_format import definition_from_job_snapshot
+
+    snapshot = (
+        '{"key":"test","label":"Test","schema_version":1,'
+        '"nodes":{"one":{"key":"one","label":"One","capability":"fetch_questions",'
+        '"after":[],"inputs":[],"outputs":["out.json"],"terminal":null,'
+        '"execution":{"provider":"","model":"","thinking":"","prompt":""}}},"edges":[]}'
+    )
+    restored = definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
+    assert restored is not None
+    assert restored.nodes["one"].config == {}

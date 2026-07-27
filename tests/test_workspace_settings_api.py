@@ -113,3 +113,121 @@ def test_lists_workspace_workflow_revisions(client):
     assert revisions.status_code == 200
     payload = revisions.json()
     assert "revisions" in payload
+
+
+def _inject_key_info_config_schema(app) -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "max_items": {"type": "integer", "default": 10, "minimum": 1, "maximum": 100}
+        },
+    }
+    agents = dict(app.state.settings.agent_definitions)
+    original = agents["question-key-info-v1"]
+    agents["question-key-info-v1"] = original.model_copy(update={"config_schema": schema})
+    app.state.settings.agent_definitions = agents
+
+
+def test_workspace_settings_nodes_round_trip(tmp_path):
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    _inject_key_info_config_schema(app)
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "nodes_ws", "default_workflow_key": "question_comprehension_info"},
+        )
+        assert ws.status_code == 200
+        workspace_id = ws.json()["workspace"]["id"]
+
+        fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
+        assert fetched.status_code == 200
+        settings = fetched.json()["settings"]
+        assert settings["nodeConfig"] == {}
+        assert set(settings["nodeConfigSchemas"]) == {"generate_key_info"}
+
+        saved = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {"max_items": 5}}},
+        )
+        assert saved.status_code == 200
+        assert saved.json()["settings"]["nodeConfig"] == {"generate_key_info": {"max_items": 5}}
+
+        cleared = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {}}},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["settings"]["nodeConfig"] == {}
+
+    workspace = app.state.job_db.get_workspace(workspace_id)
+    assert workspace["node_config"] == {"question_comprehension_info": {}}
+
+
+def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    _inject_key_info_config_schema(app)
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "nodes_ws_bad", "default_workflow_key": "question_comprehension_info"},
+        )
+        workspace_id = ws.json()["workspace"]["id"]
+
+        unknown_key = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {"nope": 1}}},
+        )
+        out_of_bounds = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {"max_items": 0}}},
+        )
+        no_schema = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"max_items": 5}}},
+        )
+        unknown_node = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"not_a_node": {"max_items": 5}}},
+        )
+
+    assert unknown_key.status_code == 400
+    assert out_of_bounds.status_code == 400
+    assert no_schema.status_code == 400
+    assert unknown_node.status_code == 400
+
+
+def test_workspace_settings_resources_are_schema_validated(tmp_path):
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "res_ws", "default_workflow_key": "question_comprehension_info"},
+        )
+        workspace_id = ws.json()["workspace"]["id"]
+
+        fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
+        assert fetched.status_code == 200
+        resource_schemas = fetched.json()["settings"]["resourceSchemas"]
+        assert set(resource_schemas) == {"question_detail", "by_knowledge"}
+        assert "page_size" in resource_schemas["by_knowledge"]["schema"]["properties"]
+
+        bad_type = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/resources",
+            json={"resources": {"by_knowledge": {"enabled": True, "config": {"page_size": "x"}}}},
+        )
+        unknown_key = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/resources",
+            json={"resources": {"question_detail": {"enabled": True, "config": {"evil": 1}}}},
+        )
+        ok = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/resources",
+            json={"resources": {"by_knowledge": {"enabled": True, "config": {"page_size": 100}}}},
+        )
+
+    assert bad_type.status_code == 400
+    assert unknown_key.status_code == 400
+    assert ok.status_code == 200
+    assert ok.json()["settings"]["resources"]["by_knowledge"]["config"] == {"page_size": 100}

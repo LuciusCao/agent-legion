@@ -9,6 +9,7 @@ from server.app.agent_artifacts import stage_agent_inputs
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_bundle import build_agent_bundle
 from server.app.agent_catalog import AgentDefinition
+from server.app.config_schema import manifest_safe_config
 from server.app.executors._pi_skill import get_skill_version, resolve_skill_dir
 from server.app.executors.models import ExecutionContext
 from server.app.services.artifact_store import ArtifactStore
@@ -49,6 +50,7 @@ class AgentDispatchService:
         job_dir: Path,
         log_path: Path,
         inputs: tuple[str, ...],
+        node_config: dict[str, Any] | None = None,
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
@@ -71,6 +73,8 @@ class AgentDispatchService:
                 "inputs": list(inputs),
                 "expected_outputs": list(node.outputs),
                 "additional_prompt": node.execution.prompt,
+                # CONFIG-MANIFEST-001: only schema-whitelisted, non-secret keys.
+                "config": manifest_safe_config(definition.config_schema, node_config or {}),
                 "tools": list(definition.tools),
                 "skill": definition.skill,
                 "skill_version": get_skill_version(self.skill_manager, definition.skill),

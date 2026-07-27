@@ -208,6 +208,13 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
+        raw_config = raw_node.get("config")
+        if raw_config is None:
+            raw_config = {}
+        if not isinstance(raw_config, dict) or not all(isinstance(key, str) for key in raw_config):
+            raise WorkflowDefinitionError(
+                f"Node {node_key}.config must be a mapping with string keys"
+            )
         nodes[node_key] = WorkflowNode(
             key=node_key,
             label=node_label,
@@ -217,6 +224,7 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
             outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),
             terminal=_load_terminal(raw_node, node_key),
             execution=load_node_execution(raw_node, node_key),
+            config=dict(raw_config),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
         )

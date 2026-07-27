@@ -46,6 +46,38 @@ def test_agent_definition_rejects_unsafe_skill_path() -> None:
         )
 
 
+def test_agent_definition_accepts_config_schema_and_hashes_it() -> None:
+    with_schema = AgentDefinition.model_validate(
+        {
+            "capability": "cap",
+            "runtime": "pi",
+            "skill": "question/generate",
+            "config_schema": {"properties": {"page_size": {"type": "integer", "default": 50}}},
+        }
+    )
+    without_schema = AgentDefinition(
+        capability="cap",
+        runtime="pi",
+        skill="question/generate",
+    )
+
+    assert with_schema.config_schema["properties"]["page_size"]["default"] == 50
+    assert without_schema.config_schema == {}
+    assert with_schema.definition_hash() != without_schema.definition_hash()
+
+
+def test_agent_definition_rejects_invalid_config_schema() -> None:
+    with pytest.raises(ValidationError, match="unsupported keys"):
+        AgentDefinition.model_validate(
+            {
+                "capability": "cap",
+                "runtime": "pi",
+                "skill": "question/generate",
+                "config_schema": {"properties": {"x": {"type": "string", "pattern": "^a"}}},
+            }
+        )
+
+
 def test_load_agent_definitions_rejects_duplicate_capability() -> None:
     with pytest.raises(ValueError, match="exactly one Agent Definition per capability"):
         load_agent_definitions(

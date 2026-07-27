@@ -68,3 +68,35 @@ def test_resolve_resource_config_overrides_legacy(settings_config):
     }
     result = resolve_cms_resource(settings_config, workspace, None, "question_detail")
     assert "subject_id=7" in result["api_url"]
+
+
+def test_resource_param_keys_match_declared_schemas():
+    from server.app.workflows.resources import RESOURCE_PARAM_KEYS
+
+    # Regression: order and content feed URL param appending and the settings UI.
+    assert RESOURCE_PARAM_KEYS == ("bank_version", "country_id", "subject_id", "page_size")
+
+
+def test_validate_resource_bindings_accepts_known_providers():
+    from server.app.workflows.resource_schemas import validate_resource_bindings
+
+    validate_resource_bindings(
+        {
+            "question_detail": {"enabled": True, "config": {"subject_id": "5"}},
+            "by_knowledge": {"enabled": True, "config": {"page_size": 100}},
+        }
+    )
+
+
+def test_validate_resource_bindings_rejects_bad_values():
+    from server.app.config_schema import ConfigSchemaError
+    from server.app.workflows.resource_schemas import validate_resource_bindings
+
+    with pytest.raises(ConfigSchemaError, match="unknown resource"):
+        validate_resource_bindings({"nope": {"config": {}}})
+    with pytest.raises(ConfigSchemaError, match="unknown keys"):
+        validate_resource_bindings({"question_detail": {"config": {"evil": "x"}}})
+    with pytest.raises(ConfigSchemaError, match="page_size must be of type integer"):
+        validate_resource_bindings({"by_knowledge": {"config": {"page_size": "100"}}})
+    with pytest.raises(ConfigSchemaError, match="must be <= 500"):
+        validate_resource_bindings({"by_knowledge": {"config": {"page_size": 9999}}})

@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from server.app.config_schema import validate_config_schema
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 
@@ -22,6 +23,13 @@ class AgentDefinition(BaseModel):
     skill: str = Field(min_length=1)
     tools: tuple[str, ...] = ("read", "write", "bash")
     requires_labels: dict[str, str] = Field(default_factory=dict)
+    config_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("config_schema", mode="after")
+    @classmethod
+    def _validate_config_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        validate_config_schema(value)
+        return value
 
     @field_validator("skill", mode="after")
     @classmethod

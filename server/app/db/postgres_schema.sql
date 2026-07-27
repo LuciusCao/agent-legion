@@ -6,10 +6,15 @@ create table if not exists workspaces (
   updated_at timestamptz not null default current_timestamp,
   cms_config_json text not null default '{}',
   resource_config_json text not null default '{}',
+  node_config_json text not null default '{}',
   default_entity text not null default 'question',
   intake_config_json text not null default '{}',
   description text not null default ''
 );
+
+-- Idempotent upgrade path for databases created before schema v14:
+-- `create table if not exists` above does not add columns to existing tables.
+alter table workspaces add column if not exists node_config_json text not null default '{}';
 
 create table if not exists workspace_executor_allocations (
   workspace_id text not null references workspaces(id) on delete cascade,
