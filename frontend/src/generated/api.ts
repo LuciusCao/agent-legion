@@ -141,6 +141,26 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-workers/self': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /**
+     * Get Worker Self
+     * @description Let a Worker inspect only its own registration with its issued token.
+     */
+    get: operations['get_worker_self_api_agent_workers_self_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-workers/{worker_id}/revoke': {
     parameters: {
       query?: never
@@ -3586,6 +3606,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_worker_self_api_agent_workers_self_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkerSummary']
         }
       }
     }

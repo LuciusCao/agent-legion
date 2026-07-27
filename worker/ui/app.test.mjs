@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, buildLineChart, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, buildLineChart, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, groupExecutions, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -64,6 +64,24 @@ test("executionLabel 取 agent · 节点，缺省时回退 execution_id 或 unkn
   assert.equal(executionLabel({ agent_id: "pi", node_key: "review" }), "pi · review");
   assert.equal(executionLabel({ execution_id: "e2" }), "e2");
   assert.equal(executionLabel({}), "unknown");
+});
+
+test("groupExecutions 按 node_key 分组并按数量排序", () => {
+  assert.deepEqual(groupExecutions([
+    { execution_id: "e1", node_key: "review", phase: "running" },
+    { execution_id: "e2", node_key: "upload", phase: "uploading" },
+    { execution_id: "e3", node_key: "review", phase: "claimed" },
+  ]).map((group) => [group.name, group.executions.length, group.phase]), [
+    ["review", 2, "running"],
+    ["upload", 1, "uploading"],
+  ]);
+});
+
+test("phaseProgress 按执行阶段提供稳定的阶段进度", () => {
+  assert.equal(phaseProgress("claimed"), 16);
+  assert.equal(phaseProgress("running"), 68);
+  assert.equal(phaseProgress("uploading"), 88);
+  assert.equal(phaseProgress("unknown"), 12);
 });
 
 test("formatTokens 按量级缩写，空值显示 —", () => {

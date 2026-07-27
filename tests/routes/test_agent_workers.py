@@ -88,6 +88,24 @@ def test_agent_worker_register_and_claim_api(tmp_path: Path) -> None:
     assert app.state.job_db.get_job_node("job-1", "generate")["status"] == "running"
 
 
+def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        own_status = client.get(
+            "/api/agent-workers/self",
+            headers={"X-Agent-Worker-Token": token},
+        )
+        anonymous = client.get("/api/agent-workers/self")
+
+    assert own_status.status_code == 200
+    assert own_status.json()["worker_id"] == "home-mini"
+    assert own_status.json()["name"] == "Home Mac mini"
+    assert own_status.json()["revoked"] is False
+    assert anonymous.status_code == 401
+
+
 def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-1", limit=2)

@@ -37,7 +37,7 @@ FAKE_WORKER_WITH_STATUS = """
 import json, os, time
 path = os.environ["AGENT_WORKER_STATUS_FILE"]
 with open(path, "w", encoding="utf-8") as handle:
-    json.dump({"pid": os.getpid(), "executions": {"exec-1": {"execution_id": "exec-1", "job_id": "job-1", "node_key": "node_a", "phase": "running", "started_at": "2026-07-23T00:00:00+00:00"}}}, handle)
+    json.dump({"pid": os.getpid(), "remote": {"host_reachable": True, "registered": True, "connected": True, "host_worker": {"worker_id": "worker-1", "name": "Test Worker"}, "connection_error": None}, "executions": {"exec-1": {"execution_id": "exec-1", "job_id": "job-1", "node_key": "node_a", "phase": "running", "started_at": "2026-07-23T00:00:00+00:00"}}}, handle)
 time.sleep(30)
 """
 
@@ -110,7 +110,6 @@ def _make_supervisor(
     token_file.write_text("secret", encoding="utf-8")
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
-    monkeypatch.setattr(state_module, "_query_remote_status", lambda config: {})
     monkeypatch.setattr(state_module, "_RESTART_BACKOFF_INITIAL", 0.05)
     monkeypatch.setenv("FAKE_WORKER_MODE", mode)
     return WorkerSupervisor(store, script)
@@ -534,6 +533,21 @@ def test_index_injects_control_token(tmp_path: Path) -> None:
     assert '= "__WORKER_CONTROL_TOKEN__"' not in body
 
 
+def test_worker_ui_serves_icon_sprite(tmp_path: Path) -> None:
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("<div>worker</div>", encoding="utf-8")
+    (ui / "icons.svg").write_text("<svg></svg>", encoding="utf-8")
+    store = WorkerConfigStore(tmp_path / "state")
+    app = create_app(FakeSupervisor(store), ui)
+
+    with TestClient(app) as client:
+        response = client.get("/assets/icons.svg")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("image/svg+xml")
+
+
 def test_supervisor_starts_and_stops_worker_process(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -638,14 +652,17 @@ def test_supervisor_injects_status_file_and_cleans_it_on_exit(
     token_file.write_text("secret", encoding="utf-8")
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
-    monkeypatch.setattr(state_module, "_query_remote_status", lambda config: {})
     supervisor = WorkerSupervisor(store, script)
     supervisor.start()
     try:
         _wait_for(lambda: supervisor.status()["current_executions"] != [])
-        executions = supervisor.status()["current_executions"]
+        status = supervisor.status()
+        executions = status["current_executions"]
         assert [item["execution_id"] for item in executions] == ["exec-1"]
         assert executions[0]["phase"] == "running"
+        assert status["host_reachable"] is True
+        assert status["registered"] is True
+        assert status["host_worker"]["worker_id"] == "worker-1"
     finally:
         supervisor.stop()
     _wait_for(lambda: supervisor.status()["current_executions"] == [])

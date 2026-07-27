@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import hmac
-import json
 import re
 import uuid
-from pathlib import PurePosixPath
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
@@ -12,20 +10,14 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from server.app.agent_broker import AgentExecutionBroker
-from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
+from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
+from server.app.routes.agent_worker_results import parse_result_metadata
 from server.app.settings import Settings
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
-_ARTIFACT_REF = re.compile(r"^sha256:[0-9a-f]{64}$")
 _LEASE_HEADER = "x-agent-lease-id"
-# Bounds for worker-supplied result metadata; the metadata travels in an HTTP
-# header and lands in the jobs DB, so keep every field small.
-_MAX_COMMAND_PARTS = 64
-_MAX_OUTPUT_ARTIFACTS = 128
-_MAX_ERROR_MESSAGE_CHARS = 4000
-_MAX_RUN_DIR_CHARS = 256
 
 
 class RegisterAgentWorkerRequest(BaseModel):
@@ -122,61 +114,6 @@ class AgentClaimResponse(BaseModel):
     agent_id: str
     manifest: dict[str, Any]
     bundle_url: str
-
-
-def _parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
-    """Validate worker result metadata into an outcome + stored record.
-
-    Raises ValueError on anything malformed so the route can answer 400
-    before touching the archive on disk (no 500s, no orphan files)."""
-    try:
-        metadata = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise ValueError("metadata is not valid JSON") from exc
-    if not isinstance(metadata, dict):
-        raise ValueError("metadata must be a JSON object")
-    status = str(metadata.get("status", ""))
-    if status not in {"completed", "failed", "cancelled"}:
-        raise ValueError("invalid status")
-    try:
-        exit_code = int(metadata.get("exit_code", 0))
-    except (TypeError, ValueError) as exc:
-        raise ValueError("invalid exit_code") from exc
-    command_raw = metadata.get("command", [])
-    if not isinstance(command_raw, (list, tuple)) or len(command_raw) > _MAX_COMMAND_PARTS:
-        raise ValueError("invalid command")
-    artifacts_raw = metadata.get("output_artifacts", {})
-    if not isinstance(artifacts_raw, dict) or len(artifacts_raw) > _MAX_OUTPUT_ARTIFACTS:
-        raise ValueError("invalid output artifacts")
-    output_artifacts = {str(name): str(ref) for name, ref in artifacts_raw.items()}
-    if any(not _ARTIFACT_REF.fullmatch(ref) for ref in output_artifacts.values()):
-        raise ValueError("invalid output artifact reference")
-    error_message = str(metadata.get("error_message", ""))[:_MAX_ERROR_MESSAGE_CHARS]
-    run_dir_raw = metadata.get("run_dir", "")
-    if not isinstance(run_dir_raw, str) or len(run_dir_raw) > _MAX_RUN_DIR_CHARS:
-        raise ValueError("invalid run_dir")
-    run_dir_relative = PurePosixPath(run_dir_raw)
-    run_dir = ""
-    if run_dir_raw:
-        if run_dir_relative.is_absolute() or ".." in run_dir_relative.parts:
-            raise ValueError("invalid run_dir")
-        run_dir = run_dir_relative.as_posix()
-    outcome = AgentOutcome(
-        status=status,  # type: ignore[arg-type]
-        exit_code=exit_code,
-        error_message=error_message,
-        command=tuple(str(part) for part in command_raw),
-        output_artifacts=output_artifacts,
-        run_dir=run_dir,
-    )
-    record = {
-        "status": status,
-        "exit_code": exit_code,
-        "error_message": error_message,
-        "output_artifacts": output_artifacts,
-        "run_dir": run_dir,
-    }
-    return outcome, record
 
 
 def create_agent_workers_router(
@@ -289,6 +226,11 @@ def create_agent_workers_router(
             raise HTTPException(status_code=404, detail="Agent register token not found")
         return AgentRegisterTokenRevokeResponse(revoked=True)
 
+    @router.get("/agent-workers/self", response_model=AgentWorkerSummary)
+    def get_worker_self(request: Request) -> AgentWorkerSummary:
+        """Let a Worker inspect only its own registration with its issued token."""
+        return AgentWorkerSummary.model_validate(authorize_worker(request))
+
     @router.post(
         "/agent-workers/{worker_id}/revoke",
         response_model=AgentWorkerRevokeResponse,
@@ -363,7 +305,7 @@ def create_agent_workers_router(
         # Validate metadata fully BEFORE writing the archive: malformed input
         # must produce a 400, never a 500 with an orphan file on disk.
         try:
-            outcome, record = _parse_result_metadata(request.headers.get("x-agent-result", "{}"))
+            outcome, record = parse_result_metadata(request.headers.get("x-agent-result", "{}"))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid Agent result metadata") from exc
         # Size gate: reject on the declared length before buffering the body.
