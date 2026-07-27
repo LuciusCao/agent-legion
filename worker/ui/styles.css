@@ -65,7 +65,7 @@ code { color: #62e4ad; }
 .chart-title { color: #718d83; font-size: 12px; margin: 0 0 8px; }
 .chart { border: 1px solid #213c34; border-radius: 12px; background: #050b09; padding: 8px; }
 .chart svg { display: block; width: 100%; height: auto; }
-.chart .axis { color: #718d83; font: 10px ui-monospace, monospace; }
+.chart .axis { fill: #718d83; font: 10px ui-monospace, monospace; }
 .chart .grid-line { stroke: #213c34; stroke-dasharray: 3 4; }
 .chart .hover-zone { fill: transparent; }
 .chart .hover-zone:hover { fill: rgba(85, 230, 166, .08); }
