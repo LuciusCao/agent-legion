@@ -14,6 +14,7 @@ import type {
 } from '../api/metrics'
 import { listAgentWorkers } from '../api/workerTokens'
 import type { AgentWorkerSummary } from '../api/workerTokens'
+import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { MetricsChart } from './MetricsChart'
 import styles from './MonitoringPanel.module.css'
 
@@ -45,20 +46,26 @@ function makeTimeFormatter(granularity: OpsGranularity) {
   }
 }
 
-function latestBucket(data: OpsMetricsResponse | null): MetricBucket | null {
-  return data?.buckets.length ? data.buckets[data.buckets.length - 1] : null
+function latestBucket(buckets: MetricBucket[]): MetricBucket | null {
+  return buckets.length ? buckets[buckets.length - 1] : null
 }
 
-function sumRecentHourTokens(data: OpsMetricsResponse | null): number | null {
-  if (!data?.buckets.length) return null
+function sumRecentHourTokens(buckets: MetricBucket[]) {
+  if (!buckets.length) return null
   const cutoff = Date.now() - HOUR_MS
-  const recent = data.buckets.filter(
+  const recent = buckets.filter(
     (b) => new Date(b.bucket_start).getTime() >= cutoff
   )
-  const source = recent.length
-    ? recent
-    : [data.buckets[data.buckets.length - 1]]
-  return source.reduce((sum, b) => sum + b.total_tokens, 0)
+  const source = recent.length ? recent : [buckets[buckets.length - 1]]
+  return source.reduce(
+    (sum, b) => ({
+      input_tokens: sum.input_tokens + b.input_tokens,
+      output_tokens: sum.output_tokens + b.output_tokens,
+      cache_read_tokens: sum.cache_read_tokens + b.cache_read_tokens,
+      total_tokens: sum.total_tokens + b.total_tokens,
+    }),
+    { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, total_tokens: 0 }
+  )
 }
 
 export function MonitoringPanel() {
@@ -116,8 +123,13 @@ export function MonitoringPanel() {
     () => makeTimeFormatter(granularity),
     [granularity]
   )
-  const latest = latestBucket(data)
-  const hourlyTokens = sumRecentHourTokens(data)
+  // 补齐成固定时间窗：切换 Worker 或数据稀疏时图表 X 轴范围不变。
+  const buckets = useMemo(
+    () => (data ? fillWindowBuckets(data.buckets, granularity) : []),
+    [data, granularity]
+  )
+  const latest = latestBucket(buckets)
+  const hourlyTokens = sumRecentHourTokens(buckets)
 
   if (error) {
     return <p className={styles.error}>监控数据加载失败：{error}</p>
@@ -194,16 +206,20 @@ export function MonitoringPanel() {
             className={styles.metricValue}
             data-testid="hourly-tokens-summary"
           >
-            {fmt(hourlyTokens)}
+            {fmt(hourlyTokens?.total_tokens)}
           </div>
-          <div className={styles.metricMeta}>输入 / 输出 / 缓存读合并统计</div>
+          <div className={styles.metricMeta}>
+            输入 {fmt(hourlyTokens?.input_tokens)} · 输出{' '}
+            {fmt(hourlyTokens?.output_tokens)} · 缓存读{' '}
+            {fmt(hourlyTokens?.cache_read_tokens)}
+          </div>
         </div>
       </div>
 
       <div className={styles.chartSection}>
         <h3>Worker 与执行并发{loading && !data ? '（加载中…）' : ''}</h3>
         <MetricsChart
-          buckets={data?.buckets ?? []}
+          buckets={buckets}
           ariaLabel="在线 Worker 与活跃执行趋势"
           formatTime={formatTime}
           series={[
@@ -216,12 +232,13 @@ export function MonitoringPanel() {
       <div className={styles.chartSection}>
         <h3>Token 吞吐量</h3>
         <MetricsChart
-          buckets={data?.buckets ?? []}
+          buckets={buckets}
           ariaLabel="Token 吞吐量趋势"
           formatTime={formatTime}
-          area
           series={[
-            { key: 'total_tokens', label: '总 Token', color: '#7c3aed' },
+            { key: 'input_tokens', label: '输入', color: '#2563eb' },
+            { key: 'output_tokens', label: '输出', color: '#7c3aed' },
+            { key: 'cache_read_tokens', label: '缓存读', color: '#0891b2' },
           ]}
         />
       </div>
