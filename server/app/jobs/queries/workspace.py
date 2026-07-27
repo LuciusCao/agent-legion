@@ -35,7 +35,6 @@ def _decode_json_object(value: Any) -> dict[str, Any]:
 
 def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
     record = dict(row)
-    record["cms_config"] = _decode_json_object(record.get("cms_config_json"))
     record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
     record["intake_config"] = _decode_json_object(record.get("intake_config_json"))
     record["node_config"] = _decode_json_object(record.get("node_config_json"))
@@ -49,7 +48,6 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         self,
         name: str,
         default_workflow_key: str = "question_comprehension_info",
-        cms_config: dict[str, Any] | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
         intake_config: dict[str, Any] | None = None,
@@ -61,7 +59,6 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         clean_workflow_key = (default_workflow_key or "").strip()
         if not clean_workflow_key:
             raise ValueError("Workspace workflow is required")
-        cms_config_json = json.dumps(cms_config or {}, ensure_ascii=False, sort_keys=True)
         resource_config_json = json.dumps(
             resource_config or {},
             ensure_ascii=False,
@@ -82,17 +79,16 @@ class WorkspaceQueriesMixin(JobQueriesBase):
             conn.execute(
                 """
                 insert into workspaces(
-                  id, name, description, default_workflow_key, cms_config_json, resource_config_json,
+                  id, name, description, default_workflow_key, resource_config_json,
                   default_entity, intake_config_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workspace_id,
                     clean_name,
                     clean_description,
                     clean_workflow_key,
-                    cms_config_json,
                     resource_config_json,
                     clean_entity,
                     intake_config_json,
@@ -120,7 +116,6 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         name: str | None = None,
         description: str | None = None,
         default_workflow_key: str | None = None,
-        cms_config: dict[str, Any] | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
         intake_config: dict[str, Any] | None = None,
@@ -136,12 +131,6 @@ class WorkspaceQueriesMixin(JobQueriesBase):
             fields["description"] = description.strip()
         if default_workflow_key is not None:
             fields["default_workflow_key"] = default_workflow_key
-        if cms_config is not None:
-            fields["cms_config_json"] = json.dumps(
-                cms_config,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
         if resource_config is not None:
             fields["resource_config_json"] = json.dumps(
                 resource_config,

@@ -48,26 +48,22 @@ def test_resolve_disabled_provider_returns_empty_url(settings_config):
     assert result.get("api_url", "") == ""
 
 
-def test_resolve_fallback_to_legacy_cms_config(settings_config):
-    workspace = {
-        "cms_config": {
-            "subject_id": "9",
+def test_resolve_settings_legacy_url_wins_over_derived():
+    settings_config = {
+        "cms": {
+            "base_url": "http://cms.example",
             "question_detail_url": "http://legacy.example/detail",
-        }
-    }
-    result = resolve_cms_resource(settings_config, workspace, None, "question_detail")
-    assert "subject_id=9" in result["api_url"]
-
-
-def test_resolve_resource_config_overrides_legacy(settings_config):
-    workspace = {
-        "cms_config": {"subject_id": "9"},
-        "resource_config": {
-            "resources": {"question_detail": {"enabled": True, "config": {"subject_id": "7"}}}
         },
+        "resource_providers": {"cms.question.detail": {"path": "/question/detail"}},
     }
+    result = resolve_cms_resource(settings_config, None, None, "question_detail")
+    assert result["api_url"].startswith("http://legacy.example/detail")
+
+
+def test_resolve_ignores_workspace_legacy_cms_config(settings_config):
+    workspace = {"cms_config": {"question_detail_url": "http://legacy.example/detail"}}
     result = resolve_cms_resource(settings_config, workspace, None, "question_detail")
-    assert "subject_id=7" in result["api_url"]
+    assert "legacy.example" not in result["api_url"]
 
 
 def test_resource_param_keys_match_declared_schemas():

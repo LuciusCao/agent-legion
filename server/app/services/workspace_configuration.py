@@ -74,7 +74,6 @@ class WorkspaceConfigurationService:
                 payload["name"],
                 default_workflow_key=payload["default_workflow_key"],
                 default_entity=payload.get("default_entity", "question"),
-                cms_config=payload.get("cms_config", {}),
                 resource_config=payload.get("resource_config", {}),
                 intake_config=payload.get("intake_config", {}),
             )
@@ -97,7 +96,6 @@ class WorkspaceConfigurationService:
                 description=payload.get("description"),
                 default_workflow_key=payload.get("default_workflow_key"),
                 default_entity=payload.get("default_entity"),
-                cms_config=payload.get("cms_config"),
                 resource_config=payload.get("resource_config"),
                 intake_config=payload.get("intake_config"),
             )
@@ -197,22 +195,9 @@ class WorkspaceConfigurationService:
                 except ConfigSchemaError as exc:
                     raise InvalidOperationError(str(exc)) from exc
                 next_resource_config["resources"] = patch["resources"]
-            if patch.get("cmsUrl") is not None or patch.get("cmsToken") is not None:
-                cms_config = workspace.get("cms_config")
-                next_cms_config = dict(cms_config) if isinstance(cms_config, dict) else {}
-                if patch.get("cmsUrl") is not None:
-                    next_cms_config["api_url"] = patch["cmsUrl"]
-                if patch.get("cmsToken") is not None:
-                    next_cms_config["token"] = patch["cmsToken"]
-                workspace = self.job_db.update_workspace(
-                    workspace_id,
-                    resource_config=next_resource_config,
-                    cms_config=next_cms_config,
-                )
-            else:
-                workspace = self.job_db.update_workspace(
-                    workspace_id, resource_config=next_resource_config
-                )
+            workspace = self.job_db.update_workspace(
+                workspace_id, resource_config=next_resource_config
+            )
         elif section == "intake":
             intake_config = workspace.get("intake_config")
             next_intake_config = dict(intake_config) if isinstance(intake_config, dict) else {}

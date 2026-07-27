@@ -97,7 +97,7 @@ describe('workspaceStore', () => {
     const updated = makeWorkspace({
       id: 'ws1',
       name: 'Old',
-      cms_config: { subject_id: '5' },
+      resource_config: { resources: {} },
     })
     useWorkspaceStore.setState({
       workspaces: [existing],
@@ -107,7 +107,7 @@ describe('workspaceStore', () => {
 
     const result = await useWorkspaceStore
       .getState()
-      .updateWorkspace('ws1', { cms_config: { subject_id: '5' } })
+      .updateWorkspace('ws1', { resource_config: { resources: {} } })
 
     expect(result).toEqual(updated)
     expect(useWorkspaceStore.getState().workspaces).toEqual([updated])

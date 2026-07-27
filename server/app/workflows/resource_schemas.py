@@ -19,6 +19,8 @@ _COMMON_RESOURCE_PARAMS: dict[str, Any] = {
     "bank_version": {"type": "string"},
     "country_id": {"type": "string"},
     "subject_id": {"type": "string"},
+    "env": {"type": "string"},
+    "token": {"type": "string", "secret": True},
 }
 
 RESOURCE_PROVIDER_SCHEMAS: dict[str, dict[str, Any]] = {

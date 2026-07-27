@@ -4,9 +4,10 @@ from pathlib import Path
 
 from server.app.db.bootstrap import bootstrap_default_workspace
 from server.app.db.connection import DatabaseDsn
+from server.app.db.migrations import migrate_workspace_cms_config
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 14
+SCHEMA_VERSION = 15
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -28,8 +29,10 @@ def init_db(database_dsn: DatabaseDsn) -> None:
         ).fetchone()
         if applied is None:
             conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
+            migrate_workspace_cms_config(conn)
+            conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (?, ?)",
-                (SCHEMA_VERSION, "workspace_node_config"),
+                (SCHEMA_VERSION, "workspace_cms_config_retirement"),
             )
         bootstrap_default_workspace(conn)

@@ -40,7 +40,6 @@ def test_question_detail_success(tmp_path, monkeypatch):
             json={
                 "name": "Math",
                 "default_workflow_key": "question_comprehension_info",
-                "cms_config": {"question_detail_url": "https://cms.example/question/detail"},
             },
         )
         c.post(
@@ -94,7 +93,6 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
             json={
                 "name": "Math",
                 "default_workflow_key": "question_comprehension_info",
-                "cms_config": {"question_detail_url": "https://cms.example/question/detail"},
             },
         )
         response = c.get("/api/workspaces/math/questions/Q001")
@@ -174,7 +172,6 @@ def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch
             json={
                 "name": "Math",
                 "default_workflow_key": "question_comprehension_info",
-                "cms_config": {"question_detail_url": "https://cms.example/question/detail"},
             },
         )
         response = c.get("/api/workspaces/math/questions/Q001")
