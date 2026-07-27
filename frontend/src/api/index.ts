@@ -54,7 +54,6 @@ export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
 export async function createWorkspace(
   name: string,
   workflowKey: string,
-  cmsConfig: Record<string, unknown> = {},
   resourceConfig: Record<string, unknown> = {},
   defaultEntity: string = 'question',
   intakeConfig: Record<string, unknown> = {}
@@ -64,7 +63,6 @@ export async function createWorkspace(
     body: JSON.stringify({
       name,
       default_workflow_key: workflowKey,
-      cms_config: cmsConfig,
       resource_config: resourceConfig,
       default_entity: defaultEntity,
       intake_config: intakeConfig,
@@ -80,7 +78,6 @@ export async function updateWorkspace(
     description?: string
     default_workflow_key?: string
     default_entity?: string
-    cms_config?: Record<string, unknown>
     resource_config?: Record<string, unknown>
     intake_config?: Record<string, unknown>
   }

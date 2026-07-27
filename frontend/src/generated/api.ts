@@ -3047,10 +3047,6 @@ export interface components {
     }
     /** WorkspaceCreateRequest */
     WorkspaceCreateRequest: {
-      /** Cms Config */
-      cms_config?: {
-        [key: string]: unknown
-      }
       /**
        * Default Entity
        * @default question
@@ -3184,12 +3180,6 @@ export interface components {
      * @description Workspace row as returned by the workspace queries (decoded configs included).
      */
     WorkspaceRecord: {
-      /** Cms Config */
-      cms_config: {
-        [key: string]: unknown
-      }
-      /** Cms Config Json */
-      cms_config_json: string
       /** Created At */
       created_at: string
       /** Default Entity */
@@ -3260,10 +3250,6 @@ export interface components {
     }
     /** WorkspaceSettingsSectionRequest */
     WorkspaceSettingsSectionRequest: {
-      /** Cmstoken */
-      cmsToken?: string | null
-      /** Cmsurl */
-      cmsUrl?: string | null
       /** Entitytype */
       entityType?: string | null
       /** Intakemodes */
@@ -3314,10 +3300,6 @@ export interface components {
     }
     /** WorkspaceUpdateRequest */
     WorkspaceUpdateRequest: {
-      /** Cms Config */
-      cms_config?: {
-        [key: string]: unknown
-      } | null
       /** Default Entity */
       default_entity?: string | null
       /** Default Workflow Key */

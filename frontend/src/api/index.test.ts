@@ -75,7 +75,7 @@ describe('api error handling', () => {
 })
 
 describe('workspace api', () => {
-  it('patches workspace cms config', async () => {
+  it('patches workspace resource config', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -85,22 +85,32 @@ describe('workspace api', () => {
             name: 'Math',
             default_workflow_key: 'question_comprehension_info',
             default_entity: 'question',
-            cms_config: { subject_id: '5' },
+            resource_config: {
+              resources: { question_detail: { enabled: true, config: {} } },
+            },
           },
         }),
     } as Response)
     global.fetch = fetchMock
 
     const workspace = await updateWorkspace('math', {
-      cms_config: { subject_id: '5' },
+      resource_config: {
+        resources: { question_detail: { enabled: true, config: {} } },
+      },
     })
 
-    expect(workspace.cms_config).toEqual({ subject_id: '5' })
+    expect(workspace.resource_config).toEqual({
+      resources: { question_detail: { enabled: true, config: {} } },
+    })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/math',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ cms_config: { subject_id: '5' } }),
+        body: JSON.stringify({
+          resource_config: {
+            resources: { question_detail: { enabled: true, config: {} } },
+          },
+        }),
       })
     )
   })
@@ -150,7 +160,6 @@ describe('workspace api', () => {
             name: 'Physics',
             default_workflow_key: 'question_comprehension_info',
             default_entity: 'knowledge',
-            cms_config: { subject_id: '3' },
             resource_config: { storage: 's3' },
             intake_config: { enabled_modes: ['manual', 'cms'] },
           },
@@ -161,7 +170,6 @@ describe('workspace api', () => {
     const workspace = await createWorkspace(
       'Physics',
       'question_comprehension_info',
-      { subject_id: '3' },
       { storage: 's3' },
       'knowledge',
       { enabled_modes: ['manual', 'cms'] }
@@ -178,7 +186,6 @@ describe('workspace api', () => {
         body: JSON.stringify({
           name: 'Physics',
           default_workflow_key: 'question_comprehension_info',
-          cms_config: { subject_id: '3' },
           resource_config: { storage: 's3' },
           default_entity: 'knowledge',
           intake_config: { enabled_modes: ['manual', 'cms'] },

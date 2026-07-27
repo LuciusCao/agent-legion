@@ -11,13 +11,11 @@ class WorkspaceRecord(BaseModel):
     description: str
     default_workflow_key: str
     default_entity: str
-    cms_config_json: str
     resource_config_json: str
     intake_config_json: str
     node_config_json: str
     created_at: str
     updated_at: str
-    cms_config: dict[str, Any]
     resource_config: dict[str, Any]
     intake_config: dict[str, Any]
     node_config: dict[str, Any]

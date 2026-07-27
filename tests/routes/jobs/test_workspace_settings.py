@@ -4,57 +4,52 @@ def _create_workspace(client, name="default", default_workflow_key="question_com
     ).json()["workspace"]["id"]
 
 
-def test_create_workspace_stores_cms_config_override(client_factory):
+def test_create_workspace_stores_resource_config_override(client_factory):
     with client_factory(workflows_enabled=True) as c:
         response = c.post(
             "/api/workspaces",
             json={
                 "name": "Math V5",
                 "default_workflow_key": "question_comprehension_info",
-                "cms_config": {
-                    "subject_id": "5",
-                    "question_detail_url": "https://cms.example/question/detail?bank_version=v5",
+                "resource_config": {
+                    "resources": {
+                        "question_detail": {
+                            "enabled": True,
+                            "config": {
+                                "subject_id": "5",
+                                "api_url": "https://cms.example/question/detail?bank_version=v5",
+                            },
+                        }
+                    }
                 },
             },
         )
 
     assert response.status_code == 200
     workspace = response.json()["workspace"]
-    assert workspace["cms_config"]["subject_id"] == "5"
-    assert (
-        workspace["cms_config"]["question_detail_url"]
-        == "https://cms.example/question/detail?bank_version=v5"
-    )
+    binding = workspace["resource_config"]["resources"]["question_detail"]
+    assert binding["config"]["subject_id"] == "5"
+    assert binding["config"]["api_url"] == "https://cms.example/question/detail?bank_version=v5"
 
 
-def test_update_workspace_cms_config(client_factory):
+def test_workspace_rejects_legacy_cms_config(client_factory):
     with client_factory(workflows_enabled=True) as c:
         created = c.post(
             "/api/workspaces",
-            json={"name": "Math V5", "default_workflow_key": "question_comprehension_info"},
-        ).json()
-        workspace_id = created["workspace"]["id"]
-        response = c.patch(
-            f"/api/workspaces/{workspace_id}",
             json={
-                "cms_config": {
-                    "question_list_url": "https://cms.example/question/list?bank_version=v5",
-                    "question_detail_url": "https://cms.example/question/detail?bank_version=v5",
-                    "subject_id": "5",
-                    "country_id": "1",
-                }
+                "name": "Math V5",
+                "default_workflow_key": "question_comprehension_info",
+                "cms_config": {"subject_id": "5"},
             },
         )
-        fetched = c.get(f"/api/workspaces/{workspace_id}")
+        assert created.status_code == 422
 
-    assert response.status_code == 200
-    workspace = response.json()["workspace"]
-    assert workspace["cms_config"]["subject_id"] == "5"
-    assert (
-        workspace["cms_config"]["question_list_url"]
-        == "https://cms.example/question/list?bank_version=v5"
-    )
-    assert fetched.json()["workspace"]["cms_config"] == workspace["cms_config"]
+        workspace_id = _create_workspace(c, name="Math V6")
+        updated = c.patch(
+            f"/api/workspaces/{workspace_id}",
+            json={"cms_config": {"question_detail_url": "https://cms.example/question/detail"}},
+        )
+        assert updated.status_code == 422
 
 
 def test_update_workspace_resource_config(client_factory):

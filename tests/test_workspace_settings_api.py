@@ -20,8 +20,6 @@ def test_workspace_settings_round_trip(tmp_path):
             f"/api/workspaces/{workspace_id}/settings/connection",
             json={
                 "resources": {"question_detail": {"enabled": True, "config": {}}},
-                "cmsUrl": "https://cms.example",
-                "cmsToken": "secret",
             },
         )
         intake = c.patch(

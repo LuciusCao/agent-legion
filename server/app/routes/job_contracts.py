@@ -30,7 +30,6 @@ class WorkspaceCreateRequest(BaseModel):
     name: str
     default_workflow_key: str
     default_entity: str = "question"
-    cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
     intake_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -42,7 +41,6 @@ class WorkspaceUpdateRequest(BaseModel):
     description: str | None = None
     default_workflow_key: str | None = None
     default_entity: str | None = None
-    cms_config: dict[str, Any] | None = None
     resource_config: dict[str, Any] | None = None
     intake_config: dict[str, Any] | None = None
 
@@ -54,8 +52,6 @@ class WorkspaceSettingsResponse(BaseModel):
 class WorkspaceSettingsSectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cmsUrl: str | None = None
-    cmsToken: str | None = None
     entityType: str | None = None
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None

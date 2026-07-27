@@ -53,7 +53,7 @@ class JobIntakeService:
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        cms_config = effective_cms_config(self.settings, workspace)
+        cms_config = effective_cms_config(self.settings)
         resource_config = workspace.get("resource_config")
         if not isinstance(resource_config, dict):
             resource_config = {}

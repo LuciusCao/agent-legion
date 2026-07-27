@@ -28,7 +28,6 @@ type WorkspaceState = {
       description?: string
       default_workflow_key?: string
       default_entity?: string
-      cms_config?: Record<string, unknown>
       resource_config?: Record<string, unknown>
       intake_config?: Record<string, unknown>
     }

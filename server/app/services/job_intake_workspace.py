@@ -22,13 +22,10 @@ def singular_field_name(value: str) -> str:
     return value
 
 
-def effective_cms_config(settings: Settings, workspace: dict[str, Any]) -> dict[str, Any]:
+def effective_cms_config(settings: Settings) -> dict[str, Any]:
+    """Global CMS config for resolvers that still consume it (video intake)."""
     base = settings.config.get("cms", {})
-    config = dict(base) if isinstance(base, dict) else {}
-    workspace_config = workspace.get("cms_config")
-    if isinstance(workspace_config, dict):
-        config.update(workspace_config)
-    return config
+    return dict(base) if isinstance(base, dict) else {}
 
 
 def enabled_intake_modes(workspace: dict[str, Any]) -> set[str] | None:

@@ -42,18 +42,17 @@ def test_singular_field_name(value, expected):
     assert singular_field_name(value) == expected
 
 
-def test_effective_cms_config_merges_workspace_overrides():
+def test_effective_cms_config_returns_global_config():
     settings = SimpleNamespace(config={"cms": {"api_url": "https://base", "limit": 10}})
-    workspace = {"cms_config": {"limit": 5}}
-    assert effective_cms_config(settings, workspace) == {
+    assert effective_cms_config(settings) == {
         "api_url": "https://base",
-        "limit": 5,
+        "limit": 10,
     }
 
 
 def test_effective_cms_config_tolerates_non_dict_base():
     settings = SimpleNamespace(config={"cms": "not-a-dict"})
-    assert effective_cms_config(settings, {}) == {}
+    assert effective_cms_config(settings) == {}
 
 
 def test_enabled_intake_modes_returns_none_without_config():
