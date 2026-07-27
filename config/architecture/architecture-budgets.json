@@ -602,7 +602,8 @@
     "server/app/quality/invariants.py": 213,
     "server/app/routes/__init__.py": 92,
     "server/app/routes/agent_catalog_contracts.py": 27,
-    "server/app/routes/agent_workers.py": 414,
+    "server/app/routes/agent_worker_results.py": 78,
+    "server/app/routes/agent_workers.py": 365,
     "server/app/routes/agents.py": 65,
     "server/app/routes/artifacts.py": 46,
     "server/app/routes/auth.py": 161,
@@ -808,6 +809,7 @@
     "worker/cli_args.py": 90,
     "worker/client.py": 80,
     "worker/config_store.py": 189,
+    "worker/execution_lifecycle.py": 86,
     "worker/executor.py": 391,
     "worker/host_client.py": 185,
     "worker/registration_retry.py": 55,
@@ -816,7 +818,8 @@
     "worker/service.py": 170,
     "worker/service_models.py": 31,
     "worker/status.py": 103,
-    "worker/supervisor.py": 241,
+    "worker/status_reader.py": 43,
+    "worker/supervisor.py": 231,
     "worker/worker_declarations.py": 59
   }
 }

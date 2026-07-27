@@ -16,8 +16,18 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker.status_reader import read_current_executions, read_runtime_status
+
 ENV_VAR = "AGENT_WORKER_STATUS_FILE"
 STATUS_FILENAME = "current_executions.json"
+
+__all__ = [
+    "ENV_VAR",
+    "STATUS_FILENAME",
+    "ExecutionStatusReporter",
+    "read_current_executions",
+    "read_runtime_status",
+]
 
 
 class ExecutionStatusReporter:
@@ -27,6 +37,7 @@ class ExecutionStatusReporter:
         self._path = path
         self._lock = threading.Lock()
         self._executions: dict[str, dict[str, Any]] = {}
+        self._remote: dict[str, Any] = {}
 
     @classmethod
     def from_env(cls) -> ExecutionStatusReporter:
@@ -55,10 +66,21 @@ class ExecutionStatusReporter:
             if self._executions.pop(execution_id, None) is not None:
                 self._flush()
 
+    def set_remote(self, remote: dict[str, Any]) -> None:
+        """Publish the child process's Worker-token-authenticated Host view."""
+        with self._lock:
+            if remote != self._remote:
+                self._remote = remote
+                self._flush()
+
     def _flush(self) -> None:
         if self._path is None:
             return
-        payload = {"pid": os.getpid(), "executions": self._executions}
+        payload = {
+            "pid": os.getpid(),
+            "executions": self._executions,
+            "remote": self._remote,
+        }
         try:
             descriptor, temporary = tempfile.mkstemp(
                 dir=self._path.parent, prefix=f"{self._path.stem}."
@@ -75,19 +97,3 @@ class ExecutionStatusReporter:
                 raise
         except OSError as exc:  # 状态展示降级为"无当前执行"，不影响任务本身
             print(f"status file write failed: {exc}", flush=True)
-
-
-def read_current_executions(path: Path) -> list[dict[str, Any]]:
-    """Reader side: live executions sorted by started_at; [] for dead/gone/corrupt writers."""
-    try:
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        os.kill(int(payload["pid"]), 0)
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
-    executions = payload.get("executions")
-    if not isinstance(executions, dict):
-        return []
-    return sorted(
-        (entry for entry in executions.values() if isinstance(entry, dict)),
-        key=lambda entry: str(entry.get("started_at", "")),
-    )

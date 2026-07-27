@@ -74,9 +74,13 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
 
     @app.get("/assets/{name}", include_in_schema=False)
     def asset(name: str) -> FileResponse:
-        if name not in {"app.js", "styles.css"}:
+        if name not in {"app.js", "styles.css", "icons.svg"}:
             raise HTTPException(status_code=404, detail="asset not found")
-        media_type = "text/javascript" if name.endswith(".js") else "text/css"
+        media_type = {
+            ".js": "text/javascript",
+            ".css": "text/css",
+            ".svg": "image/svg+xml",
+        }[Path(name).suffix]
         return FileResponse(ui_dir / name, media_type=media_type)
 
     @app.get("/api/health")

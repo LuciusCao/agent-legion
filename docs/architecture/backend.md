@@ -108,6 +108,7 @@ server/app/
 | POST | `/agent-register-tokens` | `create_register_token` | routes/agent_workers.py |
 | GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_workers.py |
 | POST | `/agent-register-tokens/{token_id}/revoke` | `revoke_register_token` | routes/agent_workers.py |
+| GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
 | POST | `/agent-workers/{worker_id}/revoke` | `revoke_worker` | routes/agent_workers.py |
 | GET | `/agent-workers` | `list_workers` | routes/agent_workers.py |
 | POST | `/agent-executions/claim` | `claim` | routes/agent_workers.py |
