@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -10,6 +11,11 @@ from pathlib import Path
 from typing import Any
 
 PROTOCOL_VERSION = 1
+
+# Artifact upload retry: transient Host 5xx / connection failures get
+# exponential backoff before the run is reported as failed.
+_UPLOAD_MAX_ATTEMPTS = 3
+_UPLOAD_BACKOFF_BASE_SECONDS = 1.0
 
 
 class WorkerAuthError(RuntimeError):
@@ -123,10 +129,27 @@ class Client:
         destination.write_bytes(body)
 
     def upload_artifact(self, path: Path) -> str:
-        status, body = self.request("POST", "/api/artifacts", data=path.read_bytes())
-        if status != 201:
-            raise RuntimeError(f"artifact upload failed: HTTP {status}: {body[:200]!r}")
-        return f"sha256:{json.loads(body)['hash']}"
+        """Upload one output artifact, retrying transient Host failures.
+
+        5xx responses and connection-level errors get exponential backoff
+        (1s, 2s, 4s, …); 4xx and repeated failures raise immediately.
+        """
+        data = path.read_bytes()
+        error = ""
+        for attempt in range(_UPLOAD_MAX_ATTEMPTS):
+            try:
+                status, body = self.request("POST", "/api/artifacts", data=data)
+            except urllib.error.URLError as exc:
+                status, error = 0, str(exc)
+            else:
+                if status == 201:
+                    return f"sha256:{json.loads(body)['hash']}"
+                error = f"HTTP {status}: {body[:200]!r}"
+            retryable = status == 0 or status >= 500
+            if not retryable or attempt + 1 == _UPLOAD_MAX_ATTEMPTS:
+                break
+            time.sleep(_UPLOAD_BACKOFF_BASE_SECONDS * 2**attempt)
+        raise RuntimeError(f"artifact upload failed: {error}")
 
     def heartbeat(self, execution_id: str, lease_id: str) -> int:
         status, _ = self.request(
