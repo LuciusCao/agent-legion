@@ -21,6 +21,7 @@ from server.app.workflows.definition import (
     load_workflow_definition,
     workflow_definition_from_mapping,
 )
+from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -360,7 +361,7 @@ def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> 
 def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
             json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
@@ -387,7 +388,7 @@ def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path
 def test_get_workflow_revision_detail_returns_definition_and_yaml(tmp_path: Path) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
             json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
@@ -419,7 +420,7 @@ def test_get_workflow_revision_detail_returns_404_for_unknown_revision(
         "Studio",
         default_workflow_key="question_comprehension_info",
     )
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/missing-rev")
 
     assert response.status_code == 404
@@ -431,7 +432,7 @@ def test_get_workflow_revision_detail_rejects_other_workspace_revision(
 ) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         first = client.post(
             "/api/workspaces",
             json={"name": "First", "default_workflow_key": "question_comprehension_info"},
@@ -463,7 +464,7 @@ def test_get_active_workflow_revision_returns_404_for_workspace_without_revision
         "No Revision",
         default_workflow_key="question_comprehension_info",
     )
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/active")
 
     assert response.status_code == 404

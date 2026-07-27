@@ -141,6 +141,12 @@ def _fake_cms_question_item(question_id: str) -> dict[str, object]:
     }
 
 
+@pytest.fixture(autouse=True)
+def _fast_password_hashing(monkeypatch):
+    """Tests mint a session per client; keep pbkdf2 cheap so the suite stays fast."""
+    monkeypatch.setattr("server.app.auth.passwords._ITERATIONS", 1_000)
+
+
 @pytest.fixture
 def settings(tmp_path):
     return load_settings(data_dir=tmp_path)
@@ -175,9 +181,18 @@ def app_factory(tmp_path):
 @pytest.fixture
 def client_factory(app_factory):
     @contextmanager
-    def factory(**app_options):
+    def factory(authenticated: bool = True, **app_options):
         app = app_factory(**app_options)
         with TestClient(app) as client:
+            if authenticated:
+                # Every test schema starts empty; bootstrap the first admin and
+                # keep its session cookie so existing tests stay authenticated.
+                response = client.post(
+                    "/api/auth/bootstrap",
+                    json={"username": "admin", "password": "admin-pw"},
+                )
+                assert response.status_code == 200, response.text
+                client.headers["x-agent-legion-request"] = "1"
             yield client
 
     return factory
@@ -186,4 +201,11 @@ def client_factory(app_factory):
 @pytest.fixture
 def client(client_factory):
     with client_factory() as c:
+        yield c
+
+
+@pytest.fixture
+def anon_client(client_factory):
+    """Unauthenticated client for auth-matrix tests (no session cookie)."""
+    with client_factory(authenticated=False) as c:
         yield c

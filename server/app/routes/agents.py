@@ -1,9 +1,10 @@
 import logging
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from ..agents import AgentStatusManager
+from ..auth.dependencies import SESSION_COOKIE, require_user
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ class AgentsResponse(BaseModel):
 def create_agents_router(agent_manager: AgentStatusManager) -> APIRouter:
     router = APIRouter(prefix="/agents", tags=["agents"])
 
-    @router.get("", response_model=AgentsResponse)
+    @router.get("", response_model=AgentsResponse, dependencies=[Depends(require_user)])
     def list_agents() -> AgentsResponse:
         return AgentsResponse(
             agents=[AgentStatusResponse.model_validate(agent) for agent in agent_manager.to_dicts()]
@@ -34,6 +35,12 @@ def create_agents_router(agent_manager: AgentStatusManager) -> APIRouter:
 
     @router.websocket("")
     async def agents_ws(websocket: WebSocket) -> None:
+        # WS handshakes carry the session cookie same-site; router-level
+        # dependencies cannot run on websocket scopes, so authenticate here.
+        auth = websocket.app.state.auth_service
+        if auth.authenticate(websocket.cookies.get(SESSION_COOKIE, "")) is None:
+            await websocket.close(code=4401)
+            return
         await agent_manager.connect(websocket)
         try:
             while True:

@@ -1,5 +1,7 @@
 import json
 
+from tests.helpers.auth import authenticate_client
+
 
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
     return client.post(
@@ -14,7 +16,7 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -49,7 +51,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         workspace_response = c.post(
             "/api/workspaces",
             json={
@@ -83,7 +85,7 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         workspace_response = c.post(
             "/api/workspaces",
             json={
@@ -120,7 +122,7 @@ def test_batch_with_entity_question(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -150,7 +152,7 @@ def test_batch_unsupported_entity_mode(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -174,7 +176,7 @@ def test_batch_video_entity_is_unsupported_for_question_comprehension_workflow(t
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -198,7 +200,7 @@ def test_batch_with_entity_question_batch_by_ids(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -231,7 +233,7 @@ def test_workflow_response_no_task_entity(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/workflows/question_comprehension_info")
 
     assert response.status_code == 200
@@ -252,7 +254,7 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -286,7 +288,7 @@ def test_batch_delete_skips_running_job(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -328,7 +330,7 @@ def test_batch_run_to_returns_results_in_order(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",

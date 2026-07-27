@@ -1,6 +1,8 @@
 import json
 from concurrent.futures import ThreadPoolExecutor
 
+from tests.helpers.auth import authenticate_client
+
 
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
     return client.post(
@@ -15,7 +17,7 @@ def test_create_question_jobs_when_enabled(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -69,7 +71,7 @@ def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path
         "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
         lambda self: False,
     )
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -122,7 +124,7 @@ def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
     )
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -149,7 +151,7 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -198,7 +200,7 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
         "env": "prod",
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
     }
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -254,7 +256,7 @@ def test_create_workspace_job_batch_from_question_ids_uses_cms_title(tmp_path, m
         "env": "prod",
         "question_detail_url": "https://cms.example/question/detail",
     }
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         workspace = c.post(
             "/api/workspaces",
             json={
@@ -295,7 +297,7 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -376,7 +378,7 @@ def test_question_comprehension_info_batch_by_knowledge_resolves_questions(tmp_p
         "env": "prod",
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
     }
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -436,7 +438,7 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
         "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
         lambda self: False,
     )
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",

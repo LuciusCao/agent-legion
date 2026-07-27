@@ -12,6 +12,7 @@ from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_dispatch import AgentDispatchService
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.agents import AgentStatusManager
+from server.app.auth.service import build_auth_service
 from server.app.db.connection import close_database_pools
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
@@ -25,6 +26,7 @@ from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
+from server.app.routes.auth import create_auth_router
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
@@ -191,6 +193,7 @@ def create_app(
     add_http_middleware(app, settings)
     app.state.settings = settings
     app.state.job_db = job_db
+    app.state.auth_service = build_auth_service(job_db, settings.config)
     app.state.executor_registry = executor_registry
     app.state.agent_broker = agent_broker
     app.state.agent_dispatch = agent_dispatch
@@ -213,6 +216,7 @@ def create_app(
         job_db, settings, agent_manager, workflow_catalog
     )
     job_packages = JobPackageService(job_db, settings)
+    app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
     app.include_router(
         create_router(
             job_db,

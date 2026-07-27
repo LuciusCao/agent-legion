@@ -86,6 +86,7 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         _path_parser,
     ),
     "AGENT_LEGION_DATABASE_URL": (("database", "url"), _str_parser),
+    "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
 }
 
 

@@ -5,6 +5,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
+from tests.helpers.auth import authenticate_client
 
 
 @pytest.fixture
@@ -16,7 +17,7 @@ def app(tmp_path: Path):
 
 @pytest.fixture
 def client(app):
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         yield c
 
 

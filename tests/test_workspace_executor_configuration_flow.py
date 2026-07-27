@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
+from tests.helpers.auth import authenticate_client
 
 WORKFLOW_KEY = "question_comprehension_info"
 
@@ -53,13 +54,13 @@ def _expected_local_bindings(workspace_id: str) -> list[dict]:
 @pytest.fixture
 def flow_client(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         yield client
 
 
 def test_get_filters_retired_executor_residue(tmp_path) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         workspace_response = client.post(
             "/api/workspaces",
             json={"name": "Residue Workspace", "default_workflow_key": WORKFLOW_KEY},

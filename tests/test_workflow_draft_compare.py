@@ -9,13 +9,14 @@ from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import load_workflow_definition
 from server.app.workflows.schema import WorkflowNodeExecution
+from tests.helpers.auth import authenticate_client
 
 
 @pytest.fixture
 def app_with_workspace(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    response = TestClient(app).post(
+    response = authenticate_client(TestClient(app)).post(
         "/api/workspaces",
         json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
     )
@@ -39,7 +40,7 @@ def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     yaml_text = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, yaml_text)
 
     assert result["valid"] is True
@@ -67,7 +68,7 @@ def test_compare_node_added_returns_info_change(app_with_workspace):
     )
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is True
@@ -88,7 +89,7 @@ def test_compare_execution_only_change_does_not_create_revision(app_with_workspa
         execution=WorkflowNodeExecution(provider="openai", model="gpt-5.2"),
     )
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, definition_to_yaml(definition))
 
     assert result["valid"] is True
@@ -124,7 +125,7 @@ def test_compare_node_removed_returns_breaking_change(app_with_workspace):
     )
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is True
@@ -153,7 +154,7 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace):
     )
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     change = next(
@@ -183,7 +184,7 @@ def test_compare_output_removed_returns_breaking_change(app_with_workspace):
     )
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     change = next(
@@ -225,7 +226,7 @@ def test_compare_edge_condition_changed_returns_breaking_change(app_with_workspa
     object.__setattr__(definition, "edges", new_edges)
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     change = next(
@@ -244,7 +245,7 @@ def test_compare_edge_condition_changed_returns_breaking_change(app_with_workspa
 def test_compare_invalid_yaml_returns_errors_and_no_summary(app_with_workspace):
     app, workspace_id = app_with_workspace
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, "key: value\n  bad_indent: x")
 
     assert result["valid"] is False
@@ -269,7 +270,7 @@ def test_compare_missing_active_revision_returns_revision_error(tmp_path):
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is False
@@ -286,7 +287,7 @@ def test_compare_rejects_draft_key_mismatch(app_with_workspace):
         "key: changed_workflow_key",
     )
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is False
@@ -324,7 +325,7 @@ def test_compare_aggregate_risk_breaking_wins(app_with_workspace):
     )
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is True
@@ -339,7 +340,7 @@ def test_compare_workflow_label_changed_returns_info_metadata_change(app_with_wo
     object.__setattr__(definition, "label", f"{definition.label} v2")
     raw = definition_to_yaml(definition)
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is True
@@ -354,7 +355,7 @@ def test_compare_schema_version_changed_returns_breaking_metadata_change(app_wit
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     raw = definition_to_yaml(definition).replace("schema_version: 2", "schema_version: 3")
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         result = _compare(client, workspace_id, raw)
 
     assert result["valid"] is True

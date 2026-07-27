@@ -388,3 +388,37 @@ alter table ops_metric_samples drop constraint if exists ops_metric_samples_buck
 create index if not exists idx_ops_metric_samples_bucket on ops_metric_samples(bucket_start);
 create unique index if not exists uq_ops_metric_samples_bucket_worker
   on ops_metric_samples(bucket_start, worker_id);
+
+-- Auth (schema v13): local users, revocable server-side sessions, and
+-- per-workspace membership for the B-end self-hosted rollout. Session rows
+-- store only the sha256 of the bearer token so a database leak does not
+-- expose usable credentials (SECURITY-AUTH-001).
+create table if not exists users (
+  id text primary key,
+  username text not null unique,
+  display_name text not null default '',
+  password_hash text,
+  role text not null default 'member' check(role in ('admin', 'member')),
+  disabled_at timestamptz,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);
+
+create table if not exists sessions (
+  token_hash text primary key,
+  user_id text not null references users(id) on delete cascade,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_sessions_user_id on sessions(user_id);
+create index if not exists idx_sessions_expires_at on sessions(expires_at);
+
+create table if not exists workspace_members (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  user_id text not null references users(id) on delete cascade,
+  role text not null default 'editor' check(role in ('editor', 'viewer')),
+  created_at timestamptz not null default current_timestamp,
+  primary key (workspace_id, user_id)
+);
+create index if not exists idx_workspace_members_user_id on workspace_members(user_id);

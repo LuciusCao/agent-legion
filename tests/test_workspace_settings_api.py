@@ -3,12 +3,13 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
+from tests.helpers.auth import authenticate_client
 
 
 def test_workspace_settings_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
             json={"name": "test_ws", "default_workflow_key": "question_comprehension_info"},
@@ -57,7 +58,7 @@ def test_workspace_settings_round_trip(tmp_path):
 def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
             json={"name": "test_ws", "default_workflow_key": "question_comprehension_info"},

@@ -1,4 +1,5 @@
 from server.app.storage_paths import resolve_job_dir
+from tests.helpers.auth import authenticate_client
 
 
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
@@ -14,7 +15,7 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -53,7 +54,7 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -96,7 +97,7 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -128,7 +129,7 @@ def test_batch_rerun_from_failed_node(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -173,7 +174,7 @@ def test_batch_rerun_from_failed_node_skips_non_failed(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -204,7 +205,7 @@ def test_batch_rerun_requires_node_key_or_from_failed(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/jobs/batch-rerun",
@@ -221,7 +222,7 @@ def test_rerun_node_errors(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -254,7 +255,7 @@ def test_rerun_node_rejects_running_job(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -291,7 +292,7 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -326,7 +327,7 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -363,7 +364,7 @@ def test_rerun_node_preserves_ancestors(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -391,7 +392,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -449,7 +450,7 @@ def test_batch_rerun_mixed_node_availability(tmp_path, monkeypatch):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -500,7 +501,7 @@ def test_batch_rerun_request_order_preserved(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -540,7 +541,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -597,7 +598,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
@@ -655,7 +656,7 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},

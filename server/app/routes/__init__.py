@@ -1,11 +1,12 @@
 from typing import Any
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
 from ..agent_broker import AgentExecutionBroker
 from ..agent_completion import AgentCompletionHandler
 from ..agent_workers import AgentWorkerRegistry
 from ..agents import AgentStatusManager
+from ..auth.dependencies import require_workspace_access
 from ..events import JobEventManager
 from ..jobs import JobQueries
 from ..services.artifact_store import ArtifactStore
@@ -56,44 +57,45 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
+    def secured(sub_router: APIRouter) -> None:
+        router.include_router(sub_router, dependencies=[Depends(require_workspace_access)])
+
     router.include_router(create_common_router())
     router.include_router(create_agents_router(agent_manager))
-    router.include_router(create_packages_router(job_db, settings, job_packages))
-    router.include_router(create_worker_router(workspace_worker_control))
+    secured(create_packages_router(job_db, settings, job_packages))
+    secured(create_worker_router(workspace_worker_control))
     if (
         agent_broker is not None
         and agent_worker_registry is not None
         and agent_completion is not None
     ):
-        router.include_router(
-            create_agent_workers_router(
-                agent_broker, agent_worker_registry, agent_completion, settings
-            )
+        workers_router = create_agent_workers_router(
+            agent_broker, agent_worker_registry, agent_completion, settings
         )
+        router.include_router(workers_router)
     if artifact_store is not None:
         router.include_router(
             create_artifacts_router(artifact_store, settings, agent_worker_registry)
         )
     if ops_metrics is not None:
-        router.include_router(create_metrics_router(ops_metrics))
-    router.include_router(create_workflow_catalog_router(workflow_catalog, settings))
-    router.include_router(create_workflow_resource_providers_router(workflow_catalog, settings))
-    router.include_router(
-        create_workspaces_router(
-            workspace_configuration, settings, job_event_manager=job_event_manager
-        )
+        secured(create_metrics_router(ops_metrics))
+    secured(create_workflow_catalog_router(workflow_catalog, settings))
+    secured(create_workflow_resource_providers_router(workflow_catalog, settings))
+    workspaces_router = create_workspaces_router(
+        workspace_configuration, settings, job_event_manager=job_event_manager
     )
-    router.include_router(create_workspace_settings_router(workspace_configuration, settings))
-    router.include_router(create_workflow_revisions_router(job_db, settings))
-    router.include_router(create_workspace_configuration_router(workspace_configuration, settings))
-    router.include_router(
-        create_workspace_executors_router(
-            executor_catalog, workspace_executor_configuration, settings
-        )
+    secured(workspaces_router)
+    secured(create_workspace_settings_router(workspace_configuration, settings))
+    secured(create_workflow_revisions_router(job_db, settings))
+    secured(create_workspace_configuration_router(workspace_configuration, settings))
+    executors_router = create_workspace_executors_router(
+        executor_catalog, workspace_executor_configuration, settings
     )
-    router.include_router(create_workspace_agent_routes_router(job_db, settings))
+    secured(executors_router)
+    secured(create_workspace_agent_routes_router(job_db, settings))
+    job_group = APIRouter(dependencies=[Depends(require_workspace_access)])
     include_job_routes(
-        router,
+        job_group,
         job_db,
         settings,
         workflow_catalog,
@@ -102,5 +104,6 @@ def create_router(
         job_event_buffer,
         artifact_store=artifact_store,
     )
+    router.include_router(job_group)
 
     return router

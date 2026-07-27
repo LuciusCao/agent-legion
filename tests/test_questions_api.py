@@ -4,6 +4,7 @@ from fastapi.testclient import TestClient
 
 from server.app.cms.client import CmsClientError
 from server.app.main import create_app
+from tests.helpers.auth import authenticate_client
 
 
 def test_question_detail_success(tmp_path, monkeypatch):
@@ -30,7 +31,7 @@ def test_question_detail_success(tmp_path, monkeypatch):
     }
 
     with (
-        TestClient(app) as c,
+        authenticate_client(TestClient(app)) as c,
         patch("server.app.cms.question._fetch_json", lambda url, params, token: fake_payload),
         patch("server.app.cms.client.get_token", lambda env, config: "token"),
     ):
@@ -65,7 +66,7 @@ def test_question_detail_success(tmp_path, monkeypatch):
 def test_question_detail_workspace_not_found(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/workspaces/nonexistent/questions/Q001")
     assert response.status_code == 404
 
@@ -82,7 +83,7 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
         raise CmsClientError("CMS down")
 
     with (
-        TestClient(app) as c,
+        authenticate_client(TestClient(app)) as c,
         patch(
             "server.app.services.question_detail.fetch_question_detail", fake_fetch_question_detail
         ),
@@ -106,7 +107,7 @@ def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     app.state.settings.config["cms"] = {}
 
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={"name": "Math", "default_workflow_key": "question_comprehension_info"},
@@ -167,7 +168,7 @@ def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch
         lambda env, config: "token",
     )
 
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
             json={

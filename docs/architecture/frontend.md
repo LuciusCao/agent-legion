@@ -103,6 +103,9 @@ frontend/src/
 
 | 路径 | 页面组件 |
 |------|----------|
+| `/login` | LoginPage |
+| `/setup` | SetupPage |
+| `/admin/users` | UsersAdminPage |
 | `/` | DashboardPage |
 | `/monitoring` | MonitoringPage |
 | `/workspaces/:workspaceId` | WorkspaceLayout |

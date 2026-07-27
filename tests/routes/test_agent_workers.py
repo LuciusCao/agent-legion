@@ -13,6 +13,17 @@ from server.app.workflows.definition import workflow_definition_from_mapping
 from tests.test_agent_broker import _seed_request
 
 _MANAGEMENT = {"X-Agent-Worker-Register-Token": "management-secret"}
+_CSRF = {"x-agent-legion-request": "1"}
+
+
+def _authenticate_admin(client: TestClient) -> None:
+    """Bootstrap the first admin and keep its session cookie on the client."""
+    response = client.post(
+        "/api/auth/bootstrap",
+        json={"username": "admin", "password": "admin-pw"},
+    )
+    assert response.status_code == 200, response.text
+    client.headers["x-agent-legion-request"] = "1"
 
 
 def _make_app(tmp_path: Path):
@@ -288,20 +299,20 @@ def test_agent_register_token_management_api(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
-        # Management endpoints are currently open (trusted-network deployment,
-        # see TODO in authorize_management): no header works, and calls still
-        # carrying the legacy management header are accepted too.
+        # Management endpoints require an admin session (SECURITY-AUTH-001):
+        # anonymous calls and the legacy register-token header both get 401.
         unauthenticated = client.post(
             "/api/agent-register-tokens",
             json={"workspace_id": "test-workspace", "label": "no header"},
         )
-        assert unauthenticated.status_code == 201, unauthenticated.text
+        assert unauthenticated.status_code == 401
         legacy = client.post(
             "/api/agent-register-tokens",
             headers={"X-Agent-Worker-Register-Token": "nope"},
             json={"label": "legacy header"},
         )
-        assert legacy.status_code == 201, legacy.text
+        assert legacy.status_code == 401
+        _authenticate_admin(client)
 
         created = client.post(
             "/api/agent-register-tokens",
@@ -353,16 +364,16 @@ def test_agent_worker_revoke_api(tmp_path: Path) -> None:
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
-        # Management endpoints are currently open (trusted-network deployment,
-        # see TODO in authorize_management): no header works, and calls still
-        # carrying the legacy management header are accepted too.
+        # Management endpoints require an admin session (SECURITY-AUTH-001):
+        # anonymous calls and the legacy register-token header both get 401.
         unauthenticated = client.post("/api/agent-workers/no-such/revoke")
-        assert unauthenticated.status_code == 404
+        assert unauthenticated.status_code == 401
         legacy = client.post(
             "/api/agent-workers/no-such/revoke",
             headers={"X-Agent-Worker-Register-Token": "nope"},
         )
-        assert legacy.status_code == 404
+        assert legacy.status_code == 401
+        _authenticate_admin(client)
 
         token = _register(client)["worker_token"]
         revoked = client.post("/api/agent-workers/home-mini/revoke", headers=_MANAGEMENT)
@@ -392,6 +403,7 @@ def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> 
     _seed_request(app.state.job_db, job_id="job-1", limit=2)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         created = client.post(
             "/api/agent-register-tokens",
             headers=_MANAGEMENT,
@@ -420,6 +432,7 @@ def test_worker_online_flag_tracks_last_seen(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 
     with TestClient(app) as client:
+        _authenticate_admin(client)
         token = _register(client)["worker_token"]
         workers = client.get("/api/agent-workers").json()["workers"]
         assert workers[0]["online"] is True

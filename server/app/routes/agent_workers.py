@@ -5,15 +5,16 @@ import json
 import re
 import uuid
 from pathlib import PurePosixPath
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
 from server.app.agent_workers import AgentWorkerRegistry
+from server.app.auth.dependencies import require_admin, require_user
 from server.app.settings import Settings
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -187,13 +188,6 @@ def create_agent_workers_router(
     router = APIRouter(tags=["agent-workers"])
     config = settings.executor_runtime.agent_workers
 
-    def authorize_management(request: Request) -> None:
-        # TODO(auth): 管理端点（签发/列表/吊销 register token、吊销 Worker）
-        # 暂与 Host 现有无鉴权模型一致（可信内网/Tailscale 部署），任何调用
-        # 直接放行，带管理 token 的旧客户端亦不受影响。待登录/权限体系落地后
-        # 在此恢复校验。Worker 注册鉴权不受影响，见 resolve_registration_scope。
-        _ = request
-
     def resolve_registration_scope(request: Request) -> list[str]:
         """Resolve the presented registration credential to a workspace scope.
 
@@ -259,9 +253,9 @@ def create_agent_workers_router(
         response_model=AgentRegisterTokenCreatedResponse,
     )
     def create_register_token(
-        payload: CreateAgentRegisterTokenRequest, request: Request
+        payload: CreateAgentRegisterTokenRequest,
+        _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> AgentRegisterTokenCreatedResponse:
-        authorize_management(request)
         try:
             token_id, plaintext = registry.issue_register_token(
                 workspace_id=payload.workspace_id, label=payload.label
@@ -276,8 +270,9 @@ def create_agent_workers_router(
         )
 
     @router.get("/agent-register-tokens", response_model=AgentRegisterTokensResponse)
-    def list_register_tokens(request: Request) -> AgentRegisterTokensResponse:
-        authorize_management(request)
+    def list_register_tokens(
+        _admin: Annotated[dict[str, Any], Depends(require_admin)],
+    ) -> AgentRegisterTokensResponse:
         return AgentRegisterTokensResponse.model_validate(
             {"tokens": registry.list_register_tokens()}
         )
@@ -286,8 +281,10 @@ def create_agent_workers_router(
         "/agent-register-tokens/{token_id}/revoke",
         response_model=AgentRegisterTokenRevokeResponse,
     )
-    def revoke_register_token(token_id: str, request: Request) -> AgentRegisterTokenRevokeResponse:
-        authorize_management(request)
+    def revoke_register_token(
+        token_id: str,
+        _admin: Annotated[dict[str, Any], Depends(require_admin)],
+    ) -> AgentRegisterTokenRevokeResponse:
         if not registry.revoke_register_token(token_id):
             raise HTTPException(status_code=404, detail="Agent register token not found")
         return AgentRegisterTokenRevokeResponse(revoked=True)
@@ -296,14 +293,18 @@ def create_agent_workers_router(
         "/agent-workers/{worker_id}/revoke",
         response_model=AgentWorkerRevokeResponse,
     )
-    def revoke_worker(worker_id: str, request: Request) -> AgentWorkerRevokeResponse:
-        authorize_management(request)
+    def revoke_worker(
+        worker_id: str,
+        _admin: Annotated[dict[str, Any], Depends(require_admin)],
+    ) -> AgentWorkerRevokeResponse:
         if not registry.revoke(worker_id):
             raise HTTPException(status_code=404, detail="Agent Worker not found")
         return AgentWorkerRevokeResponse(worker_id=worker_id, revoked=True)
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
-    def list_workers() -> AgentWorkersResponse:
+    def list_workers(
+        _user: Annotated[dict[str, Any], Depends(require_user)],
+    ) -> AgentWorkersResponse:
         return AgentWorkersResponse.model_validate({"workers": registry.list_workers()})
 
     @router.post("/agent-executions/claim", response_model=AgentClaimResponse)
