@@ -5,6 +5,7 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useDashboardEvents } from '../hooks/useDashboardEvents'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
+import { UserMenu } from '../components/UserMenu'
 
 export function DashboardPage() {
   const navigate = useNavigate()
@@ -37,9 +38,12 @@ export function DashboardPage() {
         }}
       >
         <h1 style={{ margin: 0, fontSize: 28 }}>Agent Legion</h1>
-        <Button variant="contained" onClick={() => setDialogOpen(true)}>
-          新建 Workspace
-        </Button>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <UserMenu />
+          <Button variant="contained" onClick={() => setDialogOpen(true)}>
+            新建 Workspace
+          </Button>
+        </div>
       </div>
 
       <div
