@@ -1,3 +1,4 @@
+from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -15,7 +16,7 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "default", "question_comprehension_info")
         response = c.put(
             f"/api/workspaces/{ws_id}/configuration",
@@ -79,7 +80,7 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "rollback", "question_comprehension_info")
 
         # Establish a known good configuration first.
@@ -160,7 +161,7 @@ def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_pa
     )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
 
     assert response.status_code == 200
@@ -174,7 +175,7 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "residue", "question_comprehension_info")
         # Seed rows left behind by the retired `pi` Executor alongside valid
         # local-default rows, bypassing PUT validation like the legacy writers did.
@@ -247,7 +248,7 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "capacity", "question_comprehension_info")
         saved = c.put(
             f"/api/workspaces/{ws_id}/configuration",

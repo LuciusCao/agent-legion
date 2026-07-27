@@ -27,6 +27,7 @@ from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker_execution import reap_futures
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
+from tests.helpers.auth import authenticate_client
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_KEY = "test_control_flow"
@@ -208,7 +209,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         ws_response = client.post(
             "/api/workspaces",
             json={"name": "Control Flow", "default_workflow_key": WORKFLOW_KEY},
@@ -363,7 +364,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         ws_response = client.post(
             "/api/workspaces",
             json={"name": "Terminal State", "default_workflow_key": WORKFLOW_KEY},
@@ -416,7 +417,7 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         ws_response = client.post(
             "/api/workspaces",
             json={"name": "Paused State", "default_workflow_key": WORKFLOW_KEY},

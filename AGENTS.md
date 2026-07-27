@@ -44,6 +44,11 @@
 ## 6. Boundary Rules（禁止模式摘要）
 
 - Workspace API 扩展顺序：contract → service → focused route。
+- 用户鉴权经 `server/app/auth/dependencies.py` 注入（`require_user` /
+  `require_admin` / `require_workspace_access`），不要在路由里手写 cookie /
+  token 解析；公开端点仅限 `/api/health` 与 `/api/auth/login|bootstrap`。
+- 测试中受保护 API 走 `client` fixture（自动 bootstrap admin 并带 CSRF
+  header）；匿名行为用 `anon_client`。不留 auth 开关。
 - Workspace Executor 扩展顺序：capability → executor → allocation → binding → local limit（仅 local executor）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。

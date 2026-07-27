@@ -1,3 +1,4 @@
+from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -21,7 +22,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         workspace_response = c.post(
             "/api/workspaces",
             json={"name": "Math Sprint", "default_workflow_key": "question_comprehension_info"},
@@ -66,7 +67,7 @@ def test_delete_workspace_hidden_when_workflows_disabled(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = False
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.delete("/api/workspaces/some_ws")
     assert response.status_code == 404
 
@@ -78,7 +79,7 @@ def test_delete_workspace_named_default_is_allowed(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
             json={"name": "default", "default_workflow_key": "question_comprehension_info"},
@@ -96,7 +97,7 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
             json={"name": "Running WS", "default_workflow_key": "question_comprehension_info"},
@@ -127,7 +128,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
             json={"name": "Delete Me", "default_workflow_key": "question_comprehension_info"},
@@ -179,7 +180,7 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.delete("/api/workspaces/nonexistent")
     assert response.status_code == 404
 
@@ -242,7 +243,7 @@ def test_create_workspace_with_intake_config(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.post(
             "/api/workspaces",
             json={
@@ -266,7 +267,7 @@ def test_update_workspace_intake_config(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         created = c.post(
             "/api/workspaces",
             json={"name": "Update Intake", "default_workflow_key": "question_comprehension_info"},

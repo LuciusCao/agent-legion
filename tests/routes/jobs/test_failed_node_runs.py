@@ -1,3 +1,6 @@
+from tests.helpers.auth import authenticate_client
+
+
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
@@ -51,7 +54,7 @@ def test_list_failed_node_runs_filters_by_category(tmp_path):
     from fastapi.testclient import TestClient
 
     app = _app(tmp_path)
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         job_id = _create_job(c, ws_id, "Q901")
         _fail_node(app, job_id, "clean_and_parse", "technical", "provider_stream")
@@ -81,7 +84,7 @@ def test_rerun_by_failure_route_reruns_matching_jobs(tmp_path):
     from fastapi.testclient import TestClient
 
     app = _app(tmp_path)
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         job_id = _create_job(c, ws_id, "Q902")
         _fail_node(app, job_id, "review_key_info", "business", "review_rejected")
@@ -107,7 +110,7 @@ def test_rerun_by_failure_route_validates_category(tmp_path):
     from fastapi.testclient import TestClient
 
     app = _app(tmp_path)
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
             f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",

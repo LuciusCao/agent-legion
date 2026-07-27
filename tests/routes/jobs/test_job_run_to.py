@@ -1,3 +1,6 @@
+from tests.helpers.auth import authenticate_client
+
+
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
@@ -11,7 +14,7 @@ def test_run_to_target_sets_execution_control(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -43,7 +46,7 @@ def test_run_to_rejects_unknown_target(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -68,7 +71,7 @@ def test_run_to_rejects_start_outside_target_closure(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -99,7 +102,7 @@ def test_continue_job_resumes_after_target_reached(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",

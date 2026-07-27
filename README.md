@@ -399,6 +399,28 @@ Rerunning a node deletes that node's and all downstream nodes' declared outputs 
 
 Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
 
+## User Authentication
+
+The Host requires login for all business APIs (B-end self-hosted single-tenant
+model; Agent Worker machine credentials are a separate system and unchanged).
+
+- First start: open the UI — it redirects to `/setup` to create the first
+  admin, or `POST /api/auth/bootstrap` directly. For unattended deploys, set
+  `AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD` before first start; the Host seeds
+  an `admin` user with that password only while no users exist.
+- Sessions are cookie-based (`agent_legion_session`, HttpOnly,
+  SameSite=Strict, 7-day sliding expiry) with `Authorization: Bearer` as an
+  API channel. Only sha256 digests are stored; disabling a user or resetting
+  a password revokes their sessions immediately.
+- Browser writes carry the `x-agent-legion-request: 1` header (CSRF guard);
+  the frontend API layer adds it automatically.
+- Admins manage users at `/admin/users` and workspace membership (editor /
+  viewer) in workspace Settings. Members only see workspaces they belong to:
+  anonymous gets 401, non-members get 404, viewers get 403 on writes.
+- Upgrade note: schema v13 adds `users` / `sessions` / `workspace_members`
+  (idempotent migration). After upgrading, all previously anonymous access
+  returns 401 until the first admin is created.
+
 ## API Notes
 
 Agent Legion workflow (workspace / job) endpoints:

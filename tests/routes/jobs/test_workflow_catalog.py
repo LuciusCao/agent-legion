@@ -1,3 +1,6 @@
+from tests.helpers.auth import authenticate_client
+
+
 def test_get_workflow_definition_when_enabled(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -5,7 +8,7 @@ def test_get_workflow_definition_when_enabled(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/workflows/question_comprehension_info")
 
     assert response.status_code == 200
@@ -49,7 +52,7 @@ def test_list_workflows_includes_registered_workflows(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/workflows")
 
     assert response.status_code == 200
@@ -74,7 +77,7 @@ def test_get_resource_providers_returns_provider_list(tmp_path):
         "country_id": "1",
         "subject_id": "2",
     }
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/resource-providers")
 
     assert response.status_code == 200
@@ -111,7 +114,7 @@ def test_get_global_services_returns_cms_status(tmp_path):
         "base_url": "http://cms.example.com/v2",
         "token": "secret123",
     }
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/global-services")
 
     assert response.status_code == 200
@@ -138,7 +141,7 @@ def test_get_global_services_unconfigured_token(tmp_path, monkeypatch):
         monkeypatch.delenv(key, raising=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {"env": "dev"}
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/global-services")
 
     assert response.status_code == 200
@@ -163,7 +166,7 @@ def test_get_global_services_token_gen_configured(tmp_path):
             "url": "http://token.example/generate",
         },
     }
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         response = c.get("/api/global-services")
 
     assert response.status_code == 200
@@ -178,7 +181,7 @@ def test_update_workspace_rejects_invalid_workflow_key(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
         create_resp = c.post(
             "/api/workspaces",
             json={"name": "Test", "default_workflow_key": "question_comprehension_info"},

@@ -11,6 +11,7 @@ from server.app.main import create_app
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.registry import load_registered_workflow
+from tests.helpers.auth import authenticate_client
 
 
 def _create_video_knowledge_job(
@@ -70,7 +71,7 @@ def test_get_video_job_source_serves_local_source_mp4(tmp_path: Path) -> None:
     job_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
     (job_dir / "source.mp4").write_bytes(b"local video bytes")
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/jobs/{job['id']}/video/source")
 
     assert response.status_code == 200
@@ -96,7 +97,7 @@ def test_get_video_job_source_falls_back_to_canonical_output(tmp_path: Path) -> 
 
     (job_dir / "source.mp4").unlink()
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/jobs/{job['id']}/video/source")
 
     assert response.status_code == 200
@@ -122,7 +123,7 @@ def test_get_video_job_source_redirects_to_source_url(tmp_path: Path) -> None:
     if canonical_dir.exists():
         canonical_dir.rmdir()
 
-    with TestClient(app) as client:
+    with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/jobs/{job['id']}/video/source", follow_redirects=False)
 
     assert response.status_code == 302

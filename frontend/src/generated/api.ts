@@ -209,6 +209,75 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/auth/bootstrap': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Bootstrap Status */
+    get: operations['bootstrap_status_api_auth_bootstrap_get']
+    put?: never
+    /** Bootstrap */
+    post: operations['bootstrap_api_auth_bootstrap_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/auth/login': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Login */
+    post: operations['login_api_auth_login_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/auth/logout': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Logout */
+    post: operations['logout_api_auth_logout_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/auth/me': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Me */
+    get: operations['me_api_auth_me_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/dashboard/events': {
     parameters: {
       query?: never
@@ -531,6 +600,41 @@ export interface paths {
     options?: never
     head?: never
     patch?: never
+    trace?: never
+  }
+  '/api/users': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Users */
+    get: operations['list_users_api_users_get']
+    put?: never
+    /** Create User */
+    post: operations['create_user_api_users_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/users/{user_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    /** Update User */
+    patch: operations['update_user_api_users__user_id__patch']
     trace?: never
   }
   '/api/worker/pause': {
@@ -905,6 +1009,41 @@ export interface paths {
     put?: never
     post?: never
     delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/members': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Members */
+    get: operations['list_members_api_workspaces__workspace_id__members_get']
+    /** Put Member */
+    put: operations['put_member_api_workspaces__workspace_id__members_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/members/{user_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** Delete Member */
+    delete: operations['delete_member_api_workspaces__workspace_id__members__user_id__delete']
     options?: never
     head?: never
     patch?: never
@@ -1392,6 +1531,23 @@ export interface components {
       start_node_key?: string | null
       /** Target Node Key */
       target_node_key: string
+    }
+    /** BootstrapRequest */
+    BootstrapRequest: {
+      /**
+       * Display Name
+       * @default
+       */
+      display_name: string
+      /** Password */
+      password: string
+      /** Username */
+      username: string
+    }
+    /** BootstrapStatusResponse */
+    BootstrapStatusResponse: {
+      /** Available */
+      available: boolean
     }
     /** ClaimAgentExecutionRequest */
     ClaimAgentExecutionRequest: {
@@ -1886,6 +2042,57 @@ export interface components {
       /** Type */
       type: string
     }
+    /** LoginRequest */
+    LoginRequest: {
+      /** Password */
+      password: string
+      /** Username */
+      username: string
+    }
+    /** LoginResponse */
+    LoginResponse: {
+      user: components['schemas']['UserResponse']
+    }
+    /** MeResponse */
+    MeResponse: {
+      user: components['schemas']['UserResponse']
+    }
+    /** MemberPutRequest */
+    MemberPutRequest: {
+      /**
+       * Role
+       * @enum {string}
+       */
+      role: 'editor' | 'viewer'
+      /** User Id */
+      user_id: string
+    }
+    /** MemberResponse */
+    MemberResponse: {
+      /** Disabled At */
+      disabled_at: string | null
+      /** Display Name */
+      display_name: string
+      /** Id */
+      id: string
+      /**
+       * Member Role
+       * @enum {string}
+       */
+      member_role: 'editor' | 'viewer'
+      /**
+       * User Role
+       * @enum {string}
+       */
+      user_role: 'admin' | 'member'
+      /** Username */
+      username: string
+    }
+    /** MembersResponse */
+    MembersResponse: {
+      /** Members */
+      members: components['schemas']['MemberResponse'][]
+    }
     /** MetricBucket */
     MetricBucket: {
       /** Active Executions */
@@ -2300,6 +2507,61 @@ export interface components {
       summary: components['schemas']['TokenUsageSummary']
       /** Workspace Id */
       workspace_id: string
+    }
+    /** UserCreateRequest */
+    UserCreateRequest: {
+      /**
+       * Display Name
+       * @default
+       */
+      display_name: string
+      /** Password */
+      password: string
+      /**
+       * Role
+       * @default member
+       * @enum {string}
+       */
+      role: 'admin' | 'member'
+      /** Username */
+      username: string
+    }
+    /** UserPatchRequest */
+    UserPatchRequest: {
+      /** Disabled */
+      disabled?: boolean | null
+      /** Display Name */
+      display_name?: string | null
+      /** Password */
+      password?: string | null
+      /** Role */
+      role?: ('admin' | 'member') | null
+    }
+    /** UserResponse */
+    UserResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Disabled At */
+      disabled_at: string | null
+      /** Display Name */
+      display_name: string
+      /** Id */
+      id: string
+      /**
+       * Role
+       * @enum {string}
+       */
+      role: 'admin' | 'member'
+      /** Username */
+      username: string
+    }
+    /** UsersResponse */
+    UsersResponse: {
+      /** Users */
+      users: components['schemas']['UserResponse'][]
     }
     /** ValidationError */
     ValidationError: {
@@ -3434,6 +3696,132 @@ export interface operations {
       }
     }
   }
+  bootstrap_status_api_auth_bootstrap_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BootstrapStatusResponse']
+        }
+      }
+    }
+  }
+  bootstrap_api_auth_bootstrap_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BootstrapRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LoginResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  login_api_auth_login_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['LoginRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['LoginResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  logout_api_auth_logout_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MeResponse']
+        }
+      }
+    }
+  }
+  me_api_auth_me_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MeResponse']
+        }
+      }
+    }
+  }
   dashboard_events_api_dashboard_events_get: {
     parameters: {
       query?: never
@@ -4020,6 +4408,94 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ResourceProvidersResponse']
+        }
+      }
+    }
+  }
+  list_users_api_users_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UsersResponse']
+        }
+      }
+    }
+  }
+  create_user_api_users_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UserCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UserResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_user_api_users__user_id__patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        user_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['UserPatchRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['UserResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -4813,6 +5289,104 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobsSnapshotResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_members_api_workspaces__workspace_id__members_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MembersResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  put_member_api_workspaces__workspace_id__members_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['MemberPutRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MembersResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_member_api_workspaces__workspace_id__members__user_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        user_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['MembersResponse']
         }
       }
       /** @description Validation Error */

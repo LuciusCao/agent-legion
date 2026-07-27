@@ -214,6 +214,18 @@ server/app/
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
 | ArtifactUploadResponse | BaseModel | hash: str | app/routes/artifacts.py |
+| LoginRequest | BaseModel | username: str, password: str | app/routes/auth_contracts.py |
+| BootstrapRequest | BaseModel | username: str, password: str, display_name: str | app/routes/auth_contracts.py |
+| UserResponse | BaseModel | id: str, username: str, display_name: str, role: Literal['admin', 'member'], ... | app/routes/auth_contracts.py |
+| LoginResponse | BaseModel | user: UserResponse | app/routes/auth_contracts.py |
+| MeResponse | BaseModel | user: UserResponse | app/routes/auth_contracts.py |
+| BootstrapStatusResponse | BaseModel | available: bool | app/routes/auth_contracts.py |
+| UserCreateRequest | BaseModel | username: str, password: str, display_name: str, role: Literal['admin', 'memb... | app/routes/auth_contracts.py |
+| UserPatchRequest | BaseModel | display_name: str | None, role: Literal['admin', 'member'] | None, password: ... | app/routes/auth_contracts.py |
+| UsersResponse | BaseModel | users: list[UserResponse] | app/routes/auth_contracts.py |
+| MemberResponse | BaseModel | id: str, username: str, display_name: str, user_role: Literal['admin', 'membe... | app/routes/auth_contracts.py |
+| MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
+| MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | HealthResponse | BaseModel | ok: bool | app/routes/common.py |
 | ExecutorCapabilityResponse | BaseModel | name: str, handler: str | None, skill: str | None, tools: list[str], provider... | app/routes/executor_catalog_contracts.py |
 | ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['local', 'pi', 'openclaw'], global_capacity: int, capa... | app/routes/executor_catalog_contracts.py |

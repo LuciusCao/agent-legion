@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from server.app.jobs.atomic_mutations import AtomicJobMutationsMixin
 from server.app.jobs.execution_control import JobExecutionControlMixin
+from server.app.jobs.queries.auth import AuthQueriesMixin
 from server.app.jobs.queries.base import JobQueriesBase
 from server.app.jobs.queries.batch import BatchQueriesMixin
 from server.app.jobs.queries.failed_node_runs import FailedNodeRunQueriesMixin
@@ -16,6 +17,7 @@ from server.app.jobs.queries.workspace_packages import WorkspacePackageQueriesMi
 
 
 class JobQueries(
+    AuthQueriesMixin,
     WorkspacePackageQueriesMixin,
     WorkspaceQueriesMixin,
     BatchQueriesMixin,

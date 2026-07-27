@@ -54,6 +54,15 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
     with _run_test_server(tmp_path) as base_url:
         client = httpx.Client(trust_env=False)
         try:
+            # Authenticate first: bootstrap the initial admin; the session
+            # cookie and CSRF header carry over to all later requests.
+            resp = client.post(
+                f"{base_url}/api/auth/bootstrap",
+                json={"username": "admin", "password": "admin-pw"},
+            )
+            assert resp.status_code == 200, resp.text
+            client.headers["x-agent-legion-request"] = "1"
+
             # Create workspace first via API
             resp = client.post(
                 f"{base_url}/api/workspaces",

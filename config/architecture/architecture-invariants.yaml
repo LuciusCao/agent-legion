@@ -366,3 +366,21 @@ invariants:
       - kind: integration
         target: tests/full/test_shard_fanout_e2e.py
         gate: full
+
+  - id: SECURITY-AUTH-001
+    statement: "User sessions are revocable bearer tokens persisted only as sha256 digests with sliding expiry; management endpoints require the admin role; business routes require an authenticated user (anonymous gets 401); workspace membership gates reads (viewer) and writes (editor); repeated login failures lock the account temporarily."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/routes/test_auth_routes.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_auth_matrix.py
+        gate: quick
+      - kind: integration
+        target: tests/test_auth_queries.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_auth_control_plane.py
+        gate: full

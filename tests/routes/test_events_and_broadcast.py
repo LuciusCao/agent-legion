@@ -1,6 +1,18 @@
 import asyncio
 import json
 import subprocess
+from types import SimpleNamespace
+
+
+class _FakeAuthService:
+    def authenticate(self, token):
+        return {"id": "u1", "role": "admin"}
+
+
+_FAKE_WS_ATTRS = {
+    "cookies": {"agent_legion_session": "tok"},
+    "app": SimpleNamespace(state=SimpleNamespace(auth_service=_FakeAuthService())),
+}
 
 
 def test_agents_websocket_sends_initial_list(client, monkeypatch):
@@ -75,6 +87,9 @@ def test_agents_websocket_clean_disconnect_stays_silent(caplog):
     from server.app.routes.agents import create_agents_router
 
     class _FakeWebSocket:
+        cookies = _FAKE_WS_ATTRS["cookies"]
+        app = _FAKE_WS_ATTRS["app"]
+
         async def accept(self):
             pass
 
@@ -106,6 +121,9 @@ def test_agents_websocket_logs_unexpected_receive_error(caplog):
     from server.app.routes.agents import create_agents_router
 
     class _FakeWebSocket:
+        cookies = _FAKE_WS_ATTRS["cookies"]
+        app = _FAKE_WS_ATTRS["app"]
+
         async def accept(self):
             pass
 

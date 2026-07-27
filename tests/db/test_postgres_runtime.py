@@ -35,6 +35,9 @@ def test_schema_initialization_is_idempotent() -> None:
         "workspace_node_routes",
         "workspace_node_capacities",
         "workspace_agent_capacities",
+        "users",
+        "sessions",
+        "workspace_members",
     } <= names
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = {
