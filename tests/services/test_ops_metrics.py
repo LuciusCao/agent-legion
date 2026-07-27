@@ -17,10 +17,11 @@ def _bucket_start(now: datetime) -> datetime:
     return now.replace(second=0, microsecond=0) - timedelta(minutes=1)
 
 
-def _fetch_sample(bucket_start: datetime) -> dict | None:
+def _fetch_sample(bucket_start: datetime, worker_id: str = "") -> dict | None:
     with read_connection(TEST_DATABASE_URL) as conn:
         return conn.execute(
-            "select * from ops_metric_samples where bucket_start = ?", (bucket_start,)
+            "select * from ops_metric_samples where bucket_start = ? and worker_id = ?",
+            (bucket_start, worker_id),
         ).fetchone()
 
 
@@ -87,23 +88,30 @@ def _insert_worker(worker_id: str, last_seen_at: datetime, *, revoked: bool = Fa
         )
 
 
-def _insert_execution(execution_id: str, state: str) -> None:
+def _insert_execution(
+    execution_id: str,
+    state: str,
+    *,
+    worker_id: str | None = None,
+    node_run_id: int | None = None,
+) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             """
             insert into agent_execution_requests(
               execution_id, workspace_id, job_id, workflow_key, node_key,
               agent_id, agent_definition_hash, node_concurrency_limit, state,
-              queued_at, manifest_json
-            ) values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 5, ?, ?, '{}')
+              worker_id, node_run_id, queued_at, manifest_json
+            ) values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 5, ?, ?, ?, ?, '{}')
             """,
-            (execution_id, f"node-{execution_id}", state, _NOW),
+            (execution_id, f"node-{execution_id}", state, worker_id, node_run_id, _NOW),
         )
 
 
 def _insert_sample(
     bucket_start: datetime,
     *,
+    worker_id: str = "",
     online_workers: int = 0,
     active_executions: int = 0,
     input_tokens: int = 0,
@@ -115,12 +123,13 @@ def _insert_sample(
         conn.execute(
             """
             insert into ops_metric_samples(
-              bucket_start, online_workers, active_executions,
+              bucket_start, worker_id, online_workers, active_executions,
               input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 bucket_start,
+                worker_id,
                 online_workers,
                 active_executions,
                 input_tokens,
@@ -150,7 +159,8 @@ def test_sample_once_upserts_existing_bucket() -> None:
     assert row["online_workers"] == 1
     with read_connection(TEST_DATABASE_URL) as conn:
         count = conn.execute(
-            "select count(*) as c from ops_metric_samples where bucket_start = ?",
+            "select count(*) as c from ops_metric_samples"
+            " where bucket_start = ? and worker_id = ''",
             (_bucket_start(_NOW),),
         ).fetchone()["c"]
     assert count == 1
@@ -190,6 +200,73 @@ def test_sample_counts_only_claimed_executions() -> None:
     row = _fetch_sample(_bucket_start(_NOW))
     assert row is not None
     assert row["active_executions"] == 1
+
+
+def test_sample_writes_per_worker_rows_with_attributed_tokens() -> None:
+    _seed_workspace_job()
+    bucket = _bucket_start(_NOW)
+    _insert_worker("w-a", _NOW)
+    _insert_worker("w-b", _NOW)
+    _insert_execution("e-a", "claimed", worker_id="w-a", node_run_id=11)
+    _insert_execution("e-b", "claimed", worker_id="w-b", node_run_id=12)
+    _insert_token_usage(
+        11, bucket + timedelta(seconds=10), input_tokens=100, output_tokens=50, cache_read_tokens=10
+    )
+    _insert_token_usage(
+        12,
+        bucket + timedelta(seconds=20),
+        input_tokens=200,
+        output_tokens=100,
+        cache_read_tokens=20,
+    )
+    # Host-local run: no agent_execution_requests row, counted only globally.
+    _insert_token_usage(
+        13, bucket + timedelta(seconds=30), input_tokens=7, output_tokens=3, cache_read_tokens=1
+    )
+    _service().sample_once(_NOW)
+
+    global_row = _fetch_sample(bucket)
+    assert global_row is not None
+    assert global_row["online_workers"] == 2
+    assert global_row["active_executions"] == 2
+    assert global_row["total_tokens"] == 160 + 320 + 11
+
+    row_a = _fetch_sample(bucket, "w-a")
+    assert row_a is not None
+    assert row_a["online_workers"] == 1
+    assert row_a["active_executions"] == 1
+    assert row_a["input_tokens"] == 100
+    assert row_a["output_tokens"] == 50
+    assert row_a["cache_read_tokens"] == 10
+    assert row_a["total_tokens"] == 160
+
+    row_b = _fetch_sample(bucket, "w-b")
+    assert row_b is not None
+    assert row_b["online_workers"] == 1
+    assert row_b["active_executions"] == 1
+    assert row_b["total_tokens"] == 320
+
+    assert row_a["total_tokens"] + row_b["total_tokens"] < global_row["total_tokens"]
+
+
+def test_sample_once_upserts_per_worker_rows_idempotently() -> None:
+    _seed_workspace_job()
+    service = _service()
+    _insert_worker("w-1", _NOW)
+    service.sample_once(_NOW)
+    _insert_execution("e-1", "claimed", worker_id="w-1")
+    service.sample_once(_NOW)
+    bucket = _bucket_start(_NOW)
+    row = _fetch_sample(bucket, "w-1")
+    assert row is not None
+    assert row["online_workers"] == 1
+    assert row["active_executions"] == 1
+    with read_connection(TEST_DATABASE_URL) as conn:
+        rows = conn.execute(
+            "select worker_id from ops_metric_samples where bucket_start = ? order by worker_id",
+            (bucket,),
+        ).fetchall()
+    assert [r["worker_id"] for r in rows] == ["", "w-1"]
 
 
 def test_query_series_minute_returns_raw_rows_in_order() -> None:
@@ -255,6 +332,54 @@ def test_query_series_day_rolls_up_by_day_window() -> None:
     assert row["online_workers"] == 3
     assert row["online_workers_max"] == 5
     assert row["total_tokens"] == 20
+
+
+def test_query_series_filters_by_worker_id() -> None:
+    now = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
+    _insert_sample(now, online_workers=2, total_tokens=35)
+    _insert_sample(now, worker_id="w-1", online_workers=1, total_tokens=10)
+    _insert_sample(now, worker_id="w-2", online_workers=1, total_tokens=20)
+    global_rows = _service().query_series("minute", hours=6, days=7)
+    assert [r["total_tokens"] for r in global_rows] == [35]
+    assert [r["online_workers"] for r in global_rows] == [2]
+    worker_rows = _service().query_series("minute", hours=6, days=7, worker_id="w-1")
+    assert [r["total_tokens"] for r in worker_rows] == [10]
+    assert worker_rows[0]["online_workers"] == 1
+    assert _service().query_series("minute", hours=6, days=7, worker_id="w-unknown") == []
+
+
+def test_query_series_hour_rolls_up_per_worker_rows() -> None:
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    hour_start = now.replace(minute=0)
+    _insert_sample(
+        hour_start + timedelta(minutes=1),
+        worker_id="w-1",
+        online_workers=1,
+        active_executions=1,
+        input_tokens=10,
+        total_tokens=20,
+    )
+    _insert_sample(
+        hour_start + timedelta(minutes=2),
+        worker_id="w-1",
+        online_workers=0,
+        active_executions=3,
+        input_tokens=30,
+        total_tokens=60,
+    )
+    # Other scopes in the same hour must not leak into the w-1 rollup.
+    _insert_sample(hour_start + timedelta(minutes=1), worker_id="w-2", total_tokens=999)
+    _insert_sample(hour_start + timedelta(minutes=1), total_tokens=999)
+    rows = _service().query_series("hour", hours=6, days=7, worker_id="w-1")
+    assert len(rows) == 1
+    row = rows[0]
+    assert datetime.fromisoformat(row["bucket_start"]) == hour_start
+    assert row["online_workers"] == 1
+    assert row["online_workers_max"] == 1
+    assert row["active_executions"] == 2
+    assert row["active_executions_max"] == 3
+    assert row["input_tokens"] == 40
+    assert row["total_tokens"] == 80
 
 
 def test_cleanup_expired_deletes_only_rows_past_retention() -> None:

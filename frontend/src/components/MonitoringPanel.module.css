@@ -32,6 +32,13 @@
   font-size: 12px;
 }
 
+.controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
 .summaryGrid {
   display: grid;
   grid-template-columns: repeat(3, minmax(140px, 1fr));

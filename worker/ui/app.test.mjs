@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, buildLineChart, executionLabel, formatElapsed, formatTokens, labelsFromText, latestMetric, linesFromText, modelsFromText, numberField, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, buildLineChart, executionLabel, formatElapsed, formatTokens, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -99,6 +99,17 @@ test("bucketLabel 按粒度格式化（无 Z 后缀按本地时区解析，测�
   assert.equal(bucketLabel("2026-07-26T05:00:00", "hour"), "05:00");
   assert.equal(bucketLabel("2026-07-26T00:00:00", "day"), "07-26");
   assert.equal(bucketLabel("not-a-date", "day"), "not-a-date");
+});
+
+test("metricsParams 按粒度带时间窗，本机范围附 worker_id=self", () => {
+  assert.deepEqual(metricsParams("minute", "self"), { granularity: "minute", hours: 6, worker_id: "self" });
+  assert.deepEqual(metricsParams("hour", "self"), { granularity: "hour", hours: 24, worker_id: "self" });
+  assert.deepEqual(metricsParams("day", "self"), { granularity: "day", days: 7, worker_id: "self" });
+});
+
+test("metricsParams 全局范围不带 worker_id", () => {
+  assert.deepEqual(metricsParams("minute", "all"), { granularity: "minute", hours: 6 });
+  assert.deepEqual(metricsParams("day", "all"), { granularity: "day", days: 7 });
 });
 
 const CHART_BUCKETS = [
