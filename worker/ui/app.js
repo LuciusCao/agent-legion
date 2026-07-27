@@ -1,4 +1,6 @@
-// labelsFromText / numberField / NUMBER_DEFAULTS / formatElapsed / executionLabel 是纯函数，由 app.test.mjs（node:test）直接 import；
+// labelsFromText / numberField / NUMBER_DEFAULTS / formatElapsed / executionLabel /
+// formatTokens / latestMetric / tokensLastHour / bucketLabel / buildLineChart 是纯函数，
+// 由 app.test.mjs（node:test）直接 import；
 // 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
 const hasDom = typeof document !== "undefined";
 const form = hasDom ? document.querySelector("#config-form") : null;
@@ -147,6 +149,81 @@ export function numberField(data, key) {
   return raw === null || raw === "" ? NUMBER_DEFAULTS[key] : Number(raw);
 }
 
+// ---- Host 监控面板：纯数据/渲染函数（无 DOM），供 app.test.mjs 直接测试 ----
+
+export function formatTokens(value) {
+  if (value == null || Number.isNaN(value)) return "—";
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`;
+  if (value >= 10_000) return `${Math.round(value / 1_000)}k`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(1)}k`;
+  return String(Math.round(value));
+}
+
+export function latestMetric(payload, key) {
+  const buckets = payload?.buckets ?? [];
+  const last = buckets[buckets.length - 1];
+  return last && last[key] != null ? last[key] : null;
+}
+
+export function tokensLastHour(buckets, now = Date.now()) {
+  const all = buckets ?? [];
+  const cutoff = now - 3_600_000;
+  const recent = all.filter((bucket) => Date.parse(bucket.bucket_start) >= cutoff);
+  const source = recent.length ? recent : all.slice(-1);
+  return source.reduce((sum, bucket) => sum + (bucket.total_tokens || 0), 0);
+}
+
+export function bucketLabel(bucketStart, granularity) {
+  const date = new Date(bucketStart);
+  if (Number.isNaN(date.getTime())) return String(bucketStart);
+  const pad = (n) => String(n).padStart(2, "0");
+  if (granularity === "day") return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+const escapeXml = (text) => String(text).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
+
+// 手绘 SVG 折线/面积图（viewBox 自适应宽度）；hover 数值用 <title> 原生提示，无 JS 事件。
+// seriesList: [{ name, color, points: [{ label, value }], area? }]
+export function buildLineChart(seriesList, { width = 520, height = 180, formatValue = (v) => String(v) } = {}) {
+  const series = seriesList.filter((item) => item.points.length > 0);
+  const count = Math.max(0, ...series.map((item) => item.points.length));
+  if (count === 0) return "";
+  const pad = { left: 36, right: 10, top: 18, bottom: 20 };
+  const innerW = width - pad.left - pad.right;
+  const innerH = height - pad.top - pad.bottom;
+  const maxValue = Math.max(1, ...series.flatMap((item) => item.points.map((point) => point.value ?? 0)));
+  const x = (index) => pad.left + (count === 1 ? innerW / 2 : (index / (count - 1)) * innerW);
+  const y = (value) => pad.top + innerH - (Math.max(0, value ?? 0) / maxValue) * innerH;
+  const baseline = y(0);
+  const parts = [];
+  for (const tick of [0, maxValue / 2, maxValue]) {
+    parts.push(`<line class="grid-line" x1="${pad.left}" y1="${y(tick)}" x2="${width - pad.right}" y2="${y(tick)}"/>`);
+    parts.push(`<text class="axis" x="${pad.left - 4}" y="${y(tick) + 3}" text-anchor="end">${escapeXml(formatValue(tick))}</text>`);
+  }
+  const labels = series[0].points;
+  for (const index of [...new Set([0, Math.floor((count - 1) / 2), count - 1])]) {
+    parts.push(`<text class="axis" x="${x(index)}" y="${height - 6}" text-anchor="middle">${escapeXml(labels[index].label)}</text>`);
+  }
+  series.forEach((item, i) => {
+    parts.push(`<rect x="${pad.left + i * 110}" y="4" width="8" height="8" rx="2" fill="${item.color}"/>`);
+    parts.push(`<text class="axis" x="${pad.left + i * 110 + 12}" y="11">${escapeXml(item.name)}</text>`);
+  });
+  for (const item of series) {
+    const coords = item.points.map((point, i) => `${x(i).toFixed(1)},${y(point.value).toFixed(1)}`);
+    if (item.area) {
+      parts.push(`<path d="M ${x(0).toFixed(1)},${baseline} L ${coords.join(" L ")} L ${x(item.points.length - 1).toFixed(1)},${baseline} Z" fill="${item.color}" opacity="0.18"/>`);
+    }
+    parts.push(`<polyline points="${coords.join(" ")}" fill="none" stroke="${item.color}" stroke-width="1.6" stroke-linejoin="round"/>`);
+  }
+  const zoneWidth = innerW / count;
+  for (let i = 0; i < count; i++) {
+    const values = series.map((item) => `${item.name}: ${formatValue(item.points[i]?.value ?? 0)}`).join("\n");
+    parts.push(`<rect class="hover-zone" x="${(x(i) - zoneWidth / 2).toFixed(1)}" y="${pad.top}" width="${zoneWidth.toFixed(1)}" height="${innerH}"><title>${escapeXml(`${labels[i].label}\n${values}`)}</title></rect>`);
+  }
+  return `<svg viewBox="0 0 ${width} ${height}" role="img">${parts.join("")}</svg>`;
+}
+
 async function loadStatus() {
   try { renderStatus(await api("/api/status")); } catch (error) { setText("status-detail", error.message); }
 }
@@ -160,6 +237,45 @@ async function loadLogs() {
 
 async function loadConfig() {
   try { fillForm(await api("/api/config")); } catch (error) { errorBox.textContent = `加载配置失败：${error.message}`; }
+}
+
+// ---- Host 监控面板：加载与 DOM 渲染 ----
+let metricsGranularity = "minute";
+const GRANULARITY_QUERY = { minute: { hours: 6 }, hour: { hours: 24 }, day: { days: 7 } };
+
+function renderMetrics(payload) {
+  const buckets = payload.buckets ?? [];
+  const granularity = payload.granularity ?? metricsGranularity;
+  setText("metric-workers", latestMetric(payload, "online_workers"));
+  setText("metric-executions", latestMetric(payload, "active_executions"));
+  setText("metric-tokens", formatTokens(tokensLastHour(buckets)));
+  const points = (key) => buckets.map((bucket) => ({ label: bucketLabel(bucket.bucket_start, granularity), value: bucket[key] }));
+  const fleet = buildLineChart(
+    [
+      { name: "在线 Worker", color: "#55e6a6", points: points("online_workers") },
+      { name: "活跃执行", color: "#f0a83c", points: points("active_executions") },
+    ],
+    { formatValue: (v) => String(Math.round(v)) },
+  );
+  const tokens = buildLineChart(
+    [{ name: "total_tokens", color: "#62e4ad", points: points("total_tokens"), area: true }],
+    { formatValue: formatTokens },
+  );
+  const empty = '<p class="chart-empty">暂无监控数据</p>';
+  document.querySelector("#chart-fleet").innerHTML = fleet || empty;
+  document.querySelector("#chart-tokens").innerHTML = tokens || empty;
+}
+
+async function loadMetrics() {
+  const metricsError = document.querySelector("#metrics-error");
+  try {
+    const params = new URLSearchParams({ granularity: metricsGranularity, ...GRANULARITY_QUERY[metricsGranularity] });
+    const payload = await api(`/api/metrics/overview?${params}`);
+    metricsError.textContent = "";
+    renderMetrics(payload);
+  } catch (error) {
+    metricsError.textContent = `监控数据不可用：${error.message}`;
+  }
 }
 
 if (hasDom) {
@@ -201,13 +317,21 @@ if (hasDom) {
     } catch (error) { errorBox.textContent = error.message; }
   });
   document.querySelector("#refresh-logs").addEventListener("click", loadLogs);
+  document.querySelectorAll(".granularity-switch .chip").forEach((button) => {
+    button.addEventListener("click", () => {
+      metricsGranularity = button.dataset.granularity;
+      document.querySelectorAll(".granularity-switch .chip").forEach((chip) => chip.classList.toggle("active", chip === button));
+      loadMetrics();
+    });
+  });
 
   if (TOKEN_MISSING) {
     setText("status-title", "控制令牌未注入");
     setText("status-detail", "请通过 Worker Service（默认 http://127.0.0.1:8787/）访问本页面，静态打开 index.html 无法鉴权");
     errorBox.textContent = "控制令牌未注入，页面不可用";
   } else {
-    Promise.all([loadConfig(), loadStatus(), loadLogs()]);
+    Promise.all([loadConfig(), loadStatus(), loadLogs(), loadMetrics()]);
     setInterval(loadStatus, 5000);
+    setInterval(loadMetrics, 30000);
   }
 }

@@ -8,7 +8,7 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
@@ -122,6 +122,21 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
     @app.get("/api/logs", dependencies=guarded)
     def logs(limit: int = Query(default=200, ge=1, le=500)) -> dict[str, list[str]]:
         return {"lines": supervisor.logs(limit)}
+
+    @app.get("/api/metrics/overview", dependencies=guarded)
+    def metrics_overview(
+        granularity: Literal["minute", "hour", "day"] = "minute",
+        hours: int = Query(default=6, ge=1, le=24),
+        days: int = Query(default=7, ge=1, le=30),
+    ) -> dict[str, Any]:
+        """Proxy the Host ops-metrics endpoint; the browser page cannot reach the Host."""
+        host_url = str(supervisor.store.read(require_identity=False).get("host_url", ""))
+        if not host_url:
+            raise HTTPException(status_code=409, detail="尚未配置 Host 地址")
+        try:
+            return Client(host_url).get_ops_metrics(granularity, hours, days)
+        except Exception as exc:  # noqa: BLE001 — Host 不可达 / 非 200 统一映射为 503
+            raise HTTPException(status_code=503, detail=f"Host 监控数据不可用：{exc}") from exc
 
     return app
 

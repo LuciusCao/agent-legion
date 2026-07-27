@@ -138,6 +138,7 @@ server/app/
 | POST | `/jobs/{job_id}/run-to` | `run_to` | routes/jobs.py |
 | POST | `/jobs/{job_id}/continue` | `continue_job` | routes/jobs.py |
 | POST | `/workspaces/{workspace_id}/jobs/batch-run-to` | `batch_run_to` | routes/jobs.py |
+| GET | `/metrics/overview` | `get_metrics_overview` | routes/metrics.py |
 | GET | `/workspaces/{workspace_id}/packages` | `list_workspace_packages` | routes/packages.py |
 | DELETE | `/workspaces/{workspace_id}/packages/{package_id:int}` | `delete_workspace_package_route` | routes/packages.py |
 | PATCH | `/workspaces/{workspace_id}/packages/{package_id:int}` | `update_workspace_package_route` | routes/packages.py |
@@ -270,6 +271,8 @@ server/app/
 | LogEventResponse | BaseModel | type: str, title: str, detail: str, truncated: bool | app/routes/job_view_contracts.py |
 | JobLogResponse | BaseModel | run_id: int, log: str, truncated: bool, structured: list[LogEventResponse] | ... | app/routes/job_view_contracts.py |
 | JobDetailResponse | BaseModel | job: JobSummaryResponse, nodes: list[JobNodeResponse], runs: list[NodeRunResp... | app/routes/job_view_contracts.py |
+| MetricBucket | BaseModel | bucket_start: str, online_workers: int, online_workers_max: int, active_execu... | app/routes/metrics_contracts.py |
+| OpsMetricsResponse | BaseModel | granularity: Literal['minute', 'hour', 'day'], buckets: list[MetricBucket] | app/routes/metrics_contracts.py |
 | WorkspacePackageRequest | BaseModel | job_ids: list[str] | app/routes/package_contracts.py |
 | WorkspacePackageResultResponse | BaseModel | job_id: str, status: Literal['succeeded', 'failed'], reason_code: str | None,... | app/routes/package_contracts.py |
 | WorkspacePackageResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |

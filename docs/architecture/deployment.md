@@ -63,6 +63,7 @@ scripts/
 - `heartbeat_failure_threshold`
 - `heartbeat_interval_seconds`
 - `lease_ttl_seconds`
+- `monitoring`
 - `openclaw` — OpenClaw 命令模板与工作目录
 - `resource_providers` — 资源提供方路径映射
 - `server` — HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）

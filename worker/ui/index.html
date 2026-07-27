@@ -82,6 +82,33 @@
         </section>
       </div>
 
+      <section class="panel metrics-panel">
+        <div class="panel-heading">
+          <div><p class="eyebrow">MONITORING</p><h2>Host 监控</h2></div>
+          <div class="granularity-switch" role="group" aria-label="时间粒度">
+            <button class="chip active" data-granularity="minute">分钟 · 近 6h</button>
+            <button class="chip" data-granularity="hour">小时 · 近 24h</button>
+            <button class="chip" data-granularity="day">天 · 近 7 天</button>
+          </div>
+        </div>
+        <p id="metrics-error" class="error" role="alert"></p>
+        <dl class="metrics-cards">
+          <div><dt>在线 Worker</dt><dd id="metric-workers">—</dd></div>
+          <div><dt>活跃执行</dt><dd id="metric-executions">—</dd></div>
+          <div><dt>近 1h Token</dt><dd id="metric-tokens">—</dd></div>
+        </dl>
+        <div class="charts">
+          <div>
+            <p class="chart-title">在线 Worker 数 / 活跃执行数</p>
+            <div id="chart-fleet" class="chart"></div>
+          </div>
+          <div>
+            <p class="chart-title">Token 吞吐（total_tokens）</p>
+            <div id="chart-tokens" class="chart"></div>
+          </div>
+        </div>
+      </section>
+
       <section class="panel executions-panel">
         <div class="panel-heading">
           <div><p class="eyebrow">EXECUTIONS</p><h2>当前执行</h2></div>

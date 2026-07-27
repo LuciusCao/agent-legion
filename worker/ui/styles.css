@@ -54,5 +54,21 @@ code { color: #62e4ad; }
 .phase-badge.phase-downloading, .phase-badge.phase-uploading { background: rgba(240, 168, 60, .15); color: #f0a83c; }
 .execution-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 12px 0 0; }
 .execution-meta div { padding-top: 10px; border-top: 1px solid #213c34; min-width: 0; }
+.metrics-panel { margin-top: 20px; }
+.granularity-switch { display: flex; gap: 8px; }
+.chip { background: #183a30; color: #93aaa1; padding: 7px 12px; font-size: 12px; }
+.chip.active { background: rgba(85, 230, 166, .15); color: #55e6a6; }
+.metrics-cards { grid-template-columns: repeat(3, 1fr); margin-top: 16px; }
+.metrics-cards dd { font-size: 22px; font-weight: 700; }
+.charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+.chart-title { color: #718d83; font-size: 12px; margin: 0 0 8px; }
+.chart { border: 1px solid #213c34; border-radius: 12px; background: #050b09; padding: 8px; }
+.chart svg { display: block; width: 100%; height: auto; }
+.chart .axis { color: #718d83; font: 10px ui-monospace, monospace; }
+.chart .grid-line { stroke: #213c34; stroke-dasharray: 3 4; }
+.chart .hover-zone { fill: transparent; }
+.chart .hover-zone:hover { fill: rgba(85, 230, 166, .08); }
+.chart-empty { color: #93aaa1; font-size: 13px; margin: 24px 0; text-align: center; }
+@media (max-width: 800px) { .charts, .metrics-cards { grid-template-columns: 1fr; } }
 @media (max-width: 800px) { .grid { grid-template-columns: 1fr; } dl { grid-template-columns: 1fr 1fr; } }
 @media (max-width: 520px) { main { padding-top: 28px; } header { align-items: flex-start; flex-direction: column; } .header-actions { width: 100%; } .header-actions button { flex: 1; } form, .advanced, dl { grid-template-columns: 1fr; } }

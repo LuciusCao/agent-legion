@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { Link } from 'react-router-dom'
 import { IconButton, Switch } from '@mui/material'
 import { MaterialIcon } from './MaterialIcon'
 import { AgentConnectionDot } from './AgentConnectionDot'
@@ -56,6 +57,10 @@ export function AgentStatusIndicator({
         </div>
         <div className={styles.divider} />
         <AgentWorkerStatusList workspaceId={workspaceId} />
+        <div className={styles.divider} />
+        <Link to="/monitoring" className={styles.monitorLink}>
+          查看监控
+        </Link>
       </div>
     </div>
   )

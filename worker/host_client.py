@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any
@@ -99,6 +100,14 @@ class Client:
             raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
         if status != 200:
             raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
+        return json.loads(body)
+
+    def get_ops_metrics(self, granularity: str, hours: int, days: int) -> dict[str, Any]:
+        """Fetch the Host ops-metrics overview (unauthenticated endpoint)."""
+        query = urllib.parse.urlencode({"granularity": granularity, "hours": hours, "days": days})
+        status, body = self.request("GET", f"/api/metrics/overview?{query}")
+        if status != 200:
+            raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
         return json.loads(body)
 
     def download(self, path: str, destination: Path) -> None:

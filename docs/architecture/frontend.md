@@ -104,6 +104,7 @@ frontend/src/
 | 路径 | 页面组件 |
 |------|----------|
 | `/` | DashboardPage |
+| `/monitoring` | MonitoringPage |
 | `/workspaces/:workspaceId` | WorkspaceLayout |
 | `/workspaces/:workspaceId` | WorkspaceMainPage |
 | `/workspaces/:workspaceId/jobs/:jobId` | JobDetailPage |
