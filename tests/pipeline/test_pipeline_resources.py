@@ -71,10 +71,21 @@ def test_resolve_resource_config_overrides_legacy(settings_config):
 
 
 def test_resource_param_keys_match_declared_schemas():
-    from server.app.workflows.resources import RESOURCE_PARAM_KEYS
+    from server.app.workflows.resource_schemas import (
+        RESOURCE_PARAM_KEYS,
+        resource_param_keys,
+    )
 
     # Regression: order and content feed URL param appending and the settings UI.
     assert RESOURCE_PARAM_KEYS == ("bank_version", "country_id", "subject_id", "page_size")
+    # page_size is a list-only param and must not leak onto the detail URL.
+    assert resource_param_keys("question_detail") == ("bank_version", "country_id", "subject_id")
+    assert resource_param_keys("by_knowledge") == (
+        "bank_version",
+        "country_id",
+        "subject_id",
+        "page_size",
+    )
 
 
 def test_validate_resource_bindings_accepts_known_providers():

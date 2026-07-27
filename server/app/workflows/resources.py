@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from server.app.workflows.resource_schemas import RESOURCE_PARAM_KEYS
+from server.app.workflows.resource_schemas import resource_param_keys
 
 RESOURCE_PROVIDERS = {
     "question_detail": {
@@ -65,10 +65,14 @@ def _merge_resource_config(
     return result
 
 
-def _append_resource_params(api_url: str, config: dict[str, Any]) -> str:
+def _append_resource_params(
+    api_url: str,
+    config: dict[str, Any],
+    param_keys: tuple[str, ...],
+) -> str:
     parsed = urlparse(api_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    for key in RESOURCE_PARAM_KEYS:
+    for key in param_keys:
         value = config.get(key)
         if value not in (None, ""):
             query[key] = str(value)
@@ -156,7 +160,9 @@ def resolve_cms_resource(
         binding_config.get("api_url") or result.get("api_url") or result.get(url_key) or ""
     )
     if api_url:
-        api_url = _append_resource_params(api_url, binding_config)
+        # Params come from the merged result so global cms defaults (e.g.
+        # bank_version) reach the URL even without a workspace binding.
+        api_url = _append_resource_params(api_url, result, resource_param_keys(resource_key))
         result["api_url"] = api_url
         if url_key:
             result[url_key] = api_url

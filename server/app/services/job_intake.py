@@ -12,7 +12,6 @@ from server.app.services.job_intake_enqueue import enqueue_intake_batch
 from server.app.services.job_intake_resolution import RESOLVER_MAP, normalize_values
 from server.app.services.job_intake_video import write_video_input
 from server.app.services.job_intake_workspace import (
-    check_resource_enabled,
     effective_cms_config,
     enabled_intake_modes,
     get_workspace,
@@ -54,9 +53,6 @@ class JobIntakeService:
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        resource_key = mode.resource if mode.resource else None
-        if resource_key:
-            check_resource_enabled(workspace, resource_key)
         cms_config = effective_cms_config(self.settings, workspace)
         resource_config = workspace.get("resource_config")
         if not isinstance(resource_config, dict):
@@ -156,7 +152,6 @@ class JobIntakeService:
             "key": mode.key,
             "label": mode.label,
             "input_field": mode.input_field,
-            "resource": mode.resource,
         }
         source_payload["task_candidates"] = candidates
         batch = self.job_db.create_batch(

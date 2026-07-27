@@ -75,9 +75,7 @@ def resolve_cms_question_candidates(
     if entity != "question":
         raise UnsupportedOperationError(f"{entity} resolver not yet implemented")
 
-    resource_key = mode.resource
-    if resolver == "cms.question_ids":
-        resource_key = "question_detail"
+    resource_key = "question_detail" if resolver == "cms.question_ids" else "by_knowledge"
 
     cms_resource = resolve_cms_resource(
         settings.config,

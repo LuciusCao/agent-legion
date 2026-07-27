@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.settings import Settings
 
 
@@ -20,16 +20,6 @@ def singular_field_name(value: str) -> str:
     if value.endswith("s"):
         return value[:-1]
     return value
-
-
-def check_resource_enabled(workspace: dict[str, Any], resource_key: str) -> None:
-    ws_resource_config = workspace.get("resource_config") or {}
-    resources = ws_resource_config.get("resources") or {}
-    binding = resources.get(resource_key) or {}
-    if binding.get("enabled") is False:
-        raise InvalidOperationError(
-            f"Resource provider '{resource_key}' is disabled for this workspace"
-        )
 
 
 def effective_cms_config(settings: Settings, workspace: dict[str, Any]) -> dict[str, Any]:

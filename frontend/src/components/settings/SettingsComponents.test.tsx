@@ -37,9 +37,8 @@ const workflowDefinition: WorkflowDefinitionRecord = {
         key: 'manual',
         label: 'Manual',
         input_field: 'id_list',
-        resource: 'cms',
       },
-      { key: 'auto', label: 'Auto', input_field: 'source', resource: 'asr' },
+      { key: 'auto', label: 'Auto', input_field: 'source' },
     ],
   },
   edges: [],
@@ -83,16 +82,14 @@ describe('IntakeConfigSection', () => {
     expect(mockSetSettings).toHaveBeenCalledWith({ entityType: 'knowledge' })
   })
 
-  it('toggles an intake mode without resource', () => {
+  it('toggles an intake mode on', () => {
     render(
       <IntakeConfigSection
         settings={{ ...baseSettings, intakeModes: [] }}
         workflowDefinition={{
           ...workflowDefinition,
           intake: {
-            modes: [
-              { key: 'none', label: 'None', input_field: 'x', resource: '' },
-            ],
+            modes: [{ key: 'none', label: 'None', input_field: 'x' }],
           },
         }}
         resourceProviders={[]}
@@ -113,7 +110,7 @@ describe('IntakeConfigSection', () => {
     expect(mockSetSettings).toHaveBeenCalledWith({ intakeModes: ['none'] })
   })
 
-  it('toggles an intake mode with resource and updates resource binding', () => {
+  it('toggles an intake mode without touching resource bindings', () => {
     render(
       <IntakeConfigSection
         settings={{ ...baseSettings, intakeModes: [], resources: {} }}
@@ -135,13 +132,10 @@ describe('IntakeConfigSection', () => {
 
     expect(mockSetSettings).toHaveBeenCalledWith({
       intakeModes: ['manual'],
-      resources: {
-        cms: { enabled: true, config: {} },
-      },
     })
   })
 
-  it('unchecks an intake mode and disables its resource binding', () => {
+  it('unchecks an intake mode without touching resource bindings', () => {
     render(
       <IntakeConfigSection
         settings={baseSettings}
@@ -163,10 +157,6 @@ describe('IntakeConfigSection', () => {
 
     expect(mockSetSettings).toHaveBeenCalledWith({
       intakeModes: [],
-      resources: {
-        ...baseSettings.resources,
-        cms: { enabled: false, config: { url: 'http://cms.test' } },
-      },
     })
   })
 

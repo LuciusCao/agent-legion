@@ -309,7 +309,7 @@ server/app/
 | TokenUsageWorkspaceGroup | BaseModel | group_key: str, node_key: str, provider: str, model: str, skill_version: str,... | app/routes/token_usage_workspace_group_contract.py |
 | WorkerStatusResponse | BaseModel | paused: bool | app/routes/worker.py |
 | WorkflowSummaryResponse | BaseModel | key: str, label: str | app/routes/workflow_contracts.py |
-| WorkflowIntakeModeResponse | BaseModel | key: str, label: str, input_field: str, resource: str | app/routes/workflow_contracts.py |
+| WorkflowIntakeModeResponse | BaseModel | key: str, label: str, input_field: str | app/routes/workflow_contracts.py |
 | WorkflowIntakeResponse | BaseModel | modes: list[WorkflowIntakeModeResponse] | app/routes/workflow_contracts.py |
 | WorkflowConditionResponse | BaseModel | artifact: str, path: str, equals: Any | app/routes/workflow_contracts.py |
 | WorkflowEdgeResponse | BaseModel | source: str, target: str, condition: WorkflowConditionResponse | None | app/routes/workflow_contracts.py |

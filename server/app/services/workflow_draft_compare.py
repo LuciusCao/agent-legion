@@ -323,8 +323,6 @@ def _mode_fields_changed(base: WorkflowIntakeMode, draft: WorkflowIntakeMode) ->
         fields.append("label")
     if base.input_field != draft.input_field:
         fields.append("input_field")
-    if base.resource != draft.resource:
-        fields.append("resource")
     return fields
 
 

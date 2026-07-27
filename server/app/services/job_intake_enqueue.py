@@ -31,7 +31,6 @@ def enqueue_intake_batch(
                 "key": mode.key,
                 "label": mode.label,
                 "input_field": mode.input_field,
-                "resource": mode.resource,
             },
             "task_candidates": [],
             "_intake_queue": {

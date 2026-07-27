@@ -4,8 +4,8 @@ from urllib.parse import urlparse
 
 from server.app.settings import Settings
 from server.app.workflows.resource_schemas import (
-    RESOURCE_PARAM_KEYS,
     RESOURCE_PROVIDER_SCHEMAS,
+    resource_param_keys,
 )
 from server.app.workflows.resources import RESOURCE_PROVIDERS
 
@@ -21,9 +21,7 @@ def build_resource_providers(settings: Settings) -> list[dict[str, Any]]:
         provider = str(meta.get("provider") or "")
         provider_config = providers_config.get(provider) or {}
         path = str(provider_config.get("path", ""))
-        param_keys = list(RESOURCE_PARAM_KEYS)
-        if key == "question_detail" and "page_size" in param_keys:
-            param_keys.remove("page_size")
+        param_keys = list(resource_param_keys(key))
         default_params: dict[str, str] = {}
         for param_key in param_keys:
             if param_key in cms_config and cms_config[param_key] not in (None, ""):

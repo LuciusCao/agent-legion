@@ -42,12 +42,27 @@ RESOURCE_PROVIDER_SCHEMAS: dict[str, dict[str, Any]] = {
 for _schema in RESOURCE_PROVIDER_SCHEMAS.values():
     validate_config_schema(_schema)
 
+
+def _url_param_keys(schema: dict[str, Any]) -> tuple[str, ...]:
+    """URL query params declared by a schema (secrets and env excluded)."""
+    return tuple(
+        key
+        for key, prop in schema["properties"].items()
+        if key != "api_url" and key != "env" and not prop.get("secret")
+    )
+
+
+def resource_param_keys(resource_key: str) -> tuple[str, ...]:
+    """URL query params declared by one resource's provider schema."""
+    schema = RESOURCE_PROVIDER_SCHEMAS.get(resource_key)
+    if schema is None:
+        return ()
+    return _url_param_keys(schema)
+
+
 RESOURCE_PARAM_KEYS = tuple(
     dict.fromkeys(
-        key
-        for schema in RESOURCE_PROVIDER_SCHEMAS.values()
-        for key in schema["properties"]
-        if key != "api_url"
+        key for schema in RESOURCE_PROVIDER_SCHEMAS.values() for key in _url_param_keys(schema)
     )
 )
 

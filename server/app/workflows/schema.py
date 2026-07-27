@@ -72,7 +72,6 @@ class WorkflowIntakeMode:
     key: str
     label: str
     input_field: str
-    resource: str = ""
 
 
 @dataclass(frozen=True)

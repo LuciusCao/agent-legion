@@ -116,31 +116,24 @@ def _apply_basecms_env_overrides(config: dict[str, Any]) -> None:
 
 
 def _normalize_cms_config(config: dict[str, Any]) -> None:
-    """Derive legacy URL fields from base_url when present."""
+    """Derive the legacy knowledge URL from base_url when present.
+
+    Question resource URLs resolve through ``resource_providers`` (see
+    ``workflows.resources.resolve_cms_resource``); only the video intake still
+    consumes ``knowledge_url`` directly.
+    """
     cms = config.get("cms")
     if not isinstance(cms, dict):
         return
     base_url = str(cms.get("base_url", "")).rstrip("/")
-    if not base_url:
+    if not base_url or cms.get("knowledge_url"):
         return
     params: dict[str, str] = {
         "bank_version": str(cms.get("bank_version", "v5")),
         "country_id": str(cms.get("country_id", "1")),
         "subject_id": str(cms.get("subject_id", "2")),
     }
-    if not cms.get("knowledge_url"):
-        cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
-    if not cms.get("question_url"):
-        cms["question_url"] = f"{base_url}/question/detail?" + urlencode(params)
-    if not cms.get("question_detail_url"):
-        cms["question_detail_url"] = cms["question_url"]
-    list_params = {**params}
-    if "page_size" in cms and cms["page_size"] not in (None, ""):
-        list_params["page_size"] = str(cms["page_size"])
-    else:
-        list_params["page_size"] = "50"
-    if not cms.get("question_list_url"):
-        cms["question_list_url"] = f"{base_url}/question/list?" + urlencode(list_params)
+    cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
 
 
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:

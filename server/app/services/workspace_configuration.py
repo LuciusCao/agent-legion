@@ -17,6 +17,7 @@ from server.app.services.workspace_settings_payload import workspace_settings_pa
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
 from server.app.workflows.resource_schemas import validate_resource_bindings
+from server.app.workflows.resources import resolve_cms_resource
 
 
 def _build_settings_config(
@@ -249,9 +250,11 @@ class WorkspaceConfigurationService:
         return self._payload(workspace)
 
     def test_connection(self, workspace_id: str) -> dict[str, Any]:
-        self._workspace(workspace_id)
-        cms_config = self.settings.config.get("cms", {}) or {}
-        if not (cms_config.get("question_detail_url") or cms_config.get("question_list_url")):
+        workspace = self._workspace(workspace_id)
+        cms_resource = resolve_cms_resource(
+            self.settings.config, workspace, None, "question_detail"
+        )
+        if not cms_resource.get("api_url"):
             raise InvalidOperationError("Global CMS URL is not configured")
         return {"ok": True, "message": "全局配置已就绪"}
 
