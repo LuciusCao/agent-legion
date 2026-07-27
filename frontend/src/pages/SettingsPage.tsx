@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
+import { useAuthStore } from '../stores/authStore'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
@@ -14,10 +15,12 @@ import { DangerZone } from '../components/settings/DangerZone'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
+import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import styles from './SettingsPage.module.css'
 
 export function SettingsPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const {
     setWorkspaceId,
     workspaceName,
@@ -76,11 +79,12 @@ export function SettingsPage() {
       { id: 'executor-allocation', label: '执行器分配' },
       { id: 'executor-binding', label: '节点绑定' },
       { id: 'worker-tokens', label: 'Worker Token' },
+      ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasLocalNodes
         ? [{ id: 'local-node-concurrency', label: '本地节点并发' }]
         : []),
     ],
-    [hasLocalNodes]
+    [hasLocalNodes, isAdmin]
   )
 
   const [activeSection, setActiveSection] = useState('basic-info')
@@ -204,6 +208,7 @@ export function SettingsPage() {
             <hr className={styles.sectionDivider} />
             <WorkerTokensSection />
           </section>
+          {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
           {hasLocalNodes && (
             <section id="local-node-concurrency" className={styles.section}>
               <h2 className={styles.sectionTitle}>本地节点并发</h2>

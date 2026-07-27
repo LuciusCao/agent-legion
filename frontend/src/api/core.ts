@@ -1,10 +1,17 @@
+import { handleUnauthorized, withCsrfHeader } from './requestAuth'
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const isGet = !init || !init.method || init.method === 'GET'
+  const method = (init?.method ?? 'GET').toUpperCase()
+  const headers = withCsrfHeader(method, {
+    'Content-Type': 'application/json',
+    ...(init?.headers ?? {}),
+  } as Record<string, string>)
   const response = await fetch(path, {
-    ...(isGet ? { cache: 'no-store' } : {}),
+    ...(method === 'GET' ? { cache: 'no-store' } : {}),
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers,
   })
+  if (response.status === 401) handleUnauthorized(path)
   if (!response.ok) {
     const text = await response.text()
     let message: string
