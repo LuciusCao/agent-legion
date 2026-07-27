@@ -1,0 +1,90 @@
+.panel {
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.08);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid #e5e7eb;
+  flex-wrap: wrap;
+}
+
+.titleGroup {
+  display: grid;
+  gap: 2px;
+}
+
+.titleGroup h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+}
+
+.titleGroup p {
+  margin: 0;
+  color: #5f6368;
+  font-size: 12px;
+}
+
+.summaryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.metric {
+  padding: 14px 16px;
+  border-right: 1px solid #e5e7eb;
+  min-width: 0;
+}
+
+.metric:last-child {
+  border-right: 0;
+}
+
+.metricLabel {
+  font-size: 12px;
+  color: #5f6368;
+  margin-bottom: 6px;
+}
+
+.metricValue {
+  font-size: 20px;
+  font-weight: 750;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+.metricMeta {
+  color: #8a8f98;
+  font-size: 12px;
+  margin-top: 4px;
+}
+
+.chartSection {
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.chartSection:last-child {
+  border-bottom: 0;
+}
+
+.chartSection h3 {
+  margin: 0;
+  padding: 12px 16px 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1c1e;
+}
+
+.error {
+  padding: 24px 16px;
+  color: #b3261e;
+  font-size: 13px;
+}

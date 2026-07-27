@@ -27,6 +27,9 @@ export {
   publishWorkflowDraft,
   validateWorkflowDraft,
 } from './workflows'
+export { fetchOpsMetrics } from './metrics'
+// prettier-ignore
+export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse } from './metrics'
 // prettier-ignore
 export { createRegisterToken, listAgentWorkers, listRegisterTokens, revokeAgentWorker, revokeRegisterToken } from './workerTokens'
 // prettier-ignore

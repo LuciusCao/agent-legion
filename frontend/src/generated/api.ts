@@ -499,6 +499,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/metrics/overview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Metrics Overview */
+    get: operations['get_metrics_overview_api_metrics_overview_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/resource-providers': {
     parameters: {
       query?: never
@@ -1869,6 +1886,27 @@ export interface components {
       /** Type */
       type: string
     }
+    /** MetricBucket */
+    MetricBucket: {
+      /** Active Executions */
+      active_executions: number
+      /** Active Executions Max */
+      active_executions_max: number
+      /** Bucket Start */
+      bucket_start: string
+      /** Cache Read Tokens */
+      cache_read_tokens: number
+      /** Input Tokens */
+      input_tokens: number
+      /** Online Workers */
+      online_workers: number
+      /** Online Workers Max */
+      online_workers_max: number
+      /** Output Tokens */
+      output_tokens: number
+      /** Total Tokens */
+      total_tokens: number
+    }
     /** NodeBindingRequest */
     NodeBindingRequest: {
       /** Executor Id */
@@ -1918,6 +1956,16 @@ export interface components {
       started_at: string
       /** Status */
       status: string
+    }
+    /** OpsMetricsResponse */
+    OpsMetricsResponse: {
+      /** Buckets */
+      buckets: components['schemas']['MetricBucket'][]
+      /**
+       * Granularity
+       * @enum {string}
+       */
+      granularity: 'minute' | 'hour' | 'day'
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
@@ -3909,6 +3957,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ArtifactResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_metrics_overview_api_metrics_overview_get: {
+    parameters: {
+      query?: {
+        granularity?: 'minute' | 'hour' | 'day'
+        hours?: number
+        days?: number
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['OpsMetricsResponse']
         }
       }
       /** @description Validation Error */

@@ -11,6 +11,7 @@ from ..jobs import JobQueries
 from ..services.artifact_store import ArtifactStore
 from ..services.executor_catalog import ExecutorCatalogService
 from ..services.job_packages import JobPackageService
+from ..services.ops_metrics import OpsMetricsService
 from ..services.workflow_catalog import WorkflowCatalogService
 from ..services.workspace_configuration import WorkspaceConfigurationService
 from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
@@ -21,6 +22,7 @@ from .agents import create_agents_router
 from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .job_route_group import include_job_routes
+from .metrics import create_metrics_router
 from .packages import create_packages_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
@@ -50,6 +52,7 @@ def create_router(
     agent_broker: AgentExecutionBroker | None = None,
     agent_worker_registry: AgentWorkerRegistry | None = None,
     agent_completion: AgentCompletionHandler | None = None,
+    ops_metrics: OpsMetricsService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -71,6 +74,8 @@ def create_router(
         router.include_router(
             create_artifacts_router(artifact_store, settings, agent_worker_registry)
         )
+    if ops_metrics is not None:
+        router.include_router(create_metrics_router(ops_metrics))
     router.include_router(create_workflow_catalog_router(workflow_catalog, settings))
     router.include_router(create_workflow_resource_providers_router(workflow_catalog, settings))
     router.include_router(

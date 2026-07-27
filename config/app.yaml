@@ -13,6 +13,10 @@ cleanup:
   run_dir_retention_days: 3
   interval_seconds: 3600
 
+monitoring:
+  sample_interval_seconds: 60
+  retention_days: 7
+
 token_usage:
   currency: CNY
   pricing:

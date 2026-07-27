@@ -29,6 +29,7 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
+from server.app.services.ops_metrics import OpsMetricsService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -114,6 +115,7 @@ def create_app(
         job_event_buffer=job_event_buffer,
     )
     agent_worker_registry = AgentWorkerRegistry(job_db.path)
+    ops_metrics = OpsMetricsService(job_db.path, settings.config)
     agent_completion = AgentCompletionHandler(
         executor_leases,
         artifact_store,
@@ -126,6 +128,7 @@ def create_app(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
         job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
+        ops_metrics=ops_metrics,
     )
 
     @asynccontextmanager
@@ -227,6 +230,7 @@ def create_app(
             agent_broker=agent_broker,
             agent_worker_registry=agent_worker_registry,
             agent_completion=agent_completion,
+            ops_metrics=ops_metrics,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")

@@ -18,11 +18,13 @@ const WorkspaceMainPage = lazy(() => import('./pages/WorkspaceMainPage'))
 const TokenUsagePage = lazy(() =>
   import('./pages/TokenUsagePage').then((m) => ({ default: m.TokenUsagePage }))
 )
+const MonitoringPage = lazy(() => import('./pages/MonitoringPage'))
 
 export default function AppRoutes() {
   return (
     <Routes>
       <Route path="/" element={<DashboardPage />} />
+      <Route path="/monitoring" element={<MonitoringPage />} />
       <Route path="/workspaces" element={<Navigate to="/" replace />} />
       <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
         <Route index element={<WorkspaceMainPage />} />

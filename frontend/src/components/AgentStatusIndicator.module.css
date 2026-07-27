@@ -54,3 +54,11 @@
   margin: 8px 0;
   background: #e5e7eb;
 }
+
+.monitorLink {
+  display: block;
+  padding: 4px 0;
+  color: #2563eb;
+  font-size: 13px;
+  text-decoration: none;
+}

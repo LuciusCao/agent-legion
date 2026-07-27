@@ -382,10 +382,101 @@ def test_api_requires_bearer_token_except_health(tmp_path: Path) -> None:
         assert client.get("/api/status").status_code == 401
         assert client.get("/api/logs").status_code == 401
         assert client.post("/api/restart").status_code == 401
+        assert client.get("/api/metrics/overview").status_code == 401
         wrong = {"Authorization": "Bearer wrong-token"}
         assert client.get("/api/status", headers=wrong).status_code == 401
+        assert client.get("/api/metrics/overview", headers=wrong).status_code == 401
         assert client.get("/api/health").status_code == 200
         assert client.get("/api/status", headers=_auth(store)).status_code == 200
+
+
+def test_metrics_overview_validates_query_params(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    app = create_app(FakeSupervisor(store), tmp_path)
+
+    with TestClient(app) as client:
+        headers = _auth(store)
+        assert (
+            client.get("/api/metrics/overview?granularity=second", headers=headers).status_code
+            == 422
+        )
+        assert client.get("/api/metrics/overview?hours=0", headers=headers).status_code == 422
+        assert client.get("/api/metrics/overview?hours=25", headers=headers).status_code == 422
+        assert client.get("/api/metrics/overview?days=31", headers=headers).status_code == 422
+
+
+def test_metrics_overview_proxies_host_response(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    app = create_app(FakeSupervisor(store), tmp_path)
+    payload = {
+        "granularity": "hour",
+        "buckets": [
+            {
+                "bucket_start": "2026-07-26T12:00:00+00:00",
+                "online_workers": 2,
+                "online_workers_max": 3,
+                "active_executions": 1,
+                "active_executions_max": 2,
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_read_tokens": 10,
+                "total_tokens": 160,
+            }
+        ],
+    }
+    calls: list[tuple[str, str, int, int]] = []
+
+    class FakeHostClient:
+        def __init__(self, host: str) -> None:
+            self.host = host
+
+        def get_ops_metrics(self, granularity: str, hours: int, days: int) -> dict[str, Any]:
+            calls.append((self.host, granularity, hours, days))
+            return payload
+
+    monkeypatch.setattr(service_module, "Client", FakeHostClient)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/api/metrics/overview?granularity=hour&hours=24&days=7", headers=_auth(store)
+        )
+
+    assert response.status_code == 200
+    assert response.json() == payload
+    assert calls == [("http://host.test:8000", "hour", 24, 7)]
+
+
+def test_metrics_overview_without_host_config_returns_409(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")  # 未写入配置：host_url 为空
+    app = create_app(FakeSupervisor(store), tmp_path)
+
+    with TestClient(app) as client:
+        response = client.get("/api/metrics/overview", headers=_auth(store))
+
+    assert response.status_code == 409
+
+
+def test_metrics_overview_host_unreachable_returns_503(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    app = create_app(FakeSupervisor(store), tmp_path)
+
+    def failing_metrics(self: Any, granularity: str, hours: int, days: int) -> dict[str, Any]:
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(service_module.Client, "get_ops_metrics", failing_metrics)
+
+    with TestClient(app) as client:
+        response = client.get("/api/metrics/overview", headers=_auth(store))
+
+    assert response.status_code == 503
+    assert "Host" in response.json()["detail"]
 
 
 def test_index_injects_control_token(tmp_path: Path) -> None:
