@@ -18,6 +18,7 @@ from server.app.services.job_intake_workspace import (
     get_workspace,
     singular_field_name,
 )
+from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
@@ -84,6 +85,13 @@ class JobIntakeService:
         if resolver is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
 
+        try:
+            node_config = resolve_workflow_node_configs(
+                definition, self.settings.agent_definitions, workspace
+            )
+        except ValueError as exc:
+            raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc
+
         if payload.get("async_processing"):
             return enqueue_intake_batch(
                 self.job_db,
@@ -95,6 +103,7 @@ class JobIntakeService:
                 resource_config,
                 mode,
                 active_revision,
+                node_config,
             )
 
         # Filter candidates that already exist in the workspace so duplicates are
@@ -142,6 +151,7 @@ class JobIntakeService:
         source_payload["knowledge_codes"] = knowledge_codes
         source_payload["cms_config"] = cms_config
         source_payload["resource_config"] = resource_config
+        source_payload["node_config"] = node_config
         source_payload["intake_mode"] = {
             "key": mode.key,
             "label": mode.label,

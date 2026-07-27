@@ -1,6 +1,7 @@
 from typing import Any
 
 from server.app.agents import AgentStatusManager
+from server.app.config_schema import ConfigSchemaError
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -8,9 +9,14 @@ from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
+from server.app.services.workspace_node_config import (
+    update_workspace_node_config,
+    workspace_settings_payload_with_schemas,
+)
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
+from server.app.workflows.resource_schemas import validate_resource_bindings
 
 
 def _build_settings_config(
@@ -51,6 +57,11 @@ class WorkspaceConfigurationService:
         if workspace is None:
             raise NotFoundError("Workspace not found")
         return workspace
+
+    def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
+        return workspace_settings_payload_with_schemas(
+            self.workflows, self.settings.agent_definitions, workspace
+        )
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         return self.job_db.list_workspaces()
@@ -102,7 +113,7 @@ class WorkspaceConfigurationService:
 
     def settings_payload(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        return workspace_settings_payload(workspace)
+        return self._payload(workspace)
 
     def replace_configuration(
         self,
@@ -165,7 +176,7 @@ class WorkspaceConfigurationService:
         executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,
-            "settings": workspace_settings_payload(saved_workspace),
+            "settings": self._payload(saved_workspace),
             "executor_configuration": {**executor_configuration, "migration_warnings": []},
             "agent_capacity": self.job_db.get_workspace_agent_capacity(workspace_id),
         }
@@ -180,6 +191,10 @@ class WorkspaceConfigurationService:
                 dict(resource_config) if isinstance(resource_config, dict) else {}
             )
             if patch.get("resources") is not None:
+                try:
+                    validate_resource_bindings(patch["resources"])
+                except ConfigSchemaError as exc:
+                    raise InvalidOperationError(str(exc)) from exc
                 next_resource_config["resources"] = patch["resources"]
             if patch.get("cmsUrl") is not None or patch.get("cmsToken") is not None:
                 cms_config = workspace.get("cms_config")
@@ -220,10 +235,18 @@ class WorkspaceConfigurationService:
                 WorkflowRevisionService(self.job_db).ensure_active_revision(
                     workspace_id, definition
                 )
+        elif section == "nodes":
+            workspace = update_workspace_node_config(
+                self.job_db,
+                self.workflows,
+                self.settings.agent_definitions,
+                workspace,
+                patch,
+            )
 
         else:
             raise NotFoundError("Unknown settings section")
-        return workspace_settings_payload(workspace)
+        return self._payload(workspace)
 
     def test_connection(self, workspace_id: str) -> dict[str, Any]:
         self._workspace(workspace_id)

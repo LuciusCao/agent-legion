@@ -6,7 +6,7 @@ from server.app.db.bootstrap import bootstrap_default_workspace
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 13
+SCHEMA_VERSION = 14
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -30,6 +30,6 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
             conn.execute(
                 "insert into schema_migrations(version, name) values (?, ?)",
-                (SCHEMA_VERSION, "auth_users_sessions_workspace_members"),
+                (SCHEMA_VERSION, "workspace_node_config"),
             )
         bootstrap_default_workspace(conn)

@@ -3,7 +3,11 @@ from typing import Any
 from urllib.parse import urlparse
 
 from server.app.settings import Settings
-from server.app.workflows.resources import RESOURCE_PARAM_KEYS, RESOURCE_PROVIDERS
+from server.app.workflows.resource_schemas import (
+    RESOURCE_PARAM_KEYS,
+    RESOURCE_PROVIDER_SCHEMAS,
+)
+from server.app.workflows.resources import RESOURCE_PROVIDERS
 
 
 def build_resource_providers(settings: Settings) -> list[dict[str, Any]]:
@@ -31,6 +35,7 @@ def build_resource_providers(settings: Settings) -> list[dict[str, Any]]:
                 "path": path,
                 "defaultParams": default_params,
                 "paramKeys": param_keys,
+                "config_schema": RESOURCE_PROVIDER_SCHEMAS[key],
             }
         )
     return result

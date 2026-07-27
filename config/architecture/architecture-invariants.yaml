@@ -384,3 +384,18 @@ invariants:
       - kind: integration
         target: tests/full/test_auth_control_plane.py
         gate: full
+
+  - id: CONFIG-MANIFEST-001
+    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_config_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_node_config.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_node_config_manifest.py
+        gate: full

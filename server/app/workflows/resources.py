@@ -3,6 +3,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from server.app.workflows.resource_schemas import RESOURCE_PARAM_KEYS
+
 RESOURCE_PROVIDERS = {
     "question_detail": {
         "provider": "cms.question.detail",
@@ -13,8 +15,6 @@ RESOURCE_PROVIDERS = {
         "url_key": "question_list_url",
     },
 }
-
-RESOURCE_PARAM_KEYS = ("bank_version", "country_id", "subject_id", "page_size")
 
 
 def _resource_config_from_legacy_cms(cms_config: dict[str, Any]) -> dict[str, Any]:

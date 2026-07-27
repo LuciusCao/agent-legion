@@ -14,11 +14,13 @@ class WorkspaceRecord(BaseModel):
     cms_config_json: str
     resource_config_json: str
     intake_config_json: str
+    node_config_json: str
     created_at: str
     updated_at: str
     cms_config: dict[str, Any]
     resource_config: dict[str, Any]
     intake_config: dict[str, Any]
+    node_config: dict[str, Any]
 
 
 class ResourceProviderDefinition(BaseModel):
@@ -27,6 +29,7 @@ class ResourceProviderDefinition(BaseModel):
     path: str
     defaultParams: dict[str, str]
     paramKeys: list[str]
+    config_schema: dict[str, Any] = Field(default_factory=dict)
 
 
 class CmsServiceStatus(BaseModel):

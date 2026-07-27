@@ -38,6 +38,7 @@ def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
     record["cms_config"] = _decode_json_object(record.get("cms_config_json"))
     record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
     record["intake_config"] = _decode_json_object(record.get("intake_config_json"))
+    record["node_config"] = _decode_json_object(record.get("node_config_json"))
     return record
 
 
@@ -123,6 +124,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
         intake_config: dict[str, Any] | None = None,
+        node_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -152,6 +154,12 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         if intake_config is not None:
             fields["intake_config_json"] = json.dumps(
                 intake_config,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        if node_config is not None:
+            fields["node_config_json"] = json.dumps(
+                node_config,
                 ensure_ascii=False,
                 sort_keys=True,
             )
