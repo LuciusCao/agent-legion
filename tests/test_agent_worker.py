@@ -19,7 +19,7 @@ import pytest
 from server.app.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
 from worker.registration_retry import register_with_retry
-from worker.status import ExecutionStatusReporter, read_current_executions
+from worker.status import ExecutionStatusReporter, read_current_executions, read_runtime_status
 
 
 def _make_bundle(tmp_path: Path, manifest: dict) -> Path:
@@ -69,6 +69,14 @@ class FakeClient:
         data = path.read_bytes()
         self.uploads[hashlib.sha256(data).hexdigest()] = data
         return f"sha256:{hashlib.sha256(data).hexdigest()}"
+
+    def get_self(self) -> dict:
+        return {
+            "worker_id": "w1",
+            "name": "Worker 1",
+            "revoked": False,
+            "online": True,
+        }
 
     def heartbeat(self, execution_id: str, lease_id: str) -> int:
         self.heartbeats += 1
@@ -651,6 +659,25 @@ def test_read_current_executions_sorts_by_started_at(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert [item["execution_id"] for item in read_current_executions(path)] == ["a", "b"]
+
+
+def test_runtime_status_includes_worker_authenticated_remote_state(tmp_path: Path) -> None:
+    path = tmp_path / "status.json"
+    reporter = ExecutionStatusReporter(path)
+    reporter.set_remote(
+        {
+            "host_reachable": True,
+            "registered": True,
+            "connected": True,
+            "host_worker": {"worker_id": "w1"},
+            "connection_error": None,
+        }
+    )
+
+    runtime = read_runtime_status(path)
+
+    assert runtime["remote"]["host_reachable"] is True
+    assert runtime["remote"]["host_worker"]["worker_id"] == "w1"
 
 
 def test_run_execution_publishes_status_and_clears_it(
