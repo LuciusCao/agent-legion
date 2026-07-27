@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import Any
 
 from server.app.services.token_usage_pricing import calculate_cost
@@ -28,56 +29,83 @@ def _group_label(group_by: str, group_key: str) -> dict[str, str]:
     return labels
 
 
-def _workspace_usage_filter_clauses(
-    *,
-    node_key: str | None,
-    job_id: str | None,
-    provider: str | None,
-    model: str | None,
-    skill_version: str | None,
-) -> tuple[list[str], list[Any]]:
-    """Return (clauses, params) for node_run_token_usage filter queries."""
-    clauses: list[str] = []
-    params: list[Any] = []
-    if node_key:
-        clauses.append("node_key = ?")
-        params.append(node_key)
-    if job_id:
-        clauses.append("job_id = ?")
-        params.append(job_id)
-    if provider:
-        clauses.append("provider = ?")
-        params.append(provider)
-    if model:
-        clauses.append("model = ?")
-        params.append(model)
-    if skill_version:
-        clauses.append("skill_version = ?")
-        params.append(skill_version)
-    return clauses, params
+@dataclass(frozen=True)
+class _UsageFilters:
+    """Optional dimension filters shared by the workspace usage queries."""
+
+    node_key: str | None = None
+    job_id: str | None = None
+    provider: str | None = None
+    model: str | None = None
+    skill_version: str | None = None
+
+    def usage_where(self, workspace_id: str) -> tuple[str, list[Any]]:
+        """Return (where_sql, params) for node_run_token_usage filter queries."""
+        clauses = ["workspace_id = ?"]
+        params: list[Any] = [workspace_id]
+        if self.node_key:
+            clauses.append("node_key = ?")
+            params.append(self.node_key)
+        if self.job_id:
+            clauses.append("job_id = ?")
+            params.append(self.job_id)
+        if self.provider:
+            clauses.append("provider = ?")
+            params.append(self.provider)
+        if self.model:
+            clauses.append("model = ?")
+            params.append(self.model)
+        if self.skill_version:
+            clauses.append("skill_version = ?")
+            params.append(self.skill_version)
+        return " and ".join(clauses), params
+
+    def run_count_where(self, workspace_id: str) -> tuple[str, list[Any]]:
+        """Return (where_sql, params) for node_runs/jobs count queries.
+
+        When provider/model/skill_version filters are present, runs that have
+        a token usage row under a different provider/model/version are
+        excluded from the count. Runs without any usage row are still
+        included.
+        """
+        clauses = ["jobs.workspace_id = ?"]
+        params: list[Any] = [workspace_id]
+        if self.node_key:
+            clauses.append("node_runs.node_key = ?")
+            params.append(self.node_key)
+        if self.job_id:
+            clauses.append("node_runs.job_id = ?")
+            params.append(self.job_id)
+
+        usage_filter_clauses: list[str] = []
+        if self.provider is not None:
+            usage_filter_clauses.append("(u.provider != ? or u.provider is null)")
+            params.append(self.provider)
+        if self.model is not None:
+            usage_filter_clauses.append("(u.model != ? or u.model is null)")
+            params.append(self.model)
+        if self.skill_version is not None:
+            usage_filter_clauses.append("(u.skill_version != ? or u.skill_version is null)")
+            params.append(self.skill_version)
+
+        if usage_filter_clauses:
+            # Exclude runs whose existing usage row does not match the active
+            # filters. Runs without any usage row are still included.
+            excluded = " or ".join(usage_filter_clauses)
+            clauses.append(
+                "not exists (select 1 from node_run_token_usage u "
+                f"where u.node_run_id = node_runs.id and ({excluded}))"
+            )
+        return " and ".join(clauses), params
 
 
 def _query_workspace_usage_aggregates(
     job_db: Any,
     workspace_id: str,
-    *,
-    node_key: str | None,
-    job_id: str | None,
-    provider: str | None,
-    model: str | None,
-    skill_version: str | None,
+    filters: _UsageFilters,
 ) -> dict[str, Any]:
     """Aggregate token usage over the full filtered set (not limited)."""
-    filter_clauses, filter_params = _workspace_usage_filter_clauses(
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
-    )
-    clauses = ["workspace_id = ?", *filter_clauses]
-    params: list[Any] = [workspace_id, *filter_params]
-    where = " and ".join(clauses)
+    where, params = filters.usage_where(workspace_id)
     with job_db.connect() as conn:
         row = conn.execute(
             f"""
@@ -118,27 +146,14 @@ def _group_by_sql(group_by: str) -> tuple[str, list[str]]:
 def _query_workspace_group_aggregates(
     job_db: Any,
     workspace_id: str,
+    filters: _UsageFilters,
     *,
-    node_key: str | None,
-    job_id: str | None,
-    provider: str | None,
-    model: str | None,
-    skill_version: str | None,
     group_by: str,
     limit: int,
 ) -> Sequence[Mapping[str, Any]]:
     """Aggregate per group over the full filtered set, then apply limit."""
     group_expr, group_columns = _group_by_sql(group_by)
-    filter_clauses, filter_params = _workspace_usage_filter_clauses(
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
-    )
-    clauses = ["workspace_id = ?", *filter_clauses]
-    params: list[Any] = [workspace_id, *filter_params]
-    where = " and ".join(clauses)
+    where, params = filters.usage_where(workspace_id)
     group_by_sql = ", ".join(group_columns)
     params.append(max(1, limit))
     with job_db.connect() as conn:
@@ -170,12 +185,8 @@ def _query_workspace_group_aggregates(
 def _query_workspace_group_cost_rows(
     job_db: Any,
     workspace_id: str,
+    filters: _UsageFilters,
     *,
-    node_key: str | None,
-    job_id: str | None,
-    provider: str | None,
-    model: str | None,
-    skill_version: str | None,
     group_by: str,
 ) -> Sequence[Mapping[str, Any]]:
     """Aggregate token and cost inputs per (group_key, provider, model).
@@ -185,16 +196,7 @@ def _query_workspace_group_cost_rows(
     provider/model pairs, and each pair must be priced independently.
     """
     group_expr, group_columns = _group_by_sql(group_by)
-    filter_clauses, filter_params = _workspace_usage_filter_clauses(
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
-    )
-    clauses = ["workspace_id = ?", *filter_clauses]
-    params: list[Any] = [workspace_id, *filter_params]
-    where = " and ".join(clauses)
+    where, params = filters.usage_where(workspace_id)
     group_by_sql = ", ".join([*group_columns, "provider", "model"])
     with job_db.connect() as conn:
         rows = conn.execute(
@@ -219,24 +221,10 @@ def _query_workspace_group_cost_rows(
 def _query_workspace_summary_cost_rows(
     job_db: Any,
     workspace_id: str,
-    *,
-    node_key: str | None,
-    job_id: str | None,
-    provider: str | None,
-    model: str | None,
-    skill_version: str | None,
+    filters: _UsageFilters,
 ) -> Sequence[Mapping[str, Any]]:
     """Aggregate token and cost inputs per (provider, model) over the full set."""
-    filter_clauses, filter_params = _workspace_usage_filter_clauses(
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
-    )
-    clauses = ["workspace_id = ?", *filter_clauses]
-    params: list[Any] = [workspace_id, *filter_params]
-    where = " and ".join(clauses)
+    where, params = filters.usage_where(workspace_id)
     with job_db.connect() as conn:
         rows = conn.execute(
             f"""
@@ -259,49 +247,14 @@ def _query_workspace_summary_cost_rows(
 def _count_workspace_runs(
     job_db: Any,
     workspace_id: str,
-    *,
-    node_key: str | None,
-    job_id: str | None,
-    provider: str | None,
-    model: str | None,
-    skill_version: str | None,
+    filters: _UsageFilters,
 ) -> int:
     """Count runs in the matching dimension set.
 
-    When provider/model/skill_version filters are present, runs that have a
-    token usage row under a different provider/model/version are excluded from
-    the denominator. The remaining count is the union of runs that lack any
-    usage row and runs whose usage row matches the active filters.
+    See ``_UsageFilters.run_count_where`` for how provider/model/skill_version
+    filters affect the denominator.
     """
-    clauses = ["jobs.workspace_id = ?"]
-    params: list[Any] = [workspace_id]
-    if node_key:
-        clauses.append("node_runs.node_key = ?")
-        params.append(node_key)
-    if job_id:
-        clauses.append("node_runs.job_id = ?")
-        params.append(job_id)
-
-    usage_filter_clauses: list[str] = []
-    if provider is not None:
-        usage_filter_clauses.append("(u.provider != ? or u.provider is null)")
-        params.append(provider)
-    if model is not None:
-        usage_filter_clauses.append("(u.model != ? or u.model is null)")
-        params.append(model)
-    if skill_version is not None:
-        usage_filter_clauses.append("(u.skill_version != ? or u.skill_version is null)")
-        params.append(skill_version)
-
-    if usage_filter_clauses:
-        # Exclude runs whose existing usage row does not match the active
-        # filters. Runs without any usage row are still included.
-        excluded = " or ".join(usage_filter_clauses)
-        clauses.append(
-            f"not exists (select 1 from node_run_token_usage u where u.node_run_id = node_runs.id and ({excluded}))"
-        )
-
-    where = " and ".join(clauses)
+    where, params = filters.run_count_where(workspace_id)
     with job_db.connect() as conn:
         row = conn.execute(
             f"select count(*) as count from node_runs join jobs on jobs.id = node_runs.job_id where {where}",
@@ -313,41 +266,10 @@ def _count_workspace_runs(
 def _count_runs_per_node_group(
     job_db: Any,
     workspace_id: str,
-    *,
-    node_key: str | None,
-    job_id: str | None,
-    provider: str | None,
-    model: str | None,
-    skill_version: str | None,
+    filters: _UsageFilters,
 ) -> dict[str, int]:
     """Count total runs per node_key for coverage denominator."""
-    clauses = ["jobs.workspace_id = ?"]
-    params: list[Any] = [workspace_id]
-    if node_key:
-        clauses.append("node_runs.node_key = ?")
-        params.append(node_key)
-    if job_id:
-        clauses.append("node_runs.job_id = ?")
-        params.append(job_id)
-
-    usage_filter_clauses: list[str] = []
-    if provider is not None:
-        usage_filter_clauses.append("(u.provider != ? or u.provider is null)")
-        params.append(provider)
-    if model is not None:
-        usage_filter_clauses.append("(u.model != ? or u.model is null)")
-        params.append(model)
-    if skill_version is not None:
-        usage_filter_clauses.append("(u.skill_version != ? or u.skill_version is null)")
-        params.append(skill_version)
-
-    if usage_filter_clauses:
-        excluded = " or ".join(usage_filter_clauses)
-        clauses.append(
-            f"not exists (select 1 from node_run_token_usage u where u.node_run_id = node_runs.id and ({excluded}))"
-        )
-
-    where = " and ".join(clauses)
+    where, params = filters.run_count_where(workspace_id)
     with job_db.connect() as conn:
         rows = conn.execute(
             f"""
@@ -403,65 +325,32 @@ def build_workspace_usage_response(
     group_by: str = "node",
     limit: int = 100,
 ) -> dict[str, Any]:
-    aggregates = _query_workspace_usage_aggregates(
-        job_db,
-        workspace_id,
+    filters = _UsageFilters(
         node_key=node_key,
         job_id=job_id,
         provider=provider,
         model=model,
         skill_version=skill_version,
     )
+    aggregates = _query_workspace_usage_aggregates(job_db, workspace_id, filters)
     group_rows = _query_workspace_group_aggregates(
         job_db,
         workspace_id,
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
+        filters,
         group_by=group_by,
         limit=limit,
     )
     group_cost_rows = _query_workspace_group_cost_rows(
         job_db,
         workspace_id,
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
+        filters,
         group_by=group_by,
     )
-    summary_cost_rows = _query_workspace_summary_cost_rows(
-        job_db,
-        workspace_id,
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
-    )
-    total_runs = _count_workspace_runs(
-        job_db,
-        workspace_id,
-        node_key=node_key,
-        job_id=job_id,
-        provider=provider,
-        model=model,
-        skill_version=skill_version,
-    )
+    summary_cost_rows = _query_workspace_summary_cost_rows(job_db, workspace_id, filters)
+    total_runs = _count_workspace_runs(job_db, workspace_id, filters)
     node_group_totals: dict[str, int] = {}
     if group_by == "node":
-        node_group_totals = _count_runs_per_node_group(
-            job_db,
-            workspace_id,
-            node_key=node_key,
-            job_id=job_id,
-            provider=provider,
-            model=model,
-            skill_version=skill_version,
-        )
+        node_group_totals = _count_runs_per_node_group(job_db, workspace_id, filters)
 
     group_cost_by_key: dict[str, list[dict[str, Any]]] = {}
     for r in group_cost_rows:

@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-import server.app.db.connection as connection_module
+import server.app.db.pools as pools_module
 from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
@@ -74,7 +74,7 @@ def test_connection_pool_reuses_short_lived_connections(tmp_path: Path) -> None:
 def test_failed_checkout_does_not_tear_down_pools(monkeypatch: pytest.MonkeyPatch) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("select 1")
-    pool = connection_module._POOLS[(os.getpid(), TEST_DATABASE_URL)]
+    pool = pools_module._POOLS[(os.getpid(), TEST_DATABASE_URL)]
 
     def boom() -> None:
         raise RuntimeError("checkout failed")
@@ -84,7 +84,7 @@ def test_failed_checkout_does_not_tear_down_pools(monkeypatch: pytest.MonkeyPatc
         connect_database(TEST_DATABASE_URL)
     monkeypatch.undo()
 
-    assert connection_module._POOLS[(os.getpid(), TEST_DATABASE_URL)] is pool
+    assert pools_module._POOLS[(os.getpid(), TEST_DATABASE_URL)] is pool
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute("select 1 as ok").fetchone()
     assert row == {"ok": 1}
