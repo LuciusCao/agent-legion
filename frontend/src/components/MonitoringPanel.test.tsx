@@ -3,11 +3,12 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { MonitoringPanel } from './MonitoringPanel'
 
-const now = Date.now()
-
+// bucket_start 必须对齐到整分钟，否则在固定时间窗网格里匹配不上会被填零。
 function bucket(offsetMinutes: number, overrides = {}) {
+  const aligned =
+    Math.floor((Date.now() - offsetMinutes * 60_000) / 60_000) * 60_000
   return {
-    bucket_start: new Date(now - offsetMinutes * 60_000).toISOString(),
+    bucket_start: new Date(aligned).toISOString(),
     online_workers: 3,
     online_workers_max: 5,
     active_executions: 2,
@@ -24,7 +25,7 @@ const mockFetchOpsMetrics = vi.fn(
   (params: { granularity: string; hours?: number; days?: number }) =>
     Promise.resolve({
       granularity: params.granularity,
-      buckets: [bucket(30), bucket(20), bucket(10), bucket(0)],
+      buckets: [bucket(4), bucket(3), bucket(2), bucket(1)],
     })
 )
 
@@ -56,6 +57,10 @@ describe('MonitoringPanel', () => {
     )
     // 近 1 小时：4 个 bucket 各 160 total tokens
     expect(screen.getByTestId('hourly-tokens-summary')).toHaveTextContent('640')
+    // 细分：输入 400 · 输出 200 · 缓存读 40
+    expect(screen.getByText(/输入 400/)).toBeInTheDocument()
+    expect(screen.getByText(/输出 200/)).toBeInTheDocument()
+    expect(screen.getByText(/缓存读 40/)).toBeInTheDocument()
     expect(
       screen.getByRole('img', { name: '在线 Worker 与活跃执行趋势' })
     ).toBeInTheDocument()
@@ -132,7 +137,7 @@ describe('MonitoringPanel', () => {
     ).toBeInTheDocument()
   })
 
-  it('shows empty chart state when no buckets', async () => {
+  it('renders a zero-filled fixed window when no buckets', async () => {
     mockFetchOpsMetrics.mockResolvedValueOnce({
       granularity: 'minute',
       buckets: [],
@@ -140,8 +145,13 @@ describe('MonitoringPanel', () => {
 
     render(<MonitoringPanel />)
 
-    await waitFor(() => {
-      expect(screen.getAllByText('暂无数据')).toHaveLength(2)
-    })
+    // 固定时间窗下空数据渲染为零值折线，而不是“暂无数据”占位
+    expect(
+      await screen.findByTestId('hourly-tokens-summary')
+    ).toHaveTextContent('0')
+    expect(screen.queryByText('暂无数据')).not.toBeInTheDocument()
+    expect(
+      screen.getByRole('img', { name: 'Token 吞吐量趋势' })
+    ).toBeInTheDocument()
   })
 })

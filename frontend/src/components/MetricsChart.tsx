@@ -3,7 +3,7 @@ import type { MetricBucket } from '../api/metrics'
 import styles from './MetricsChart.module.css'
 
 export interface ChartSeries {
-  key: 'online_workers' | 'active_executions' | 'total_tokens'
+  key: keyof Omit<MetricBucket, 'bucket_start'>
   label: string
   color: string
 }

@@ -483,7 +483,7 @@ def test_metrics_overview_host_unreachable_returns_503(
     assert "Host" in response.json()["detail"]
 
 
-def test_metrics_overview_passes_worker_id_to_host(
+def test_metrics_overview_always_uses_local_worker_id(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     store = WorkerConfigStore(tmp_path / "state")
@@ -500,44 +500,18 @@ def test_metrics_overview_passes_worker_id_to_host(
     monkeypatch.setattr(service_module.Client, "get_ops_metrics", fake_metrics)
 
     with TestClient(app) as client:
-        headers = _auth(store)
-        sliced = client.get("/api/metrics/overview?worker_id=worker-9", headers=headers)
-        fleet = client.get("/api/metrics/overview", headers=headers)
-
-    assert sliced.status_code == 200
-    assert fleet.status_code == 200
-    assert calls == ["worker-9", None]  # 不传 worker_id 时按全局 fleet 视图转发
-
-
-def test_metrics_overview_self_resolves_local_worker_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    store = WorkerConfigStore(tmp_path / "state")
-    store.write(validate_config(_config()))
-    app = create_app(FakeSupervisor(store), tmp_path)
-    calls: list[str | None] = []
-
-    def fake_metrics(
-        self: Any, granularity: str, hours: int, days: int, worker_id: str | None = None
-    ) -> dict[str, Any]:
-        calls.append(worker_id)
-        return {"granularity": granularity, "buckets": []}
-
-    monkeypatch.setattr(service_module.Client, "get_ops_metrics", fake_metrics)
-
-    with TestClient(app) as client:
-        response = client.get("/api/metrics/overview?worker_id=self", headers=_auth(store))
+        response = client.get("/api/metrics/overview", headers=_auth(store))
 
     assert response.status_code == 200
-    assert calls == ["worker-1"]
+    assert calls == ["worker-1"]  # 监控只代理本机切片，不提供全局视图
 
 
-def test_metrics_overview_self_without_worker_id_returns_409(tmp_path: Path) -> None:
+def test_metrics_overview_without_worker_id_returns_409(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")  # 未写入配置：worker_id 为空
     app = create_app(FakeSupervisor(store), tmp_path)
 
     with TestClient(app) as client:
-        response = client.get("/api/metrics/overview?worker_id=self", headers=_auth(store))
+        response = client.get("/api/metrics/overview", headers=_auth(store))
 
     assert response.status_code == 409
     assert "Worker ID" in response.json()["detail"]

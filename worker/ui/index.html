@@ -85,19 +85,12 @@
       <section class="panel metrics-panel">
         <div class="panel-heading">
           <div><p class="eyebrow">MONITORING</p><h2>Host 监控</h2></div>
-          <div class="metrics-switches">
-            <div class="scope-switch" role="group" aria-label="数据范围">
-              <button class="chip active" data-scope="self">本机</button>
-              <button class="chip" data-scope="all">全局</button>
-            </div>
-            <div class="granularity-switch" role="group" aria-label="时间粒度">
-              <button class="chip active" data-granularity="minute">分钟 · 近 6h</button>
-              <button class="chip" data-granularity="hour">小时 · 近 24h</button>
-              <button class="chip" data-granularity="day">天 · 近 7 天</button>
-            </div>
+          <div class="granularity-switch" role="group" aria-label="时间粒度">
+            <button class="chip active" data-granularity="minute">分钟 · 近 6h</button>
+            <button class="chip" data-granularity="hour">小时 · 近 24h</button>
+            <button class="chip" data-granularity="day">天 · 近 7 天</button>
           </div>
         </div>
-        <p id="metrics-scope-note" class="muted"></p>
         <p id="metrics-error" class="error" role="alert"></p>
         <dl class="metrics-cards">
           <div><dt>在线 Worker</dt><dd id="metric-workers">—</dd></div>

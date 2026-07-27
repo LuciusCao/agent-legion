@@ -101,15 +101,10 @@ test("bucketLabel 按粒度格式化（无 Z 后缀按本地时区解析，测�
   assert.equal(bucketLabel("not-a-date", "day"), "not-a-date");
 });
 
-test("metricsParams 按粒度带时间窗，本机范围附 worker_id=self", () => {
-  assert.deepEqual(metricsParams("minute", "self"), { granularity: "minute", hours: 6, worker_id: "self" });
-  assert.deepEqual(metricsParams("hour", "self"), { granularity: "hour", hours: 24, worker_id: "self" });
-  assert.deepEqual(metricsParams("day", "self"), { granularity: "day", days: 7, worker_id: "self" });
-});
-
-test("metricsParams 全局范围不带 worker_id", () => {
-  assert.deepEqual(metricsParams("minute", "all"), { granularity: "minute", hours: 6 });
-  assert.deepEqual(metricsParams("day", "all"), { granularity: "day", days: 7 });
+test("metricsParams 按粒度带时间窗，固定本机范围 worker_id=self", () => {
+  assert.deepEqual(metricsParams("minute"), { granularity: "minute", hours: 6, worker_id: "self" });
+  assert.deepEqual(metricsParams("hour"), { granularity: "hour", hours: 24, worker_id: "self" });
+  assert.deepEqual(metricsParams("day"), { granularity: "day", days: 7, worker_id: "self" });
 });
 
 const CHART_BUCKETS = [

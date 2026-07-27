@@ -128,19 +128,17 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
         granularity: Literal["minute", "hour", "day"] = "minute",
         hours: int = Query(default=6, ge=1, le=24),
         days: int = Query(default=7, ge=1, le=30),
-        worker_id: str | None = Query(default=None, max_length=64),
     ) -> dict[str, Any]:
-        """Proxy the Host ops-metrics endpoint; the browser page cannot reach the Host."""
+        """Proxy the Host ops-metrics endpoint scoped to this Worker's own slice."""
         config = supervisor.store.read(require_identity=False)
-        if worker_id == "self":
-            worker_id = str(config.get("worker_id", ""))
-            if not worker_id:
-                raise HTTPException(status_code=409, detail="尚未配置本机 Worker ID")
+        worker_id = str(config.get("worker_id", ""))
+        if not worker_id:
+            raise HTTPException(status_code=409, detail="尚未配置本机 Worker ID")
         host_url = str(config.get("host_url", ""))
         if not host_url:
             raise HTTPException(status_code=409, detail="尚未配置 Host 地址")
         try:
-            return Client(host_url).get_ops_metrics(granularity, hours, days, worker_id or None)
+            return Client(host_url).get_ops_metrics(granularity, hours, days, worker_id)
         except Exception as exc:  # noqa: BLE001 — Host 不可达 / 非 200 统一映射为 503
             raise HTTPException(status_code=503, detail=f"Host 监控数据不可用：{exc}") from exc
 
