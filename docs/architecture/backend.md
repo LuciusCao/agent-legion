@@ -408,7 +408,7 @@ server/app/
 
 - PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow：
   - `videos` — 旧版视频队列（迁移后仅读）
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `cms_config_json`, `resource_config_json`, `default_entity`, `intake_config_json`）
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `resource_config_json`, `default_entity`, `intake_config_json`）
   - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
   - `workflow_revisions` — workflow 版本修订历史
   - `packages` — 已创建 package 路径
