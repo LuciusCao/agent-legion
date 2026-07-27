@@ -16,9 +16,11 @@ def create_metrics_router(ops_metrics: OpsMetricsService) -> APIRouter:
         granularity: Literal["minute", "hour", "day"] = "minute",
         hours: Annotated[int, Query(ge=1, le=24)] = 6,
         days: Annotated[int, Query(ge=1, le=30)] = 7,
+        worker_id: str | None = None,
     ) -> OpsMetricsResponse:
         buckets = [
-            MetricBucket(**bucket) for bucket in ops_metrics.query_series(granularity, hours, days)
+            MetricBucket(**bucket)
+            for bucket in ops_metrics.query_series(granularity, hours, days, worker_id)
         ]
         return OpsMetricsResponse(granularity=granularity, buckets=buckets)
 

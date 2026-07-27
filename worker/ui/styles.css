@@ -55,9 +55,11 @@ code { color: #62e4ad; }
 .execution-meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 12px 0 0; }
 .execution-meta div { padding-top: 10px; border-top: 1px solid #213c34; min-width: 0; }
 .metrics-panel { margin-top: 20px; }
-.granularity-switch { display: flex; gap: 8px; }
+.metrics-switches { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.scope-switch, .granularity-switch { display: flex; gap: 8px; }
 .chip { background: #183a30; color: #93aaa1; padding: 7px 12px; font-size: 12px; }
 .chip.active { background: rgba(85, 230, 166, .15); color: #55e6a6; }
+.chip:disabled { opacity: .4; cursor: not-allowed; }
 .metrics-cards { grid-template-columns: repeat(3, 1fr); margin-top: 16px; }
 .metrics-cards dd { font-size: 22px; font-weight: 700; }
 .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }

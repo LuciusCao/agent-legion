@@ -236,12 +236,25 @@ async function loadLogs() {
 }
 
 async function loadConfig() {
-  try { fillForm(await api("/api/config")); } catch (error) { errorBox.textContent = `加载配置失败：${error.message}`; }
+  try {
+    const config = await api("/api/config");
+    fillForm(config);
+    syncMetricsScope(config);
+  } catch (error) { errorBox.textContent = `加载配置失败：${error.message}`; }
 }
 
 // ---- Host 监控面板：加载与 DOM 渲染 ----
 let metricsGranularity = "minute";
+// "self" = 本机 worker 切片（服务端把 worker_id=self 解析成本机 id），"all" = 全局 fleet 视图。
+let metricsScope = "self";
 const GRANULARITY_QUERY = { minute: { hours: 6 }, hour: { hours: 24 }, day: { days: 7 } };
+
+// 纯函数：组装 /api/metrics/overview 的查询参数（scope=self 时带 worker_id=self）。
+export function metricsParams(granularity, scope) {
+  const params = { granularity, ...GRANULARITY_QUERY[granularity] };
+  if (scope === "self") params.worker_id = "self";
+  return params;
+}
 
 function renderMetrics(payload) {
   const buckets = payload.buckets ?? [];
@@ -269,13 +282,26 @@ function renderMetrics(payload) {
 async function loadMetrics() {
   const metricsError = document.querySelector("#metrics-error");
   try {
-    const params = new URLSearchParams({ granularity: metricsGranularity, ...GRANULARITY_QUERY[metricsGranularity] });
+    const params = new URLSearchParams(metricsParams(metricsGranularity, metricsScope));
     const payload = await api(`/api/metrics/overview?${params}`);
     metricsError.textContent = "";
     renderMetrics(payload);
   } catch (error) {
     metricsError.textContent = `监控数据不可用：${error.message}`;
   }
+}
+
+function setMetricsScope(scope) {
+  metricsScope = scope;
+  document.querySelectorAll(".scope-switch .chip").forEach((chip) => chip.classList.toggle("active", chip.dataset.scope === scope));
+}
+
+// 本机视图依赖本地配置里的 worker_id；未配置时禁用"本机"chip 并回退全局视图。
+function syncMetricsScope(config) {
+  const hasWorkerId = Boolean(config?.worker_id);
+  document.querySelector('[data-scope="self"]').disabled = !hasWorkerId;
+  if (!hasWorkerId && metricsScope === "self") setMetricsScope("all");
+  setText("metrics-scope-note", hasWorkerId ? "" : "未配置本机 Worker ID，仅显示全局视图");
 }
 
 if (hasDom) {
@@ -299,8 +325,10 @@ if (hasDom) {
       renderStatus(result.status);
       form.elements.register_token.value = "";
       fillForm(result.config);
+      syncMetricsScope(result.config);
       setText("save-state", result.restarted ? "已保存并重启生效" : "已热更新");
       await loadLogs();
+      loadMetrics();
     } catch (error) { errorBox.textContent = error.message; setText("save-state", "保存失败"); }
   });
 
@@ -325,12 +353,21 @@ if (hasDom) {
     });
   });
 
+  document.querySelectorAll(".scope-switch .chip").forEach((button) => {
+    button.addEventListener("click", () => {
+      setMetricsScope(button.dataset.scope);
+      loadMetrics();
+    });
+  });
+
   if (TOKEN_MISSING) {
     setText("status-title", "控制令牌未注入");
     setText("status-detail", "请通过 Worker Service（默认 http://127.0.0.1:8787/）访问本页面，静态打开 index.html 无法鉴权");
     errorBox.textContent = "控制令牌未注入，页面不可用";
   } else {
-    Promise.all([loadConfig(), loadStatus(), loadLogs(), loadMetrics()]);
+    // 监控首次加载排在配置之后：syncMetricsScope 先确定本机/全局范围，避免未配置 worker_id 时多余的 409。
+    loadConfig().finally(loadMetrics);
+    Promise.all([loadStatus(), loadLogs()]);
     setInterval(loadStatus, 5000);
     setInterval(loadMetrics, 30000);
   }

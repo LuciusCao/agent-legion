@@ -47,6 +47,28 @@ def test_metrics_overview_rejects_invalid_granularity(client) -> None:
     assert response.status_code == 422
 
 
+def test_metrics_overview_passes_worker_id_filter(client) -> None:
+    # Same background-sampler guard as above: insert an old bucket, and the
+    # sampler's own global rows are excluded by the worker_id filter anyway.
+    bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            """
+            insert into ops_metric_samples(
+              bucket_start, worker_id, online_workers, active_executions,
+              input_tokens, output_tokens, cache_read_tokens, total_tokens
+            ) values (?, 'w-1', 1, 1, 10, 5, 1, 16)
+            """,
+            (bucket,),
+        )
+    response = client.get("/api/metrics/overview?granularity=minute&hours=1&worker_id=w-1")
+    assert response.status_code == 200
+    rows = [r for r in response.json()["buckets"] if r["bucket_start"] == bucket.isoformat()]
+    assert len(rows) == 1
+    assert rows[0]["online_workers"] == 1
+    assert rows[0]["total_tokens"] == 16
+
+
 def test_metrics_overview_validates_window_bounds(client) -> None:
     assert client.get("/api/metrics/overview?hours=0").status_code == 422
     assert client.get("/api/metrics/overview?hours=25").status_code == 422

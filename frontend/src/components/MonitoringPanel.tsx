@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ToggleButton, ToggleButtonGroup } from '@mui/material'
+import {
+  FormControl,
+  MenuItem,
+  Select,
+  ToggleButton,
+  ToggleButtonGroup,
+} from '@mui/material'
 import { fetchOpsMetrics } from '../api/metrics'
 import type {
   MetricBucket,
   OpsGranularity,
   OpsMetricsResponse,
 } from '../api/metrics'
+import { listAgentWorkers } from '../api/workerTokens'
+import type { AgentWorkerSummary } from '../api/workerTokens'
 import { MetricsChart } from './MetricsChart'
 import styles from './MonitoringPanel.module.css'
 
@@ -55,9 +63,25 @@ function sumRecentHourTokens(data: OpsMetricsResponse | null): number | null {
 
 export function MonitoringPanel() {
   const [granularity, setGranularity] = useState<OpsGranularity>('minute')
+  const [workerId, setWorkerId] = useState('')
+  const [workers, setWorkers] = useState<AgentWorkerSummary[]>([])
   const [data, setData] = useState<OpsMetricsResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let stale = false
+    listAgentWorkers()
+      .then((list) => {
+        if (!stale) setWorkers(list)
+      })
+      .catch(() => {
+        // Worker 列表拉取失败不阻塞监控数据，仅不提供过滤选项。
+      })
+    return () => {
+      stale = true
+    }
+  }, [])
 
   useEffect(() => {
     let stale = false
@@ -65,7 +89,11 @@ export function MonitoringPanel() {
     setLoading(true)
     setError(null)
     const load = () => {
-      fetchOpsMetrics({ granularity, ...WINDOWS[granularity] })
+      fetchOpsMetrics({
+        granularity,
+        ...WINDOWS[granularity],
+        ...(workerId ? { worker_id: workerId } : {}),
+      })
         .then((next) => {
           if (!stale) setData(next)
         })
@@ -82,7 +110,7 @@ export function MonitoringPanel() {
       stale = true
       clearInterval(timer)
     }
-  }, [granularity])
+  }, [granularity, workerId])
 
   const formatTime = useMemo(
     () => makeTimeFormatter(granularity),
@@ -102,19 +130,37 @@ export function MonitoringPanel() {
           <h2>运维监控</h2>
           <p>在线 Worker、执行并发与 token 吞吐趋势，每 30 秒自动刷新。</p>
         </div>
-        <ToggleButtonGroup
-          size="small"
-          exclusive
-          value={granularity}
-          onChange={(_e, value: OpsGranularity | null) => {
-            if (value) setGranularity(value)
-          }}
-          aria-label="时间粒度"
-        >
-          <ToggleButton value="minute">分钟 · 近 6 小时</ToggleButton>
-          <ToggleButton value="hour">小时 · 近 24 小时</ToggleButton>
-          <ToggleButton value="day">天 · 近 7 天</ToggleButton>
-        </ToggleButtonGroup>
+        <div className={styles.controls}>
+          <FormControl size="small">
+            <Select
+              value={workerId}
+              onChange={(e) => setWorkerId(e.target.value)}
+              displayEmpty
+              inputProps={{ 'aria-label': '选择 Worker' }}
+            >
+              <MenuItem value="">全部 Worker</MenuItem>
+              {workers.map((w) => (
+                <MenuItem key={w.worker_id} value={w.worker_id}>
+                  {w.name || w.worker_id}
+                  {w.online ? '（在线）' : '（离线）'}
+                </MenuItem>
+              ))}
+            </Select>
+          </FormControl>
+          <ToggleButtonGroup
+            size="small"
+            exclusive
+            value={granularity}
+            onChange={(_e, value: OpsGranularity | null) => {
+              if (value) setGranularity(value)
+            }}
+            aria-label="时间粒度"
+          >
+            <ToggleButton value="minute">分钟 · 近 6 小时</ToggleButton>
+            <ToggleButton value="hour">小时 · 近 24 小时</ToggleButton>
+            <ToggleButton value="day">天 · 近 7 天</ToggleButton>
+          </ToggleButtonGroup>
+        </div>
       </header>
 
       <div className={styles.summaryGrid}>

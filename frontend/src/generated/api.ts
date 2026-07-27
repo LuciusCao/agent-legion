@@ -3976,6 +3976,7 @@ export interface operations {
         granularity?: 'minute' | 'hour' | 'day'
         hours?: number
         days?: number
+        worker_id?: string | null
       }
       header?: never
       path?: never
