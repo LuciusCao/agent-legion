@@ -1,12 +1,8 @@
 import { upgradeJobWorkflow } from '../../../api/jobWorkflowUpgradeApi'
 import type { JobMutationResult } from '../../../types/jobTypes'
 import { useUiStore } from '../../uiStore'
-import {
-  countMutationResults,
-  makeMutationToast,
-  type JobState,
-  type JobStoreSet,
-} from '../state'
+import { applyMutationResults } from './mutationResults'
+import type { JobState, JobStoreSet } from '../state'
 
 export function upgradeActions(set: JobStoreSet, get: () => JobState) {
   return {
@@ -28,26 +24,7 @@ export function upgradeActions(set: JobStoreSet, get: () => JobState) {
             })
           }
         }
-        const succeededIds = new Set(
-          results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
-        )
-        set((state) => {
-          const nextSelected = new Set(state.selectedIds)
-          for (const id of succeededIds) {
-            nextSelected.delete(id)
-          }
-          return {
-            selectedIds: nextSelected,
-            selectMode: nextSelected.size === 0 ? false : state.selectMode,
-          }
-        })
-        const counts = countMutationResults(results)
-        useUiStore
-          .getState()
-          .showToast(
-            makeMutationToast('升级 workflow', counts),
-            counts.failed > 0 ? 'error' : 'success'
-          )
+        applyMutationResults(set, results, '升级 workflow')
         await get().fetchJobs(workspaceId)
         return { results }
       } catch (err) {

@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import os
 from collections.abc import Iterable, Mapping, Sequence
-from threading import Lock
 from typing import Any
 
 from psycopg import Connection
@@ -11,10 +9,8 @@ from psycopg_pool import ConnectionPool
 
 from server.app.db.cursor import Cursor
 from server.app.db.dialect import DatabaseDsn, postgres_sql
-from server.app.db.rows import configure_connection, string_dict_row
-
-_POOLS: dict[tuple[int, str], ConnectionPool[Connection[dict[str, Any]]]] = {}
-_POOLS_LOCK = Lock()
+from server.app.db.pools import close_database_pools as close_database_pools
+from server.app.db.pools import pool_for
 
 
 class DatabaseConnection:
@@ -65,37 +61,11 @@ class DatabaseConnection:
             self.rollback()
 
 
-def _pool_for(dsn: DatabaseDsn) -> ConnectionPool[Connection[dict[str, Any]]]:
-    key = (os.getpid(), dsn)
-    with _POOLS_LOCK:
-        pool = _POOLS.get(key)
-        if pool is None:
-            pool = ConnectionPool[Connection[dict[str, Any]]](
-                conninfo=dsn,
-                min_size=1,
-                max_size=32,
-                timeout=10,
-                open=True,
-                kwargs={"row_factory": string_dict_row},
-                configure=configure_connection,
-            )
-            _POOLS[key] = pool
-        return pool
-
-
 def connect_database(dsn: DatabaseDsn) -> DatabaseConnection:
     if not dsn.startswith(("postgresql://", "postgres://")):
         raise ValueError("VIDEO_HIVE_DATABASE_URL must be a PostgreSQL URL")
-    pool = _pool_for(dsn)
+    pool = pool_for(dsn)
     # A failed checkout (pool timeout or unreachable server) must not tear down
     # any pool: ConnectionPool recovers on its own, and other threads may still
     # hold healthy connections checked out from it.
     return DatabaseConnection(pool.getconn(), pool, dsn)
-
-
-def close_database_pools() -> None:
-    with _POOLS_LOCK:
-        pools = list(_POOLS.values())
-        _POOLS.clear()
-    for pool in pools:
-        pool.close()

@@ -18,11 +18,12 @@ exemptions:
   remove_when: issues/open/032-P2-event-driven-worker.md
 - check: architecture.file_budget
   path: server/app/main.py
-  reason: Task 9 of the phase1 event-bus plan converges the six route service
-    constructions from routes/__init__.py into create_app; extracting an
-    AppContainer composition module will bring main.py back under budget.
-    Agent Worker composition now wires the PostgreSQL broker, catalog sync,
-    artifact store, completion handler, and Host scheduler in one lifecycle.
+  reason: Task 9 of the phase1 event-bus plan (complete) converged the six route
+    service constructions from routes/__init__.py into create_app; the remaining
+    path under budget is extracting an AppContainer composition module. Agent
+    Worker composition wires the PostgreSQL broker, catalog sync, artifact
+    store, completion handler, and Host scheduler in one lifecycle. The ceiling
+    holds actual + buffer until that extraction lands.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
   ceiling: 246
@@ -39,15 +40,17 @@ exemptions:
   ceiling: 83
 - check: architecture.file_budget
   path: server/app/agents.py
-  reason: Task 9 of the phase1 event-bus plan routes agent WS broadcasts through
-    the EventBus (subscribe/forward in connect, bus publish in _broadcast, public
-    broadcast_controller); the WS forwarding block will be extracted into its own
-    module once the event-bus migration completes. Task 9 of the phase4
-    agent-collaboration plan envelopes WS messages (snapshot/agent_busy/
-    agent_idle) and buffers per-agent incremental events between flushes.
+  reason: Task 9 of the phase1 event-bus plan (complete) routes agent WS broadcasts
+    through the EventBus (subscribe/forward in connect, bus publish in _broadcast,
+    public broadcast_controller); the WS forwarding block will be extracted into
+    its own module. Task 9 of the phase4 agent-collaboration plan envelopes WS
+    messages (snapshot/agent_busy/agent_idle) and buffers per-agent incremental
+    events between flushes. The dormant workspace assignment functions were
+    removed per issues/closed/050-P3-agents-py-assignment-functions-deferral.md
+    and the ceiling was tightened to actual + buffer.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 325
+  ceiling: 302
 - check: architecture.file_budget
   path: server/app/jobs/queries/workflow_revisions.py
   reason: Task 1 of the workflow-studio-ux-refinement plan adds the get_workflow_revision
@@ -82,15 +85,6 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
   ceiling: 112
 - check: architecture.file_budget
-  path: server/app/workflows/loader.py
-  reason: Task 6 of the phase4 agent-collaboration plan adds the _load_shard /
-    _load_reduce node-declaration validators and their wiring in _load_nodes;
-    the loaders stay next to the existing node loaders and the budget will be
-    re-ratcheted if the module shrinks.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
-  ceiling: 320
-- check: architecture.file_budget
   path: server/app/routes/job_view_contracts.py
   reason: Task 9 of the phase4 agent-collaboration plan adds the JobNodeResponse
     worker_id field; Agent Legion adds the separate logical agent_id field. The contract module
@@ -98,14 +92,6 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-9
   ceiling: 114
-- check: architecture.file_budget
-  path: server/app/db/connection.py
-  reason: The PostgreSQL-only migration introduces the typed DB-API facade,
-    process-safe bounded pool registry, and parameter-marker normalization in
-    one connection boundary. Split the pool registry after the migration lands.
-  owner: database
-  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 102
 - check: architecture.file_budget
   path: server/app/executors/_lease_claims.py
   reason: Cross-replica capacity enforcement adds a transaction-scoped advisory

@@ -56,7 +56,6 @@ class AgentStatusManager:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._busy_video_ids: set[str] = set()
         self._agent_video_ids: dict[tuple[str, str], list[str]] = {}
-        self._workspace_assignments: dict[str, dict[str, int]] = {}
         # Incremental WS events buffered between broadcast flushes, keyed by
         # (agent_id, workspace_id) so the latest state per agent wins.
         self._pending_events: dict[tuple[str, str], dict[str, Any]] = {}
@@ -84,28 +83,6 @@ class AgentStatusManager:
         with self._lock:
             self.agents = agents
         return list(agents)
-
-    def set_workspace_assignment(
-        self, workspace_id: str, agent_id: str, concurrency_limit: int = 1
-    ) -> None:
-        with self._lock:
-            self._workspace_assignments.setdefault(workspace_id, {})[agent_id] = concurrency_limit
-
-    def remove_workspace_assignment(self, workspace_id: str, agent_id: str) -> None:
-        with self._lock:
-            self._workspace_assignments.get(workspace_id, {}).pop(agent_id, None)
-
-    def get_allowed_agents(self, workspace_id: str) -> list[str] | None:
-        with self._lock:
-            if workspace_id not in self._workspace_assignments:
-                return None if workspace_id == "video-hive" else []
-            return list(self._workspace_assignments[workspace_id].keys())
-
-    def is_agent_allowed(self, workspace_id: str, agent_id: str) -> bool:
-        with self._lock:
-            if workspace_id not in self._workspace_assignments:
-                return workspace_id == "video-hive"
-            return agent_id in self._workspace_assignments[workspace_id]
 
     def get_all(self) -> list[AgentStatus]:
         with self._lock:
