@@ -188,7 +188,11 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     settings = load_settings()
     assert settings.data_dir == tmp_path / "runtime"
-    assert settings.config["cms"]["question_url"].startswith("https://cms.example/v2")
+    assert settings.config["cms"]["knowledge_url"].startswith("https://cms.example/v2")
+    # Question resource URLs resolve via resource_providers, not derivation.
+    assert "question_url" not in settings.config["cms"]
+    assert "question_detail_url" not in settings.config["cms"]
+    assert "question_list_url" not in settings.config["cms"]
 
 
 def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):

@@ -37,21 +37,7 @@ export function IntakeConfigSection({
     const nextModes = isEnabled
       ? settings.intakeModes.filter((k) => k !== key)
       : [...settings.intakeModes, key]
-
-    const mode = workflowDefinition?.intake?.modes.find((m) => m.key === key)
-    if (mode?.resource) {
-      const binding = settings.resources[mode.resource] || {
-        enabled: true,
-        config: {},
-      }
-      const nextResources = {
-        ...settings.resources,
-        [mode.resource]: { ...binding, enabled: !isEnabled },
-      }
-      setSettings({ intakeModes: nextModes, resources: nextResources })
-    } else {
-      setSettings({ intakeModes: nextModes })
-    }
+    setSettings({ intakeModes: nextModes })
   }
 
   const handleResourceConfigChange = (

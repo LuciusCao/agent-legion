@@ -20,13 +20,11 @@ def test_get_workflow_definition_when_enabled(tmp_path):
             "key": "batch_by_knowledge",
             "label": "按知识点批量",
             "input_field": "knowledge_codes",
-            "resource": "",
         },
         {
             "key": "batch_by_ids",
             "label": "按题目ID批量",
             "input_field": "question_ids",
-            "resource": "",
         },
     ]
     node_keys = [node["key"] for node in body["workflow"]["nodes"]]

@@ -166,18 +166,14 @@ def _load_intake(raw: dict[str, Any]) -> WorkflowIntake:
             raise WorkflowDefinitionError(f"Intake mode {mode_key} must be a mapping")
         label = raw_mode.get("label", mode_key)
         input_field = raw_mode.get("input_field", mode_key)
-        resource = raw_mode.get("resource", "")
         if not isinstance(label, str) or not label:
             raise WorkflowDefinitionError(f"Intake mode {mode_key}.label must be a string")
         if not isinstance(input_field, str) or not input_field:
             raise WorkflowDefinitionError(f"Intake mode {mode_key}.input_field must be a string")
-        if not isinstance(resource, str):
-            raise WorkflowDefinitionError(f"Intake mode {mode_key}.resource must be a string")
         modes[mode_key] = WorkflowIntakeMode(
             key=mode_key,
             label=label,
             input_field=input_field,
-            resource=resource,
         )
     return WorkflowIntake(modes=modes)
 

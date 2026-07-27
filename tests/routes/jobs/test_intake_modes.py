@@ -241,10 +241,10 @@ def test_workflow_response_no_task_entity(tmp_path):
     for mode in body["workflow"]["intake"]["modes"]:
         assert "task_entity" not in mode
         assert "resolver" not in mode
+        assert "resource" not in mode
         assert "key" in mode
         assert "label" in mode
         assert "input_field" in mode
-        assert "resource" in mode
 
 
 def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):

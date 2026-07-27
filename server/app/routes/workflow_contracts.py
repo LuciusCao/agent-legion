@@ -14,7 +14,6 @@ class WorkflowIntakeModeResponse(BaseModel):
     key: str
     label: str
     input_field: str
-    resource: str
 
 
 class WorkflowIntakeResponse(BaseModel):

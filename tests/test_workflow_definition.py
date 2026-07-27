@@ -42,11 +42,9 @@ def test_load_question_comprehension_info_definition():
     batch_by_ids = definition.intake.modes["batch_by_ids"]
     assert batch_by_ids.label == "按题目ID批量"
     assert batch_by_ids.input_field == "question_ids"
-    assert batch_by_ids.resource == ""
     batch_by_knowledge = definition.intake.modes["batch_by_knowledge"]
     assert batch_by_knowledge.label == "按知识点批量"
     assert batch_by_knowledge.input_field == "knowledge_codes"
-    assert batch_by_knowledge.resource == ""
     assert definition.nodes["fetch_questions"].label == "获取题目"
     assert definition.nodes["clean_and_parse"].label == "清洗与解析"
     assert definition.nodes["clean_and_parse"].after == ["fetch_questions"]

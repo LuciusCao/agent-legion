@@ -2,9 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import NotFoundError
 from server.app.services.job_intake_workspace import (
-    check_resource_enabled,
     effective_cms_config,
     enabled_intake_modes,
     get_workspace,
@@ -41,21 +40,6 @@ def test_get_workspace_raises_not_found():
 )
 def test_singular_field_name(value, expected):
     assert singular_field_name(value) == expected
-
-
-def test_check_resource_enabled_passes_without_config():
-    check_resource_enabled({}, "cms")
-
-
-def test_check_resource_enabled_raises_when_disabled():
-    workspace = {"resource_config": {"resources": {"cms": {"enabled": False}}}}
-    with pytest.raises(InvalidOperationError, match="disabled"):
-        check_resource_enabled(workspace, "cms")
-
-
-def test_check_resource_enabled_passes_when_explicitly_enabled():
-    workspace = {"resource_config": {"resources": {"cms": {"enabled": True}}}}
-    check_resource_enabled(workspace, "cms")
 
 
 def test_effective_cms_config_merges_workspace_overrides():

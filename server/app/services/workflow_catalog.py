@@ -74,7 +74,6 @@ class WorkflowCatalogService:
                         "key": mode.key,
                         "label": mode.label,
                         "input_field": mode.input_field,
-                        "resource": mode.resource,
                     }
                     for mode in definition.intake.modes.values()
                 ]

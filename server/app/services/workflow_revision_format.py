@@ -40,7 +40,6 @@ def workflow_definition_to_response_payload(definition: WorkflowDefinition) -> d
                     "key": mode.key,
                     "label": mode.label,
                     "input_field": mode.input_field,
-                    "resource": mode.resource,
                 }
                 for mode in definition.intake.modes.values()
             ]
@@ -90,7 +89,6 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
                 key: {
                     "label": mode.label,
                     "input_field": mode.input_field,
-                    **({"resource": mode.resource} if mode.resource else {}),
                 }
                 for key, mode in definition.intake.modes.items()
             }
