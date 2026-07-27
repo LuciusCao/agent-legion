@@ -14,6 +14,7 @@ import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { DangerZone } from '../components/settings/DangerZone'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
+import { NodeConfigSection } from '../components/settings/NodeConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import styles from './SettingsPage.module.css'
@@ -71,10 +72,13 @@ export function SettingsPage() {
 
   const hasLocalNodes = localBoundNodeKeys.size > 0
 
+  const hasNodeConfig = Object.keys(settings.nodeConfigSchemas ?? {}).length > 0
+
   const navItems = useMemo(
     () => [
       { id: 'basic-info', label: '基础信息' },
       { id: 'intake-config', label: '接入与资源' },
+      ...(hasNodeConfig ? [{ id: 'node-config', label: '节点配置' }] : []),
       { id: 'workflow', label: '工作流' },
       { id: 'executor-allocation', label: '执行器分配' },
       { id: 'executor-binding', label: '节点绑定' },
@@ -84,7 +88,7 @@ export function SettingsPage() {
         ? [{ id: 'local-node-concurrency', label: '本地节点并发' }]
         : []),
     ],
-    [hasLocalNodes, isAdmin]
+    [hasLocalNodes, hasNodeConfig, isAdmin]
   )
 
   const [activeSection, setActiveSection] = useState('basic-info')
@@ -181,6 +185,12 @@ export function SettingsPage() {
             isSaving={isSaving}
             setSettings={setSettings}
             onTestConnection={testConnection}
+          />
+
+          <NodeConfigSection
+            workspaceId={workspaceId}
+            settings={settings}
+            workflowDefinition={workflowDefinition}
           />
 
           <WorkflowSection

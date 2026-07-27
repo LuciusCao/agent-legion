@@ -91,7 +91,39 @@ export type WorkflowDraftValidationResponse =
 export type ResourceProvidersResponse = ApiSchemas['ResourceProvidersResponse']
 export type WorkerStatusResponse = ApiSchemas['WorkerStatusResponse']
 
-export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload']
+/**
+ * JSON-Schema subset the backend uses to declare configurable node/resource
+ * parameters. The generated OpenAPI types expose these blobs as
+ * `{[key: string]: unknown}` (e.g. ResourceProviderDefinition.config_schema);
+ * these types are the client-side interpretation of that contract.
+ */
+export type ConfigSchemaProperty = {
+  type: 'string' | 'integer' | 'number' | 'boolean'
+  default?: string | number | boolean
+  enum?: (string | number)[]
+  minimum?: number
+  maximum?: number
+  description?: string
+  secret?: boolean
+  secret_ref?: boolean
+}
+
+export type ConfigSchema = {
+  type?: 'object'
+  properties?: Record<string, ConfigSchemaProperty>
+  required?: string[]
+}
+
+export type ResourceSchemaEntry = {
+  provider: string
+  schema: ConfigSchema
+}
+
+export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload'] & {
+  nodeConfig?: Record<string, Record<string, unknown>>
+  nodeConfigSchemas?: Record<string, ConfigSchema>
+  resourceSchemas?: Record<string, ResourceSchemaEntry>
+}
 
 export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
 export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']
