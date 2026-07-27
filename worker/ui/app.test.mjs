@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, buildLineChart, executionLabel, formatElapsed, formatTokens, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, buildLineChart, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -105,6 +105,36 @@ test("metricsParams 按粒度带时间窗，固定本机范围 worker_id=self", 
   assert.deepEqual(metricsParams("minute"), { granularity: "minute", hours: 6, worker_id: "self" });
   assert.deepEqual(metricsParams("hour"), { granularity: "hour", hours: 24, worker_id: "self" });
   assert.deepEqual(metricsParams("day"), { granularity: "day", days: 7, worker_id: "self" });
+});
+
+test("fillWindowBuckets 分钟粒度补齐 360 桶，结束于上一个已完成分钟", () => {
+  const now = Date.parse("2026-07-27T10:23:45Z");
+  const filled = fillWindowBuckets([], "minute", now);
+  assert.equal(filled.length, 360);
+  assert.equal(filled[359].bucket_start, "2026-07-27T10:22:00.000Z");
+  assert.equal(filled[0].bucket_start, "2026-07-27T04:23:00.000Z");
+  assert.equal(filled[0].total_tokens, 0);
+  assert.equal(filled[0].active_executions, 0);
+});
+
+test("fillWindowBuckets 小时/天粒度结束于当前未完成时段", () => {
+  const now = Date.parse("2026-07-27T10:23:45Z");
+  const hours = fillWindowBuckets([], "hour", now);
+  assert.equal(hours.length, 24);
+  assert.equal(hours[23].bucket_start, "2026-07-27T10:00:00.000Z");
+  const days = fillWindowBuckets([], "day", now);
+  assert.equal(days.length, 7);
+  assert.equal(days[6].bucket_start, "2026-07-27T00:00:00.000Z");
+});
+
+test("fillWindowBuckets 保留已有桶、稀疏数据不改变窗口范围", () => {
+  const now = Date.parse("2026-07-27T10:23:45Z");
+  const sparse = [{ bucket_start: "2026-07-27T08:00:00+00:00", total_tokens: 50, active_executions: 1 }];
+  const filled = fillWindowBuckets(sparse, "minute", now);
+  assert.equal(filled.length, 360);
+  const hits = filled.filter((b) => b.total_tokens === 50);
+  assert.equal(hits.length, 1);
+  assert.equal(hits[0].bucket_start, "2026-07-27T08:00:00+00:00");
 });
 
 const CHART_BUCKETS = [

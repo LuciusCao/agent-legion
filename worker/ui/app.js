@@ -181,6 +181,31 @@ export function bucketLabel(bucketStart, granularity) {
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
+const WINDOW_STEP_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
+const WINDOW_BUCKET_COUNT = { minute: 360, hour: 24, day: 7 };
+
+// 把稀疏 bucket 补齐成固定长度时间网格（UTC 对齐，与 Host date_trunc 汇总一致），
+// 缺失的桶填零：横轴窗口固定，不随本机实际有数据的时间段变化。
+export function fillWindowBuckets(buckets, granularity, now = Date.now()) {
+  const step = WINDOW_STEP_MS[granularity];
+  const aligned = Math.floor(now / step) * step;
+  const end = granularity === "minute" ? aligned - step : aligned;
+  const start = end - (WINDOW_BUCKET_COUNT[granularity] - 1) * step;
+  const byStart = new Map((buckets ?? []).map((bucket) => [Date.parse(bucket.bucket_start), bucket]));
+  const zero = (t) => ({
+    bucket_start: new Date(t).toISOString(),
+    online_workers: 0,
+    active_executions: 0,
+    input_tokens: 0,
+    output_tokens: 0,
+    cache_read_tokens: 0,
+    total_tokens: 0,
+  });
+  const filled = [];
+  for (let t = start; t <= end; t += step) filled.push(byStart.get(t) ?? zero(t));
+  return filled;
+}
+
 const escapeXml = (text) => String(text).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
 
 // 手绘 SVG 折线/面积图（viewBox 自适应宽度）；hover 数值用 <title> 原生提示，无 JS 事件。
@@ -252,17 +277,13 @@ export function metricsParams(granularity) {
 }
 
 function renderMetrics(payload) {
-  const buckets = payload.buckets ?? [];
   const granularity = payload.granularity ?? metricsGranularity;
-  setText("metric-workers", latestMetric(payload, "online_workers"));
-  setText("metric-executions", latestMetric(payload, "active_executions"));
+  const buckets = fillWindowBuckets(payload.buckets ?? [], granularity);
+  setText("metric-executions", latestMetric({ buckets }, "active_executions"));
   setText("metric-tokens", formatTokens(tokensLastHour(buckets)));
   const points = (key) => buckets.map((bucket) => ({ label: bucketLabel(bucket.bucket_start, granularity), value: bucket[key] }));
   const fleet = buildLineChart(
-    [
-      { name: "在线 Worker", color: "#55e6a6", points: points("online_workers") },
-      { name: "活跃执行", color: "#f0a83c", points: points("active_executions") },
-    ],
+    [{ name: "活跃执行", color: "#f0a83c", points: points("active_executions"), area: true }],
     { formatValue: (v) => String(Math.round(v)) },
   );
   const tokens = buildLineChart(
