@@ -239,6 +239,7 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         last_seen_at is not None
         and datetime.now(UTC) - last_seen_at <= timedelta(seconds=_ONLINE_THRESHOLD_SECONDS)
     )
+    registered_at = row["registered_at"]
     return {
         "worker_id": row["worker_id"],
         "name": row["name"],
@@ -249,8 +250,12 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "labels": json.loads(row["labels_json"]),
         "protocol_version": int(row["protocol_version"]),
         "allowed_workspaces": json.loads(row["allowed_workspaces_json"] or "[]"),
-        "registered_at": row["registered_at"],
-        "last_seen_at": row["last_seen_at"],
+        "registered_at": (
+            registered_at.isoformat() if isinstance(registered_at, datetime) else str(registered_at)
+        ),
+        "last_seen_at": (
+            last_seen_at.isoformat() if isinstance(last_seen_at, datetime) else str(last_seen_at)
+        ),
         "online": online,
         "revoked": row["revoked_at"] is not None,
     }

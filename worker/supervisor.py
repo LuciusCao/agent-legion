@@ -3,21 +3,18 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import os
 import subprocess
 import sys
 import threading
 import time
-import urllib.error
-import urllib.request
 from collections import deque
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
-from worker.status import ENV_VAR, STATUS_FILENAME, read_current_executions
+from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
@@ -197,7 +194,20 @@ class WorkerSupervisor:
                 "next_restart_delay": self._next_restart_delay,
                 "failed": self._failed_reason,
             }
-        remote = _query_remote_status(config) if configured else {}
+        runtime = read_runtime_status(self.store.state_dir / STATUS_FILENAME)
+        remote = runtime["remote"] if configured else {}
+        if configured and not remote:
+            remote = {
+                "host_reachable": False,
+                "registered": False,
+                "connected": False,
+                "host_worker": None,
+                "connection_error": (
+                    "等待 Worker 使用签发 token 同步 Host 状态"
+                    if snapshot["worker_running"]
+                    else "Worker 执行进程未运行"
+                ),
+            }
         return {
             "service": "running",
             "configured": configured,
@@ -206,36 +216,6 @@ class WorkerSupervisor:
             "bootstrap_error": self.store.bootstrap_error,
             "mounted_config_diverged": self._mounted_config_diverged(),
             **snapshot,
-            "current_executions": read_current_executions(self.store.state_dir / STATUS_FILENAME),
+            "current_executions": runtime["executions"],
             **remote,
-        }
-
-
-def _query_remote_status(config: dict[str, Any]) -> dict[str, Any]:
-    host_url = str(config.get("host_url", ""))
-    worker_id = str(config.get("worker_id", ""))
-    if not host_url or not worker_id:
-        return {"host_reachable": False, "registered": False, "connected": False}
-    try:
-        with urllib.request.urlopen(f"{host_url}/api/agent-workers", timeout=2) as response:
-            payload = json.loads(response.read())
-        worker = next(
-            (item for item in payload.get("workers", []) if item.get("worker_id") == worker_id),
-            None,
-        )
-        return {
-            "host_reachable": True,
-            "registered": worker is not None,
-            # connected 实为"已登记且未被吊销"，不代表实时在线。
-            "connected": worker is not None and not worker.get("revoked", False),
-            "host_worker": worker,
-            "connection_error": None,
-        }
-    except (OSError, ValueError, urllib.error.URLError) as exc:
-        return {
-            "host_reachable": False,
-            "registered": False,
-            "connected": False,
-            "host_worker": None,
-            "connection_error": str(exc),
         }

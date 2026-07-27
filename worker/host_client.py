@@ -90,6 +90,15 @@ class Client:
         if status != 200:
             raise RuntimeError(f"Agent Worker revoke failed: HTTP {status}: {body[:300]!r}")
 
+    def get_self(self) -> dict[str, Any]:
+        """Return this Worker's Host-side record using its per-worker token."""
+        status, body = self.request("GET", "/api/agent-workers/self")
+        if status in (401, 409):
+            raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
+        if status != 200:
+            raise RuntimeError(f"Agent Worker status failed: HTTP {status}: {body[:300]!r}")
+        return dict(json.loads(body))
+
     def claim(self, worker_id: str, max_concurrency: int | None = None) -> dict[str, Any] | None:
         payload: dict[str, Any] = {"worker_id": worker_id}
         if max_concurrency is not None:
