@@ -12,11 +12,13 @@ export function makeWorkspace(
     cms_config_json: '{}',
     resource_config_json: '{}',
     intake_config_json: '{}',
+    node_config_json: '{}',
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
     cms_config: {},
     resource_config: {},
     intake_config: {},
+    node_config: {},
     ...overrides,
   }
 }

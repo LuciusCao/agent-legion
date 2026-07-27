@@ -199,7 +199,7 @@ describe('IntakeConfigSection', () => {
     )
   })
 
-  it('hides resource provider cards when no active resource', () => {
+  it('renders resource provider cards even when no intake mode is selected (issue 024)', () => {
     render(
       <IntakeConfigSection
         settings={{ ...baseSettings, intakeModes: [] }}
@@ -222,7 +222,8 @@ describe('IntakeConfigSection', () => {
       />
     )
 
-    expect(screen.queryByText('CMS')).not.toBeInTheDocument()
+    expect(screen.getByText('CMS')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'url' })).toBeInTheDocument()
   })
 
   it('updates resource config when provider card input changes', () => {
@@ -439,8 +440,8 @@ describe('ConnectionTestStatus', () => {
 })
 
 describe('ResourceProviderCard', () => {
-  it('renders inputs and fires change events', () => {
-    const onChange = vi.fn()
+  it('renders paramKeys inputs and fires whole-config change events', () => {
+    const onConfigChange = vi.fn()
     render(
       <ResourceProviderCard
         provider={{
@@ -451,7 +452,7 @@ describe('ResourceProviderCard', () => {
           paramKeys: ['url', 'token'],
         }}
         binding={{ enabled: true, config: { url: 'http://cms.test' } }}
-        onChange={onChange}
+        onConfigChange={onConfigChange}
       />
     )
 
@@ -462,6 +463,39 @@ describe('ResourceProviderCard', () => {
     expect(urlInput).toHaveValue('http://cms.test')
 
     fireEvent.change(urlInput, { target: { value: 'http://new.test' } })
-    expect(onChange).toHaveBeenCalledWith('url', 'http://new.test')
+    expect(onConfigChange).toHaveBeenCalledWith({ url: 'http://new.test' })
+  })
+
+  it('prefers config_schema and emits schema-typed values', () => {
+    const onConfigChange = vi.fn()
+    render(
+      <ResourceProviderCard
+        provider={{
+          key: 'by_knowledge',
+          provider: 'By Knowledge',
+          path: '/api/by_knowledge',
+          defaultParams: {},
+          paramKeys: ['page_size'],
+          config_schema: {
+            type: 'object',
+            properties: {
+              page_size: { type: 'integer', default: 100 },
+            },
+          },
+        }}
+        binding={{ enabled: true, config: { page_size: 20 } }}
+        onConfigChange={onConfigChange}
+      />
+    )
+
+    const pageSizeInput = screen.getByRole('spinbutton', { name: 'page_size' })
+    expect(pageSizeInput).toHaveValue(20)
+
+    fireEvent.change(pageSizeInput, { target: { value: '50' } })
+    expect(onConfigChange).toHaveBeenCalledWith({ page_size: 50 })
+    expect(
+      typeof (onConfigChange.mock.calls[0][0] as Record<string, unknown>)
+        .page_size
+    ).toBe('number')
   })
 })

@@ -2279,6 +2279,10 @@ export interface components {
     }
     /** ResourceProviderDefinition */
     ResourceProviderDefinition: {
+      /** Config Schema */
+      config_schema?: {
+        [key: string]: unknown
+      }
       /** Defaultparams */
       defaultParams: {
         [key: string]: string
@@ -3206,6 +3210,12 @@ export interface components {
       intake_config_json: string
       /** Name */
       name: string
+      /** Node Config */
+      node_config: {
+        [key: string]: unknown
+      }
+      /** Node Config Json */
+      node_config_json: string
       /** Resource Config */
       resource_config: {
         [key: string]: unknown
@@ -3263,6 +3273,12 @@ export interface components {
       /** Labeloverrides */
       labelOverrides?: {
         [key: string]: string
+      } | null
+      /** Nodeconfig */
+      nodeConfig?: {
+        [key: string]: {
+          [key: string]: unknown
+        }
       } | null
       /** Resources */
       resources?: {

@@ -1,13 +1,42 @@
 import { TextField } from '@mui/material'
-import type { ResourceBinding, ResourceProviderDefinition } from '../../types'
+import type {
+  ConfigSchema,
+  ResourceBinding,
+  ResourceProviderDefinition,
+} from '../../types'
+import { SchemaConfigForm } from './SchemaConfigForm'
 
 interface Props {
   provider: ResourceProviderDefinition
   binding: ResourceBinding
-  onChange: (paramKey: string, value: string) => void
+  onConfigChange: (config: Record<string, unknown>) => void
 }
 
-export function ResourceProviderCard({ provider, binding, onChange }: Props) {
+function hasSchemaProperties(schema: unknown): schema is ConfigSchema {
+  return (
+    typeof schema === 'object' &&
+    schema !== null &&
+    Object.keys((schema as ConfigSchema).properties ?? {}).length > 0
+  )
+}
+
+export function ResourceProviderCard({
+  provider,
+  binding,
+  onConfigChange,
+}: Props) {
+  const config = binding.config ?? {}
+
+  const handleFallbackChange = (paramKey: string, value: string) => {
+    const next = { ...config }
+    if (value) {
+      next[paramKey] = value
+    } else {
+      delete next[paramKey]
+    }
+    onConfigChange(next)
+  }
+
   return (
     <div
       style={{
@@ -22,19 +51,29 @@ export function ResourceProviderCard({ provider, binding, onChange }: Props) {
       <div style={{ fontSize: 12, color: '#616161', marginBottom: 12 }}>
         Path: {provider.path}
       </div>
-      <div style={{ display: 'grid', gap: 8 }}>
-        {provider.paramKeys.map((paramKey) => (
-          <TextField
-            key={paramKey}
-            label={paramKey}
-            variant="outlined"
-            placeholder={provider.defaultParams[paramKey] || ''}
-            value={(binding.config?.[paramKey] as string | undefined) || ''}
-            onChange={(event) => onChange(paramKey, event.target.value)}
-            fullWidth
-          />
-        ))}
-      </div>
+      {hasSchemaProperties(provider.config_schema) ? (
+        <SchemaConfigForm
+          schema={provider.config_schema}
+          values={config}
+          onChange={onConfigChange}
+        />
+      ) : (
+        <div style={{ display: 'grid', gap: 8 }}>
+          {provider.paramKeys.map((paramKey) => (
+            <TextField
+              key={paramKey}
+              label={paramKey}
+              variant="outlined"
+              placeholder={provider.defaultParams[paramKey] || ''}
+              value={(config[paramKey] as string | undefined) || ''}
+              onChange={(event) =>
+                handleFallbackChange(paramKey, event.target.value)
+              }
+              fullWidth
+            />
+          ))}
+        </div>
+      )}
     </div>
   )
 }

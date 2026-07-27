@@ -56,18 +56,11 @@ export function IntakeConfigSection({
 
   const handleResourceConfigChange = (
     providerKey: string,
-    paramKey: string,
-    value: string
+    nextConfig: Record<string, unknown>
   ) => {
     const binding = settings.resources[providerKey] || {
       enabled: true,
       config: {},
-    }
-    const nextConfig = { ...binding.config }
-    if (value) {
-      nextConfig[paramKey] = value
-    } else {
-      delete nextConfig[paramKey]
     }
     setSettings({
       resources: {
@@ -142,44 +135,33 @@ export function IntakeConfigSection({
         </div>
       </div>
 
-      {(() => {
-        const activeKeys = new Set<string>()
-        for (const mode of workflowDefinition?.intake?.modes || []) {
-          if (settings.intakeModes.includes(mode.key) && mode.resource) {
-            activeKeys.add(mode.resource)
-          }
-        }
-        if (activeKeys.size === 0) return null
-        return (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <span
-              style={{
-                fontSize: 12,
-                color: '#616161',
-              }}
-            >
-              资源接口参数
-            </span>
-            {resourceProviders
-              .filter((p) => activeKeys.has(p.key))
-              .map((provider) => (
-                <ResourceProviderCard
-                  key={provider.key}
-                  provider={provider}
-                  binding={
-                    settings.resources[provider.key] || {
-                      enabled: true,
-                      config: {},
-                    }
-                  }
-                  onChange={(paramKey, value) =>
-                    handleResourceConfigChange(provider.key, paramKey, value)
-                  }
-                />
-              ))}
-          </div>
-        )
-      })()}
+      {resourceProviders.length > 0 && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <span
+            style={{
+              fontSize: 12,
+              color: '#616161',
+            }}
+          >
+            资源接口参数
+          </span>
+          {resourceProviders.map((provider) => (
+            <ResourceProviderCard
+              key={provider.key}
+              provider={provider}
+              binding={
+                settings.resources[provider.key] || {
+                  enabled: true,
+                  config: {},
+                }
+              }
+              onConfigChange={(nextConfig) =>
+                handleResourceConfigChange(provider.key, nextConfig)
+              }
+            />
+          ))}
+        </div>
+      )}
 
       <div
         style={{
