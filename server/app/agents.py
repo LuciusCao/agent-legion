@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,6 +10,8 @@ from fastapi import WebSocket
 
 from server.app.agent_broadcast import AgentBroadcastController
 from server.app.event_bus import _EVICTED, EventBus
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -289,4 +292,5 @@ class AgentStatusManager:
             try:
                 asyncio.run_coroutine_threadsafe(ws.send_json(envelope), loop)
             except Exception:
+                logger.warning("agent WS send failed, dropping client", exc_info=True)
                 self._clients.discard(ws)

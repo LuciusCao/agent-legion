@@ -90,6 +90,11 @@ export function createRealtimeChannel(
       socket.onmessage = (event) => {
         onEvent(null, event.data as string)
       }
+      socket.onerror = () => {
+        // An error does not guarantee a close event on every browser;
+        // force close so the onclose handler drives the reconnect flow.
+        socket.close()
+      }
       socket.onclose = () => {
         if (ws === socket) ws = null
         scheduleReconnect()
