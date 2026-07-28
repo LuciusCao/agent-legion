@@ -1,6 +1,7 @@
+import pytest
 import requests
 
-from server.app.cms.client import get_token
+from server.app.cms.client import CmsClientError, get_token
 from server.app.cms.knowledge import lookup_knowledge_video
 from server.app.cms.question import (
     fetch_question_detail,
@@ -64,6 +65,26 @@ def test_get_token_returns_none_without_configured_credentials(monkeypatch):
     monkeypatch.delenv("BASECMS_TOKEN_URL", raising=False)
 
     assert get_token("prod", {}) is None
+
+
+def test_lookup_knowledge_video_requires_configured_url():
+    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+        lookup_knowledge_video("K001")
+
+
+def test_lookup_question_video_requires_configured_url():
+    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+        lookup_question_video("Q001")
+
+
+def test_list_questions_by_knowledge_requires_configured_url():
+    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+        list_questions_by_knowledge("K001")
+
+
+def test_fetch_question_detail_requires_configured_url():
+    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+        fetch_question_detail("Q001")
 
 
 def test_lookup_knowledge_video_found_with_url(monkeypatch):

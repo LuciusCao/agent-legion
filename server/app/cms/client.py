@@ -4,19 +4,26 @@ from typing import Any
 
 import requests
 
-DEFAULT_KNOWLEDGE_URL = (
-    "http://cms.internal.example.com/v2/knowledge/detail?bank_version=v5&country_id=1&subject_id=2"
-)
-DEFAULT_QUESTION_URL = (
-    "http://cms.internal.example.com/v2/question/detail?bank_version=v5&country_id=1&subject_id=2"
-)
-DEFAULT_QUESTION_LIST_URL = (
-    "http://cms.internal.example.com/v2/question/list?bank_version=v5&country_id=1&subject_id=2"
-)
-
 
 class CmsClientError(RuntimeError):
     pass
+
+
+def require_api_url(api_url: str | None, resource: str) -> str:
+    """Return the configured CMS URL or fail with migration guidance.
+
+    There is no built-in fallback host anymore (config governance G2): the URL
+    must come from ``cms.base_url`` (yaml) / ``BASECMS_BASE_URL`` (env), or
+    from an ``api_url`` bound in the workspace resource config.
+    """
+    url = str(api_url or "").strip()
+    if url:
+        return url
+    raise CmsClientError(
+        f"CMS {resource} URL is not configured: set cms.base_url in "
+        "config/agent_legion.yaml (or env BASECMS_BASE_URL), or bind api_url in "
+        "the workspace resource config"
+    )
 
 
 def _build_headers(token: str | None) -> dict[str, str]:

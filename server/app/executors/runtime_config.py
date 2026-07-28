@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.cms.auth import cms_token_available
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 
 
@@ -23,11 +24,24 @@ class PiRuntimeConfig(BaseModel):
     environment: dict[str, str] = Field(default_factory=dict)
 
 
+class OpenClawSkillSafetyRepo(BaseModel):
+    """One skill checkout the OpenClaw runner may force-restore before a run.
+
+    Only the path is declared here; the restore ref is pinned by
+    ``config/skills.lock`` (config governance G3, single source of truth).
+    A ``ref`` key is rejected as an extra field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
+
+
 class OpenClawSkillSafetyRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    repos: list[dict[str, str]] = Field(default_factory=list)
+    repos: list[OpenClawSkillSafetyRepo] = Field(default_factory=list)
 
 
 class OpenClawRuntimeConfig(BaseModel):
@@ -125,33 +139,6 @@ def _cms_resource_enabled(config: dict[str, Any]) -> bool:
     )
 
 
-def _cms_token_available(config: dict[str, Any]) -> bool:
-    """Return True when CMS credentials are available from any supported source.
-
-    Credentials may come from the config file, ``VIDEO_HIVE_CMS_*`` environment
-    overrides, or the legacy ``BASECMS_*`` environment variables.
-    """
-    cms_config = config.get("cms") or {}
-    if not isinstance(cms_config, dict):
-        return False
-    if cms_config.get("token"):
-        return True
-    if os.environ.get("BASECMS_TOKEN"):
-        return True
-    token_gen = cms_config.get("token_gen") or {}
-    if all(str(token_gen.get(key) or "") for key in ("app_id", "nonce", "secret", "url")):
-        return True
-    return all(
-        os.environ.get(env_key)
-        for env_key in (
-            "BASECMS_APP_ID",
-            "BASECMS_NONCE",
-            "BASECMS_SECRET",
-            "BASECMS_TOKEN_URL",
-        )
-    )
-
-
 def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
@@ -236,15 +223,16 @@ def validate_runtime(
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
 
-    if _cms_resource_enabled(config) and not _cms_token_available(config):
-        cms_config = config.get("cms") or {}
-        if not isinstance(cms_config, dict):
-            cms_config = {}
-        if not str(cms_config.get("token", "")):
-            errors.append(("cms.token", "missing CMS token"))
-        token_gen = cms_config.get("token_gen") or {}
-        if isinstance(token_gen, dict) and not str(token_gen.get("secret", "")):
-            errors.append(("cms.token_gen.secret", "missing CMS token_gen secret"))
+    if _cms_resource_enabled(config) and not cms_token_available(config.get("cms")):
+        errors.append(
+            (
+                "cms.token",
+                "missing CMS credentials: set env BASECMS_TOKEN (or "
+                "VIDEO_HIVE_CMS_TOKEN), set all of BASECMS_APP_ID / "
+                "BASECMS_NONCE / BASECMS_SECRET / BASECMS_TOKEN_URL, or bind a "
+                "token in the workspace resource config (vault)",
+            )
+        )
 
     if errors:
         raise StartupValidationError(errors)

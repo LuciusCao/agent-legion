@@ -5,10 +5,9 @@ from typing import Any
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
 from server.app.cms.client import (
-    DEFAULT_QUESTION_LIST_URL,
-    DEFAULT_QUESTION_URL,
     CmsVideoLookup,
     _fetch_json,
+    require_api_url,
 )
 
 
@@ -217,7 +216,7 @@ def _normalize_question_detail(data: dict[str, Any]) -> dict[str, Any]:
 def lookup_question_video(
     uuid: str, api_url: str | None = None, token: str | None = None
 ) -> CmsVideoLookup:
-    url = api_url or DEFAULT_QUESTION_URL
+    url = require_api_url(api_url, "question detail")
     payload = _fetch_json(url, {"uuid": uuid}, token)
     data = _parse_question_detail_payload(payload)
     if data is None:
@@ -234,7 +233,7 @@ def list_questions_by_knowledge(
     api_url: str | None = None,
     token: str | None = None,
 ) -> list[CmsQuestionSummary]:
-    url = _strip_query_params(api_url or DEFAULT_QUESTION_LIST_URL, {"knowledge", "page"})
+    url = _strip_query_params(require_api_url(api_url, "question list"), {"knowledge", "page"})
     page_size = _page_size_from_url(url)
     page = 1
     results: list[CmsQuestionSummary] = []
@@ -271,7 +270,7 @@ def fetch_question_detail(
     api_url: str | None = None,
     token: str | None = None,
 ) -> CmsQuestionDetail:
-    url = _strip_query_params(api_url or DEFAULT_QUESTION_URL, {"uuid"})
+    url = _strip_query_params(require_api_url(api_url, "question detail"), {"uuid"})
     payload = _fetch_json(url, {"uuid": question_id}, token)
     data = _parse_question_detail_payload(payload)
     if data is None:
