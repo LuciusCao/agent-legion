@@ -3,18 +3,8 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
+from server.app.workflows.resource_providers import RESOURCE_PROVIDERS
 from server.app.workflows.resource_schemas import resource_param_keys
-
-RESOURCE_PROVIDERS = {
-    "question_detail": {
-        "provider": "cms.question.detail",
-        "url_key": "question_detail_url",
-    },
-    "by_knowledge": {
-        "provider": "cms.question.list_by_knowledge",
-        "url_key": "question_list_url",
-    },
-}
 
 
 def _merge_resource_config(
@@ -71,6 +61,7 @@ def resolve_cms_resource(
     workspace: dict[str, Any] | None,
     batch_payload: dict[str, Any] | None,
     resource_key: str,
+    node_config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     cms_config = settings_config.get("cms", {}) if isinstance(settings_config, dict) else {}
     result = dict(cms_config) if isinstance(cms_config, dict) else {}
@@ -108,6 +99,10 @@ def resolve_cms_resource(
         dict(raw_binding_config) if isinstance(raw_binding_config, dict) else {}
     )
     result.update(binding_config)
+    if node_config:
+        # Executor node config (spec D15) wins over bindings and defaults for
+        # the non-secret parameters its capability config_schema declares.
+        result.update({key: value for key, value in node_config.items() if value not in (None, "")})
     # Explicit legacy URLs (settings-level question_*_url) win over the URL
     # derived from resource_providers base_url + path.
     api_url = str(

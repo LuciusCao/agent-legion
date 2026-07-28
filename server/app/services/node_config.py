@@ -21,23 +21,68 @@ from server.app.config_schema import (
 from server.app.workflows.schema import WorkflowDefinition
 
 
+def executor_capability_config_schemas(
+    executor_definitions: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Map capability → config_schema declared by executor capabilities (spec D15).
+
+    The first declaration wins when several executors share a capability;
+    dispatch resolves the schema from the specific bound executor instead.
+    """
+    schemas: dict[str, dict[str, Any]] = {}
+    for definition in executor_definitions.values():
+        capabilities = getattr(definition, "capabilities", None)
+        if not isinstance(capabilities, Mapping):
+            continue
+        for capability, cap_config in capabilities.items():
+            schema = getattr(cap_config, "config_schema", None)
+            if schema and capability not in schemas:
+                schemas[str(capability)] = dict(schema)
+    return schemas
+
+
+def executor_definition_capability_schema(
+    executor_definitions: Mapping[str, Any],
+    executor_id: str,
+    capability: str,
+) -> dict[str, Any]:
+    """Schema one specific executor declares for a capability ({} if undeclared)."""
+    definition = executor_definitions.get(executor_id)
+    capabilities = getattr(definition, "capabilities", None)
+    if not isinstance(capabilities, Mapping):
+        return {}
+    schema = getattr(capabilities.get(capability), "config_schema", None)
+    return dict(schema) if schema else {}
+
+
 def capability_config_schemas(
     agent_definitions: Mapping[str, AgentDefinition],
+    executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
-    """Map capability → declared config_schema (phase 1: one agent per capability)."""
-    return {
+    """Map capability → declared config_schema.
+
+    Agent Definitions win; executor capability schemas are the fallback for
+    capabilities without an Agent Definition (spec D15).
+    """
+    schemas = {
         definition.capability: definition.config_schema
         for definition in agent_definitions.values()
         if definition.config_schema
     }
+    for capability, schema in executor_capability_config_schemas(
+        executor_definitions or {}
+    ).items():
+        schemas.setdefault(capability, schema)
+    return schemas
 
 
 def workflow_node_config_schemas(
     definition: WorkflowDefinition,
     agent_definitions: Mapping[str, AgentDefinition],
+    executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Map node key → config_schema for nodes whose capability declares one."""
-    schemas = capability_config_schemas(agent_definitions)
+    schemas = capability_config_schemas(agent_definitions, executor_definitions)
     return {
         node.key: schemas[node.capability]
         for node in definition.nodes.values()
@@ -89,9 +134,10 @@ def resolve_workflow_node_configs(
     definition: WorkflowDefinition,
     agent_definitions: Mapping[str, AgentDefinition],
     workspace: Mapping[str, Any] | None,
+    executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, dict[str, Any]]:
     """Resolve the effective config of every node for an intake freeze."""
-    schemas = capability_config_schemas(agent_definitions)
+    schemas = capability_config_schemas(agent_definitions, executor_definitions)
     overrides = workspace_node_overrides(workspace, definition.key)
     resolved: dict[str, dict[str, Any]] = {}
     for node in definition.nodes.values():

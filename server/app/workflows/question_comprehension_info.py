@@ -44,6 +44,9 @@ def fetch_questions(
     )
 
     cms_config = _effective_cms_config(job, context)
+    node_config = context.get("node_config")
+    if isinstance(node_config, dict) and node_config:
+        logger.info("  node_config overrides: %s", sorted(node_config))
     api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
     if api_url:
         logger.info("  fetching from CMS: %s", api_url)

@@ -54,8 +54,10 @@
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.local` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
 - 节点可调参数经 `AgentDefinition.config_schema` 声明（`server/app/config_schema.py`
-  子集），解析链 defaults → 节点 `config` → workspace 覆盖，intake 冻结；
-  manifest 仅携带白名单非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`。
+  子集）；executor 节点经 capability 的 `LocalCapabilityConfig.config_schema`
+  声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
+  workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
+  （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
 
 典型反例：
 
@@ -93,6 +95,8 @@ LocalExecutor(...).execute(context)
 ## 8. Security & Data
 
 - `data/` 不提交，配置与密钥不外传。
+- Secret 值必须经 vault（Fernet 加密落 `workspace_secrets`），配置与快照只存
+  `secret_ref`，不得明文落库、出 API 或进日志（VAULT-SECRET-001）。
 - OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。
 
 ## 9. Video Knowledge Workspace

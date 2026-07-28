@@ -142,7 +142,9 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         assert fetched.status_code == 200
         settings = fetched.json()["settings"]
         assert settings["nodeConfig"] == {}
-        assert set(settings["nodeConfigSchemas"]) == {"generate_key_info"}
+        # generate_key_info comes from the Agent catalog; fetch_questions is an
+        # executor capability whose schema is declared in workflow.yaml (D15).
+        assert set(settings["nodeConfigSchemas"]) == {"generate_key_info", "fetch_questions"}
 
         saved = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
@@ -151,9 +153,19 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         assert saved.status_code == 200
         assert saved.json()["settings"]["nodeConfig"] == {"generate_key_info": {"max_items": 5}}
 
+        saved_executor = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"bank_version": "v6"}}},
+        )
+        assert saved_executor.status_code == 200
+        assert saved_executor.json()["settings"]["nodeConfig"] == {
+            "generate_key_info": {"max_items": 5},
+            "fetch_questions": {"bank_version": "v6"},
+        }
+
         cleared = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
-            json={"nodeConfig": {"generate_key_info": {}}},
+            json={"nodeConfig": {"generate_key_info": {}, "fetch_questions": {}}},
         )
         assert cleared.status_code == 200
         assert cleared.json()["settings"]["nodeConfig"] == {}
@@ -181,7 +193,7 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
             f"/api/workspaces/{workspace_id}/settings/nodes",
             json={"nodeConfig": {"generate_key_info": {"max_items": 0}}},
         )
-        no_schema = c.patch(
+        executor_unknown_key = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
             json={"nodeConfig": {"fetch_questions": {"max_items": 5}}},
         )
@@ -192,7 +204,9 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
 
     assert unknown_key.status_code == 400
     assert out_of_bounds.status_code == 400
-    assert no_schema.status_code == 400
+    # fetch_questions is an executor node with a declared schema (D15);
+    # max_items is not part of it.
+    assert executor_unknown_key.status_code == 400
     assert unknown_node.status_code == 400
 
 
@@ -228,4 +242,8 @@ def test_workspace_settings_resources_are_schema_validated(tmp_path):
     assert bad_type.status_code == 400
     assert unknown_key.status_code == 400
     assert ok.status_code == 200
-    assert ok.json()["settings"]["resources"]["by_knowledge"]["config"] == {"page_size": 100}
+    # Secret schema fields surface as write-only markers in the payload.
+    assert ok.json()["settings"]["resources"]["by_knowledge"]["config"] == {
+        "page_size": 100,
+        "token": {"secret_set": False},
+    }
