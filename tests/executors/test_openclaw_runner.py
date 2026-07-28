@@ -1,13 +1,18 @@
 import subprocess
 from unittest.mock import patch
 
+import pytest
+
 from server.app.executors.agent_workspace import cleanup_agent_workspace_files
 from server.app.executors.openclaw_runner import (
     AgentPhase,
     OpenClawRunner,
     SkillSafetyConfig,
+    resolve_skill_safety_repos,
     restore_skill_repos,
 )
+from server.app.skills.config import LockedSkillSource, SkillsLock
+from server.app.skills.errors import SkillConfigError
 
 
 def test_openclaw_runner_sanitizes_null_bytes_in_prompt(tmp_path):
@@ -299,3 +304,45 @@ def test_openclaw_runner_calls_restore_before_run(tmp_path):
         mock_restore.assert_called_once_with(safety.repos)
 
     assert result.status == "completed"
+
+
+def test_resolve_skill_safety_repos_uses_locked_commit(tmp_path):
+    """The restore ref comes from skills.lock (locked commit), never from yaml."""
+    repo = tmp_path / "skills" / "generate_chapters"
+    lock = SkillsLock(
+        skills={
+            "video_knowledge/generate_chapters": LockedSkillSource(
+                repo=f"file://{repo}",
+                ref="v1.0.1",
+                commit="abc123",
+            )
+        }
+    )
+
+    resolved = resolve_skill_safety_repos([str(repo)], lock)
+
+    assert resolved == [{"path": str(repo.expanduser().resolve()), "ref": "abc123"}]
+
+
+def test_resolve_skill_safety_repos_falls_back_to_locked_ref(tmp_path):
+    repo = tmp_path / "skills" / "review_subtitles"
+    lock = SkillsLock(
+        skills={
+            "video_knowledge/review_subtitles": LockedSkillSource(
+                repo=f"file://{repo}",
+                ref="v1.0.2",
+                commit="",
+            )
+        }
+    )
+
+    resolved = resolve_skill_safety_repos([str(repo)], lock)
+
+    assert resolved == [{"path": str(repo.expanduser().resolve()), "ref": "v1.0.2"}]
+
+
+def test_resolve_skill_safety_repos_rejects_path_missing_from_lock(tmp_path):
+    lock = SkillsLock()
+
+    with pytest.raises(SkillConfigError, match="not declared in skills.lock"):
+        resolve_skill_safety_repos([str(tmp_path / "unknown")], lock)

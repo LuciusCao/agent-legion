@@ -117,7 +117,7 @@ def test_get_global_services_returns_cms_status(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["cms"]["baseUrl"] == "http://cms.***.cn/v2"
+    assert body["cms"]["baseUrl"] == "http://cms.***.com/v2"
     assert body["cms"]["tokenConfigured"] is True
     assert body["cms"]["env"] == "prod"
     assert body["cms"]["healthy"] is None
