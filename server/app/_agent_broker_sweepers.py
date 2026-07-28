@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING
 
 from server.app._agent_broker_claim import cancel_request
 from server.app.db.transaction import write_transaction
+from server.app.executors._failed_node_recording import record_failed_node_without_execution
+from server.app.services import failure_classification
 
 if TYPE_CHECKING:
     from server.app.agent_broker import AgentExecutionBroker
@@ -133,19 +135,24 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
                 f"Agent definition {row['agent_id']!r} was disabled or changed"
                 " while the request was queued"
             )
+            failure_category, failure_detail = failure_classification.resolve_failure_fields(
+                "failed", None, error
+            )
             outcome = {"status": "failed", "exit_code": 1, "error_message": error}
             conn.execute(
                 "update agent_execution_requests set state='done', outcome_json=?,"
                 " finished_at=current_timestamp where execution_id=?",
                 (json.dumps(outcome), row["execution_id"]),
             )
-            updated = conn.execute(
-                "update job_nodes set status='failed', finished_at=current_timestamp,"
-                " error_message=? where job_id=? and node_key=?"
-                " and status in ('pending', 'ready', 'stale')",
-                (error, row["job_id"], row["node_key"]),
+            updated = record_failed_node_without_execution(
+                conn,
+                job_id=str(row["job_id"]),
+                node_key=str(row["node_key"]),
+                error_message=error,
+                failure_category=failure_category,
+                failure_detail=failure_detail,
             )
-            if updated.rowcount:
+            if updated is not None:
                 conn.execute(
                     "update jobs set status='failed', error_message=?,"
                     " updated_at=current_timestamp"

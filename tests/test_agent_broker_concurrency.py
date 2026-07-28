@@ -323,6 +323,8 @@ def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
     node = job_db.get_job_node("stale-def-job", "generate")
     assert node["status"] == "failed"
     assert "disabled or changed" in node["error_message"]
+    assert node["failure_category"] == "technical"
+    assert node["failure_detail"] == "stale_definition"
     assert job_db.get_job("stale-def-job")["status"] == "failed"
     with job_db._connect_read() as conn:
         row = conn.execute(
@@ -330,3 +332,9 @@ def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
             (execution_id,),
         ).fetchone()
     assert row["state"] == "done"
+    # The synthetic failed run makes the sweep visible to failed-node-runs
+    # views and rerun-by-failure.
+    runs = job_db.list_failed_node_runs("test-workspace", category="technical")
+    assert [
+        (str(run["job_id"]), str(run["node_key"]), str(run["failure_detail"])) for run in runs
+    ] == [("stale-def-job", "generate", "stale_definition")]

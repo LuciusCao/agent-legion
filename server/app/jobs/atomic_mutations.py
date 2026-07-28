@@ -132,6 +132,7 @@ def mark_nodes_for_rerun(
             """
             update job_nodes
             set status='pending', stale_reason='', error_message='',
+                failure_category='', failure_detail='',
                 started_at=null, finished_at=null, created_at=current_timestamp
             where job_id=? and node_key=?
             """,
@@ -144,6 +145,7 @@ def mark_nodes_for_rerun(
             """
             update job_nodes
             set status='stale', stale_reason='upstream rerun', error_message='',
+                failure_category='', failure_detail='',
                 created_at=current_timestamp
             where job_id=? and node_key=?
             """,

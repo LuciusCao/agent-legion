@@ -344,7 +344,7 @@ invariants:
         gate: full
 
   - id: DB-FAILURE-001
-    statement: "node_runs/job_nodes failure_category is restricted to {'', 'technical', 'business', 'unknown'} (empty for non-failures); unrecognized failures classify as unknown and never default to technical; orphan recovery assigns (technical, worker_orphaned) directly at its write path."
+    statement: "node_runs/job_nodes failure_category is restricted to {'', 'technical', 'business', 'unknown'} (empty for non-failures); unrecognized failures classify as unknown and never default to technical; orphan recovery assigns (technical, worker_orphaned) and the stale-definition sweep assigns (technical, stale_definition) directly at their write paths."
     owner: jobs
     risk: high
     evidence:
@@ -353,6 +353,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/executors/leases/test_failure_classification_persistence.py
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
         gate: quick
 
   - id: EXEC-SHARD-001
