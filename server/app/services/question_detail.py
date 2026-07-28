@@ -38,7 +38,13 @@ class QuestionDetailService:
         if workspace is None:
             raise QuestionWorkspaceNotFoundError(workspace_id)
 
-        cms_config = resolve_cms_resource(self._settings.config, workspace, None, "question_detail")
+        cms_config = resolve_cms_resource(
+            self._settings.config,
+            workspace,
+            None,
+            "question_detail",
+            declarations=self._settings.resource_providers,
+        )
         api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
         title = question_id
         normalized: dict[str, Any] = {}

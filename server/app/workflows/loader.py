@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -179,7 +180,10 @@ def _load_intake(raw: dict[str, Any]) -> WorkflowIntake:
     return WorkflowIntake(modes=modes)
 
 
-def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
+def _load_nodes(
+    raw_nodes: dict[str, Any],
+    resource_providers: Mapping[str, Any] | None = None,
+) -> dict[str, WorkflowNode]:
     nodes: dict[str, WorkflowNode] = {}
     for node_key, raw_node in raw_nodes.items():
         if not isinstance(node_key, str) or not node_key:
@@ -206,7 +210,7 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
 
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
         resources = _string_list(raw_node.get("resources"), "resources", node_key)
-        validate_node_resource_references(node_key, resources)
+        validate_node_resource_references(node_key, resources, resource_providers)
         raw_config = raw_node.get("config")
         if raw_config is None:
             raw_config = {}
@@ -246,7 +250,10 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
     return nodes
 
 
-def workflow_definition_from_mapping(raw: dict[str, Any]) -> WorkflowDefinition:
+def workflow_definition_from_mapping(
+    raw: dict[str, Any],
+    resource_providers: Mapping[str, Any] | None = None,
+) -> WorkflowDefinition:
     key = raw.get("key")
     label = raw.get("label")
     raw_nodes = raw.get("nodes")
@@ -268,7 +275,7 @@ def workflow_definition_from_mapping(raw: dict[str, Any]) -> WorkflowDefinition:
         raise WorkflowDefinitionError("Workflow schema_version must be an integer")
 
     intake = _load_intake(raw)
-    nodes = _load_nodes(raw_nodes)
+    nodes = _load_nodes(raw_nodes, resource_providers)
     edges = _load_edges(raw, nodes, schema_version)
     _validate_acyclic(nodes, edges)
     return WorkflowDefinition(
@@ -281,7 +288,10 @@ def workflow_definition_from_mapping(raw: dict[str, Any]) -> WorkflowDefinition:
     )
 
 
-def workflow_definition_from_dict(payload: dict[str, Any]) -> WorkflowDefinition:
+def workflow_definition_from_dict(
+    payload: dict[str, Any],
+    resource_providers: Mapping[str, Any] | None = None,
+) -> WorkflowDefinition:
     if not isinstance(payload, dict):
         raise WorkflowDefinitionError("Workflow definition snapshot must be a mapping")
     raw = {
@@ -311,11 +321,14 @@ def workflow_definition_from_dict(payload: dict[str, Any]) -> WorkflowDefinition
                 "equals": condition.get("equals"),
             }
         raw["edges"].append(raw_edge)
-    return workflow_definition_from_mapping(raw)
+    return workflow_definition_from_mapping(raw, resource_providers)
 
 
-def load_workflow_definition(path: Path) -> WorkflowDefinition:
+def load_workflow_definition(
+    path: Path,
+    resource_providers: Mapping[str, Any] | None = None,
+) -> WorkflowDefinition:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
         raise WorkflowDefinitionError("Workflow definition must be a mapping")
-    return workflow_definition_from_mapping(raw)
+    return workflow_definition_from_mapping(raw, resource_providers)

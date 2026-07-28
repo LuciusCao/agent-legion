@@ -74,10 +74,20 @@ def test_openclaw_skill_safety_defaults():
 def test_openclaw_skill_safety_valid_overrides():
     config = OpenClawSkillSafetyRuntimeConfig(
         enabled=True,
-        repos=[{"path": "~/.skills/s1", "ref": "v1.0.0"}],
+        repos=[{"path": "~/.skills/s1"}],
     )
     assert config.enabled is True
-    assert config.repos == [{"path": "~/.skills/s1", "ref": "v1.0.0"}]
+    assert [repo.path for repo in config.repos] == ["~/.skills/s1"]
+
+
+def test_openclaw_skill_safety_rejects_ref_override():
+    """Refs are pinned by skills.lock (config governance G3); yaml ref is retired."""
+    with pytest.raises(ValidationError) as exc_info:
+        OpenClawSkillSafetyRuntimeConfig(
+            enabled=True,
+            repos=[{"path": "~/.skills/s1", "ref": "v1.0.0"}],
+        )
+    assert "ref" in str(exc_info.value)
 
 
 def test_openclaw_skill_safety_rejects_invalid_repos_container():
@@ -103,7 +113,7 @@ def test_openclaw_runtime_config_valid_overrides():
         isolated_workspace_root="/tmp/isolated",
         skill_safety=OpenClawSkillSafetyRuntimeConfig(
             enabled=True,
-            repos=[{"path": "~/.skills/s1", "ref": "v1.0.0"}],
+            repos=[{"path": "~/.skills/s1"}],
         ),
     )
     assert config.command_template == ("openclaw", "agent", "--local")
@@ -170,7 +180,7 @@ def test_executor_runtime_config_from_full_config():
             "skill_safety": {
                 "enabled": True,
                 "repos": [
-                    {"path": "~/.openclaw/workspace/skills/s1", "ref": "v1.0.0"},
+                    {"path": "~/.openclaw/workspace/skills/s1"},
                 ],
             },
             "command_template": [
@@ -194,7 +204,7 @@ def test_executor_runtime_config_from_full_config():
         "main",
     )
     assert config.openclaw.skill_safety.enabled is True
-    assert config.openclaw.skill_safety.repos[0]["ref"] == "v1.0.0"
+    assert config.openclaw.skill_safety.repos[0].path == "~/.openclaw/workspace/skills/s1"
 
 
 def test_executor_runtime_config_parses_lease_heartbeat_settings():

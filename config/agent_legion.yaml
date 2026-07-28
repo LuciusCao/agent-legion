@@ -15,12 +15,6 @@ cms:
   country_id: '1'
   subject_id: '2'
   page_size: '50'
-  token: ''
-  token_gen:
-    app_id: ''
-    nonce: ''
-    secret: ''
-    url: ''
 resource_providers:
   cms.question.detail:
     path: /question/detail
@@ -72,15 +66,13 @@ openclaw:
   isolated_workspace_root: ''
   skill_safety:
     enabled: true
+    # Path whitelist only: refs are pinned by config/skills.lock (single source
+    # of truth, config governance G3). A ref key here is rejected at startup.
     repos:
     - path: ~/.agents/skills/agent-legion/video_knowledge/generate_interactions
-      ref: v1.0.0
     - path: ~/.agents/skills/agent-legion/video_knowledge/review_video_content
-      ref: v1.0.0
     - path: ~/.agents/skills/agent-legion/video_knowledge/review_subtitles
-      ref: v1.0.0
     - path: ~/.agents/skills/agent-legion/video_knowledge/generate_chapters
-      ref: v1.0.0
   command_template:
   - openclaw
   - agent

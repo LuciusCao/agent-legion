@@ -198,7 +198,8 @@ server/app/
 | PiExecutorConfig | BaseModel | kind: Literal['pi'], global_capacity: int, capabilities: dict[str, PiCapabili... | app/executors/config.py |
 | OpenClawExecutorConfig | BaseModel | kind: Literal['openclaw'], agent_id: str, global_capacity: int, capabilities:... | app/executors/config.py |
 | PiRuntimeConfig | BaseModel | binary: str, provider: str, model: str, thinking: str, timeout_seconds: int, ... | app/executors/runtime_config.py |
-| OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[dict[str, str]] | app/executors/runtime_config.py |
+| OpenClawSkillSafetyRepo | BaseModel | path: str | app/executors/runtime_config.py |
+| OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[OpenClawSkillSafetyRepo] | app/executors/runtime_config.py |
 | OpenClawRuntimeConfig | BaseModel | command_template: tuple[str, ...], cwd: str, timeout_seconds: int, cancellati... | app/executors/runtime_config.py |
 | WorkflowsRuntimeConfig | BaseModel | enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
 | AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
@@ -452,7 +453,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `server/app/configuration/` 负责加载并校验按领域拆分的 YAML 配置。
 
-- `loader.py`: 加载 `config/app.yaml`, `config/video_hive.yaml`, `config/workflow.yaml` 并合并环境变量覆盖。
+- `loader.py`: 加载 `config/app.yaml`, `config/agent_legion.yaml`, `config/workflow.yaml` 并合并环境变量覆盖（旧名 `config/video_hive.yaml` 在过渡期内兼容加载并打 warning，两个文件同时存在则报错）。
 - `owned_keys.py`: 声明每个配置文件的 owned keys，防止跨文件键冲突。
 
 ### Quality Subsystem
@@ -482,13 +483,15 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 ## Configuration Reference
 
-配置按域拆分为三个文件：
+配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
 
-- `config/app.yaml`：应用路径、HTTP 设置、worker 并发。
-- `config/video_hive.yaml`：ASR、CMS、资源提供者、清理、OpenClaw 设置。
-- `config/workflow.yaml`：workspace executor 与 workflow 运行时设置。
+- `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）、token 用量计价（`token_usage`）。
+- `config/agent_legion.yaml`：ASR、CMS、资源提供者（`resource_providers`）、OpenClaw 设置。（旧名 `config/video_hive.yaml` 过渡期内兼容加载并打 warning，两个文件同时存在则启动报错。）
+- `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，local executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
 
-常用 `config/video_hive.yaml` 配置项：
+env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 权威、`VIDEO_HIVE_DATABASE_URL` 为 deprecated alias，两者冲突即启动报错（G4）。
+
+常用 `config/agent_legion.yaml` 配置项：
 
 - `asr.provider`: `auto`, `whisper`, `sensevoice`
 - `asr.whisper.binary`: 本地 `whisper-cli` 路径
@@ -496,28 +499,33 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `asr.whisper.vad_model`: 可选 VAD 模型路径
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
+- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`VIDEO_HIVE_CMS_TOKEN` / `BASECMS_*`）或 workspace resource binding + vault
 - `resource_providers`: 资源提供者声明（如 `cms.question.detail`）：`path` 拼接信息、`resource_key`、legacy 设置项 `url_key`，以及可调参数的 `config_schema`（含 `secret: true` 标记）；声明在加载时校验，非法声明启动失败
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒
-- `openclaw.skill_safety`: OpenClaw skill 安全校验配置
+- `openclaw.skill_safety`: OpenClaw skill 安全校验配置；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 `config/skills.lock`（locked commit）解析（config 治理 G3 单源化），yaml 中写 `ref` 会在启动校验时报错
 
 `config/app.yaml` 额外配置项：
 
 - `data_dir`: 数据根目录
 - `server.cors`: 浏览器跨域来源和 credentials 策略
 - `cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`: 日志与运行目录清理策略
+- `monitoring.sample_interval_seconds` / `retention_days`: 资源监控采样间隔与保留天数
 - `token_usage.currency` / `token_usage.pricing`: Token 用量货币与模型单价
 
 `config/workflow.yaml` 核心配置项：
 
+- `agents`: Agent 目录（AgentDefinition），声明各 capability 的 runtime / skill / tools / `config_schema`
+- `agent_workers`: Agent Worker 注册设置（`register_token` / `register_token_file` 等；token 值亦可经 env `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 注入）
 - `executors`: local / pi / openclaw 执行器定义；local capability 除 `handler` 外可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入 handler runtime 的 `node_config` 键
 - `workflows.enabled`: 是否启用 Agent Legion DAG workflow worker
 - `workflows.pi`: Pi agent runner 配置（provider, model, timeout, environment）
 
 其他配置文件：
 
-- `config/skills.yaml` / `config/skills.lock`：外部 Pi skill 仓库源与固定 commit。
+- `config/skills.yaml` / `config/skills.lock`：外部 Pi skill 仓库源与固定 commit；lock 是 skill ref 的唯一权威（G3）。
 - `config/workflows/*.yaml`：workflow 定义，Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`。
+- `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 
 ## Testing
@@ -538,7 +546,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
-- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自用户可写的 `config/video_hive.yaml`；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量；仍需确保该配置文件不被未信任用户修改。
+- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自用户可写的 `config/agent_legion.yaml`；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量；仍需确保该配置文件不被未信任用户修改。
 - PostgreSQL 与视频存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的 User Authentication 章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证（如 CMS token）经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

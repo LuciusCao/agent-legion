@@ -1,13 +1,9 @@
-import os
 from typing import Any
 from urllib.parse import urlparse
 
+from server.app.cms.auth import cms_token_available
 from server.app.settings import Settings
-from server.app.workflows.resource_schemas import (
-    RESOURCE_PROVIDER_SCHEMAS,
-    resource_param_keys,
-)
-from server.app.workflows.resources import RESOURCE_PROVIDERS
+from server.app.workflows.resource_schemas import resource_param_keys
 
 
 def build_resource_providers(settings: Settings) -> list[dict[str, Any]]:
@@ -15,13 +11,14 @@ def build_resource_providers(settings: Settings) -> list[dict[str, Any]]:
     if not isinstance(providers_config, dict):
         return []
     cms_config = settings.config.get("cms", {}) or {}
+    declarations = settings.resource_providers
 
     result: list[dict[str, Any]] = []
-    for key, meta in RESOURCE_PROVIDERS.items():
+    for key, meta in declarations.providers.items():
         provider = str(meta.get("provider") or "")
         provider_config = providers_config.get(provider) or {}
         path = str(provider_config.get("path", ""))
-        param_keys = list(resource_param_keys(key))
+        param_keys = list(resource_param_keys(key, declarations.schemas))
         default_params: dict[str, str] = {}
         for param_key in param_keys:
             if param_key in cms_config and cms_config[param_key] not in (None, ""):
@@ -33,7 +30,7 @@ def build_resource_providers(settings: Settings) -> list[dict[str, Any]]:
                 "path": path,
                 "defaultParams": default_params,
                 "paramKeys": param_keys,
-                "config_schema": RESOURCE_PROVIDER_SCHEMAS[key],
+                "config_schema": declarations.schemas.get(key, {}),
             }
         )
     return result
@@ -45,7 +42,7 @@ def build_global_services(settings: Settings) -> dict[str, Any]:
     return {
         "cms": {
             "baseUrl": _mask_url(base_url) if base_url else "",
-            "tokenConfigured": _token_available(cms_config),
+            "tokenConfigured": cms_token_available(cms_config),
             "env": str(cms_config.get("env", "")),
             "healthy": None,
             "lastCheckedAt": None,
@@ -64,17 +61,3 @@ def _mask_url(url: str) -> str:
     else:
         masked = hostname
     return f"{parsed.scheme}://{masked}{parsed.path}"
-
-
-def _token_available(cms_config: dict[str, Any]) -> bool:
-    if cms_config.get("token"):
-        return True
-    if os.environ.get("BASECMS_TOKEN"):
-        return True
-    token_gen = cms_config.get("token_gen") or {}
-    if all(token_gen.get(k) for k in ("app_id", "nonce", "secret", "url")):
-        return True
-    return all(
-        os.environ.get(env_key)
-        for env_key in ("BASECMS_APP_ID", "BASECMS_NONCE", "BASECMS_SECRET", "BASECMS_TOKEN_URL")
-    )

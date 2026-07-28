@@ -417,3 +417,18 @@ invariants:
       - kind: integration
         target: tests/full/test_vault_secret_freeze.py
         gate: full
+
+  - id: CONFIG-YAML-001
+    statement: "Tracked split config yaml files carry no secret values: the retired yaml keys `cms.token` / `cms.token_gen` (G2) and `openclaw.skill_safety` refs (G3, pinned by config/skills.lock) are rejected at startup, and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
+    owner: config
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/test_config_yaml_hygiene.py
+        gate: quick
+      - kind: integration
+        target: tests/test_settings.py
+        gate: quick
+      - kind: integration
+        target: tests/test_configuration_loader.py
+        gate: quick

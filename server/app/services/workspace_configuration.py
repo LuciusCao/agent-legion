@@ -53,7 +53,13 @@ class WorkspaceConfigurationService:
         self, workspace_id: str, workspace: dict[str, Any], resources_patch: Any
     ) -> dict[str, Any]:
         """Validate a resources patch and persist secret fields via the vault."""
-        return apply_resources_patch(self._vault(), workspace_id, workspace, resources_patch)
+        return apply_resources_patch(
+            self._vault(),
+            workspace_id,
+            workspace,
+            resources_patch,
+            self.settings.resource_providers.schemas,
+        )
 
     def _vault(self) -> VaultService:
         return VaultService(self.job_db.path, self.settings.config)
@@ -127,7 +133,9 @@ class WorkspaceConfigurationService:
         agent_capacity: int | None = None,
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        current = workspace_settings_payload(workspace)
+        current = workspace_settings_payload(
+            workspace, declarations=self.settings.resource_providers
+        )
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
@@ -248,7 +256,11 @@ class WorkspaceConfigurationService:
     def test_connection(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         cms_resource = resolve_cms_resource(
-            self.settings.config, workspace, None, "question_detail"
+            self.settings.config,
+            workspace,
+            None,
+            "question_detail",
+            declarations=self.settings.resource_providers,
         )
         if not cms_resource.get("api_url"):
             raise InvalidOperationError("Global CMS URL is not configured")

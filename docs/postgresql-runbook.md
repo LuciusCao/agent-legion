@@ -8,7 +8,7 @@ fallback.
 
 ```bash
 createdb agent_legion
-export VIDEO_HIVE_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
 uv run uvicorn server.app.main:app --reload
 ```
 

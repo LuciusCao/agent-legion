@@ -83,6 +83,7 @@ def resolve_cms_question_candidates(
         workspace,
         None,
         resource_key,
+        declarations=settings.resource_providers,
     )
     try:
         # Resolve secret_ref markers in memory only; legacy plaintext passes

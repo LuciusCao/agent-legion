@@ -13,8 +13,8 @@ video-hive/
 ├── .env.example                # 运行时密钥与覆盖项模板
 ├── Makefile                    # 常用命令快捷方式
 ├── config/                     # 按领域拆分的配置
-│   ├── app.yaml                # 应用路径、HTTP 设置、worker 并发、清理、token 定价
-│   ├── video_hive.yaml         # ASR、CMS、资源提供方、清理、OpenClaw
+│   ├── app.yaml                # 应用路径、PostgreSQL URL、HTTP 设置、清理、监控、token 定价
+│   ├── agent_legion.yaml       # ASR、CMS、资源提供方、OpenClaw
 │   ├── workflow.yaml           # Workspace 执行器、工作流运行时、Pi 配置
 │   ├── skills.yaml             # 外部 Pi skill 源声明
 │   ├── skills.lock             # 解析后的 skill commit 锁定

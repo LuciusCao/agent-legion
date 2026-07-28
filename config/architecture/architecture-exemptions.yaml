@@ -111,17 +111,16 @@ exemptions:
   path: server/app/settings.py
   reason: PostgreSQL-only configuration adds a validated database URL and its
     explicit environment override. Agent Worker secret-file configuration is
-    resolved at the same trusted boundary. Extract database settings into the
-    configuration package after rollout.
+    resolved at the same trusted boundary. Resource provider declarations are
+    parsed once here and injected through Settings. The retired yaml cms
+    credential keys are rejected at this boundary with migration guidance
+    (config governance G2). The AGENT_LEGION_DATABASE_URL /
+    VIDEO_HIVE_DATABASE_URL dual-name arbitration lives here too (config
+    governance G4). Extract database settings into the configuration
+    package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 196
-- check: architecture.file_budget
-  path: server/app/executors/runtime_config.py
-  reason: Agent Worker registration protocol settings live beside execution lease settings during rollout.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 250
+  ceiling: 267
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router and artifact authentication dependency.
@@ -136,10 +135,11 @@ exemptions:
   ceiling: 61
 - check: architecture.file_budget
   path: server/app/services/workflow_drafts.py
-  reason: Publish validation resolves Agent capabilities through the Agent Catalog.
+  reason: Publish validation resolves Agent capabilities through the Agent Catalog
+    and validates node resource references against injected provider declarations.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 69
+  ceiling: 75
 - check: architecture.file_budget
   path: server/app/services/workflow_revisions.py
   reason: Active revisions reconcile Agent routes at Host startup (capacity is

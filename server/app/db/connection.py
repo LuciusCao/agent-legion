@@ -63,7 +63,7 @@ class DatabaseConnection:
 
 def connect_database(dsn: DatabaseDsn) -> DatabaseConnection:
     if not dsn.startswith(("postgresql://", "postgres://")):
-        raise ValueError("VIDEO_HIVE_DATABASE_URL must be a PostgreSQL URL")
+        raise ValueError("AGENT_LEGION_DATABASE_URL must be a PostgreSQL URL")
     pool = pool_for(dsn)
     # A failed checkout (pool timeout or unreachable server) must not tear down
     # any pool: ConnectionPool recovers on its own, and other threads may still

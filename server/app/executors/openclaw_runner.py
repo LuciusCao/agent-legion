@@ -13,8 +13,46 @@ from typing import Any
 from server.app.executors.agent_workspace import cleanup_agent_workspace_files
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
+from server.app.skills.config import LockedSkillSource, SkillsLock
+from server.app.skills.errors import SkillConfigError
 
 logger = logging.getLogger(__name__)
+
+
+def _lock_repo_path(repo: str) -> str | None:
+    """Normalize a locked skill repo location to a local filesystem path."""
+    if repo.startswith("file://"):
+        repo = repo[len("file://") :]
+    path = Path(repo).expanduser()
+    if not path.is_absolute():
+        return None
+    return str(path.resolve())
+
+
+def resolve_skill_safety_repos(paths: list[str], lock: SkillsLock) -> list[dict[str, str]]:
+    """Resolve skill-safety whitelist paths to locked refs from ``skills.lock``.
+
+    The whitelist only declares which checkouts may be force-restored; the
+    restore ref is the locked commit (falling back to the locked ref), so the
+    runner can never checkout a ref that diverges from the skill manager pin.
+    """
+    locked_by_path: dict[str, LockedSkillSource] = {}
+    for source in lock.skills.values():
+        repo_path = _lock_repo_path(source.repo)
+        if repo_path is not None:
+            locked_by_path.setdefault(repo_path, source)
+    resolved: list[dict[str, str]] = []
+    for raw_path in paths:
+        path = str(Path(raw_path).expanduser().resolve())
+        locked = locked_by_path.get(path)
+        if locked is None:
+            raise SkillConfigError(
+                f"openclaw skill_safety repo {raw_path!r} is not declared in skills.lock; "
+                "declare the skill in config/skills.yaml and refresh the lock, or remove "
+                "the whitelist entry"
+            )
+        resolved.append({"path": path, "ref": locked.commit or locked.ref})
+    return resolved
 
 
 @dataclass

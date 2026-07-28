@@ -41,7 +41,12 @@ def test_fetch_questions_with_cms(tmp_path):
     detail.payload = {"raw": "data"}
 
     settings_config = {
-        "resource_providers": {"cms.question.detail": {"api_url": "https://cms.example.com"}}
+        "resource_providers": {
+            "cms.question.detail": {
+                "resource_key": "question_detail",
+                "api_url": "https://cms.example.com",
+            }
+        }
     }
 
     with (

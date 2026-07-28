@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.cms.client import DEFAULT_KNOWLEDGE_URL, CmsVideoLookup, _fetch_json
+from server.app.cms.client import CmsVideoLookup, _fetch_json, require_api_url
 
 # ---------------------------------------------------------------------------
 # Schema helpers – strict field access matching the actual CMS API contract
@@ -85,7 +85,7 @@ def _extract_knowledge_video_url(data: dict[str, Any]) -> tuple[str | None, str 
 def lookup_knowledge_video(
     code: str, api_url: str | None = None, token: str | None = None
 ) -> CmsVideoLookup:
-    url = api_url or DEFAULT_KNOWLEDGE_URL
+    url = require_api_url(api_url, "knowledge detail")
     payload = _fetch_json(url, {"code": code}, token)
     data = _parse_knowledge_payload(payload)
     if data is None:
