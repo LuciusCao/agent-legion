@@ -19,7 +19,7 @@ def _write(path: Path, text: str = "{}\n") -> None:
 
 
 def test_detect_layout_accepts_complete_split(tmp_path: Path):
-    for name in ("app.yaml", "video_hive.yaml", "workflow.yaml"):
+    for name in ("app.yaml", "agent_legion.yaml", "workflow.yaml"):
         _write(tmp_path / name)
     assert detect_layout(tmp_path).layout is ConfigLayout.SPLIT
 
@@ -30,10 +30,10 @@ def test_detect_layout_accepts_complete_split(tmp_path: Path):
         set(),
         {"workflow.yaml"},
         {"app.yaml"},
-        {"video_hive.yaml"},
+        {"agent_legion.yaml"},
         {"app.yaml", "workflow.yaml"},
-        {"video_hive.yaml", "workflow.yaml"},
-        {"app.yaml", "video_hive.yaml"},
+        {"agent_legion.yaml", "workflow.yaml"},
+        {"app.yaml", "agent_legion.yaml"},
     ],
 )
 def test_detect_layout_rejects_partial_split(tmp_path: Path, present: set[str]):
@@ -49,7 +49,7 @@ def test_detect_layout_rejects_partial_split(tmp_path: Path, present: set[str]):
 def test_split_layout_merges_owned_keys(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write(config_dir / "app.yaml", "data_dir: data\nserver: {port: 8000}\n")
-    _write(config_dir / "video_hive.yaml", "asr: {provider: auto}\n")
+    _write(config_dir / "agent_legion.yaml", "asr: {provider: auto}\n")
     _write(config_dir / "workflow.yaml", "workflows: {enabled: true}\n")
     loaded = load_application_config(tmp_path)
     assert loaded.layout is ConfigLayout.SPLIT
@@ -64,9 +64,53 @@ def test_split_layout_merges_owned_keys(tmp_path: Path):
 def test_split_layout_rejects_key_in_wrong_file(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write(config_dir / "app.yaml", "cms: {}\n")
-    _write(config_dir / "video_hive.yaml")
+    _write(config_dir / "agent_legion.yaml")
     _write(config_dir / "workflow.yaml")
     with pytest.raises(ConfigurationLoadError, match="app.yaml.*cms"):
+        load_application_config(tmp_path)
+
+
+# --- Legacy video_hive.yaml transition window (config governance G4) --------
+
+
+def test_legacy_video_hive_yaml_loads_with_warning(tmp_path: Path, caplog):
+    config_dir = tmp_path / "config"
+    _write(config_dir / "app.yaml", "data_dir: data\n")
+    _write(config_dir / "video_hive.yaml", "asr: {provider: auto}\n")
+    _write(config_dir / "workflow.yaml", "workflows: {enabled: true}\n")
+    with caplog.at_level("WARNING", logger="server.app.configuration.loader"):
+        loaded = load_application_config(tmp_path)
+    assert loaded.layout is ConfigLayout.SPLIT
+    assert loaded.config["asr"] == {"provider": "auto"}
+    assert any(path.name == "video_hive.yaml" for path in loaded.paths)
+    assert "video_hive.yaml" in caplog.text
+    assert "agent_legion.yaml" in caplog.text
+
+
+def test_legacy_video_hive_yaml_counts_toward_layout_completeness(tmp_path: Path):
+    # Only the legacy middle file exists: it covers the agent_legion.yaml slot,
+    # so the partial-layout error reports it as present (not missing).
+    _write(tmp_path / "video_hive.yaml")
+    with pytest.raises(ConfigurationLoadError) as exc_info:
+        detect_layout(tmp_path)
+    message = str(exc_info.value)
+    assert "present=['video_hive.yaml']" in message
+    assert "missing=['app.yaml', 'workflow.yaml']" in message
+
+
+def test_legacy_and_canonical_names_conflict(tmp_path: Path):
+    for name in ("app.yaml", "agent_legion.yaml", "video_hive.yaml", "workflow.yaml"):
+        _write(tmp_path / name)
+    with pytest.raises(ConfigurationLoadError, match="renaming"):
+        detect_layout(tmp_path)
+
+
+def test_legacy_file_obeys_owned_keys(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    _write(config_dir / "app.yaml")
+    _write(config_dir / "video_hive.yaml", "workflows: {}\n")
+    _write(config_dir / "workflow.yaml")
+    with pytest.raises(ConfigurationLoadError, match="video_hive.yaml.*unowned"):
         load_application_config(tmp_path)
 
 
