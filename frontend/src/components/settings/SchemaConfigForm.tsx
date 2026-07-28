@@ -1,26 +1,16 @@
 import { FormControlLabel, MenuItem, Switch, TextField } from '@mui/material'
 import type { ConfigSchema, ConfigSchemaProperty } from '../../types'
+import {
+  SecretConfigField,
+  configHelperText,
+  configPlaceholder,
+} from './SecretConfigField'
 
 interface Props {
   schema: ConfigSchema
   values: Record<string, unknown>
   onChange: (next: Record<string, unknown>) => void
   disabled?: boolean
-}
-
-function helperText(prop: ConfigSchemaProperty): string | undefined {
-  const parts: string[] = []
-  if (prop.description) parts.push(prop.description)
-  if (prop.minimum != null || prop.maximum != null) {
-    const min = prop.minimum != null ? String(prop.minimum) : '-∞'
-    const max = prop.maximum != null ? String(prop.maximum) : '+∞'
-    parts.push(`范围: ${min} ~ ${max}`)
-  }
-  return parts.length > 0 ? parts.join(' · ') : undefined
-}
-
-function placeholder(prop: ConfigSchemaProperty): string | undefined {
-  return prop.default != null ? String(prop.default) : undefined
 }
 
 export function SchemaConfigForm({
@@ -50,6 +40,22 @@ export function SchemaConfigForm({
   const renderField = (key: string, prop: ConfigSchemaProperty) => {
     const value = values[key]
 
+    if (prop.secret) {
+      // Secret values stay write-only: the raw string (including '') reaches
+      // the backend so an explicit clear does not drop the key.
+      return (
+        <SecretConfigField
+          key={key}
+          name={key}
+          prop={prop}
+          value={value}
+          required={required.has(key)}
+          disabled={disabled}
+          onChange={(next) => onChange({ ...values, [key]: next })}
+        />
+      )
+    }
+
     if (prop.enum) {
       return (
         <TextField
@@ -61,7 +67,7 @@ export function SchemaConfigForm({
           disabled={disabled}
           value={value ?? ''}
           onChange={(event) => setValue(key, event.target.value)}
-          helperText={helperText(prop)}
+          helperText={configHelperText(prop)}
           fullWidth
         >
           <MenuItem value="">（默认）</MenuItem>
@@ -99,7 +105,7 @@ export function SchemaConfigForm({
           variant="outlined"
           required={required.has(key)}
           disabled={disabled}
-          placeholder={placeholder(prop)}
+          placeholder={configPlaceholder(prop)}
           value={value ?? ''}
           onChange={(event) => {
             const raw = event.target.value
@@ -111,7 +117,7 @@ export function SchemaConfigForm({
             if (!Number.isNaN(num)) setValue(key, num)
           }}
           inputProps={{ min: prop.minimum, max: prop.maximum }}
-          helperText={helperText(prop)}
+          helperText={configHelperText(prop)}
           fullWidth
         />
       )
@@ -120,15 +126,15 @@ export function SchemaConfigForm({
     return (
       <TextField
         key={key}
-        type={prop.secret ? 'password' : 'text'}
+        type="text"
         label={key}
         variant="outlined"
         required={required.has(key)}
         disabled={disabled}
-        placeholder={placeholder(prop)}
+        placeholder={configPlaceholder(prop)}
         value={value ?? ''}
         onChange={(event) => setValue(key, event.target.value)}
-        helperText={helperText(prop)}
+        helperText={configHelperText(prop)}
         fullWidth
       />
     )

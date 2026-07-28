@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.services.vault import mask_resource_secrets
 from server.app.workflows.resource_schemas import resource_schemas_payload
 from server.app.workflows.resources import RESOURCE_PROVIDERS
 
@@ -35,7 +36,7 @@ def workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
         "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
         "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
         "workflowKey": workflow_key,
-        "resources": resources,
+        "resources": mask_resource_secrets(resources),
         "resourceSchemas": _RESOURCE_SCHEMAS,
         "nodeConfig": node_overrides,
     }

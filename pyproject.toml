@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Local processing console for educational videos and Agent Legion workflows"
 requires-python = ">=3.11"
 dependencies = [
+  "cryptography",
   "fastapi",
   "filelock",
   "funasr>=1.3.1",
