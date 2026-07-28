@@ -427,3 +427,15 @@ create table if not exists workspace_members (
   primary key (workspace_id, user_id)
 );
 create index if not exists idx_workspace_members_user_id on workspace_members(user_id);
+
+-- Vault (schema v16): per-workspace secrets encrypted with the Fernet master
+-- key (VAULT-SECRET-001). Only ciphertext is stored; plaintext never leaves
+-- the vault service layer and is never returned by the API.
+create table if not exists workspace_secrets (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  name text not null,
+  ciphertext text not null,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp,
+  primary key(workspace_id, name)
+);

@@ -11,18 +11,17 @@ from __future__ import annotations
 
 import logging
 from collections import deque
-from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.executors.models import (
-    ConfigurationFailureRequest,
-    ExecutionContext,
-    LeaseClaimRequest,
-)
+from server.app.executors.models import ConfigurationFailureRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.services.node_config import batch_source_payload, dispatch_effective_config
-from server.app.workflow_worker_execution import submit_claim
+from server.app.services.node_config import (
+    batch_source_payload,
+    dispatch_effective_config,
+    executor_definition_capability_schema,
+)
+from server.app.workflow_worker_executor_claim import claim_executor_node
 from server.app.workflow_worker_routing import resolve_node_route
 from server.app.workflow_worker_shards import assemble_reduce_inputs, claim_shard_node
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
@@ -160,55 +159,33 @@ def try_claim_and_submit(
             )
 
     executor_id = resolved.target_id
-    local_node_limit = resolved.local_node_limit
 
-    global_capacity = worker.registry.global_capacity(executor_id)
-    if global_capacity is None:
-        return False
-    if not snapshot.has_capacity(executor_id, workspace_id):
-        return False
-
-    claim = worker.leases.try_claim(
-        LeaseClaimRequest(
-            executor_id=executor_id,
-            global_capacity=global_capacity,
-            workspace_id=workspace_id,
-            job_id=job["id"],
-            workflow_key=workflow_key,
-            node_key=node_key,
-            capability=node.capability,
-            local_node_limit=local_node_limit,
-            lease_ttl_seconds=worker.runtime.lease_ttl_seconds,
-            log_path=str(log_path),
-            execution_mode=control_snapshot.get("execution_mode", "full")
-            if control_snapshot
-            else "full",
-            target_node_key=control_snapshot.get("target_node_key") if control_snapshot else None,
-            allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
+    try:
+        node_config = dispatch_effective_config(
+            executor_definition_capability_schema(
+                worker.settings.executor_definitions, executor_id, node.capability
+            ),
+            node,
+            workflow_key,
+            workspace,
+            batch_source_payload(worker.job_db, job),
         )
-    )
-    if claim is None:
-        return False
-    snapshot.record_claim(executor_id, workspace_id)
+    except ValueError as exc:
+        return _fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
-    context = ExecutionContext(
-        execution_id=claim.execution_id,
-        lease_id=claim.lease_id,
-        node_run_id=claim.node_run_id,
-        executor_id=claim.executor_id,
-        workspace_id=claim.workspace_id,
-        job_id=claim.job_id,
-        workflow_key=claim.workflow_key,
-        node_key=claim.node_key,
-        capability=claim.capability,
-        workspace=dict(workspace),
-        job=dict(job),
-        job_dir=job_dir,
-        log_path=log_path,
-        inputs=inputs,
-        expected_outputs=tuple(node.outputs),
-        runtime={"node_execution": asdict(node.execution)},
+    return claim_executor_node(
+        worker,
+        workspace,
+        job,
+        node,
+        job_dir,
+        log_path,
+        inputs,
+        executor_id,
+        resolved.local_node_limit,
+        workflow_key,
+        control_snapshot,
+        allowed_node_keys,
+        snapshot,
+        node_config,
     )
-
-    submit_claim(worker, executor_id, claim, context)
-    return True

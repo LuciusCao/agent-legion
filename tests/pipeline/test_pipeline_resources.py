@@ -107,3 +107,54 @@ def test_validate_resource_bindings_rejects_bad_values():
         validate_resource_bindings({"by_knowledge": {"config": {"page_size": "100"}}})
     with pytest.raises(ConfigSchemaError, match="must be <= 500"):
         validate_resource_bindings({"by_knowledge": {"config": {"page_size": 9999}}})
+
+
+def test_resolve_node_config_wins_over_binding_and_defaults(settings_config):
+    workspace = {
+        "resource_config": {
+            "resources": {
+                "question_detail": {
+                    "enabled": True,
+                    "config": {"subject_id": "5"},
+                }
+            }
+        }
+    }
+    result = resolve_cms_resource(
+        settings_config,
+        workspace,
+        None,
+        "question_detail",
+        node_config={"subject_id": "9", "bank_version": "v6"},
+    )
+    # node_config (spec D15) overrides both the binding config and the global
+    # cms defaults for the non-secret URL params the capability declares.
+    assert "subject_id=9" in result["api_url"]
+    assert "bank_version=v6" in result["api_url"]
+
+
+def test_resolve_node_config_empty_values_do_not_override(settings_config):
+    result = resolve_cms_resource(
+        settings_config, None, None, "question_detail", node_config={"bank_version": ""}
+    )
+    assert "bank_version=v5" in result["api_url"]
+
+
+def test_effective_cms_config_applies_context_node_config():
+    from server.app.workflows.cms_helpers import _effective_cms_config
+
+    context = {
+        "settings_config": {
+            "cms": {
+                "env": "prod",
+                "bank_version": "v5",
+                "country_id": "1",
+                "subject_id": "2",
+                "question_detail_url": "http://cms.example/detail",
+            },
+        },
+        "node_config": {"country_id": "8"},
+    }
+    resolved = _effective_cms_config({"source_id": "q1"}, context)
+    assert "country_id=8" in resolved["api_url"]
+    assert "bank_version=v5" in resolved["api_url"]

@@ -150,9 +150,3 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
   ceiling: 132
-- check: architecture.file_budget
-  path: server/app/workflow_worker_schedule.py
-  reason: Scheduler dispatches Agent nodes to the persistent queue while retaining Host-local handler claims.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 215

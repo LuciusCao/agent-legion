@@ -83,7 +83,10 @@ class JobIntakeService:
 
         try:
             node_config = resolve_workflow_node_configs(
-                definition, self.settings.agent_definitions, workspace
+                definition,
+                self.settings.agent_definitions,
+                workspace,
+                self.settings.executor_definitions,
             )
         except ValueError as exc:
             raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc
