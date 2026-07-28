@@ -23,6 +23,7 @@ def workspace_settings_payload_with_schemas(
     workflows: WorkflowCatalogService,
     agent_definitions: Mapping[str, AgentDefinition],
     workspace: dict[str, Any],
+    executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Settings payload plus the node config schemas for the current workflow."""
     payload = workspace_settings_payload(workspace)
@@ -34,7 +35,9 @@ def workspace_settings_payload_with_schemas(
         except NotFoundError:
             definition = None
         if definition is not None:
-            schemas = workflow_node_config_schemas(definition, agent_definitions)
+            schemas = workflow_node_config_schemas(
+                definition, agent_definitions, executor_definitions
+            )
     payload["nodeConfigSchemas"] = schemas
     return payload
 
@@ -45,6 +48,7 @@ def update_workspace_node_config(
     agent_definitions: Mapping[str, AgentDefinition],
     workspace: dict[str, Any],
     patch: dict[str, Any],
+    executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate and persist per-node overrides for the workspace's workflow.
 
@@ -56,7 +60,7 @@ def update_workspace_node_config(
         raise InvalidOperationError("nodeConfig must be a mapping of node key to values")
     workflow_key = str(workspace.get("default_workflow_key") or "")
     definition = workflows.definition(workflow_key)
-    schemas = workflow_node_config_schemas(definition, agent_definitions)
+    schemas = workflow_node_config_schemas(definition, agent_definitions, executor_definitions)
     node_config = workspace.get("node_config")
     next_node_config = dict(node_config) if isinstance(node_config, dict) else {}
     workflow_overrides = next_node_config.get(workflow_key)

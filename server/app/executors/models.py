@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 ExecutionStatus = Literal["completed", "failed", "cancelled"]
 
@@ -24,6 +24,9 @@ class ExecutionContext:
     inputs: tuple[str, ...]
     expected_outputs: tuple[str, ...]
     runtime: Mapping[str, object] = field(default_factory=dict)
+    # Effective node config resolved at dispatch (spec D15); empty for
+    # executors whose capability declares no config_schema.
+    node_config: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

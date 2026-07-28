@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -10,10 +10,21 @@ from pydantic import (
     field_validator,
 )
 
+from server.app.config_schema import validate_config_schema
+
 
 class LocalCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     handler: str = Field(min_length=1)
+    # Non-secret tunable parameters for the node_config chain (spec D15);
+    # secrets stay in resource bindings / the vault (spec D16).
+    config_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("config_schema", mode="after")
+    @classmethod
+    def _validate_config_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        validate_config_schema(value)
+        return value
 
 
 class PiCapabilityConfig(BaseModel):

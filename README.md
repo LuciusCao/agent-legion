@@ -49,6 +49,21 @@ cp .env.example .env
 cd frontend && cp .env.example .env
 ```
 
+The `.env` also carries the vault master key used to encrypt workspace secrets
+(CMS tokens and other `secret: true` binding fields) at rest. Generate one and
+set either `AGENT_LEGION_VAULT_MASTER_KEY` or
+`AGENT_LEGION_VAULT_MASTER_KEY_FILE` (pointing at a file containing the key):
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+Without a key the server still starts, but vault writes (saving a secret
+binding field, `PUT /api/workspaces/{id}/secrets/{name}`) and `secret_ref`
+resolution fail until one is configured. Existing plaintext tokens in old
+workspace bindings keep working through the compatibility window; re-saving
+the binding in Settings moves the value into the vault.
+
 ## Makefile Shortcuts
 
 A `Makefile` is provided to simplify the most common commands. It automatically sets `UV_CACHE_DIR=.uv-cache`, so you can omit the prefix in restricted sandboxes.
@@ -78,7 +93,7 @@ make upload-workspace-package # 从 workspace zip 直接上传审题信息
 Configuration is split by domain into files under `config/`:
 
 - `config/app.yaml`: PostgreSQL URL, application paths, HTTP settings, worker concurrency, log/run-dir cleanup, and token-usage pricing.
-- `config/video_hive.yaml`: ASR, CMS, resource providers, cleanup, and OpenClaw settings.
+- `config/video_hive.yaml`: ASR, CMS, resource providers (path/url_key plus the typed `config_schema` each provider accepts), cleanup, and OpenClaw settings.
 - `config/workflow.yaml`: workspace executors, workflow runtime, and Pi agent settings.
 - `config/skills.yaml` / `config/skills.lock`: skill source declarations and resolved versions for Pi agent nodes.
 - `config/agent-worker.example.yaml`: Worker Service 首次启动引导配置；每次 Worker 执行进程启动或重启时 claim 都会关闭，需通过本机 `http://127.0.0.1:8787` 控制台或 `workerctl claim enable` 主动开启（控制台自动注入 control token，API 端点除 `/api/health` 外均需该 token）。
@@ -168,7 +183,7 @@ Backend with automatic worker:
 UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port 8000
 ```
 
-The backend has no authentication layer; always bind it to `127.0.0.1` and never expose it with `--host 0.0.0.0`.
+The backend requires login for all business APIs (see [User Authentication](#user-authentication)); still always bind it to `127.0.0.1` and never expose it with `--host 0.0.0.0`.
 
 Frontend during development:
 
@@ -440,6 +455,7 @@ Agent Legion workflow (workspace / job) endpoints:
 - `POST /api/jobs/{job_id}/continue` — continue a paused job after a run-to target was reached
 - `DELETE /api/jobs/{job_id}` — delete job records, storage, and logs
 - `POST /api/workspaces/{workspace_id}/jobs/package` — package completed jobs
+- `GET/PUT/DELETE /api/workspaces/{workspace_id}/secrets[/{name}]` — vault secrets, write-only (GET returns names and metadata only, never values)
 
 Generic Workspace Job code follows the boundary: UI reads persisted Node state, mutations call
 services, and the scheduler claims Nodes through Executor leases. See [AGENTS.md](AGENTS.md) for

@@ -1,9 +1,9 @@
 from typing import Any
 
 from server.app.agents import AgentStatusManager
-from server.app.config_schema import ConfigSchemaError
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.vault import VaultService, apply_resources_patch
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_validation import (
@@ -16,28 +16,18 @@ from server.app.services.workspace_node_config import (
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
-from server.app.workflows.resource_schemas import validate_resource_bindings
 from server.app.workflows.resources import resolve_cms_resource
 
 
-def _build_settings_config(
-    current: dict[str, Any], patch: dict[str, Any]
-) -> tuple[dict[str, Any], dict[str, Any]]:
-    return (
-        {
-            "resources": patch["resources"]
-            if patch.get("resources") is not None
-            else current["resources"]
-        },
-        {
-            "enabled_modes": patch["intakeModes"]
-            if patch.get("intakeModes") is not None
-            else current["intakeModes"],
-            "label_overrides": patch["labelOverrides"]
-            if patch.get("labelOverrides") is not None
-            else current["labelOverrides"],
-        },
-    )
+def _build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "enabled_modes": patch["intakeModes"]
+        if patch.get("intakeModes") is not None
+        else current["intakeModes"],
+        "label_overrides": patch["labelOverrides"]
+        if patch.get("labelOverrides") is not None
+        else current["labelOverrides"],
+    }
 
 
 class WorkspaceConfigurationService:
@@ -59,9 +49,21 @@ class WorkspaceConfigurationService:
             raise NotFoundError("Workspace not found")
         return workspace
 
+    def _apply_resources_patch(
+        self, workspace_id: str, workspace: dict[str, Any], resources_patch: Any
+    ) -> dict[str, Any]:
+        """Validate a resources patch and persist secret fields via the vault."""
+        return apply_resources_patch(self._vault(), workspace_id, workspace, resources_patch)
+
+    def _vault(self) -> VaultService:
+        return VaultService(self.job_db.path, self.settings.config)
+
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
-            self.workflows, self.settings.agent_definitions, workspace
+            self.workflows,
+            self.settings.agent_definitions,
+            workspace,
+            self.settings.executor_definitions,
         )
 
     def list_workspaces(self) -> list[dict[str, Any]]:
@@ -149,7 +151,18 @@ class WorkspaceConfigurationService:
             if description_value is not None
             else str(workspace.get("description") or "")
         )
-        resource_config, intake_config = _build_settings_config(current, settings_patch)
+        if settings_patch.get("resources") is not None:
+            resource_config = self._apply_resources_patch(
+                workspace_id, workspace, settings_patch["resources"]
+            )
+        else:
+            # Reuse the stored raw config so secret_ref dicts survive a save
+            # that does not touch resources (the settings payload masks them).
+            raw_resource_config = workspace.get("resource_config")
+            resource_config = (
+                dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
+            )
+        intake_config = _build_intake_config(current, settings_patch)
         if agent_capacity is not None and agent_capacity <= 0:
             raise InvalidOperationError("Agent capacity must be a positive integer")
         try:
@@ -190,11 +203,8 @@ class WorkspaceConfigurationService:
                 dict(resource_config) if isinstance(resource_config, dict) else {}
             )
             if patch.get("resources") is not None:
-                try:
-                    validate_resource_bindings(patch["resources"])
-                except ConfigSchemaError as exc:
-                    raise InvalidOperationError(str(exc)) from exc
-                next_resource_config["resources"] = patch["resources"]
+                applied = self._apply_resources_patch(workspace_id, workspace, patch["resources"])
+                next_resource_config["resources"] = applied["resources"]
             workspace = self.job_db.update_workspace(
                 workspace_id, resource_config=next_resource_config
             )
@@ -228,6 +238,7 @@ class WorkspaceConfigurationService:
                 self.settings.agent_definitions,
                 workspace,
                 patch,
+                self.settings.executor_definitions,
             )
 
         else:
