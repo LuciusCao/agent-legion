@@ -47,8 +47,18 @@ def migrate_workspace_cms_config(conn: Any) -> None:
     Existing binding config keys win; legacy values only fill gaps. Bindings
     created by the migration are enabled so resolution keeps behaving like the
     legacy workspace-level config did. Idempotent: a second run finds every
-    key already present and writes nothing.
+    key already present and writes nothing. Databases already upgraded past
+    v15 no longer have the legacy column and are skipped.
     """
+    columns = {
+        row["column_name"]
+        for row in conn.execute(
+            "select column_name from information_schema.columns"
+            " where table_schema=current_schema() and table_name='workspaces'"
+        ).fetchall()
+    }
+    if "cms_config_json" not in columns:
+        return
     rows = conn.execute(
         "select id, cms_config_json, resource_config_json from workspaces"
     ).fetchall()

@@ -53,8 +53,23 @@ def test_env_example_lists_all_basecms_variables():
         "BASECMS_NONCE",
         "BASECMS_SECRET",
         "BASECMS_TOKEN_URL",
+        "AGENT_LEGION_VAULT_MASTER_KEY",
+        "AGENT_LEGION_VAULT_MASTER_KEY_FILE",
     ):
         assert f"{key}=" in example, f"{key} is missing from .env.example"
+
+
+def test_vault_master_key_env_overrides_map_to_config(tmp_path, monkeypatch):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", "fernet-key-value")
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", "/run/secrets/vault_key")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    vault = settings.config["vault"]
+    assert vault["master_key"] == "fernet-key-value"
+    assert vault["master_key_file"] == "/run/secrets/vault_key"
 
 
 def test_database_url_environment_override(tmp_path, monkeypatch):

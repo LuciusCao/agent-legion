@@ -399,3 +399,18 @@ invariants:
       - kind: integration
         target: tests/full/test_node_config_manifest.py
         gate: full
+
+  - id: VAULT-SECRET-001
+    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in binding configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/services/test_vault.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_workspace_secrets.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_vault_secret_freeze.py
+        gate: full

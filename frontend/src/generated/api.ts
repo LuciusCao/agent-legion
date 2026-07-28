@@ -1135,6 +1135,41 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/secrets': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workspace Secrets */
+    get: operations['list_workspace_secrets_api_workspaces__workspace_id__secrets_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/secrets/{name}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Put Workspace Secret */
+    put: operations['put_workspace_secret_api_workspaces__workspace_id__secrets__name__put']
+    post?: never
+    /** Delete Workspace Secret */
+    delete: operations['delete_workspace_secret_api_workspaces__workspace_id__secrets__name__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/settings': {
     parameters: {
       query?: never
@@ -3223,6 +3258,34 @@ export interface components {
       runs: {
         [key: string]: unknown
       }[]
+    }
+    /** WorkspaceSecretDeleteResponse */
+    WorkspaceSecretDeleteResponse: {
+      /** Deleted */
+      deleted: string
+    }
+    /** WorkspaceSecretMetadata */
+    WorkspaceSecretMetadata: {
+      /** Created At */
+      created_at: string
+      /** Name */
+      name: string
+      /** Updated At */
+      updated_at: string
+    }
+    /** WorkspaceSecretResponse */
+    WorkspaceSecretResponse: {
+      secret: components['schemas']['WorkspaceSecretMetadata']
+    }
+    /** WorkspaceSecretSetRequest */
+    WorkspaceSecretSetRequest: {
+      /** Value */
+      value: string
+    }
+    /** WorkspaceSecretsResponse */
+    WorkspaceSecretsResponse: {
+      /** Secrets */
+      secrets: components['schemas']['WorkspaceSecretMetadata'][]
     }
     /** WorkspaceSettingsPayload */
     WorkspaceSettingsPayload: {
@@ -5582,6 +5645,105 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceRunsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_workspace_secrets_api_workspaces__workspace_id__secrets_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceSecretsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  put_workspace_secret_api_workspaces__workspace_id__secrets__name__put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        name: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkspaceSecretSetRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceSecretResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_workspace_secret_api_workspaces__workspace_id__secrets__name__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        name: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceSecretDeleteResponse']
         }
       }
       /** @description Validation Error */
