@@ -1,55 +1,23 @@
-"""Typed parameter schemas for resource providers (spec D10).
+"""Typed parameter schema views for resource providers (spec D10/D11).
 
-Split from ``resources.py`` to keep that module within its size budget. The
-settings page renders its resource panel from these schemas, decoupled from
-intake modes.
+Declarations live in the ``resource_providers:`` config yaml section (loaded
+by ``resource_providers.py``); this module keeps the derived views consumed by
+the settings payload and the ``resolve_cms_resource`` chain.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from server.app.config_schema import (
-    ConfigSchemaError,
-    validate_config_schema,
-    validate_config_values,
-)
-
-_COMMON_RESOURCE_PARAMS: dict[str, Any] = {
-    "bank_version": {"type": "string"},
-    "country_id": {"type": "string"},
-    "subject_id": {"type": "string"},
-    "env": {"type": "string"},
-    "token": {"type": "string", "secret": True},
-}
-
-RESOURCE_PROVIDER_SCHEMAS: dict[str, dict[str, Any]] = {
-    "question_detail": {
-        "type": "object",
-        "properties": {
-            "api_url": {"type": "string"},
-            **_COMMON_RESOURCE_PARAMS,
-        },
-    },
-    "by_knowledge": {
-        "type": "object",
-        "properties": {
-            "api_url": {"type": "string"},
-            **_COMMON_RESOURCE_PARAMS,
-            "page_size": {"type": "integer", "minimum": 1, "maximum": 500},
-        },
-    },
-}
-
-for _schema in RESOURCE_PROVIDER_SCHEMAS.values():
-    validate_config_schema(_schema)
+from server.app.config_schema import ConfigSchemaError, validate_config_values
+from server.app.workflows.resource_providers import RESOURCE_PROVIDER_SCHEMAS
 
 
 def _url_param_keys(schema: dict[str, Any]) -> tuple[str, ...]:
     """URL query params declared by a schema (secrets and env excluded)."""
     return tuple(
         key
-        for key, prop in schema["properties"].items()
+        for key, prop in schema.get("properties", {}).items()
         if key != "api_url" and key != "env" and not prop.get("secret")
     )
 

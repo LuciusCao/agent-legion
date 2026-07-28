@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 
+from server.app.workflows.resource_providers import validate_node_resource_references
 from server.app.workflows.schema import (
     WorkflowCondition,
     WorkflowDefinition,
@@ -204,6 +205,8 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
         inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
+        resources = _string_list(raw_node.get("resources"), "resources", node_key)
+        validate_node_resource_references(node_key, resources)
         raw_config = raw_node.get("config")
         if raw_config is None:
             raw_config = {}
@@ -221,6 +224,7 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
             terminal=_load_terminal(raw_node, node_key),
             execution=load_node_execution(raw_node, node_key),
             config=dict(raw_config),
+            resources=resources,
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
         )
