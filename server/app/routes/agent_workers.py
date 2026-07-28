@@ -13,7 +13,9 @@ from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
+from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import parse_result_metadata
+from server.app.services.ops_metrics import OpsMetricsService
 from server.app.settings import Settings
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
@@ -121,6 +123,7 @@ def create_agent_workers_router(
     registry: AgentWorkerRegistry,
     completion: AgentCompletionHandler,
     settings: Settings,
+    ops_metrics: OpsMetricsService | None = None,
 ) -> APIRouter:
     router = APIRouter(tags=["agent-workers"])
     config = settings.executor_runtime.agent_workers
@@ -166,6 +169,9 @@ def create_agent_workers_router(
         if not lease_id:
             raise HTTPException(status_code=400, detail="missing Agent lease id")
         return lease_id
+
+    if ops_metrics is not None:
+        router.include_router(create_agent_worker_metrics_router(ops_metrics, authorize_worker))
 
     @router.post(
         "/agent-workers/register",

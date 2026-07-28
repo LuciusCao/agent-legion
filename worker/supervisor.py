@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
+from worker.metrics_cache import METRICS_FILENAME
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
@@ -74,6 +75,7 @@ class WorkerSupervisor:
             generation = self._generation
             status_file = self.store.state_dir / STATUS_FILENAME
             status_file.unlink(missing_ok=True)
+            (self.store.state_dir / METRICS_FILENAME).unlink(missing_ok=True)
             self._process = subprocess.Popen(
                 [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
                 stdout=subprocess.PIPE,
@@ -136,6 +138,7 @@ class WorkerSupervisor:
             self._logs.append(f"Worker 执行进程已退出，退出码 {exit_code}")
             if generation == self._generation:
                 (self.store.state_dir / STATUS_FILENAME).unlink(missing_ok=True)
+                (self.store.state_dir / METRICS_FILENAME).unlink(missing_ok=True)
             if generation != self._generation or self._shutdown:
                 return
             self._exit_code = exit_code

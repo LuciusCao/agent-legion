@@ -117,15 +117,12 @@ class Client:
             raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
         return json.loads(body)
 
-    def get_ops_metrics(
-        self, granularity: str, hours: int, days: int, worker_id: str | None = None
-    ) -> dict[str, Any]:
-        """Fetch the Host ops-metrics overview (unauthenticated endpoint)."""
-        params: dict[str, Any] = {"granularity": granularity, "hours": hours, "days": days}
-        if worker_id:
-            params["worker_id"] = worker_id
-        query = urllib.parse.urlencode(params)
-        status, body = self.request("GET", f"/api/metrics/overview?{query}")
+    def get_ops_metrics(self, granularity: str, hours: int, days: int) -> dict[str, Any]:
+        """Fetch this Worker's metrics with its issued Worker token."""
+        query = urllib.parse.urlencode({"granularity": granularity, "hours": hours, "days": days})
+        status, body = self.request("GET", f"/api/agent-workers/self/metrics?{query}")
+        if status in (401, 409):
+            raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
         if status != 200:
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
         return json.loads(body)

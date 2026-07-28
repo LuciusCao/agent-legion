@@ -37,6 +37,8 @@ from worker.cleanup import (
 )
 from worker.execution_lifecycle import heartbeat_loop, terminate, wait_for_exit
 from worker.host_client import Client, WorkerAuthError
+from worker.host_status_sync import sync_host_status
+from worker.metrics_cache import WorkerMetricsCache
 from worker.registration_retry import register_from_config
 from worker.status import ExecutionStatusReporter
 
@@ -228,22 +230,6 @@ def run_execution(
     shutil.rmtree(execution_dir, ignore_errors=True)
 
 
-def _remote_status(
-    worker: dict[str, Any] | None,
-    *,
-    host_reachable: bool,
-    connection_error: str | None = None,
-) -> dict[str, Any]:
-    registered = worker is not None and not bool(worker.get("revoked", False))
-    return {
-        "host_reachable": host_reachable,
-        "registered": registered,
-        "connected": registered,
-        "host_worker": worker,
-        "connection_error": connection_error,
-    }
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="Run an Agent Legion Worker")
     parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
@@ -252,6 +238,7 @@ def main() -> int:
     client = Client(str(config["host_url"]))
     stop = threading.Event()
     status = ExecutionStatusReporter.from_env()
+    metrics = WorkerMetricsCache.from_env()
     signal.signal(signal.SIGTERM, lambda *_: stop.set())
     signal.signal(signal.SIGINT, lambda *_: stop.set())
     poll_interval, registration = register_from_config(client, config, stop)
@@ -263,20 +250,10 @@ def main() -> int:
         "revoked": False,
     }
     try:
-        host_worker = client.get_self()
-        status.set_remote(_remote_status(host_worker, host_reachable=True))
+        host_worker = sync_host_status(client, status, metrics, host_worker)
     except WorkerAuthError as exc:
-        status.set_remote(_remote_status(None, host_reachable=True, connection_error=str(exc)))
         print(f"Agent Worker status authentication rejected: {exc}", flush=True)
         return 2
-    except Exception as exc:
-        status.set_remote(
-            _remote_status(
-                host_worker,
-                host_reachable=False,
-                connection_error=str(exc),
-            )
-        )
     max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
     work_root = Path(str(config.get("work_root", "/var/lib/agent-legion-worker"))).resolve()
     clean_work_root(work_root)
@@ -295,25 +272,13 @@ def main() -> int:
         while not stop.is_set():
             if time.monotonic() >= next_host_status:
                 try:
-                    host_worker = client.get_self()
-                    status.set_remote(_remote_status(host_worker, host_reachable=True))
+                    host_worker = sync_host_status(client, status, metrics, host_worker)
                 except WorkerAuthError as exc:
-                    status.set_remote(
-                        _remote_status(None, host_reachable=True, connection_error=str(exc))
-                    )
                     print(
                         f"Agent Worker rejected by server: {exc}; re-register required",
                         flush=True,
                     )
                     return 2
-                except Exception as exc:
-                    status.set_remote(
-                        _remote_status(
-                            host_worker,
-                            host_reachable=False,
-                            connection_error=str(exc),
-                        )
-                    )
                 next_host_status = time.monotonic() + interval
             if time.monotonic() >= next_sweep:
                 sweep_stale_executions(work_root)
