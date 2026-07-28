@@ -26,7 +26,9 @@ def workspace_settings_payload_with_schemas(
     executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Settings payload plus the node config schemas for the current workflow."""
-    payload = workspace_settings_payload(workspace)
+    payload = workspace_settings_payload(
+        workspace, declarations=workflows.settings.resource_providers
+    )
     schemas: dict[str, dict[str, Any]] = {}
     workflow_key = str(payload.get("workflowKey") or "")
     if workflow_key:

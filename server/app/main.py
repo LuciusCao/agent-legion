@@ -68,6 +68,7 @@ def build_executor_registry(
         skill_manager=skill_manager,
         openclaw_runtime=settings.executor_runtime.openclaw,
         settings_config=settings.config,
+        resource_providers=settings.resource_providers,
         job_db=job_db,
         cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
         artifact_store=artifact_store,

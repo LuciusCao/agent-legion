@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 import yaml
 
 from server.app.config_schema import ConfigSchemaError
 from server.app.settings import load_settings
-from server.app.workflows.resource_providers import (
-    PROJECT_ROOT,
-    RESOURCE_PROVIDER_SCHEMAS,
-    RESOURCE_PROVIDERS,
-    load_resource_provider_declarations,
-)
+from server.app.workflows.resource_providers import load_resource_provider_declarations
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 _COMMON_PROPERTIES = {
     "api_url": {"type": "string"},
@@ -52,7 +51,9 @@ EXPECTED_PROVIDERS = {
 
 
 def _repo_declarations():
-    raw = yaml.safe_load((PROJECT_ROOT / "config" / "video_hive.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load(
+        (PROJECT_ROOT / "config" / "agent_legion.yaml").read_text(encoding="utf-8")
+    )
     return load_resource_provider_declarations(raw["resource_providers"])
 
 
@@ -62,9 +63,11 @@ def test_yaml_declarations_match_previous_hardcoded_version():
     assert declarations.schemas == EXPECTED_SCHEMAS
 
 
-def test_module_constants_are_loaded_from_yaml():
-    assert RESOURCE_PROVIDERS == EXPECTED_PROVIDERS
-    assert RESOURCE_PROVIDER_SCHEMAS == EXPECTED_SCHEMAS
+def test_load_settings_exposes_repo_declarations(tmp_path, monkeypatch):
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    settings = load_settings(data_dir=tmp_path / "data")
+    assert settings.resource_providers.providers == EXPECTED_PROVIDERS
+    assert settings.resource_providers.schemas == EXPECTED_SCHEMAS
 
 
 def test_none_section_yields_empty_declarations():
@@ -142,6 +145,20 @@ def test_load_settings_accepts_valid_resource_provider_declarations(tmp_path, mo
     assert settings.config["resource_providers"]["cms.question.detail"]["resource_key"] == (
         "question_detail"
     )
+    # Declarations come from the explicit config_path, not the repo yaml:
+    # the repo declares by_knowledge as well, this file does not.
+    assert settings.resource_providers.providers == {
+        "question_detail": {
+            "provider": "cms.question.detail",
+            "url_key": "question_detail_url",
+        }
+    }
+    assert settings.resource_providers.schemas == {
+        "question_detail": {
+            "type": "object",
+            "properties": {"token": {"type": "string", "secret": True}},
+        }
+    }
 
 
 def test_load_settings_rejects_invalid_resource_provider_declarations(tmp_path, monkeypatch):

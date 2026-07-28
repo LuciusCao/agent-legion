@@ -96,7 +96,9 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         request: WorkflowDraftRequest,
     ) -> WorkflowDraftValidationResponse:
         require_workflows_enabled(settings)
-        errors = validate_workflow_definition(request.definition_yaml)
+        errors = validate_workflow_definition(
+            request.definition_yaml, settings.resource_providers.providers
+        )
         return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
 
     @router.post(
@@ -113,6 +115,7 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
             workspace_id,
             request.definition_yaml,
             settings.executor_definitions,
+            settings.resource_providers.providers,
         )
         return WorkflowDraftValidationResponse(valid=valid, errors=errors)
 
