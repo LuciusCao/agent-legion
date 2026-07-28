@@ -431,7 +431,7 @@ async function loadConfig() {
 let metricsGranularity = "minute";
 const GRANULARITY_QUERY = { minute: { hours: 6 }, hour: { hours: 24 }, day: { days: 7 } };
 
-// 纯函数：组装 /api/metrics/overview 的查询参数；worker_id=self 由服务端解析成本机 id。
+// 纯函数：组装本地缓存指标查询；Worker 身份由执行子进程的签发 token 决定。
 export function metricsParams(granularity) {
   return { granularity, ...GRANULARITY_QUERY[granularity], worker_id: "self" };
 }
