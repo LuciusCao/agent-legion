@@ -123,3 +123,29 @@ def test_get_self_rejects_invalid_worker_token(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(WorkerAuthError):
         Client("http://host", "bad-token").get_self()
+
+
+def test_get_ops_metrics_uses_worker_scoped_endpoint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[tuple[str, str]] = []
+
+    def fake_request(self, method: str, path: str, **kwargs) -> tuple[int, bytes]:
+        seen.append((method, path))
+        return 200, b'{"granularity":"minute","buckets":[]}'
+
+    monkeypatch.setattr(Client, "request", fake_request)
+
+    payload = Client("http://host", "worker-token").get_ops_metrics("minute", 6, 7)
+
+    assert payload["granularity"] == "minute"
+    assert seen == [("GET", "/api/agent-workers/self/metrics?granularity=minute&hours=6&days=7")]
+
+
+def test_get_ops_metrics_rejects_invalid_worker_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(Client, "request", lambda *args, **kwargs: (401, b"invalid token"))
+
+    with pytest.raises(WorkerAuthError):
+        Client("http://host", "bad-token").get_ops_metrics("hour", 24, 7)

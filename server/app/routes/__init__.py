@@ -69,9 +69,7 @@ def create_router(
         and agent_worker_registry is not None
         and agent_completion is not None
     ):
-        workers_router = create_agent_workers_router(
-            agent_broker, agent_worker_registry, agent_completion, settings
-        )
+        workers_router = create_agent_workers_router(agent_broker, agent_worker_registry, agent_completion, settings, ops_metrics)  # fmt: skip
         router.include_router(workers_router)
     if artifact_store is not None:
         router.include_router(
