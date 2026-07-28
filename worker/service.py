@@ -8,13 +8,14 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import uvicorn
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 
 from worker.host_client import Client
+from worker.metrics_proxy import create_metrics_proxy_router
 from worker.registration_token import registration_token_configured
 from worker.service_models import WorkerConfigPayload
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
@@ -127,24 +128,7 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
     def logs(limit: int = Query(default=200, ge=1, le=500)) -> dict[str, list[str]]:
         return {"lines": supervisor.logs(limit)}
 
-    @app.get("/api/metrics/overview", dependencies=guarded)
-    def metrics_overview(
-        granularity: Literal["minute", "hour", "day"] = "minute",
-        hours: int = Query(default=6, ge=1, le=24),
-        days: int = Query(default=7, ge=1, le=30),
-    ) -> dict[str, Any]:
-        """Proxy the Host ops-metrics endpoint scoped to this Worker's own slice."""
-        config = supervisor.store.read(require_identity=False)
-        worker_id = str(config.get("worker_id", ""))
-        if not worker_id:
-            raise HTTPException(status_code=409, detail="尚未配置本机 Worker ID")
-        host_url = str(config.get("host_url", ""))
-        if not host_url:
-            raise HTTPException(status_code=409, detail="尚未配置 Host 地址")
-        try:
-            return Client(host_url).get_ops_metrics(granularity, hours, days, worker_id)
-        except Exception as exc:  # noqa: BLE001 — Host 不可达 / 非 200 统一映射为 503
-            raise HTTPException(status_code=503, detail=f"Host 监控数据不可用：{exc}") from exc
+    app.include_router(create_metrics_proxy_router(supervisor), dependencies=guarded)
 
     return app
 

@@ -13,6 +13,7 @@ from fastapi.testclient import TestClient
 
 import worker.service as service_module
 import worker.supervisor as state_module
+from worker.metrics_cache import WorkerMetricsCache, metrics_cache_key, metrics_cache_path
 from worker.registration_token import registration_token_configured
 from worker.service import create_app
 from worker.supervisor import (
@@ -405,9 +406,7 @@ def test_metrics_overview_validates_query_params(tmp_path: Path) -> None:
         assert client.get("/api/metrics/overview?days=31", headers=headers).status_code == 422
 
 
-def test_metrics_overview_proxies_host_response(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_overview_reads_worker_authenticated_cache(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
@@ -427,19 +426,9 @@ def test_metrics_overview_proxies_host_response(
             }
         ],
     }
-    calls: list[tuple[str, str, int, int]] = []
-
-    class FakeHostClient:
-        def __init__(self, host: str) -> None:
-            self.host = host
-
-        def get_ops_metrics(
-            self, granularity: str, hours: int, days: int, worker_id: str | None = None
-        ) -> dict[str, Any]:
-            calls.append((self.host, granularity, hours, days))
-            return payload
-
-    monkeypatch.setattr(service_module, "Client", FakeHostClient)
+    WorkerMetricsCache(metrics_cache_path(store.state_dir)).publish(
+        {metrics_cache_key("hour", 24, 7): payload}
+    )
 
     with TestClient(app) as client:
         response = client.get(
@@ -448,72 +437,33 @@ def test_metrics_overview_proxies_host_response(
 
     assert response.status_code == 200
     assert response.json() == payload
-    assert calls == [("http://host.test:8000", "hour", 24, 7)]
 
 
-def test_metrics_overview_without_host_config_returns_409(tmp_path: Path) -> None:
-    store = WorkerConfigStore(tmp_path / "state")  # 未写入配置：host_url 为空
-    app = create_app(FakeSupervisor(store), tmp_path)
-
-    with TestClient(app) as client:
-        response = client.get("/api/metrics/overview", headers=_auth(store))
-
-    assert response.status_code == 409
-
-
-def test_metrics_overview_host_unreachable_returns_503(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_overview_without_cache_returns_503(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
-
-    def failing_metrics(
-        self: Any, granularity: str, hours: int, days: int, worker_id: str | None = None
-    ) -> dict[str, Any]:
-        raise RuntimeError("connection refused")
-
-    monkeypatch.setattr(service_module.Client, "get_ops_metrics", failing_metrics)
 
     with TestClient(app) as client:
         response = client.get("/api/metrics/overview", headers=_auth(store))
 
     assert response.status_code == 503
-    assert "Host" in response.json()["detail"]
+    assert "等待 Worker" in response.json()["detail"]
 
 
-def test_metrics_overview_always_uses_local_worker_id(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_metrics_overview_cache_error_returns_503(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
-    calls: list[str | None] = []
-
-    def fake_metrics(
-        self: Any, granularity: str, hours: int, days: int, worker_id: str | None = None
-    ) -> dict[str, Any]:
-        calls.append(worker_id)
-        return {"granularity": granularity, "buckets": []}
-
-    monkeypatch.setattr(service_module.Client, "get_ops_metrics", fake_metrics)
+    WorkerMetricsCache(metrics_cache_path(store.state_dir)).publish(
+        {}, "minute: connection refused"
+    )
 
     with TestClient(app) as client:
         response = client.get("/api/metrics/overview", headers=_auth(store))
 
-    assert response.status_code == 200
-    assert calls == ["worker-1"]  # 监控只代理本机切片，不提供全局视图
-
-
-def test_metrics_overview_without_worker_id_returns_409(tmp_path: Path) -> None:
-    store = WorkerConfigStore(tmp_path / "state")  # 未写入配置：worker_id 为空
-    app = create_app(FakeSupervisor(store), tmp_path)
-
-    with TestClient(app) as client:
-        response = client.get("/api/metrics/overview", headers=_auth(store))
-
-    assert response.status_code == 409
-    assert "Worker ID" in response.json()["detail"]
+    assert response.status_code == 503
+    assert "connection refused" in response.json()["detail"]
 
 
 def test_index_injects_control_token(tmp_path: Path) -> None:
@@ -653,9 +603,13 @@ def test_supervisor_injects_status_file_and_cleans_it_on_exit(
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
     supervisor = WorkerSupervisor(store, script)
+    metrics_path = tmp_path / "state" / "ops_metrics.json"
+    metrics_path.write_text("stale", encoding="utf-8")
     supervisor.start()
     try:
+        assert not metrics_path.exists()
         _wait_for(lambda: supervisor.status()["current_executions"] != [])
+        metrics_path.write_text("runtime", encoding="utf-8")
         status = supervisor.status()
         executions = status["current_executions"]
         assert [item["execution_id"] for item in executions] == ["exec-1"]
@@ -667,6 +621,7 @@ def test_supervisor_injects_status_file_and_cleans_it_on_exit(
         supervisor.stop()
     _wait_for(lambda: supervisor.status()["current_executions"] == [])
     assert not (tmp_path / "state" / "current_executions.json").exists()
+    assert not metrics_path.exists()
 
 
 def test_status_endpoint_exposes_current_executions(tmp_path: Path) -> None:

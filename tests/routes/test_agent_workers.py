@@ -3,10 +3,12 @@ from __future__ import annotations
 import io
 import json
 import tarfile
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from server.app.db.transaction import write_transaction
 from server.app.main import create_app
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import workflow_definition_from_mapping
@@ -104,6 +106,38 @@ def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -
     assert own_status.json()["name"] == "Home Mac mini"
     assert own_status.json()["revoked"] is False
     assert anonymous.status_code == 401
+
+
+def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
+    with write_transaction(app.state.job_db.path) as conn:
+        for worker_id, total_tokens in (("home-mini", 16), ("other-worker", 999)):
+            conn.execute(
+                """
+                insert into ops_metric_samples(
+                  bucket_start, worker_id, online_workers, active_executions,
+                  input_tokens, output_tokens, cache_read_tokens, total_tokens
+                ) values (?, ?, 1, 0, 10, 5, 1, ?)
+                """,
+                (bucket, worker_id, total_tokens),
+            )
+
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        path = "/api/agent-workers/self/metrics?granularity=minute&hours=1&worker_id=other-worker"
+        own = client.get(path, headers={"X-Agent-Worker-Token": token})
+        anonymous = client.get(path)
+        invalid = client.get(path, headers={"X-Agent-Worker-Token": "bad-token"})
+        _authenticate_admin(client)
+        session_only = client.get(path)
+
+    assert own.status_code == 200
+    rows = [row for row in own.json()["buckets"] if row["bucket_start"] == bucket.isoformat()]
+    assert [row["total_tokens"] for row in rows] == [16]
+    assert anonymous.status_code == 401
+    assert invalid.status_code == 401
+    assert session_only.status_code == 401
 
 
 def test_claim_requires_matching_worker_capability_and_model(tmp_path: Path) -> None:

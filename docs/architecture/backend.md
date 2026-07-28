@@ -104,6 +104,7 @@ server/app/
 
 | 方法 | 路径 | 处理函数 | 文件 |
 |------|------|----------|------|
+| GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | POST | `/agent-register-tokens` | `create_register_token` | routes/agent_workers.py |
 | GET | `/agent-register-tokens` | `list_register_tokens` | routes/agent_workers.py |
