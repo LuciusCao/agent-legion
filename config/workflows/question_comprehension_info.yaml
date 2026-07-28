@@ -16,6 +16,7 @@ nodes:
     after: []
     inputs: []
     outputs: [questions.json]
+    resources: [question_detail, by_knowledge]
   clean_and_parse:
     label: 清洗与解析
     capability: clean_and_parse
