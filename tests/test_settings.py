@@ -75,23 +75,115 @@ def test_vault_master_key_env_overrides_map_to_config(tmp_path, monkeypatch):
 def test_database_url_environment_override(tmp_path, monkeypatch):
     config_path = tmp_path / "app.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
-    monkeypatch.setenv("VIDEO_HIVE_DATABASE_URL", "postgresql://override/test")
+    # Skip the worktree .env so only the names set below are in play.
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.delenv("VIDEO_HIVE_DATABASE_URL", raising=False)
+    monkeypatch.setenv("AGENT_LEGION_DATABASE_URL", "postgresql://override/test")
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert settings.database_url == "postgresql://override/test"
 
 
+def test_database_url_deprecated_alias_still_applies(tmp_path, monkeypatch, caplog):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.delenv("AGENT_LEGION_DATABASE_URL", raising=False)
+    monkeypatch.setenv("VIDEO_HIVE_DATABASE_URL", "postgresql://override/alias")
+
+    with caplog.at_level("WARNING", logger="server.app.settings"):
+        settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.database_url == "postgresql://override/alias"
+    assert "VIDEO_HIVE_DATABASE_URL" in caplog.text
+    assert "AGENT_LEGION_DATABASE_URL" in caplog.text
+
+
+def test_database_url_env_both_set_same_value_accepted(tmp_path, monkeypatch):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_DATABASE_URL", "postgresql://override/same")
+    monkeypatch.setenv("VIDEO_HIVE_DATABASE_URL", "postgresql://override/same")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.database_url == "postgresql://override/same"
+
+
+def test_database_url_env_conflict_rejected(tmp_path, monkeypatch):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_DATABASE_URL", "postgresql://override/primary")
+    monkeypatch.setenv("VIDEO_HIVE_DATABASE_URL", "postgresql://override/alias")
+
+    with pytest.raises(ValueError, match="VIDEO_HIVE_DATABASE_URL") as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "AGENT_LEGION_DATABASE_URL" in str(exc_info.value)
+
+
 def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
     config_path = tmp_path / "app.yaml"
     config_path.write_text("database: {url: data/app.sqlite}\n", encoding="utf-8")
+    monkeypatch.delenv("AGENT_LEGION_DATABASE_URL", raising=False)
     monkeypatch.delenv("VIDEO_HIVE_DATABASE_URL", raising=False)
-    # Worktrees carry a real VIDEO_HIVE_DATABASE_URL in the project .env;
+    # Worktrees carry a real AGENT_LEGION_DATABASE_URL in the project .env;
     # skip it so the yaml value below is the one under test.
     monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
 
     with pytest.raises(ValueError, match="PostgreSQL URL"):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+
+def test_load_settings_rejects_retired_yaml_cms_token(tmp_path):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\ncms: {token: yaml-token}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"cms\.token") as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    message = str(exc_info.value)
+    assert "VIDEO_HIVE_CMS_TOKEN" in message
+    assert "BASECMS_TOKEN" in message
+
+
+def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\n"
+        "cms:\n"
+        "  token_gen:\n"
+        "    app_id: a\n"
+        "    nonce: n\n"
+        "    secret: s\n"
+        "    url: http://yaml/token\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"cms\.token_gen") as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    message = str(exc_info.value)
+    for env_key in ("BASECMS_APP_ID", "BASECMS_NONCE", "BASECMS_SECRET", "BASECMS_TOKEN_URL"):
+        assert env_key in message
+
+
+def test_load_settings_rejects_retired_yaml_cms_keys_in_split_layout(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
+    (config_dir / "agent_legion.yaml").write_text("cms: {token: yaml-token}\n", encoding="utf-8")
+    (config_dir / "workflow.yaml").write_text("workflows: {enabled: false}\n", encoding="utf-8")
+    monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(ValueError, match=r"cms\.token"):
+        load_settings()
 
 
 def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypatch):
@@ -107,19 +199,7 @@ def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypa
     monkeypatch.setenv("BASECMS_TOKEN_URL", "http://basecms/token")
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
-        "data_dir: data\n"
-        "cms:\n"
-        "  token: yaml-token\n"
-        "  token_gen:\n"
-        "    app_id: yaml-app\n"
-        "    nonce: yaml-nonce\n"
-        "    secret: yaml-secret\n"
-        "    url: http://yaml/token\n"
-        "openclaw:\n"
-        "  cwd: .\n"
-        "  command_template:\n"
-        "    - openclaw\n"
-        "    - agent\n",
+        "data_dir: data\nopenclaw:\n  cwd: .\n  command_template:\n    - openclaw\n    - agent\n",
         encoding="utf-8",
     )
 
@@ -141,11 +221,7 @@ def _write_split_config(root: Path) -> None:
     config_dir = root / "config"
     config_dir.mkdir()
     (config_dir / "app.yaml").write_text("data_dir: data\nserver: {}\n", encoding="utf-8")
-    (config_dir / "video_hive.yaml").write_text(
-        "cms:\n"
-        "  token: yaml-token\n"
-        "  token_gen:\n"
-        "    secret: yaml-secret\n"
+    (config_dir / "agent_legion.yaml").write_text(
         "asr:\n"
         "  provider: whisper\n"
         "  whisper:\n"
@@ -185,14 +261,17 @@ def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
 
     settings = load_settings()
 
-    assert settings.config["cms"]["token"] == "yaml-token"
+    # With the dotenv skipped, no env-injected CMS token exists; yaml values
+    # from the split config stand on their own.
+    assert "token" not in settings.config.get("cms", {})
+    assert settings.config["asr"]["whisper"]["binary"] == "yaml-binary"
 
 
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
-    (config_dir / "video_hive.yaml").write_text(
+    (config_dir / "agent_legion.yaml").write_text(
         "cms: {base_url: 'https://cms.example/v2'}\n"
         "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
         encoding="utf-8",
@@ -252,6 +331,7 @@ def test_load_settings_builds_agent_catalog(tmp_path, monkeypatch):
         "    skill: question/generate_key_info\n",
         encoding="utf-8",
     )
+    monkeypatch.delenv("AGENT_LEGION_DATABASE_URL", raising=False)
     monkeypatch.delenv("VIDEO_HIVE_DATABASE_URL", raising=False)
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
@@ -302,7 +382,6 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
         "    enabled: true\n"
         "    repos:\n"
         "      - path: ~/.openclaw/workspace/skills/s1\n"
-        "        ref: v1.0.0\n"
         "  command_template:\n"
         "    - openclaw\n"
         "    - agent\n",
@@ -318,10 +397,32 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     assert settings.executor_runtime.openclaw.timeout_seconds == 600
     assert settings.executor_runtime.openclaw.command_template == ("openclaw", "agent")
     assert settings.executor_runtime.openclaw.skill_safety.enabled is True
-    assert settings.executor_runtime.openclaw.skill_safety.repos == [
-        {"path": "~/.openclaw/workspace/skills/s1", "ref": "v1.0.0"}
+    assert [repo.path for repo in settings.executor_runtime.openclaw.skill_safety.repos] == [
+        "~/.openclaw/workspace/skills/s1"
     ]
     assert settings.config["workflows"]["pi"]["thinking"] == "low"
+
+
+def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
+    """skill_safety refs were retired (config governance G3); lock is the source."""
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "openclaw:\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "  skill_safety:\n"
+        "    enabled: true\n"
+        "    repos:\n"
+        "      - path: ~/.openclaw/workspace/skills/s1\n"
+        "        ref: v1.0.0\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "ref" in str(exc_info.value)
 
 
 def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeypatch):
@@ -362,8 +463,8 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
             "legacy",
             "BASECMS_BASE_URL",
             ["cms", "base_url"],
-            "http://cms.internal.example.com/v2",
-            "http://cms.internal.example.com/v2",
+            "http://cms.internal.example.cn/v2",
+            "http://cms.internal.example.cn/v2",
         ),
         ("legacy", "VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
         (
@@ -400,8 +501,8 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
             "split",
             "BASECMS_BASE_URL",
             ["cms", "base_url"],
-            "http://cms.internal.example.com/v2",
-            "http://cms.internal.example.com/v2",
+            "http://cms.internal.example.cn/v2",
+            "http://cms.internal.example.cn/v2",
         ),
         ("split", "VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
         (
@@ -444,10 +545,6 @@ def test_env_override_precedes_yaml(
         config_path_file = tmp_path / "workflow.yaml"
         config_path_file.write_text(
             "data_dir: data\n"
-            "cms:\n"
-            "  token: yaml-token\n"
-            "  token_gen:\n"
-            "    secret: yaml-secret\n"
             "asr:\n"
             "  provider: whisper\n"
             "  whisper:\n"

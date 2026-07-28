@@ -77,7 +77,7 @@ def main() -> None:
     parser.add_argument(
         "--database-url",
         default=None,
-        help="Override the configured VIDEO_HIVE_DATABASE_URL.",
+        help="Override the configured AGENT_LEGION_DATABASE_URL.",
     )
     args = parser.parse_args()
 
