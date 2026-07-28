@@ -1,16 +1,18 @@
 """Typed parameter schema views for resource providers (spec D10/D11).
 
-Declarations live in the ``resource_providers:`` config yaml section (loaded
-by ``resource_providers.py``); this module keeps the derived views consumed by
-the settings payload and the ``resolve_cms_resource`` chain.
+Declarations live in the ``resource_providers:`` config yaml section (parsed
+by ``resource_providers.py`` and injected via ``Settings.resource_providers``);
+this module keeps the derived views consumed by the settings payload and the
+``resolve_cms_resource`` chain. Every function takes the schema mapping
+explicitly so importing this module has no configuration side effects.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 from server.app.config_schema import ConfigSchemaError, validate_config_values
-from server.app.workflows.resource_providers import RESOURCE_PROVIDER_SCHEMAS
 
 
 def _url_param_keys(schema: dict[str, Any]) -> tuple[str, ...]:
@@ -22,27 +24,23 @@ def _url_param_keys(schema: dict[str, Any]) -> tuple[str, ...]:
     )
 
 
-def resource_param_keys(resource_key: str) -> tuple[str, ...]:
+def resource_param_keys(
+    resource_key: str, schemas: Mapping[str, Any] | None = None
+) -> tuple[str, ...]:
     """URL query params declared by one resource's provider schema."""
-    schema = RESOURCE_PROVIDER_SCHEMAS.get(resource_key)
+    schema = (schemas or {}).get(resource_key)
     if schema is None:
         return ()
     return _url_param_keys(schema)
 
 
-RESOURCE_PARAM_KEYS = tuple(
-    dict.fromkeys(
-        key for schema in RESOURCE_PROVIDER_SCHEMAS.values() for key in _url_param_keys(schema)
-    )
-)
-
-
-def validate_resource_bindings(resources: Any) -> None:
+def validate_resource_bindings(resources: Any, schemas: Mapping[str, Any] | None = None) -> None:
     """Validate a settings-page ``resources`` patch against the provider schemas."""
     if not isinstance(resources, dict):
         raise ConfigSchemaError("resources must be a mapping")
+    schemas = schemas or {}
     for key, binding in resources.items():
-        schema = RESOURCE_PROVIDER_SCHEMAS.get(key)
+        schema = schemas.get(key)
         if schema is None:
             raise ConfigSchemaError(f"unknown resource {key!r}")
         if not isinstance(binding, dict):
@@ -55,13 +53,15 @@ def validate_resource_bindings(resources: Any) -> None:
         )
 
 
-def resource_schemas_payload(providers: dict[str, Any]) -> dict[str, Any]:
+def resource_schemas_payload(
+    providers: Mapping[str, Any], schemas: Mapping[str, Any]
+) -> dict[str, Any]:
     """Settings-payload view: resource key → provider name + typed schema."""
     return {
         key: {
             "provider": str(providers[key]["provider"]),
-            "schema": RESOURCE_PROVIDER_SCHEMAS[key],
+            "schema": schemas[key],
         }
         for key in providers
-        if key in RESOURCE_PROVIDER_SCHEMAS
+        if key in schemas
     }

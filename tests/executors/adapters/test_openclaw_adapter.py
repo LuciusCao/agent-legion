@@ -2,12 +2,22 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+import yaml
+
 from server.app.executors.config import (
     OpenClawCapabilityConfig,
+    OpenClawExecutorConfig,
 )
 from server.app.executors.models import ExecutionContext
-from server.app.executors.openclaw import OpenClawExecutor
+from server.app.executors.openclaw import OpenClawExecutor, build_openclaw_executor
 from server.app.executors.openclaw_runner import OpenClawRunner
+from server.app.executors.runtime_config import (
+    OpenClawRuntimeConfig,
+    OpenClawSkillSafetyRuntimeConfig,
+)
+from server.app.skills.errors import SkillConfigError
+from server.app.skills.manager import SkillManager
 
 
 def test_openclaw_executor_supports_capability(tmp_path: Path) -> None:
@@ -184,3 +194,93 @@ def test_openclaw_executor_prepends_skill_to_prompt(tmp_path: Path) -> None:
     assert prompt_file.is_file()
     prompt_text = prompt_file.read_text(encoding="utf-8")
     assert "Use the installed skill interaction." in prompt_text
+
+
+def _executor_config() -> OpenClawExecutorConfig:
+    return OpenClawExecutorConfig(
+        kind="openclaw",
+        agent_id="main",
+        global_capacity=1,
+        capabilities={"interaction_generate": OpenClawCapabilityConfig(skill="interaction")},
+    )
+
+
+def _skill_manager(tmp_path: Path, skills: dict[str, dict[str, str]]) -> SkillManager:
+    lock_path = tmp_path / "skills.lock"
+    lock_path.write_text(
+        yaml.safe_dump({"version": "1", "skills": skills}),
+        encoding="utf-8",
+    )
+    return SkillManager(
+        config_path=tmp_path / "skills.yaml",
+        lock_path=lock_path,
+        base_dir=tmp_path / "skill-cache",
+    )
+
+
+def test_build_openclaw_executor_resolves_skill_safety_refs_from_lock(tmp_path: Path) -> None:
+    skill_repo = tmp_path / "skills" / "generate_chapters"
+    manager = _skill_manager(
+        tmp_path,
+        {
+            "video_knowledge/generate_chapters": {
+                "repo": f"file://{skill_repo}",
+                "ref": "v1.0.1",
+                "commit": "abc123",
+            }
+        },
+    )
+    runtime = OpenClawRuntimeConfig(
+        command_template=("openclaw",),
+        skill_safety=OpenClawSkillSafetyRuntimeConfig(
+            enabled=True,
+            repos=[{"path": str(skill_repo)}],
+        ),
+    )
+
+    executor = build_openclaw_executor("oc", runtime, _executor_config(), skill_manager=manager)
+
+    assert executor.runner.skill_safety is not None
+    assert executor.runner.skill_safety.repos == [
+        {"path": str(skill_repo.expanduser().resolve()), "ref": "abc123"}
+    ]
+
+
+def test_build_openclaw_executor_rejects_safety_repo_missing_from_lock(tmp_path: Path) -> None:
+    manager = _skill_manager(tmp_path, {})
+    runtime = OpenClawRuntimeConfig(
+        command_template=("openclaw",),
+        skill_safety=OpenClawSkillSafetyRuntimeConfig(
+            enabled=True,
+            repos=[{"path": str(tmp_path / "unknown")}],
+        ),
+    )
+
+    with pytest.raises(SkillConfigError, match="not declared in skills.lock"):
+        build_openclaw_executor("oc", runtime, _executor_config(), skill_manager=manager)
+
+
+def test_build_openclaw_executor_requires_skill_manager_for_safety(tmp_path: Path) -> None:
+    runtime = OpenClawRuntimeConfig(
+        command_template=("openclaw",),
+        skill_safety=OpenClawSkillSafetyRuntimeConfig(
+            enabled=True,
+            repos=[{"path": str(tmp_path / "skills" / "s1")}],
+        ),
+    )
+
+    with pytest.raises(SkillConfigError, match="no skill manager"):
+        build_openclaw_executor("oc", runtime, _executor_config())
+
+
+def test_build_openclaw_executor_disabled_safety_skips_lock(tmp_path: Path) -> None:
+    runtime = OpenClawRuntimeConfig(
+        command_template=("openclaw",),
+        skill_safety=OpenClawSkillSafetyRuntimeConfig(enabled=False, repos=[]),
+    )
+
+    executor = build_openclaw_executor("oc", runtime, _executor_config())
+
+    assert executor.runner.skill_safety is not None
+    assert executor.runner.skill_safety.enabled is False
+    assert executor.runner.skill_safety.repos == []

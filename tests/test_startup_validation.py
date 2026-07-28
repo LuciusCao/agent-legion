@@ -193,7 +193,7 @@ def test_cms_credentials_allowed_when_no_cms_resource(tmp_path, monkeypatch):
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\ncms:\n  token: ''\n"
+    config += "\ncms:\n  env: dev\n"
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
@@ -213,10 +213,6 @@ def test_cms_credentials_required_when_cms_resource_enabled(tmp_path, monkeypatc
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-cms:
-  token: ''
-  token_gen:
-    secret: ''
 resource_providers:
   cms.question.detail:
     resource_key: question_detail
@@ -228,7 +224,9 @@ resource_providers:
 
     fields = [loc for loc, _ in exc_info.value.fields]
     assert "cms.token" in fields
-    assert "cms.token_gen.secret" in fields
+    message = str(exc_info.value)
+    assert "BASECMS_TOKEN" in message
+    assert "vault" in message
 
 
 def test_cms_credentials_required_for_provider_keyed_defaults(tmp_path, monkeypatch):
@@ -246,10 +244,6 @@ def test_cms_credentials_required_for_provider_keyed_defaults(tmp_path, monkeypa
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-cms:
-  token: ''
-  token_gen:
-    secret: ''
 resource_providers:
   cms.question.detail:
     resource_key: question_detail
@@ -260,7 +254,7 @@ resource_providers:
         _load_and_validate(tmp_path, monkeypatch, config)
 
     fields = {loc for loc, _ in exc_info.value.fields}
-    assert {"cms.token", "cms.token_gen.secret"} <= fields
+    assert "cms.token" in fields
 
 
 def test_aggregate_invalid_fields_in_one_exception(tmp_path, monkeypatch):
@@ -302,10 +296,6 @@ def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch)
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-cms:
-  token: ''
-  token_gen:
-    secret: ''
 resource_providers:
   cms.question.detail:
     resource_key: question_detail
@@ -329,10 +319,6 @@ def test_cms_resource_accepts_basecms_token_env(tmp_path, monkeypatch):
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-cms:
-  token: ''
-  token_gen:
-    secret: ''
 resource_providers:
   cms.question.detail:
     resource_key: question_detail
@@ -352,10 +338,6 @@ def test_cms_resource_accepts_basecms_token_gen_env(tmp_path, monkeypatch):
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-cms:
-  token: ''
-  token_gen:
-    secret: ''
 resource_providers:
   cms.question.detail:
     resource_key: question_detail

@@ -20,13 +20,19 @@ class WorkflowCatalogService:
 
     def definition(self, workflow_key: str) -> WorkflowDefinition:
         try:
-            return load_registered_workflow(self.settings.root_dir, workflow_key)
+            return load_registered_workflow(
+                self.settings.root_dir,
+                workflow_key,
+                self.settings.resource_providers.providers,
+            )
         except KeyError as exc:
             raise NotFoundError("Unknown workflow") from exc
 
     def list_workflows(self) -> list[dict[str, Any]]:
         workflows: list[dict[str, Any]] = []
-        for definition in list_registered_workflows(self.settings.root_dir):
+        for definition in list_registered_workflows(
+            self.settings.root_dir, self.settings.resource_providers.providers
+        ):
             workflows.append(
                 {
                     "key": definition.key,

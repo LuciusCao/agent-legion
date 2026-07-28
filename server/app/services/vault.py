@@ -15,6 +15,7 @@ responses carry names and metadata exclusively.
 from __future__ import annotations
 
 import os
+from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -27,7 +28,6 @@ from server.app.db.transaction import read_connection, write_transaction
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.settings import Settings
-from server.app.workflows.resource_providers import RESOURCE_PROVIDER_SCHEMAS
 from server.app.workflows.resource_schemas import validate_resource_bindings
 
 _MAX_NAME_LENGTH = 128
@@ -83,9 +83,11 @@ def resource_secret_name(resource_key: str, field: str) -> str:
     return f"resource:{resource_key}:{field}"
 
 
-def secret_field_names(resource_key: str) -> tuple[str, ...]:
+def secret_field_names(
+    resource_key: str, schemas: Mapping[str, Any] | None = None
+) -> tuple[str, ...]:
     """Config fields marked ``secret: true`` by the resource provider schema."""
-    schema = RESOURCE_PROVIDER_SCHEMAS.get(resource_key) or {}
+    schema = (schemas or {}).get(resource_key) or {}
     properties = schema.get("properties")
     if not isinstance(properties, dict):
         return ()
@@ -214,7 +216,7 @@ class VaultService:
         return resolved
 
 
-def strip_resource_secret_fields(resources: Any) -> Any:
+def strip_resource_secret_fields(resources: Any, schemas: Mapping[str, Any] | None = None) -> Any:
     """Copy of a resources patch with secret field values removed.
 
     The stripped view is what ``validate_resource_bindings`` checks, so the
@@ -225,7 +227,7 @@ def strip_resource_secret_fields(resources: Any) -> Any:
         return resources
     stripped: dict[str, Any] = {}
     for resource_key, binding in resources.items():
-        fields = secret_field_names(str(resource_key))
+        fields = secret_field_names(str(resource_key), schemas)
         if not fields or not isinstance(binding, dict):
             stripped[resource_key] = binding
             continue
@@ -243,6 +245,7 @@ def apply_resource_secret_fields(
     workspace_id: str,
     resources: Any,
     current_resources: Any,
+    schemas: Mapping[str, Any] | None = None,
 ) -> Any:
     """Move secret field values into the vault and store ``secret_ref`` dicts.
 
@@ -258,7 +261,7 @@ def apply_resource_secret_fields(
         return resources
     result: dict[str, Any] = {}
     for resource_key, raw_binding in resources.items():
-        fields = secret_field_names(str(resource_key))
+        fields = secret_field_names(str(resource_key), schemas)
         if not fields or not isinstance(raw_binding, dict):
             result[resource_key] = raw_binding
             continue
@@ -303,6 +306,7 @@ def apply_resources_patch(
     workspace_id: str,
     workspace: dict[str, Any],
     resources_patch: Any,
+    schemas: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate a resources patch and divert secret fields to the vault.
 
@@ -311,13 +315,13 @@ def apply_resources_patch(
     shape never reaches the generic config validation (spec D13).
     """
     try:
-        validate_resource_bindings(strip_resource_secret_fields(resources_patch))
+        validate_resource_bindings(strip_resource_secret_fields(resources_patch, schemas), schemas)
         raw_resource_config = workspace.get("resource_config")
         current_resources = (
             raw_resource_config.get("resources") if isinstance(raw_resource_config, dict) else None
         )
         resources = apply_resource_secret_fields(
-            vault, workspace_id, resources_patch, current_resources
+            vault, workspace_id, resources_patch, current_resources, schemas
         )
     except (ConfigSchemaError, VaultError) as exc:
         raise InvalidOperationError(str(exc)) from exc
@@ -330,7 +334,9 @@ def _is_secret_set(value: Any) -> bool:
     return isinstance(value, dict) and "secret_ref" in value
 
 
-def mask_resource_secrets(resources: dict[str, Any]) -> dict[str, Any]:
+def mask_resource_secrets(
+    resources: dict[str, Any], schemas: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
     """Replace secret binding values with a write-only ``secret_set`` marker.
 
     Secret values (legacy plaintext or ``secret_ref`` dicts) never leave the
@@ -339,7 +345,7 @@ def mask_resource_secrets(resources: dict[str, Any]) -> dict[str, Any]:
     """
     masked: dict[str, Any] = {}
     for resource_key, binding in resources.items():
-        fields = secret_field_names(str(resource_key))
+        fields = secret_field_names(str(resource_key), schemas)
         if not fields or not isinstance(binding, dict):
             masked[resource_key] = binding
             continue

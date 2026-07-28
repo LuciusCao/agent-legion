@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
 from server.app.skills.manager import SkillManager
+from server.app.workflows.resource_providers import ResourceProviderDeclarations
 
 if TYPE_CHECKING:
     from server.app.services.artifact_store import ArtifactStore
@@ -48,6 +49,9 @@ class RuntimeDependencies:
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
     settings_config: Mapping[str, Any] | None = None
+    resource_providers: ResourceProviderDeclarations = field(
+        default_factory=ResourceProviderDeclarations
+    )
     job_db: Any | None = None
     cancellation_grace_seconds: int = 5
     artifact_store: ArtifactStore | None = None

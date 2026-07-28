@@ -27,7 +27,7 @@ For the full directory tree, see [docs/architecture/project-structure.md](docs/a
 ```bash
 uv sync
 createdb agent_legion
-export VIDEO_HIVE_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
 cd frontend
 npm install
 ```
@@ -92,13 +92,25 @@ make upload-workspace-package # 从 workspace zip 直接上传审题信息
 
 Configuration is split by domain into files under `config/`:
 
-- `config/app.yaml`: PostgreSQL URL, application paths, HTTP settings, worker concurrency, log/run-dir cleanup, and token-usage pricing.
-- `config/video_hive.yaml`: ASR, CMS, resource providers (path/url_key plus the typed `config_schema` each provider accepts), cleanup, and OpenClaw settings.
-- `config/workflow.yaml`: workspace executors, workflow runtime, and Pi agent settings.
-- `config/skills.yaml` / `config/skills.lock`: skill source declarations and resolved versions for Pi agent nodes.
+- `config/app.yaml`: PostgreSQL URL, application paths, HTTP settings, log/run-dir cleanup, monitoring, and token-usage pricing.
+- `config/agent_legion.yaml`: ASR, CMS, resource providers (path/url_key plus the typed `config_schema` each provider accepts), and OpenClaw settings. (Formerly `config/video_hive.yaml`; the old file name still loads with a warning during the transition window, and both files existing at once is a startup error.)
+- `config/workflow.yaml`: agent catalog (`agents`), agent worker registration (`agent_workers`), workspace executors (`executors`; local executor concurrency is `executors.local-default.global_capacity`), workflow runtime, and Pi agent settings.
+- `config/workflows/*.yaml`: workflow DAG definitions; nodes declare only `capability`.
+- `config/skills.yaml` / `config/skills.lock`: skill source declarations and resolved versions for Pi agent nodes. The lock file is the single authority for skill refs; writing a `ref` into yaml is a startup error (see the G3 note below).
 - `config/agent-worker.example.yaml`: Worker Service 首次启动引导配置；每次 Worker 执行进程启动或重启时 claim 都会关闭，需通过本机 `http://127.0.0.1:8787` 控制台或 `workerctl claim enable` 主动开启（控制台自动注入 control token，API 端点除 `/api/health` 外均需该 token）。
 
-Edit `config/video_hive.yaml` for:
+Each split file accepts only its owned top-level keys (declared in
+`server/app/configuration/owned_keys.py`); an unrecognized section name fails
+startup. Two sections are env-only by design: `vault` (master key) and `auth`
+(bootstrap admin password) are injected exclusively via the env vars
+`AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE` and
+`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`, and are rejected by the owned-key
+check if written into a yaml file. Likewise the database URL is governed by
+env: `AGENT_LEGION_DATABASE_URL` is authoritative and `VIDEO_HIVE_DATABASE_URL`
+a deprecated alias — set at most one; conflicting values fail startup (config
+governance G4).
+
+Edit `config/agent_legion.yaml` for:
 
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: local `whisper-cli`.
@@ -114,6 +126,46 @@ In `auto` ASR mode, Agent Legion tries whisper.cpp first and falls back to Sense
 > See [docs/architecture/backend.md](docs/architecture/backend.md) for full configuration reference.
 >
 > You must also configure `config/skills.yaml` (and commit the generated `config/skills.lock`) for Agent Legion / Pi workflows to resolve skills. See the Pi section below.
+
+### Breaking: CMS credentials single-sourcing (config governance G2)
+
+**What changed.** The yaml `cms:` section no longer accepts `token` or
+`token_gen`; `config/agent_legion.yaml` keeps only `base_url`, `env`, and the
+global query parameters (`bank_version` / `country_id` / `subject_id` /
+`page_size`). The hardcoded `cms.internal.*` fallback URLs in the CMS client
+were deleted — a missing base URL is now a hard error, not a silent default.
+`load_settings` rejects a yaml `cms:` section containing `token` or
+`token_gen` with a migration message.
+
+**How to migrate.** Move the static token to env `VIDEO_HIVE_CMS_TOKEN` (or
+`BASECMS_TOKEN`), or — preferred for workspace-scoped setups — bind it in the
+workspace resource config, where it is stored encrypted in the vault. Move the
+four `token_gen` keys to env `BASECMS_APP_ID` / `BASECMS_NONCE` /
+`BASECMS_SECRET` / `BASECMS_TOKEN_URL`. Set the CMS base URL explicitly via
+`cms.base_url` in `config/agent_legion.yaml` (or env `BASECMS_BASE_URL`), or via
+an `api_url` workspace binding.
+
+**Why.** Tokens previously had five competing sources (yaml, two env names,
+token_gen, vault) and base URLs four, including a hardcoded internal host
+baked into the client. Secrets in plaintext yaml also bypassed the vault.
+Single-sourcing makes the effective credential auditable and keeps secrets
+out of tracked config files.
+
+### Skill refs single-sourcing (config governance G3)
+
+`openclaw.skill_safety.repos` in `config/agent_legion.yaml` is a pure path
+allowlist of skill repositories that may be force-restored before each run.
+The restore ref always resolves from `config/skills.lock` (the locked commit);
+writing a `ref` into the yaml section is a startup error.
+
+### Config file and env naming (config governance G4)
+
+`config/video_hive.yaml` was renamed to `config/agent_legion.yaml`. The old
+file name still loads with a deprecation warning during the transition window;
+both files existing at once is a startup error. The database URL env var
+follows the same rename: `AGENT_LEGION_DATABASE_URL` is authoritative,
+`VIDEO_HIVE_DATABASE_URL` is a deprecated alias, and setting both to
+different values fails startup.
 
 ## Video Intake
 

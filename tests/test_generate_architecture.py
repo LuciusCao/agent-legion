@@ -159,7 +159,7 @@ def test_extract_config(tmp_path: Path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "app.yaml").write_text("data_dir: data\n")
-    (config_dir / "video_hive.yaml").write_text("""
+    (config_dir / "agent_legion.yaml").write_text("""
 asr:
   provider: auto
 openclaw:

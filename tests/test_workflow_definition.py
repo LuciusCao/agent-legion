@@ -265,7 +265,8 @@ def test_workflow_node_loads_resources(tmp_path: Path) -> None:
         tmp_path,
         node_body="capability: fetch_questions\noutputs: [out.json]\nresources: [question_detail]",
     )
-    assert load_workflow_definition(path).nodes["one"].resources == ["question_detail"]
+    definition = load_workflow_definition(path, resource_providers={"question_detail": {}})
+    assert definition.nodes["one"].resources == ["question_detail"]
 
 
 def test_workflow_node_resources_default_to_empty(tmp_path: Path) -> None:
@@ -288,7 +289,7 @@ def test_workflow_node_rejects_unknown_resource(tmp_path: Path) -> None:
         node_body="capability: fetch_questions\noutputs: [out.json]\nresources: [nope]",
     )
     with pytest.raises(WorkflowDefinitionError, match="unknown resource 'nope'"):
-        load_workflow_definition(path)
+        load_workflow_definition(path, resource_providers={"question_detail": {}})
 
 
 def test_node_resources_round_trip_through_job_snapshot(tmp_path: Path) -> None:

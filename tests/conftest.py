@@ -9,6 +9,9 @@ from fastapi.testclient import TestClient
 
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
+os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
+# Keep the deprecated alias in sync so an ambient or .env VIDEO_HIVE_DATABASE_URL
+# can never redirect the suite (and never conflicts with the authoritative name).
 os.environ["VIDEO_HIVE_DATABASE_URL"] = TEST_DATABASE_URL
 
 import psycopg
@@ -92,7 +95,7 @@ def _block_real_cms_http(monkeypatch):
 
     def guarded_request(self, method, url, *args, **kwargs):
         host = urlparse(str(url)).hostname or ""
-        if host == "cms.example.com" or host.endswith(".example.com"):
+        if host == "cms.example.com":
             return _fake_cms_response(method, url, kwargs.get("params"))
         return original_request(self, method, url, *args, **kwargs)
 

@@ -9,8 +9,14 @@ from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import OpenClawCapabilityConfig, OpenClawExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
 from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.executors.openclaw_runner import OpenClawRunner, SkillSafetyConfig
+from server.app.executors.openclaw_runner import (
+    OpenClawRunner,
+    SkillSafetyConfig,
+    resolve_skill_safety_repos,
+)
 from server.app.executors.runtime_config import OpenClawRuntimeConfig
+from server.app.skills.errors import SkillConfigError
+from server.app.skills.manager import SkillManager
 
 logger = logging.getLogger(__name__)
 
@@ -19,17 +25,11 @@ def build_openclaw_executor(
     executor_id: str,
     runtime: OpenClawRuntimeConfig,
     config: OpenClawExecutorConfig,
+    skill_manager: SkillManager | None = None,
 ) -> OpenClawExecutor:
     """Build an OpenClawExecutor with the executor's agent_id injected into the runner."""
     command_template = _inject_agent_id(list(runtime.command_template), config.agent_id)
-    skill_safety = (
-        SkillSafetyConfig(
-            enabled=runtime.skill_safety.enabled,
-            repos=list(runtime.skill_safety.repos),
-        )
-        if runtime.skill_safety is not None
-        else None
-    )
+    skill_safety = _build_skill_safety(runtime, skill_manager)
     isolated_root = (
         Path(runtime.isolated_workspace_root) if runtime.isolated_workspace_root else None
     )
@@ -47,6 +47,29 @@ def build_openclaw_executor(
         runner=runner,
         capabilities=config.capabilities,
     )
+
+
+def _build_skill_safety(
+    runtime: OpenClawRuntimeConfig, skill_manager: SkillManager | None
+) -> SkillSafetyConfig:
+    """Resolve the skill-safety whitelist against skills.lock.
+
+    Refs come from the lock (locked commit, single source of truth), never from
+    ``agent_legion.yaml``; an enabled whitelist that cannot be resolved fails the
+    build instead of silently skipping the safety restore.
+    """
+    safety = runtime.skill_safety
+    if not safety.enabled or not safety.repos:
+        return SkillSafetyConfig(enabled=safety.enabled, repos=[])
+    if skill_manager is None:
+        raise SkillConfigError(
+            "openclaw skill_safety is enabled but no skill manager is available "
+            "to resolve refs from skills.lock"
+        )
+    repos = resolve_skill_safety_repos(
+        [repo.path for repo in safety.repos], skill_manager.load_lock()
+    )
+    return SkillSafetyConfig(enabled=True, repos=repos)
 
 
 def _inject_agent_id(command_template: list[str], agent_id: str) -> list[str]:
@@ -169,7 +192,9 @@ class OpenClawExecutor:
 def build_openclaw_executor_entry(
     executor_id: str, config: OpenClawExecutorConfig, deps: RuntimeDependencies
 ) -> OpenClawExecutor:
-    return build_openclaw_executor(executor_id, deps.openclaw_runtime, config)
+    return build_openclaw_executor(
+        executor_id, deps.openclaw_runtime, config, skill_manager=deps.skill_manager
+    )
 
 
 register_kind(

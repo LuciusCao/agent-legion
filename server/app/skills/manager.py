@@ -233,6 +233,10 @@ class SkillManager:
             raise SkillRepoError(f"git command failed: {' '.join(cmd)}\n{result.stderr}")
         return result
 
+    def load_lock(self) -> SkillsLock:
+        """Return the current skills.lock contents (empty when the file is missing)."""
+        return self._load_lock()
+
     def _load_lock(self) -> SkillsLock:
         if not self.lock_path.is_file():
             return SkillsLock()
