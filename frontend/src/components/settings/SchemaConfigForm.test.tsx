@@ -77,6 +77,79 @@ describe('SchemaConfigForm', () => {
     expect(input.type).toBe('password')
   })
 
+  it('shows 已设置 for a masked secret marker without echoing a value', () => {
+    const schema: ConfigSchema = {
+      type: 'object',
+      properties: { token: { type: 'string', secret: true } },
+    }
+    render(
+      <SchemaConfigForm
+        schema={schema}
+        values={{ token: { secret_set: true } }}
+        onChange={vi.fn()}
+      />
+    )
+
+    const input = screen.getByLabelText('token') as HTMLInputElement
+    expect(input.type).toBe('password')
+    expect(input.value).toBe('')
+    expect(screen.getByText('已设置')).toBeInTheDocument()
+  })
+
+  it('shows 未设置 for an unset secret marker', () => {
+    const schema: ConfigSchema = {
+      type: 'object',
+      properties: { token: { type: 'string', secret: true } },
+    }
+    render(
+      <SchemaConfigForm
+        schema={schema}
+        values={{ token: { secret_set: false } }}
+        onChange={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('未设置')).toBeInTheDocument()
+  })
+
+  it('emits the typed string for secrets, replacing the marker', () => {
+    const onChange = vi.fn()
+    const schema: ConfigSchema = {
+      type: 'object',
+      properties: { token: { type: 'string', secret: true } },
+    }
+    render(
+      <SchemaConfigForm
+        schema={schema}
+        values={{ token: { secret_set: true } }}
+        onChange={onChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('token'), {
+      target: { value: 'new-secret' },
+    })
+    expect(onChange).toHaveBeenCalledWith({ token: 'new-secret' })
+  })
+
+  it('keeps an explicit clear as an empty string instead of dropping the key', () => {
+    const onChange = vi.fn()
+    const schema: ConfigSchema = {
+      type: 'object',
+      properties: { token: { type: 'string', secret: true } },
+    }
+    render(
+      <SchemaConfigForm
+        schema={schema}
+        values={{ token: 'typed-value' }}
+        onChange={onChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('token'), { target: { value: '' } })
+    expect(onChange).toHaveBeenCalledWith({ token: '' })
+  })
+
   it('uses the default as placeholder', () => {
     const schema: ConfigSchema = {
       type: 'object',

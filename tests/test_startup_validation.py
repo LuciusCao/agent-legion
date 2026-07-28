@@ -218,8 +218,8 @@ cms:
   token_gen:
     secret: ''
 resource_providers:
-  question_detail:
-    provider: cms.question.detail
+  cms.question.detail:
+    resource_key: question_detail
     path: /question/detail
 """
 
@@ -252,6 +252,7 @@ cms:
     secret: ''
 resource_providers:
   cms.question.detail:
+    resource_key: question_detail
     path: /question/detail
 """
 
@@ -306,8 +307,8 @@ cms:
   token_gen:
     secret: ''
 resource_providers:
-  question_detail:
-    provider: cms.question.detail
+  cms.question.detail:
+    resource_key: question_detail
     path: /question/detail
 """
 
@@ -333,8 +334,8 @@ cms:
   token_gen:
     secret: ''
 resource_providers:
-  question_detail:
-    provider: cms.question.detail
+  cms.question.detail:
+    resource_key: question_detail
     path: /question/detail
 """
 
@@ -356,8 +357,8 @@ cms:
   token_gen:
     secret: ''
 resource_providers:
-  question_detail:
-    provider: cms.question.detail
+  cms.question.detail:
+    resource_key: question_detail
     path: /question/detail
 """
 

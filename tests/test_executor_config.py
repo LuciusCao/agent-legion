@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
+from server.app.executors.config import LocalExecutorConfig
 from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.kinds import UnknownExecutorKindError
 
@@ -77,6 +78,58 @@ def test_rejects_unsafe_pi_skill_path(skill: str) -> None:
                     "kind": "pi",
                     "global_capacity": 8,
                     "capabilities": {"review_keywords": {"skill": skill}},
+                }
+            }
+        )
+
+
+def test_loads_local_capability_config_schema() -> None:
+    definitions = load_executor_definitions(
+        {
+            "local-default": {
+                "kind": "local",
+                "global_capacity": 4,
+                "capabilities": {
+                    "fetch_questions": {
+                        "handler": "question_comprehension_info.fetch_questions",
+                        "config_schema": {
+                            "type": "object",
+                            "properties": {"bank_version": {"type": "string"}},
+                        },
+                    }
+                },
+            }
+        }
+    )
+    local = definitions["local-default"]
+    assert isinstance(local, LocalExecutorConfig)
+    assert local.capabilities["fetch_questions"].config_schema == {
+        "type": "object",
+        "properties": {"bank_version": {"type": "string"}},
+    }
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "array"},
+        {"type": "object", "properties": {"x": {"type": "weird"}}},
+        {"type": "object", "properties": {"x": {"type": "integer", "default": "nan"}}},
+    ],
+)
+def test_rejects_invalid_local_capability_config_schema(schema: object) -> None:
+    with pytest.raises(ValidationError):
+        load_executor_definitions(
+            {
+                "local-default": {
+                    "kind": "local",
+                    "global_capacity": 4,
+                    "capabilities": {
+                        "fetch_questions": {
+                            "handler": "question_comprehension_info.fetch_questions",
+                            "config_schema": schema,
+                        }
+                    },
                 }
             }
         )

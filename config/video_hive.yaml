@@ -24,8 +24,48 @@ cms:
 resource_providers:
   cms.question.detail:
     path: /question/detail
+    resource_key: question_detail
+    url_key: question_detail_url
+    config_schema:
+      type: object
+      properties:
+        api_url:
+          type: string
+        bank_version:
+          type: string
+        country_id:
+          type: string
+        subject_id:
+          type: string
+        env:
+          type: string
+        token:
+          type: string
+          secret: true
   cms.question.list_by_knowledge:
     path: /question/list
+    resource_key: by_knowledge
+    url_key: question_list_url
+    config_schema:
+      type: object
+      properties:
+        api_url:
+          type: string
+        bank_version:
+          type: string
+        country_id:
+          type: string
+        subject_id:
+          type: string
+        env:
+          type: string
+        token:
+          type: string
+          secret: true
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 500
 openclaw:
   cwd: .
   timeout_seconds: 600

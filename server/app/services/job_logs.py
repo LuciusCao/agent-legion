@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -12,6 +13,7 @@ from server.app.services.job_log_paths import (
 )
 from server.app.services.job_log_raw import read_raw_log
 from server.app.services.job_log_renderer import render_log
+from server.app.services.vault import VaultService, collect_vault_plaintexts
 from server.app.settings import Settings
 
 
@@ -47,7 +49,7 @@ class JobLogService:
         rendered = render_log(
             path,
             run_dir,
-            sanitize=self._sanitize,
+            sanitize=self._sanitizer_for(job_id),
             command_json=run.get("command_json") or "[]",
         )
         return {
@@ -59,9 +61,19 @@ class JobLogService:
         }
 
     def read_raw(self, job_id: str, run_id: int) -> str:
-        return self._sanitize(read_raw_log(job_id, run_id, self.job_db, self.settings))
+        sanitizer = self._sanitizer_for(job_id)
+        return sanitizer(read_raw_log(job_id, run_id, self.job_db, self.settings))
 
-    def _sanitize(self, text: str) -> str:
+    def _sanitizer_for(self, job_id: str) -> Callable[[str], str]:
+        job = self.job_db.get_job(job_id) or {}
+        workspace_id = str(job.get("workspace_id") or "")
+
+        def sanitize(text: str) -> str:
+            return self._sanitize(text, workspace_id)
+
+        return sanitize
+
+    def _sanitize(self, text: str, workspace_id: str = "") -> str:
         paths = [
             (str(self.settings.root_dir.resolve()), "<local-path>"),
             (str(Path.home().resolve()), "<local-path>"),
@@ -71,6 +83,10 @@ class JobLogService:
             text = text.replace(original, replacement)
 
         secrets = self._collect_secrets(self.settings.config)
+        if workspace_id:
+            # Vault-resolved plaintexts are redacted too (VAULT-SECRET-001).
+            vault = VaultService(self.job_db.path, self.settings.config)
+            secrets.extend(collect_vault_plaintexts(vault, workspace_id))
         secrets.sort(key=len, reverse=True)
         for secret in secrets:
             text = text.replace(secret, "<redacted>")

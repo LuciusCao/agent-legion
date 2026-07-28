@@ -17,6 +17,7 @@ from server.app.executors.runtime_config import (
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
+from server.app.workflows.resource_providers import load_resource_provider_declarations
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -87,6 +88,8 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     ),
     "AGENT_LEGION_DATABASE_URL": (("database", "url"), _str_parser),
     "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
+    "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
+    "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
 }
 
 
@@ -162,6 +165,8 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         path.mkdir(parents=True, exist_ok=True)
     executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
     agent_definitions = load_agent_definitions(config.get("agents", {}))
+    # Fail fast on invalid resource provider declarations (spec D11).
+    load_resource_provider_declarations(config.get("resource_providers"))
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     token_file = executor_runtime.agent_workers.register_token_file
     if token_file and not executor_runtime.agent_workers.register_token:

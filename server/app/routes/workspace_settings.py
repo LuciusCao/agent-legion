@@ -6,7 +6,9 @@ from server.app.routes.job_contracts import (
     WorkspaceSettingsTestResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.workspace_secrets import create_workspace_secrets_router
 from server.app.services.job_errors import JobServiceError
+from server.app.services.vault import WorkspaceSecretsService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.settings import Settings
 
@@ -53,5 +55,10 @@ def create_workspace_settings_router(
             return WorkspaceSettingsTestResponse(**service.test_connection(workspace_id))
         except JobServiceError as exc:
             raise_job_http_error(exc)
+
+    # Vault secrets live in the same workspace settings route family (spec D13).
+    router.include_router(
+        create_workspace_secrets_router(WorkspaceSecretsService(service.job_db, settings), settings)
+    )
 
     return router

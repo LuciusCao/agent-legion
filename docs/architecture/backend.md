@@ -172,6 +172,9 @@ server/app/
 | GET | `/workspaces/{workspace_id}/executor-configuration` | `get_workspace_executor_configuration` | routes/workspace_executors.py |
 | GET | `/workspaces/{workspace_id}/runs` | `list_workspace_runs` | routes/workspace_runs.py |
 | GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/workspace_runs.py |
+| GET | `/workspaces/{workspace_id}/secrets` | `list_workspace_secrets` | routes/workspace_secrets.py |
+| PUT | `/workspaces/{workspace_id}/secrets/{name}` | `put_workspace_secret` | routes/workspace_secrets.py |
+| DELETE | `/workspaces/{workspace_id}/secrets/{name}` | `delete_workspace_secret` | routes/workspace_secrets.py |
 | GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/workspace_settings.py |
 | PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/workspace_settings.py |
 | POST | `/workspaces/{workspace_id}/settings/test-connection` | `test_workspace_connection` | routes/workspace_settings.py |
@@ -188,7 +191,7 @@ server/app/
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw'], skill: str, tools: tuple... | app/agent_catalog.py |
-| LocalCapabilityConfig | BaseModel | handler: str | app/executors/config.py |
+| LocalCapabilityConfig | BaseModel | handler: str, config_schema: dict[str, Any] | app/executors/config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
 | OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
 | LocalExecutorConfig | BaseModel | kind: Literal['local'], global_capacity: int, capabilities: dict[str, LocalCa... | app/executors/config.py |
@@ -341,6 +344,11 @@ server/app/
 | ResourceProviderDefinition | BaseModel | key: str, provider: str, path: str, defaultParams: dict[str, str], paramKeys:... | app/routes/workspace_contracts.py |
 | CmsServiceStatus | BaseModel | baseUrl: str, tokenConfigured: bool, env: str, healthy: bool | None, lastChec... | app/routes/workspace_contracts.py |
 | ResourceBinding | BaseModel | enabled: bool, config: dict[str, Any] | app/routes/workspace_contracts.py |
+| WorkspaceSecretSetRequest | BaseModel | value: str | app/routes/workspace_secrets.py |
+| WorkspaceSecretMetadata | BaseModel | name: str, created_at: str, updated_at: str | app/routes/workspace_secrets.py |
+| WorkspaceSecretsResponse | BaseModel | secrets: list[WorkspaceSecretMetadata] | app/routes/workspace_secrets.py |
+| WorkspaceSecretResponse | BaseModel | secret: WorkspaceSecretMetadata | app/routes/workspace_secrets.py |
+| WorkspaceSecretDeleteResponse | BaseModel | deleted: str | app/routes/workspace_secrets.py |
 | JobDeleteResult | TypedDict | job_id: str, operation: str, status: str, reason_code: str | None, message: s... | app/services/job_deletion.py |
 | LogEntry | TypedDict | type: str, title: str, detail: str, truncated: bool | app/services/job_log_renderer.py |
 | CostBreakdown | BaseModel | currency: str, input: float, output: float, cache_read: float, total: float, ... | app/services/token_usage_contracts.py |
@@ -408,9 +416,10 @@ server/app/
 
 ## Database
 
-- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow：
+- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前 `SCHEMA_VERSION = 16`）：
   - `videos` — 旧版视频队列（迁移后仅读）
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `resource_config_json`, `default_entity`, `intake_config_json`）
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `resource_config_json`, `default_entity`, `intake_config_json`）。`resource_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（兼容窗口内老明文仍可读，见下文 Secrets Vault）
+  - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
   - `workflow_revisions` — workflow 版本修订历史
   - `packages` — 已创建 package 路径
@@ -461,6 +470,16 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `contracts.py`, `response_contracts.py`: 视频详情与产物响应模型。
 - `projection.py`: 将底层 artifacts 投影为 API 响应。
 
+### Secrets Vault
+
+`server/app/services/vault.py` 提供按 workspace 隔离的凭证保管库（VAULT-SECRET-001）。
+
+- **Routes**: `routes/workspace_secrets.py`（`GET/PUT/DELETE /workspaces/{workspace_id}/secrets[/{name}]`），write-only：GET 只返回 name 与时间戳元数据，任何响应都不含明文或密文。
+- **Service**: `VaultService`（Fernet 加解密 + `workspace_secrets` 持久化，明文不跨越服务层边界落盘或出 API）与 `WorkspaceSecretsService`（API 门面）。
+- **Master key**: env `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`（映射到 `vault.master_key` / `vault.master_key_file`）；缺 key 时 server 可启动，但 vault 写操作与 `secret_ref` 解析报错。
+- **写入链**: resource binding 保存时，provider `config_schema` 标记 `secret: true` 的字段值转存 vault，binding config 只留 `{"secret_ref": "resource:{resource_key}:{field}"}`；settings payload 中 secret 字段只返回 `{"secret_set": bool}`。
+- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口）；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。
+
 ## Configuration Reference
 
 配置按域拆分为三个文件：
@@ -477,7 +496,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `asr.whisper.vad_model`: 可选 VAD 模型路径
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `resource_providers`: CMS 资源路径映射（如 `cms.question.detail`）
+- `resource_providers`: 资源提供者声明（如 `cms.question.detail`）：`path` 拼接信息、`resource_key`、legacy 设置项 `url_key`，以及可调参数的 `config_schema`（含 `secret: true` 标记）；声明在加载时校验，非法声明启动失败
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒
 - `openclaw.skill_safety`: OpenClaw skill 安全校验配置
@@ -491,7 +510,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `config/workflow.yaml` 核心配置项：
 
-- `executors`: local / pi / openclaw 执行器定义
+- `executors`: local / pi / openclaw 执行器定义；local capability 除 `handler` 外可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入 handler runtime 的 `node_config` 键
 - `workflows.enabled`: 是否启用 Agent Legion DAG workflow worker
 - `workflows.pi`: Pi agent runner 配置（provider, model, timeout, environment）
 
@@ -520,5 +539,6 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 
 - 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
 - OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自用户可写的 `config/video_hive.yaml`；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量；仍需确保该配置文件不被未信任用户修改。
-- PostgreSQL 与视频存储部署在受信网络内，但应用本身仍**无认证层**；uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何人都可删除 job、下载产物、触发执行。
+- PostgreSQL 与视频存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的 User Authentication 章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
+- Workspace 凭证（如 CMS token）经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

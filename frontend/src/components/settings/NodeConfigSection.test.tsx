@@ -101,6 +101,30 @@ describe('NodeConfigSection', () => {
     expect(screen.getByText('审核关键词')).toBeInTheDocument()
   })
 
+  it('renders executor node cards from string-only schemas', () => {
+    // Executor capability schemas (spec D15) declare non-secret string
+    // parameters without defaults; the section must render them like any
+    // other node card.
+    const settings: WorkspaceSettings = {
+      ...baseSettings,
+      nodeConfig: {},
+      nodeConfigSchemas: {
+        fetch_questions: {
+          type: 'object',
+          properties: {
+            bank_version: { type: 'string', description: '题库版本' },
+          },
+        },
+      },
+    }
+    render(<NodeConfigSection workspaceId="ws1" settings={settings} />)
+
+    expect(screen.getByText('fetch_questions')).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'bank_version' })).toHaveValue(
+      ''
+    )
+  })
+
   it('sends the current values on save', async () => {
     render(<NodeConfigSection workspaceId="ws1" settings={baseSettings} />)
 

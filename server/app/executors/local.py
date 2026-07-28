@@ -204,6 +204,7 @@ class LocalExecutor:
             "workspace": dict(context.workspace),
             "job": dict(context.job),
             "settings_config": self.settings_config,
+            "node_config": dict(context.node_config),
             "cancellation": token,
         }
         if self.job_db is not None:

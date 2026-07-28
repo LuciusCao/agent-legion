@@ -5,12 +5,14 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from cryptography.fernet import Fernet
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_log_paths import resolve_job_log_path, resolve_run_dir
 from server.app.services.job_log_raw import MAX_RAW_LOG_BYTES, PayloadTooLargeError
 from server.app.services.job_logs import JobLogService
+from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
 from tests.postgres_support import TEST_DATABASE_URL
@@ -276,6 +278,27 @@ def test_job_log_service_redacts_config_secrets(log_service_with_secret_config):
     assert "cms-token-123" not in result["log"]
     assert "cms-password" not in result["log"]
     assert "openclaw-key" not in result["log"]
+    assert "keep-visible" in result["log"]
+    assert "<redacted>" in result["log"]
+
+
+def test_job_log_service_redacts_vault_secrets(log_service, monkeypatch):
+    service, settings, job_db = log_service
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    logs_root = settings.logs_dir / "jobs"
+    logs_root.mkdir(parents=True, exist_ok=True)
+    log_file = logs_root / "run.log"
+    log_file.write_text("vault-plain-value keep-visible", encoding="utf-8")
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
+    vault = VaultService(job_db.path, settings.config)
+    vault.set(str(job["workspace_id"]), "cms-token", "vault-plain-value")
+
+    result = service.read(job["id"], run["id"])
+
+    assert "vault-plain-value" not in result["log"]
     assert "keep-visible" in result["log"]
     assert "<redacted>" in result["log"]
 

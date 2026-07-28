@@ -81,3 +81,76 @@ def test_intake_freeze_and_manifest_whitelist(job_db) -> None:
     manifest_config = manifest_safe_config(SCHEMA, frozen)
     assert "api_key" not in manifest_config
     assert manifest_config == {"page_size": 5, "subject_id": "math"}
+
+
+EXECUTOR_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "bank_version": {"type": "string", "default": "v5"},
+        "country_id": {"type": "string"},
+    },
+}
+
+
+def _executor_definition() -> WorkflowDefinition:
+    return WorkflowDefinition(
+        key="wf",
+        label="Wf",
+        intake=WorkflowIntake(),
+        nodes={
+            "fetch": WorkflowNode(
+                key="fetch",
+                label="Fetch",
+                capability="fetch",
+                config={"bank_version": "v9"},
+            )
+        },
+    )
+
+
+@pytest.mark.full_gate
+def test_executor_node_config_freeze_and_manifest(job_db) -> None:
+    """Executor capability schemas join the same freeze chain (spec D15)."""
+    from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+
+    workspace = job_db.create_workspace("cfg-exec-ws")
+    job_db.update_workspace(
+        workspace["id"],
+        node_config={"wf": {"fetch": {"country_id": "9"}}},
+    )
+    workspace = job_db.get_workspace(workspace["id"])
+    executors = {
+        "local-default": LocalExecutorConfig(
+            kind="local",
+            global_capacity=2,
+            capabilities={
+                "fetch": LocalCapabilityConfig(handler="mod.fetch", config_schema=EXECUTOR_SCHEMA),
+            },
+        )
+    }
+
+    resolved = resolve_workflow_node_configs(_executor_definition(), {}, workspace, executors)
+    # defaults → node config → workspace override
+    assert resolved == {"fetch": {"bank_version": "v9", "country_id": "9"}}
+
+    mode = SimpleNamespace(key="batch_by_ids", label="IDs", input_field="question_ids", resource="")
+    result = enqueue_intake_batch(
+        job_db,
+        workspace["id"],
+        {"workflow_key": "wf", "source_kind": "batch_by_ids"},
+        "question",
+        ["q1"],
+        {},
+        {},
+        mode,
+        {"id": "rev-1"},
+        resolved,
+    )
+    batch = job_db.get_batch(str(result["batch"]["id"]))
+    payload = json.loads(str(batch["source_payload_json"]))
+    frozen = payload["node_config"]["fetch"]
+    assert frozen == {"bank_version": "v9", "country_id": "9"}
+
+    # Executor schemas declare non-secret keys only (D16), so the manifest
+    # whitelist passes the frozen config through unchanged.
+    assert manifest_safe_config(EXECUTOR_SCHEMA, frozen) == frozen
