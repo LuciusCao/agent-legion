@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -17,9 +18,14 @@ from server.app.executors.runtime_config import (
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
-from server.app.workflows.resource_providers import load_resource_provider_declarations
+from server.app.workflows.resource_providers import (
+    ResourceProviderDeclarations,
+    load_resource_provider_declarations,
+)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -35,6 +41,9 @@ class Settings:
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
     agent_definitions: dict[str, AgentDefinition] = field(default_factory=dict)
+    resource_providers: ResourceProviderDeclarations = field(
+        default_factory=ResourceProviderDeclarations
+    )
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -72,8 +81,10 @@ def _path_parser(value: str) -> str:
 
 # Reviewed mapping from environment variable to config path and parser.
 # Do not add arbitrary double-underscore mutation; every override is listed here.
+# ``database.url`` is deliberately absent: it is handled by
+# ``_apply_database_url_env`` below, which arbitrates between the authoritative
+# AGENT_LEGION_DATABASE_URL and its deprecated VIDEO_HIVE_DATABASE_URL alias.
 _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
-    "VIDEO_HIVE_DATABASE_URL": (("database", "url"), _str_parser),
     "VIDEO_HIVE_CMS_TOKEN": (("cms", "token"), _str_parser),
     "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
     "VIDEO_HIVE_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
@@ -86,11 +97,45 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         ("agent_workers", "register_token_file"),
         _path_parser,
     ),
-    "AGENT_LEGION_DATABASE_URL": (("database", "url"), _str_parser),
     "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
 }
+
+_DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"
+_DATABASE_URL_ENV_ALIAS = "VIDEO_HIVE_DATABASE_URL"
+
+
+def _apply_database_url_env(config: dict[str, Any]) -> None:
+    """Arbitrate the database URL env override (config governance G4).
+
+    ``AGENT_LEGION_DATABASE_URL`` is authoritative; ``VIDEO_HIVE_DATABASE_URL``
+    is a deprecated alias kept for the transition window. Exactly one set: it
+    wins (alias-only logs a deprecation warning). Both set to the same value:
+    accepted silently. Both set with different values: hard error.
+    """
+    primary = os.environ.get(_DATABASE_URL_ENV)
+    alias = os.environ.get(_DATABASE_URL_ENV_ALIAS)
+    if primary and alias and primary != alias:
+        raise ValueError(
+            f"{_DATABASE_URL_ENV} and {_DATABASE_URL_ENV_ALIAS} are both set "
+            f"with different values. {_DATABASE_URL_ENV_ALIAS} is a deprecated "
+            f"alias (config governance G4): unset it and keep only "
+            f"{_DATABASE_URL_ENV}."
+        )
+    value = primary or alias
+    if value is None:
+        return
+    if not primary:
+        logger.warning(
+            "%s is deprecated; rename it to %s (same value)",
+            _DATABASE_URL_ENV_ALIAS,
+            _DATABASE_URL_ENV,
+        )
+    database = config.setdefault("database", {})
+    if not isinstance(database, dict):
+        config["database"] = database = {}
+    database["url"] = value
 
 
 def _apply_env_overrides(config: dict[str, Any]) -> None:
@@ -139,12 +184,39 @@ def _normalize_cms_config(config: dict[str, Any]) -> None:
     cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
 
 
+def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
+    """Fail fast when the yaml ``cms:`` section carries retired keys.
+
+    Config governance G2 (breaking): ``cms.token`` and ``cms.token_gen`` are no
+    longer read from yaml. This check runs before env overrides so env-injected
+    in-memory values (``VIDEO_HIVE_CMS_TOKEN`` et al.) are not mistaken for
+    yaml keys.
+    """
+    cms = config.get("cms")
+    if not isinstance(cms, dict):
+        return
+    retired = [key for key in ("token", "token_gen") if key in cms]
+    if not retired:
+        return
+    keys = ", ".join(f"cms.{key}" for key in retired)
+    raise ValueError(
+        f"Unsupported yaml keys under cms: {keys}. The yaml cms.token and "
+        "cms.token_gen sections were retired (config governance G2). Migrate: "
+        "token -> env VIDEO_HIVE_CMS_TOKEN (or BASECMS_TOKEN), or a workspace "
+        "resource binding token stored in the vault; token_gen app_id/nonce/"
+        "secret/url -> env BASECMS_APP_ID / BASECMS_NONCE / BASECMS_SECRET / "
+        "BASECMS_TOKEN_URL."
+    )
+
+
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = PROJECT_ROOT
     if os.environ.get("VIDEO_HIVE_SKIP_DOTENV") != "1":
         load_env_file(root_dir / ".env")
     loaded = load_application_config(root_dir, config_path=config_path)
     config = loaded.config
+    _reject_retired_cms_yaml_keys(config)
+    _apply_database_url_env(config)
     _apply_env_overrides(config)
     _apply_basecms_env_overrides(config)
     _normalize_cms_config(config)
@@ -166,7 +238,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
     agent_definitions = load_agent_definitions(config.get("agents", {}))
     # Fail fast on invalid resource provider declarations (spec D11).
-    load_resource_provider_declarations(config.get("resource_providers"))
+    resource_providers = load_resource_provider_declarations(config.get("resource_providers"))
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     token_file = executor_runtime.agent_workers.register_token_file
     if token_file and not executor_runtime.agent_workers.register_token:
@@ -185,6 +257,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         cors=load_cors_settings(config),
         executor_definitions=executor_definitions,
         agent_definitions=agent_definitions,
+        resource_providers=resource_providers,
         executor_runtime=executor_runtime,
     )
 

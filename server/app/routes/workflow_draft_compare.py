@@ -25,7 +25,12 @@ def create_workflow_draft_compare_router(job_db: JobQueries, settings: Settings)
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
             raise HTTPException(status_code=404, detail="Workspace not found")
-        result = compare_workflow_draft(job_db, workspace_id, request.definition_yaml)
+        result = compare_workflow_draft(
+            job_db,
+            workspace_id,
+            request.definition_yaml,
+            resource_providers=settings.resource_providers.providers,
+        )
         return WorkflowDraftCompareResponse.model_validate(result)
 
     return router

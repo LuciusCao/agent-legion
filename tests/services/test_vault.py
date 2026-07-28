@@ -145,7 +145,7 @@ def test_resolve_secret_refs_missing_entry_raises(vault, job_db):
         vault.resolve_secret_refs({"token": {"secret_ref": "gone"}}, workspace["id"])
 
 
-def test_apply_resource_secret_fields_diverts_to_vault(vault, job_db):
+def test_apply_resource_secret_fields_diverts_to_vault(vault, job_db, settings):
     workspace = job_db.create_workspace("vault-apply")
     resources = {
         "question_detail": {
@@ -154,52 +154,60 @@ def test_apply_resource_secret_fields_diverts_to_vault(vault, job_db):
         }
     }
 
-    applied = apply_resource_secret_fields(vault, workspace["id"], resources, {})
+    applied = apply_resource_secret_fields(
+        vault, workspace["id"], resources, {}, settings.resource_providers.schemas
+    )
 
     token = applied["question_detail"]["config"]["token"]
     assert token == {"secret_ref": "resource:question_detail:token"}
     assert vault.get(workspace["id"], "resource:question_detail:token") == PLAINTEXT
 
 
-def test_apply_resource_secret_fields_empty_value_clears(vault, job_db):
+def test_apply_resource_secret_fields_empty_value_clears(vault, job_db, settings):
     workspace = job_db.create_workspace("vault-clear")
     current = _resource_config({"secret_ref": "resource:question_detail:token"})["resources"]
     vault.set(workspace["id"], "resource:question_detail:token", PLAINTEXT)
     patch = {"question_detail": {"enabled": True, "config": {"token": ""}}}
 
-    applied = apply_resource_secret_fields(vault, workspace["id"], patch, current)
+    applied = apply_resource_secret_fields(
+        vault, workspace["id"], patch, current, settings.resource_providers.schemas
+    )
 
     assert "token" not in applied["question_detail"]["config"]
     assert vault.get(workspace["id"], "resource:question_detail:token") is None
 
 
-def test_apply_resource_secret_fields_absent_key_inherits_stored(vault, job_db):
+def test_apply_resource_secret_fields_absent_key_inherits_stored(vault, job_db, settings):
     workspace = job_db.create_workspace("vault-inherit")
     current = _resource_config({"secret_ref": "resource:question_detail:token"})["resources"]
     patch = {"question_detail": {"enabled": True, "config": {"api_url": "http://new.example"}}}
 
-    applied = apply_resource_secret_fields(vault, workspace["id"], patch, current)
+    applied = apply_resource_secret_fields(
+        vault, workspace["id"], patch, current, settings.resource_providers.schemas
+    )
 
     assert applied["question_detail"]["config"]["token"] == {
         "secret_ref": "resource:question_detail:token"
     }
 
 
-def test_apply_resource_secret_fields_masked_echo_keeps_stored(vault, job_db):
+def test_apply_resource_secret_fields_masked_echo_keeps_stored(vault, job_db, settings):
     workspace = job_db.create_workspace("vault-echo")
     current = _resource_config({"secret_ref": "resource:question_detail:token"})["resources"]
     patch = {"question_detail": {"enabled": True, "config": {"token": {"secret_set": True}}}}
 
-    applied = apply_resource_secret_fields(vault, workspace["id"], patch, current)
+    applied = apply_resource_secret_fields(
+        vault, workspace["id"], patch, current, settings.resource_providers.schemas
+    )
 
     assert applied["question_detail"]["config"]["token"] == {
         "secret_ref": "resource:question_detail:token"
     }
 
 
-def test_strip_resource_secret_fields_removes_secret_values():
+def test_strip_resource_secret_fields_removes_secret_values(settings):
     resources = _resource_config(PLAINTEXT)["resources"]
-    stripped = strip_resource_secret_fields(resources)
+    stripped = strip_resource_secret_fields(resources, settings.resource_providers.schemas)
     assert "token" not in stripped["question_detail"]["config"]
     assert stripped["question_detail"]["config"]["api_url"] == (
         "http://cms.example.com/question/detail"

@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-from server.app.workflows.resource_providers import RESOURCE_PROVIDERS
+from server.app.workflows.resource_providers import (
+    ResourceProviderDeclarations,
+    load_resource_provider_declarations,
+)
 from server.app.workflows.resource_schemas import resource_param_keys
 
 
@@ -62,10 +65,18 @@ def resolve_cms_resource(
     batch_payload: dict[str, Any] | None,
     resource_key: str,
     node_config: dict[str, Any] | None = None,
+    declarations: ResourceProviderDeclarations | None = None,
 ) -> dict[str, Any]:
+    if declarations is None:
+        # Fallback for call sites that only carry the raw config mapping
+        # (e.g. hand-built executor contexts); composition roots inject the
+        # declarations parsed and validated at load_settings time.
+        declarations = load_resource_provider_declarations(
+            settings_config.get("resource_providers") if isinstance(settings_config, dict) else None
+        )
     cms_config = settings_config.get("cms", {}) if isinstance(settings_config, dict) else {}
     result = dict(cms_config) if isinstance(cms_config, dict) else {}
-    defaults = RESOURCE_PROVIDERS.get(resource_key, {})
+    defaults = declarations.providers.get(resource_key, {})
     provider = str(defaults.get("provider") or "")
     url_key = str(defaults.get("url_key") or "")
 
@@ -111,7 +122,9 @@ def resolve_cms_resource(
     if api_url:
         # Params come from the merged result so global cms defaults (e.g.
         # bank_version) reach the URL even without a workspace binding.
-        api_url = _append_resource_params(api_url, result, resource_param_keys(resource_key))
+        api_url = _append_resource_params(
+            api_url, result, resource_param_keys(resource_key, declarations.schemas)
+        )
         result["api_url"] = api_url
         if url_key:
             result[url_key] = api_url

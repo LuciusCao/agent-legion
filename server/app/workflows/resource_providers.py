@@ -4,21 +4,20 @@ Providers are declared in the ``resource_providers:`` section of the
 application config. Alongside the runtime URL defaults (``path``), each
 provider declares which resource key it serves (``resource_key``), the legacy
 settings URL key (``url_key``) and the typed ``config_schema`` for its tunable
-parameters. Declarations are validated at load time; invalid declarations fail
-startup, mirroring Agent Definition loading.
+parameters. Declarations are validated at ``load_settings`` time and injected
+through ``Settings.resource_providers``; invalid declarations fail startup,
+mirroring Agent Definition loading. This module intentionally performs no I/O
+at import time.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
 from server.app.config_schema import ConfigSchemaError, validate_config_schema
-from server.app.configuration import load_application_config
 from server.app.workflows.schema import WorkflowDefinitionError
-
-PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
 
 @dataclass(frozen=True)
@@ -60,17 +59,22 @@ def load_resource_provider_declarations(raw: Any) -> ResourceProviderDeclaration
     return ResourceProviderDeclarations(providers=providers, schemas=schemas)
 
 
-DECLARATIONS = load_resource_provider_declarations(
-    load_application_config(PROJECT_ROOT).config.get("resource_providers")
-)
-RESOURCE_PROVIDERS = DECLARATIONS.providers
-RESOURCE_PROVIDER_SCHEMAS = DECLARATIONS.schemas
+def validate_node_resource_references(
+    node_key: str,
+    resources: list[str],
+    providers: Mapping[str, Any] | None = None,
+) -> None:
+    """Fail workflow loading when a node references an unknown resource key.
 
-
-def validate_node_resource_references(node_key: str, resources: list[str]) -> None:
-    """Fail workflow loading when a node references an unknown resource key."""
+    ``providers`` is the validated declaration mapping (resource key → provider
+    metadata) injected from ``Settings``. ``None`` skips the check; it is used
+    only when re-loading persisted definition snapshots that were validated at
+    intake/publish time.
+    """
+    if providers is None:
+        return
     for resource_key in resources:
-        if resource_key not in RESOURCE_PROVIDERS:
+        if resource_key not in providers:
             raise WorkflowDefinitionError(
                 f"Node {node_key} references unknown resource {resource_key!r}"
             )
