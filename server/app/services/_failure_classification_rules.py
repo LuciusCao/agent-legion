@@ -111,6 +111,10 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     if message.startswith(("No Executor binding", "workspace node is not routed to an Agent")):
         return CATEGORY_TECHNICAL, "executor_binding"
 
+    # Sweeper-failed queued requests whose pinned Agent definition changed.
+    if message.startswith("Agent definition '") and "was disabled or changed" in message:
+        return CATEGORY_TECHNICAL, "stale_definition"
+
     if "config differs from skills.lock" in message or message.startswith(
         ("skill missing references", "git command failed")
     ):

@@ -184,6 +184,13 @@ def test_heartbeat_expired_is_worker_orphaned():
     )
 
 
+def test_stale_agent_definition_is_technical():
+    assert classify_failure(
+        None,
+        "Agent definition 'generator-v1' was disabled or changed while the request was queued",
+    ) == ("technical", "stale_definition")
+
+
 def test_http_502_is_provider_request():
     assert classify_failure(
         1, "HTTPError: 502 Server Error: Bad Gateway for url: http://account.internal/x"

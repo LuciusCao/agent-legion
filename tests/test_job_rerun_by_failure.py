@@ -198,3 +198,32 @@ def test_recovered_node_is_not_rerun_again(rerun_service, job_db, workspace):
     results = rerun_service.rerun_by_failure_category(workspace["id"], "technical")
 
     assert results == []
+
+
+def test_rerun_clears_failure_fields_on_job_nodes(rerun_service, job_db, workspace):
+    job = _create_job(job_db, workspace, "Q-clear")
+    _fail_node(
+        job_db,
+        job,
+        "clean_and_parse",
+        "technical",
+        "stale_definition",
+        error_message=(
+            "Agent definition 'generator-v1' was disabled or changed while the request was queued"
+        ),
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set failure_category='technical',"
+            " failure_detail='stale_definition' where job_id=? and node_key=?",
+            (job["id"], "clean_and_parse"),
+        )
+        conn.execute("commit")
+
+    results = rerun_service.rerun_by_failure_category(workspace["id"], "technical")
+
+    assert results[0]["status"] == "succeeded"
+    node = job_db.get_job_node(job["id"], "clean_and_parse")
+    assert node["status"] == "pending"
+    assert node["failure_category"] == ""
+    assert node["failure_detail"] == ""
