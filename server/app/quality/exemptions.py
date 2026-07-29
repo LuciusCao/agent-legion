@@ -53,7 +53,14 @@ def _reason_is_vague(reason: str) -> bool:
 
 
 def _validate_remove_when(remove_when: str, base_path: Path) -> str | None:
-    """Return an error message when remove_when does not reference a tracked artifact."""
+    """Return an error message when remove_when does not reference a removal artifact.
+
+    docs/superpowers/ and issues/ are internal documents that are not published
+    with the repository. When the corresponding directory tree is absent (for
+    example in an open-source checkout), the file-existence check is skipped
+    instead of failing; when the directory exists, a missing referenced file is
+    still an error.
+    """
     remove_when = remove_when.strip()
     if not remove_when:
         return "remove_when is empty"
@@ -72,7 +79,9 @@ def _validate_remove_when(remove_when: str, base_path: Path) -> str | None:
 
     referenced = base_path / file_part
     if not referenced.exists():
-        return f"remove_when references missing file '{file_part}'"
+        anchor = base_path / "docs" / "superpowers" if is_plan else base_path / "issues"
+        if anchor.is_dir():
+            return f"remove_when references missing file '{file_part}'"
 
     return None
 

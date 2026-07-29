@@ -62,8 +62,3 @@ server/app/workflows/
 `download` → `transcribe` → `subtitle_review` → `chapter_generate` → `interaction_generate` → `content_review` → `assemble` → `package`
 
 <!-- END AUTO-GENERATED -->
-
-## Related Specs
-
-- [批量从失败阶段重跑](../superpowers/completed/2026-06-02-batch-rerun-from-failed-phase-design.md)
-- [Agent Legion Pipeline DAG](../superpowers/completed/2026-06-05-agent-legion-pipeline-dag-design.md)
