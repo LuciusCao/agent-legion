@@ -2244,7 +2244,7 @@ export interface components {
        * Granularity
        * @enum {string}
        */
-      granularity: 'minute' | 'hour' | 'day'
+      granularity: '6h' | '24h' | '30d'
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
@@ -3713,9 +3713,7 @@ export interface operations {
   get_worker_metrics_api_agent_workers_self_metrics_get: {
     parameters: {
       query?: {
-        granularity?: 'minute' | 'hour' | 'day'
-        hours?: number
-        days?: number
+        granularity?: '6h' | '24h' | '30d'
       }
       header?: never
       path?: never
@@ -4510,9 +4508,7 @@ export interface operations {
   get_metrics_overview_api_metrics_overview_get: {
     parameters: {
       query?: {
-        granularity?: 'minute' | 'hour' | 'day'
-        hours?: number
-        days?: number
+        granularity?: '6h' | '24h' | '30d'
         worker_id?: string | null
       }
       header?: never

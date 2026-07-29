@@ -18,5 +18,5 @@ class MetricBucket(BaseModel):
 
 
 class OpsMetricsResponse(BaseModel):
-    granularity: Literal["minute", "hour", "day"]
+    granularity: Literal["6h", "24h", "30d"]
     buckets: list[MetricBucket]

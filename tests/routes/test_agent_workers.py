@@ -125,7 +125,7 @@ def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Pat
 
     with TestClient(app) as client:
         token = _register(client)["worker_token"]
-        path = "/api/agent-workers/self/metrics?granularity=minute&hours=1&worker_id=other-worker"
+        path = "/api/agent-workers/self/metrics?granularity=6h&worker_id=other-worker"
         own = client.get(path, headers={"X-Agent-Worker-Token": token})
         anonymous = client.get(path)
         invalid = client.get(path, headers={"X-Agent-Worker-Token": "bad-token"})

@@ -401,9 +401,6 @@ def test_metrics_overview_validates_query_params(tmp_path: Path) -> None:
             client.get("/api/metrics/overview?granularity=second", headers=headers).status_code
             == 422
         )
-        assert client.get("/api/metrics/overview?hours=0", headers=headers).status_code == 422
-        assert client.get("/api/metrics/overview?hours=25", headers=headers).status_code == 422
-        assert client.get("/api/metrics/overview?days=31", headers=headers).status_code == 422
 
 
 def test_metrics_overview_reads_worker_authenticated_cache(tmp_path: Path) -> None:
@@ -411,7 +408,7 @@ def test_metrics_overview_reads_worker_authenticated_cache(tmp_path: Path) -> No
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
     payload = {
-        "granularity": "hour",
+        "granularity": "24h",
         "buckets": [
             {
                 "bucket_start": "2026-07-26T12:00:00+00:00",
@@ -427,13 +424,11 @@ def test_metrics_overview_reads_worker_authenticated_cache(tmp_path: Path) -> No
         ],
     }
     WorkerMetricsCache(metrics_cache_path(store.state_dir)).publish(
-        {metrics_cache_key("hour", 24, 7): payload}
+        {metrics_cache_key("24h"): payload}
     )
 
     with TestClient(app) as client:
-        response = client.get(
-            "/api/metrics/overview?granularity=hour&hours=24&days=7", headers=_auth(store)
-        )
+        response = client.get("/api/metrics/overview?granularity=24h", headers=_auth(store))
 
     assert response.status_code == 200
     assert response.json() == payload
@@ -455,9 +450,7 @@ def test_metrics_overview_cache_error_returns_503(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
     app = create_app(FakeSupervisor(store), tmp_path)
-    WorkerMetricsCache(metrics_cache_path(store.state_dir)).publish(
-        {}, "minute: connection refused"
-    )
+    WorkerMetricsCache(metrics_cache_path(store.state_dir)).publish({}, "6h: connection refused")
 
     with TestClient(app) as client:
         response = client.get("/api/metrics/overview", headers=_auth(store))

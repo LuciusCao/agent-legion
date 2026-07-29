@@ -1,10 +1,12 @@
-"""Host operations metrics: minute sampling and minute/hour/day rollups.
+"""Host operations metrics: minute sampling and fixed-window rollups.
 
 A background loop (see ``server.app.startup_tasks.BackgroundTasks``) calls
 ``sample_once`` every ``monitoring.sample_interval_seconds`` to persist one
 global row (``worker_id=''``) plus one row per active Worker per minute into
 ``ops_metric_samples``; the ``/api/metrics/overview`` route serves raw minute
-rows or hour/day rollups from the same table.
+rows or epoch-floor rollups from the same table. The ``granularity`` query
+value names the window (``6h``/``24h``/``30d``) and implies the bin size
+(60s/300s/14400s); there are no separate window params.
 """
 
 from __future__ import annotations
@@ -16,10 +18,18 @@ from server.app.agent_workers import _ONLINE_THRESHOLD_SECONDS
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 
-Granularity = Literal["minute", "hour", "day"]
+Granularity = Literal["6h", "24h", "30d"]
 
 _DEFAULT_SAMPLE_INTERVAL_SECONDS = 60
-_DEFAULT_RETENTION_DAYS = 7
+# 30d 窗口需要至少 30 天的采样保留，否则长尾段永远为空。
+_DEFAULT_RETENTION_DAYS = 30
+
+# granularity -> (回看窗口, 聚合桶秒数)；6h 直接返回逐分钟原始行。
+_WINDOWS: dict[Granularity, tuple[timedelta, int]] = {
+    "6h": (timedelta(hours=6), 60),
+    "24h": (timedelta(hours=24), 300),
+    "30d": (timedelta(days=30), 14_400),
+}
 
 # The shared row factory renders datetimes as UTC "%Y-%m-%d %H:%M:%S.%f"
 # strings (see server.app.db.rows); accept either shape and emit ISO-8601
@@ -204,18 +214,19 @@ class OpsMetricsService:
     def query_series(
         self,
         granularity: Granularity,
-        hours: int,
-        days: int,
         worker_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Read minute rows or hour/day rollups for one metric scope.
+        """Read minute rows or epoch-floor rollups for one metric scope.
 
-        ``worker_id=None`` reads the global aggregate rows (``worker_id=''``);
-        any other value reads only that Worker's per-worker samples.
+        ``granularity`` names the lookback window and implies the bin size
+        (``6h``→60s raw rows, ``24h``→300s, ``30d``→14400s). ``worker_id=None``
+        reads the global aggregate rows (``worker_id=''``); any other value
+        reads only that Worker's per-worker samples.
         """
         worker_key = worker_id if worker_id is not None else ""
-        if granularity == "minute":
-            cutoff = datetime.now(UTC) - timedelta(hours=hours)
+        window, bin_seconds = _WINDOWS[granularity]
+        cutoff = datetime.now(UTC) - window
+        if bin_seconds == 60:
             sql = """
                 select bucket_start,
                        online_workers, online_workers as online_workers_max,
@@ -226,12 +237,12 @@ class OpsMetricsService:
                 order by bucket_start
                 """
         else:
-            unit = "hour" if granularity == "hour" else "day"
-            cutoff = datetime.now(UTC) - (
-                timedelta(hours=hours) if granularity == "hour" else timedelta(days=days)
-            )
+            # epoch-floor 分桶（UTC，与 date_trunc 不同不受会话时区影响）：
+            # 5 分钟 / 4 小时桶边界分别对齐 :00/:05… 与 00/04/08/12/16/20 UTC。
             sql = f"""
-                select date_trunc('{unit}', bucket_start) as bucket_start,
+                select to_timestamp(
+                         floor(extract(epoch from bucket_start) / {bin_seconds}) * {bin_seconds}
+                       ) as bucket_start,
                        round(avg(online_workers)) as online_workers,
                        max(online_workers) as online_workers_max,
                        round(avg(active_executions)) as active_executions,
