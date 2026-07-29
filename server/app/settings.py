@@ -247,4 +247,9 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
 
 def validate_settings(settings: Settings) -> None:
     """Validate runtime dependencies after settings are constructed."""
-    validate_runtime(settings.executor_runtime, settings.config, settings.executor_definitions)
+    validate_runtime(
+        settings.executor_runtime,
+        settings.config,
+        settings.executor_definitions,
+        repo_root=settings.root_dir,
+    )

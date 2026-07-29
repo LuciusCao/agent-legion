@@ -55,6 +55,7 @@ class RuntimeDependencies:
     job_db: Any | None = None
     cancellation_grace_seconds: int = 5
     artifact_store: ArtifactStore | None = None
+    repo_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[3])
 
 
 _KIND_REGISTRY: dict[str, ExecutorKind[Any]] = {}

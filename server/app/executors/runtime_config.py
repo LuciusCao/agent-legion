@@ -10,6 +10,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from server.app.cms.auth import cms_token_available
+from server.app.executors.code_config import validate_code_config_paths
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
 
@@ -155,6 +156,7 @@ def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
     executor_definitions: Mapping[str, ExecutorConfig] | None = None,
+    repo_root: Path | None = None,
 ) -> None:
     """Validate enabled runtime dependencies at startup.
 
@@ -247,6 +249,9 @@ def validate_runtime(
             "each workspace must bind a token in its resource config (vault) "
             "or its CMS jobs will fail"
         )
+
+    if repo_root is not None:
+        errors.extend(validate_code_config_paths(executor_definitions or {}, repo_root))
 
     if errors:
         raise StartupValidationError(errors)

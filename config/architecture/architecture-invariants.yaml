@@ -358,6 +358,21 @@ invariants:
         target: tests/test_architecture_execution_decoupling.py
         gate: quick
 
+  - id: EXEC-CODE-001
+    statement: "Code executor capabilities must reference repo-tracked Python files via repo-relative paths: absolute paths and '..' segments are rejected at config load, paths must resolve to files inside the repository root at startup and executor construction, and node code runs only through the isolated child-process contract run(job, job_dir, runtime)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_code_executor.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_executor_kind_registration.py::test_builtin_kinds_registered
+        gate: quick
+      - kind: integration
+        target: tests/db/test_code_executor_migration.py
+        gate: quick
+
   - id: SECURITY-WORKER-001
     statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
     owner: security

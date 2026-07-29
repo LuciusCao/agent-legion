@@ -1,8 +1,9 @@
 """video_knowledge download node: execution-time CMS resolution.
 
 Knowledge-mode intake writes an opaque ``source_ref``; the download node
-resolves it against the CMS through the resource binding + vault chain and
-writes the resolved fields back to video_input.json before downloading.
+(``workflow_nodes/video_download.py``) resolves it against the CMS through
+the resource binding + vault chain and writes the resolved fields back to
+video_input.json before downloading.
 """
 
 from __future__ import annotations
@@ -16,7 +17,7 @@ from cryptography.fernet import Fernet
 from server.app.cms.client import CmsVideoLookup
 from server.app.services.vault import VaultService
 from server.app.services.vault_resources import resource_secret_name
-from server.app.workflows.video_knowledge import download_video
+from workflow_nodes.video_download import run as download_video
 
 PLAINTEXT = "knowledge-video-cms-token"
 
@@ -56,7 +57,7 @@ def test_download_urls_mode_downloads_source_url_directly(tmp_path, monkeypatch)
     monkeypatch.setattr("server.app.cms.knowledge.lookup_knowledge_video", fail_on_cms)
     downloaded = []
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge.legacy_download_video",
+        "workflow_nodes.video_download.legacy_download_video",
         lambda source_url, output_path: downloaded.append((source_url, output_path)),
     )
 
@@ -88,15 +89,11 @@ def test_download_knowledge_mode_resolves_via_cms(tmp_path, monkeypatch) -> None
         calls.append((code, api_url, token))
         return lookup
 
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.get_token", lambda env, config: "token"
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.lookup_knowledge_video", fake_lookup
-    )
+    monkeypatch.setattr("workflow_nodes.video_download.get_token", lambda env, config: "token")
+    monkeypatch.setattr("workflow_nodes.video_download.lookup_knowledge_video", fake_lookup)
     downloaded = []
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge.legacy_download_video",
+        "workflow_nodes.video_download.legacy_download_video",
         lambda source_url, output_path: downloaded.append(source_url),
     )
 
@@ -122,11 +119,9 @@ def test_download_knowledge_mode_not_found_fails_with_code(tmp_path, monkeypatch
             }
         }
     }
+    monkeypatch.setattr("workflow_nodes.video_download.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.get_token", lambda env, config: "token"
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.lookup_knowledge_video",
+        "workflow_nodes.video_download.lookup_knowledge_video",
         lambda code, api_url=None, token=None: CmsVideoLookup(status="not_found"),
     )
 
@@ -185,11 +180,9 @@ def test_download_knowledge_mode_resolves_vault_secret_ref(
             source_uuid="uuid-1",
         )
 
+    monkeypatch.setattr("workflow_nodes.video_download.lookup_knowledge_video", fake_lookup)
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.lookup_knowledge_video", fake_lookup
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge.legacy_download_video",
+        "workflow_nodes.video_download.legacy_download_video",
         lambda source_url, output_path: None,
     )
 

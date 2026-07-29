@@ -74,9 +74,12 @@
 - Workspace Executor 扩展顺序：capability → executor → allocation → binding → local limit（仅 local executor）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
-- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.local` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
+- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.local` / `.code` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
+- `code` executor 节点：`config/workflow.yaml` 的 capability 用 `path`（仓库相对路径）绑定
+  `workflow_nodes/` 下的 Python 文件，文件暴露模块级 `run(job, job_dir, runtime)`；
+  path 禁止绝对路径与 `..`（EXEC-CODE-001），代码变更必须入库经 git review 与 CI。
 - 节点可调参数经 `AgentDefinition.config_schema` 声明（`server/app/config_schema.py`
-  子集）；executor 节点经 capability 的 `LocalCapabilityConfig.config_schema`
+  子集）；executor 节点经 capability 的 `config_schema`
   声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
   workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
   （CONFIG-MANIFEST-001），敏感参数标记 `secret`。

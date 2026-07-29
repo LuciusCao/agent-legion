@@ -11,6 +11,24 @@ def service(job_db, settings, agent_manager):
 def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogService) -> None:
     result = service.catalog()
     assert result["executors"][0] == {
+        "id": "code-default",
+        "kind": "code",
+        "global_capacity": 16,
+        "capabilities": ["download_video", "fetch_questions"],
+        "capability_details": [
+            {
+                "name": "download_video",
+                "path": "workflow_nodes/video_download.py",
+                "timeout_seconds": 600,
+            },
+            {
+                "name": "fetch_questions",
+                "path": "workflow_nodes/question_intake.py",
+                "timeout_seconds": 600,
+            },
+        ],
+    }
+    assert result["executors"][1] == {
         "id": "local-default",
         "kind": "local",
         "global_capacity": 128,
@@ -19,8 +37,6 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
             "assemble_video_metadata",
             "classify_comprehension_eligibility",
             "clean_and_parse",
-            "download_video",
-            "fetch_questions",
             "finalize_non_uploadable",
             "package_video_job",
             "transcribe_video",
@@ -42,11 +58,6 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
                 "name": "clean_and_parse",
                 "handler": "question_comprehension_info.clean_and_parse",
             },
-            {"name": "download_video", "handler": "video_knowledge.download_video"},
-            {
-                "name": "fetch_questions",
-                "handler": "question_comprehension_info.fetch_questions",
-            },
             {
                 "name": "finalize_non_uploadable",
                 "handler": "question_comprehension_info.finalize_non_uploadable",
@@ -66,7 +77,7 @@ def test_executor_catalog_does_not_expose_agent_runtimes(
     assert "pi-video-main" not in executors_by_id
     assert "pi-default" not in executors_by_id
     assert "pi" not in executors_by_id
-    assert set(executors_by_id) == {"local-default"}
+    assert set(executors_by_id) == {"code-default", "local-default"}
 
 
 def test_catalog_exposes_agent_definitions_with_runtime_defaults(

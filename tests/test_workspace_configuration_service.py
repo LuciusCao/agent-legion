@@ -45,18 +45,26 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
         workspace["id"],
         workspace_patch={"name": "Reading"},
         settings_patch={"workflowKey": "question_comprehension_info"},
-        executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+        executor_allocations=[
+            {"executor_id": "local-default", "concurrency_limit": 4},
+            {"executor_id": "code-default", "concurrency_limit": 4},
+        ],
         node_bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
+                "executor_id": "code-default",
+            },
+            {
+                "workflow_key": "question_comprehension_info",
+                "node_key": "clean_and_parse",
                 "executor_id": "local-default",
-            }
+            },
         ],
         node_limits=[
             {
                 "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "node_key": "clean_and_parse",
                 "concurrency_limit": 2,
             }
         ],
@@ -64,7 +72,10 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
     assert result["workspace"]["name"] == "Reading"
     assert result["settings"]["workflowKey"] == "question_comprehension_info"
     assert result["executor_configuration"]["allocations"][0]["concurrency_limit"] == 4
-    assert result["executor_configuration"]["bindings"][0]["node_key"] == "fetch_questions"
+    assert {b["node_key"] for b in result["executor_configuration"]["bindings"]} == {
+        "fetch_questions",
+        "clean_and_parse",
+    }
     assert result["executor_configuration"]["node_limits"][0]["concurrency_limit"] == 2
 
 

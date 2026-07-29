@@ -32,18 +32,24 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 },
                 "executor_allocations": [
                     {"executor_id": "local-default", "concurrency_limit": 4},
+                    {"executor_id": "code-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
                         "workflow_key": "question_comprehension_info",
                         "node_key": "fetch_questions",
+                        "executor_id": "code-default",
+                    },
+                    {
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "clean_and_parse",
                         "executor_id": "local-default",
                     },
                 ],
                 "node_limits": [
                     {
                         "workflow_key": "question_comprehension_info",
-                        "node_key": "fetch_questions",
+                        "node_key": "clean_and_parse",
                         "concurrency_limit": 3,
                     },
                 ],
@@ -55,19 +61,25 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     assert body["workspace"]["name"] == "Updated Workspace"
     assert body["settings"]["entityType"] == "video"
     assert body["executor_configuration"]["allocations"] == [
+        {"executor_id": "code-default", "workspace_id": ws_id, "concurrency_limit": 4},
         {"executor_id": "local-default", "workspace_id": ws_id, "concurrency_limit": 4},
     ]
     assert body["executor_configuration"]["bindings"] == [
         {
             "workflow_key": "question_comprehension_info",
-            "node_key": "fetch_questions",
+            "node_key": "clean_and_parse",
             "executor_id": "local-default",
+        },
+        {
+            "workflow_key": "question_comprehension_info",
+            "node_key": "fetch_questions",
+            "executor_id": "code-default",
         },
     ]
     assert body["executor_configuration"]["node_limits"] == [
         {
             "workflow_key": "question_comprehension_info",
-            "node_key": "fetch_questions",
+            "node_key": "clean_and_parse",
             "concurrency_limit": 3,
         },
     ]
@@ -95,14 +107,14 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
                 "node_bindings": [
                     {
                         "workflow_key": "question_comprehension_info",
-                        "node_key": "fetch_questions",
+                        "node_key": "clean_and_parse",
                         "executor_id": "local-default",
                     },
                 ],
                 "node_limits": [
                     {
                         "workflow_key": "question_comprehension_info",
-                        "node_key": "fetch_questions",
+                        "node_key": "clean_and_parse",
                         "concurrency_limit": 2,
                     },
                 ],
@@ -178,12 +190,14 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "residue", "question_comprehension_info")
         # Seed rows left behind by the retired `pi` Executor alongside valid
-        # local-default rows, bypassing PUT validation like the legacy writers did.
+        # local-default / code-default rows, bypassing PUT validation like the
+        # legacy writers did.
         app.state.job_db.replace_workspace_executor_configuration(
             ws_id,
             [
                 {"executor_id": "pi", "concurrency_limit": 2},
                 {"executor_id": "local-default", "concurrency_limit": 8},
+                {"executor_id": "code-default", "concurrency_limit": 8},
             ],
             [
                 {
@@ -194,6 +208,11 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "fetch_questions",
+                    "executor_id": "code-default",
+                },
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "finalize_non_uploadable",
                     "executor_id": "local-default",
                 },
             ],
@@ -205,7 +224,7 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
                 },
                 {
                     "workflow_key": "question_comprehension_info",
-                    "node_key": "fetch_questions",
+                    "node_key": "finalize_non_uploadable",
                     "concurrency_limit": 2,
                 },
             ],
@@ -234,10 +253,16 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
 
     # The successful full replace physically removed the retired Executor rows.
     persisted = app.state.job_db.get_workspace_executor_configuration(ws_id)
-    assert {row["executor_id"] for row in persisted["allocations"]} == {"local-default"}
-    assert {row["executor_id"] for row in persisted["bindings"]} == {"local-default"}
+    assert {row["executor_id"] for row in persisted["allocations"]} == {
+        "local-default",
+        "code-default",
+    }
+    assert {row["executor_id"] for row in persisted["bindings"]} == {
+        "local-default",
+        "code-default",
+    }
     assert [(row["workflow_key"], row["node_key"]) for row in persisted["node_limits"]] == [
-        ("question_comprehension_info", "fetch_questions")
+        ("question_comprehension_info", "finalize_non_uploadable")
     ]
 
 

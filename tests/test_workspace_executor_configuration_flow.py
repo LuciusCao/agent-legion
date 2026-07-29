@@ -31,7 +31,7 @@ def _put_config(client: TestClient, workspace_id: str, payload: dict) -> dict:
     return {"status_code": response.status_code, "json": response.json()}
 
 
-def _expected_local_bindings(workspace_id: str) -> list[dict]:
+def _expected_bindings(workspace_id: str) -> list[dict]:
     return [
         {
             "workflow_key": WORKFLOW_KEY,
@@ -41,7 +41,7 @@ def _expected_local_bindings(workspace_id: str) -> list[dict]:
         {
             "workflow_key": WORKFLOW_KEY,
             "node_key": "fetch_questions",
-            "executor_id": "local-default",
+            "executor_id": "code-default",
         },
         {
             "workflow_key": WORKFLOW_KEY,
@@ -131,7 +131,10 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     assert "local-default" in executor_ids
     local_executor = next(executor for executor in catalog if executor["id"] == "local-default")
     assert local_executor["kind"] == "local"
-    assert "fetch_questions" in local_executor["capabilities"]
+    assert "clean_and_parse" in local_executor["capabilities"]
+    code_executor = next(executor for executor in catalog if executor["id"] == "code-default")
+    assert code_executor["kind"] == "code"
+    assert "fetch_questions" in code_executor["capabilities"]
 
     # Create a workspace to configure.
     workspace_response = client.post(
@@ -155,10 +158,10 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
             {"executor_id": "local-default", "concurrency_limit": 8},
+            {"executor_id": "code-default", "concurrency_limit": 8},
         ],
-        "node_bindings": _expected_local_bindings(workspace_id),
+        "node_bindings": _expected_bindings(workspace_id),
         "node_limits": [
-            {"workflow_key": WORKFLOW_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
             {"workflow_key": WORKFLOW_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
             {
                 "workflow_key": WORKFLOW_KEY,
@@ -175,6 +178,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     assert _sort(config["allocations"]) == _sort(
         [
             {"executor_id": "local-default", "workspace_id": workspace_id, "concurrency_limit": 8},
+            {"executor_id": "code-default", "workspace_id": workspace_id, "concurrency_limit": 8},
         ]
     )
     assert _sort(config["bindings"]) == _sort(save_payload["node_bindings"])

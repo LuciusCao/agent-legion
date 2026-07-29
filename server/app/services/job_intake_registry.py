@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.services.job_errors import InvalidOperationError, UnsupportedOperationError
 from server.app.services.job_intake_resolution import (
-    resolve_cms_question_candidates,
+    resolve_cms_question_opaque_candidates,
     resolve_direct_candidates,
 )
 
@@ -66,19 +66,23 @@ RESOLVERS: dict[tuple[str, str], ResolverSpec] = {
     ("question", "by_knowledge"): ResolverSpec(
         "cms.questions_by_knowledge",
         "question",
-        "intake",
+        "node",
         "by_knowledge",
-        resolve_cms_question_candidates,
+        resolve_cms_question_opaque_candidates,
     ),
     ("question", "batch_by_ids"): ResolverSpec(
-        "cms.question_ids", "question", "intake", "question_detail", resolve_cms_question_candidates
+        "cms.question_ids",
+        "question",
+        "node",
+        "question_detail",
+        resolve_cms_question_opaque_candidates,
     ),
     ("question", "batch_by_knowledge"): ResolverSpec(
         "cms.questions_by_knowledge",
         "question",
-        "intake",
+        "node",
         "by_knowledge",
-        resolve_cms_question_candidates,
+        resolve_cms_question_opaque_candidates,
     ),
     ("video", "direct_ids"): ResolverSpec(
         "direct.video_ids", "video", None, None, resolve_direct_candidates

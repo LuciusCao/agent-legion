@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from server.app.jobs import JobQueries
@@ -345,21 +344,12 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
 
 def test_make_workflow_worker_runs_question_comprehension_info_local_node(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        "server.app.workflows.question_comprehension_info.get_token",
-        lambda env, config: "test-token",
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.question_comprehension_info.fetch_question_detail",
-        lambda question_id, api_url, token: SimpleNamespace(
-            question_id=question_id,
-            title="Question Q100",
-            normalized={},
-            payload={"uuid": question_id},
-        ),
-    )
+    # fetch_questions runs on the code-default executor in an isolated child
+    # process, which does not inherit parent monkeypatches. make_workflow_worker
+    # injects empty resource declarations, so the node resolves no CMS api_url
+    # and writes the base payload without any network call.
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
     workspace = queries.create_workspace(
@@ -368,11 +358,11 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
     with queries.connect() as conn:
         conn.execute(
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
-            (workspace["id"], "local-default", 2),
+            (workspace["id"], "code-default", 2),
         )
         conn.execute(
             "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (workspace["id"], "question_comprehension_info", "fetch_questions", "local-default"),
+            (workspace["id"], "question_comprehension_info", "fetch_questions", "code-default"),
         )
     job = queries.create_job(
         workflow_key="question_comprehension_info",

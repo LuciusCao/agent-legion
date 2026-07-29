@@ -5,10 +5,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from server.app.cms.client import get_token
-from server.app.cms.question import fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
-from server.app.workflows.cms_helpers import _effective_cms_config
 from server.app.workflows.comprehension_common import (
     _assert_artifact_question_id,
     _load_json_object,
@@ -29,51 +26,6 @@ from server.app.workflows.workflow_manifest import workflow_manifest
 __all__ = ["classify_comprehension_eligibility", "finalize_non_uploadable"]
 
 logger = logging.getLogger(__name__)
-
-
-def fetch_questions(
-    job: dict[str, Any],
-    artifact_dir: Path,
-    context: dict[str, Any] | None = None,
-) -> None:
-    context = context or {}
-    check_cancellation(context)
-    logger.info(
-        "fetch_questions: source_id=%s title=%s",
-        job["source_id"],
-        job.get("title", ""),
-    )
-
-    cms_config = _effective_cms_config(job, context)
-    node_config = context.get("node_config")
-    if isinstance(node_config, dict) and node_config:
-        logger.info("  node_config overrides: %s", sorted(node_config))
-    api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
-    if api_url:
-        logger.info("  fetching from CMS: %s", api_url)
-        token = get_token(str(cms_config.get("env", "")), cms_config)
-        detail = fetch_question_detail(str(job["source_id"]), str(api_url), token)
-        check_cancellation(context)
-        payload = {
-            "question_id": detail.question_id or job["source_id"],
-            "title": detail.title or job["title"],
-            "normalized": detail.normalized,
-            "cms_payload": detail.payload,
-        }
-    else:
-        logger.info("  no CMS configured, using base payload")
-        payload = {
-            "question_id": job["source_id"],
-            "title": job["title"],
-            "normalized": {},
-            "cms_payload": None,
-        }
-
-    artifact_dir.mkdir(parents=True, exist_ok=True)
-    payload_obj = {"questions": [payload]}
-    out_path = artifact_dir / "questions.json"
-    out_path.write_text(json.dumps(payload_obj, ensure_ascii=False, indent=2), encoding="utf-8")
-    logger.info("  wrote %s", out_path.name)
 
 
 def clean_and_parse(

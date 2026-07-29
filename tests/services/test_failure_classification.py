@@ -270,6 +270,17 @@ def test_http_404_is_business_source_missing():
     ) == ("business", "source_missing")
 
 
+def test_unresolvable_intake_inputs_are_business_source_missing():
+    assert classify_failure(1, "RuntimeError: knowledge video not found: K404") == (
+        "business",
+        "source_missing",
+    )
+    assert classify_failure(1, "RuntimeError: no questions found for knowledge code: K404") == (
+        "business",
+        "source_missing",
+    )
+
+
 def test_cancelled_execution_is_technical_cancelled():
     assert classify_failure(None, "execution was cancelled") == ("technical", "cancelled")
 
