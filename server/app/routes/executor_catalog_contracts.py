@@ -7,7 +7,6 @@ from server.app.routes.agent_catalog_contracts import AgentDefinitionResponse
 
 class ExecutorCapabilityResponse(BaseModel):
     name: str
-    handler: str | None = None
     path: str | None = None
     timeout_seconds: int | None = None
     skill: str | None = None
@@ -21,7 +20,7 @@ class ExecutorCapabilityResponse(BaseModel):
 
 class ExecutorDefinitionResponse(BaseModel):
     id: str
-    kind: Literal["local", "code", "pi", "openclaw"]
+    kind: Literal["code", "pi", "openclaw"]
     global_capacity: int = Field(ge=1)
     capabilities: list[str]
     capability_details: list[ExecutorCapabilityResponse] = Field(default_factory=list)

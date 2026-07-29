@@ -554,7 +554,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
                 (
                     "lease-1",
                     "exec-1",
-                    "local-default",
+                    "code-default",
                     "test",
                     job_id,
                     "question_comprehension_info",
@@ -612,7 +612,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
                 (
                     "lease-1",
                     "exec-1",
-                    "local-default",
+                    "code-default",
                     "test",
                     job_id,
                     "question_comprehension_info",

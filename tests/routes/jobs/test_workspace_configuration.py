@@ -31,7 +31,6 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                     "resources": {"question_detail": {"enabled": True, "config": {}}},
                 },
                 "executor_allocations": [
-                    {"executor_id": "local-default", "concurrency_limit": 4},
                     {"executor_id": "code-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
@@ -43,7 +42,7 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                     {
                         "workflow_key": "question_comprehension_info",
                         "node_key": "clean_and_parse",
-                        "executor_id": "local-default",
+                        "executor_id": "code-default",
                     },
                 ],
                 "node_limits": [
@@ -62,13 +61,12 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     assert body["settings"]["entityType"] == "video"
     assert body["executor_configuration"]["allocations"] == [
         {"executor_id": "code-default", "workspace_id": ws_id, "concurrency_limit": 4},
-        {"executor_id": "local-default", "workspace_id": ws_id, "concurrency_limit": 4},
     ]
     assert body["executor_configuration"]["bindings"] == [
         {
             "workflow_key": "question_comprehension_info",
             "node_key": "clean_and_parse",
-            "executor_id": "local-default",
+            "executor_id": "code-default",
         },
         {
             "workflow_key": "question_comprehension_info",
@@ -102,13 +100,13 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
                 "name": "Rollback Test",
                 "settings": {"workflowKey": "question_comprehension_info"},
                 "executor_allocations": [
-                    {"executor_id": "local-default", "concurrency_limit": 4},
+                    {"executor_id": "code-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
                         "workflow_key": "question_comprehension_info",
                         "node_key": "clean_and_parse",
-                        "executor_id": "local-default",
+                        "executor_id": "code-default",
                     },
                 ],
                 "node_limits": [
@@ -128,13 +126,13 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
                 "name": "Must Roll Back",
                 "settings": {"workflowKey": "question_comprehension_info"},
                 "executor_allocations": [
-                    {"executor_id": "local-default", "concurrency_limit": 4},
+                    {"executor_id": "code-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
                         "workflow_key": "question_comprehension_info",
                         "node_key": "unknown_node",
-                        "executor_id": "local-default",
+                        "executor_id": "code-default",
                     },
                 ],
                 "node_limits": [],
@@ -166,7 +164,7 @@ def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_pa
     queries.replace_workspace_executor_configuration(
         ws_id,
         [
-            {"executor_id": "local-default", "concurrency_limit": 1},
+            {"executor_id": "code-default", "concurrency_limit": 1},
         ],
         [],
         [],
@@ -177,7 +175,7 @@ def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_pa
         response = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
 
     assert response.status_code == 200
-    assert {row["executor_id"] for row in response.json()["allocations"]} == {"local-default"}
+    assert {row["executor_id"] for row in response.json()["allocations"]} == {"code-default"}
 
 
 def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_path):
@@ -190,13 +188,12 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c, "residue", "question_comprehension_info")
         # Seed rows left behind by the retired `pi` Executor alongside valid
-        # local-default / code-default rows, bypassing PUT validation like the
-        # legacy writers did.
+        # code-default rows, bypassing PUT validation like the legacy writers
+        # did.
         app.state.job_db.replace_workspace_executor_configuration(
             ws_id,
             [
                 {"executor_id": "pi", "concurrency_limit": 2},
-                {"executor_id": "local-default", "concurrency_limit": 8},
                 {"executor_id": "code-default", "concurrency_limit": 8},
             ],
             [
@@ -213,7 +210,7 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "finalize_non_uploadable",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 },
             ],
             [
@@ -253,14 +250,8 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
 
     # The successful full replace physically removed the retired Executor rows.
     persisted = app.state.job_db.get_workspace_executor_configuration(ws_id)
-    assert {row["executor_id"] for row in persisted["allocations"]} == {
-        "local-default",
-        "code-default",
-    }
-    assert {row["executor_id"] for row in persisted["bindings"]} == {
-        "local-default",
-        "code-default",
-    }
+    assert {row["executor_id"] for row in persisted["allocations"]} == {"code-default"}
+    assert {row["executor_id"] for row in persisted["bindings"]} == {"code-default"}
     assert [(row["workflow_key"], row["node_key"]) for row in persisted["node_limits"]] == [
         ("question_comprehension_info", "finalize_non_uploadable")
     ]

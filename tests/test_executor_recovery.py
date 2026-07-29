@@ -7,7 +7,7 @@ import pytest
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
-from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.executors.registry import ExecutorRegistry
@@ -86,14 +86,14 @@ def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
             values (%s, %s, %s)
             """,
-            (workspace_id, "local-default", 1),
+            (workspace_id, "code-default", 1),
         )
         conn.execute(
             """
             insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
             values (%s, %s, %s, %s)
             """,
-            (workspace_id, "recovery_test", "fetch", "local-default"),
+            (workspace_id, "recovery_test", "fetch", "code-default"),
         )
         conn.execute(
             """
@@ -107,7 +107,7 @@ def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
 
 def _claim(workspace_id: str, job_id: str, repo: ExecutorLeaseRepository) -> None:
     request = LeaseClaimRequest(
-        executor_id="local-default",
+        executor_id="code-default",
         global_capacity=1,
         workspace_id=workspace_id,
         job_id=job_id,
@@ -148,8 +148,8 @@ def _fetch_recovery_state(queries: JobQueries, job_id: str, lease_id: str, node_
 
 
 class _NoOpExecutor:
-    kind = "local"
-    id = "local-default"
+    kind = "code"
+    id = "code-default"
 
     def supports(self, capability: str) -> bool:
         return True
@@ -164,15 +164,15 @@ class _NoOpExecutor:
 def _make_worker(
     tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
 ) -> WorkflowWorkerThread:
-    executor_def = LocalExecutorConfig(
-        kind="local",
+    executor_def = CodeExecutorConfig(
+        kind="code",
         global_capacity=1,
-        capabilities={"fetch": LocalCapabilityConfig(handler="dummy.handler")},
+        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
     )
     registry = ExecutorRegistry(
-        executors={"local-default": _NoOpExecutor()},
-        global_capacities={"local-default": 1},
-        definitions={"local-default": executor_def},
+        executors={"code-default": _NoOpExecutor()},
+        global_capacities={"code-default": 1},
+        definitions={"code-default": executor_def},
     )
     runtime = ExecutionRuntime(
         leases=repo,
@@ -299,7 +299,7 @@ def test_recovery_frees_global_and_workspace_capacity(
 
     claim_b = fresh_repo.try_claim(
         LeaseClaimRequest(
-            executor_id="local-default",
+            executor_id="code-default",
             global_capacity=1,
             workspace_id=workspace_id,
             job_id=job_id_b,

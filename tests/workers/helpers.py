@@ -5,8 +5,8 @@ from pathlib import Path
 from typing import Any
 
 from server.app.executors.config import (
-    LocalCapabilityConfig,
-    LocalExecutorConfig,
+    CodeCapabilityConfig,
+    CodeExecutorConfig,
     PiCapabilityConfig,
     PiExecutorConfig,
 )
@@ -40,11 +40,11 @@ def _local_node(key: str, outputs: list[str] | None = None) -> WorkflowNode:
 
 
 class RecordingExecutor:
-    kind = "local"
+    kind = "code"
 
     def __init__(self, executor_id: str, block_event: threading.Event | None = None):
         self.id = executor_id
-        self.kind = "local"
+        self.kind = "code"
         self.block_event = block_event or threading.Event()
         self.contexts: list[ExecutionContext] = []
         self._cancelled: set[str] = set()
@@ -73,15 +73,15 @@ def _make_worker(
     executor: RecordingExecutor,
     definitions: list[WorkflowDefinition],
 ) -> WorkflowWorkerThread:
-    executor_def = LocalExecutorConfig(
-        kind="local",
+    executor_def = CodeExecutorConfig(
+        kind="code",
         global_capacity=2,
-        capabilities={"fetch": LocalCapabilityConfig(handler="dummy.handler")},
+        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
     )
     registry = ExecutorRegistry(
-        executors={"local-default": executor},
-        global_capacities={"local-default": 2},
-        definitions={"local-default": executor_def},
+        executors={"code-default": executor},
+        global_capacities={"code-default": 2},
+        definitions={"code-default": executor_def},
     )
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(db_path, data_dir=tmp_path)

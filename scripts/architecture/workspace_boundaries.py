@@ -25,7 +25,7 @@ _LEGACY_VIDEO_EXCEPTIONS: set[tuple[str, str]] = set()
 
 _JOB_SERVICE_PREFIX = "server/app/services/job_"
 _DIRECT_EXECUTOR_MODULE_PREFIXES = tuple(
-    """server.app.executors.local server.app.executors.pi server.app.executors.openclaw server.app.executors.runtime server.app.executors.registry server.app.executors.protocol server.app.executors.config""".split()
+    """server.app.executors.code server.app.executors.pi server.app.executors.openclaw server.app.executors.runtime server.app.executors.registry server.app.executors.protocol server.app.executors.config""".split()
 )
 
 _GENERATED_JOB_TRANSPORT_NAMES = frozenset(

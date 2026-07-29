@@ -50,12 +50,12 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_
         ws_id = ws["workspace"]["id"]
         job_db.replace_workspace_executor_configuration(
             ws_id,
-            allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+            allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
             bindings=[
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "review_keywords",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 }
             ],
             node_limits=[],
@@ -75,9 +75,9 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_
     body = stats.json()
     executors = body["executor_status"]["executors"]
     assert len(executors) == 1
-    assert executors[0]["executor_id"] == "local-default"
-    assert executors[0]["kind"] == "local"
-    assert executors[0]["global_capacity"] == 128
+    assert executors[0]["executor_id"] == "code-default"
+    assert executors[0]["kind"] == "code"
+    assert executors[0]["global_capacity"] == 16
     assert executors[0]["workspace_limit"] == 4
     assert executors[0]["running"] == 0
     assert executors[0]["available"] == 4

@@ -1,14 +1,22 @@
+"""video_knowledge node: assemble video metadata and derived artifacts.
+
+Normalizes ``interactions.json`` into the dict shape the legacy assembler
+expects, runs ``assemble_video`` over the job directory, and guarantees a
+fallback ``report.md``.
+"""
+
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
 from server.app.pipeline.assemble import assemble_video
-from server.app.pipeline.transcribe import run_transcription_with_providers
-from server.app.settings import load_settings
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
 from server.app.workflows.video_knowledge_transcription import build_default_providers
+
+logger = logging.getLogger(__name__)
 
 
 def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
@@ -18,28 +26,6 @@ def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
 
 def _video_id(video_input: VideoKnowledgeInput, job: dict[str, Any]) -> str:
     return video_input.legacy_video_id or str(job.get("id") or "") or video_input.external_id
-
-
-def transcribe_video(
-    job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None = None
-) -> None:
-    settings = load_settings()
-    if runtime and runtime.get("settings_config"):
-        settings.config.update(runtime["settings_config"])
-    video_input = _load_video_input(job_dir)
-    mode = str(settings.config.get("asr", {}).get("provider", "auto"))
-    result = run_transcription_with_providers(
-        video_path=job_dir / "source.mp4",
-        output_dir=job_dir,
-        title=video_input.title,
-        duration=0,
-        mode=mode,
-        providers=build_default_providers(settings),
-    )
-    (job_dir / "transcription.json").write_text(
-        json.dumps(result.__dict__, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
 
 
 def _normalize_interactions(video_dir: Path) -> None:
@@ -55,8 +41,10 @@ def _normalize_interactions(video_dir: Path) -> None:
         )
 
 
-def assemble_video_metadata(
-    job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None = None
+def run(
+    job: dict[str, Any],
+    job_dir: Path,
+    runtime: dict[str, Any] | None = None,
 ) -> None:
     video_input = _load_video_input(job_dir)
     legacy_video = {
@@ -73,22 +61,3 @@ def assemble_video_metadata(
         (job_dir / "report.md").write_text(
             f"# {video_input.title or legacy_video['id']}\n", encoding="utf-8"
         )
-
-
-def package_video_job(
-    job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None = None
-) -> None:
-    files = sorted(
-        path.name
-        for path in job_dir.iterdir()
-        if path.is_file() and path.name != "package_manifest.json"
-    )
-    manifest = {
-        "workflow_key": "video_knowledge",
-        "job_id": str(job.get("id") or ""),
-        "files": files,
-    }
-    (job_dir / "package_manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )

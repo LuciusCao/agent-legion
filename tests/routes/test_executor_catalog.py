@@ -4,4 +4,4 @@ def test_executor_catalog_contains_only_host_executors(client_factory):
 
     assert response.status_code == 200
     executors = response.json()["executors"]
-    assert [executor["id"] for executor in executors] == ["code-default", "local-default"]
+    assert [executor["id"] for executor in executors] == ["code-default"]

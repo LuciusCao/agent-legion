@@ -3,24 +3,34 @@ from __future__ import annotations
 from dataclasses import replace
 from pathlib import Path
 
+from server.app.executors.code import CodeExecutor
 from server.app.executors.config import (
+    CodeCapabilityConfig,
     OpenClawCapabilityConfig,
     PiCapabilityConfig,
 )
-from server.app.executors.local import LocalExecutor
 from server.app.executors.models import ExecutionContext
 from server.app.executors.openclaw import OpenClawExecutor
 from server.app.executors.openclaw_runner import OpenClawRunner
 from server.app.executors.pi import PiExecutor
 from server.app.executors.runtime_config import PiRuntimeConfig
-from tests.executors.adapters.helpers import (
-    _make_skill_manager,
-    write_output_handler,
-)
+from tests.executors.adapters.helpers import _make_skill_manager
 
 
-def test_local_executor_result_log_path_is_absolute(context: ExecutionContext) -> None:
-    executor = LocalExecutor("local-default", {"fetch": write_output_handler})
+def test_code_executor_result_log_path_is_absolute(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    node = tmp_path / "node_write_output.py"
+    node.write_text(
+        "def run(job, job_dir, runtime):\n"
+        "    (job_dir / 'out.json').write_text('{}', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    executor = CodeExecutor(
+        "code-default",
+        {"fetch": CodeCapabilityConfig(path="node_write_output.py")},
+        repo_root=tmp_path,
+    )
     result = executor.execute(replace(context, capability="fetch", expected_outputs=("out.json",)))
     assert result.status == "completed"
     assert result.log_path == str(context.log_path)

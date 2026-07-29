@@ -196,10 +196,8 @@ server/app/
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/agent_stock.py |
 | CodeCapabilityConfig | BaseModel | path: str, timeout_seconds: int, config_schema: dict[str, Any] | app/executors/code_config.py |
 | CodeExecutorConfig | BaseModel | kind: Literal['code'], global_capacity: int, capabilities: dict[str, CodeCapa... | app/executors/code_config.py |
-| LocalCapabilityConfig | BaseModel | handler: str, timeout_seconds: float | None, isolation: Literal['process', 't... | app/executors/config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
 | OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
-| LocalExecutorConfig | BaseModel | kind: Literal['local'], global_capacity: int, capabilities: dict[str, LocalCa... | app/executors/config.py |
 | PiExecutorConfig | BaseModel | kind: Literal['pi'], global_capacity: int, capabilities: dict[str, PiCapabili... | app/executors/config.py |
 | OpenClawExecutorConfig | BaseModel | kind: Literal['openclaw'], agent_id: str, global_capacity: int, capabilities:... | app/executors/config.py |
 | PiRuntimeConfig | BaseModel | flavor: Literal['pi', 'velites'], binary: str, provider: str, model: str, thi... | app/executors/runtime_config.py |
@@ -238,8 +236,8 @@ server/app/
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None | app/routes/common.py |
-| ExecutorCapabilityResponse | BaseModel | name: str, handler: str | None, path: str | None, timeout_seconds: int | None... | app/routes/executor_catalog_contracts.py |
-| ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['local', 'code', 'pi', 'openclaw'], global_capacity: i... | app/routes/executor_catalog_contracts.py |
+| ExecutorCapabilityResponse | BaseModel | name: str, path: str | None, timeout_seconds: int | None, skill: str | None, ... | app/routes/executor_catalog_contracts.py |
+| ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['code', 'pi', 'openclaw'], global_capacity: int, capab... | app/routes/executor_catalog_contracts.py |
 | ExecutorCatalogResponse | BaseModel | executors: list[ExecutorDefinitionResponse], agents: list[AgentDefinitionResp... | app/routes/executor_catalog_contracts.py |
 | ExecutorAllocationRequest | BaseModel | executor_id: str, concurrency_limit: int | app/routes/executor_contracts.py |
 | NodeBindingRequest | BaseModel | workflow_key: str, node_key: str, executor_id: str | app/routes/executor_contracts.py |
@@ -508,7 +506,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 - `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）。
 - `config/agent_legion.yaml`：ASR、CMS、资源提供者（`resource_providers`）、OpenClaw 设置。
-- `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，local executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
+- `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
@@ -539,7 +537,7 @@ token 用量计价已产品化：定价存于 `global_settings` 表（`token_usa
 
 - `agents`: Agent 目录（AgentDefinition），声明各 capability 的 runtime / skill / tools / `config_schema`
 - `agent_workers`: Agent Worker 注册设置（`register_token` / `register_token_file` 等；token 值亦可经 env `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 注入）
-- `executors`: local / pi / openclaw 执行器定义；local capability 除 `handler` 外可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入 handler runtime 的 `node_config` 键
+- `executors`: code / pi / openclaw 执行器定义；code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键
 - `workflows.enabled`: 是否启用 Agent Legion DAG workflow worker
 - `workflows.pi`: Pi agent runner 配置（provider, model, timeout, environment）
 

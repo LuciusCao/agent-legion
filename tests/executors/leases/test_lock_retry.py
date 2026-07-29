@@ -13,7 +13,7 @@ from tests.executors.leases.helpers import _claim_request, _setup_workspace
 def test_try_claim_retries_transient_lock_error(
     queries: JobQueries, repo_a: ExecutorLeaseRepository, monkeypatch
 ) -> None:
-    workspace_id, job_id = _setup_workspace(queries, "ws-retry", "local-default", workspace_limit=2)
+    workspace_id, job_id = _setup_workspace(queries, "ws-retry", "code-default", workspace_limit=2)
     real_claim_lease = _lease_write_paths.claim_lease
     calls = {"count": 0}
 
@@ -25,7 +25,7 @@ def test_try_claim_retries_transient_lock_error(
 
     monkeypatch.setattr(_lease_write_paths, "claim_lease", flaky_claim_lease)
 
-    claim = repo_a.try_claim(_claim_request(workspace_id, job_id))
+    claim = repo_a.try_claim(_claim_request(workspace_id, job_id, executor_id="code-default"))
 
     assert claim is not None
     assert calls["count"] == 2

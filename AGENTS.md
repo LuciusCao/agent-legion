@@ -71,10 +71,10 @@
   token 解析；公开端点仅限 `/api/health` 与 `/api/auth/login|bootstrap`。
 - 测试中受保护 API 走 `client` fixture（自动 bootstrap admin 并带 CSRF
   header）；匿名行为用 `anon_client`。不留 auth 开关。
-- Workspace Executor 扩展顺序：capability → executor → allocation → binding → local limit（仅 local executor）。
+- Workspace Executor 扩展顺序：capability → executor → allocation → binding → node limit（仅 code executor）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
-- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.local` / `.code` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
+- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
 - `code` executor 节点：`config/workflow.yaml` 的 capability 用 `path`（仓库相对路径）绑定
   `workflow_nodes/` 下的 Python 文件，文件暴露模块级 `run(job, job_dir, runtime)`；
   path 禁止绝对路径与 `..`（EXEC-CODE-001），代码变更必须入库经 git review 与 CI。
@@ -117,8 +117,8 @@ from server.app.pipeline.download import download_video
 
 ```python
 # Wrong: Job service invokes an Executor directly.
-from server.app.executors.local import LocalExecutor
-LocalExecutor(...).execute(context)
+from server.app.executors.code import CodeExecutor
+CodeExecutor(...).execute(context)
 ```
 
 更多完整规则与示例见 [docs/architecture/workspace-executor-evidence-matrix.md](docs/architecture/workspace-executor-evidence-matrix.md)。

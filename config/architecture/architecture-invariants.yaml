@@ -108,7 +108,7 @@ invariants:
         gate: ci_extended
 
   - id: EXEC-CANCEL-001
-    statement: "Adapter-specific cancellation terminates active Pi/OpenClaw subprocess groups and isolated local handlers within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
+    statement: "Adapter-specific cancellation terminates active Pi/OpenClaw subprocess groups and isolated code node subprocesses within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
     owner: workspace-executor
     risk: critical
     evidence:

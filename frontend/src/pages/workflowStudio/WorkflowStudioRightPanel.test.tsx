@@ -21,14 +21,14 @@ const workflow = {
 
 const executorCatalog = [
   {
-    id: 'local-default',
-    kind: 'local' as const,
+    id: 'code-default',
+    kind: 'code' as const,
     global_capacity: 16,
     capabilities: ['fetch_questions'],
     capability_details: [
       {
         name: 'fetch_questions',
-        handler: 'question_comprehension_info.fetch_questions',
+        path: 'workflow_nodes/fetch_questions.py',
       },
     ],
   },
@@ -52,9 +52,9 @@ describe('WorkflowStudioRightPanel', () => {
 
     expect(screen.getByRole('region', { name: '节点配置' })).toBeInTheDocument()
     expect(screen.getByText('基本设置')).toBeInTheDocument()
-    expect(screen.getByText('local-default')).toBeInTheDocument()
+    expect(screen.getByText('code-default')).toBeInTheDocument()
     expect(
-      screen.getByText('question_comprehension_info.fetch_questions')
+      screen.getByText('workflow_nodes/fetch_questions.py')
     ).toBeInTheDocument()
     expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.queryByText('YAML 源码')).not.toBeInTheDocument()

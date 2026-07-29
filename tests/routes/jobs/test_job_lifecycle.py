@@ -137,13 +137,13 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
         job_db.replace_workspace_executor_configuration(
             ws_id,
             allocations=[
-                {"executor_id": "local-default", "concurrency_limit": 1},
+                {"executor_id": "code-default", "concurrency_limit": 1},
             ],
             bindings=[
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "assemble_comprehension_info",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 },
             ],
             node_limits=[],
@@ -155,8 +155,8 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
     assert nodes["review_key_info"]["executor_id"] is None
     assert nodes["review_key_info"]["executor_kind"] is None
     assert nodes["review_key_info"]["agent_id"] == "question-key-info-review-v1"
-    assert nodes["assemble_comprehension_info"]["executor_id"] == "local-default"
-    assert nodes["assemble_comprehension_info"]["executor_kind"] == "local"
+    assert nodes["assemble_comprehension_info"]["executor_id"] == "code-default"
+    assert nodes["assemble_comprehension_info"]["executor_kind"] == "code"
 
 
 def test_delete_job_returns_404_for_unknown_job(tmp_path):

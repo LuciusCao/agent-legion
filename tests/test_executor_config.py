@@ -2,7 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
-from server.app.executors.config import LocalExecutorConfig
+from server.app.executors.config import CodeExecutorConfig
 from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.kinds import UnknownExecutorKindError
 
@@ -10,12 +10,10 @@ from server.app.executors.kinds import UnknownExecutorKindError
 def test_loads_discriminated_executor_definitions() -> None:
     definitions = load_executor_definitions(
         {
-            "local-default": {
-                "kind": "local",
+            "code-default": {
+                "kind": "code",
                 "global_capacity": 4,
-                "capabilities": {
-                    "fetch_questions": {"handler": "question_comprehension_info.fetch_questions"}
-                },
+                "capabilities": {"fetch_questions": {"path": "workflow_nodes/question_intake.py"}},
             },
             "pi-default": {
                 "kind": "pi",
@@ -43,7 +41,7 @@ def test_loads_discriminated_executor_definitions() -> None:
 def test_rejects_non_positive_global_capacity(capacity: object) -> None:
     with pytest.raises(ValidationError):
         load_executor_definitions(
-            {"local-default": {"kind": "local", "global_capacity": capacity, "capabilities": {}}}
+            {"code-default": {"kind": "code", "global_capacity": capacity, "capabilities": {}}}
         )
 
 
@@ -58,12 +56,10 @@ def test_rejects_empty_capability_name() -> None:
     with pytest.raises(ValidationError):
         load_executor_definitions(
             {
-                "local-default": {
-                    "kind": "local",
+                "code-default": {
+                    "kind": "code",
                     "global_capacity": 4,
-                    "capabilities": {
-                        "": {"handler": "question_comprehension_info.fetch_questions"}
-                    },
+                    "capabilities": {"": {"path": "workflow_nodes/question_intake.py"}},
                 }
             }
         )
@@ -83,15 +79,15 @@ def test_rejects_unsafe_pi_skill_path(skill: str) -> None:
         )
 
 
-def test_loads_local_capability_config_schema() -> None:
+def test_loads_code_capability_config_schema() -> None:
     definitions = load_executor_definitions(
         {
-            "local-default": {
-                "kind": "local",
+            "code-default": {
+                "kind": "code",
                 "global_capacity": 4,
                 "capabilities": {
                     "fetch_questions": {
-                        "handler": "question_comprehension_info.fetch_questions",
+                        "path": "workflow_nodes/question_intake.py",
                         "config_schema": {
                             "type": "object",
                             "properties": {"bank_version": {"type": "string"}},
@@ -101,9 +97,9 @@ def test_loads_local_capability_config_schema() -> None:
             }
         }
     )
-    local = definitions["local-default"]
-    assert isinstance(local, LocalExecutorConfig)
-    assert local.capabilities["fetch_questions"].config_schema == {
+    code = definitions["code-default"]
+    assert isinstance(code, CodeExecutorConfig)
+    assert code.capabilities["fetch_questions"].config_schema == {
         "type": "object",
         "properties": {"bank_version": {"type": "string"}},
     }
@@ -117,16 +113,16 @@ def test_loads_local_capability_config_schema() -> None:
         {"type": "object", "properties": {"x": {"type": "integer", "default": "nan"}}},
     ],
 )
-def test_rejects_invalid_local_capability_config_schema(schema: object) -> None:
+def test_rejects_invalid_code_capability_config_schema(schema: object) -> None:
     with pytest.raises(ValidationError):
         load_executor_definitions(
             {
-                "local-default": {
-                    "kind": "local",
+                "code-default": {
+                    "kind": "code",
                     "global_capacity": 4,
                     "capabilities": {
                         "fetch_questions": {
-                            "handler": "question_comprehension_info.fetch_questions",
+                            "path": "workflow_nodes/question_intake.py",
                             "config_schema": schema,
                         }
                     },

@@ -88,7 +88,7 @@ def _resolve_uncached(
             executor = worker.registry.require(executor_id, capability)
         except Exception as exc:
             return NodeRoute("error", error_message=str(exc))
-        if executor.kind == "local":
+        if executor.kind == "code":
             return NodeRoute(
                 "executor",
                 target_id=executor_id,

@@ -176,8 +176,8 @@ describe('SettingsPage', () => {
       },
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local',
+          id: 'code-default',
+          kind: 'code',
           capabilities: ['fetch_questions'],
           global_capacity: 4,
         },
@@ -185,7 +185,7 @@ describe('SettingsPage', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -194,7 +194,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'question_content',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -211,6 +211,7 @@ describe('SettingsPage', () => {
       '工作流',
       '执行器',
       'Agent 与 Worker',
+      '代码节点并发',
       '危险操作',
     ])
   })
@@ -486,8 +487,8 @@ describe('SettingsPage', () => {
       },
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local',
+          id: 'code-default',
+          kind: 'code',
           capabilities: ['fetch_questions'],
           global_capacity: 4,
         },
@@ -495,7 +496,7 @@ describe('SettingsPage', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -504,7 +505,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'question_content',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -519,7 +520,7 @@ describe('SettingsPage', () => {
     expect(labels.indexOf('节点绑定')).toBeGreaterThan(
       labels.indexOf('执行器分配')
     )
-    expect(labels.indexOf('本地节点并发')).toBeGreaterThan(
+    expect(labels.indexOf('代码节点并发')).toBeGreaterThan(
       labels.indexOf('节点绑定')
     )
   })
@@ -542,8 +543,8 @@ describe('SettingsPage', () => {
       originalSettings: settings,
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local' as const,
+          id: 'code-default',
+          kind: 'code' as const,
           capabilities: ['fetch_questions'],
           global_capacity: 4,
         },
@@ -593,7 +594,7 @@ describe('SettingsPage', () => {
       executor_configuration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 1,
           },
@@ -602,7 +603,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [
@@ -621,12 +622,12 @@ describe('SettingsPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('checkbox', { name: '分配 local-default' })
+        screen.getByRole('checkbox', { name: '分配 code-default' })
       ).toBeInTheDocument()
     })
 
     const switchEl = screen.getByRole('checkbox', {
-      name: '分配 local-default',
+      name: '分配 code-default',
     })
     await act(async () => {
       fireEvent.click(switchEl)
@@ -646,7 +647,7 @@ describe('SettingsPage', () => {
     })
     await act(async () => {
       fireEvent.click(
-        screen.getByRole('option', { name: 'local-default (local)' })
+        screen.getByRole('option', { name: 'code-default (code)' })
       )
     })
 
@@ -692,13 +693,13 @@ describe('SettingsPage', () => {
       name: 'Flow Workspace',
       description: '',
       executor_allocations: [
-        { executor_id: 'local-default', concurrency_limit: 1 },
+        { executor_id: 'code-default', concurrency_limit: 1 },
       ],
       node_bindings: [
         {
           workflow_key: 'sample_workflow',
           node_key: 'fetch_questions',
-          executor_id: 'local-default',
+          executor_id: 'code-default',
         },
       ],
       node_limits: [
@@ -718,8 +719,8 @@ describe('SettingsPage', () => {
       ...defaultState,
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local' as const,
+          id: 'code-default',
+          kind: 'code' as const,
           capabilities: ['fetch_questions'],
           global_capacity: 4,
         },
@@ -743,7 +744,7 @@ describe('SettingsPage', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -752,7 +753,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -761,7 +762,7 @@ describe('SettingsPage', () => {
       originalExecutorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -770,7 +771,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -785,7 +786,7 @@ describe('SettingsPage', () => {
     await act(async () => {})
 
     const switchEl = screen.getByRole('checkbox', {
-      name: '分配 local-default',
+      name: '分配 code-default',
     })
     await act(async () => {
       fireEvent.click(switchEl)

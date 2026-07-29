@@ -10,8 +10,8 @@ function createProps(overrides = {}) {
     jobStats: { running: 2, completed: 5, failed: 1 },
     executorStatus: [
       {
-        executor_id: 'local-default',
-        kind: 'local',
+        executor_id: 'code-default',
+        kind: 'code',
         global_capacity: 16,
         workspace_limit: 4,
         running: 2,

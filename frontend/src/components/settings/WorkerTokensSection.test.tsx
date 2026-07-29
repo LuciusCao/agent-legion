@@ -44,7 +44,7 @@ const sampleWorker = {
   models: [],
   protocol_version: 1,
   registered_at: '2026-07-01T00:00:00Z',
-  runtimes: ['local'],
+  runtimes: ['pi'],
 }
 
 beforeEach(() => {

@@ -10,62 +10,71 @@ def service(job_db, settings, agent_manager):
 
 def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogService) -> None:
     result = service.catalog()
-    assert result["executors"][0] == {
-        "id": "code-default",
-        "kind": "code",
-        "global_capacity": 16,
-        "capabilities": ["download_video", "fetch_questions"],
-        "capability_details": [
-            {
-                "name": "download_video",
-                "path": "workflow_nodes/video_download.py",
-                "timeout_seconds": 600,
-            },
-            {
-                "name": "fetch_questions",
-                "path": "workflow_nodes/question_intake.py",
-                "timeout_seconds": 600,
-            },
-        ],
-    }
-    assert result["executors"][1] == {
-        "id": "local-default",
-        "kind": "local",
-        "global_capacity": 128,
-        "capabilities": [
-            "assemble_comprehension_info",
-            "assemble_video_metadata",
-            "classify_comprehension_eligibility",
-            "clean_and_parse",
-            "finalize_non_uploadable",
-            "package_video_job",
-            "transcribe_video",
-        ],
-        "capability_details": [
-            {
-                "name": "assemble_comprehension_info",
-                "handler": "question_comprehension_info.assemble_comprehension_info",
-            },
-            {
-                "name": "assemble_video_metadata",
-                "handler": "video_knowledge.assemble_video_metadata",
-            },
-            {
-                "name": "classify_comprehension_eligibility",
-                "handler": "question_comprehension_info.classify_comprehension_eligibility",
-            },
-            {
-                "name": "clean_and_parse",
-                "handler": "question_comprehension_info.clean_and_parse",
-            },
-            {
-                "name": "finalize_non_uploadable",
-                "handler": "question_comprehension_info.finalize_non_uploadable",
-            },
-            {"name": "package_video_job", "handler": "video_knowledge.package_video_job"},
-            {"name": "transcribe_video", "handler": "video_knowledge.transcribe_video"},
-        ],
-    }
+    assert result["executors"] == [
+        {
+            "id": "code-default",
+            "kind": "code",
+            "global_capacity": 16,
+            "capabilities": [
+                "assemble_comprehension_info",
+                "assemble_video_metadata",
+                "classify_comprehension_eligibility",
+                "clean_and_parse",
+                "download_video",
+                "fetch_questions",
+                "finalize_non_uploadable",
+                "package_video_job",
+                "transcribe_video",
+            ],
+            "capability_details": [
+                {
+                    "name": "assemble_comprehension_info",
+                    "path": "workflow_nodes/comprehension_assemble.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "assemble_video_metadata",
+                    "path": "workflow_nodes/video_assemble.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "classify_comprehension_eligibility",
+                    "path": "workflow_nodes/comprehension_classify.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "clean_and_parse",
+                    "path": "workflow_nodes/question_clean_parse.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "download_video",
+                    "path": "workflow_nodes/video_download.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "fetch_questions",
+                    "path": "workflow_nodes/question_intake.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "finalize_non_uploadable",
+                    "path": "workflow_nodes/comprehension_finalize.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "package_video_job",
+                    "path": "workflow_nodes/video_package.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "transcribe_video",
+                    "path": "workflow_nodes/video_transcribe.py",
+                    "timeout_seconds": 600,
+                },
+            ],
+        }
+    ]
 
 
 def test_executor_catalog_does_not_expose_agent_runtimes(
@@ -77,7 +86,7 @@ def test_executor_catalog_does_not_expose_agent_runtimes(
     assert "pi-video-main" not in executors_by_id
     assert "pi-default" not in executors_by_id
     assert "pi" not in executors_by_id
-    assert set(executors_by_id) == {"code-default", "local-default"}
+    assert set(executors_by_id) == {"code-default"}
 
 
 def test_catalog_exposes_agent_definitions_with_runtime_defaults(

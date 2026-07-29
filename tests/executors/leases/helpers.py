@@ -100,7 +100,7 @@ def _claim_request(
     workspace_id: str,
     job_id: str,
     node_key: str = "review_keywords",
-    executor_id: str = "local-default",
+    executor_id: str = "code-default",
     global_capacity: int = 2,
     local_node_limit: int | None = 1,
     ttl: int = 60,

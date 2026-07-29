@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
@@ -30,17 +30,19 @@ def _make_worker(
     executor: RecordingExecutor,
     definitions: list[WorkflowDefinition],
 ) -> WorkflowWorkerThread:
-    executor_def = LocalExecutorConfig(
-        kind="local",
+    executor_def = CodeExecutorConfig(
+        kind="code",
         global_capacity=2,
         capabilities={
-            "fetch": LocalCapabilityConfig(handler="dummy.handler", config_schema=SCHEMA),
+            "fetch": CodeCapabilityConfig(
+                path="workflow_nodes/question_intake.py", config_schema=SCHEMA
+            ),
         },
     )
     registry = ExecutorRegistry(
-        executors={"local-default": executor},
-        global_capacities={"local-default": 2},
-        definitions={"local-default": executor_def},
+        executors={"code-default": executor},
+        global_capacities={"code-default": 2},
+        definitions={"code-default": executor_def},
     )
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path)
@@ -97,18 +99,18 @@ def _prepare_job(
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (ws["id"], "test", node.key, "local-default"),
+            (ws["id"], "test", node.key, "code-default"),
         )
         conn.execute(
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
-            (ws["id"], "local-default", 2),
+            (ws["id"], "code-default", 2),
         )
     return ws, job
 
 
 def test_dispatch_injects_live_node_config_chain(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     node = WorkflowNode(
         key="fetch",
         label="fetch",
@@ -133,7 +135,7 @@ def test_dispatch_injects_live_node_config_chain(tmp_path: Path) -> None:
 
 def test_dispatch_prefers_frozen_batch_node_config(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     node = _local_node("fetch")
     ws = job_db.create_workspace("Test WS", default_workflow_key="test")
     batch = job_db.create_batch(
@@ -158,7 +160,7 @@ def test_dispatch_prefers_frozen_batch_node_config(tmp_path: Path) -> None:
 
 def test_dispatch_fails_node_on_invalid_workspace_override(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     node = _local_node("fetch")
     _ws, job = _prepare_job(job_db, node)
     job_db.update_workspace(_ws["id"], node_config={"test": {"fetch": {"nope": 1}}})

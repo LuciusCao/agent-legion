@@ -62,10 +62,10 @@ class TestJobExecutionExecutorBoundary:
         [
             (
                 "server/app/services/job_execution.py",
-                "from server.app.executors.local import LocalExecutor\n"
+                "from server.app.executors.code import CodeExecutor\n"
                 "class JobExecutionService:\n"
                 "    def run(self):\n"
-                "        LocalExecutor(id='x', handlers={}).execute(None)\n",
+                "        CodeExecutor(id='x', handlers={}).execute(None)\n",
             ),
             (
                 "server/app/services/job_rerun.py",

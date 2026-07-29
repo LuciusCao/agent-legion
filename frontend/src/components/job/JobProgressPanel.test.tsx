@@ -28,7 +28,7 @@ const mockNodes: JobNode[] = [
     capability: 'extract',
     inputs: [],
     outputs: [],
-    executor_kind: 'local',
+    executor_kind: 'code',
     executor_id: 'local-1',
   },
   {
@@ -230,7 +230,7 @@ describe('JobProgressPanel', () => {
     expect(screen.getByText('1秒')).toBeInTheDocument()
   })
 
-  it('renders executor kind labels for local and agent nodes', () => {
+  it('renders executor kind labels for code and agent nodes', () => {
     render(
       <JobProgressPanel
         jobId="j1"
@@ -239,7 +239,7 @@ describe('JobProgressPanel', () => {
         onOpenDagDialog={vi.fn()}
       />
     )
-    expect(screen.getByText('本地')).toBeInTheDocument()
+    expect(screen.getByText('代码')).toBeInTheDocument()
     expect(screen.getByText('Pi Agent')).toBeInTheDocument()
   })
 

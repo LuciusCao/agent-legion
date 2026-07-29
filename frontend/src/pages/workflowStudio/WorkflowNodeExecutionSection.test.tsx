@@ -19,14 +19,14 @@ const node: WorkflowNodeRecord = {
 
 const executorCatalog: ExecutorDefinition[] = [
   {
-    id: 'local-default',
-    kind: 'local',
+    id: 'code-default',
+    kind: 'code',
     global_capacity: 16,
     capabilities: ['fetch_questions'],
     capability_details: [
       {
         name: 'fetch_questions',
-        handler: 'question_comprehension_info.fetch_questions',
+        path: 'workflow_nodes/fetch_questions.py',
       },
     ],
   },
@@ -78,7 +78,7 @@ describe('WorkflowNodeExecutionSection', () => {
       screen.getByRole('button', { name: '浏览技能文件' })
     ).toBeInTheDocument()
     expect(screen.getByText(/your-model-b/)).toBeInTheDocument()
-    expect(screen.queryByText('local-default')).not.toBeInTheDocument()
+    expect(screen.queryByText('code-default')).not.toBeInTheDocument()
   })
 
   it('writes a node model override to workflow YAML', () => {
