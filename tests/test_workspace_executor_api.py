@@ -34,13 +34,32 @@ def test_list_executors_endpoint(client):
     } in executor["capability_details"]
 
 
-def test_get_configured_skill_detail(client):
-    response = client.get("/api/executors/skills/question_comprehension_info/generate_key_info")
+def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
+    # ref/commit come from the tracked config/skills.{yaml,lock}, but the file
+    # listing is read from the machine-local skill checkout at
+    # ~/.agents/skills/agent-legion, which only exists on maintainer machines.
+    # Point HOME at a fake checkout so the test is environment-independent.
+    skill_dir = (
+        tmp_path
+        / "home"
+        / ".agents"
+        / "skills"
+        / "agent-legion"
+        / "question_comprehension_info"
+        / "generate_key_info"
+    )
+    skill_dir.mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# Generate Key Info\n", encoding="utf-8")
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+
+    with client_factory() as client:
+        response = client.get("/api/executors/skills/question_comprehension_info/generate_key_info")
 
     assert response.status_code == 200
     data = response.json()
     assert data["ref"] == "v1.3.8"
     assert data["commit"].startswith("5c5eae7")
+    assert data["available"] is True
     assert any(item["path"] == "SKILL.md" for item in data["files"])
 
 

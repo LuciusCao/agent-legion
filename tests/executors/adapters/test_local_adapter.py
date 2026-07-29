@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import multiprocessing
 from dataclasses import replace
+
+import pytest
 
 from server.app.executors.local import LocalExecutor
 from server.app.executors.models import ExecutionContext
@@ -42,7 +45,19 @@ def test_local_executor_catches_handler_exception(context: ExecutionContext) -> 
     assert "boom" in result.error_message
 
 
-def test_local_executor_writes_logs_to_log_path(context: ExecutionContext) -> None:
+def test_local_executor_writes_logs_to_log_path(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The isolated child redirects fd 1/2 onto the log file with dup2. Under
+    # Linux's default fork start method the child also inherits pytest's
+    # captured sys.stdout, so print()/logging keep writing to the capture
+    # buffer instead of fd 1 and the log file stays empty. In production (and
+    # under spawn, the macOS default) the child's stdout is bound to the real
+    # fd, so pin the spawn start method here to test that behavior.
+    spawn = multiprocessing.get_context("spawn")
+    monkeypatch.setattr(multiprocessing, "Process", spawn.Process)
+    monkeypatch.setattr(multiprocessing, "Pipe", spawn.Pipe)
+    monkeypatch.setattr(multiprocessing, "Event", spawn.Event)
     executor = LocalExecutor("local-default", {"fetch": logging_local_handler})
     result = executor.execute(replace(context, capability="fetch", expected_outputs=("out.json",)))
     assert result.status == "completed"

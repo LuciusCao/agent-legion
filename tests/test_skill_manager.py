@@ -115,7 +115,10 @@ def _make_bare_repo(tmp_path: Path) -> str:
     env = _git_env()
     repo = tmp_path / "remote.git"
     repo.mkdir()
-    subprocess.run(["git", "init", "--bare", str(repo)], check=True, env=env)
+    # Pin the initial branch: fixtures reference `main`, but the default
+    # branch of `git init` varies with the runner's git configuration (e.g.
+    # CI defaults to `master`).
+    subprocess.run(["git", "init", "--bare", "-b", "main", str(repo)], check=True, env=env)
     work = tmp_path / "work"
     work.mkdir()
     subprocess.run(["git", "clone", str(repo), str(work / "clone")], check=True, env=env)
