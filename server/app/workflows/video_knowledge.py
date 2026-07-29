@@ -10,6 +10,7 @@ from server.app.pipeline.transcribe import run_transcription_with_providers
 from server.app.services.transcription_providers import build_default_providers
 from server.app.settings import load_settings
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
+from server.app.workflows.video_knowledge_source import resolve_knowledge_source
 
 
 def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
@@ -26,7 +27,7 @@ def download_video(
 ) -> None:
     video_input = _load_video_input(job_dir)
     if not video_input.source_url:
-        raise RuntimeError("video source_url is empty")
+        video_input = resolve_knowledge_source(job, job_dir, video_input, runtime or {})
     output_path = job_dir / "source.mp4"
     legacy_download_video(video_input.source_url, output_path)
 

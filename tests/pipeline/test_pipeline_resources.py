@@ -188,6 +188,40 @@ def test_resolve_node_config_empty_values_do_not_override(settings_config):
     assert "bank_version=v5" in result["api_url"]
 
 
+_KNOWLEDGE_VIDEO_PROVIDER = {
+    "cms.knowledge.video": {
+        "resource_key": "knowledge_video",
+        "url_key": "knowledge_url",
+        "path": "/knowledge/detail",
+        "config_schema": _DETAIL_SCHEMA,
+    }
+}
+
+
+def test_resolve_knowledge_video_provider_path_builds_api_url():
+    settings_config = {
+        "cms": {"base_url": "http://cms.example", "bank_version": "v5", "subject_id": "2"},
+        "resource_providers": _KNOWLEDGE_VIDEO_PROVIDER,
+    }
+    result = resolve_cms_resource(settings_config, None, None, "knowledge_video")
+    assert result["api_url"].startswith("http://cms.example/knowledge/detail")
+    assert "bank_version=v5" in result["api_url"]
+    # The legacy url_key mirrors the resolved URL for consumers reading it.
+    assert result["knowledge_url"] == result["api_url"]
+
+
+def test_resolve_knowledge_video_legacy_knowledge_url_fallback():
+    settings_config = {
+        "cms": {
+            "base_url": "http://cms.example",
+            "knowledge_url": "http://legacy.example/knowledge/detail",
+        },
+        "resource_providers": _KNOWLEDGE_VIDEO_PROVIDER,
+    }
+    result = resolve_cms_resource(settings_config, None, None, "knowledge_video")
+    assert result["api_url"].startswith("http://legacy.example/knowledge/detail")
+
+
 def test_effective_cms_config_applies_context_node_config():
     from server.app.workflows.cms_helpers import _effective_cms_config
 

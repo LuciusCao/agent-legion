@@ -9,10 +9,10 @@ from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_enqueue import enqueue_intake_batch
-from server.app.services.job_intake_resolution import RESOLVER_MAP, normalize_values
+from server.app.services.job_intake_registry import RESOLVERS
+from server.app.services.job_intake_resolution import normalize_values
 from server.app.services.job_intake_video import write_video_input
 from server.app.services.job_intake_workspace import (
-    effective_cms_config,
     enabled_intake_modes,
     get_workspace,
     singular_field_name,
@@ -53,7 +53,6 @@ class JobIntakeService:
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        cms_config = effective_cms_config(self.settings)
         resource_config = workspace.get("resource_config")
         if not isinstance(resource_config, dict):
             resource_config = {}
@@ -77,8 +76,8 @@ class JobIntakeService:
         entity = (payload.get("entity") or workspace_entity).strip() or "question"
         if entity == "video" and workflow_key != "video_knowledge":
             raise InvalidOperationError("Unsupported entity and intake mode combination")
-        resolver = RESOLVER_MAP.get((entity, mode.key))
-        if resolver is None:
+        spec = RESOLVERS.get((entity, mode.key))
+        if spec is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
 
         try:
@@ -98,7 +97,6 @@ class JobIntakeService:
                 payload,
                 entity,
                 input_values,
-                cms_config,
                 resource_config,
                 mode,
                 active_revision,
@@ -112,11 +110,10 @@ class JobIntakeService:
         # boundaries are filtered exactly like pre-existing jobs.
         existing_keys = self.job_db.list_job_dedup_keys(workspace_id)
         candidates, resolved_any = resolve_fresh_candidates(
-            resolver,
+            spec,
             entity,
             input_values,
             payload["source_kind"],
-            cms_config,
             mode,
             self.settings,
             workspace,
@@ -128,7 +125,7 @@ class JobIntakeService:
             if entity == "video" and resolved_any:
                 return {"created_count": 0, "jobs": []}
             detail = "No tasks were resolved from input"
-            if resolver.startswith("cms.") and mode.input_field == "knowledge_codes":
+            if spec.key.startswith("cms.") and mode.input_field == "knowledge_codes":
                 detail += f". Checked {len(input_values)} knowledge code(s) via CMS; ensure the codes are correct and the resource API URL is configured."
             raise InvalidOperationError(detail)
 
@@ -148,7 +145,6 @@ class JobIntakeService:
         source_payload["entity"] = entity
         source_payload["question_ids"] = resolved_ids
         source_payload["knowledge_codes"] = knowledge_codes
-        source_payload["cms_config"] = cms_config
         source_payload["resource_config"] = resource_config
         source_payload["node_config"] = node_config
         source_payload["intake_mode"] = {

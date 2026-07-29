@@ -60,6 +60,26 @@ resource_providers:
           type: integer
           minimum: 1
           maximum: 500
+  cms.knowledge.video:
+    path: /knowledge/detail
+    resource_key: knowledge_video
+    url_key: knowledge_url
+    config_schema:
+      type: object
+      properties:
+        api_url:
+          type: string
+        bank_version:
+          type: string
+        country_id:
+          type: string
+        subject_id:
+          type: string
+        env:
+          type: string
+        token:
+          type: string
+          secret: true
 openclaw:
   cwd: .
   timeout_seconds: 600

@@ -223,7 +223,7 @@ def test_workspace_settings_resources_are_schema_validated(tmp_path):
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
         assert fetched.status_code == 200
         resource_schemas = fetched.json()["settings"]["resourceSchemas"]
-        assert set(resource_schemas) == {"question_detail", "by_knowledge"}
+        assert set(resource_schemas) == {"question_detail", "by_knowledge", "knowledge_video"}
         assert "page_size" in resource_schemas["by_knowledge"]["schema"]["properties"]
 
         bad_type = c.patch(

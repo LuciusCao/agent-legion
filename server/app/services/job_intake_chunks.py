@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.services.job_intake_registry import ResolverSpec
 from server.app.services.job_intake_resolver import resolve_candidates
 from server.app.services.job_intake_video import exclude_existing_candidates
 from server.app.settings import Settings
@@ -19,11 +20,10 @@ INTAKE_RESOLUTION_CHUNK_SIZE = 500
 
 
 def resolve_fresh_candidates(
-    resolver: str,
+    spec: ResolverSpec,
     entity: str,
     input_values: list[str],
     source_kind: str,
-    cms_config: dict[str, Any],
     mode: Any,
     settings: Settings,
     workspace: dict[str, Any],
@@ -35,25 +35,21 @@ def resolve_fresh_candidates(
     ``existing_keys`` starts as the workspace dedup key set and grows with
     every accepted candidate, so duplicates across chunk boundaries within
     the same request are filtered exactly like pre-existing jobs.
-    ``dedup_state`` keeps resolver-level dedup (e.g. shared video URLs)
-    effective across chunks. Returns the accepted candidates and whether any
-    candidate was resolved at all (pre-filter).
+    Returns the accepted candidates and whether any candidate was resolved at
+    all (pre-filter).
     """
     candidates: list[dict[str, Any]] = []
     resolved_any = False
-    dedup_state: dict[str, set[str]] = {}
     for start in range(0, len(input_values), INTAKE_RESOLUTION_CHUNK_SIZE):
         chunk = resolve_candidates(
-            resolver,
+            spec,
             entity,
             input_values[start : start + INTAKE_RESOLUTION_CHUNK_SIZE],
             source_kind,
-            cms_config,
             mode,
             settings,
             workspace,
             workspace_id,
-            dedup_state=dedup_state,
         )
         resolved_any = resolved_any or bool(chunk)
         fresh = exclude_existing_candidates(chunk, existing_keys)
