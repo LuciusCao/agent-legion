@@ -10,7 +10,6 @@ import yaml
 
 from server.app.configuration.owned_keys import (
     CONFIG_FILE_KEYS,
-    LEGACY_FILE_ALIASES,
     owned_keys_for_file,
 )
 
@@ -41,39 +40,17 @@ class LoadedConfig:
     paths: tuple[Path, ...]
 
 
-def _legacy_name_for(name: str) -> str | None:
-    for legacy, target in LEGACY_FILE_ALIASES.items():
-        if target == name:
-            return legacy
-    return None
-
-
 def detect_layout(config_dir: Path) -> LayoutSelection:
-    """Select the split config files, honoring legacy file-name aliases.
+    """Select the split config files for the canonical layout.
 
-    Config governance G4 renamed ``video_hive.yaml`` to ``agent_legion.yaml``.
-    The legacy name keeps working during the transition window: it is loaded
-    with a warning when it is the only one present, and rejected when both
-    exist. Migrate by renaming the file to the canonical name.
+    Config governance G4: only the canonical split file names are accepted.
     """
     paths: list[Path] = []
     present_names: list[str] = []
     missing_names: list[str] = []
-    legacy_used: list[tuple[str, str]] = []
     for name in SPLIT_FILE_NAMES:
         canonical = config_dir / name
-        legacy_name = _legacy_name_for(name)
-        legacy = config_dir / legacy_name if legacy_name else None
-        if legacy is not None and legacy.exists() and canonical.exists():
-            raise ConfigurationLoadError(
-                f"both {canonical} and {legacy} exist; migrate by renaming "
-                f"{legacy.name} to {canonical.name} and deleting the old file"
-            )
-        if legacy is not None and legacy.exists():
-            paths.append(legacy)
-            present_names.append(legacy.name)
-            legacy_used.append((legacy.name, name))
-        elif canonical.exists():
+        if canonical.exists():
             paths.append(canonical)
             present_names.append(canonical.name)
         else:
@@ -82,12 +59,6 @@ def detect_layout(config_dir: Path) -> LayoutSelection:
     if missing_names:
         raise ConfigurationLoadError(
             f"partial configuration layout: present={present_names}, missing={missing_names}"
-        )
-    for legacy_name, canonical_name in legacy_used:
-        logger.warning(
-            "loading legacy config file name %s; migrate by renaming it to %s (content unchanged)",
-            legacy_name,
-            canonical_name,
         )
     return LayoutSelection(ConfigLayout.SPLIT, tuple(paths))
 

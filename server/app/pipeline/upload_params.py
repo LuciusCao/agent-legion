@@ -1,7 +1,7 @@
 """Assemble upload_params.json in llm_claude format.
 
 This module mirrors the data-transformation logic from
-llm_claude/Step3_upload_results.py so that video-hive packages produce
+llm_claude/Step3_upload_results.py so that agent-legion packages produce
 compatible output.
 """
 

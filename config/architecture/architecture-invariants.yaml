@@ -197,7 +197,7 @@ invariants:
 
   - id: BOUNDARY-VIDEO-001
     statement: "video_capabilities modules must not import orchestration or runtime modules such as server.app.db, server.app.jobs, server.app.routes, server.app.worker, or server.app.worker_thread."
-    owner: video-hive
+    owner: agent-legion
     risk: high
     evidence:
       - kind: contract
@@ -208,8 +208,8 @@ invariants:
         gate: quick
 
   - id: BOUNDARY-VIDEO-002
-    statement: "Production app and router code must not reintroduce legacy Video Hive route modules (e.g., server.app.routes.videos) after migration; Workspace job routes must be used instead."
-    owner: video-hive
+    statement: "Production app and router code must not reintroduce legacy video route modules (e.g., server.app.routes.videos) after migration; Workspace job routes must be used instead."
+    owner: agent-legion
     risk: high
     evidence:
       - kind: contract

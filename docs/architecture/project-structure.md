@@ -5,7 +5,7 @@
 > 具体文件清单以实际文件系统为准；本文件只记录稳定的顶层模块和关键入口。
 
 ```text
-video-hive/
+agent-legion/
 ├── pyproject.toml              # Python project metadata, dependencies, tool config
 ├── uv.lock                     # Locked Python dependency tree
 ├── README.md                   # 项目入口文档

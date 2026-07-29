@@ -106,7 +106,7 @@ class TestWorkspacePipelinePhaseImports:
             "from server.app.pipeline.phases import phase_sequence\n",
             tmp_path,
         )
-        assert any("Video Hive" in error or "legacy pipeline phase" in error for error in errors)
+        assert any("legacy video" in error or "legacy pipeline phase" in error for error in errors)
 
     def test_allows_pipeline_package_import_in_workspace_service(self, tmp_path: Path):
         errors = run_architecture_check_for_source(
@@ -115,7 +115,7 @@ class TestWorkspacePipelinePhaseImports:
             tmp_path,
         )
         assert not any(
-            "Video Hive" in error or "legacy pipeline phase" in error for error in errors
+            "legacy video" in error or "legacy pipeline phase" in error for error in errors
         )
 
 

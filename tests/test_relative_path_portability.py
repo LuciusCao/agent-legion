@@ -97,7 +97,7 @@ def _seed_old_root(old_root: Path) -> None:
 
 @pytest.fixture
 def portable_roots(tmp_path: Path) -> tuple[Path, Path]:
-    """Return *(old_root, new_root)* with a copied, portable Video Hive tree."""
+    """Return *(old_root, new_root)* with a copied, portable Agent Legion tree."""
     old_root = tmp_path / "old_root"
     new_root = tmp_path / "new_root"
     old_root.mkdir()

@@ -30,7 +30,7 @@ services:
       AGENT_LEGION_DATABASE_URL: postgresql://agent_legion@postgres:5432/agent_legion
       PGPASSFILE: /run/secrets/postgres_pgpass
       AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE: /run/secrets/agent_worker_register_token
-      VIDEO_HIVE_DATA_DIR: /var/lib/agent-legion
+      AGENT_LEGION_DATA_DIR: /var/lib/agent-legion
     secrets: [agent_worker_register_token, postgres_pgpass]
     volumes:
       - host-data:/var/lib/agent-legion

@@ -9,6 +9,7 @@
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免 SQLite、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
 - 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（不要用 tracked 的 `config/app.yaml` 里的共享库）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
+- 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并在首次测试运行时自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
 - 不要污染主工作区或他人 worktree 的运行时数据。
 
 ## 2. Agent Tool Discipline
@@ -73,7 +74,7 @@ review_keywords:
 ```
 
 ```python
-# Wrong: Generic Workspace route imports a Video Hive phase.
+# Wrong: Generic Workspace route imports a legacy video pipeline phase.
 from server.app.pipeline.download import download_video
 ```
 
@@ -98,7 +99,7 @@ LocalExecutor(...).execute(context)
 - Secret 值必须经 vault（Fernet 加密落 `workspace_secrets`），配置与快照只存
   `secret_ref`，不得明文落库、出 API 或进日志（VAULT-SECRET-001）。
 - Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS token 只走 env
-  （`VIDEO_HIVE_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
+  （`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
   workspace resource binding + vault；
   yaml 出现 `cms.token` / `cms.token_gen` 启动即报错（G2），`openclaw.skill_safety`
   写 `ref` 启动即报错（G3，ref 以 `config/skills.lock` 为唯一权威）。

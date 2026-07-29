@@ -448,7 +448,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `server/app/configuration/` 负责加载并校验按领域拆分的 YAML 配置。
 
-- `loader.py`: 加载 `config/app.yaml`, `config/agent_legion.yaml`, `config/workflow.yaml` 并合并环境变量覆盖（旧名 `config/video_hive.yaml` 在过渡期内兼容加载并打 warning，两个文件同时存在则报错）。
+- `loader.py`: 加载 `config/app.yaml`, `config/agent_legion.yaml`, `config/workflow.yaml` 并合并环境变量覆盖。
 - `owned_keys.py`: 声明每个配置文件的 owned keys，防止跨文件键冲突。
 
 ### Quality Subsystem
@@ -481,10 +481,10 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
 
 - `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）、token 用量计价（`token_usage`）。
-- `config/agent_legion.yaml`：ASR、CMS、资源提供者（`resource_providers`）、OpenClaw 设置。（旧名 `config/video_hive.yaml` 过渡期内兼容加载并打 warning，两个文件同时存在则启动报错。）
+- `config/agent_legion.yaml`：ASR、CMS、资源提供者（`resource_providers`）、OpenClaw 设置。
 - `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，local executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
 
-env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 权威、`VIDEO_HIVE_DATABASE_URL` 为 deprecated alias，两者冲突即启动报错（G4）。
+env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
 常用 `config/agent_legion.yaml` 配置项：
 
@@ -494,7 +494,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 - `asr.whisper.vad_model`: 可选 VAD 模型路径
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`VIDEO_HIVE_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或 workspace resource binding + vault
+- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或 workspace resource binding + vault
 - `resource_providers`: 资源提供者声明（如 `cms.question.detail`）：`path` 拼接信息、`resource_key`、legacy 设置项 `url_key`，以及可调参数的 `config_schema`（含 `secret: true` 标记）；声明在加载时校验，非法声明启动失败
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒

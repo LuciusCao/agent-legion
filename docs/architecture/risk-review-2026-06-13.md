@@ -1,4 +1,4 @@
-# Video Hive 架构风险 Review 报告
+# Agent Legion 架构风险 Review 报告
 
 **日期**：2026-06-13  
 **分支**：`codex/workspace-executor-governance`  
@@ -9,7 +9,7 @@
 
 ## 1. 总体结论
 
-Video Hive 当前是一个**功能成熟、架构门禁完善**的本地教育视频处理控制台。Phase 5/6 的 executor governance 规则已经在代码和门禁中落地，大部分明显越界（如 route 直接调用 Video Hive phase、service 导入 FastAPI、手写前端 transport 类型等）都能被 `scripts/check_architecture.py` 拦截。
+Agent Legion 当前是一个**功能成熟、架构门禁完善**的本地教育视频处理控制台。Phase 5/6 的 executor governance 规则已经在代码和门禁中落地，大部分明显越界（如 route 直接调用 legacy video pipeline phase、service 导入 FastAPI、手写前端 transport 类型等）都能被 `scripts/check_architecture.py` 拦截。
 
 但系统在以下方面仍存在显著风险：
 

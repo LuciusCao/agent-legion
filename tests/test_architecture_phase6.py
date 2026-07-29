@@ -17,7 +17,7 @@ def _empty_budgets(path: Path) -> None:
     write_neutral_budget_governance(path)
 
 
-class TestWorkspaceVideoHiveBoundary:
+class TestWorkspaceLegacyVideoBoundary:
     @pytest.mark.parametrize(
         "rel_path,source,expected_fragment",
         [
@@ -30,13 +30,13 @@ class TestWorkspaceVideoHiveBoundary:
             ),
         ],
     )
-    def test_rejects_video_hive_imports(self, tmp_path, rel_path, source, expected_fragment):
+    def test_rejects_legacy_video_imports(self, tmp_path, rel_path, source, expected_fragment):
         write(tmp_path / rel_path, source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
 
-        assert any("Video Hive" in error and expected_fragment in error for error in errors)
+        assert any("legacy video" in error and expected_fragment in error for error in errors)
 
     def test_allows_generic_workflow_imports_in_workspace_services(self, tmp_path):
         write(
@@ -51,7 +51,7 @@ class TestWorkspaceVideoHiveBoundary:
 
         errors = check_repository(tmp_path)
 
-        assert not any("Video Hive" in error for error in errors)
+        assert not any("legacy video" in error for error in errors)
 
 
 class TestJobExecutionExecutorBoundary:
@@ -187,7 +187,7 @@ def test_phase6_current_repository_has_no_errors():
         if any(
             tag in error
             for tag in (
-                "Video Hive",
+                "legacy video",
                 "direct Executor",
                 "DAG traversal",
                 "filesystem deletion",

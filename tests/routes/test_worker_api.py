@@ -29,19 +29,19 @@ def test_worker_pause_resume_with_workspace(client):
     assert status.json() == {"paused": False}
 
 
-def test_worker_with_video_hive_workspace_uses_workspace_worker(client):
-    # workspace_id == "video-hive" is treated like any other workspace.
-    status = client.get("/api/worker/status", params={"workspace_id": "video-hive"})
+def test_worker_with_agent_legion_workspace_uses_workspace_worker(client):
+    # workspace_id == "agent-legion" is treated like any other workspace.
+    status = client.get("/api/worker/status", params={"workspace_id": "agent-legion"})
     assert status.json() == {"paused": True}
 
-    client.post("/api/worker/resume", params={"workspace_id": "video-hive"})
-    assert client.app.state.workspace_worker_control.is_paused("video-hive") is False
+    client.post("/api/worker/resume", params={"workspace_id": "agent-legion"})
+    assert client.app.state.workspace_worker_control.is_paused("agent-legion") is False
 
-    status = client.get("/api/worker/status", params={"workspace_id": "video-hive"})
+    status = client.get("/api/worker/status", params={"workspace_id": "agent-legion"})
     assert status.json() == {"paused": False}
 
-    client.post("/api/worker/pause", params={"workspace_id": "video-hive"})
-    assert client.app.state.workspace_worker_control.is_paused("video-hive") is True
+    client.post("/api/worker/pause", params={"workspace_id": "agent-legion"})
+    assert client.app.state.workspace_worker_control.is_paused("agent-legion") is True
 
 
 def test_worker_without_workspace_id_is_required():

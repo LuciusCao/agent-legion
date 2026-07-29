@@ -45,7 +45,7 @@ def test_job_artifact_service_reads_file(artifact_service, job, job_db):
 
 def test_job_artifact_service_rejects_traversal(artifact_service, job):
     with pytest.raises(InvalidOperationError, match="Invalid artifact name"):
-        artifact_service.read(job["id"], "../video_hive.sqlite")
+        artifact_service.read(job["id"], "../agent_legion.sqlite")
 
 
 def test_job_artifact_service_missing_job(artifact_service):
