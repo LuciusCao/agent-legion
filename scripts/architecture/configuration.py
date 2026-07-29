@@ -6,13 +6,11 @@ from server.app.configuration.loader import (
     detect_layout,
     load_yaml_mapping,
 )
-from server.app.configuration.owned_keys import LEGACY_FILE_ALIASES
 
 
 def check_configuration_ownership(root: Path) -> list[str]:
     config_dir = root / "config"
     split_files = [config_dir / name for name in CONFIG_FILE_KEYS]
-    split_files += [config_dir / name for name in LEGACY_FILE_ALIASES]
     if not any(path.exists() for path in split_files):
         # Synthetic repositories in tests have no runtime config; there is
         # nothing to check until at least one split file exists.
@@ -29,8 +27,7 @@ def check_configuration_ownership(root: Path) -> list[str]:
         except ConfigurationLoadError as exc:
             errors.append(str(exc))
             continue
-        # Legacy file names own the same keys as their canonical replacement.
-        file_name = LEGACY_FILE_ALIASES.get(path.name, path.name)
+        file_name = path.name
         for key in sorted(mapping):
             expected = owner_by_key.get(key)
             if expected is None:

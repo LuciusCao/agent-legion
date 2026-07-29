@@ -297,10 +297,10 @@ workflows:
 
 
 def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch):
-    monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN", "super-secret-token")
-    monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN_GEN_SECRET", "super-secret-gen")
+    monkeypatch.setenv("AGENT_LEGION_CMS_TOKEN", "super-secret-token")
+    monkeypatch.setenv("AGENT_LEGION_CMS_TOKEN_GEN_SECRET", "super-secret-gen")
 
-    monkeypatch.setenv("VIDEO_HIVE_OPENCLAW_CWD", "/no/such/cwd")
+    monkeypatch.setenv("AGENT_LEGION_OPENCLAW_CWD", "/no/such/cwd")
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")

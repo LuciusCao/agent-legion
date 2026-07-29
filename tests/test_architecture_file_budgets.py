@@ -323,7 +323,7 @@ def test_frozen_exemption_allows_maintaining_or_shrinking(tmp_path: Path) -> Non
         check="architecture.file_budget",
         path="server/app/example.py",
         reason="Oversized module needs staged split.",
-        owner="video-hive",
+        owner="agent-legion",
         remove_when="issues/open/001.md",
         ceiling=100,
     )
@@ -337,7 +337,7 @@ def test_frozen_exemption_rejects_growth_above_exemption_ceiling(tmp_path: Path)
         check="architecture.file_budget",
         path="server/app/example.py",
         reason="Oversized module needs staged split.",
-        owner="video-hive",
+        owner="agent-legion",
         remove_when="issues/open/001.md",
         ceiling=100,
     )
@@ -353,7 +353,7 @@ def test_stale_exemption_fails_when_file_fits_normal_ceiling(tmp_path: Path) -> 
         check="architecture.file_budget",
         path="server/app/example.py",
         reason="Oversized module needs staged split.",
-        owner="video-hive",
+        owner="agent-legion",
         remove_when="issues/open/001.md",
         ceiling=100,
     )
@@ -378,7 +378,7 @@ def test_absolute_production_limit_rejects_growth_even_with_exemption(tmp_path: 
         check="architecture.file_budget",
         path="server/app/example.py",
         reason="Oversized module needs staged split.",
-        owner="video-hive",
+        owner="agent-legion",
         remove_when="issues/open/001.md",
         ceiling=60,
     )

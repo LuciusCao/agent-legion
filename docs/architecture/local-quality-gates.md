@@ -41,7 +41,7 @@ result is stored under:
 
 The fingerprint includes the gate scripts, dependency lock files, architecture registries, and
 local tool versions. Repeated pushes of the same unchanged commit reuse the evidence. Set
-`VIDEO_HIVE_LOCAL_GATE_FORCE=1` to run the gate again.
+`AGENT_LEGION_LOCAL_GATE_FORCE=1` to run the gate again.
 
 The evidence is intentionally local and is never committed. The merge request records only the
 verified commit SHA and gate level.

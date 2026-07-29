@@ -1,6 +1,6 @@
 # Video Knowledge Workspace Migration
 
-This document summarizes the architecture for migrating knowledge videos from the legacy Video Hive runtime to the Agent Legion Workspace runtime.
+This document summarizes the architecture for migrating knowledge videos from the legacy video runtime to the Agent Legion Workspace runtime.
 
 ## Overview
 

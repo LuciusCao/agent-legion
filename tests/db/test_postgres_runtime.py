@@ -14,7 +14,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def test_runtime_rejects_sqlite_urls() -> None:
     with pytest.raises(ValueError, match="PostgreSQL URL"):
-        connect_database("data/video_hive.sqlite")
+        connect_database("data/agent_legion.sqlite")
 
 
 def test_schema_initialization_is_idempotent() -> None:

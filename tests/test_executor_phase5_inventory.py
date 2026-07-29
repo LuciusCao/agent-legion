@@ -20,7 +20,7 @@ REPLACEMENTS: dict[str, str] = {
     "workflow concurrency": "Workspace-level Executor allocation limits + local Node limits",
 }
 
-PROTECTED_VIDEO_HIVE_PATHS: set[str] = {
+PROTECTED_LEGACY_VIDEO_PATHS: set[str] = {
     "server/app/routes/agents.py",
     "server/app/agents.py",
     # OpenClawRunner 自 pipeline/openclaw.py 迁入 executors（issues/closed/057）。
@@ -75,7 +75,7 @@ def test_workspace_agent_assignment_modules_are_removed() -> None:
     assert not (ROOT / "server/app/services/workspace_agent_assignments.py").exists()
 
 
-@pytest.mark.parametrize("rel_path", sorted(PROTECTED_VIDEO_HIVE_PATHS))
-def test_protected_video_hive_path_exists(rel_path: str) -> None:
-    """These Video Hive files must still exist at Phase 5 completion."""
-    assert (ROOT / rel_path).exists(), f"Protected Video Hive path missing: {rel_path}"
+@pytest.mark.parametrize("rel_path", sorted(PROTECTED_LEGACY_VIDEO_PATHS))
+def test_protected_legacy_video_path_exists(rel_path: str) -> None:
+    """These legacy video files must still exist at Phase 5 completion."""
+    assert (ROOT / rel_path).exists(), f"Protected legacy video path missing: {rel_path}"

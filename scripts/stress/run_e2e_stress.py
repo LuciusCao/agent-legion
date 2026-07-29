@@ -79,7 +79,7 @@ def _frontend_command(port: int) -> list[str]:
 def _start_backend(cmd: list[str], run_dir: Path) -> subprocess.Popen:
     env = {
         **os.environ,
-        "VIDEO_HIVE_DATA_DIR": str(PROJECT_ROOT / "data" / "stress"),
+        "AGENT_LEGION_DATA_DIR": str(PROJECT_ROOT / "data" / "stress"),
         "AGENT_LEGION_ENABLE_STRESS_EVENTS": "1",
     }
     logs_dir = run_dir / "backend"
@@ -144,7 +144,7 @@ def _run_backend_stress(
     backend_results = run_dir / "backend"
     backend_results.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
-    env["VIDEO_HIVE_DATA_DIR"] = str(PROJECT_ROOT / "data" / "stress")
+    env["AGENT_LEGION_DATA_DIR"] = str(PROJECT_ROOT / "data" / "stress")
     env["AGENT_LEGION_ENABLE_STRESS_EVENTS"] = "1"
     cmd = [
         sys.executable,
