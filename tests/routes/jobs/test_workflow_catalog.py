@@ -130,6 +130,11 @@ def test_get_global_services_unconfigured_token(tmp_path, monkeypatch):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     for key in (
+        "CMS_APP_ID",
+        "CMS_NONCE",
+        "CMS_SECRET",
+        "CMS_TOKEN_URL",
+        "CMS_TOKEN",
         "BASECMS_APP_ID",
         "BASECMS_NONCE",
         "BASECMS_SECRET",

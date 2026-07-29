@@ -10,6 +10,12 @@ pytestmark = pytest.mark.full_gate
 
 def test_repository_split_configuration_builds_application(tmp_path: Path, monkeypatch):
     for key in (
+        "CMS_BASE_URL",
+        "CMS_TOKEN",
+        "CMS_APP_ID",
+        "CMS_NONCE",
+        "CMS_SECRET",
+        "CMS_TOKEN_URL",
         "BASECMS_BASE_URL",
         "BASECMS_TOKEN",
         "BASECMS_APP_ID",
