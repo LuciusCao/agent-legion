@@ -1,8 +1,8 @@
+import json
 from pathlib import Path
 
 import pytest
 
-from server.app.cms.client import CmsVideoLookup
 from server.app.main import create_app
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -53,22 +53,8 @@ def test_video_url_intake_creates_video_job_and_input_artifact(app) -> None:
     assert (job_dir / "video_input.json").is_file()
 
 
-def test_video_external_id_duplicate_is_rejected_or_reported(app, monkeypatch) -> None:
+def test_video_external_id_duplicate_is_rejected_or_reported(app) -> None:
     _create_workspace_with_revision(app)
-
-    def fake_lookup_knowledge_video(code, api_url=None, token=None):
-        return CmsVideoLookup(
-            status="found",
-            url="https://example.invalid/knowledge.mp4",
-            title=f"Knowledge {code}",
-            source_uuid="uuid-1",
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_video.lookup_knowledge_video",
-        fake_lookup_knowledge_video,
-    )
-    monkeypatch.setattr("server.app.services.job_intake_video.get_token", lambda env, config: "")
 
     service = make_job_intake_service(app)
     payload = {
@@ -85,53 +71,15 @@ def test_video_external_id_duplicate_is_rejected_or_reported(app, monkeypatch) -
     assert second["created_count"] == 0
 
 
-def test_video_knowledge_intake_dedupes_shared_video_url(app, monkeypatch) -> None:
+def test_video_knowledge_intake_does_not_call_cms(app, monkeypatch) -> None:
+    """Knowledge-mode intake is a pure fan-out; CMS resolution moved to the
+    download DAG node, so intake must not touch the knowledge lookup."""
     _create_workspace_with_revision(app)
 
-    def fake_lookup_knowledge_video(code, api_url=None, token=None):
-        return CmsVideoLookup(
-            status="found",
-            url="https://example.invalid/shared.mp4",
-            title=f"Knowledge {code}",
-            source_uuid="uuid-shared",
-        )
+    def fail_on_cms(*args, **kwargs):
+        raise AssertionError("intake must not call the CMS")
 
-    monkeypatch.setattr(
-        "server.app.services.job_intake_video.lookup_knowledge_video",
-        fake_lookup_knowledge_video,
-    )
-    monkeypatch.setattr("server.app.services.job_intake_video.get_token", lambda env, config: "")
-
-    service = make_job_intake_service(app)
-    payload = {
-        "workflow_key": "video_knowledge",
-        "source_kind": "batch_by_knowledge",
-        "entity": "video",
-        "knowledge_codes": ["K001", "K002"],
-    }
-
-    result = service.create_batch("video_knowledge", payload)
-
-    assert result["created_count"] == 1
-    assert result["jobs"][0]["source_id"] == "K001"
-
-
-def test_video_knowledge_intake_keeps_distinct_video_urls(app, monkeypatch) -> None:
-    _create_workspace_with_revision(app)
-
-    def fake_lookup_knowledge_video(code, api_url=None, token=None):
-        return CmsVideoLookup(
-            status="found",
-            url=f"https://example.invalid/{code}.mp4",
-            title=f"Knowledge {code}",
-            source_uuid=f"uuid-{code}",
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_video.lookup_knowledge_video",
-        fake_lookup_knowledge_video,
-    )
-    monkeypatch.setattr("server.app.services.job_intake_video.get_token", lambda env, config: "")
+    monkeypatch.setattr("server.app.cms.knowledge.lookup_knowledge_video", fail_on_cms)
 
     service = make_job_intake_service(app)
     payload = {
@@ -144,24 +92,37 @@ def test_video_knowledge_intake_keeps_distinct_video_urls(app, monkeypatch) -> N
     result = service.create_batch("video_knowledge", payload)
 
     assert result["created_count"] == 2
+    assert [job["source_id"] for job in result["jobs"]] == ["K001", "K002"]
 
 
-def test_video_knowledge_intake_dedupes_shared_url_across_chunks(app, monkeypatch) -> None:
+def test_video_knowledge_intake_writes_source_ref_video_input(app) -> None:
     _create_workspace_with_revision(app)
 
-    def fake_lookup_knowledge_video(code, api_url=None, token=None):
-        return CmsVideoLookup(
-            status="found",
-            url="https://example.invalid/shared.mp4",
-            title=f"Knowledge {code}",
-            source_uuid="uuid-shared",
-        )
+    service = make_job_intake_service(app)
+    payload = {
+        "workflow_key": "video_knowledge",
+        "source_kind": "batch_by_knowledge",
+        "entity": "video",
+        "knowledge_codes": ["K001"],
+    }
 
-    monkeypatch.setattr(
-        "server.app.services.job_intake_video.lookup_knowledge_video",
-        fake_lookup_knowledge_video,
-    )
-    monkeypatch.setattr("server.app.services.job_intake_video.get_token", lambda env, config: "")
+    result = service.create_batch("video_knowledge", payload)
+
+    assert result["created_count"] == 1
+    job = result["jobs"][0]
+    job_dir = app.state.settings.jobs_dir / job["workspace_id"] / job["id"]
+    raw = (job_dir / "video_input.json").read_text(encoding="utf-8")
+    video_input = json.loads(raw)
+    # Node-phase resolution: the candidate carries an opaque source_ref; the
+    # download node fills source_url/source_uuid/title from the CMS.
+    assert video_input["source_ref"] == "K001"
+    assert video_input["source_url"] == ""
+    assert video_input["source_uuid"] == ""
+    assert "token" not in raw
+
+
+def test_video_knowledge_intake_dedupes_repeated_codes_across_chunks(app, monkeypatch) -> None:
+    _create_workspace_with_revision(app)
     monkeypatch.setattr("server.app.services.job_intake_chunks.INTAKE_RESOLUTION_CHUNK_SIZE", 1)
 
     service = make_job_intake_service(app)
@@ -174,5 +135,5 @@ def test_video_knowledge_intake_dedupes_shared_url_across_chunks(app, monkeypatc
 
     result = service.create_batch("video_knowledge", payload)
 
-    assert result["created_count"] == 1
-    assert result["jobs"][0]["source_id"] == "K001"
+    assert result["created_count"] == 2
+    assert [job["source_id"] for job in result["jobs"]] == ["K001", "K002"]

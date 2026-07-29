@@ -149,9 +149,9 @@ def _apply_cms_env_overrides(config: dict[str, Any]) -> None:
 def _normalize_cms_config(config: dict[str, Any]) -> None:
     """Derive the legacy knowledge URL from base_url when present.
 
-    Question resource URLs resolve through ``resource_providers`` (see
-    ``workflows.resources.resolve_cms_resource``); only the video intake still
-    consumes ``knowledge_url`` directly.
+    Resource URLs resolve through ``resource_providers`` (see
+    ``workflows.resources.resolve_cms_resource``); ``knowledge_url`` stays as
+    the legacy fallback for ``cms.knowledge.video``'s ``url_key`` (D14).
     """
     cms = config.get("cms")
     if not isinstance(cms, dict):

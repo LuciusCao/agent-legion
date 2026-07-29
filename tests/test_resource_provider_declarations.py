@@ -22,7 +22,8 @@ _COMMON_PROPERTIES = {
     "token": {"type": "string", "secret": True},
 }
 
-# The exact schemas previously hardcoded in resource_schemas.py (spec D10).
+# The exact schemas previously hardcoded in resource_schemas.py (spec D10),
+# plus the knowledge_video schema added with the video resource binding.
 EXPECTED_SCHEMAS = {
     "question_detail": {
         "type": "object",
@@ -35,9 +36,14 @@ EXPECTED_SCHEMAS = {
             "page_size": {"type": "integer", "minimum": 1, "maximum": 500},
         },
     },
+    "knowledge_video": {
+        "type": "object",
+        "properties": dict(_COMMON_PROPERTIES),
+    },
 }
 
-# The exact mapping previously hardcoded as RESOURCE_PROVIDERS in resources.py.
+# The exact mapping previously hardcoded as RESOURCE_PROVIDERS in resources.py,
+# plus the cms.knowledge.video provider added with the video resource binding.
 EXPECTED_PROVIDERS = {
     "question_detail": {
         "provider": "cms.question.detail",
@@ -46,6 +52,10 @@ EXPECTED_PROVIDERS = {
     "by_knowledge": {
         "provider": "cms.question.list_by_knowledge",
         "url_key": "question_list_url",
+    },
+    "knowledge_video": {
+        "provider": "cms.knowledge.video",
+        "url_key": "knowledge_url",
     },
 }
 

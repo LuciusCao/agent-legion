@@ -34,3 +34,12 @@ def test_video_knowledge_workflow_declares_capabilities_only() -> None:
     assert definition.nodes["transcribe"].capability == "transcribe_video"
     assert definition.nodes["assemble"].capability == "assemble_video_metadata"
     assert definition.nodes["package"].capability == "package_video_job"
+
+
+def test_video_knowledge_download_node_declares_knowledge_video_resource() -> None:
+    definition = load_workflow_definition(ROOT / "config/workflows/video_knowledge.yaml")
+    download = definition.nodes["download"]
+    assert download.resources == ["knowledge_video"]
+    # The node resolves knowledge source_refs at execution time and writes the
+    # resolved fields back to video_input.json.
+    assert "video_input.json" in download.outputs

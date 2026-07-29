@@ -396,7 +396,7 @@ server/app/
 - 视频 Job 的 `content_type` 固定为 `knowledge`（`video_capabilities/contracts.py` 强制校验），pipeline 节点序列：
 
   **Knowledge videos (`knowledge`):**
-  1. `download_video` — 下载 MP4
+  1. `download_video` — 下载 MP4；`batch_by_knowledge` 模式下先经 resource binding + vault 把 `knowledge_code` 解析为播放地址（见下文 Job Intake 资源解析）
   2. `transcribe_video` — 生成 `subtitles.srt` 与 `transcription.json`
   3. `subtitle_review` — openclaw agent
   4. `chapter_generate` — openclaw agent
@@ -409,6 +409,16 @@ server/app/
 - 任一 node 失败会把 Job 置为 `failed`，错误写入数据库与日志文件。
 - 支持从任意 node 重跑；重跑会清除该 node 及下游所有 artifacts。
 - `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
+
+### Job Intake 资源解析（resolve phase）
+
+Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）：
+
+- `phase="intake"`：intake 期经 `resolve_cms_resource` + vault 解析（question 侧；`batch_by_knowledge` 是 1:N fan-out，job 数依赖 CMS 响应，必须在 intake 解析）。
+- `phase="node"`：intake 只做无外部调用的 fan-out（1:1 模式），candidate 只携带 opaque `source_ref`；解析下沉到声明了 `resources: [<resource_key>]` 的 DAG 节点执行期，经 workspace binding + vault 完成（video `batch_by_knowledge` 的 `knowledge_code → 播放地址` 在 `download_video` 节点解析并回写 `video_input.json`）。
+- `phase=None`：direct 模式，不访问外部资源。
+
+接入新内容类型只需三步：在 `config/agent_legion.yaml` 声明 `resource_providers` 条目、在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并声明 `resources:`。Intake 快照只冻结 `resource_config` / `node_config` 与 `secret_ref`，不再冻结 `cms_config`。
 
 ## Database
 
