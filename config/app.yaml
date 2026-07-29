@@ -15,7 +15,7 @@ cleanup:
 
 monitoring:
   sample_interval_seconds: 60
-  retention_days: 7
+  retention_days: 30
 
 token_usage:
   currency: CNY

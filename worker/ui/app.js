@@ -1,5 +1,6 @@
 // labelsFromText / numberField / NUMBER_DEFAULTS / formatElapsed / executionLabel /
-// formatTokens / latestMetric / tokensLastHour / bucketLabel / buildLineChart 是纯函数，
+// formatTokens / latestMetric / tokensLastHour / bucketLabel / fillWindowBuckets /
+// chartSeriesData / hasChartData 是纯函数，
 // 由 app.test.mjs（node:test）直接 import；
 // 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
 const hasDom = typeof document !== "undefined";
@@ -337,21 +338,24 @@ export function bucketLabel(bucketStart, granularity) {
   const date = new Date(bucketStart);
   if (Number.isNaN(date.getTime())) return String(bucketStart);
   const pad = (n) => String(n).padStart(2, "0");
-  if (granularity === "day") return `${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
+  // 30d 的 4 小时桶需要「日期 + 小时」才能区分同一天内的多个桶
+  if (granularity === "30d") return `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:00`;
   return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
-const WINDOW_STEP_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
-const WINDOW_BUCKET_COUNT = { minute: 360, hour: 24, day: 7 };
+const WINDOW_STEP_MS = { "6h": 60_000, "24h": 300_000, "30d": 14_400_000 };
+const WINDOW_BUCKET_COUNT = { "6h": 360, "24h": 288, "30d": 180 };
 
-// 把稀疏 bucket 补齐成固定长度时间网格（UTC 对齐，与 Host date_trunc 汇总一致），
+// 把稀疏 bucket 补齐成固定长度时间网格（UTC 对齐，与 Host epoch-floor 汇总一致），
 // 横轴窗口固定，不随本机实际有数据的时间段变化。
+// 6h（1 分钟桶）结束于上一个已完成分钟；24h（5 分钟桶）/ 30d（4 小时桶）结束于
+// 当前进行中的桶（聚合自已有分钟行）。
 // 窗口内、最后一个真实数据点之前的缺失桶填零（确实没数据）；
 // 右端 Host 尚未聚合写入的尾部缺失桶填 null（数据未出），由图表渲染成缺口而不是掉到 0。
 export function fillWindowBuckets(buckets, granularity, now = Date.now()) {
   const step = WINDOW_STEP_MS[granularity];
   const aligned = Math.floor(now / step) * step;
-  const end = granularity === "minute" ? aligned - step : aligned;
+  const end = granularity === "6h" ? aligned - step : aligned;
   const start = end - (WINDOW_BUCKET_COUNT[granularity] - 1) * step;
   const byStart = new Map((buckets ?? []).map((bucket) => [Date.parse(bucket.bucket_start), bucket]));
   const lastDataTs = Math.max(-Infinity, ...(buckets ?? []).map((bucket) => Date.parse(bucket.bucket_start)));
@@ -369,66 +373,97 @@ export function fillWindowBuckets(buckets, granularity, now = Date.now()) {
   return filled;
 }
 
-const escapeXml = (text) => String(text).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
+// uPlot 数据：x 为 unix 秒；y 中 null（数据未出）由 uPlot 原生渲染为缺口。
+export function chartSeriesData(buckets, keys) {
+  const x = buckets.map((bucket) => Date.parse(bucket.bucket_start) / 1000);
+  return [x, ...keys.map((key) => buckets.map((bucket) => bucket[key]))];
+}
 
-// 手绘 SVG 折线/面积图（viewBox 自适应宽度）；hover 数值用 <title> 原生提示，无 JS 事件。
-// seriesList: [{ name, color, points: [{ label, value }], area? }]；value 为 null 表示数据未出，
-// 渲染为缺口（折线/面积断开，hover 显示 —），不参与折线绘制。
-export function buildLineChart(seriesList, { width = 520, height = 180, formatValue = (v) => String(v) } = {}) {
-  const series = seriesList.filter((item) => item.points.some((point) => point.value != null));
-  const count = Math.max(0, ...series.map((item) => item.points.length));
-  if (count === 0) return "";
-  const pad = { left: 36, right: 10, top: 18, bottom: 20 };
-  const innerW = width - pad.left - pad.right;
-  const innerH = height - pad.top - pad.bottom;
-  const maxValue = Math.max(1, ...series.flatMap((item) => item.points.map((point) => point.value ?? 0)));
-  const x = (index) => pad.left + (count === 1 ? innerW / 2 : (index / (count - 1)) * innerW);
-  const y = (value) => pad.top + innerH - (Math.max(0, value ?? 0) / maxValue) * innerH;
-  const baseline = y(0);
-  const parts = [];
-  for (const tick of [0, maxValue / 2, maxValue]) {
-    parts.push(`<line class="grid-line" x1="${pad.left}" y1="${y(tick)}" x2="${width - pad.right}" y2="${y(tick)}"/>`);
-    parts.push(`<text class="axis" x="${pad.left - 4}" y="${y(tick) + 3}" text-anchor="end">${escapeXml(formatValue(tick))}</text>`);
+export function hasChartData(buckets, keys) {
+  return buckets.some((bucket) => keys.some((key) => bucket[key] != null));
+}
+
+function hexToRgba(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
+}
+
+// 每个图表容器一个 uPlot 实例；series/粒度不变时仅 setData 增量刷新。
+const metricsCharts = new Map();
+
+function destroyChart(el) {
+  const chart = metricsCharts.get(el);
+  if (chart) {
+    chart.destroy();
+    metricsCharts.delete(el);
   }
-  const labels = series[0].points;
-  for (const index of [...new Set([0, Math.floor((count - 1) / 2), count - 1])]) {
-    parts.push(`<text class="axis" x="${x(index)}" y="${height - 6}" text-anchor="middle">${escapeXml(labels[index].label)}</text>`);
+}
+
+// 用 uPlot 渲染阶梯折线（step-after：值保持整个采样桶），legend 实时跟随光标数值。
+// series: [{ key, name, color, area? }]；全部无数据时回退「暂无监控数据」占位。
+function renderUplotChart(el, buckets, series, { height, formatValue, granularity }) {
+  if (!el || typeof window === "undefined" || !window.uPlot) return;
+  const keys = series.map((item) => item.key);
+  if (!hasChartData(buckets, keys)) {
+    destroyChart(el);
+    el.innerHTML = '<p class="chart-empty">暂无监控数据</p>';
+    return;
   }
-  series.forEach((item, i) => {
-    parts.push(`<rect x="${pad.left + i * 110}" y="4" width="8" height="8" rx="2" fill="${item.color}"/>`);
-    parts.push(`<text class="axis" x="${pad.left + i * 110 + 12}" y="11">${escapeXml(item.name)}</text>`);
-  });
-  for (const item of series) {
-    // 按连续非空点拆段：null（数据未出）处折线/面积断开，不再掉 0。
-    const segments = [];
-    let current = [];
-    item.points.forEach((point, i) => {
-      if (point.value == null) {
-        if (current.length) segments.push(current);
-        current = [];
-      } else {
-        current.push(`${x(i).toFixed(1)},${y(point.value).toFixed(1)}`);
-      }
-    });
-    if (current.length) segments.push(current);
-    for (const segment of segments) {
-      if (item.area) {
-        const firstX = segment[0].split(",")[0];
-        const lastX = segment[segment.length - 1].split(",")[0];
-        parts.push(`<path d="M ${firstX},${baseline} L ${segment.join(" L ")} L ${lastX},${baseline} Z" fill="${item.color}" opacity="0.18"/>`);
-      }
-      parts.push(`<polyline points="${segment.join(" ")}" fill="none" stroke="${item.color}" stroke-width="1.6" stroke-linejoin="round"/>`);
-    }
+  const data = chartSeriesData(buckets, keys);
+  const reuseKey = `${granularity}:${keys.join(",")}`;
+  const existing = metricsCharts.get(el);
+  if (existing && existing._agentLegionKey === reuseKey) {
+    existing.setData(data);
+    return;
   }
-  const zoneWidth = innerW / count;
-  for (let i = 0; i < count; i++) {
-    const values = series.map((item) => {
-      const value = item.points[i]?.value;
-      return `${item.name}: ${value == null ? "—" : formatValue(value)}`;
-    }).join("\n");
-    parts.push(`<rect class="hover-zone" x="${(x(i) - zoneWidth / 2).toFixed(1)}" y="${pad.top}" width="${zoneWidth.toFixed(1)}" height="${innerH}"><title>${escapeXml(`${labels[i].label}\n${values}`)}</title></rect>`);
-  }
-  return `<svg viewBox="0 0 ${width} ${height}" role="img">${parts.join("")}</svg>`;
+  destroyChart(el);
+  el.innerHTML = "";
+  const chart = new window.uPlot(
+    {
+      width: el.clientWidth || 520,
+      height,
+      // 右/上留 8px 内边距，避免末端的点和峰值的线贴画布边被裁（CSS px）
+      padding: [8, 8, 0, 0],
+      cursor: { drag: { x: false, y: false } },
+      scales: {
+        x: { time: false },
+        // y 从 0 起，顶部留 10% 余量避免峰值贴边
+        y: { range: (_u, _min, max) => [0, max == null || max <= 0 ? 1 : max * 1.1] },
+      },
+      axes: [
+        {
+          stroke: "#668078",
+          font: "10px ui-monospace, monospace",
+          grid: { show: false },
+          ticks: { show: false },
+          values: (_u, splits) => splits.map((ts) => bucketLabel(new Date(ts * 1000).toISOString(), granularity)),
+        },
+        {
+          stroke: "#668078",
+          font: "10px ui-monospace, monospace",
+          grid: { stroke: "#1d392f", width: 1 },
+          ticks: { show: false },
+          values: (_u, splits) => splits.map((v) => formatValue(v)),
+        },
+      ],
+      series: [
+        {},
+        ...series.map((item) => ({
+          label: item.name,
+          stroke: item.color,
+          width: 1.6,
+          fill: item.area ? hexToRgba(item.color, 0.18) : undefined,
+          paths: window.uPlot.paths.stepped({ align: 1 }),
+          points: { show: false },
+          value: (_u, v) => (v == null ? "—" : formatValue(v)),
+        })),
+      ],
+    },
+    data,
+    el,
+  );
+  chart._agentLegionKey = reuseKey;
+  metricsCharts.set(el, chart);
 }
 
 async function loadStatus() {
@@ -450,35 +485,41 @@ async function loadConfig() {
 }
 
 // ---- Host 监控面板：加载与 DOM 渲染（只看本机 Worker 切片） ----
-let metricsGranularity = "minute";
-const GRANULARITY_QUERY = { minute: { hours: 6 }, hour: { hours: 24 }, day: { days: 7 } };
+let metricsGranularity = "6h";
 
 // 纯函数：组装本地缓存指标查询；Worker 身份由执行子进程的签发 token 决定。
+// 窗口（6h/24h/30d）由 granularity 唯一决定，不再带 hours/days 参数。
 export function metricsParams(granularity) {
-  return { granularity, ...GRANULARITY_QUERY[granularity], worker_id: "self" };
+  return { granularity, worker_id: "self" };
 }
+
+const CAPACITY_SERIES = [{ key: "active_executions", name: "活跃执行", color: "#66e8ad", area: true }];
+const TOKEN_SERIES = [
+  { key: "input_tokens", name: "输入", color: "#5b9cf5" },
+  { key: "output_tokens", name: "输出", color: "#a78bfa" },
+  { key: "cache_read_tokens", name: "缓存读", color: "#62e4ad" },
+];
 
 function renderMetrics(payload) {
   const granularity = payload.granularity ?? metricsGranularity;
   const buckets = fillWindowBuckets(payload.buckets ?? [], granularity);
-  const points = (key) => buckets.map((bucket) => ({ label: bucketLabel(bucket.bucket_start, granularity), value: bucket[key] }));
-  const capacitySeries = () => [{ name: "活跃执行", color: "#66e8ad", points: points("active_executions"), area: true }];
   const formatCount = (v) => String(Math.round(v));
-  const fleet = buildLineChart(capacitySeries(), { height: 260, formatValue: formatCount });
-  const tokens = buildLineChart(
-    [
-      { name: "输入", color: "#5b9cf5", points: points("input_tokens") },
-      { name: "输出", color: "#a78bfa", points: points("output_tokens") },
-      { name: "缓存读", color: "#62e4ad", points: points("cache_read_tokens") },
-    ],
-    { height: 260, formatValue: formatTokens },
-  );
-  const empty = '<p class="chart-empty">暂无监控数据</p>';
-  document.querySelector("#chart-fleet").innerHTML = fleet || empty;
-  document.querySelector("#chart-tokens").innerHTML = tokens || empty;
-  if (granularity === "minute") {
-    const overview = buildLineChart(capacitySeries(), { height: 180, formatValue: formatCount });
-    document.querySelector("#chart-capacity").innerHTML = overview || empty;
+  renderUplotChart(document.querySelector("#chart-fleet"), buckets, CAPACITY_SERIES, {
+    height: 260,
+    formatValue: formatCount,
+    granularity,
+  });
+  renderUplotChart(document.querySelector("#chart-tokens"), buckets, TOKEN_SERIES, {
+    height: 260,
+    formatValue: formatTokens,
+    granularity,
+  });
+  if (granularity === "6h") {
+    renderUplotChart(document.querySelector("#chart-capacity"), buckets, CAPACITY_SERIES, {
+      height: 180,
+      formatValue: formatCount,
+      granularity,
+    });
   }
 }
 
