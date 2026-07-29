@@ -39,6 +39,9 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          # api:check's create_app connects to AGENT_LEGION_DATABASE_URL; the
+          # service only auto-creates POSTGRES_DB (tests create their own).
+          POSTGRES_DB: agent_legion_ci
         ports:
           - 5432:5432
         options: >-
@@ -78,6 +81,9 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          # api:check's create_app connects to AGENT_LEGION_DATABASE_URL; the
+          # service only auto-creates POSTGRES_DB (tests create their own).
+          POSTGRES_DB: agent_legion_ci
         ports:
           - 5432:5432
         options: >-
@@ -129,6 +135,9 @@ jobs:
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
+          # api:check's create_app connects to AGENT_LEGION_DATABASE_URL; the
+          # service only auto-creates POSTGRES_DB (tests create their own).
+          POSTGRES_DB: agent_legion_ci
         ports:
           - 5432:5432
         options: >-
