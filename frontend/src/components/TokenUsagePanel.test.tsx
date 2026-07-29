@@ -100,7 +100,9 @@ describe('TokenUsagePanel', () => {
     await user.click(screen.getByRole('tab', { name: '按模型' }))
 
     await waitFor(() => {
-      expect(within(table).getByText('gateway/your-model-a')).toBeInTheDocument()
+      expect(
+        within(table).getByText('gateway/your-model-a')
+      ).toBeInTheDocument()
     })
   })
 

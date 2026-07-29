@@ -90,7 +90,9 @@ def test_finish_lease_captures_token_usage(lease_repo):
         ],
     )
     (run_dir / "run.json").write_text(
-        json.dumps({"model": {"provider": "gateway", "model": "your-model-a"}, "skill_version": "v2"}),
+        json.dumps(
+            {"model": {"provider": "gateway", "model": "your-model-a"}, "skill_version": "v2"}
+        ),
         encoding="utf-8",
     )
 

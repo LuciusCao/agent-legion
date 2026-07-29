@@ -96,7 +96,7 @@ workflows:
   pi:
     binary: pi
     provider: gateway
-    model: your-model-b
+    model: your-model
     thinking: low
     timeout_seconds: 1800
     environment:

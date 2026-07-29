@@ -81,5 +81,5 @@ def test_catalog_exposes_agent_definitions_with_runtime_defaults(
     assert agent["skill"] == "video_knowledge/review_video_content"
     assert agent["tools"] == ["read", "write", "bash"]
     assert agent["provider"] == "gateway"
-    assert agent["model"] == "your-model-b"
+    assert agent["model"] == "your-model"
     assert agent["thinking"] == "low"
