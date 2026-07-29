@@ -43,11 +43,11 @@ llm-gateway: ## 从 Pi models.json 读取凭据并启动远程 LLM 网关
 		--provider "$(LLM_GATEWAY_PROVIDER)" --models-json "$(PI_MODELS_JSON)"
 
 .PHONY: stack-host-up
-stack-host-up: ## 公司电脑：启动 PostgreSQL + Agent Legion Host + 本机 Worker
+stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Worker
 	docker compose -f deploy/compose.host.yaml up -d --build
 
 .PHONY: stack-host-down
-stack-host-down: ## 停止公司电脑 Agent Legion stack
+stack-host-down: ## 停止部署机 Agent Legion stack
 	docker compose -f deploy/compose.host.yaml down
 
 .PHONY: stack-worker-up

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Minimal OpenAI-compatible LLM gateway for remote workers.
 
-Runs on the company laptop, binds to its tailnet address, and forwards
-requests to the company model platform (中台) with the credential held here.
+Runs on a gateway machine, binds to its tailnet address, and forwards
+requests to the upstream LLM provider with the credential held here.
 Remote workers point their pi provider base_url at this gateway; the API key
-never leaves the laptop and is never logged. When LLM_GATEWAY_TOKEN is set,
+never leaves the gateway machine and is never logged. When LLM_GATEWAY_TOKEN is set,
 requests must present it (X-Gateway-Token or Authorization: Bearer; pi sends
 its provider apiKey as Bearer, so apiKey: "$LLM_GATEWAY_TOKEN" in the
 worker's models.json authenticates natively). Unset means open — loopback
