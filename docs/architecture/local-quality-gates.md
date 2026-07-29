@@ -1,23 +1,21 @@
-# Local Quality Gates Without a CI Runner
+# Quality Gates: Local Hooks + GitHub Actions CI
 
 ## Purpose
 
-This project does not currently have CI runner capacity. Local
-quality gates therefore protect the exact commit that is pushed, while GitLab branch settings keep
-the verified commit identity unchanged during merge.
-
-This is a deliberate single-maintainer operating model, not a claim that local hooks provide the
-same trust boundary as server-side CI. Hooks can be bypassed with `--no-verify`, so protected branch
-settings and an explicit merge-request record remain required.
+Slow quality gates run on GitHub Actions hosted runners
+(`.github/workflows/quality-gate.yml`); local hooks keep only the fast
+feedback loop on the maintainer machine. Branch protection on GitHub (required
+status checks) is the server-side trust boundary that local hooks cannot
+provide.
 
 ## Gate Levels
 
-| Event | Gate | Command |
+| Event | Gate | Command / CI job |
 | --- | --- | --- |
 | Commit | Fast | `scripts/check-fast.sh` |
-| Push feature branch | Quick | `scripts/check-quick.sh` |
-| Push `develop`, `main`, `master`, `release/*`, or a tag | Full | `scripts/check.sh` |
-| Release, migration, concurrency, or recovery change | Extended | `scripts/check-ci.sh` manually |
+| Push (any branch) | Quick | `scripts/check-quick.sh` |
+| PR / push to `develop`, `main`, `master` | Full | CI jobs `backend` + `frontend` |
+| Push to protected branches, manual dispatch | Extended | CI job `ci-extended` |
 
 Install the repository-managed hooks once from a worktree that contains `.githooks/`:
 
@@ -30,7 +28,35 @@ the current worktree root and executes its versioned `.githooks/` implementation
 branch does not contain `.githooks/`, the dispatcher exits successfully and leaves that worktree
 unaffected. Passing evidence is shared through the same Git common directory.
 
-## Exact-Commit Evidence
+## CI Workflow
+
+`.github/workflows/quality-gate.yml` runs on pull requests and pushes to
+`develop` / `main` / `master`, plus manual dispatch:
+
+- **backend** — static checks (ruff, format, mypy, architecture contracts,
+  invariant registry, spec health), the full pytest suite with coverage, and
+  the `tests/full -m full_gate` evidence with a combined coverage report. This
+  is the backend lane of `scripts/check.sh`.
+- **frontend** — generated API contract, prettier, ESLint, `tsc`, Vitest with
+  coverage, and the production bundle (`npm run build:bundle`).
+- **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Skipped on pull
+  requests; runs on branch pushes and manual dispatch, matching the old manual
+  `scripts/check-ci.sh` policy.
+
+CI environment notes:
+
+- Each job gets a fresh `postgres:17` service container; `AGENT_LEGION_DATABASE_URL`
+  and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database is created
+  automatically by `tests/postgres_support.py`.
+- The frontend job also needs Python + Postgres because `npm run api:check`
+  regenerates the OpenAPI schema through `create_app`.
+- `AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK=1` skips `check-skills-shared.py` in CI:
+  `config/skills.yaml` points at machine-local skill repos (`~/.agents/skills/...`)
+  that do not exist on runners. Local gates still run the check.
+- uv and npm caches are enabled; the first cold run is dominated by downloading
+  torch/funasr and takes substantially longer than cached runs.
+
+## Exact-Commit Evidence (Local)
 
 Before running a pre-push gate, `scripts/run-local-gate.sh` requires a clean worktree. A successful
 result is stored under:
@@ -43,40 +69,45 @@ The fingerprint includes the gate scripts, dependency lock files, architecture r
 local tool versions. Repeated pushes of the same unchanged commit reuse the evidence. Set
 `AGENT_LEGION_LOCAL_GATE_FORCE=1` to run the gate again.
 
-The evidence is intentionally local and is never committed. The merge request records only the
-verified commit SHA and gate level.
+The evidence is intentionally local and is never committed. Server-side
+verification comes from the CI workflow, not from these files.
 
-## Required GitLab Settings
+## Required GitHub Settings
 
-Configure the project in GitLab as follows:
+Configure the repository on GitHub as follows:
 
-1. Protect `develop` and any release branches.
-2. Disable force-push and branch deletion for protected branches.
-3. Use **Fast-forward merge** so GitLab does not create an unverified merge commit.
-4. Merge changes through a merge request; do not edit protected branches in the Web IDE.
-5. Keep the default merge-request template enabled and record the locally verified SHA.
+1. Protect `develop` and any release branches (Settings → Branches, or Rules → Rulesets).
+2. Require the `backend` and `frontend` status checks to pass before merging;
+   require branches to be up to date.
+3. Disable force-push and branch deletion for protected branches.
+4. Merge changes through a pull request; do not edit protected branches in the web UI.
 
-Fast-forward-only history is essential: the commit entering `develop` must be the same commit that
-passed the local full gate.
+Until required status checks are configured, nothing server-side blocks a red
+merge — the protection is only as strong as this one-time setup.
 
 ## Extended Gate Policy
 
-Run `scripts/check-ci.sh` manually before pushing when changes touch any of these areas:
+The `ci-extended` CI job covers the areas that previously required a manual
+`scripts/check-ci.sh` run:
 
 - PostgreSQL schema migration, offline SQLite import, backup, or restore;
 - executor leases, capacity, cancellation, or worker concurrency;
 - filesystem deletion, path validation, or artifact recovery;
 - release tags or a large multi-branch integration.
 
-If a local environment restriction prevents a deterministic test from running, record the exact
-failure in the merge request and rerun in an environment that permits the required local resource.
-Do not record passing evidence for a partial gate.
+Because the job runs on every push to protected branches, no manual step is
+needed anymore; use `workflow_dispatch` to run it against any other ref. If a
+deterministic test cannot run in the CI environment, record the exact failure
+in the pull request and rerun where the required resource is available. Do not
+record passing evidence for a partial gate.
 
 ## Quality Impact
 
-- Fast feedback remains cheap enough to run on every commit.
-- Pushes are blocked unless the appropriate repository gate passes for the exact commit.
-- Shared worktrees reuse evidence without sharing runtime data directories.
-- GitLab keeps the tested SHA stable even without a Runner.
-- The remaining trust limitation is explicit: local hooks cannot prevent a maintainer from using
-  `--no-verify` or prove behavior on a second machine.
+- Fast feedback remains cheap enough to run on every commit; pushes only wait
+  for the quick gate locally.
+- The slow full gate and stress evidence run on every PR/push server-side,
+  instead of blocking the maintainer machine or relying on manual runs.
+- Hooks can still be bypassed with `--no-verify`; the required status checks
+  on GitHub are the actual merge boundary.
+- CI runs in a clean environment (fresh Postgres, no local skill repos, no
+  `.env`), which also proves the gates are environment-independent.

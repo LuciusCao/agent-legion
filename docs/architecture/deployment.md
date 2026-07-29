@@ -43,7 +43,7 @@ scripts/
 
 - 使用 `uv` 而非 `pip`/`poetry`，依赖锁定在 `uv.lock`。
 - PostgreSQL 是唯一运行时数据库；SQLite 只由一次性离线导入器读取。
-- 质量门分为 `check-quick.sh`（日常）和 `check.sh`（提交前）。
+- 质量门分为 `check-quick.sh`（日常/本地 pre-push）和 `check.sh`（完整门禁，由 GitHub Actions CI 执行，见 `.github/workflows/quality-gate.yml`）。
 - 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录。
 
 ## API Surface / Interface
