@@ -542,13 +542,18 @@ def test_idle_claim_poll_registers_worker_panel_rows(job_db) -> None:
     _register_worker(registry)
     manager = AgentStatusManager()
     broker = AgentExecutionBroker(TEST_DATABASE_URL, agent_status=manager)
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values ('idle-workspace', 'Idle')"
+            " on conflict(id) do nothing"
+        )
 
     assert broker.claim("worker-1") is None
 
     # A global-scope Worker appears in every workspace's panel with 0/cap,
     # including ones where nothing is queued.
     rows = [a for a in manager.get_all() if a.id == "worker-1"]
-    assert rows
+    assert [row.workspace_id for row in rows] == ["idle-workspace"]
     assert all(row.busy is False and row.task_count == 0 for row in rows)
     assert all(row.max_tasks == 10 for row in rows)
 
