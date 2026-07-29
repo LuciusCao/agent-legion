@@ -131,8 +131,9 @@ test("fillWindowBuckets 分钟粒度补齐 360 桶，结束于上一个已完成
   assert.equal(filled.length, 360);
   assert.equal(filled[359].bucket_start, "2026-07-27T10:22:00.000Z");
   assert.equal(filled[0].bucket_start, "2026-07-27T04:23:00.000Z");
-  assert.equal(filled[0].total_tokens, 0);
-  assert.equal(filled[0].active_executions, 0);
+  // 完全无真实数据时视为「数据未出」，不填 0
+  assert.equal(filled[0].total_tokens, null);
+  assert.equal(filled[0].active_executions, null);
 });
 
 test("fillWindowBuckets 小时/天粒度结束于当前未完成时段", () => {
@@ -153,6 +154,20 @@ test("fillWindowBuckets 保留已有桶、稀疏数据不改变窗口范围", ()
   const hits = filled.filter((b) => b.total_tokens === 50);
   assert.equal(hits.length, 1);
   assert.equal(hits[0].bucket_start, "2026-07-27T08:00:00+00:00");
+});
+
+test("fillWindowBuckets 最后真实数据点之后填 null、之前缺失桶填 0", () => {
+  const now = Date.parse("2026-07-27T10:23:45Z");
+  const sparse = [{ bucket_start: "2026-07-27T08:00:00+00:00", total_tokens: 50, active_executions: 1 }];
+  const filled = fillWindowBuckets(sparse, "minute", now);
+  // 08:00 之前的缺失桶：真实无数据，填 0
+  assert.equal(filled[0].total_tokens, 0);
+  assert.equal(filled[0].active_executions, 0);
+  // 08:00 之后（Host 尚未聚合写入）的尾部桶：数据未出，填 null
+  const last = filled[filled.length - 1];
+  assert.equal(last.bucket_start, "2026-07-27T10:22:00.000Z");
+  assert.equal(last.total_tokens, null);
+  assert.equal(last.active_executions, null);
 });
 
 const CHART_BUCKETS = [
@@ -203,4 +218,39 @@ test("buildLineChart 转义文本内容，防止 Host 数据注入 markup", () =
   assert.ok(!svg.includes("<b>x</b>"));
   assert.ok(svg.includes("&lt;b&gt;"));
   assert.ok(svg.includes("&lt;script&gt;"));
+});
+
+test("buildLineChart null 缺口：折线拆段不连到 0，hover 显示 —", () => {
+  const points = [
+    { label: "10:00", value: 3 },
+    { label: "11:00", value: 5 },
+    { label: "12:00", value: null },
+    { label: "13:00", value: null },
+  ];
+  const svg = buildLineChart([{ name: "活跃执行", color: "#66e8ad", points, area: true }]);
+  // 缺口后只有一段折线、一段面积
+  assert.equal(svg.match(/<polyline/g).length, 1);
+  assert.equal(svg.match(/<path /g).length, 1);
+  // hover 带仍覆盖全部 bucket，缺口值显示 —
+  assert.equal(svg.match(/hover-zone/g).length, 4);
+  assert.ok(svg.includes("活跃执行: —"));
+  assert.ok(svg.includes("活跃执行: 3"));
+});
+
+test("buildLineChart 中间缺口：折线拆成两段", () => {
+  const points = [
+    { label: "10:00", value: 3 },
+    { label: "11:00", value: null },
+    { label: "12:00", value: 5 },
+  ];
+  const svg = buildLineChart([{ name: "活跃执行", color: "#66e8ad", points }]);
+  assert.equal(svg.match(/<polyline/g).length, 2);
+});
+
+test("buildLineChart 系列全为 null 时返回空字符串（沿用空态）", () => {
+  const points = [
+    { label: "10:00", value: null },
+    { label: "11:00", value: null },
+  ];
+  assert.equal(buildLineChart([{ name: "x", color: "#fff", points }]), "");
 });

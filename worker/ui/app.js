@@ -345,33 +345,37 @@ const WINDOW_STEP_MS = { minute: 60_000, hour: 3_600_000, day: 86_400_000 };
 const WINDOW_BUCKET_COUNT = { minute: 360, hour: 24, day: 7 };
 
 // 把稀疏 bucket 补齐成固定长度时间网格（UTC 对齐，与 Host date_trunc 汇总一致），
-// 缺失的桶填零：横轴窗口固定，不随本机实际有数据的时间段变化。
+// 横轴窗口固定，不随本机实际有数据的时间段变化。
+// 窗口内、最后一个真实数据点之前的缺失桶填零（确实没数据）；
+// 右端 Host 尚未聚合写入的尾部缺失桶填 null（数据未出），由图表渲染成缺口而不是掉到 0。
 export function fillWindowBuckets(buckets, granularity, now = Date.now()) {
   const step = WINDOW_STEP_MS[granularity];
   const aligned = Math.floor(now / step) * step;
   const end = granularity === "minute" ? aligned - step : aligned;
   const start = end - (WINDOW_BUCKET_COUNT[granularity] - 1) * step;
   const byStart = new Map((buckets ?? []).map((bucket) => [Date.parse(bucket.bucket_start), bucket]));
-  const zero = (t) => ({
+  const lastDataTs = Math.max(-Infinity, ...(buckets ?? []).map((bucket) => Date.parse(bucket.bucket_start)));
+  const empty = (t, pending) => ({
     bucket_start: new Date(t).toISOString(),
-    online_workers: 0,
-    active_executions: 0,
-    input_tokens: 0,
-    output_tokens: 0,
-    cache_read_tokens: 0,
-    total_tokens: 0,
+    online_workers: pending ? null : 0,
+    active_executions: pending ? null : 0,
+    input_tokens: pending ? null : 0,
+    output_tokens: pending ? null : 0,
+    cache_read_tokens: pending ? null : 0,
+    total_tokens: pending ? null : 0,
   });
   const filled = [];
-  for (let t = start; t <= end; t += step) filled.push(byStart.get(t) ?? zero(t));
+  for (let t = start; t <= end; t += step) filled.push(byStart.get(t) ?? empty(t, t > lastDataTs));
   return filled;
 }
 
 const escapeXml = (text) => String(text).replace(/[<>&"]/g, (c) => ({ "<": "&lt;", ">": "&gt;", "&": "&amp;", '"': "&quot;" })[c]);
 
 // 手绘 SVG 折线/面积图（viewBox 自适应宽度）；hover 数值用 <title> 原生提示，无 JS 事件。
-// seriesList: [{ name, color, points: [{ label, value }], area? }]
+// seriesList: [{ name, color, points: [{ label, value }], area? }]；value 为 null 表示数据未出，
+// 渲染为缺口（折线/面积断开，hover 显示 —），不参与折线绘制。
 export function buildLineChart(seriesList, { width = 520, height = 180, formatValue = (v) => String(v) } = {}) {
-  const series = seriesList.filter((item) => item.points.length > 0);
+  const series = seriesList.filter((item) => item.points.some((point) => point.value != null));
   const count = Math.max(0, ...series.map((item) => item.points.length));
   if (count === 0) return "";
   const pad = { left: 36, right: 10, top: 18, bottom: 20 };
@@ -395,15 +399,33 @@ export function buildLineChart(seriesList, { width = 520, height = 180, formatVa
     parts.push(`<text class="axis" x="${pad.left + i * 110 + 12}" y="11">${escapeXml(item.name)}</text>`);
   });
   for (const item of series) {
-    const coords = item.points.map((point, i) => `${x(i).toFixed(1)},${y(point.value).toFixed(1)}`);
-    if (item.area) {
-      parts.push(`<path d="M ${x(0).toFixed(1)},${baseline} L ${coords.join(" L ")} L ${x(item.points.length - 1).toFixed(1)},${baseline} Z" fill="${item.color}" opacity="0.18"/>`);
+    // 按连续非空点拆段：null（数据未出）处折线/面积断开，不再掉 0。
+    const segments = [];
+    let current = [];
+    item.points.forEach((point, i) => {
+      if (point.value == null) {
+        if (current.length) segments.push(current);
+        current = [];
+      } else {
+        current.push(`${x(i).toFixed(1)},${y(point.value).toFixed(1)}`);
+      }
+    });
+    if (current.length) segments.push(current);
+    for (const segment of segments) {
+      if (item.area) {
+        const firstX = segment[0].split(",")[0];
+        const lastX = segment[segment.length - 1].split(",")[0];
+        parts.push(`<path d="M ${firstX},${baseline} L ${segment.join(" L ")} L ${lastX},${baseline} Z" fill="${item.color}" opacity="0.18"/>`);
+      }
+      parts.push(`<polyline points="${segment.join(" ")}" fill="none" stroke="${item.color}" stroke-width="1.6" stroke-linejoin="round"/>`);
     }
-    parts.push(`<polyline points="${coords.join(" ")}" fill="none" stroke="${item.color}" stroke-width="1.6" stroke-linejoin="round"/>`);
   }
   const zoneWidth = innerW / count;
   for (let i = 0; i < count; i++) {
-    const values = series.map((item) => `${item.name}: ${formatValue(item.points[i]?.value ?? 0)}`).join("\n");
+    const values = series.map((item) => {
+      const value = item.points[i]?.value;
+      return `${item.name}: ${value == null ? "—" : formatValue(value)}`;
+    }).join("\n");
     parts.push(`<rect class="hover-zone" x="${(x(i) - zoneWidth / 2).toFixed(1)}" y="${pad.top}" width="${zoneWidth.toFixed(1)}" height="${innerH}"><title>${escapeXml(`${labels[i].label}\n${values}`)}</title></rect>`);
   }
   return `<svg viewBox="0 0 ${width} ${height}" role="img">${parts.join("")}</svg>`;
@@ -440,22 +462,24 @@ function renderMetrics(payload) {
   const granularity = payload.granularity ?? metricsGranularity;
   const buckets = fillWindowBuckets(payload.buckets ?? [], granularity);
   const points = (key) => buckets.map((bucket) => ({ label: bucketLabel(bucket.bucket_start, granularity), value: bucket[key] }));
-  const fleet = buildLineChart(
-    [{ name: "活跃执行", color: "#66e8ad", points: points("active_executions"), area: true }],
-    { formatValue: (v) => String(Math.round(v)) },
-  );
+  const capacitySeries = () => [{ name: "活跃执行", color: "#66e8ad", points: points("active_executions"), area: true }];
+  const formatCount = (v) => String(Math.round(v));
+  const fleet = buildLineChart(capacitySeries(), { height: 260, formatValue: formatCount });
   const tokens = buildLineChart(
     [
       { name: "输入", color: "#5b9cf5", points: points("input_tokens") },
       { name: "输出", color: "#a78bfa", points: points("output_tokens") },
       { name: "缓存读", color: "#62e4ad", points: points("cache_read_tokens") },
     ],
-    { formatValue: formatTokens },
+    { height: 260, formatValue: formatTokens },
   );
   const empty = '<p class="chart-empty">暂无监控数据</p>';
   document.querySelector("#chart-fleet").innerHTML = fleet || empty;
   document.querySelector("#chart-tokens").innerHTML = tokens || empty;
-  if (granularity === "minute") document.querySelector("#chart-capacity").innerHTML = fleet || empty;
+  if (granularity === "minute") {
+    const overview = buildLineChart(capacitySeries(), { height: 180, formatValue: formatCount });
+    document.querySelector("#chart-capacity").innerHTML = overview || empty;
+  }
 }
 
 async function loadMetrics() {

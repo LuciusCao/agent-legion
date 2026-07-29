@@ -435,16 +435,16 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
 .chart-panel { min-height: 206px; margin-top: 16px; }
 .chart-legend { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
 .chart-legend i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); }
-.chart { min-height: 180px; border-radius: 10px; background: #07130f; }
-.overview-chart { min-height: 122px; background: transparent; }
-.chart.overview-chart svg { height: 122px; }
-#overview-metrics-error:not(:empty) + .overview-chart { min-height: 96px; }
+.chart { min-height: 260px; border-radius: 10px; background: #07130f; }
+.overview-chart { min-height: 180px; background: transparent; }
+.chart.overview-chart svg { height: 180px; }
+#overview-metrics-error:not(:empty) + .overview-chart { min-height: 150px; }
 .chart svg { display: block; width: 100%; height: auto; }
 .chart .axis { fill: #668078; font: 10px ui-monospace, monospace; }
 .chart .grid-line { stroke: #1d392f; stroke-dasharray: 3 5; }
 .chart .hover-zone { fill: transparent; }
 .chart .hover-zone:hover { fill: rgba(85, 230, 166, .06); }
-.chart-empty { margin: 62px 0; color: var(--muted); text-align: center; font-size: 13px; }
+.chart-empty { margin: 110px 0; color: var(--muted); text-align: center; font-size: 13px; }
 .page-panel { padding: 22px; }
 .page-heading { padding-bottom: 20px; border-bottom: 1px solid var(--line); }
 .page-heading p:not(.eyebrow) { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
