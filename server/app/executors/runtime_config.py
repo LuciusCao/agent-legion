@@ -228,7 +228,7 @@ def validate_runtime(
             (
                 "cms.token",
                 "missing CMS credentials: set env CMS_TOKEN (or "
-                "VIDEO_HIVE_CMS_TOKEN; BASECMS_TOKEN is a deprecated alias), "
+                "AGENT_LEGION_CMS_TOKEN; BASECMS_TOKEN is a deprecated alias), "
                 "set all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / "
                 "CMS_TOKEN_URL, or bind a token in the workspace resource "
                 "config (vault)",

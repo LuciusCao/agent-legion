@@ -10,9 +10,6 @@ from fastapi.testclient import TestClient
 from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
 
 os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
-# Keep the deprecated alias in sync so an ambient or .env VIDEO_HIVE_DATABASE_URL
-# can never redirect the suite (and never conflicts with the authoritative name).
-os.environ["VIDEO_HIVE_DATABASE_URL"] = TEST_DATABASE_URL
 
 import psycopg
 from psycopg import sql
@@ -44,15 +41,15 @@ _CMS_ENV_KEYS = (
     "BASECMS_NONCE",
     "BASECMS_SECRET",
     "BASECMS_TOKEN_URL",
-    "VIDEO_HIVE_CMS_TOKEN",
-    "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
-    "VIDEO_HIVE_REMOTE_WORKER_TOKEN",
+    "AGENT_LEGION_CMS_TOKEN",
+    "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
+    "AGENT_LEGION_REMOTE_WORKER_TOKEN",
 )
 
 
 def pytest_configure() -> None:
-    if os.environ.get("VIDEO_HIVE_TEST_REAL_CMS") != "1":
-        os.environ.setdefault("VIDEO_HIVE_SKIP_DOTENV", "1")
+    if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") != "1":
+        os.environ.setdefault("AGENT_LEGION_SKIP_DOTENV", "1")
         for key in _CMS_ENV_KEYS:
             os.environ[key] = ""
 
@@ -68,7 +65,7 @@ def _isolate_postgres_database():
             conn.execute(sql.SQL("create schema {}").format(sql.Identifier(TEST_SCHEMA)))
     except psycopg.Error as exc:
         pytest.fail(
-            "PostgreSQL is required for tests. Set VIDEO_HIVE_TEST_DATABASE_URL to a reachable "
+            "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
             f"test database: {exc}"
         )
     init_db(TEST_DATABASE_URL)
@@ -84,18 +81,18 @@ def _isolate_project_dotenv(monkeypatch):
 
     Production and local app runs still load the project .env normally. Tests
     that intentionally exercise real CMS credentials can opt in with
-    VIDEO_HIVE_TEST_REAL_CMS=1.
+    AGENT_LEGION_TEST_REAL_CMS=1.
     """
-    if os.environ.get("VIDEO_HIVE_TEST_REAL_CMS") == "1":
+    if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
         return
-    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     for key in _CMS_ENV_KEYS:
         monkeypatch.setenv(key, "")
 
 
 @pytest.fixture(autouse=True)
 def _block_real_cms_http(monkeypatch):
-    if os.environ.get("VIDEO_HIVE_TEST_REAL_CMS") == "1":
+    if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
         return
     original_request = requests.sessions.Session.request
 

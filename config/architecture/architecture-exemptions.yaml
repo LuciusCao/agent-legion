@@ -114,14 +114,14 @@ exemptions:
     resolved at the same trusted boundary. Resource provider declarations are
     parsed once here and injected through Settings. The retired yaml cms
     credential keys are rejected at this boundary with migration guidance
-    (config governance G2). The AGENT_LEGION_DATABASE_URL /
-    VIDEO_HIVE_DATABASE_URL dual-name arbitration lives here too (config
+    (config governance G2). The AGENT_LEGION_DATABASE_URL
+    environment override lives here too (config
     governance G4), as does the CMS_* / BASECMS_* alias validation hook
     (de-identification D3). Extract database settings into the configuration
     package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 269
+  ceiling: 260
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router and artifact authentication dependency.

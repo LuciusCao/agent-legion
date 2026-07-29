@@ -35,7 +35,7 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
 
         detail = c.get(f"/api/jobs/{job_id}")
         artifact_response = c.get(f"/api/jobs/{job_id}/artifacts/question_context.json")
-        traversal = c.get(f"/api/jobs/{job_id}/artifacts/../video_hive.sqlite")
+        traversal = c.get(f"/api/jobs/{job_id}/artifacts/../agent_legion.sqlite")
 
     assert detail.status_code == 200
     assert detail.json()["job"]["id"] == job_id

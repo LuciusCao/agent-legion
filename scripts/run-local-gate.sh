@@ -55,7 +55,7 @@ fingerprint="$(printf '%s' "$fingerprint_input" | git hash-object --stdin)"
 cache_dir="$common_dir/local-gates/$head_sha"
 cache_file="$cache_dir/$gate-$fingerprint.pass"
 
-if [[ "${VIDEO_HIVE_LOCAL_GATE_FORCE:-0}" != "1" && -f "$cache_file" ]]; then
+if [[ "${AGENT_LEGION_LOCAL_GATE_FORCE:-0}" != "1" && -f "$cache_file" ]]; then
   echo "Local $gate gate already passed for ${head_sha:0:12}; reusing cached evidence."
   exit 0
 fi

@@ -83,16 +83,16 @@ def _path_parser(value: str) -> str:
 # Reviewed mapping from environment variable to config path and parser.
 # Do not add arbitrary double-underscore mutation; every override is listed here.
 # ``database.url`` is deliberately absent: it is handled by
-# ``_apply_database_url_env`` below, which arbitrates between the authoritative
-# AGENT_LEGION_DATABASE_URL and its deprecated VIDEO_HIVE_DATABASE_URL alias.
+# ``_apply_database_url_env`` below, which applies the authoritative
+# AGENT_LEGION_DATABASE_URL override.
 _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
-    "VIDEO_HIVE_CMS_TOKEN": (("cms", "token"), _str_parser),
-    "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
-    "VIDEO_HIVE_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
-    "VIDEO_HIVE_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
-    "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
-    "VIDEO_HIVE_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
-    "VIDEO_HIVE_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
+    "AGENT_LEGION_CMS_TOKEN": (("cms", "token"), _str_parser),
+    "AGENT_LEGION_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
+    "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
+    "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
+    "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
+    "AGENT_LEGION_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
+    "AGENT_LEGION_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
     "AGENT_LEGION_WORKER_REGISTER_TOKEN": (("agent_workers", "register_token"), _str_parser),
     "AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE": (
         ("agent_workers", "register_token_file"),
@@ -104,35 +104,16 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
 }
 
 _DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"
-_DATABASE_URL_ENV_ALIAS = "VIDEO_HIVE_DATABASE_URL"
 
 
 def _apply_database_url_env(config: dict[str, Any]) -> None:
-    """Arbitrate the database URL env override (config governance G4).
+    """Apply the database URL env override (config governance G4).
 
-    ``AGENT_LEGION_DATABASE_URL`` is authoritative; ``VIDEO_HIVE_DATABASE_URL``
-    is a deprecated alias kept for the transition window. Exactly one set: it
-    wins (alias-only logs a deprecation warning). Both set to the same value:
-    accepted silently. Both set with different values: hard error.
+    ``AGENT_LEGION_DATABASE_URL`` is the single authoritative variable.
     """
-    primary = os.environ.get(_DATABASE_URL_ENV)
-    alias = os.environ.get(_DATABASE_URL_ENV_ALIAS)
-    if primary and alias and primary != alias:
-        raise ValueError(
-            f"{_DATABASE_URL_ENV} and {_DATABASE_URL_ENV_ALIAS} are both set "
-            f"with different values. {_DATABASE_URL_ENV_ALIAS} is a deprecated "
-            f"alias (config governance G4): unset it and keep only "
-            f"{_DATABASE_URL_ENV}."
-        )
-    value = primary or alias
+    value = os.environ.get(_DATABASE_URL_ENV)
     if value is None:
         return
-    if not primary:
-        logger.warning(
-            "%s is deprecated; rename it to %s (same value)",
-            _DATABASE_URL_ENV_ALIAS,
-            _DATABASE_URL_ENV,
-        )
     database = config.setdefault("database", {})
     if not isinstance(database, dict):
         config["database"] = database = {}
@@ -191,7 +172,7 @@ def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
 
     Config governance G2 (breaking): ``cms.token`` and ``cms.token_gen`` are no
     longer read from yaml. This check runs before env overrides so env-injected
-    in-memory values (``VIDEO_HIVE_CMS_TOKEN`` et al.) are not mistaken for
+    in-memory values (``AGENT_LEGION_CMS_TOKEN`` et al.) are not mistaken for
     yaml keys.
     """
     cms = config.get("cms")
@@ -204,7 +185,7 @@ def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
     raise ValueError(
         f"Unsupported yaml keys under cms: {keys}. The yaml cms.token and "
         "cms.token_gen sections were retired (config governance G2). Migrate: "
-        "token -> env CMS_TOKEN (or VIDEO_HIVE_CMS_TOKEN; BASECMS_TOKEN is a "
+        "token -> env CMS_TOKEN (or AGENT_LEGION_CMS_TOKEN; BASECMS_TOKEN is a "
         "deprecated alias) or a vault-backed workspace resource binding; "
         "token_gen -> env CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL "
         "(deprecated aliases BASECMS_*)."
@@ -213,7 +194,7 @@ def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
 
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = PROJECT_ROOT
-    if os.environ.get("VIDEO_HIVE_SKIP_DOTENV") != "1":
+    if os.environ.get("AGENT_LEGION_SKIP_DOTENV") != "1":
         load_env_file(root_dir / ".env")
     loaded = load_application_config(root_dir, config_path=config_path)
     config = loaded.config
@@ -223,7 +204,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     _apply_cms_env_overrides(config)
     _normalize_cms_config(config)
     if data_dir is None:
-        env_data_dir = os.environ.get("VIDEO_HIVE_DATA_DIR")
+        env_data_dir = os.environ.get("AGENT_LEGION_DATA_DIR")
         if env_data_dir:
             data_dir = Path(env_data_dir)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))

@@ -6,7 +6,7 @@ export function buildWorkflowNodePromptPreview(
   additionalPrompt: string
 ) {
   const lines = [
-    'Execute the loaded node skill for this Video Hive workflow job.',
+    'Execute the loaded node skill for this Agent Legion workflow job.',
     '',
     'Job ID: <job_id>',
     `Node: ${node.key}`,

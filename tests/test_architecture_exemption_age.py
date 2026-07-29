@@ -39,7 +39,7 @@ def make_exemption(remove_when: str) -> ArchitectureExemption:
         check="architecture.file_budget",
         path="server/app/example.py",
         reason="Oversized module needs staged split.",
-        owner="video-hive",
+        owner="agent-legion",
         remove_when=remove_when,
         ceiling=100,
     )
@@ -120,7 +120,7 @@ def test_loaded_registry_roundtrip(exemptions_root: Path) -> None:
                         "check": "architecture.file_budget",
                         "path": "server/app/example.py",
                         "reason": "Oversized module needs staged split.",
-                        "owner": "video-hive",
+                        "owner": "agent-legion",
                         "remove_when": "docs/superpowers/plans/2026-06-15-old-plan.md",
                         "ceiling": 100,
                     }
