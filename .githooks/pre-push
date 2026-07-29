@@ -2,6 +2,9 @@
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
+# The full gate for protected branches (develop/main/release/tags) runs in
+# GitHub Actions (.github/workflows/quality-gate.yml); local pre-push always
+# runs the quick gate so slow checks stay off the maintainer machine.
 gate="quick"
 has_update=0
 zero_sha="0000000000000000000000000000000000000000"
@@ -12,11 +15,6 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     continue
   fi
   has_update=1
-  case "$remote_ref" in
-    refs/heads/develop|refs/heads/main|refs/heads/master|refs/heads/release/*|refs/tags/*)
-      gate="full"
-      ;;
-  esac
 done
 
 if [[ "$has_update" -eq 0 ]]; then

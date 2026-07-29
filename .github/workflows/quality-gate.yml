@@ -1,0 +1,146 @@
+name: Quality Gate
+
+on:
+  pull_request:
+    branches: [develop, main, master]
+  push:
+    branches: [develop, main, master]
+  workflow_dispatch:
+
+concurrency:
+  group: quality-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Gate scripts default UV_CACHE_DIR to the in-project .uv-cache; point it back
+  # at the default location so astral-sh/setup-uv caching covers it.
+  UV_CACHE_DIR: /home/runner/.cache/uv
+  # Fresh per-run databases on the service container below. export_openapi's
+  # create_app writes worker_control_state at startup, so the frontend job needs
+  # a live database too.
+  AGENT_LEGION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_ci
+  AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_test_ci
+  # check-skills-shared.py compares skill repos at machine-local paths
+  # (~/.agents/skills/...) that only exist on maintainer machines.
+  AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK: "1"
+
+jobs:
+  backend:
+    name: backend
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Backend static checks
+        run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
+
+      - name: Backend tests
+        run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+
+      - name: Full gate evidence (tests/full)
+        run: uv run pytest -q tests/full -m full_gate --cov=server --cov-report= --cov-append
+
+      - name: Combined coverage report
+        run: uv run coverage report
+
+  frontend:
+    name: frontend
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      # api:check regenerates the OpenAPI schema via uv run + create_app,
+      # so this job needs the Python environment and the database as well.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: uv sync
+
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Frontend static checks
+        run: FRONTEND_GATE_PHASE=static FRONTEND_TEST_MODE=coverage ./scripts/check-quick-frontend.sh
+
+      - name: Frontend tests
+        run: FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage ./scripts/check-quick-frontend.sh
+
+      - name: Production bundle
+        run: npm run build:bundle
+        working-directory: frontend
+
+  ci-extended:
+    name: ci-extended
+    # Repeated stress scenarios; too slow for the PR loop. Runs on branch
+    # pushes and manual dispatch, matching the old manual check-ci.sh policy.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: CI extended architecture evidence
+        run: uv run pytest -q tests/ci -m ci_extended

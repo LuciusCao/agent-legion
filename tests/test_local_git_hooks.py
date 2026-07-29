@@ -125,7 +125,9 @@ def test_feature_push_runs_quick_gate_once_and_reuses_evidence(
 
 
 @pytest.mark.parametrize("remote_ref", ["refs/heads/develop", "refs/tags/v1.0.0"])
-def test_protected_ref_push_runs_full_gate(hook_repo: tuple[Path, Path], remote_ref: str) -> None:
+def test_protected_ref_push_runs_quick_gate(hook_repo: tuple[Path, Path], remote_ref: str) -> None:
+    # The full gate for protected refs runs in GitHub Actions CI; the local
+    # pre-push hook always runs the quick gate.
     repo, gate_log = hook_repo
 
     result = _run(
@@ -135,8 +137,8 @@ def test_protected_ref_push_runs_full_gate(hook_repo: tuple[Path, Path], remote_
         env=_hook_env(gate_log),
     )
 
-    assert gate_log.read_text(encoding="utf-8").splitlines() == ["full"]
-    assert "Running local full gate" in result.stdout
+    assert gate_log.read_text(encoding="utf-8").splitlines() == ["quick"]
+    assert "Running local quick gate" in result.stdout
 
 
 def test_pre_push_rejects_dirty_worktree(hook_repo: tuple[Path, Path]) -> None:

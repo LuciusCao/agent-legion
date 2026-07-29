@@ -28,9 +28,10 @@
 ## 4. Quality Gates（必须执行）
 
 - 任何代码修改后先跑 `./scripts/check-quick.sh`。
-- 提交或交接前必须跑 `./scripts/check.sh`。
+- 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
+  的 `backend` + `frontend` job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
-  对 feature 分支跑 quick gate、对 `develop` / release / tag 跑 full gate。
+  对所有分支跑 quick gate；full / ci-extended gate 由 GitHub CI 执行。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
 

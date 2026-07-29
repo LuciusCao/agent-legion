@@ -358,15 +358,17 @@ the versioned `.githooks/` implementation from the current worktree when that br
 older worktrees without `.githooks/` remain unaffected. Successful gate evidence is shared:
 
 - pre-commit runs `scripts/check-fast.sh` for lint, formatting, and type feedback;
-- pre-push runs `scripts/check-quick.sh` for feature branches;
-- pushes to `develop`, `main`, `master`, `release/*`, or tags run `scripts/check.sh`;
+- pre-push runs `scripts/check-quick.sh` for all branches;
+- the full gate (`scripts/check.sh` backend lane, frontend build) and the extended stress gate
+  (`scripts/check-ci.sh`) run on GitHub Actions — see `.github/workflows/quality-gate.yml` —
+  for pull requests and pushes to `develop`, `main`, or `master`;
 - successful pre-push evidence is cached by commit SHA in the Git common directory, so all
   worktrees can reuse an unchanged result;
 - pre-push refuses a dirty worktree so the verified commit is exactly the commit being pushed.
 
 Set `AGENT_LEGION_LOCAL_GATE_FORCE=1` to force a fresh pre-push verification for an unchanged
-commit. See [Local Quality Gates](docs/architecture/local-quality-gates.md) for the GitLab setup
-and operating policy used when no CI runner is available.
+commit. See [Quality Gates](docs/architecture/local-quality-gates.md) for the GitHub branch
+protection settings and the CI operating policy.
 
 > See [docs/architecture/](docs/architecture/) for architecture details, code style conventions, and security notes.
 
