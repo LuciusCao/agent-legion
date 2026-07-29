@@ -49,9 +49,13 @@ describe('MonitoringPanel', () => {
   it('renders stat cards and charts from fetched buckets', async () => {
     render(<MonitoringPanel />)
 
-    expect(
-      await screen.findByTestId('online-workers-summary')
-    ).toHaveTextContent('3')
+    // 摘要元素首帧就以占位符 '-' 渲染，必须等内容到位而不是等元素出现，
+    // 否则并行高负载下断言会抢在 fetch resolve 之前执行。
+    await waitFor(() =>
+      expect(screen.getByTestId('online-workers-summary')).toHaveTextContent(
+        '3'
+      )
+    )
     expect(screen.getByTestId('active-executions-summary')).toHaveTextContent(
       '2'
     )
@@ -146,9 +150,9 @@ describe('MonitoringPanel', () => {
     render(<MonitoringPanel />)
 
     // 固定时间窗下空数据渲染为零值折线，而不是“暂无数据”占位
-    expect(
-      await screen.findByTestId('hourly-tokens-summary')
-    ).toHaveTextContent('0')
+    await waitFor(() =>
+      expect(screen.getByTestId('hourly-tokens-summary')).toHaveTextContent('0')
+    )
     expect(screen.queryByText('暂无数据')).not.toBeInTheDocument()
     expect(
       screen.getByRole('img', { name: 'Token 吞吐量趋势' })
