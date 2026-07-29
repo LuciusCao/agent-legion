@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -198,7 +199,7 @@ def test_cms_credentials_allowed_when_no_cms_resource(tmp_path, monkeypatch):
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_credentials_required_when_cms_resource_enabled(tmp_path, monkeypatch):
+def test_cms_credentials_warning_when_cms_resource_enabled(tmp_path, monkeypatch, caplog):
     # Set these to empty strings so the real .env file cannot populate them.
     for env_key in (
         "CMS_TOKEN",
@@ -224,17 +225,16 @@ resource_providers:
     path: /question/detail
 """
 
-    with pytest.raises(StartupValidationError) as exc_info:
+    # Workspace vault bindings cannot be pre-checked at startup, so missing
+    # env-level credentials only log a warning instead of failing startup.
+    with caplog.at_level(logging.WARNING, logger="server.app.executors.runtime_config"):
         _load_and_validate(tmp_path, monkeypatch, config)
 
-    fields = [loc for loc, _ in exc_info.value.fields]
-    assert "cms.token" in fields
-    message = str(exc_info.value)
-    assert "CMS_TOKEN" in message
-    assert "vault" in message
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("cms.token" in message and "vault" in message for message in messages)
 
 
-def test_cms_credentials_required_for_provider_keyed_defaults(tmp_path, monkeypatch):
+def test_cms_credentials_warning_for_provider_keyed_defaults(tmp_path, monkeypatch, caplog):
     # Set these to empty strings so the real .env file cannot populate them.
     for env_key in (
         "CMS_TOKEN",
@@ -260,11 +260,10 @@ resource_providers:
     path: /question/detail
 """
 
-    with pytest.raises(StartupValidationError) as exc_info:
+    with caplog.at_level(logging.WARNING, logger="server.app.executors.runtime_config"):
         _load_and_validate(tmp_path, monkeypatch, config)
 
-    fields = {loc for loc, _ in exc_info.value.fields}
-    assert "cms.token" in fields
+    assert any("cms.token" in record.getMessage() for record in caplog.records)
 
 
 def test_aggregate_invalid_fields_in_one_exception(tmp_path, monkeypatch):

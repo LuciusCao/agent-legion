@@ -7,6 +7,7 @@ from server.app.services.vault import VaultService
 from server.app.services.vault_resources import apply_resources_patch
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.services.workspace_connection_test import test_workspace_connection
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
@@ -17,7 +18,6 @@ from server.app.services.workspace_node_config import (
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
-from server.app.workflows.resources import resolve_cms_resource
 
 
 def _build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -255,17 +255,12 @@ class WorkspaceConfigurationService:
         return self._payload(workspace)
 
     def test_connection(self, workspace_id: str) -> dict[str, Any]:
-        workspace = self._workspace(workspace_id)
-        cms_resource = resolve_cms_resource(
-            self.settings.config,
-            workspace,
-            None,
-            "question_detail",
-            declarations=self.settings.resource_providers,
+        return test_workspace_connection(
+            workspace_id,
+            self._workspace(workspace_id),
+            self.settings,
+            self._vault(),
         )
-        if not cms_resource.get("api_url"):
-            raise InvalidOperationError("Global CMS URL is not configured")
-        return {"ok": True, "message": "全局配置已就绪"}
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         return build_workspace_stats(

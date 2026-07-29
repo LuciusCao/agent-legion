@@ -1,3 +1,7 @@
+import requests
+from cryptography.fernet import Fernet
+
+
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
@@ -142,7 +146,7 @@ def test_patch_settings_connection_saves_resource_config(client_factory):
 def test_test_connection_uses_global_cms_url(client_factory):
     def configure(app):
         app.state.settings.config["cms"] = {
-            "question_detail_url": "http://cms.example/detail",
+            "question_detail_url": "http://cms.example.com/question/detail",
             "token": "global_token",
         }
 
@@ -152,9 +156,10 @@ def test_test_connection_uses_global_cms_url(client_factory):
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
+    assert "全局 env" in response.json()["message"]
 
 
-def test_test_connection_fails_when_global_url_missing(client_factory):
+def test_test_connection_fails_when_cms_url_missing(client_factory):
     def configure(app):
         app.state.settings.config["cms"] = {}
 
@@ -163,4 +168,51 @@ def test_test_connection_fails_when_global_url_missing(client_factory):
         response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
 
     assert response.status_code == 400
-    assert "Global CMS URL" in response.json()["detail"]
+    assert "CMS URL 未配置" in response.json()["detail"]
+
+
+def test_test_connection_binding_token_overrides_env(client_factory, monkeypatch):
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.setenv("CMS_TOKEN", "env-token")
+
+    def configure(app):
+        app.state.settings.config["cms"] = {
+            "question_detail_url": "http://cms.example.com/question/detail",
+        }
+
+    with client_factory(workflows_enabled=True, configure=configure) as c:
+        ws_id = _create_workspace(c)
+        patch = c.patch(
+            f"/api/workspaces/{ws_id}/settings/connection",
+            json={
+                "resources": {
+                    "question_detail": {"enabled": True, "config": {"token": "binding-token"}}
+                }
+            },
+        )
+        assert patch.status_code == 200
+        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert "workspace binding" in response.json()["message"]
+
+
+def test_test_connection_reports_auth_failure(client_factory, monkeypatch):
+    class _Unauthorized:
+        status_code = 401
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: _Unauthorized())
+
+    def configure(app):
+        app.state.settings.config["cms"] = {
+            "question_detail_url": "http://cms.internal/question/detail",
+            "token": "global_token",
+        }
+
+    with client_factory(workflows_enabled=True, configure=configure) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
+
+    assert response.status_code == 400
+    assert "鉴权失败" in response.json()["detail"]
