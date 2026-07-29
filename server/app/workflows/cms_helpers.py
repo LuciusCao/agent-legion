@@ -18,7 +18,9 @@ def _decode_json_object(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _effective_cms_config(job: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
+def _effective_cms_config(
+    job: dict[str, Any], context: dict[str, Any], resource_key: str = "question_detail"
+) -> dict[str, Any]:
     settings_config = context.get("settings_config")
     if not isinstance(settings_config, dict):
         settings_config = {}
@@ -37,7 +39,7 @@ def _effective_cms_config(job: dict[str, Any], context: dict[str, Any]) -> dict[
         settings_config,
         workspace,
         batch_payload,
-        "question_detail",
+        resource_key,
         node_config=dict(node_config) if isinstance(node_config, dict) else None,
         # Executor contexts carry the declarations injected at the composition
         # root; anything else falls back to parsing the raw config section.

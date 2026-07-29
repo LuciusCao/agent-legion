@@ -6,7 +6,7 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
-from server.app.services.job_intake_resolution import RESOLVER_MAP
+from server.app.services.job_intake_registry import RESOLVERS, ResolverSpec
 from server.app.services.job_intake_video import write_video_input
 from server.app.services.job_intake_workspace import get_workspace
 from server.app.settings import Settings
@@ -58,7 +58,7 @@ class JobIntakeQueue:
         definition = workflow_definition_from_dict(json.loads(revision["definition_json"]))
         mode = definition.intake.modes[str(batch["source_kind"])]
         entity = str(payload["entity"])
-        resolver = RESOLVER_MAP[(entity, mode.key)]
+        spec = RESOLVERS[(entity, mode.key)]
         workspace = get_workspace(self.job_db, str(batch["workspace_id"]))
         try:
             self._create_chunk_jobs(
@@ -67,7 +67,7 @@ class JobIntakeQueue:
                 definition,
                 mode,
                 entity,
-                resolver,
+                spec,
                 workspace,
                 revision,
                 input_values[start:end],
@@ -109,18 +109,17 @@ class JobIntakeQueue:
         definition: Any,
         mode: Any,
         entity: str,
-        resolver: str,
+        spec: ResolverSpec,
         workspace: dict[str, Any],
         revision: dict[str, Any],
         values: list[str],
     ) -> None:
         existing_keys = self.job_db.list_job_dedup_keys(str(batch["workspace_id"]))
         candidates, _ = resolve_fresh_candidates(
-            resolver,
+            spec,
             entity,
             values,
             str(batch["source_kind"]),
-            dict(payload.get("cms_config") or {}),
             mode,
             self.settings,
             workspace,

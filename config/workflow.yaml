@@ -82,6 +82,21 @@ executors:
         handler: question_comprehension_info.assemble_comprehension_info
       download_video:
         handler: video_knowledge.download_video
+        # Non-secret CMS query selectors the node may tune (spec D15), used
+        # when resolving knowledge codes against the CMS at execution time;
+        # the token stays in the resource binding + vault chain (spec D16).
+        config_schema:
+          type: object
+          properties:
+            bank_version:
+              type: string
+              description: CMS 题库版本（覆盖 resource binding 与全局 cms 默认值）
+            country_id:
+              type: string
+              description: CMS 国家/地区 ID（覆盖 resource binding 与全局 cms 默认值）
+            subject_id:
+              type: string
+              description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
       transcribe_video:
         handler: video_knowledge.transcribe_video
       assemble_video_metadata:
