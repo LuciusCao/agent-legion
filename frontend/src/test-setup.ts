@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { EventSourceMock } from './testing/eventSourceMock'
+import './test-setup-matchmedia'
 
 let unexpectedConsoleErrors: unknown[][] = []
 let expectedConsoleErrors: RegExp[] = []
@@ -122,17 +123,3 @@ class IntersectionObserverMock {
   IntersectionObserverMock as unknown as typeof IntersectionObserver
 ;(globalThis as unknown as { EventSource: typeof EventSource }).EventSource =
   EventSourceMock as unknown as typeof EventSource
-
-// jsdom 未实现 matchMedia；uPlot 在模块加载时用它检测设备像素比。
-if (!globalThis.matchMedia) {
-  globalThis.matchMedia = ((query: string) => ({
-    matches: false,
-    media: query,
-    onchange: null,
-    addListener: () => {},
-    removeListener: () => {},
-    addEventListener: () => {},
-    removeEventListener: () => {},
-    dispatchEvent: () => false,
-  })) as unknown as typeof globalThis.matchMedia
-}

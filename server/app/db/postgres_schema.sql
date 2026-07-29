@@ -252,7 +252,7 @@ create table if not exists agent_execution_requests (
   agent_definition_hash text not null,
   node_concurrency_limit integer not null check(node_concurrency_limit > 0),
   state text not null default 'queued'
-    check(state in ('queued', 'claimed', 'done', 'cancelled')),
+    check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled')),
   worker_id text,
   lease_id text,
   node_run_id bigint,
@@ -266,6 +266,11 @@ create table if not exists agent_execution_requests (
 );
 alter table agent_execution_requests add column if not exists lease_id text;
 alter table agent_execution_requests add column if not exists node_run_id bigint;
+-- State evolution: 'reporting' (result upload pending; execution slot released).
+-- Drop/re-add so databases created before this state existed pick it up.
+alter table agent_execution_requests drop constraint if exists agent_execution_requests_state_check;
+alter table agent_execution_requests add constraint agent_execution_requests_state_check
+  check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled'));
 
 create index if not exists idx_agent_requests_claim
   on agent_execution_requests(state, queued_at, execution_id);
@@ -273,9 +278,12 @@ create index if not exists idx_agent_requests_node_active
   on agent_execution_requests(workspace_id, workflow_key, node_key, state);
 create index if not exists idx_agent_requests_worker_active
   on agent_execution_requests(worker_id, state);
+-- One active request per node; 'reporting' still owns the node until the
+-- result commits, so it must block re-enqueue too.
+drop index if exists idx_agent_requests_one_active_node;
 create unique index if not exists idx_agent_requests_one_active_node
   on agent_execution_requests(job_id, node_key)
-  where state in ('queued', 'claimed');
+  where state in ('queued', 'claimed', 'reporting');
 
 create table if not exists job_event_seq (
   id integer primary key check(id = 1),

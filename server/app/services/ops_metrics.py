@@ -17,6 +17,7 @@ from typing import Any, Literal
 from server.app.agent_workers import _ONLINE_THRESHOLD_SECONDS
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.services._ops_metrics_sampling import _EMPTY_TOKENS, _upsert_sample
 
 Granularity = Literal["6h", "24h", "30d"]
 
@@ -49,50 +50,6 @@ def _fetch_one(conn: DatabaseConnection, sql: str, params: tuple[Any, ...] = ())
     row = conn.execute(sql, params).fetchone()
     assert row is not None  # aggregate queries always return one row
     return row
-
-
-_EMPTY_TOKENS: dict[str, int] = {
-    "input_tokens": 0,
-    "output_tokens": 0,
-    "cache_read_tokens": 0,
-    "total_tokens": 0,
-}
-
-
-def _upsert_sample(
-    conn: DatabaseConnection,
-    bucket_start: datetime,
-    worker_id: str,
-    *,
-    online_workers: int,
-    active_executions: int,
-    tokens: dict[str, Any],
-) -> None:
-    conn.execute(
-        """
-        insert into ops_metric_samples(
-          bucket_start, worker_id, online_workers, active_executions,
-          input_tokens, output_tokens, cache_read_tokens, total_tokens
-        ) values (?, ?, ?, ?, ?, ?, ?, ?)
-        on conflict (bucket_start, worker_id) do update set
-          online_workers=excluded.online_workers,
-          active_executions=excluded.active_executions,
-          input_tokens=excluded.input_tokens,
-          output_tokens=excluded.output_tokens,
-          cache_read_tokens=excluded.cache_read_tokens,
-          total_tokens=excluded.total_tokens
-        """,
-        (
-            bucket_start,
-            worker_id,
-            online_workers,
-            active_executions,
-            tokens["input_tokens"],
-            tokens["output_tokens"],
-            tokens["cache_read_tokens"],
-            tokens["total_tokens"],
-        ),
-    )
 
 
 class OpsMetricsService:

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
-import { fillWindowBuckets, lastNonNullBucket } from './opsMetricsWindow'
+import { fillWindowBuckets } from './opsMetricsWindow'
+import { lastNonNullBucket } from './opsMetricsBuckets'
 import type { MetricBucket } from '../api/metrics'
 
 const NOW = Date.parse('2026-07-27T10:23:45Z')

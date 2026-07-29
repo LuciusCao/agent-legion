@@ -10,15 +10,21 @@ import shutil
 import time
 from pathlib import Path
 
+from worker.upload_queue import PENDING_FILENAME
+
 STALE_EXECUTION_MAX_AGE_SECONDS = 24 * 3600
 SWEEP_INTERVAL_SECONDS = 3600
 
 
 def clean_work_root(work_root: Path) -> None:
-    """Drop execution dirs left behind by a crashed supervisor."""
+    """Drop execution dirs left behind by a crashed supervisor.
+
+    Dirs holding an upload_pending.json marker contain results the
+    UploadQueue has just restored for delivery; they are kept until their
+    report resolves."""
     work_root.mkdir(parents=True, exist_ok=True)
     for child in work_root.iterdir():
-        if child.is_dir():
+        if child.is_dir() and not (child / PENDING_FILENAME).is_file():
             shutil.rmtree(child, ignore_errors=True)
 
 
@@ -30,9 +36,10 @@ def sweep_stale_executions(
 ) -> None:
     """Remove execution dirs untouched for longer than max_age_seconds.
 
-    Results are reported back to the host as soon as a run finishes, so a
-    local execution dir this old is a leftover of a crashed run and holds no
-    value (its events.jsonl alone can reach 100MB+).
+    Dirs with a pending-upload marker are skipped: they hold unreported
+    results and the UploadQueue owns their lifecycle. Anything else this
+    old is a leftover of a crashed run and holds no value (its events.jsonl
+    alone can reach 100MB+).
     """
     now = time.time() if now is None else now
     try:
@@ -40,7 +47,7 @@ def sweep_stale_executions(
     except OSError:
         return
     for child in children:
-        if not child.is_dir():
+        if not child.is_dir() or (child / PENDING_FILENAME).is_file():
             continue
         try:
             stale = now - child.stat().st_mtime > max_age_seconds

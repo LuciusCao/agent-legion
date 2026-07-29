@@ -115,6 +115,7 @@ server/app/
 | POST | `/agent-executions/claim` | `claim` | routes/agent_workers.py |
 | GET | `/agent-executions/{execution_id}/bundle` | `bundle` | routes/agent_workers.py |
 | POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_workers.py |
+| POST | `/agent-executions/{execution_id}/release-slot` | `release_slot` | routes/agent_workers.py |
 | POST | `/agent-executions/{execution_id}/result` | `result` | routes/agent_workers.py |
 | GET | `/agents` | `list_agents` | routes/agents.py |
 | WEBSOCKET | `/agents` | `agents_ws` | routes/agents.py |
@@ -205,18 +206,18 @@ server/app/
 | AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw'], capability: str, skill: str, too... | app/routes/agent_catalog_contracts.py |
-| RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers.py |
-| RegisterAgentWorkerResponse | BaseModel | worker_token: str, allowed_workspaces: list[str] | app/routes/agent_workers.py |
-| CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers.py |
-| AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str | None, label: str | app/routes/agent_workers.py |
-| AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers.py |
-| AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers.py |
-| AgentRegisterTokenRevokeResponse | BaseModel | revoked: bool | app/routes/agent_workers.py |
-| ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None | app/routes/agent_workers.py |
-| AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers.py |
-| AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers.py |
-| AgentWorkerRevokeResponse | BaseModel | worker_id: str, revoked: bool | app/routes/agent_workers.py |
-| AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers.py |
+| RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
+| RegisterAgentWorkerResponse | BaseModel | worker_token: str, allowed_workspaces: list[str] | app/routes/agent_workers_contracts.py |
+| CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
+| AgentRegisterTokenCreatedResponse | BaseModel | token_id: str, register_token: str, workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
+| AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers_contracts.py |
+| AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers_contracts.py |
+| AgentRegisterTokenRevokeResponse | BaseModel | revoked: bool | app/routes/agent_workers_contracts.py |
+| ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None | app/routes/agent_workers_contracts.py |
+| AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
+| AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers_contracts.py |
+| AgentWorkerRevokeResponse | BaseModel | worker_id: str, revoked: bool | app/routes/agent_workers_contracts.py |
+| AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers_contracts.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
 | ArtifactUploadResponse | BaseModel | hash: str | app/routes/artifacts.py |
