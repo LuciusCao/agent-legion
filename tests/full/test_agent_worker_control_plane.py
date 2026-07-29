@@ -15,7 +15,9 @@ from server.app.agent_catalog import load_agent_definitions
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.configuration import load_application_config
 from server.app.main import create_app
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.settings import PROJECT_ROOT
+from server.app.workflows.definition import load_workflow_definition
 from tests.db.test_postgres_runtime import (
     test_schema_initialization_is_idempotent as _assert_schema_idempotent,
 )
@@ -105,12 +107,25 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
 
 @pytest.mark.full_gate
 def test_startup_syncs_catalog_and_materializes_routes(client, job_db) -> None:
-    """Startup wiring: the configured catalog lands enabled, and the bootstrap
-    workspace's active revision gets its Agent routes materialized — the two
-    states whose loss caused the 'Executor pi is not registered' incident."""
+    """Startup wiring: the configured catalog lands enabled, and an explicitly
+    created workspace's active revision gets its Agent routes materialized —
+    the two states whose loss caused the 'Executor pi is not registered'
+    incident. No workspace is seeded at startup; the fixture workspace is
+    created and published here, then the startup reconcile is replayed."""
     configured = load_application_config(PROJECT_ROOT).config
     expected_agents = set(load_agent_definitions(configured.get("agents", {})))
     assert expected_agents, "test requires a non-empty configured Agent catalog"
+
+    workspace = job_db.create_workspace(
+        "Route Check", default_workflow_key="question_comprehension_info"
+    )
+    workspace_id = workspace["id"]
+    definition = load_workflow_definition(
+        PROJECT_ROOT / "config" / "workflows" / "question_comprehension_info.yaml"
+    )
+    revision_service = WorkflowRevisionService(job_db)
+    revision_service.publish_workspace_revision(workspace_id, definition)
+    revision_service.reconcile_active_agent_routes()
 
     with job_db._connect_read() as conn:
         enabled = {
@@ -121,7 +136,8 @@ def test_startup_syncs_catalog_and_materializes_routes(client, job_db) -> None:
         }
         routes = conn.execute(
             "select node_key, target_id from workspace_node_routes"
-            " where workspace_id='question_comprehension' and target_kind='agent'"
+            " where workspace_id=? and target_kind='agent'",
+            (workspace_id,),
         ).fetchall()
 
     assert enabled == expected_agents

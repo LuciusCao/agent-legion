@@ -2,17 +2,49 @@ from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
 
-def test_startup_creates_question_comprehension_workspace(client):
+def test_startup_does_not_seed_any_workspace(client):
     with client as c:
         response = c.get("/api/workspaces")
 
     assert response.status_code == 200
-    workspaces = response.json()["workspaces"]
-    by_id = {workspace["id"]: workspace for workspace in workspaces}
+    assert response.json()["workspaces"] == []
 
-    assert "question_comprehension" in by_id
-    assert by_id["question_comprehension"]["name"] == "题目审题信息"
-    assert by_id["question_comprehension"]["default_workflow_key"] == "question_comprehension_info"
+
+def test_fresh_install_workspace_and_revision_flow(tmp_path):
+    """Empty DB → bootstrap admin → create workspace → publish revision.
+
+    No built-in workspace or workflow revision is seeded at startup; the whole
+    chain must work through the explicit admin-driven paths only.
+    """
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from server.app.settings import PROJECT_ROOT
+    from server.app.workflows.definition import load_workflow_definition
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        assert c.get("/api/workspaces").json()["workspaces"] == []
+        created = c.post(
+            "/api/workspaces",
+            json={"name": "Comprehension", "default_workflow_key": "question_comprehension_info"},
+        )
+        workspace_id = created.json()["workspace"]["id"]
+
+        definition = load_workflow_definition(
+            PROJECT_ROOT / "config" / "workflows" / "question_comprehension_info.yaml"
+        )
+        revision = WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
+            workspace_id, definition
+        )
+        active = c.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+
+    assert created.status_code == 200
+    assert revision["status"] == "active"
+    assert active.status_code == 200
+    assert active.json()["revision"]["id"] == revision["id"]
 
 
 def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
