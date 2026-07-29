@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from server.app.db.bootstrap import bootstrap_default_workspace
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.migrations import migrate_workspace_cms_config
 from server.app.db.transaction import write_transaction
@@ -54,4 +53,3 @@ def init_db(database_dsn: DatabaseDsn) -> None:
                 "insert into schema_migrations(version, name) values (?, ?)",
                 (SCHEMA_VERSION, "workspace_secrets"),
             )
-        bootstrap_default_workspace(conn)
