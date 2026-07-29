@@ -14,7 +14,7 @@ project's `uv` environment. No extra dependencies are required.
 Copy `config.example.yaml` to `config.yaml` and edit it for your environment:
 
 ```yaml
-api_base_url: "http://dev-basic-be-addonsquestionsource.be.dev.example.com"
+api_base_url: "https://cms.example.com/questionsource"
 db_path: "data/comprehension_uploader.db"
 question_source:
   type: "json_file"
@@ -31,9 +31,9 @@ automatically loads `.env` if present.
 
 Priority:
 
-1. `BASECMS_TOKEN` environment variable (or `.env` entry).
-2. Generated token from `BASECMS_APP_ID`, `BASECMS_NONCE`, `BASECMS_SECRET`,
-   `BASECMS_TOKEN_URL`. The generation is the same HMAC-SHA256 flow as
+1. `CMS_TOKEN` environment variable (or `.env` entry).
+2. Generated token from `CMS_APP_ID`, `CMS_NONCE`, `CMS_SECRET`,
+   `CMS_TOKEN_URL`. The generation is the same HMAC-SHA256 flow as
    `server/app/cms/auth.py`.
 3. Optional `token` / `token_gen` overrides in `config.yaml`.
 
@@ -53,8 +53,9 @@ make upload WORKSPACE=ws-123 CONFIG=config.prod.yaml PACKAGE=package.jsonl
 make scan-comprehension CONFIG=config.prod.yaml OUTPUT=stale.json
 ```
 
-No extra `export` is needed as long as `BASECMS_APP_ID`, `BASECMS_NONCE`,
-`BASECMS_SECRET`, and `BASECMS_TOKEN_URL` are set in `.env`.
+No extra `export` is needed as long as `CMS_APP_ID`, `CMS_NONCE`,
+`CMS_SECRET`, and `CMS_TOKEN_URL` are set in `.env`. The old `BASECMS_*`
+names remain as deprecated aliases (set at most one name per key).
 
 ### Work with a workspace package zip
 

@@ -49,7 +49,7 @@ def resolve_credentials(
         upstream = upstream or file_upstream
         key = key or file_key
     if not upstream:
-        parser.error("REMOTE_LLM_UPSTREAM or --provider is required (中台 base URL)")
+        parser.error("REMOTE_LLM_UPSTREAM or --provider is required (upstream provider base URL)")
     if not key:
-        parser.error("REMOTE_LLM_KEY or --provider is required (中台 credential)")
+        parser.error("REMOTE_LLM_KEY or --provider is required (upstream provider credential)")
     return upstream, key
