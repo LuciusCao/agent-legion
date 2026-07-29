@@ -33,7 +33,7 @@ def _load(name: str) -> dict[str, Any]:
 def test_tracked_cms_section_has_no_retired_secret_keys():
     cms = _load("agent_legion.yaml").get("cms") or {}
     assert "token" not in cms, "cms.token was retired (G2); use env or a vault binding"
-    assert "token_gen" not in cms, "cms.token_gen was retired (G2); use BASECMS_* env"
+    assert "token_gen" not in cms, "cms.token_gen was retired (G2); use CMS_* env"
 
 
 def test_tracked_skill_safety_repos_are_path_only():

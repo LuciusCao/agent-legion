@@ -90,11 +90,7 @@ video-hive/
 ├── tools/
 │   └── content-uploader/ # 审题信息上传 CLI 工具
 ├── docs/
-│   ├── architecture/           # 架构文档
-│   └── superpowers/            # 设计规格与实施计划
-├── issues/
-│   ├── open/                   # 待修复问题
-│   └── closed/                 # 已修复问题
+│   └── architecture/           # 架构文档
 └── data/                       # 运行时数据（gitignored）
     ├── videos/
     ├── jobs/

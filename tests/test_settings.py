@@ -4,13 +4,21 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+import server.app.cms.env as cms_env
 from server.app.executors.kinds import UnknownExecutorKindError
 from server.app.settings import load_env_file, load_settings
 
 
 @pytest.fixture(autouse=True)
 def _clear_video_hive_env(monkeypatch):
+    cms_env._warned_aliases.clear()
     for key in (
+        "CMS_BASE_URL",
+        "CMS_TOKEN",
+        "CMS_APP_ID",
+        "CMS_NONCE",
+        "CMS_SECRET",
+        "CMS_TOKEN_URL",
         "BASECMS_BASE_URL",
         "BASECMS_TOKEN",
         "BASECMS_APP_ID",
@@ -30,29 +38,29 @@ def _clear_video_hive_env(monkeypatch):
 
 
 def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
-    monkeypatch.setenv("BASECMS_TOKEN", "already-set")
+    monkeypatch.setenv("CMS_TOKEN", "already-set")
     env_file = tmp_path / ".env"
     env_file.write_text(
-        'BASECMS_TOKEN="from-file"\nBASECMS_SECRET="fake#secret$value"\n',
+        'CMS_TOKEN="from-file"\nCMS_SECRET="fake#secret$value"\n',
         encoding="utf-8",
     )
 
     load_env_file(env_file)
 
-    assert os.environ["BASECMS_TOKEN"] == "already-set"
-    assert os.environ["BASECMS_SECRET"] == "fake#secret$value"
+    assert os.environ["CMS_TOKEN"] == "already-set"
+    assert os.environ["CMS_SECRET"] == "fake#secret$value"
 
 
-def test_env_example_lists_all_basecms_variables():
+def test_env_example_lists_all_cms_variables():
     example_path = Path(__file__).resolve().parents[1] / ".env.example"
     example = example_path.read_text(encoding="utf-8")
     for key in (
-        "BASECMS_BASE_URL",
-        "BASECMS_TOKEN",
-        "BASECMS_APP_ID",
-        "BASECMS_NONCE",
-        "BASECMS_SECRET",
-        "BASECMS_TOKEN_URL",
+        "CMS_BASE_URL",
+        "CMS_TOKEN",
+        "CMS_APP_ID",
+        "CMS_NONCE",
+        "CMS_SECRET",
+        "CMS_TOKEN_URL",
         "AGENT_LEGION_VAULT_MASTER_KEY",
         "AGENT_LEGION_VAULT_MASTER_KEY_FILE",
     ):
@@ -125,6 +133,33 @@ def test_database_url_env_conflict_rejected(tmp_path, monkeypatch):
     assert "AGENT_LEGION_DATABASE_URL" in str(exc_info.value)
 
 
+def test_cms_env_alias_conflict_rejected_at_startup(tmp_path, monkeypatch):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("CMS_TOKEN", "new-token")
+    monkeypatch.setenv("BASECMS_TOKEN", "old-token")
+
+    with pytest.raises(ValueError, match="BASECMS_TOKEN") as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "CMS_TOKEN" in str(exc_info.value)
+
+
+def test_cms_base_url_alias_only_applies_with_warning(tmp_path, monkeypatch, caplog):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("BASECMS_BASE_URL", "http://cms.alias.example/v2")
+
+    with caplog.at_level("WARNING", logger="server.app.cms.env"):
+        settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.config["cms"]["base_url"] == "http://cms.alias.example/v2"
+    assert "BASECMS_BASE_URL" in caplog.text
+    assert "CMS_BASE_URL" in caplog.text
+
+
 def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
     config_path = tmp_path / "app.yaml"
     config_path.write_text("database: {url: data/app.sqlite}\n", encoding="utf-8")
@@ -149,6 +184,7 @@ def test_load_settings_rejects_retired_yaml_cms_token(tmp_path):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     message = str(exc_info.value)
+    assert "CMS_TOKEN" in message
     assert "VIDEO_HIVE_CMS_TOKEN" in message
     assert "BASECMS_TOKEN" in message
 
@@ -170,7 +206,7 @@ def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     message = str(exc_info.value)
-    for env_key in ("BASECMS_APP_ID", "BASECMS_NONCE", "BASECMS_SECRET", "BASECMS_TOKEN_URL"):
+    for env_key in ("CMS_APP_ID", "CMS_NONCE", "CMS_SECRET", "CMS_TOKEN_URL"):
         assert env_key in message
 
 
@@ -186,17 +222,20 @@ def test_load_settings_rejects_retired_yaml_cms_keys_in_split_layout(tmp_path, m
         load_settings()
 
 
-def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypatch):
+def test_cms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypatch):
     from server.app.cms.auth import _token_gen_config
     from server.app.cms.client import get_token
 
     monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN", "video-hive-token")
     monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN_GEN_SECRET", "video-hive-secret")
-    monkeypatch.setenv("BASECMS_TOKEN", "basecms-token")
-    monkeypatch.setenv("BASECMS_APP_ID", "basecms-app")
-    monkeypatch.setenv("BASECMS_NONCE", "basecms-nonce")
-    monkeypatch.setenv("BASECMS_SECRET", "basecms-secret")
-    monkeypatch.setenv("BASECMS_TOKEN_URL", "http://basecms/token")
+    # Skip the worktree .env: it carries BASECMS_* aliases whose values would
+    # conflict with the CMS_* names set below.
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("CMS_TOKEN", "cms-token")
+    monkeypatch.setenv("CMS_APP_ID", "cms-app")
+    monkeypatch.setenv("CMS_NONCE", "cms-nonce")
+    monkeypatch.setenv("CMS_SECRET", "cms-secret")
+    monkeypatch.setenv("CMS_TOKEN_URL", "http://cms/token")
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\nopenclaw:\n  cwd: .\n  command_template:\n    - openclaw\n    - agent\n",
@@ -208,13 +247,13 @@ def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypa
     # VIDEO_HIVE_* still wins in the parsed config (generic YAML override).
     assert settings.config["cms"]["token"] == "video-hive-token"
     assert settings.config["cms"]["token_gen"]["secret"] == "video-hive-secret"
-    # BASECMS_* wins at the CMS client/auth layer.
-    assert get_token("dev", settings.config) == "basecms-token"
+    # CMS_* wins at the CMS client/auth layer.
+    assert get_token("dev", settings.config) == "cms-token"
     token_gen = _token_gen_config(settings.config)
-    assert token_gen["app_id"] == "basecms-app"
-    assert token_gen["nonce"] == "basecms-nonce"
-    assert token_gen["secret"] == "basecms-secret"
-    assert token_gen["url"] == "http://basecms/token"
+    assert token_gen["app_id"] == "cms-app"
+    assert token_gen["nonce"] == "cms-nonce"
+    assert token_gen["secret"] == "cms-secret"
+    assert token_gen["url"] == "http://cms/token"
 
 
 def _write_split_config(root: Path) -> None:
@@ -461,7 +500,7 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
     [
         (
             "legacy",
-            "BASECMS_BASE_URL",
+            "CMS_BASE_URL",
             ["cms", "base_url"],
             "http://cms.internal.example.cn/v2",
             "http://cms.internal.example.cn/v2",
@@ -499,7 +538,7 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
         ("legacy", "VIDEO_HIVE_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
         (
             "split",
-            "BASECMS_BASE_URL",
+            "CMS_BASE_URL",
             ["cms", "base_url"],
             "http://cms.internal.example.cn/v2",
             "http://cms.internal.example.cn/v2",
@@ -540,6 +579,9 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
 def test_env_override_precedes_yaml(
     tmp_path, monkeypatch, layout, env_var, config_path, env_value, expected
 ):
+    # Skip the worktree .env: its BASECMS_* alias values would conflict with
+    # the CMS_* names under test.
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
     monkeypatch.setenv(env_var, env_value)
     if layout == "legacy":
         config_path_file = tmp_path / "workflow.yaml"

@@ -32,6 +32,12 @@ from server.app.main import create_app
 from server.app.settings import PROJECT_ROOT, load_settings
 
 _CMS_ENV_KEYS = (
+    "CMS_BASE_URL",
+    "CMS_TOKEN",
+    "CMS_APP_ID",
+    "CMS_NONCE",
+    "CMS_SECRET",
+    "CMS_TOKEN_URL",
     "BASECMS_BASE_URL",
     "BASECMS_TOKEN",
     "BASECMS_APP_ID",

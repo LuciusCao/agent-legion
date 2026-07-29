@@ -2,38 +2,38 @@ version: '1'
 resolved_at: '2026-07-21T06:51:45Z'
 skills:
   question_comprehension_info/assess_comprehension_difficulty:
-    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
     ref: v1.1.7
     commit: 7f68c2072b03540a5b1854f1bf72c6b0d11c6646
   question_comprehension_info/generate_key_info:
-    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
     ref: v1.3.8
     commit: 5c5eae72064abde37bfc4b07a4b2f7e9637c473d
   question_comprehension_info/generate_possible_errors:
-    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
     ref: v1.3.4
     commit: 903bfaeb61ea7e8e07dc732e0388e37258800334
   question_comprehension_info/review_key_info:
-    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_key_info
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_key_info
     ref: v1.1.11
     commit: b3a676d9f349dca6a042c00d3a6609fc60a92703
   question_comprehension_info/review_possible_errors:
-    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
     ref: v1.3.5
     commit: 1947d3f17d42bd37432bdb19f45568d0c775b0c4
   video_knowledge/generate_chapters:
-    repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/generate_chapters
+    repo: ~/.agents/skills/agent-legion/video_knowledge/generate_chapters
     ref: v1.0.1
     commit: 81e9a58a4fa3d0ef0d7b677e34708c6accfe0816
   video_knowledge/generate_interactions:
-    repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/generate_interactions
+    repo: ~/.agents/skills/agent-legion/video_knowledge/generate_interactions
     ref: v1.0.2
     commit: afb50c54ec0f1f87851c39debe306a3e027c07b4
   video_knowledge/review_subtitles:
-    repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/review_subtitles
+    repo: ~/.agents/skills/agent-legion/video_knowledge/review_subtitles
     ref: v1.0.2
     commit: b5cbf8b0b3aef150facda444630dd4a198485842
   video_knowledge/review_video_content:
-    repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/review_video_content
+    repo: ~/.agents/skills/agent-legion/video_knowledge/review_video_content
     ref: v1.0.3
     commit: b319ca1fa1a93d14b1c59469655ff0aaeaecc6a5

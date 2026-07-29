@@ -98,7 +98,8 @@ LocalExecutor(...).execute(context)
 - Secret 值必须经 vault（Fernet 加密落 `workspace_secrets`），配置与快照只存
   `secret_ref`，不得明文落库、出 API 或进日志（VAULT-SECRET-001）。
 - Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS token 只走 env
-  （`VIDEO_HIVE_CMS_TOKEN` / `BASECMS_*`）或 workspace resource binding + vault；
+  （`VIDEO_HIVE_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
+  workspace resource binding + vault；
   yaml 出现 `cms.token` / `cms.token_gen` 启动即报错（G2），`openclaw.skill_safety`
   写 `ref` 启动即报错（G3，ref 以 `config/skills.lock` 为唯一权威）。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
@@ -115,6 +116,4 @@ LocalExecutor(...).execute(context)
 ## 10. Where to look next
 
 - 项目结构 / 运行细节：[README.md](README.md) / [docs/architecture/](docs/architecture/)
-- 设计规格与计划：[docs/superpowers/](docs/superpowers/)
 - 远程执行运维手册：[docs/remote-execution-runbook.md](docs/remote-execution-runbook.md)
-- 已知问题：[issues/open](issues/open) / [issues/closed](issues/closed)

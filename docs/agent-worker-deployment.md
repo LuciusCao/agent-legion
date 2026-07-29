@@ -1,12 +1,12 @@
 # Agent Legion Host 与 Worker 部署
 
-Agent Legion 把服务拆成两个角色：Host 负责工作流、数据库与任务调度；Worker Service 负责本机配置、状态查询和运行 Agent。即使同一台公司电脑同时承担两个角色，也运行两个独立服务。
+Agent Legion 把服务拆成两个角色：Host 负责工作流、数据库与任务调度；Worker Service 负责本机配置、状态查询和运行 Agent。即使同一台部署机同时承担两个角色，也运行两个独立服务。
 
 Worker Service 宿主机发布面默认只绑定 `127.0.0.1:8787`（控制台和查询 API）；compose 网络内其它容器可以到达该端口，但除 `GET /api/health` 外所有端点都要求本地 control token 鉴权。首次启动会把现有只读 YAML 导入独立的可写控制卷；此后可以直接在页面中修改配置，不再需要编辑 YAML。注册密钥既可以通过 Docker secret 提供，也可以在本机控制台中填写；页面和 API 只接受写入、不回显明文，托管副本以 `0600` 权限保存在控制卷中。
 
 LLM gateway 是独立基础设施，不属于 Agent Worker 协议。Worker 容器通过挂载自己的 Pi 配置访问它。
 
-## 1. 公司电脑准备密钥
+## 1. 部署机准备密钥
 
 在仓库根目录执行：
 
@@ -28,16 +28,16 @@ postgres:5432:agent_legion:agent_legion:<postgres-password>
 chmod 600 deploy/secrets/postgres_password deploy/secrets/postgres_pgpass deploy/secrets/agent_worker_register_token
 ```
 
-## 2. 公司电脑准备挂载目录
+## 2. 部署机准备挂载目录
 
-设置 Agent skills 和 Pi 配置目录。Pi 配置中继续使用已经验证可用的 `gateway/your-model-b` 与 LLM gateway 地址。
+设置 Agent skills 和 Pi 配置目录。Pi 配置中继续使用已验证可用的 provider/model 与 LLM gateway 地址。
 
 ```bash
 export AGENT_SKILLS_DIR="$PWD/skills"
 export PI_CONFIG_DIR="$HOME/.pi/agent"
 ```
 
-如果 Mac mini 要通过 Tailscale 访问 Host，将监听地址设为公司电脑的 Tailscale IP：
+如果 Mac mini 要通过 Tailscale 访问 Host，将监听地址设为部署机的 Tailscale IP：
 
 ```bash
 export AGENT_LEGION_HOST_BIND=192.0.2.1
@@ -50,16 +50,16 @@ echo 'LLM_GATEWAY_TOKEN=<gateway-token>' >> deploy/.env
 chmod 600 deploy/.env
 ```
 
-不要把它写进 Compose YAML、worker.yaml 或命令行。Worker supervisor 会把它透传给 Pi 子进程；中台凭证本身只存在于 gateway 进程，不经过 Worker。
+不要把它写进 Compose YAML、worker.yaml 或命令行。Worker supervisor 会把它透传给 Pi 子进程；上游 LLM provider 凭证本身只存在于 gateway 进程，不经过 Worker。
 
-## 3. 启动公司电脑的 stack
+## 3. 启动部署机的 stack
 
 ```bash
 make stack-host-up
 curl http://192.0.2.1:8000/api/health
 ```
 
-该命令启动 PostgreSQL、Host 和公司电脑本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。
+该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。
 
 ## 4. Mac mini 准备 Worker
 
@@ -73,14 +73,14 @@ mkdir -p deploy/secrets
 
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
 
-- **全局 token**：把公司电脑的 `deploy/secrets/agent_worker_register_token` 安全复制到 Mac mini 的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
+- **全局 token**：把部署机的 `deploy/secrets/agent_worker_register_token` 安全复制到 Mac mini 的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
 - **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Mac mini 上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
 
   该 Worker 注册后只能看到并 claim 对应 workspace 的任务。
 
   注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）当前**不做鉴权**，与 Host 现有无鉴权模型一致，依赖可信内网/Tailscale 部署保护；待登录/权限体系落地后会恢复校验。Worker 注册本身仍必须凭 register token（全局或 scoped），不受影响。
 
-  也可以用 curl 在公司电脑上签发（备选方式，无需任何鉴权 header）：
+  也可以用 curl 在部署机上签发（备选方式，无需任何鉴权 header）：
 
 ```bash
 curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
@@ -114,7 +114,7 @@ make stack-worker-up
 make stack-logs STACK=worker
 ```
 
-打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写公司电脑可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
+打开 [http://127.0.0.1:8787](http://127.0.0.1:8787)，填写部署机可通过 Tailscale 访问的 Host 地址并保存。控制台页面由 Worker Service 动态返回并自动注入 control token；直接用浏览器打开 `worker/ui/index.html` 静态文件不可用。页面可以看到：
 
 - Worker 执行进程是否运行；
 - 当前配置的 Host 地址以及 Host 是否可达；
@@ -191,7 +191,7 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 
 ## 6. 验证两个 Worker
 
-可以直接查看 Worker 控制台，也可以在公司电脑执行：
+可以直接查看 Worker 控制台，也可以在部署机执行：
 
 ```bash
 curl http://192.0.2.1:8000/api/agent-workers
@@ -214,14 +214,14 @@ docker compose -f deploy/compose.worker.yaml exec worker \
 
 # LLM gateway（Tailnet 地址 + token；token 未启用时去掉 header）
 docker compose -f deploy/compose.worker.yaml exec worker \
-  python3 -c "import urllib.request; req = urllib.request.Request('http://192.0.2.1:8788/v1/chat/completions', data=b'{\"model\":\"gateway/your-model-b\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}', headers={'Content-Type': 'application/json', 'Authorization': 'Bearer $LLM_GATEWAY_TOKEN'}); print(urllib.request.urlopen(req, timeout=30).status)"
+  python3 -c "import urllib.request; req = urllib.request.Request('http://192.0.2.1:8788/v1/chat/completions', data=b'{\"model\":\"<model>\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}]}', headers={'Content-Type': 'application/json', 'Authorization': 'Bearer $LLM_GATEWAY_TOKEN'}); print(urllib.request.urlopen(req, timeout=30).status)"
 ```
 
 两条都成功后才允许承接生产任务。如果容器内无法解析或路由到 Tailnet 地址，不要把它隐式塞进业务容器——先单独设计 Tailscale sidecar，再重新验证。
 
 ## 8. 停止服务
 
-公司电脑：
+部署机：
 
 ```bash
 make stack-host-down

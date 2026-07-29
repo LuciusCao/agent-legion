@@ -1,7 +1,7 @@
 # Remote Execution Runbook
 
-Operator guide for running Agent Workers on home devices (Mac mini) with the
-company laptop as the only machine that can reach the LLM provider.
+Operator guide for running Agent Workers on remote devices (e.g. a home Mac
+mini) with a primary machine as the only one that can reach the LLM provider.
 
 > **2026-07-21 update.** The old remote executor (`kind: remote` executors, the
 > remote broker, `/api/remote/*` routes and `scripts/remote/worker.py`) was
@@ -13,24 +13,23 @@ company laptop as the only machine that can reach the LLM provider.
 > [agent-worker-deployment.md](agent-worker-deployment.md) — this runbook keeps
 > only the cross-machine networking and LLM-gateway operations that document
 > does not repeat.
->
-> Design spec:
-> [superpowers/specs/2026-07-21-agent-definition-worker-routing-design.md](superpowers/specs/2026-07-21-agent-definition-worker-routing-design.md)
 
 ## 1. Overview
 
-The company laptop runs the Host (FastAPI + PostgreSQL + workflow scheduling)
-and its own local Worker; home devices run one Worker container each. All LLM
-traffic flows **worker → tailnet → laptop gateway → 中台**; the 中台 credential
-is injected by the gateway on the laptop and never leaves it. Workers hold no
-secrets beyond their registration token and the optional gateway token.
+The primary machine (called *the laptop* below) runs the Host (FastAPI +
+PostgreSQL + workflow scheduling) and its own local Worker; remote devices run
+one Worker container each. All LLM traffic flows **worker → tailnet → laptop
+gateway → LLM provider**; the provider credential is injected by the gateway on
+the laptop and never leaves it. Workers hold no secrets beyond their
+registration token and the optional gateway token.
 
-**Scope note.** Two components in this runbook are workarounds for our
-specific constraints, not architectural requirements:
+**Scope note.** Two components in this runbook are workarounds for a specific
+deployment topology, not architectural requirements:
 
-- the **LLM gateway** — needed solely because 中台 is reachable only from the
-  company network (disappears entirely with per-worker BYO models);
-- the **tailnet** — needed solely because the laptop and home devices are
+- the **LLM gateway** — needed solely because the LLM provider is reachable
+  only from the laptop's network (disappears entirely with per-worker BYO
+  models);
+- the **tailnet** — needed solely because the laptop and remote devices are
   behind separate NATs (replaced by plain TLS + worker token if the control
   plane is ever publicly reachable).
 
@@ -38,15 +37,16 @@ specific constraints, not architectural requirements:
 
 Verify all five preconditions **before** any rollout step:
 
-1. **Compliance sign-off** — prompts and model responses physically transit
-   personal home devices. Transport is WireGuard-encrypted, but encrypted
-   transport is not policy approval. Hard blocker; confirm first.
-2. **Tailscale installable on the company laptop** (fallback: domestic VPS
-   running frp or Headscale as relay — see §3).
-3. **中台 exposes an OpenAI-compatible HTTP API** so the gateway can proxy it
-   without protocol translation.
-4. **中台 tolerates ~100 concurrent requests from a single token/IP** — confirm
-   with the provider; the design does not solve rate limits.
+1. **Policy sign-off** — prompts and model responses physically transit remote
+   devices outside the provider's network. Transport is WireGuard-encrypted,
+   but encrypted transport is not policy approval. Hard blocker; confirm first.
+2. **Tailscale installable on the laptop** (fallback: a cloud VPS running frp
+   or Headscale as relay — see §3).
+3. **The LLM provider exposes an OpenAI-compatible HTTP API** so the gateway
+   can proxy it without protocol translation.
+4. **The LLM provider tolerates ~100 concurrent requests from a single
+   token/IP** — confirm with the provider; the design does not solve rate
+   limits.
 5. **Laptop stays awake during production runs** — `caffeinate -dims`, or AC
    power with display/system sleep disabled and no lid-close sleep.
 
@@ -69,10 +69,10 @@ tailscale status
 
 Check `tailscale status` output for the laptop peer: it should show `direct`
 (P2P NAT traversal working), not `relay ...` (traffic is bouncing off DERP
-relays, likely overseas — latency rises from ~10–30 ms to a few hundred ms).
-If P2P proves unstable, switch the relay layer to a domestic VPS running
-Headscale + DERP or frp tunnels; every other component in this runbook is
-transport-agnostic and unchanged.
+relays — latency rises from ~10–30 ms to a few hundred ms). If P2P proves
+unstable, switch the relay layer to a cloud VPS running Headscale + DERP or frp
+tunnels; every other component in this runbook is transport-agnostic and
+unchanged.
 
 The laptop's tailnet IPv4 address (`tailscale ip -4`, a `100.x.y.z` address) is
 `<laptop-tailnet-ip>` in every command below. Expose the Host API on that
@@ -90,10 +90,11 @@ sidecar; do not bake Tailscale into the Worker image.
 
 The gateway is a separate infrastructure process, outside the Host/Worker
 pair. It binds the tailnet interface only, accepts `POST /v1/*`, and injects
-the 中台 `Authorization: Bearer` header. Start it on the laptop from the repo:
+the provider `Authorization: Bearer` header. Start it on the laptop from the
+repo:
 
 ```bash
-REMOTE_LLM_UPSTREAM="https://<zhongtai-base-url>" REMOTE_LLM_KEY="<zhongtai-key>" \
+REMOTE_LLM_UPSTREAM="https://<provider-base-url>" REMOTE_LLM_KEY="<provider-key>" \
 LLM_GATEWAY_TOKEN="<random-shared-token>" \
   uv run python scripts/remote/llm_gateway.py --host <laptop-tailnet-ip> --port 8788
 ```
@@ -109,13 +110,14 @@ terminal history — export them from a local-only shell or a `.env` you
 request must present it as `X-Gateway-Token` or `Authorization: Bearer`. When
 unset the gateway is open — acceptable only on loopback. **Binding a tailnet
 (or any shared) interface without `LLM_GATEWAY_TOKEN` is a hard violation**:
-anyone who can reach the port would spend the 中台 credential. On each worker
-machine, provide the same token to the Worker container via `deploy/.env` or
-the shell environment (`LLM_GATEWAY_TOKEN=...`; see the deployment doc, §2) and
-set the pi provider's `apiKey` to `"$LLM_GATEWAY_TOKEN"` in the mounted
-`models.json` — the pi CLI interpolates the variable and sends it as
-`Authorization: Bearer`, which the gateway accepts. `worker/executor.py`
-passes the variable through to the pi subprocess environment unchanged.
+anyone who can reach the port would spend the provider credential. On each
+worker machine, provide the same token to the Worker container via
+`deploy/.env` or the shell environment (`LLM_GATEWAY_TOKEN=...`; see the
+deployment doc, §2) and set the pi provider's `apiKey` to
+`"$LLM_GATEWAY_TOKEN"` in the mounted `models.json` — the pi CLI interpolates
+the variable and sends it as `Authorization: Bearer`, which the gateway
+accepts. `worker/executor.py` passes the variable through to the pi subprocess
+environment unchanged.
 
 Verify from a worker device (host OS first, then from inside the container per
 §3):
@@ -128,7 +130,7 @@ curl -X POST http://<laptop-tailnet-ip>:8788/v1/chat/completions \
 ```
 
 Expect a normal OpenAI-compatible chat completion response. A `502` means the
-laptop could not reach 中台 (see §6).
+laptop could not reach the LLM provider (see §6).
 
 ## 5. Workers
 
@@ -170,7 +172,7 @@ raising `max_concurrency`, and keep OS headroom:
 | Heartbeat/result 409 (`execution is not owned by this Worker`) | Network partition or Host restart — the execution lease expired and was reassigned/failed | Terminal for that execution; rerun the job. Persistent storms mean the tailnet is unstable |
 | Result upload 413 | Archive exceeds `agent_workers.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
 | pi "model call failed" inside the worker container | Gateway unreachable or token rejected | Re-run the §3 container smoke test; confirm `LLM_GATEWAY_TOKEN` is set in `deploy/.env` and matches the gateway |
-| Gateway 502 | 中台 unreachable from the laptop (VPN dropped, SSID/network change) | Restore the laptop's company network path; workers' pi runs fail fast and surface as failed executions |
+| Gateway 502 | LLM provider unreachable from the laptop (VPN dropped, network change) | Restore the laptop's network path to the provider; workers' pi runs fail fast and surface as failed executions |
 | Gateway 401/403 | `LLM_GATEWAY_TOKEN` missing or mismatched | Gateway and every worker must share the same token (§4); never run a tailnet-bound gateway without it |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers recover on their own; enforce §2 item 5 |
 
@@ -180,7 +182,7 @@ raising `max_concurrency`, and keep OS headroom:
   port 8000 (Host API) and port 8788 (gateway) on the laptop. Nothing else on
   the laptop should be reachable from worker devices.
 - **Gateway exposure:** binds the tailnet interface only; it is the single
-  holder of the 中台 credential and must not be run with a widened bind
+  holder of the provider credential and must not be run with a widened bind
   address. It proxies only `POST /v1/*`. `LLM_GATEWAY_TOKEN` is mandatory for
   any non-loopback bind (§4). The token reaches workers only via
   `deploy/.env`/environment passthrough and is referenced from the worker pi
@@ -199,5 +201,5 @@ raising `max_concurrency`, and keep OS headroom:
 - **Bundle/archive safety:** execution bundles and result archives are
   path-validated on both ends (no absolute paths, `..`, or links) before
   extraction.
-- **Compliance:** precondition 1 (§2) is a hard blocker — encrypted transport
-  is not policy approval.
+- **Policy:** precondition 1 (§2) is a hard blocker — encrypted transport is
+  not policy approval.

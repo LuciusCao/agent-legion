@@ -5,7 +5,7 @@ def test_list_executors_endpoint(client):
     agent = next(item for item in data["agents"] if item["id"] == "video-content-review-v1")
     assert agent["capability"] == "review_video_content"
     assert agent["provider"] == "gateway"
-    assert agent["model"] == "your-model-b"
+    assert agent["model"] == "your-model"
     executor = data["executors"][0]
     assert executor["id"] == "local-default"
     assert executor["kind"] == "local"

@@ -7,6 +7,7 @@ from typing import Any, cast
 from urllib.parse import urlencode
 
 from server.app.agent_catalog import AgentDefinition, load_agent_definitions
+from server.app.cms.env import resolve_cms_env, validate_cms_env_aliases
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
 from server.app.executors import registration as _registration  # noqa: F401
@@ -152,9 +153,10 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
         node[path[-1]] = parser(raw)
 
 
-def _apply_basecms_env_overrides(config: dict[str, Any]) -> None:
-    """Apply BASECMS_* overrides that predate the VIDEO_HIVE_* overrides."""
-    base_url = os.environ.get("BASECMS_BASE_URL")
+def _apply_cms_env_overrides(config: dict[str, Any]) -> None:
+    """Validate CMS_* alias conflicts, then apply the CMS_BASE_URL override (D3)."""
+    validate_cms_env_aliases()
+    base_url = resolve_cms_env("CMS_BASE_URL")
     if not base_url:
         return
     cms = config.setdefault("cms", {})
@@ -202,10 +204,10 @@ def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
     raise ValueError(
         f"Unsupported yaml keys under cms: {keys}. The yaml cms.token and "
         "cms.token_gen sections were retired (config governance G2). Migrate: "
-        "token -> env VIDEO_HIVE_CMS_TOKEN (or BASECMS_TOKEN), or a workspace "
-        "resource binding token stored in the vault; token_gen app_id/nonce/"
-        "secret/url -> env BASECMS_APP_ID / BASECMS_NONCE / BASECMS_SECRET / "
-        "BASECMS_TOKEN_URL."
+        "token -> env CMS_TOKEN (or VIDEO_HIVE_CMS_TOKEN; BASECMS_TOKEN is a "
+        "deprecated alias) or a vault-backed workspace resource binding; "
+        "token_gen -> env CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL "
+        "(deprecated aliases BASECMS_*)."
     )
 
 
@@ -218,7 +220,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     _reject_retired_cms_yaml_keys(config)
     _apply_database_url_env(config)
     _apply_env_overrides(config)
-    _apply_basecms_env_overrides(config)
+    _apply_cms_env_overrides(config)
     _normalize_cms_config(config)
     if data_dir is None:
         env_data_dir = os.environ.get("VIDEO_HIVE_DATA_DIR")

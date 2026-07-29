@@ -24,6 +24,11 @@ class FakeResponse:
 def test_get_token_uses_configured_token_generator(monkeypatch):
     calls = []
     for env_key in (
+        "CMS_TOKEN",
+        "CMS_APP_ID",
+        "CMS_NONCE",
+        "CMS_SECRET",
+        "CMS_TOKEN_URL",
         "BASECMS_TOKEN",
         "BASECMS_APP_ID",
         "BASECMS_NONCE",
@@ -58,6 +63,11 @@ def test_get_token_uses_configured_token_generator(monkeypatch):
 
 
 def test_get_token_returns_none_without_configured_credentials(monkeypatch):
+    monkeypatch.delenv("CMS_TOKEN", raising=False)
+    monkeypatch.delenv("CMS_APP_ID", raising=False)
+    monkeypatch.delenv("CMS_NONCE", raising=False)
+    monkeypatch.delenv("CMS_SECRET", raising=False)
+    monkeypatch.delenv("CMS_TOKEN_URL", raising=False)
     monkeypatch.delenv("BASECMS_TOKEN", raising=False)
     monkeypatch.delenv("BASECMS_APP_ID", raising=False)
     monkeypatch.delenv("BASECMS_NONCE", raising=False)
