@@ -110,6 +110,11 @@ def resolve_cms_resource(
         dict(raw_binding_config) if isinstance(raw_binding_config, dict) else {}
     )
     result.update(binding_config)
+    if binding_config.get("token") not in (None, ""):
+        # Mark the token as workspace-bound so get_token lets it win over the
+        # env-level global default. Runtime-only marker: the frozen binding is
+        # the workspace resource_config, not this merged result.
+        result["token_from_binding"] = True
     if node_config:
         # Executor node config (spec D15) wins over bindings and defaults for
         # the non-secret parameters its capability config_schema declares.

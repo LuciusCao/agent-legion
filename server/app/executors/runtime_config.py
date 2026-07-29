@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from collections.abc import Mapping
@@ -11,6 +12,8 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 from server.app.cms.auth import cms_token_available
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
+
+logger = logging.getLogger(__name__)
 
 
 class PiRuntimeConfig(BaseModel):
@@ -157,8 +160,9 @@ def validate_runtime(
 
     Disabled runtimes require nothing. Enabled executors require their executable
     or working directory to exist. Selected ASR providers require their files;
-    ``auto`` needs at least one usable provider. CMS credentials are required only
-    when a CMS-backed resource provider is enabled.
+    ``auto`` needs at least one usable provider. Missing env-level CMS
+    credentials only log a warning when a CMS-backed resource provider is
+    enabled (workspace vault bindings cannot be pre-checked at startup).
     """
     errors: list[tuple[str, str]] = []
 
@@ -233,15 +237,15 @@ def validate_runtime(
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
 
     if _cms_resource_enabled(config) and not cms_token_available(config.get("cms")):
-        errors.append(
-            (
-                "cms.token",
-                "missing CMS credentials: set env CMS_TOKEN (or "
-                "AGENT_LEGION_CMS_TOKEN; BASECMS_TOKEN is a deprecated alias), "
-                "set all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / "
-                "CMS_TOKEN_URL, or bind a token in the workspace resource "
-                "config (vault)",
-            )
+        # Workspace bindings live in the database and cannot be pre-checked
+        # at startup, so missing env-level credentials are a warning, not a
+        # startup failure: vault-only deployments are valid as long as every
+        # workspace running CMS jobs binds its own token.
+        logger.warning(
+            "cms.token: no env-level CMS credentials (set env CMS_TOKEN, or "
+            "all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL); "
+            "each workspace must bind a token in its resource config (vault) "
+            "or its CMS jobs will fail"
         )
 
     if errors:

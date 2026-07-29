@@ -77,6 +77,26 @@ def test_get_token_returns_none_without_configured_credentials(monkeypatch):
     assert get_token("prod", {}) is None
 
 
+def test_get_token_binding_token_wins_over_env(monkeypatch):
+    monkeypatch.setenv("CMS_TOKEN", "env-token")
+
+    token = get_token("dev", {"token": "binding-token", "token_from_binding": True})
+
+    assert token == "binding-token"
+
+
+def test_get_token_env_wins_without_binding_marker(monkeypatch):
+    monkeypatch.setenv("CMS_TOKEN", "env-token")
+
+    assert get_token("dev", {"token": "config-token"}) == "env-token"
+
+
+def test_get_token_marker_without_token_falls_back_to_env(monkeypatch):
+    monkeypatch.setenv("CMS_TOKEN", "env-token")
+
+    assert get_token("dev", {"token_from_binding": True}) == "env-token"
+
+
 def test_lookup_knowledge_video_requires_configured_url():
     with pytest.raises(CmsClientError, match=r"cms\.base_url"):
         lookup_knowledge_video("K001")

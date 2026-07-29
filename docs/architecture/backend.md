@@ -496,7 +496,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - **Service**: `VaultService`（Fernet 加解密 + `workspace_secrets` 持久化，明文不跨越服务层边界落盘或出 API）与 `WorkspaceSecretsService`（API 门面）。
 - **Master key**: env `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`（映射到 `vault.master_key` / `vault.master_key_file`）；缺 key 时 server 可启动，但 vault 写操作与 `secret_ref` 解析报错。
 - **写入链**: resource binding 保存时，provider `config_schema` 标记 `secret: true` 的字段值转存 vault，binding config 只留 `{"secret_ref": "resource:{resource_key}:{field}"}`；settings payload 中 secret 字段只返回 `{"secret_set": bool}`。
-- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口）；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。
+- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口），消费点为 intake 解析、节点执行与 settings test-connection 三处；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。test-connection 还会用解析出的 token 真实探测 CMS（连通性 + 401/403 鉴权判定），响应只报告来源（workspace binding / 全局 env），不回显 token。
 
 ## Configuration Reference
 
@@ -516,7 +516,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 - `asr.whisper.vad_model`: 可选 VAD 模型路径
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或 workspace resource binding + vault
+- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或 workspace resource binding + vault。token 调用时优先级（`cms/client.py` `get_token`）：workspace binding token（`resolve_cms_resource` 以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无 binding 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault binding 启动时无法预检），不再 fail-fast
 - `resource_providers`: 资源提供者声明（如 `cms.question.detail`）：`path` 拼接信息、`resource_key`、legacy 设置项 `url_key`，以及可调参数的 `config_schema`（含 `secret: true` 标记）；声明在加载时校验，非法声明启动失败
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒

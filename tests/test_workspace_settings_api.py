@@ -9,6 +9,10 @@ from tests.helpers.auth import authenticate_client
 def test_workspace_settings_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
+    app.state.settings.config["cms"] = {
+        "question_detail_url": "http://cms.example.com/question/detail",
+        "token": "global_token",
+    }
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
