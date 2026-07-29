@@ -55,7 +55,7 @@ services:
         condition: service_healthy
     secrets: [agent_worker_register_token]
     volumes:
-      - ./worker.company.yaml:/etc/agent-legion/worker.yaml:ro
+      - ./worker.company.example.yaml:/etc/agent-legion/worker.yaml:ro
       - ${PI_CONFIG_DIR:-../pi-config}:/root/.pi/agent:ro
       - worker-data:/var/lib/agent-legion-worker
       - worker-control:/var/lib/agent-legion-worker-control

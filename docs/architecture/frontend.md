@@ -117,12 +117,6 @@ frontend/src/
 
 <!-- END AUTO-GENERATED -->
 
-## Related Specs
-
-- [前端状态管理](../superpowers/completed/2026-05-29-frontend-state-management-design.md)
-- [前端 React 反模式](../superpowers/completed/2026-05-29-frontend-react-anti-patterns-design.md)
-- [前端 Bundle 与列表渲染](../superpowers/completed/2026-05-29-frontend-bundle-and-list-rendering-design.md)
-
 ## Technology Stack
 
 - React 18

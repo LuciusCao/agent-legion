@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -342,6 +343,39 @@ def test_file_budget_valid_ceiling_accepted(write_exemptions, exemptions_root):
                     "remove_when": "docs/superpowers/plans/example.md#task-3",
                     "ceiling": 100,
                 }
+            ]
+        }
+    )
+    assert validate_exemptions(exemptions, exemptions_root) == []
+
+
+def test_missing_reference_accepted_when_internal_docs_not_published(
+    write_exemptions, exemptions_root
+):
+    """Open-source checkouts do not ship docs/superpowers or issues/.
+
+    When those directory trees are absent, the remove_when existence check is
+    skipped so quality gates keep passing; prefix validation still applies.
+    """
+    shutil.rmtree(exemptions_root / "docs" / "superpowers")
+    shutil.rmtree(exemptions_root / "issues")
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.import_boundary",
+                    "path": "server/app/example.py",
+                    "reason": "Specific technical reason.",
+                    "owner": "workspace-executor",
+                    "remove_when": "docs/superpowers/plans/example.md#task-3",
+                },
+                {
+                    "check": "architecture.import_boundary",
+                    "path": "server/app/other.py",
+                    "reason": "Specific technical reason.",
+                    "owner": "workspace-executor",
+                    "remove_when": "issues/open/123.md",
+                },
             ]
         }
     )

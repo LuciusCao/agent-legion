@@ -71,7 +71,3 @@ scripts/
 - `workflows` — Agent Legion DAG 工作流开关
 
 <!-- END AUTO-GENERATED -->
-
-## Related Specs
-
-- [质量门渐进建设](../superpowers/completed/2026-05-28-quality-gates-design.md)

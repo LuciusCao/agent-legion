@@ -227,10 +227,11 @@ def validate_runtime(
         errors.append(
             (
                 "cms.token",
-                "missing CMS credentials: set env BASECMS_TOKEN (or "
-                "VIDEO_HIVE_CMS_TOKEN), set all of BASECMS_APP_ID / "
-                "BASECMS_NONCE / BASECMS_SECRET / BASECMS_TOKEN_URL, or bind a "
-                "token in the workspace resource config (vault)",
+                "missing CMS credentials: set env CMS_TOKEN (or "
+                "VIDEO_HIVE_CMS_TOKEN; BASECMS_TOKEN is a deprecated alias), "
+                "set all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / "
+                "CMS_TOKEN_URL, or bind a token in the workspace resource "
+                "config (vault)",
             )
         )
 

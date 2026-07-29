@@ -71,8 +71,11 @@ def test_secret_put_get_list_delete_roundtrip(admin_client, vault_key):
 
 
 def test_secret_put_requires_master_key(admin_client, monkeypatch):
-    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
-    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    # Patch the resolver instead of deleting env vars: the app under test loads
+    # .env at startup, so a real key file may already be mapped into config.
+    monkeypatch.setattr(
+        "server.app.services.vault.resolve_master_key", lambda *_args, **_kwargs: None
+    )
     workspace_id = _create_workspace(admin_client)
 
     response = admin_client.put(
@@ -239,8 +242,10 @@ def test_resource_binding_empty_secret_clears_vault_entry(admin_client, app, vau
 
 
 def test_resource_binding_save_without_master_key_fails(admin_client, monkeypatch):
-    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
-    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    # See test_secret_put_requires_master_key: patch the resolver, not env.
+    monkeypatch.setattr(
+        "server.app.services.vault.resolve_master_key", lambda *_args, **_kwargs: None
+    )
     workspace_id = _create_workspace(admin_client)
 
     response = admin_client.patch(

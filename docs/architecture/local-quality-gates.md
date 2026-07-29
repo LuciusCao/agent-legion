@@ -1,8 +1,8 @@
-# Local Quality Gates Without a GitLab Runner
+# Local Quality Gates Without a CI Runner
 
 ## Purpose
 
-The company GitLab instance does not currently provide Runner capacity for this project. Local
+This project does not currently have CI runner capacity. Local
 quality gates therefore protect the exact commit that is pushed, while GitLab branch settings keep
 the verified commit identity unchanged during merge.
 

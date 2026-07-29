@@ -79,7 +79,7 @@ def test_cli_upload_uses_workspace_as_batch_id(
         captured["count"] = len(records)
 
     monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
-    monkeypatch.setenv("BASECMS_TOKEN", "token")
+    monkeypatch.setenv("CMS_TOKEN", "token")
 
     rc = cli.main(
         [
@@ -113,7 +113,7 @@ def test_cli_upload_batch_id_overrides_workspace(
         captured["workspace_id"] = workspace_id
 
     monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
-    monkeypatch.setenv("BASECMS_TOKEN", "token")
+    monkeypatch.setenv("CMS_TOKEN", "token")
 
     rc = cli.main(
         [
@@ -132,18 +132,32 @@ def test_cli_upload_batch_id_overrides_workspace(
     assert captured["workspace_id"] == "ws-123"
 
 
-def test_get_token_prefers_basecms_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("BASECMS_TOKEN", "direct-token")
-    monkeypatch.delenv("BASECMS_APP_ID", raising=False)
+def test_get_token_prefers_cms_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CMS_TOKEN", "direct-token")
+    monkeypatch.delenv("CMS_APP_ID", raising=False)
     assert get_token({}) == "direct-token"
 
 
+def test_get_token_accepts_basecms_token_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CMS_TOKEN", raising=False)
+    monkeypatch.setenv("BASECMS_TOKEN", "alias-token")
+    assert get_token({}) == "alias-token"
+
+
+def test_get_token_rejects_conflicting_dual_assignment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CMS_TOKEN", "new-token")
+    monkeypatch.setenv("BASECMS_TOKEN", "old-token")
+    monkeypatch.setattr("comprehension_uploader.auth._maybe_load_dotenv", lambda: None)
+    with pytest.raises(AuthError, match="BASECMS_TOKEN"):
+        get_token({})
+
+
 def test_get_token_generates_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
-    monkeypatch.setenv("BASECMS_APP_ID", "app-1")
-    monkeypatch.setenv("BASECMS_NONCE", "nonce-1")
-    monkeypatch.setenv("BASECMS_SECRET", "secret-1")
-    monkeypatch.setenv("BASECMS_TOKEN_URL", "http://auth.example.com/token")
+    monkeypatch.delenv("CMS_TOKEN", raising=False)
+    monkeypatch.setenv("CMS_APP_ID", "app-1")
+    monkeypatch.setenv("CMS_NONCE", "nonce-1")
+    monkeypatch.setenv("CMS_SECRET", "secret-1")
+    monkeypatch.setenv("CMS_TOKEN_URL", "http://auth.example.com/token")
 
     with patch("comprehension_uploader.auth.requests.post") as mock_post:
         mock_post.return_value.json.return_value = {"data": {"token": "generated-token"}}
@@ -162,6 +176,11 @@ def test_get_token_generates_token(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_token_raises_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CMS_TOKEN", raising=False)
+    monkeypatch.delenv("CMS_APP_ID", raising=False)
+    monkeypatch.delenv("CMS_NONCE", raising=False)
+    monkeypatch.delenv("CMS_SECRET", raising=False)
+    monkeypatch.delenv("CMS_TOKEN_URL", raising=False)
     monkeypatch.delenv("BASECMS_TOKEN", raising=False)
     monkeypatch.delenv("BASECMS_APP_ID", raising=False)
     monkeypatch.delenv("BASECMS_NONCE", raising=False)
@@ -472,7 +491,7 @@ def test_cli_upload_command_from_workspace_zip(
         captured["workspace_id"] = workspace_id
 
     monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
-    monkeypatch.setenv("BASECMS_TOKEN", "token")
+    monkeypatch.setenv("CMS_TOKEN", "token")
 
     rc = cli.main(
         [
