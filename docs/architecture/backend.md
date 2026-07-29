@@ -384,11 +384,6 @@ server/app/
   800 行绝对上限（`production.max_lines`），豁免也不能突破；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
-## Related Specs
-
-- [Worker 轮询性能](../superpowers/completed/2026-05-29-worker-polling-performance-design.md)
-- [数据库性能优化](../superpowers/completed/2026-05-29-database-performance-design.md)
-
 ## Runtime Architecture
 
 ### 后端
@@ -499,7 +494,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 - `asr.whisper.vad_model`: 可选 VAD 模型路径
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`VIDEO_HIVE_CMS_TOKEN` / `BASECMS_*`）或 workspace resource binding + vault
+- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`VIDEO_HIVE_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或 workspace resource binding + vault
 - `resource_providers`: 资源提供者声明（如 `cms.question.detail`）：`path` 拼接信息、`resource_key`、legacy 设置项 `url_key`，以及可调参数的 `config_schema`（含 `secret: true` 标记）；声明在加载时校验，非法声明启动失败
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒

@@ -1,7 +1,6 @@
 import hashlib
 import hmac
 import json
-import os
 import time
 from collections.abc import Mapping
 from typing import Any
@@ -9,27 +8,30 @@ from typing import Any
 import requests
 
 from server.app.cms.client import CmsClientError
+from server.app.cms.env import resolve_cms_env
 
 _TOKEN_GEN_ENV = {
-    "app_id": "BASECMS_APP_ID",
-    "nonce": "BASECMS_NONCE",
-    "secret": "BASECMS_SECRET",
-    "url": "BASECMS_TOKEN_URL",
+    "app_id": "CMS_APP_ID",
+    "nonce": "CMS_NONCE",
+    "secret": "CMS_SECRET",
+    "url": "CMS_TOKEN_URL",
 }
 
 
 def _token_gen_config(config: Mapping[str, Any]) -> dict[str, str]:
     """Resolve token_gen keys, environment first, then in-memory config.
 
-    The in-memory ``token_gen`` section only ever comes from env injection or
-    a workspace binding; the yaml ``cms.token_gen`` section was retired in
-    config governance G2 and is rejected at load time.
+    Env reads go through :func:`resolve_cms_env`, which arbitrates the
+    authoritative ``CMS_*`` names against the deprecated ``BASECMS_*``
+    aliases. The in-memory ``token_gen`` section only ever comes from env
+    injection or a workspace binding; the yaml ``cms.token_gen`` section was
+    retired in config governance G2 and is rejected at load time.
     """
     cfg = config.get("token_gen") or {}
     if not isinstance(cfg, Mapping):
         cfg = {}
     return {
-        key: str(os.environ.get(env_key) or cfg.get(key) or "")
+        key: str(resolve_cms_env(env_key) or cfg.get(key) or "")
         for key, env_key in _TOKEN_GEN_ENV.items()
     }
 
@@ -37,16 +39,17 @@ def _token_gen_config(config: Mapping[str, Any]) -> dict[str, str]:
 def cms_token_available(cms_config: Mapping[str, Any] | None) -> bool:
     """Return True when CMS credentials resolve from any supported source.
 
-    Priority: env ``BASECMS_TOKEN`` > binding/config ``token`` (vault
-    secret_refs must be resolved by the caller beforehand) > the four
-    token_gen keys (env first, then in-memory config).
+    Priority: env ``CMS_TOKEN`` (deprecated alias ``BASECMS_TOKEN``) >
+    binding/config ``token`` (vault secret_refs must be resolved by the
+    caller beforehand) > the four token_gen keys (env first, then in-memory
+    config).
     """
     if cms_config is None:
         cms_config = {}
     # Callers pass raw config values; a malformed cms section must not crash.
     if not isinstance(cms_config, Mapping):
         return False  # type: ignore[unreachable]
-    if os.environ.get("BASECMS_TOKEN"):
+    if resolve_cms_env("CMS_TOKEN"):
         return True
     if cms_config.get("token"):
         return True
