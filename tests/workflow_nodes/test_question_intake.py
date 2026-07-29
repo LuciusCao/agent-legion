@@ -52,9 +52,10 @@ def _context(
     cms_config: dict[str, Any],
     source_payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    monkeypatch.setattr(question_intake, "_effective_cms_config", lambda *a, **k: cms_config)
+    # Node-level CMS config arrives via runtime["node_config"]; the dispatch
+    # layer would already have resolved any vault secret_ref into plaintext.
     monkeypatch.setattr(question_intake, "get_token", lambda env, cfg: "token")
-    context: dict[str, Any] = {}
+    context: dict[str, Any] = {"node_config": cms_config}
     if source_payload is not None:
         context["job_db"] = _FakeJobDb(source_payload)
     return context
@@ -102,7 +103,10 @@ def test_by_knowledge_expands_code_into_multiple_questions(
     payload = {"intake_mode": {"key": "batch_by_knowledge", "input_field": "knowledge_codes"}}
     context = _context(
         monkeypatch,
-        {"api_url": "https://cms.example.com/list"},
+        {
+            "question_list_url": "https://cms.example.com/list",
+            "api_url": "https://cms.example.com/detail",
+        },
         source_payload=payload,
     )
     monkeypatch.setattr(
@@ -137,7 +141,10 @@ def test_by_knowledge_empty_list_raises(tmp_path: Path, monkeypatch: pytest.Monk
     payload = {"intake_mode": {"key": "batch_by_knowledge", "input_field": "knowledge_codes"}}
     context = _context(
         monkeypatch,
-        {"api_url": "https://cms.example.com/list"},
+        {
+            "question_list_url": "https://cms.example.com/list",
+            "api_url": "https://cms.example.com/detail",
+        },
         source_payload=payload,
     )
     monkeypatch.setattr(question_intake, "list_questions_by_knowledge", lambda *a: [])

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import Any
 
 import yaml
@@ -15,20 +14,18 @@ from server.app.workflows.definition import (
 
 def workflow_definition_from_yaml_string(
     raw_yaml: str,
-    resource_providers: Mapping[str, Any] | None = None,
 ) -> WorkflowDefinition:
     raw = yaml.safe_load(raw_yaml)
     if not isinstance(raw, dict):
         raise WorkflowDefinitionError("Workflow definition must be a mapping")
-    return workflow_definition_from_mapping(raw, resource_providers)
+    return workflow_definition_from_mapping(raw)
 
 
 def validate_workflow_definition(
     raw_yaml: str,
-    resource_providers: Mapping[str, Any] | None = None,
 ) -> list[str]:
     try:
-        workflow_definition_from_yaml_string(raw_yaml, resource_providers)
+        workflow_definition_from_yaml_string(raw_yaml)
     except WorkflowDefinitionError as exc:
         return [str(exc)]
     return []

@@ -65,7 +65,6 @@ scripts/
 - `lease_ttl_seconds`
 - `monitoring`
 - `openclaw` — OpenClaw 命令模板与工作目录
-- `resource_providers` — 资源提供方声明（path/url_key 及各自可调参数的 config_schema，含 secret 标记）
 - `server` — HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）
 - `workflows` — Agent Legion DAG 工作流开关
 

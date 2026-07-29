@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 import yaml
@@ -401,10 +400,9 @@ def compare_workflow_draft(
     job_db: JobQueries,
     workspace_id: str,
     definition_yaml: str,
-    resource_providers: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     try:
-        draft = workflow_definition_from_yaml_string(definition_yaml, resource_providers)
+        draft = workflow_definition_from_yaml_string(definition_yaml)
     except yaml.YAMLError as exc:
         return {
             "valid": False,

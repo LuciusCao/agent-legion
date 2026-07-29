@@ -15,7 +15,6 @@ const baseSettings: WorkspaceSettings = {
   intakeModes: [],
   labelOverrides: {},
   workflowKey: '',
-  resources: {},
   nodeConfig: {
     review_keywords: { page_size: 20 },
   },

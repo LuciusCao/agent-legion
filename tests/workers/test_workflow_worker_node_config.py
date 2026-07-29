@@ -4,12 +4,15 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from cryptography.fernet import Fernet
+
 from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
+from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
@@ -21,6 +24,7 @@ SCHEMA = {
     "properties": {
         "bank_version": {"type": "string", "default": "v5"},
         "country_id": {"type": "string"},
+        "token": {"type": "string", "secret": True},
     },
 }
 
@@ -172,5 +176,57 @@ def test_dispatch_fails_node_on_invalid_workspace_override(tmp_path: Path) -> No
     assert failed is not None
     assert failed["status"] == "failed"
     assert "unknown keys" in failed["error_message"]
+    assert not executor.contexts
+    worker.stop()
+
+
+def test_dispatch_resolves_vault_secret_refs_in_memory(tmp_path: Path, monkeypatch) -> None:
+    """Frozen/stored configs carry only secret_ref markers; the dispatch path
+    resolves them to plaintext in memory before invoking the executor
+    (VAULT-SECRET-001)."""
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    executor = RecordingExecutor("code-default")
+    node = _local_node("fetch")
+    ws, _job = _prepare_job(job_db, node)
+    name = "node:test:fetch:token"
+    VaultService(TEST_DATABASE_URL, {}).set(ws["id"], name, "dispatch-plain-token")
+    job_db.update_workspace(
+        ws["id"],
+        node_config={"test": {"fetch": {"bank_version": "v9", "token": {"secret_ref": name}}}},
+    )
+    worker = _make_worker(tmp_path, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    assert worker._poll() is True
+    for future in worker._futures.values():
+        future.result(timeout=5)
+
+    # The executor sees the resolved plaintext; the marker never leaves the server.
+    assert executor.contexts[0].node_config == {
+        "bank_version": "v9",
+        "token": "dispatch-plain-token",
+    }
+    worker.stop()
+
+
+def test_dispatch_fails_node_on_unresolvable_secret_ref(tmp_path: Path) -> None:
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    executor = RecordingExecutor("code-default")
+    node = _local_node("fetch")
+    ws, job = _prepare_job(job_db, node)
+    job_db.update_workspace(
+        ws["id"],
+        node_config={"test": {"fetch": {"token": {"secret_ref": "node:test:fetch:token"}}}},
+    )
+    worker = _make_worker(tmp_path, executor, [_make_definition([node])])
+
+    worker._poll()
+
+    failed = job_db.get_job_node(job["id"], "fetch")
+    assert failed is not None
+    assert failed["status"] == "failed"
+    assert "not found" in failed["error_message"]
     assert not executor.contexts
     worker.stop()

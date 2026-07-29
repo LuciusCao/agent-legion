@@ -137,7 +137,7 @@ CodeExecutor(...).execute(context)
   `secret_ref`，不得明文落库、出 API 或进日志（VAULT-SECRET-001）。
 - Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS token 只走 env
   （`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
-  workspace resource binding + vault；
+  节点配置的 `secret: true` 字段（workspace node config + vault）；
   yaml 出现 `cms.token` / `cms.token_gen` 启动即报错（G2），`openclaw.skill_safety`
   写 `ref` 启动即报错（G3，ref 以 `config/skills.lock` 为唯一权威）。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败

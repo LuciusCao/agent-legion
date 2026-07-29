@@ -24,7 +24,6 @@ function applySavedSettings(saved: Partial<WorkspaceSettings>) {
           ...base,
           nodeConfig: saved.nodeConfig ?? base.nodeConfig,
           nodeConfigSchemas: saved.nodeConfigSchemas ?? base.nodeConfigSchemas,
-          resourceSchemas: saved.resourceSchemas ?? base.resourceSchemas,
         }
       : base
   useSettingStore.setState({

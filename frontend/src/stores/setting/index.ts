@@ -19,7 +19,6 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   originalWorkspaceDescription: '',
   originalSettings: null,
   isDirty: false,
-  resourceProviders: [],
   workflowDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,

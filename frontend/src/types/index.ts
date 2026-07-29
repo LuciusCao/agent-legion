@@ -39,13 +39,6 @@ export type AgentStatus = ApiSchemas['AgentStatusResponse'] & {
   max_tasks: number
 }
 
-export type GlobalServiceStatus = ApiSchemas['GlobalServicesResponse']
-
-export type ResourceProviderDefinition =
-  ApiSchemas['ResourceProviderDefinition']
-
-export type ResourceBinding = ApiSchemas['ResourceBinding']
-
 export type Chapter = {
   id?: string
   start: number
@@ -88,14 +81,13 @@ export type WorkspaceSettingsTestResponse =
   ApiSchemas['WorkspaceSettingsTestResponse']
 export type WorkflowDraftValidationResponse =
   ApiSchemas['WorkflowDraftValidationResponse']
-export type ResourceProvidersResponse = ApiSchemas['ResourceProvidersResponse']
 export type WorkerStatusResponse = ApiSchemas['WorkerStatusResponse']
 
 /**
- * JSON-Schema subset the backend uses to declare configurable node/resource
+ * JSON-Schema subset the backend uses to declare configurable node
  * parameters. The generated OpenAPI types expose these blobs as
- * `{[key: string]: unknown}` (e.g. ResourceProviderDefinition.config_schema);
- * these types are the client-side interpretation of that contract.
+ * `{[key: string]: unknown}` (e.g. node config schemas on the settings
+ * payload); these types are the client-side interpretation of that contract.
  */
 export type ConfigSchemaProperty = {
   type: 'string' | 'integer' | 'number' | 'boolean'
@@ -114,15 +106,9 @@ export type ConfigSchema = {
   required?: string[]
 }
 
-export type ResourceSchemaEntry = {
-  provider: string
-  schema: ConfigSchema
-}
-
 export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload'] & {
   nodeConfig?: Record<string, Record<string, unknown>>
   nodeConfigSchemas?: Record<string, ConfigSchema>
-  resourceSchemas?: Record<string, ResourceSchemaEntry>
 }
 
 export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']

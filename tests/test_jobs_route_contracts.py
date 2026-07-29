@@ -17,8 +17,6 @@ from server.app.routes.job_view_contracts import (
 )
 
 EXPECTED_OPERATIONS = {
-    ("get", "/api/resource-providers"): "ResourceProvidersResponse",
-    ("get", "/api/global-services"): "GlobalServicesResponse",
     ("get", "/api/workflows"): "WorkflowsListResponse",
     ("get", "/api/workflows/{workflow_key}"): "WorkflowResponse",
     ("get", "/api/workspaces"): "WorkspacesResponse",

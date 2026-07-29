@@ -135,7 +135,7 @@ def test_migration_skips_empty_legacy_config() -> None:
 
 
 def test_schema_v15_drops_legacy_column() -> None:
-    # The autouse fixture already ran init_db at SCHEMA_VERSION 15.
+    # The autouse fixture already ran init_db at the current SCHEMA_VERSION.
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = {
             row["column_name"]

@@ -54,9 +54,6 @@ class JobIntakeService:
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        resource_config = workspace.get("resource_config")
-        if not isinstance(resource_config, dict):
-            resource_config = {}
         enabled_modes = enabled_intake_modes(workspace)
         if enabled_modes is not None and payload["source_kind"] not in enabled_modes:
             raise InvalidOperationError(
@@ -98,7 +95,6 @@ class JobIntakeService:
                 payload,
                 entity,
                 input_values,
-                resource_config,
                 mode,
                 active_revision,
                 node_config,
@@ -146,7 +142,6 @@ class JobIntakeService:
         source_payload["entity"] = entity
         source_payload["question_ids"] = resolved_ids
         source_payload["knowledge_codes"] = knowledge_codes
-        source_payload["resource_config"] = resource_config
         source_payload["node_config"] = node_config
         source_payload["intake_mode"] = {
             "key": mode.key,

@@ -133,23 +133,10 @@ def _resolve_executable(value: str) -> Path | None:
     return Path(found) if found else None
 
 
-def _cms_resource_enabled(config: dict[str, Any]) -> bool:
-    """Return True when a CMS-backed resource provider is enabled."""
-    providers = config.get("resource_providers")
-    if not isinstance(providers, dict):
-        return False
-    for entry in providers.values():
-        if not isinstance(entry, dict):
-            continue
-        provider = str(entry.get("provider", ""))
-        if provider.startswith("cms.") and entry.get("enabled") is not False:
-            return True
-    return any(
-        str(key).startswith("cms.")
-        and isinstance(entry, dict)
-        and entry.get("enabled") is not False
-        for key, entry in providers.items()
-    )
+def _cms_configured(config: dict[str, Any]) -> bool:
+    """Return True when a global CMS endpoint is configured."""
+    cms = config.get("cms")
+    return isinstance(cms, dict) and bool(str(cms.get("base_url") or "").strip())
 
 
 def validate_runtime(
@@ -238,15 +225,15 @@ def validate_runtime(
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
 
-    if _cms_resource_enabled(config) and not cms_token_available(config.get("cms")):
-        # Workspace bindings live in the database and cannot be pre-checked
-        # at startup, so missing env-level credentials are a warning, not a
-        # startup failure: vault-only deployments are valid as long as every
-        # workspace running CMS jobs binds its own token.
+    if _cms_configured(config) and not cms_token_available(config.get("cms")):
+        # Workspace node config tokens live in the vault and cannot be
+        # pre-checked at startup, so missing env-level credentials are a
+        # warning, not a startup failure: vault-only deployments are valid as
+        # long as every workspace running CMS jobs sets its own token.
         logger.warning(
             "cms.token: no env-level CMS credentials (set env CMS_TOKEN, or "
             "all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL); "
-            "each workspace must bind a token in its resource config (vault) "
+            "each workspace must set a token in its node config (vault) "
             "or its CMS jobs will fail"
         )
 

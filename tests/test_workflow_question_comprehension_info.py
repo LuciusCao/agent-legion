@@ -38,14 +38,8 @@ def test_fetch_questions_with_cms(tmp_path):
     detail.normalized = {"stem": "stem"}
     detail.payload = {"raw": "data"}
 
-    settings_config = {
-        "resource_providers": {
-            "cms.question.detail": {
-                "resource_key": "question_detail",
-                "api_url": "https://cms.example.com",
-            }
-        }
-    }
+    settings_config = {"cms": {"base_url": "https://cms.example.com"}}
+    node_config = {"api_url": "https://cms.example.com/question/detail"}
 
     with (
         patch("workflow_nodes.question_intake.get_token", return_value="token"),
@@ -54,9 +48,13 @@ def test_fetch_questions_with_cms(tmp_path):
             return_value=detail,
         ) as mock_fetch,
     ):
-        question_intake.run(job, artifact_dir, {"settings_config": settings_config})
+        question_intake.run(
+            job,
+            artifact_dir,
+            {"settings_config": settings_config, "node_config": node_config},
+        )
 
-    mock_fetch.assert_called_once_with("q1", "https://cms.example.com", "token")
+    mock_fetch.assert_called_once_with("q1", "https://cms.example.com/question/detail", "token")
     data = __import__("json").loads((artifact_dir / "questions.json").read_text(encoding="utf-8"))
     assert data["questions"][0]["title"] == "CMS Title"
 

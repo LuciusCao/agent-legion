@@ -161,8 +161,6 @@ server/app/
 | GET | `/workflows` | `list_workflows` | routes/workflow_catalog.py |
 | GET | `/workflows/{workflow_key}` | `get_workflow` | routes/workflow_catalog.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/compare` | `compare_workflow_draft_route` | routes/workflow_draft_compare.py |
-| GET | `/resource-providers` | `get_resource_providers` | routes/workflow_resource_providers.py |
-| GET | `/global-services` | `get_global_services` | routes/workflow_resource_providers.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/active` | `get_active_workflow_revision` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/{revision_id}` | `get_workflow_revision_detail` | routes/workflow_revisions.py |
@@ -270,8 +268,6 @@ server/app/
 | ExecutorStatusSummary | BaseModel | executors: list[ExecutorRuntimeStatus] | app/routes/job_contracts.py |
 | WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, workflow_key: str, workflow_label: str, job_sta... | app/routes/job_contracts.py |
 | DeleteWorkspaceResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
-| ResourceProvidersResponse | BaseModel | providers: list[ResourceProviderDefinition] | app/routes/job_contracts.py |
-| GlobalServicesResponse | BaseModel | cms: CmsServiceStatus | app/routes/job_contracts.py |
 | ExecutionControlSummaryResponse | BaseModel | mode: Literal['full', 'until_node'], target_node_key: str | None, paused: boo... | app/routes/job_execution_control_contracts.py |
 | JobsPageResponse | BaseModel | workspace_id: str, revision: int, total: int | None, stats: dict[str, int], j... | app/routes/job_list_contracts.py |
 | JobFacetsResponse | BaseModel | workspace_id: str, total: int, status_counts: dict[str, int], version_counts:... | app/routes/job_list_contracts.py |
@@ -353,9 +349,6 @@ server/app/
 | ActiveWorkflowRevisionResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionDetailResponse | BaseModel | revision: WorkflowRevisionSummary, workflow: workflow_contracts.WorkflowDefin... | app/routes/workflow_revisions_contracts.py |
 | WorkspaceRecord | BaseModel | id: str, name: str, description: str, default_workflow_key: str, default_enti... | app/routes/workspace_contracts.py |
-| ResourceProviderDefinition | BaseModel | key: str, provider: str, path: str, defaultParams: dict[str, str], paramKeys:... | app/routes/workspace_contracts.py |
-| CmsServiceStatus | BaseModel | baseUrl: str, tokenConfigured: bool, env: str, healthy: bool | None, lastChec... | app/routes/workspace_contracts.py |
-| ResourceBinding | BaseModel | enabled: bool, config: dict[str, Any] | app/routes/workspace_contracts.py |
 | WorkspaceSecretSetRequest | BaseModel | value: str | app/routes/workspace_secrets.py |
 | WorkspaceSecretMetadata | BaseModel | name: str, created_at: str, updated_at: str | app/routes/workspace_secrets.py |
 | WorkspaceSecretsResponse | BaseModel | secrets: list[WorkspaceSecretMetadata] | app/routes/workspace_secrets.py |
@@ -409,7 +402,7 @@ server/app/
 - 视频 Job 的 `content_type` 固定为 `knowledge`（`video_capabilities/contracts.py` 强制校验），pipeline 节点序列：
 
   **Knowledge videos (`knowledge`):**
-  1. `download_video` — 下载 MP4（`code` executor，代码在 `workflow_nodes/video_download.py`）；`batch_by_knowledge` 模式下先经 resource binding + vault 把 `knowledge_code` 解析为播放地址（见下文 Job Intake 资源解析）
+  1. `download_video` — 下载 MP4（`code` executor，代码在 `workflow_nodes/video_download.py`）；`batch_by_knowledge` 模式下先经节点 config + vault 把 `knowledge_code` 解析为播放地址（见下文 Job Intake 资源解析）
   2. `transcribe_video` — 生成 `subtitles.srt` 与 `transcription.json`
   3. `subtitle_review` — openclaw agent
   4. `chapter_generate` — openclaw agent
@@ -427,17 +420,17 @@ server/app/
 
 Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）：
 
-- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经 workspace binding + vault 完成。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
+- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经节点 config（全局 `cms:` 默认值 ← workspace 节点覆盖）+ vault 完成。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
 - `phase=None`：direct 模式，不访问外部资源。
 
-`phase="intake"`（intake 期经 `resolve_cms_resource` + vault 解析、CMS 1:N fan-out）已从 question resolver 退役：intake 不再调用 CMS，非法 id/code 在执行期以 job 失败暴露。
+`phase="intake"`（intake 期调 CMS 做 1:N fan-out）已从 question resolver 退役：intake 不再调用 CMS，非法 id/code 在执行期以 job 失败暴露。
 
-接入新内容类型只需三步：在 `config/agent_legion.yaml` 声明 `resource_providers` 条目、在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并声明 `resources:`。Intake 快照只冻结 `resource_config` / `node_config` 与 `secret_ref`，不再冻结 `cms_config`。
+接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 CMS 连接键（`base_url` / `api_url` / `token`（`secret: true`）等）。Intake 快照只冻结 `node_config` 与 `secret_ref`。
 
 ## Database
 
-- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前 `SCHEMA_VERSION = 22`）：
-  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `resource_config_json`, `default_entity`, `intake_config_json`）。`resource_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（兼容窗口内老明文仍可读，见下文 Secrets Vault）
+- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前 `SCHEMA_VERSION = 24`）：
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
   - `workflow_revisions` — workflow 版本修订历史
@@ -497,15 +490,15 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - **Routes**: `routes/workspace_secrets.py`（`GET/PUT/DELETE /workspaces/{workspace_id}/secrets[/{name}]`），write-only：GET 只返回 name 与时间戳元数据，任何响应都不含明文或密文。
 - **Service**: `VaultService`（Fernet 加解密 + `workspace_secrets` 持久化，明文不跨越服务层边界落盘或出 API）与 `WorkspaceSecretsService`（API 门面）。
 - **Master key**: env `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`（映射到 `vault.master_key` / `vault.master_key_file`）；缺 key 时 server 可启动，但 vault 写操作与 `secret_ref` 解析报错。
-- **写入链**: resource binding 保存时，provider `config_schema` 标记 `secret: true` 的字段值转存 vault，binding config 只留 `{"secret_ref": "resource:{resource_key}:{field}"}`；settings payload 中 secret 字段只返回 `{"secret_set": bool}`。
-- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口），消费点为 intake 解析、节点执行与 settings test-connection 三处；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。test-connection 还会用解析出的 token 真实探测 CMS（连通性 + 401/403 鉴权判定），响应只报告来源（workspace binding / 全局 env），不回显 token。
+- **写入链**: 节点配置保存时，capability `config_schema` 标记 `secret: true` 的字段值转存 vault，节点覆盖只留 `{"secret_ref": "node:{workflow_key}:{node_key}:{field}"}`；settings payload 中 secret 字段只返回 `{"secret_set": bool}`。
+- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口），消费点为 dispatch 执行注入、question detail 与 settings test-connection 三处；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。test-connection 还会用解析出的 token 真实探测 CMS（连通性 + 401/403 鉴权判定），响应只报告来源（workspace node config / 全局 env），不回显 token。
 
 ## Configuration Reference
 
 配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
 
 - `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）。
-- `config/agent_legion.yaml`：ASR、CMS、资源提供者（`resource_providers`）、OpenClaw 设置。
+- `config/agent_legion.yaml`：ASR、CMS、OpenClaw 设置。
 - `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
@@ -518,8 +511,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 - `asr.whisper.vad_model`: 可选 VAD 模型路径
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或 workspace resource binding + vault。token 调用时优先级（`cms/client.py` `get_token`）：workspace binding token（`resolve_cms_resource` 以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无 binding 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault binding 启动时无法预检），不再 fail-fast
-- `resource_providers`: 资源提供者声明（如 `cms.question.detail`）：`path` 拼接信息、`resource_key`、legacy 设置项 `url_key`，以及可调参数的 `config_schema`（含 `secret: true` 标记）；声明在加载时校验，非法声明启动失败
+- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒
 - `openclaw.skill_safety`: OpenClaw skill 安全校验配置；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 `config/skills.lock`（locked commit）解析（config 治理 G3 单源化），yaml 中写 `ref` 会在启动校验时报错

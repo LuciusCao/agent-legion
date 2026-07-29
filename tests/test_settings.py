@@ -281,7 +281,8 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     settings = load_settings()
     assert settings.data_dir == tmp_path / "runtime"
     assert settings.config["cms"]["knowledge_url"].startswith("https://cms.example/v2")
-    # Question resource URLs resolve via resource_providers, not derivation.
+    # Question endpoint URLs derive from cms.base_url at execution time, not
+    # from settings-time derivation.
     assert "question_url" not in settings.config["cms"]
     assert "question_detail_url" not in settings.config["cms"]
     assert "question_list_url" not in settings.config["cms"]

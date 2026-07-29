@@ -43,7 +43,6 @@ const defaultSettings: WorkspaceSettings = {
   intakeModes: [],
   labelOverrides: {},
   workflowKey: '',
-  resources: {},
 }
 
 const catalogExecutor: ExecutorDefinition = {
@@ -83,7 +82,6 @@ const defaultState: Partial<SettingState> = {
   originalWorkspaceDescription: '',
   originalSettings: null,
   isDirty: false,
-  resourceProviders: [],
   workflowDefinition: null,
   testStatus: { state: 'idle' as const },
   isSaving: false,
@@ -248,9 +246,6 @@ describe('settingStore', () => {
           intakeModes: ['direct_ids'],
           labelOverrides: { direct_ids: '输入 ID' },
           workflowKey: 'knowledge_content',
-          resources: {
-            question_detail: { enabled: true, config: { bank_version: 'v5' } },
-          },
         })
       }
       return Promise.resolve({})
@@ -277,9 +272,6 @@ describe('settingStore', () => {
     expect(state.settings.intakeModes).toEqual(['direct_ids'])
     expect(state.settings.labelOverrides).toEqual({ direct_ids: '输入 ID' })
     expect(state.settings.workflowKey).toBe('knowledge_content')
-    expect(state.settings.resources).toEqual({
-      question_detail: { enabled: true, config: { bank_version: 'v5' } },
-    })
     expect(state.workspaceName).toBe('Test Workspace')
     expect(state.workspaceDescription).toBe('A workspace')
     expect(state.originalWorkspaceName).toBe('Test Workspace')
@@ -429,7 +421,6 @@ describe('settingStore', () => {
           intakeModes: [],
           labelOverrides: {},
           workflowKey: 'question_content',
-          resources: {},
         })
       }
       return Promise.resolve({})
@@ -480,30 +471,6 @@ describe('settingStore', () => {
     expect(useSettingStore.getState().settings).toEqual(defaultState.settings)
   })
 
-  it('fetchResourceProviders hydrates providers from API', async () => {
-    mockApi.mockResolvedValueOnce({
-      providers: [
-        {
-          key: 'question_detail',
-          provider: 'cms.question.detail',
-          apiUrl: 'http://api.example.com',
-          defaultParams: { bank_version: 'v5' },
-          paramKeys: ['bank_version', 'country_id'],
-        },
-      ],
-    })
-    await useSettingStore.getState().fetchResourceProviders()
-    expect(useSettingStore.getState().resourceProviders).toEqual([
-      {
-        key: 'question_detail',
-        provider: 'cms.question.detail',
-        apiUrl: 'http://api.example.com',
-        defaultParams: { bank_version: 'v5' },
-        paramKeys: ['bank_version', 'country_id'],
-      },
-    ])
-  })
-
   it('saveAll sends exactly one PUT body containing executor_allocations, node_bindings, node_limits', async () => {
     mockApi.mockResolvedValue({
       workspace: { name: 'Test', description: 'Desc' },
@@ -511,7 +478,6 @@ describe('settingStore', () => {
         ...defaultSettings,
         workflowKey: 'question_content',
         intakeModes: ['direct_ids'],
-        resources: { question_detail: { enabled: true, config: {} } },
       },
       executor_configuration: {
         allocations: [
@@ -548,7 +514,6 @@ describe('settingStore', () => {
         ...defaultSettings,
         workflowKey: 'question_content',
         intakeModes: ['direct_ids'],
-        resources: { question_detail: { enabled: true, config: {} } },
       },
       originalExecutorConfiguration: {
         allocations: [],

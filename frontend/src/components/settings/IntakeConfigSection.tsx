@@ -1,18 +1,12 @@
 import { Button, Checkbox, MenuItem, TextField } from '@mui/material'
 import styles from '../../pages/SettingsPage.module.css'
 import { ConnectionTestStatus } from './ConnectionTestStatus'
-import { ResourceProviderCard } from './ResourceProviderCard'
-import type {
-  ResourceProviderDefinition,
-  WorkflowDefinitionRecord,
-  WorkspaceSettings,
-} from '../../types'
+import type { WorkflowDefinitionRecord, WorkspaceSettings } from '../../types'
 import type { TestStatus } from '../../stores/settingStore'
 
 interface Props {
   settings: WorkspaceSettings
   workflowDefinition: WorkflowDefinitionRecord | null
-  resourceProviders: ResourceProviderDefinition[]
   testStatus: TestStatus
   saveError: string | null
   isTesting: boolean
@@ -24,7 +18,6 @@ interface Props {
 export function IntakeConfigSection({
   settings,
   workflowDefinition,
-  resourceProviders,
   testStatus,
   saveError,
   isTesting,
@@ -38,25 +31,6 @@ export function IntakeConfigSection({
       ? settings.intakeModes.filter((k) => k !== key)
       : [...settings.intakeModes, key]
     setSettings({ intakeModes: nextModes })
-  }
-
-  const handleResourceConfigChange = (
-    providerKey: string,
-    nextConfig: Record<string, unknown>
-  ) => {
-    const binding = settings.resources[providerKey] || {
-      enabled: true,
-      config: {},
-    }
-    setSettings({
-      resources: {
-        ...settings.resources,
-        [providerKey]: {
-          ...binding,
-          config: nextConfig,
-        },
-      },
-    })
   }
 
   return (
@@ -120,34 +94,6 @@ export function IntakeConfigSection({
           })}
         </div>
       </div>
-
-      {resourceProviders.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <span
-            style={{
-              fontSize: 12,
-              color: '#616161',
-            }}
-          >
-            资源接口参数
-          </span>
-          {resourceProviders.map((provider) => (
-            <ResourceProviderCard
-              key={provider.key}
-              provider={provider}
-              binding={
-                settings.resources[provider.key] || {
-                  enabled: true,
-                  config: {},
-                }
-              }
-              onConfigChange={(nextConfig) =>
-                handleResourceConfigChange(provider.key, nextConfig)
-              }
-            />
-          ))}
-        </div>
-      )}
 
       <div
         style={{

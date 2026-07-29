@@ -19,6 +19,7 @@ from server.app.services.node_config import (
     dispatch_effective_config,
     executor_definition_capability_schema,
 )
+from server.app.services.vault import VaultError, VaultService
 from server.app.workflow_worker.agent_claim import (
     cached_batch_payload,
     claim_agent_node,
@@ -159,7 +160,10 @@ def try_claim_and_submit(
             workspace,
             cached_batch_payload(worker, job),
         )
-    except ValueError as exc:
+        # Resolve vault secret_refs in memory only; frozen payloads keep refs (VAULT-SECRET-001).
+        vault = VaultService(worker.job_db.path, worker.settings.config)
+        node_config = vault.resolve_secret_refs(node_config, workspace_id)
+    except (ValueError, VaultError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
     claimed = claim_executor_node(

@@ -34,7 +34,6 @@ export function SettingsPage() {
     isDirty,
     isSaving,
     saveError,
-    resourceProviders,
     workflowDefinition,
     executorCatalog,
     executorConfiguration,
@@ -43,7 +42,6 @@ export function SettingsPage() {
     testConnection,
     resetTestStatus,
     fetchSettings,
-    fetchResourceProviders,
     fetchWorkflowDefinition,
   } = useSettingStore()
 
@@ -100,11 +98,6 @@ export function SettingsPage() {
     resetTestStatus()
     void fetchSettings(workspaceId)
   }, [workspaceId, setWorkspaceId, resetTestStatus, fetchSettings])
-
-  useEffect(() => {
-    if (!workspaceId) return
-    void fetchResourceProviders()
-  }, [workspaceId, fetchResourceProviders])
 
   useEffect(() => {
     if (!settings.workflowKey) return
@@ -173,7 +166,6 @@ export function SettingsPage() {
           <IntakeConfigSection
             settings={settings}
             workflowDefinition={workflowDefinition}
-            resourceProviders={resourceProviders}
             testStatus={testStatus}
             saveError={saveError}
             isTesting={isTesting}

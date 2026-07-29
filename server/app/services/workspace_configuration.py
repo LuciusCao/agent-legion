@@ -4,18 +4,17 @@ from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import VaultService
-from server.app.services.vault_resources import apply_resources_patch
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_connection_test import test_workspace_connection
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
-from server.app.services.workspace_node_config import (
-    update_workspace_node_config,
+from server.app.services.workspace_node_config import update_workspace_node_config
+from server.app.services.workspace_settings_payload import workspace_settings_payload
+from server.app.services.workspace_settings_schemas import (
     workspace_settings_payload_with_schemas,
 )
-from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
 
@@ -49,18 +48,6 @@ class WorkspaceConfigurationService:
         if workspace is None:
             raise NotFoundError("Workspace not found")
         return workspace
-
-    def _apply_resources_patch(
-        self, workspace_id: str, workspace: dict[str, Any], resources_patch: Any
-    ) -> dict[str, Any]:
-        """Validate a resources patch and persist secret fields via the vault."""
-        return apply_resources_patch(
-            self._vault(),
-            workspace_id,
-            workspace,
-            resources_patch,
-            self.settings.resource_providers.schemas,
-        )
 
     def _vault(self) -> VaultService:
         return VaultService(self.job_db.path, self.settings.config)
@@ -134,9 +121,7 @@ class WorkspaceConfigurationService:
         agent_capacity: int | None = None,
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        current = workspace_settings_payload(
-            workspace, declarations=self.settings.resource_providers
-        )
+        current = workspace_settings_payload(workspace)
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
@@ -160,17 +145,10 @@ class WorkspaceConfigurationService:
             if description_value is not None
             else str(workspace.get("description") or "")
         )
-        if settings_patch.get("resources") is not None:
-            resource_config = self._apply_resources_patch(
-                workspace_id, workspace, settings_patch["resources"]
-            )
-        else:
-            # Reuse the stored raw config so secret_ref dicts survive a save
-            # that does not touch resources (the settings payload masks them).
-            raw_resource_config = workspace.get("resource_config")
-            resource_config = (
-                dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
-            )
+        # Resource bindings are retired (v19); the stored column is left
+        # untouched so legacy rows keep whatever the migration left behind.
+        raw_resource_config = workspace.get("resource_config")
+        resource_config = dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
         intake_config = _build_intake_config(current, settings_patch)
         if agent_capacity is not None and agent_capacity <= 0:
             raise InvalidOperationError("Agent capacity must be a positive integer")
@@ -206,18 +184,7 @@ class WorkspaceConfigurationService:
         self, workspace_id: str, section: str, patch: dict[str, Any]
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        if section == "connection" or section == "resources":
-            resource_config = workspace.get("resource_config")
-            next_resource_config = (
-                dict(resource_config) if isinstance(resource_config, dict) else {}
-            )
-            if patch.get("resources") is not None:
-                applied = self._apply_resources_patch(workspace_id, workspace, patch["resources"])
-                next_resource_config["resources"] = applied["resources"]
-            workspace = self.job_db.update_workspace(
-                workspace_id, resource_config=next_resource_config
-            )
-        elif section == "intake":
+        if section == "intake":
             intake_config = workspace.get("intake_config")
             next_intake_config = dict(intake_config) if isinstance(intake_config, dict) else {}
             if patch.get("intakeModes") is not None:

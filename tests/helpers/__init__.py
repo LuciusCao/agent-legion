@@ -13,7 +13,6 @@ from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import load_registered_workflow
-from server.app.workflows.resource_providers import ResourceProviderDeclarations
 
 
 def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
@@ -36,11 +35,11 @@ def make_workflow_worker(
 
     definition = load_registered_workflow(Path("."), workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    # Avoid real CMS/network calls in tests: empty declarations make every
-    # resource resolve to no provider/api_url, and the declarations travel
+    # Avoid real CMS/network calls in tests: with no global cms: config the
+    # node resolves no api_url and writes the base payload. The settings travel
     # with the executor context into isolated child processes (which do not
     # inherit parent monkeypatches).
-    settings.resource_providers = ResourceProviderDeclarations()
+    settings.config["cms"] = {}
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {
@@ -140,7 +139,6 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     from server.app import main as app_main
     from server.app.agent_catalog import load_agent_definitions
     from server.app.configuration import load_application_config
-    from server.app.workflows.resource_providers import load_resource_provider_declarations
     from tests.postgres_support import TEST_DATABASE_URL
 
     # The app boots against the isolated test schema with the real Agent
@@ -148,9 +146,6 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     # would otherwise make startup sync wipe the dev database's agent state.
     real_config = load_application_config(real_root).config
     agent_definitions = load_agent_definitions(real_config.get("agents", {}))
-    # Settings-payload endpoints mask and describe resource bindings with the
-    # real provider declarations.
-    resource_providers = load_resource_provider_declarations(real_config.get("resource_providers"))
 
     def fake_load_settings(
         data_dir: Path | None = None, config_path: Path | None = None
@@ -166,7 +161,6 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             config={},
             database_url=TEST_DATABASE_URL,
             agent_definitions=agent_definitions,
-            resource_providers=resource_providers,
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)

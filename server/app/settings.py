@@ -19,10 +19,6 @@ from server.app.executors.runtime_config import (
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
-from server.app.workflows.resource_providers import (
-    ResourceProviderDeclarations,
-    load_resource_provider_declarations,
-)
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -42,9 +38,6 @@ class Settings:
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
     agent_definitions: dict[str, AgentDefinition] = field(default_factory=dict)
-    resource_providers: ResourceProviderDeclarations = field(
-        default_factory=ResourceProviderDeclarations
-    )
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -149,9 +142,9 @@ def _apply_cms_env_overrides(config: dict[str, Any]) -> None:
 def _normalize_cms_config(config: dict[str, Any]) -> None:
     """Derive the legacy knowledge URL from base_url when present.
 
-    Resource URLs resolve through ``resource_providers`` (see
-    ``workflows.resources.resolve_cms_resource``); ``knowledge_url`` stays as
-    the legacy fallback for ``cms.knowledge.video``'s ``url_key`` (D14).
+    Node code derives endpoint URLs from ``cms.base_url`` (see
+    ``server.app.cms.urls``); ``knowledge_url`` stays as the legacy fallback
+    consumed by the video download node (D14).
     """
     cms = config.get("cms")
     if not isinstance(cms, dict):
@@ -220,8 +213,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         path.mkdir(parents=True, exist_ok=True)
     executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
     agent_definitions = load_agent_definitions(config.get("agents", {}))
-    # Fail fast on invalid resource provider declarations (spec D11).
-    resource_providers = load_resource_provider_declarations(config.get("resource_providers"))
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     token_file = executor_runtime.agent_workers.register_token_file
     if token_file and not executor_runtime.agent_workers.register_token:
@@ -240,7 +231,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         cors=load_cors_settings(config),
         executor_definitions=executor_definitions,
         agent_definitions=agent_definitions,
-        resource_providers=resource_providers,
         executor_runtime=executor_runtime,
     )
 

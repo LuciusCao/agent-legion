@@ -26,7 +26,6 @@ from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
 from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.workflows.resource_providers import ResourceProviderDeclarations
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +118,6 @@ class CodeExecutor:
         settings_config: Mapping[str, Any] | None = None,
         job_db: Any | None = None,
         cancellation_grace_seconds: float = 5,
-        resource_providers: ResourceProviderDeclarations | None = None,
     ) -> None:
         self.id = id
         self._repo_root = Path(repo_root).resolve()
@@ -138,7 +136,6 @@ class CodeExecutor:
             )
         self._capabilities = dict(capabilities)
         self.settings_config = dict(settings_config) if settings_config is not None else {}
-        self.resource_providers = resource_providers or ResourceProviderDeclarations()
         self.job_db = job_db
         self.cancellation_grace_seconds = cancellation_grace_seconds
         self._cancelled: set[str] = set()
@@ -190,7 +187,6 @@ class CodeExecutor:
             "workspace": dict(context.workspace),
             "job": dict(context.job),
             "settings_config": self.settings_config,
-            "resource_providers": self.resource_providers,
             "node_config": dict(context.node_config),
             "cancellation": token,
         }
@@ -349,7 +345,6 @@ def build_code_executor(
         settings_config=deps.settings_config,
         job_db=deps.job_db,
         cancellation_grace_seconds=deps.cancellation_grace_seconds,
-        resource_providers=deps.resource_providers,
     )
 
 

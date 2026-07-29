@@ -14,12 +14,43 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from server.app.cms import urls as cms_urls
 from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail, list_questions_by_knowledge
 from server.app.executors.cancellation import check_cancellation
-from server.app.workflows.cms_helpers import _decode_json_object, _effective_cms_config
 
 logger = logging.getLogger(__name__)
+
+
+def _decode_json_object(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        loaded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
+    """Effective CMS config: global ``cms:`` defaults overridden by node config.
+
+    The node config token arrives already resolved from the vault at dispatch
+    time; it is a workspace-scoped credential, so mark it to win over the
+    env-level global default (same precedence as the retired binding chain).
+    """
+    settings_config = context.get("settings_config")
+    merged: dict[str, Any] = {}
+    if isinstance(settings_config, dict):
+        cms = settings_config.get("cms")
+        if isinstance(cms, dict):
+            merged = dict(cms)
+    node_config = context.get("node_config")
+    if isinstance(node_config, dict):
+        merged.update({key: value for key, value in node_config.items() if value not in (None, "")})
+    if merged.get("token"):
+        merged["token_from_binding"] = True
+    return merged
 
 
 def _intake_input_field(job: dict[str, Any], context: dict[str, Any]) -> str:
@@ -61,21 +92,25 @@ def run(
         "by_knowledge" if knowledge_mode else "by_id",
     )
 
-    cms_config = _effective_cms_config(
-        job, context, resource_key="by_knowledge" if knowledge_mode else "question_detail"
-    )
+    cms_config = _cms_config(context)
     node_config = context.get("node_config")
     if isinstance(node_config, dict) and node_config:
         logger.info("  node_config overrides: %s", sorted(node_config))
 
     questions: list[dict[str, Any]] = []
     if knowledge_mode:
-        list_url = str(cms_config.get("api_url") or cms_config.get("question_list_url") or "")
+        list_url = str(
+            cms_config.get("question_list_url") or cms_urls.question_list_url(cms_config)
+        )
         if not list_url:
             raise RuntimeError(
                 f"knowledge mode requires a CMS question list URL (code={source_id})"
             )
-        detail_url = str(cms_config.get("question_detail_url") or cms_config.get("api_url") or "")
+        detail_url = str(
+            cms_config.get("api_url")
+            or cms_config.get("question_detail_url")
+            or cms_urls.question_detail_url(cms_config)
+        )
         token = get_token(str(cms_config.get("env", "")), cms_config)
         summaries = list_questions_by_knowledge(source_id, list_url, token)
         if not summaries:
@@ -86,7 +121,11 @@ def run(
             detail = fetch_question_detail(summary.question_id, detail_url, token)
             questions.append(_detail_payload(detail, summary.question_id, summary.title))
     else:
-        api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
+        api_url = str(
+            cms_config.get("api_url")
+            or cms_config.get("question_detail_url")
+            or cms_urls.question_detail_url(cms_config)
+        )
         if api_url:
             logger.info("  fetching from CMS: %s", api_url)
             token = get_token(str(cms_config.get("env", "")), cms_config)
