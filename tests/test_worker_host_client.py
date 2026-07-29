@@ -1,4 +1,4 @@
-"""Unit tests for the Worker Host client (worker/host_client.py)."""
+"""Unit tests for the Worker Host client (worker/host_client.py + host_transfer.py)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from worker import host_client
+from worker import host_transfer
 from worker.host_client import Client, WorkerAuthError
 
 
@@ -20,7 +20,7 @@ def _artifact(tmp_path: Path) -> Path:
 
 def _patch_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     sleeps: list[float] = []
-    monkeypatch.setattr(host_client.time, "sleep", sleeps.append)
+    monkeypatch.setattr(host_transfer.time, "sleep", sleeps.append)
     return sleeps
 
 

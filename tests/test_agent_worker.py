@@ -20,6 +20,7 @@ from server.app.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
 from worker.registration_retry import register_with_retry
 from worker.status import ExecutionStatusReporter, read_current_executions, read_runtime_status
+from worker.upload_queue import UploadQueue
 
 
 def _make_bundle(tmp_path: Path, manifest: dict) -> Path:
@@ -52,13 +53,17 @@ def _claim(execution_id: str = "exec-1") -> dict:
 class FakeClient:
     """In-memory stand-in for agent_worker.Client."""
 
-    def __init__(self, bundle: Path, *, heartbeat_status: int = 204) -> None:
+    def __init__(
+        self, bundle: Path, *, heartbeat_status: int = 204, release_status: int = 204
+    ) -> None:
         self._bundle = bundle
         self._heartbeat_status = heartbeat_status
+        self._release_status = release_status
         self.heartbeats = 0
         self.heartbeat_lease_ids: list[str] = []
         self.reports: list[dict] = []
         self.report_lease_ids: list[str] = []
+        self.release_calls = 0
         self.uploads: dict[str, bytes] = {}
 
     def download(self, path: str, destination: Path) -> None:
@@ -83,12 +88,26 @@ class FakeClient:
         self.heartbeat_lease_ids.append(lease_id)
         return self._heartbeat_status
 
-    def report(self, execution_id: str, lease_id: str, metadata: dict, archive: Path) -> None:
+    def release_slot(self, execution_id: str, lease_id: str) -> int:
+        self.release_calls += 1
+        return self._release_status
+
+    def report(
+        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
         self.reports.append(metadata)
         self.report_lease_ids.append(lease_id)
+        return 204, b""
 
 
 def _run(client: FakeClient, work_root: Path, shutdown: threading.Event | None = None) -> None:
+    uploads = UploadQueue(
+        client,
+        ExecutionStatusReporter(None),
+        max_concurrency=2,
+        heartbeat_interval=0.05,
+        stop=threading.Event(),
+    )
     agent_worker.run_execution(
         client,
         _claim(),
@@ -98,7 +117,11 @@ def _run(client: FakeClient, work_root: Path, shutdown: threading.Event | None =
         shutdown or threading.Event(),
         1,
         ExecutionStatusReporter(None),
+        uploads,
+        threading.Semaphore(4),
     )
+    # Uploads are asynchronous now; drain the queue before asserting.
+    uploads.shutdown()
 
 
 def _write_executable(path: Path, body: str) -> str:
@@ -225,6 +248,46 @@ def test_run_execution_replaces_stale_execution_dir(tmp_path: Path) -> None:
     client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
     _run(client, tmp_path / "work")
     assert client.reports[0]["status"] == "completed"
+
+
+def test_run_execution_releases_slot_after_process_exit(tmp_path: Path) -> None:
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        '#!/usr/bin/env python3\nfrom pathlib import Path\nPath("output.json").write_text("{}", encoding="utf-8")\n',
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
+    _run(client, tmp_path / "work")
+    assert client.release_calls == 1
+    assert client.reports[0]["status"] == "completed"
+    # Successful delivery removes the execution dir entirely.
+    assert not (tmp_path / "work" / "exec-1").exists()
+
+
+def test_run_execution_release_404_falls_back_to_inline_ownership(tmp_path: Path) -> None:
+    # Host predates release-slot: the upload must still be delivered.
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        '#!/usr/bin/env python3\nfrom pathlib import Path\nPath("output.json").write_text("{}", encoding="utf-8")\n',
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])), release_status=404)
+    _run(client, tmp_path / "work")
+    assert client.release_calls == 1
+    assert len(client.reports) == 1
+    assert client.reports[0]["status"] == "completed"
+
+
+def test_run_execution_release_409_discards_result(tmp_path: Path) -> None:
+    # Lease already gone (Host swept/requeued): the result is moot — never
+    # upload it, and clean the execution dir locally.
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        '#!/usr/bin/env python3\nfrom pathlib import Path\nPath("output.json").write_text("{}", encoding="utf-8")\n',
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])), release_status=409)
+    _run(client, tmp_path / "work")
+    assert client.release_calls == 1
+    assert client.reports == []
+    assert not (tmp_path / "work" / "exec-1").exists()
 
 
 def test_clean_work_root_removes_dirs_keeps_files(tmp_path: Path) -> None:
@@ -446,7 +509,7 @@ def _run_main(
         "signal",
         lambda sig, handler: handlers.setdefault(sig, handler),
     )
-    monkeypatch.setattr(agent_worker, "Client", lambda host: fake)
+    monkeypatch.setattr(agent_worker, "Client", lambda host, **kwargs: fake)
     fake.register = lambda config, token: "worker-token"  # type: ignore[attr-defined]
     config_path = _write_main_config(tmp_path)
     if config_updates:
@@ -530,7 +593,16 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
         return _claim(execution_id)
 
     def block_execution(  # type: ignore[no-untyped-def]
-        client, claimed, work_root, environment, interval, stop, grace, status
+        client,
+        claimed,
+        work_root,
+        environment,
+        interval,
+        stop,
+        grace,
+        status,
+        uploads,
+        download_slots,
     ):
         while not stop.is_set() and not releases[claimed["execution_id"]].wait(0.01):
             pass
@@ -699,6 +771,13 @@ def test_run_execution_publishes_status_and_clears_it(
         _make_bundle(tmp_path, _manifest([script, str(status_path), str(captured)]))
     )
     reporter = ExecutionStatusReporter(status_path)
+    uploads = UploadQueue(
+        client,
+        reporter,
+        max_concurrency=2,
+        heartbeat_interval=0.05,
+        stop=threading.Event(),
+    )
     agent_worker.run_execution(
         client,
         _claim(),
@@ -708,7 +787,10 @@ def test_run_execution_publishes_status_and_clears_it(
         threading.Event(),
         1,
         reporter,
+        uploads,
+        threading.Semaphore(4),
     )
+    uploads.shutdown()
     snapshot = json.loads(captured.read_text(encoding="utf-8"))
     assert snapshot["executions"]["exec-1"]["phase"] == "running"
     assert snapshot["executions"]["exec-1"]["node_key"] == "node_a"

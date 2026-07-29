@@ -602,3 +602,138 @@ def test_claim_records_job_update_for_live_list(job_db) -> None:
     assert broker.claim("worker-1") is not None
 
     assert buffer.records == [("test-workspace", "job-1")]
+
+
+def test_release_slot_frees_worker_and_workspace_capacity(job_db) -> None:
+    """reporting releases BOTH capacity domains: the worker slot and the
+    workspace slot are counted from state='claimed' only."""
+    _seed_request(job_db, job_id="job-1", limit=1)
+    _seed_request(job_db, job_id="job-2", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    registry.issue_token(
+        worker_id="worker-1",
+        name="worker",
+        runtimes=["pi"],
+        max_concurrency=1,
+        labels={"arch": "arm64"},
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    first = broker.claim("worker-1")
+    assert first is not None
+    assert broker.claim("worker-1") is None  # worker capacity exhausted
+
+    assert broker.release_slot(first.execution_id, "worker-1", first.lease_id) is True
+
+    second = broker.claim("worker-1")
+    assert second is not None
+    assert second.execution_id != first.execution_id
+
+
+def test_release_slot_requires_matching_lease_and_state(job_db) -> None:
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+
+    assert broker.release_slot(claimed.execution_id, "worker-1", "wrong-lease") is False
+    assert broker.release_slot(claimed.execution_id, "worker-2", claimed.lease_id) is False
+    # Still claimed afterwards: capacity is NOT released by failed attempts.
+    assert broker.claim("worker-1") is None
+
+    assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
+    # A second release is a no-op (already reporting, not claimed).
+    assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is False
+
+
+def test_heartbeat_and_mark_done_accept_reporting_state(job_db) -> None:
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
+
+    assert broker.heartbeat(claimed.execution_id, "worker-1", claimed.lease_id) is True
+    assert broker.claimed_payload(claimed.execution_id, "worker-1") is not None
+    assert (
+        broker.mark_done(
+            claimed.execution_id, "worker-1", claimed.lease_id, {"status": "completed"}
+        )
+        == claimed.lease_id
+    )
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where execution_id=?",
+            (claimed.execution_id,),
+        ).fetchone()
+    assert row["state"] == "done"
+
+
+def test_reporting_blocks_duplicate_enqueue(job_db) -> None:
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
+
+    assert broker.has_active_request("job-1", "generate") is True
+    # The partial unique index covers reporting: a second enqueue for the
+    # same node is rejected while the first result is still uploading.
+    assert (
+        broker.enqueue(
+            AgentExecutionRequest(
+                workspace_id="test-workspace",
+                job_id="job-1",
+                workflow_key="questions",
+                node_key="generate",
+                agent_id="generator-v1",
+                agent_definition_hash=_seeded_definition_hash(),
+                manifest={"job_id": "job-1"},
+            )
+        )
+        is None
+    )
+
+
+def _seeded_definition_hash() -> str:
+    """Match the definition registered by _seed_request (labels included)."""
+    return AgentDefinition(
+        capability="generate",
+        runtime="pi",
+        skill="question/generate",
+        requires_labels={"arch": "arm64"},
+    ).definition_hash()
+
+
+def test_sweep_requeues_reporting_with_expired_heartbeat(job_db) -> None:
+    """A Worker that dies mid-upload is the same as dying mid-run: the claim
+    is requeued and the half-finished node run is failed."""
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=90)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            (datetime.now(UTC) - timedelta(seconds=200), claimed.execution_id),
+        )
+
+    assert broker.sweep_expired_claims() == [claimed.execution_id]
+
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select state, worker_id, lease_id from agent_execution_requests where execution_id=?",
+            (claimed.execution_id,),
+        ).fetchone()
+    assert row["state"] == "queued"
+    assert row["worker_id"] is None
+    assert job_db.get_job_node("job-1", "generate")["status"] == "pending"

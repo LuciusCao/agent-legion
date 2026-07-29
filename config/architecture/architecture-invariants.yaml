@@ -316,6 +316,24 @@ invariants:
         target: tests/full/test_agent_worker_control_plane.py::test_scoped_register_token_lifecycle
         gate: full
 
+  - id: EXEC-REPORTING-001
+    statement: "Agent execution capacity (Worker machine domain and Workspace domain) is accounted from agent_execution_requests state='claimed' only; a Worker whose Agent process exited flips the request to 'reporting' via release-slot, which frees capacity immediately while the lease stays owned (heartbeat/claimed_payload/mark_done accept 'reporting', the one-active-node unique index and has_active_request block re-enqueue, and the expiry sweep requeues stale 'reporting' claims exactly like 'claimed' ones)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py::test_release_slot_requires_and_validates_lease_id
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_worker.py
+        gate: quick
+      - kind: integration
+        target: tests/test_worker_upload_queue.py
+        gate: quick
+
   - id: EXEC-KIND-001
     statement: "Executor kinds must resolve through the kinds registry (register_kind/build_executor); isinstance dispatch chains over executor config types are forbidden in registry.py."
     owner: workspace-executor

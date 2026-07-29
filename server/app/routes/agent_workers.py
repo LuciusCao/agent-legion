@@ -7,7 +7,6 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
-from pydantic import BaseModel, Field
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_completion import AgentCompletionHandler
@@ -15,107 +14,24 @@ from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import parse_result_metadata
+from server.app.routes.agent_workers_contracts import (
+    AgentClaimResponse,
+    AgentRegisterTokenCreatedResponse,
+    AgentRegisterTokenRevokeResponse,
+    AgentRegisterTokensResponse,
+    AgentWorkerRevokeResponse,
+    AgentWorkersResponse,
+    AgentWorkerSummary,
+    ClaimAgentExecutionRequest,
+    CreateAgentRegisterTokenRequest,
+    RegisterAgentWorkerRequest,
+    RegisterAgentWorkerResponse,
+)
 from server.app.services.ops_metrics import OpsMetricsService
 from server.app.settings import Settings
 
 _SAFE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _LEASE_HEADER = "x-agent-lease-id"
-
-
-class RegisterAgentWorkerRequest(BaseModel):
-    worker_id: str = Field(min_length=1, max_length=64)
-    name: str = Field(default="", max_length=128)
-    runtimes: list[str] = Field(min_length=1)
-    capabilities: list[str] = Field(default_factory=list)
-    models: list[dict[str, str]] = Field(default_factory=list)
-    max_concurrency: int = Field(gt=0, le=1024)
-    labels: dict[str, Any] = Field(default_factory=dict)
-    protocol_version: int = Field(default=1, ge=1)
-    # Informational only: no agent_workers column stores it yet.
-    image_version: str = Field(default="", max_length=128)
-
-
-class RegisterAgentWorkerResponse(BaseModel):
-    worker_token: str
-    # Server-resolved workspace admission scope; [] means all workspaces.
-    allowed_workspaces: list[str]
-
-
-class CreateAgentRegisterTokenRequest(BaseModel):
-    workspace_id: str | None = Field(default=None, max_length=128)
-    label: str = Field(default="", max_length=128)
-
-
-class AgentRegisterTokenCreatedResponse(BaseModel):
-    token_id: str
-    # Plaintext, returned exactly once at issuance.
-    register_token: str
-    workspace_id: str | None
-    label: str
-
-
-class AgentRegisterTokenSummary(BaseModel):
-    token_id: str
-    workspace_id: str | None
-    label: str
-    created_at: str
-    revoked: bool
-
-
-class AgentRegisterTokensResponse(BaseModel):
-    tokens: list[AgentRegisterTokenSummary]
-
-
-class AgentRegisterTokenRevokeResponse(BaseModel):
-    revoked: bool
-
-
-class ClaimAgentExecutionRequest(BaseModel):
-    worker_id: str = Field(min_length=1, max_length=64)
-    # Live re-declaration of the worker's machine-wide capacity: the Host
-    # records it as the enforced max_concurrency, so dynamic resizes on the
-    # worker take effect without re-registration.
-    max_concurrency: int | None = Field(default=None, gt=0, le=1024)
-
-
-class AgentWorkerSummary(BaseModel):
-    worker_id: str
-    name: str
-    runtimes: list[str]
-    capabilities: list[str]
-    models: list[dict[str, str]]
-    max_concurrency: int
-    labels: dict[str, str]
-    protocol_version: int
-    # Server-side workspace admission scope; [] means all workspaces.
-    allowed_workspaces: list[str]
-    registered_at: str
-    last_seen_at: str
-    # True while the Worker's last authenticated call is within the online
-    # threshold; registered-but-silent Workers show as offline.
-    online: bool
-    revoked: bool
-
-
-class AgentWorkersResponse(BaseModel):
-    workers: list[AgentWorkerSummary]
-
-
-class AgentWorkerRevokeResponse(BaseModel):
-    worker_id: str
-    revoked: bool
-
-
-class AgentClaimResponse(BaseModel):
-    execution_id: str
-    lease_id: str
-    workspace_id: str
-    job_id: str
-    workflow_key: str
-    node_key: str
-    agent_id: str
-    manifest: dict[str, Any]
-    bundle_url: str
 
 
 def create_agent_workers_router(
@@ -297,6 +213,14 @@ def create_agent_workers_router(
         worker = authorize_worker(request)
         lease_id = require_lease_id(request)
         if not broker.heartbeat(execution_id, str(worker["worker_id"]), lease_id):
+            raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
+        return Response(status_code=204)
+
+    @router.post("/agent-executions/{execution_id}/release-slot", status_code=204)
+    def release_slot(execution_id: str, request: Request) -> Response:
+        worker = authorize_worker(request)
+        lease_id = require_lease_id(request)
+        if not broker.release_slot(execution_id, str(worker["worker_id"]), lease_id):
             raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
         return Response(status_code=204)
 

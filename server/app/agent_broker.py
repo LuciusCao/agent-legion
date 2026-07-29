@@ -1,8 +1,8 @@
 """PostgreSQL Agent queue protocol: enqueue, claim, heartbeat, result close.
 
 The claim transaction lives in ``_agent_broker_claim.py``, the periodic
-sweeps in ``_agent_broker_sweepers.py``, and bundle-dir GC in
-``_agent_broker_reaper.py`` — mirroring the ``executors/_lease_*.py`` split.
+sweeps in ``_agent_broker_sweepers.py``, slot release in
+``_agent_broker_release.py``, bundle-dir GC in ``_agent_broker_reaper.py``.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from psycopg import IntegrityError
 
-from server.app import _agent_broker_reaper, _agent_broker_sweepers
+from server.app import _agent_broker_reaper, _agent_broker_release, _agent_broker_sweepers
 from server.app._agent_broker_claim import (
     AgentClaim,
     ClaimRacedError,
@@ -90,7 +90,7 @@ class AgentExecutionBroker:
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select 1 from agent_execution_requests"
-                " where job_id=? and node_key=? and state in ('queued', 'claimed') limit 1",
+                " where job_id=? and node_key=? and state in ('queued', 'claimed', 'reporting') limit 1",
                 (job_id, node_key),
             ).fetchone()
         return row is not None
@@ -206,6 +206,10 @@ class AgentExecutionBroker:
         if self.agent_status is not None:
             self.agent_status.set_idle(worker_id, workspace_id=workspace_id)
 
+    def release_slot(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
+        """Flip claimed -> reporting, freeing execution capacity (lease stays owned)."""
+        return _agent_broker_release.release_slot(self, execution_id, worker_id, lease_id)
+
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Renew the lease; bound to the current lease_id so zombie attempts
         from a requeued execution cannot keep a re-claimed lease alive.
@@ -216,7 +220,8 @@ class AgentExecutionBroker:
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id from agent_execution_requests"
-                " where execution_id=? and worker_id=? and lease_id=? and state='claimed'"
+                " where execution_id=? and worker_id=? and lease_id=?"
+                " and state in ('claimed', 'reporting')"
                 " for update",
                 (execution_id, worker_id, lease_id),
             ).fetchone()
@@ -239,7 +244,7 @@ class AgentExecutionBroker:
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select manifest_json, lease_id, job_id, node_key from agent_execution_requests"
-                " where execution_id=? and worker_id=? and state='claimed'",
+                " where execution_id=? and worker_id=? and state in ('claimed', 'reporting')",
                 (execution_id, worker_id),
             ).fetchone()
         if row is None:
@@ -262,7 +267,8 @@ class AgentExecutionBroker:
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id, agent_id, workspace_id from agent_execution_requests"
-                " where execution_id=? and worker_id=? and lease_id=? and state='claimed'"
+                " where execution_id=? and worker_id=? and lease_id=?"
+                " and state in ('claimed', 'reporting')"
                 " for update",
                 (execution_id, worker_id, lease_id),
             ).fetchone()

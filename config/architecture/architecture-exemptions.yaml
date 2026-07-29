@@ -9,6 +9,11 @@ exemptions:
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+- check: architecture.route_response_model
+  path: server/app/routes/agent_workers.py:release_slot
+  reason: Agent Worker release-slot acknowledgement returns an empty 204 response by protocol.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
 - check: architecture.scheduler_threadpool
   path: server/app/workflow_worker_thread.py:self._pools[executor_id]
   reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor

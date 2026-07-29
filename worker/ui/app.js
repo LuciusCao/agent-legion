@@ -168,11 +168,11 @@ export function groupExecutions(executions = []) {
 }
 
 export function phaseProgress(phase) {
-  return { claimed: 16, downloading: 34, running: 68, uploading: 88 }[phase] ?? 12;
+  return { claimed: 16, downloading: 34, running: 68, queued_upload: 80, uploading: 88 }[phase] ?? 12;
 }
 
 function phaseLabel(phase) {
-  return { claimed: "已领取", downloading: "下载中", running: "运行中", uploading: "上传中" }[phase] || phase || "未知";
+  return { claimed: "已领取", downloading: "下载中", running: "运行中", queued_upload: "等待上传", uploading: "上传中" }[phase] || phase || "未知";
 }
 
 function shortenId(value) {
