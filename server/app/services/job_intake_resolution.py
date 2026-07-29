@@ -12,17 +12,6 @@ from server.app.workflows.resources import resolve_cms_resource
 
 logger = logging.getLogger(__name__)
 
-RESOLVER_MAP: dict[tuple[str, str], str] = {
-    ("question", "direct_ids"): "direct.question_ids",
-    ("question", "by_knowledge"): "cms.questions_by_knowledge",
-    ("question", "batch_by_ids"): "cms.question_ids",
-    ("question", "batch_by_knowledge"): "cms.questions_by_knowledge",
-    ("video", "direct_ids"): "direct.video_ids",
-    ("video", "by_knowledge"): "cms.videos_by_knowledge",
-    ("video", "batch_by_urls"): "direct.video_urls",
-    ("video", "batch_by_knowledge"): "cms.knowledge_video",
-}
-
 
 def candidate(
     entity_type: str,

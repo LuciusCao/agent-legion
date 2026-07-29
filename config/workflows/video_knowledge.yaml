@@ -15,7 +15,8 @@ nodes:
     capability: download_video
     after: []
     inputs: [video_input.json]
-    outputs: [source.mp4]
+    outputs: [source.mp4, video_input.json]
+    resources: [knowledge_video]
   transcribe:
     label: 生成字幕
     capability: transcribe_video

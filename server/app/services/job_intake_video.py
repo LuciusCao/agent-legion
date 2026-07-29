@@ -5,8 +5,6 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from server.app.cms.client import get_token
-from server.app.cms.knowledge import lookup_knowledge_video
 from server.app.security import validate_download_url
 from server.app.services.job_errors import InvalidOperationError, UnsupportedOperationError
 from server.app.services.job_intake_resolution import candidate
@@ -43,41 +41,32 @@ def resolve_cms_video_candidates(
     entity: str,
     input_values: list[str],
     source_kind: str,
-    resolver: str,
-    cms_config: dict[str, Any],
-    dedup_state: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
+    """Build opaque knowledge-video candidates without calling CMS.
+
+    Node-phase resolution: the download DAG node resolves ``source_ref``
+    against the CMS at execution time (binding + vault chain), so intake
+    only fans out one candidate per knowledge code, deduped by code.
+    """
     if entity != "video":
         raise UnsupportedOperationError(f"{entity} resolver not yet implemented")
 
-    if resolver != "cms.knowledge_video":
-        raise UnsupportedOperationError(f"Unsupported video resolver: {resolver}")
-
-    api_url = cms_config.get("knowledge_url")
-    token = get_token(str(cms_config.get("env", "")), cms_config)
-
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
-    seen_urls = dedup_state.setdefault("urls", set()) if dedup_state is not None else set()
     for code in input_values:
-        lookup = lookup_knowledge_video(code, api_url, token)
-        if lookup.status == "not_found" or code in seen:
-            continue
-        url = str(lookup.url or "").strip()
-        if url and url in seen_urls:
-            logger.info("Skipping knowledge_code=%s: duplicate video URL in batch", code)
+        if code in seen:
             continue
         seen.add(code)
-        seen_urls.add(url)
         candidates.append(
             candidate(
                 "video",
                 code,
-                lookup.title or f"Video {code}",
+                f"Video {code}",
                 source_kind,
                 code,
-                source_url=lookup.url,
-                source_uuid=lookup.source_uuid,
+                source_url="",
+                source_uuid="",
+                source_ref=code,
                 content_type="knowledge",
             )
         )
@@ -104,6 +93,7 @@ def write_video_input(job_dir: Path, candidate: dict[str, Any]) -> None:
         "external_id": str(candidate.get("external_id") or candidate["entity_id"]),
         "source_uuid": str(candidate.get("source_uuid") or ""),
         "source_url": str(candidate.get("source_url") or ""),
+        "source_ref": str(candidate.get("source_ref") or ""),
         "title": str(candidate["title"]),
     }
     job_dir.mkdir(parents=True, exist_ok=True)
