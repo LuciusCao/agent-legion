@@ -73,9 +73,15 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
         html = (ui_dir / "index.html").read_text(encoding="utf-8")
         return HTMLResponse(html.replace('= "__WORKER_CONTROL_TOKEN__"', f'= "{token}"'))
 
-    @app.get("/assets/{name}", include_in_schema=False)
+    @app.get("/assets/{name:path}", include_in_schema=False)
     def asset(name: str) -> FileResponse:
-        if name not in {"app.js", "styles.css", "icons.svg"}:
+        if name not in {
+            "app.js",
+            "styles.css",
+            "icons.svg",
+            "vendor/uPlot.iife.min.js",
+            "vendor/uPlot.min.css",
+        }:
             raise HTTPException(status_code=404, detail="asset not found")
         media_type = {
             ".js": "text/javascript",

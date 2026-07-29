@@ -269,11 +269,11 @@ def test_sample_once_upserts_per_worker_rows_idempotently() -> None:
     assert [r["worker_id"] for r in rows] == ["", "w-1"]
 
 
-def test_query_series_minute_returns_raw_rows_in_order() -> None:
+def test_query_series_6h_returns_raw_minute_rows_in_order() -> None:
     now = datetime.now(UTC).replace(second=0, microsecond=0)
     _insert_sample(now - timedelta(minutes=3), online_workers=2, total_tokens=30)
     _insert_sample(now - timedelta(minutes=1), online_workers=1, total_tokens=10)
-    rows = _service().query_series("minute", hours=6, days=7)
+    rows = _service().query_series("6h")
     assert [r["total_tokens"] for r in rows] == [30, 10]
     assert rows[0]["online_workers"] == 2
     assert rows[0]["online_workers_max"] == 2
@@ -282,35 +282,36 @@ def test_query_series_minute_returns_raw_rows_in_order() -> None:
     assert datetime.fromisoformat(rows[0]["bucket_start"]) == now - timedelta(minutes=3)
 
 
-def test_query_series_minute_window_excludes_old_rows() -> None:
+def test_query_series_6h_window_excludes_old_rows() -> None:
     now = datetime.now(UTC).replace(second=0, microsecond=0)
-    _insert_sample(now - timedelta(hours=2), total_tokens=99)
+    _insert_sample(now - timedelta(hours=7), total_tokens=99)
     _insert_sample(now - timedelta(minutes=30), total_tokens=1)
-    rows = _service().query_series("minute", hours=1, days=7)
+    rows = _service().query_series("6h")
     assert [r["total_tokens"] for r in rows] == [1]
 
 
-def test_query_series_hour_rolls_up_sum_avg_max() -> None:
+def test_query_series_24h_rolls_up_into_5min_bins() -> None:
     now = datetime.now(UTC).replace(second=0, microsecond=0)
-    hour_start = now.replace(minute=0)
+    bin_start = now - timedelta(minutes=now.minute % 5)
+    # 同一 5 分钟桶内的两个采样（如 10:01 与 10:04）聚合为一行
     _insert_sample(
-        hour_start + timedelta(minutes=1),
+        bin_start + timedelta(minutes=1),
         online_workers=2,
         active_executions=1,
         input_tokens=10,
         total_tokens=20,
     )
     _insert_sample(
-        hour_start + timedelta(minutes=2),
+        bin_start + timedelta(minutes=4),
         online_workers=4,
         active_executions=3,
         input_tokens=30,
         total_tokens=60,
     )
-    rows = _service().query_series("hour", hours=6, days=7)
+    rows = _service().query_series("24h")
     assert len(rows) == 1
     row = rows[0]
-    assert datetime.fromisoformat(row["bucket_start"]) == hour_start
+    assert datetime.fromisoformat(row["bucket_start"]) == bin_start
     assert row["online_workers"] == 3
     assert row["online_workers_max"] == 4
     assert row["active_executions"] == 2
@@ -319,16 +320,28 @@ def test_query_series_hour_rolls_up_sum_avg_max() -> None:
     assert row["total_tokens"] == 80
 
 
-def test_query_series_day_rolls_up_by_day_window() -> None:
+def test_query_series_24h_bin_boundary_splits_adjacent_bins() -> None:
     now = datetime.now(UTC).replace(second=0, microsecond=0)
+    bin_start = now - timedelta(minutes=now.minute % 5)
+    _insert_sample(bin_start - timedelta(minutes=1), total_tokens=10)  # 上一桶
+    _insert_sample(bin_start, total_tokens=20)  # 当前桶起点
+    rows = _service().query_series("24h")
+    assert [r["total_tokens"] for r in rows] == [10, 20]
+    assert datetime.fromisoformat(rows[0]["bucket_start"]) == bin_start - timedelta(minutes=5)
+    assert datetime.fromisoformat(rows[1]["bucket_start"]) == bin_start
+
+
+def test_query_series_30d_rolls_up_into_4hour_bins() -> None:
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    # 4 小时桶边界对齐 00/04/08/12/16/20 UTC：05:23 落入 04:00 桶
     day_start = now.replace(hour=0, minute=0)
-    _insert_sample(day_start + timedelta(hours=1), online_workers=1, total_tokens=5)
-    _insert_sample(day_start + timedelta(hours=2), online_workers=5, total_tokens=15)
-    _insert_sample(day_start - timedelta(days=10), total_tokens=999)
-    rows = _service().query_series("day", hours=6, days=7)
+    _insert_sample(day_start + timedelta(hours=5, minutes=23), online_workers=1, total_tokens=5)
+    _insert_sample(day_start + timedelta(hours=6), online_workers=5, total_tokens=15)
+    _insert_sample(day_start - timedelta(days=31), total_tokens=999)
+    rows = _service().query_series("30d")
     assert len(rows) == 1
     row = rows[0]
-    assert datetime.fromisoformat(row["bucket_start"]) == day_start
+    assert datetime.fromisoformat(row["bucket_start"]) == day_start + timedelta(hours=4)
     assert row["online_workers"] == 3
     assert row["online_workers_max"] == 5
     assert row["total_tokens"] == 20
@@ -339,20 +352,20 @@ def test_query_series_filters_by_worker_id() -> None:
     _insert_sample(now, online_workers=2, total_tokens=35)
     _insert_sample(now, worker_id="w-1", online_workers=1, total_tokens=10)
     _insert_sample(now, worker_id="w-2", online_workers=1, total_tokens=20)
-    global_rows = _service().query_series("minute", hours=6, days=7)
+    global_rows = _service().query_series("6h")
     assert [r["total_tokens"] for r in global_rows] == [35]
     assert [r["online_workers"] for r in global_rows] == [2]
-    worker_rows = _service().query_series("minute", hours=6, days=7, worker_id="w-1")
+    worker_rows = _service().query_series("6h", worker_id="w-1")
     assert [r["total_tokens"] for r in worker_rows] == [10]
     assert worker_rows[0]["online_workers"] == 1
-    assert _service().query_series("minute", hours=6, days=7, worker_id="w-unknown") == []
+    assert _service().query_series("6h", worker_id="w-unknown") == []
 
 
-def test_query_series_hour_rolls_up_per_worker_rows() -> None:
+def test_query_series_24h_rolls_up_per_worker_rows() -> None:
     now = datetime.now(UTC).replace(second=0, microsecond=0)
-    hour_start = now.replace(minute=0)
+    bin_start = now - timedelta(minutes=now.minute % 5)
     _insert_sample(
-        hour_start + timedelta(minutes=1),
+        bin_start + timedelta(minutes=1),
         worker_id="w-1",
         online_workers=1,
         active_executions=1,
@@ -360,20 +373,20 @@ def test_query_series_hour_rolls_up_per_worker_rows() -> None:
         total_tokens=20,
     )
     _insert_sample(
-        hour_start + timedelta(minutes=2),
+        bin_start + timedelta(minutes=2),
         worker_id="w-1",
         online_workers=0,
         active_executions=3,
         input_tokens=30,
         total_tokens=60,
     )
-    # Other scopes in the same hour must not leak into the w-1 rollup.
-    _insert_sample(hour_start + timedelta(minutes=1), worker_id="w-2", total_tokens=999)
-    _insert_sample(hour_start + timedelta(minutes=1), total_tokens=999)
-    rows = _service().query_series("hour", hours=6, days=7, worker_id="w-1")
+    # Other scopes in the same bin must not leak into the w-1 rollup.
+    _insert_sample(bin_start + timedelta(minutes=1), worker_id="w-2", total_tokens=999)
+    _insert_sample(bin_start + timedelta(minutes=1), total_tokens=999)
+    rows = _service().query_series("24h", worker_id="w-1")
     assert len(rows) == 1
     row = rows[0]
-    assert datetime.fromisoformat(row["bucket_start"]) == hour_start
+    assert datetime.fromisoformat(row["bucket_start"]) == bin_start
     assert row["online_workers"] == 1
     assert row["online_workers_max"] == 1
     assert row["active_executions"] == 2

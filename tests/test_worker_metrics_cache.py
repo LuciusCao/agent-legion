@@ -21,11 +21,11 @@ class FakeMetricsClient:
     token = "must-never-reach-the-cache"
 
     def __init__(self, failing: str | None = None) -> None:
-        self.calls: list[tuple[str, int, int]] = []
+        self.calls: list[str] = []
         self.failing = failing
 
-    def get_ops_metrics(self, granularity: str, hours: int, days: int) -> dict[str, Any]:
-        self.calls.append((granularity, hours, days))
+    def get_ops_metrics(self, granularity: str) -> dict[str, Any]:
+        self.calls.append(granularity)
         if granularity == self.failing:
             raise RuntimeError("Host unavailable")
         return {"granularity": granularity, "buckets": []}
@@ -41,7 +41,7 @@ def test_refresh_publishes_fixed_windows_without_worker_token(tmp_path: Path) ->
 
     assert client.calls == list(METRIC_WINDOWS)
     payload = read_metrics_cache(path)
-    assert set(payload["snapshots"]) == {"minute:6", "hour:24", "day:7"}
+    assert set(payload["snapshots"]) == {"6h", "24h", "30d"}
     assert payload["error"] is None
     assert client.token not in path.read_text(encoding="utf-8")
 
@@ -50,18 +50,18 @@ def test_refresh_preserves_successful_windows_and_reports_partial_error(tmp_path
     path = tmp_path / "ops_metrics.json"
     cache = WorkerMetricsCache(path, refresh_seconds=0)
     cache.refresh(FakeMetricsClient(), now=100)
-    cache.refresh(FakeMetricsClient(failing="hour"), now=101)
+    cache.refresh(FakeMetricsClient(failing="24h"), now=101)
 
     payload = read_metrics_cache(path)
 
-    assert payload["snapshots"][metrics_cache_key("hour", 24, 7)]["granularity"] == "hour"
-    assert payload["error"] == "hour: Host unavailable"
+    assert payload["snapshots"][metrics_cache_key("24h")]["granularity"] == "24h"
+    assert payload["error"] == "24h: Host unavailable"
 
 
 def test_read_metrics_cache_ignores_dead_writer_and_malformed_file(tmp_path: Path) -> None:
     path = tmp_path / "ops_metrics.json"
     path.write_text(
-        json.dumps({"pid": 99999999, "snapshots": {"minute:6": {"secret": True}}}),
+        json.dumps({"pid": 99999999, "snapshots": {"6h": {"secret": True}}}),
         encoding="utf-8",
     )
     assert read_metrics_cache(path)["snapshots"] == {}
@@ -86,9 +86,9 @@ def test_sync_host_status_refreshes_metrics_after_worker_authentication(tmp_path
     assert worker == {"worker_id": "worker-1", "revoked": False}
     assert read_runtime_status(status_path)["remote"]["registered"] is True
     assert set(read_metrics_cache(metrics_path)["snapshots"]) == {
-        "minute:6",
-        "hour:24",
-        "day:7",
+        "6h",
+        "24h",
+        "30d",
     }
 
 
