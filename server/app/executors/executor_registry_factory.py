@@ -18,7 +18,6 @@ def build_executor_registry(
     if skill_manager is None:
         skill_manager = build_skill_manager(settings.root_dir)
     runtime = RuntimeDependencies(
-        local_handlers=build_local_handlers(settings),
         pi_runtime=settings.executor_runtime.workflows.pi,
         skill_manager=skill_manager,
         openclaw_runtime=settings.executor_runtime.openclaw,
@@ -27,5 +26,6 @@ def build_executor_registry(
         job_db=job_db,
         cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
         artifact_store=artifact_store,
+        repo_root=settings.root_dir,
     )
     return ExecutorRegistry.build(settings.executor_definitions, runtime)

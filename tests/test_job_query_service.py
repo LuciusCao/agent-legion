@@ -333,13 +333,13 @@ def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_serv
     job_db.replace_workspace_executor_configuration(
         workspace["id"],
         allocations=[
-            {"executor_id": "local-default", "concurrency_limit": 1},
+            {"executor_id": "code-default", "concurrency_limit": 1},
         ],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             },
         ],
         node_limits=[],
@@ -350,8 +350,8 @@ def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_serv
     nodes = {node["node_key"]: node for node in detail["nodes"]}
     assert nodes["question_understanding"]["executor_id"] is None
     assert nodes["question_understanding"]["executor_kind"] is None
-    assert nodes["assemble_package"]["executor_id"] == "local-default"
-    assert nodes["assemble_package"]["executor_kind"] == "local"
+    assert nodes["assemble_package"]["executor_id"] == "code-default"
+    assert nodes["assemble_package"]["executor_kind"] == "code"
 
 
 def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_service, job_db):
@@ -376,13 +376,13 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
     job_db.replace_workspace_executor_configuration(
         workspace["id"],
         allocations=[
-            {"executor_id": "local-default", "concurrency_limit": 1},
+            {"executor_id": "code-default", "concurrency_limit": 1},
         ],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             },
         ],
         node_limits=[],
@@ -391,8 +391,8 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
     detail = query_service.detail(job["id"])
 
     node = detail["nodes"][0]
-    assert node["executor_id"] == "local-default"
-    assert node["executor_kind"] == "local"
+    assert node["executor_id"] == "code-default"
+    assert node["executor_kind"] == "code"
 
 
 def test_workspace_run_service_filters_runs(query_service, job_db):

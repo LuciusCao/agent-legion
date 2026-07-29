@@ -342,8 +342,8 @@ def test_rejects_scheduler_threadpool_keyed_by_workspace(tmp_path):
 
 def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
     write(
-        tmp_path / "server/app/executors/local.py",
-        "class LocalExecutor:\n"
+        tmp_path / "server/app/executors/code.py",
+        "class CodeExecutor:\n"
         "    def __init__(self, settings):\n"
         "        self.config = settings.config['executors']\n",
     )

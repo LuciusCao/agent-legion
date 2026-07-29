@@ -304,7 +304,7 @@ def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
         "data_dir: data\n"
         "executors:\n"
         "  bad-exec:\n"
-        "    kind: local\n"
+        "    kind: code\n"
         "    global_capacity: 0\n"
         "    capabilities: {}\n",
         encoding="utf-8",
@@ -342,20 +342,20 @@ def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
     config_path.write_text(
         "data_dir: data\n"
         "executors:\n"
-        "  local-default:\n"
-        "    kind: local\n"
+        "  code-default:\n"
+        "    kind: code\n"
         "    global_capacity: 4\n"
         "    capabilities:\n"
         "      fetch_questions:\n"
-        "        handler: question_comprehension_info.fetch_questions\n",
+        "        path: workflow_nodes/question_intake.py\n",
         encoding="utf-8",
     )
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert "local-default" in settings.executor_definitions
-    assert settings.executor_definitions["local-default"].kind == "local"
-    assert settings.executor_definitions["local-default"].global_capacity == 4
+    assert "code-default" in settings.executor_definitions
+    assert settings.executor_definitions["code-default"].kind == "code"
+    assert settings.executor_definitions["code-default"].global_capacity == 4
 
 
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):

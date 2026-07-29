@@ -22,9 +22,9 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 
 class PerWorkspaceBlockingExecutor:
-    """Fake local executor that blocks on a per-workspace event."""
+    """Fake code executor that blocks on a per-workspace event."""
 
-    kind = "local"
+    kind = "code"
 
     def __init__(self, executor_id: str, events: dict[str, threading.Event]) -> None:
         self.id = executor_id
@@ -61,7 +61,7 @@ def _poll_counts_until(worker, predicate, timeout: float = 15.0) -> dict[str, in
     counts: dict[str, int] = {}
     while time.monotonic() < deadline:
         worker._poll()
-        counts = _active_counts(worker, "local-default")
+        counts = _active_counts(worker, "code-default")
         if predicate(counts):
             return counts
         time.sleep(0.01)
@@ -99,16 +99,16 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
         ws_b["id"]: threading.Event(),
         ws_c["id"]: threading.Event(),
     }
-    executor = PerWorkspaceBlockingExecutor("local-default", events=events)
+    executor = PerWorkspaceBlockingExecutor("code-default", events=events)
     registry = make_registry(
-        {"local-default": executor},
-        {"local-default": local_def(10, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": local_def(10, {"fetch"})},
     )
     definition = make_definition([local_node("fetch")])
 
     for ws, limit in [(ws_a, 8), (ws_b, 6), (ws_c, 2)]:
-        allocate(job_db, ws["id"], "local-default", limit)
-        bind(job_db, ws["id"], "test", "fetch", "local-default")
+        allocate(job_db, ws["id"], "code-default", limit)
+        bind(job_db, ws["id"], "test", "fetch", "code-default")
 
     for i in range(8):
         job_db.create_job(
@@ -125,7 +125,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
 
     counts = _poll_counts_until(worker, lambda c: c.get(ws_a["id"], 0) == 8)
 
-    counts = _active_counts(worker, "local-default")
+    counts = _active_counts(worker, "code-default")
     assert counts.get("global", 0) == 8
     assert counts.get(ws_a["id"], 0) == 8
     assert counts.get(ws_b["id"], 0) == 0
@@ -147,7 +147,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
     deadline = time.monotonic() + 15.0
     while time.monotonic() < deadline:
         worker._poll()
-        counts = _active_counts(worker, "local-default")
+        counts = _active_counts(worker, "code-default")
         assert counts.get("global", 0) <= 10
         assert counts.get(ws_a["id"], 0) <= 8
         assert counts.get(ws_b["id"], 0) <= 6
@@ -160,7 +160,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
 
     assert c_started, "workspace C must start within 5 scheduling passes"
 
-    counts = _active_counts(worker, "local-default")
+    counts = _active_counts(worker, "code-default")
     assert counts.get(ws_a["id"], 0) == 8
     assert counts.get("global", 0) == 10
     assert counts.get(ws_b["id"], 0) <= 2
@@ -181,7 +181,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
 
     counts = _poll_counts_until(worker, allocations_reached)
 
-    counts = _active_counts(worker, "local-default")
+    counts = _active_counts(worker, "code-default")
     assert counts.get(ws_a["id"], 0) == 0
     assert counts.get(ws_b["id"], 0) == 6
     assert counts.get(ws_c["id"], 0) == 2

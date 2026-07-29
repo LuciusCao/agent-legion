@@ -15,6 +15,7 @@ import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import CloseIcon from '@mui/icons-material/Close'
 import CloudIcon from '@mui/icons-material/Cloud'
 import CloudOffIcon from '@mui/icons-material/CloudOff'
+import CodeIcon from '@mui/icons-material/Code'
 import DataObjectIcon from '@mui/icons-material/DataObject'
 import DeleteIcon from '@mui/icons-material/Delete'
 import DescriptionIcon from '@mui/icons-material/Description'
@@ -70,6 +71,7 @@ export type MaterialIconName =
   | 'close'
   | 'cloud'
   | 'cloud_off'
+  | 'code'
   | 'data_object'
   | 'delete'
   | 'description'
@@ -125,6 +127,7 @@ export const ICON_MAP = {
   close: CloseIcon,
   cloud: CloudIcon,
   cloud_off: CloudOffIcon,
+  code: CodeIcon,
   data_object: DataObjectIcon,
   delete: DeleteIcon,
   description: DescriptionIcon,

@@ -132,8 +132,8 @@ const baseStats: WorkspaceStats = {
   executor_status: {
     executors: [
       {
-        executor_id: 'local-default',
-        kind: 'local',
+        executor_id: 'code-default',
+        kind: 'code',
         global_capacity: 16,
         workspace_limit: 4,
         running: 1,

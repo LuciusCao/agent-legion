@@ -7,8 +7,8 @@ from typing import Any
 
 import pytest
 
-from server.app.executors.config import PiCapabilityConfig
-from server.app.executors.local import LocalExecutor
+from server.app.executors.code import CodeExecutor
+from server.app.executors.config import CodeCapabilityConfig, PiCapabilityConfig
 from server.app.executors.pi import PiExecutor
 from server.app.jobs import JobQueries
 from server.app.skills.manager import SkillManager
@@ -42,36 +42,43 @@ class _StubSkillManager(SkillManager):
         return self.base_dir / skill_key
 
 
-# Repository-owned style handlers, referenced by fully-qualified module path so
-# the isolated multiprocessing child can resolve them after spawn.
+# Minimal code-node files, written into a tmp repo root so the isolated
+# multiprocessing child can load them by path after spawn.
+
+_COOPERATIVE_NODE = """\
+import time
 
 
-def cooperative_handler(
-    _job: dict[str, Any], artifact_dir: Path, runtime: dict[str, Any] | None
-) -> None:
+def run(job, job_dir, runtime):
     runtime = runtime or {}
     token = runtime.get("cancellation")
     for _ in range(50):
         if token is not None:
             token.raise_if_cancelled()
         time.sleep(0.01)
-    (artifact_dir / "output.json").write_text("{}", encoding="utf-8")
+    (job_dir / "output.json").write_text("{}", encoding="utf-8")
+"""
+
+_BLOCKED_NODE = """\
+import time
 
 
-def blocked_handler(
-    _job: dict[str, Any], _artifact_dir: Path, _runtime: dict[str, Any] | None
-) -> None:
+def run(job, job_dir, runtime):
     while True:
         time.sleep(10)
+"""
 
 
-def _local_executor() -> LocalExecutor:
-    return LocalExecutor(
-        "local-default",
+def _local_executor(repo_root: Path) -> CodeExecutor:
+    (repo_root / "cooperative_node.py").write_text(_COOPERATIVE_NODE, encoding="utf-8")
+    (repo_root / "blocked_node.py").write_text(_BLOCKED_NODE, encoding="utf-8")
+    return CodeExecutor(
+        "code-default",
         {
-            "cooperative": cooperative_handler,
-            "blocked": blocked_handler,
+            "cooperative": CodeCapabilityConfig(path="cooperative_node.py"),
+            "blocked": CodeCapabilityConfig(path="blocked_node.py"),
         },
+        repo_root=repo_root,
         cancellation_grace_seconds=GRACE,
     )
 
@@ -86,20 +93,16 @@ def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
     )
 
 
-def _make_registry(local_executor: LocalExecutor, pi_executor: PiExecutor) -> Any:
+def _make_registry(local_executor: CodeExecutor, pi_executor: PiExecutor) -> Any:
     return make_registry(
-        executors={"local-default": local_executor, "pi-default": pi_executor},
+        executors={"code-default": local_executor, "pi-default": pi_executor},
         definitions={
-            "local-default": {
-                "kind": "local",
+            "code-default": {
+                "kind": "code",
                 "global_capacity": 3,
                 "capabilities": {
-                    "cooperative": {
-                        "handler": "tests.full.test_executor_cancellation_recovery.cooperative_handler"
-                    },
-                    "blocked": {
-                        "handler": "tests.full.test_executor_cancellation_recovery.blocked_handler"
-                    },
+                    "cooperative": {"path": "workflow_nodes/question_intake.py"},
+                    "blocked": {"path": "workflow_nodes/question_intake.py"},
                 },
             },
             "pi-default": {
@@ -132,12 +135,12 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
     fake_pi.chmod(0o755)
 
-    local_executor = _local_executor()
+    local_executor = _local_executor(tmp_path)
     pi_executor = _pi_executor(fake_pi, tmp_path / "skills")
     registry = _make_registry(local_executor, pi_executor)
     definition = make_definition(_make_nodes())
 
-    allocate(job_db, ws["id"], "local-default", 3)
+    allocate(job_db, ws["id"], "code-default", 3)
     allocate(job_db, ws["id"], "pi-default", 1)
     for node in definition.nodes.values():
         bind(
@@ -145,7 +148,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
             ws["id"],
             "test",
             node.key,
-            "pi-default" if node.key == "blocked_pi" else "local-default",
+            "pi-default" if node.key == "blocked_pi" else "code-default",
         )
 
     job = job_db.create_job(
@@ -173,13 +176,13 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            local_counts = worker.leases.active_counts("local-default")
+            local_counts = worker.leases.active_counts("code-default")
             pi_counts = worker.leases.active_counts("pi-default")
             if local_counts.get("global", 0) >= 2 and pi_counts.get("global", 0) >= 1:
                 break
             time.sleep(0.05)
 
-        local_counts = worker.leases.active_counts("local-default")
+        local_counts = worker.leases.active_counts("code-default")
         pi_counts = worker.leases.active_counts("pi-default")
         assert local_counts.get("global", 0) >= 2
         assert pi_counts.get("global", 0) == 1
@@ -189,7 +192,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
 
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if worker.leases.active_counts("local-default").get("global", 0) == 0:
+            if worker.leases.active_counts("code-default").get("global", 0) == 0:
                 break
             time.sleep(0.05)
     finally:
@@ -200,7 +203,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     assert stop_elapsed < GRACE + 2, "worker shutdown was unbounded"
 
     # All leases finalized and capacity released.
-    assert worker.leases.active_counts("local-default").get("global", 0) == 0
+    assert worker.leases.active_counts("code-default").get("global", 0) == 0
     assert worker.leases.active_counts("pi-default").get("global", 0) == 0
 
     # Active process maps drained.
@@ -236,7 +239,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
         cancellation_grace_seconds=GRACE,
     )
     worker2._poll()
-    assert worker2.leases.active_counts("local-default").get("global", 0) == 1
+    assert worker2.leases.active_counts("code-default").get("global", 0) == 1
     for future in list(worker2._futures.values()):
         future.result(timeout=10)
     node2 = job_db.get_job_node(job2["id"], "cooperative")

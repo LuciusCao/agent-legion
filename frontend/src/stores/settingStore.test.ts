@@ -47,21 +47,21 @@ const defaultSettings: WorkspaceSettings = {
 }
 
 const catalogExecutor: ExecutorDefinition = {
-  id: 'local-default',
-  kind: 'local',
+  id: 'code-default',
+  kind: 'code',
   capabilities: ['execute_local'],
   global_capacity: 4,
 }
 
 const initialExecutorConfiguration: WorkspaceExecutorConfiguration = {
   allocations: [
-    { executor_id: 'local-default', workspace_id: 'ws1', concurrency_limit: 2 },
+    { executor_id: 'code-default', workspace_id: 'ws1', concurrency_limit: 2 },
   ],
   bindings: [
     {
       workflow_key: 'question_content',
       node_key: 'ingest',
-      executor_id: 'local-default',
+      executor_id: 'code-default',
     },
   ],
   node_limits: [
@@ -190,7 +190,7 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       originalExecutorConfiguration: initialExecutorConfiguration,
     })
-    useSettingStore.getState().setExecutorAllocation('local-default', 5)
+    useSettingStore.getState().setExecutorAllocation('code-default', 5)
     expect(useSettingStore.getState().isDirty).toBe(true)
   })
 
@@ -261,7 +261,7 @@ describe('settingStore', () => {
     mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
       allocations: [
         {
-          executor_id: 'local-default',
+          executor_id: 'code-default',
           workspace_id: 'ws1',
           concurrency_limit: 3,
         },
@@ -287,7 +287,7 @@ describe('settingStore', () => {
     expect(state.executorCatalog).toEqual([catalogExecutor])
     expect(state.executorConfiguration.allocations).toEqual([
       {
-        executor_id: 'local-default',
+        executor_id: 'code-default',
         workspace_id: 'ws1',
         concurrency_limit: 3,
       },
@@ -516,7 +516,7 @@ describe('settingStore', () => {
       executor_configuration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -525,7 +525,7 @@ describe('settingStore', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [
@@ -559,7 +559,7 @@ describe('settingStore', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -568,7 +568,7 @@ describe('settingStore', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [
@@ -595,13 +595,13 @@ describe('settingStore', () => {
       name: 'Test',
       description: 'Desc',
       executor_allocations: [
-        { executor_id: 'local-default', concurrency_limit: 4 },
+        { executor_id: 'code-default', concurrency_limit: 4 },
       ],
       node_bindings: [
         {
           workflow_key: 'question_content',
           node_key: 'ingest',
-          executor_id: 'local-default',
+          executor_id: 'code-default',
         },
       ],
       node_limits: [
@@ -619,7 +619,7 @@ describe('settingStore', () => {
     const responseConfiguration: WorkspaceExecutorConfiguration = {
       allocations: [
         {
-          executor_id: 'local-default',
+          executor_id: 'code-default',
           workspace_id: 'ws1',
           concurrency_limit: 4,
         },
@@ -655,7 +655,7 @@ describe('settingStore', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -690,11 +690,11 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       originalExecutorConfiguration: initialExecutorConfiguration,
     })
-    useSettingStore.getState().setExecutorAllocation('local-default', 5)
+    useSettingStore.getState().setExecutorAllocation('code-default', 5)
     const allocation = useSettingStore
       .getState()
       .executorConfiguration.allocations.find(
-        (a) => a.executor_id === 'local-default'
+        (a) => a.executor_id === 'code-default'
       )
     expect(allocation?.concurrency_limit).toBe(5)
   })
@@ -771,14 +771,14 @@ describe('settingStore', () => {
   })
 
   it('requestExecutorRemoval sets pending allocation removal', () => {
-    useSettingStore.getState().requestExecutorRemoval('local-default')
+    useSettingStore.getState().requestExecutorRemoval('code-default')
     expect(useSettingStore.getState().pendingAllocationRemoval).toBe(
-      'local-default'
+      'code-default'
     )
   })
 
   it('cancelExecutorRemoval clears pending allocation removal', () => {
-    useSettingStore.setState({ pendingAllocationRemoval: 'local-default' })
+    useSettingStore.setState({ pendingAllocationRemoval: 'code-default' })
     useSettingStore.getState().cancelExecutorRemoval()
     expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
   })
@@ -790,7 +790,7 @@ describe('settingStore', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -804,7 +804,7 @@ describe('settingStore', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
           {
             workflow_key: 'question_content',
@@ -826,18 +826,18 @@ describe('settingStore', () => {
         ],
         migration_warnings: [],
       },
-      pendingAllocationRemoval: 'local-default',
+      pendingAllocationRemoval: 'code-default',
     })
     useSettingStore.getState().confirmExecutorRemoval()
     const state = useSettingStore.getState()
     expect(
       state.executorConfiguration.allocations.some(
-        (a) => a.executor_id === 'local-default'
+        (a) => a.executor_id === 'code-default'
       )
     ).toBe(false)
     expect(
       state.executorConfiguration.bindings.some(
-        (b) => b.executor_id === 'local-default'
+        (b) => b.executor_id === 'code-default'
       )
     ).toBe(false)
     expect(

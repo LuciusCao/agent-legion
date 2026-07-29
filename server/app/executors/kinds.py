@@ -36,7 +36,6 @@ class ExecutorKind(Generic[ConfigModelT]):
 
 @dataclass(frozen=True)
 class RuntimeDependencies:
-    local_handlers: Mapping[str, Any] = field(default_factory=dict)
     pi_runtime: PiRuntimeConfig = field(default_factory=PiRuntimeConfig)
     skill_manager: SkillManager = field(
         default_factory=lambda: SkillManager(

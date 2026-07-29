@@ -1760,8 +1760,6 @@ export interface components {
     }
     /** ExecutorCapabilityResponse */
     ExecutorCapabilityResponse: {
-      /** Handler */
-      handler?: string | null
       /** Model */
       model?: string | null
       /** Name */
@@ -1804,7 +1802,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'local' | 'code' | 'pi' | 'openclaw'
+      kind: 'code' | 'pi' | 'openclaw'
     }
     /** ExecutorRuntimeStatus */
     ExecutorRuntimeStatus: {
@@ -2024,7 +2022,7 @@ export interface components {
       /** Executor Id */
       executor_id?: string | null
       /** Executor Kind */
-      executor_kind?: ('local' | 'code' | 'pi' | 'openclaw') | null
+      executor_kind?: ('code' | 'pi' | 'openclaw') | null
       /** Finished At */
       finished_at?: string | null
       /** Id */

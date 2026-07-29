@@ -5,16 +5,16 @@ from typing import Any, cast
 
 import pytest
 
+from server.app.executors.code import CodeExecutor
 from server.app.executors.config import (
+    CodeCapabilityConfig,
+    CodeExecutorConfig,
     ExecutorConfig,
-    LocalCapabilityConfig,
-    LocalExecutorConfig,
     OpenClawCapabilityConfig,
     OpenClawExecutorConfig,
     PiCapabilityConfig,
     PiExecutorConfig,
 )
-from server.app.executors.local import LocalExecutor
 from server.app.executors.openclaw import OpenClawExecutor
 from server.app.executors.registry import (
     ExecutorRegistry,
@@ -31,26 +31,11 @@ from server.app.executors.runtime_config import (
 from server.app.skills.manager import SkillManager
 
 
-def _write_handler_artifact(artifact_dir: Path, name: str) -> None:
-    (artifact_dir / f"{name}.txt").write_text(name, encoding="utf-8")
-
-
-def _fetch_questions_handler(
-    job: dict[str, Any], artifact_dir: Path, context: dict[str, Any] | None
-) -> None:
-    _write_handler_artifact(artifact_dir, "fetch_questions")
-
-
-def _clean_and_parse_handler(
-    job: dict[str, Any], artifact_dir: Path, context: dict[str, Any] | None
-) -> None:
-    _write_handler_artifact(artifact_dir, "clean_and_parse")
-
-
-def _available_handler(
-    job: dict[str, Any], artifact_dir: Path, context: dict[str, Any] | None
-) -> None:
-    _write_handler_artifact(artifact_dir, "available")
+def _write_node(repo_root: Path, name: str) -> str:
+    node = repo_root / "nodes" / name
+    node.parent.mkdir(parents=True, exist_ok=True)
+    node.write_text("def run(job, job_dir, runtime):\n    pass\n", encoding="utf-8")
+    return f"nodes/{name}"
 
 
 def _sample_pi_runtime() -> PiRuntimeConfig:
@@ -65,17 +50,17 @@ def _sample_pi_runtime() -> PiRuntimeConfig:
 
 
 @pytest.fixture
-def definitions() -> dict[str, ExecutorConfig]:
+def definitions(tmp_path: Path) -> dict[str, ExecutorConfig]:
     return {
-        "local-default": LocalExecutorConfig(
-            kind="local",
+        "code-default": CodeExecutorConfig(
+            kind="code",
             global_capacity=4,
             capabilities={
-                "fetch_questions": LocalCapabilityConfig(
-                    handler="question_comprehension_info.fetch_questions"
+                "fetch_questions": CodeCapabilityConfig(
+                    path=_write_node(tmp_path, "fetch_questions.py")
                 ),
-                "clean_and_parse": LocalCapabilityConfig(
-                    handler="question_comprehension_info.clean_and_parse"
+                "clean_and_parse": CodeCapabilityConfig(
+                    path=_write_node(tmp_path, "clean_and_parse.py")
                 ),
             },
         ),
@@ -112,12 +97,9 @@ def runtime_dependencies(tmp_path: Path) -> RuntimeDependencies:
         base_dir=tmp_path / "skills",
     )
     return RuntimeDependencies(
-        local_handlers={
-            "question_comprehension_info.fetch_questions": _fetch_questions_handler,
-            "question_comprehension_info.clean_and_parse": _clean_and_parse_handler,
-        },
         pi_runtime=_sample_pi_runtime(),
         skill_manager=skill_manager,
+        repo_root=tmp_path,
         openclaw_runtime=OpenClawRuntimeConfig(
             command_template=(
                 "openclaw",
@@ -171,7 +153,7 @@ def test_registry_require_unknown_executor_raises(registry: ExecutorRegistry) ->
 
 
 def test_registry_global_capacity(registry: ExecutorRegistry) -> None:
-    assert registry.global_capacity("local-default") == 4
+    assert registry.global_capacity("code-default") == 4
     assert registry.global_capacity("pi-default") == 8
     assert registry.global_capacity("openclaw-default") == 2
     assert registry.global_capacity("unknown") is None
@@ -201,30 +183,21 @@ def test_registry_rejects_unknown_kind_factory(
         )
 
 
-def test_registry_skips_unavailable_local_handlers(
+def test_registry_rejects_missing_code_paths(
     runtime_dependencies: RuntimeDependencies,
 ) -> None:
     definitions: dict[str, ExecutorConfig] = {
-        "local-default": LocalExecutorConfig(
-            kind="local",
+        "code-default": CodeExecutorConfig(
+            kind="code",
             global_capacity=4,
             capabilities={
-                "available": LocalCapabilityConfig(handler="question_comprehension_info.available"),
-                "missing": LocalCapabilityConfig(handler="question_comprehension_info.missing"),
+                "missing": CodeCapabilityConfig(path="nodes/missing.py"),
             },
         ),
     }
-    runtime = RuntimeDependencies(
-        local_handlers={"question_comprehension_info.available": _available_handler},
-        pi_runtime=runtime_dependencies.pi_runtime,
-        skill_manager=runtime_dependencies.skill_manager,
-        openclaw_runtime=runtime_dependencies.openclaw_runtime,
-    )
 
-    registry = ExecutorRegistry.build(definitions, runtime)
-    executor = registry.require("local-default", "available")
-    assert executor.supports("available")
-    assert not executor.supports("missing")
+    with pytest.raises(ValueError, match="inside the repository root"):
+        ExecutorRegistry.build(definitions, runtime_dependencies)
 
 
 def test_registry_builds_openclaw_executor_with_agent_id_substitution(
@@ -240,23 +213,23 @@ def test_registry_builds_openclaw_executor_with_agent_id_substitution(
     assert "main" in executor.runner.command_template
 
 
-def test_registry_builds_local_executor_with_settings_and_job_db(
+def test_registry_builds_code_executor_with_settings_and_job_db(
     definitions: dict[str, ExecutorConfig],
     runtime_dependencies: RuntimeDependencies,
 ) -> None:
     settings_config = {"cms": {"base_url": "http://example.com"}}
     job_db = object()
     runtime = RuntimeDependencies(
-        local_handlers=runtime_dependencies.local_handlers,
         pi_runtime=runtime_dependencies.pi_runtime,
         skill_manager=runtime_dependencies.skill_manager,
+        repo_root=runtime_dependencies.repo_root,
         openclaw_runtime=runtime_dependencies.openclaw_runtime,
         settings_config=settings_config,
         job_db=job_db,
     )
 
     registry = ExecutorRegistry.build(definitions, runtime)
-    executor = registry.require("local-default", "fetch_questions")
-    assert isinstance(executor, LocalExecutor)
+    executor = registry.require("code-default", "fetch_questions")
+    assert isinstance(executor, CodeExecutor)
     assert executor.settings_config == settings_config
     assert executor.job_db is job_db

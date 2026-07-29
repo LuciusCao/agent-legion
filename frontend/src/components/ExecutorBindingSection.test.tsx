@@ -5,8 +5,8 @@ import { useSettingStore } from '../stores/settingStore'
 
 const catalog = [
   {
-    id: 'local-default',
-    kind: 'local' as const,
+    id: 'code-default',
+    kind: 'code' as const,
     capabilities: ['fetch_questions', 'clean_and_parse', 'mark_question'],
     global_capacity: 4,
   },
@@ -15,7 +15,6 @@ const catalog = [
 const workflowDefinition = {
   key: 'sample_workflow',
   label: '示例工作流',
-  concurrency: { local: 8, agent: 2, nodes: {} },
   intake: { modes: [] },
   edges: [],
   nodes: [
@@ -91,7 +90,7 @@ describe('ExecutorBindingSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -117,8 +116,8 @@ describe('ExecutorBindingSection', () => {
 
     // The rendered input values reflect the available options.
     expect(getSelectInput('fetch_questions').value).toBe('')
-    changeSelectValue('fetch_questions', 'local-default')
-    expect(getSelectInput('fetch_questions').value).toBe('local-default')
+    changeSelectValue('fetch_questions', 'code-default')
+    expect(getSelectInput('fetch_questions').value).toBe('code-default')
   })
 
   it('matches local nodes by capability, independent of executor implementation', () => {
@@ -135,7 +134,7 @@ describe('ExecutorBindingSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -154,8 +153,8 @@ describe('ExecutorBindingSection', () => {
     render(<ExecutorBindingSection />)
 
     // Both compatible executors are selectable.
-    changeSelectValue('fetch_questions', 'local-default')
-    expect(getSelectInput('fetch_questions').value).toBe('local-default')
+    changeSelectValue('fetch_questions', 'code-default')
+    expect(getSelectInput('fetch_questions').value).toBe('code-default')
 
     changeSelectValue('fetch_questions', 'alternate-local')
     expect(getSelectInput('fetch_questions').value).toBe('alternate-local')

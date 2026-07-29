@@ -29,12 +29,12 @@ def test_replace_executor_configuration_is_authoritative(queries: JobQueries) ->
     workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
     queries.replace_workspace_executor_configuration(
         workspace["id"],
-        allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+        allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             }
         ],
         node_limits=[
@@ -58,12 +58,12 @@ def test_replace_executor_configuration_is_authoritative(queries: JobQueries) ->
 
 def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
     workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
-    original_allocations = [{"executor_id": "local-default", "concurrency_limit": 4}]
+    original_allocations = [{"executor_id": "code-default", "concurrency_limit": 4}]
     original_bindings = [
         {
             "workflow_key": "question_comprehension_info",
             "node_key": "fetch_questions",
-            "executor_id": "local-default",
+            "executor_id": "code-default",
         }
     ]
     original_node_limits = [
@@ -106,7 +106,7 @@ def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
         "allocations": [
             {
                 "workspace_id": workspace["id"],
-                "executor_id": "local-default",
+                "executor_id": "code-default",
                 "concurrency_limit": 4,
             }
         ],
@@ -114,7 +114,7 @@ def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             }
         ],
         "node_limits": [

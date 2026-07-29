@@ -8,25 +8,22 @@ def test_list_executors_endpoint(client):
     # yaml 默认 model 已清空（issue #13）：占位符 model 在 enqueue 被拒。
     assert agent["model"] == ""
     executors = {item["id"]: item for item in data["executors"]}
-    executor = executors["local-default"]
-    assert executor["kind"] == "local"
-    assert executor["global_capacity"] == 128
-    assert executor["capabilities"] == [
+    code_executor = executors["code-default"]
+    assert code_executor["kind"] == "code"
+    assert code_executor["global_capacity"] == 16
+    assert code_executor["capabilities"] == [
         "assemble_comprehension_info",
         "assemble_video_metadata",
         "classify_comprehension_eligibility",
         "clean_and_parse",
+        "download_video",
+        "fetch_questions",
         "finalize_non_uploadable",
         "package_video_job",
         "transcribe_video",
     ]
-    code_executor = executors["code-default"]
-    assert code_executor["kind"] == "code"
-    assert code_executor["global_capacity"] == 16
-    assert code_executor["capabilities"] == ["download_video", "fetch_questions"]
     assert {
         "name": "fetch_questions",
-        "handler": None,
         "path": "workflow_nodes/question_intake.py",
         "timeout_seconds": 600,
         "skill": None,

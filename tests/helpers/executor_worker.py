@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.executors.config import ExecutorConfig, LocalExecutorConfig, PiExecutorConfig
+from server.app.executors.config import CodeExecutorConfig, ExecutorConfig, PiExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
@@ -34,9 +34,11 @@ def make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
 
 def local_def(capacity: int, capabilities: set[str]) -> Any:
     return {
-        "kind": "local",
+        "kind": "code",
         "global_capacity": capacity,
-        "capabilities": {cap: {"handler": "dummy.handler"} for cap in capabilities},
+        "capabilities": {
+            cap: {"path": "workflow_nodes/question_intake.py"} for cap in capabilities
+        },
     }
 
 
@@ -65,13 +67,13 @@ def make_registry(
     executors: dict[str, Any],
     definitions: dict[str, Any],
 ) -> ExecutorRegistry:
-    """Build an ExecutorRegistry from local and/or pi executor definitions."""
+    """Build an ExecutorRegistry from code and/or pi executor definitions."""
 
     def _build_config(eid: str) -> ExecutorConfig:
         kind = definitions[eid]["kind"]
         if kind == "pi":
             return PiExecutorConfig(**definitions[eid])
-        return LocalExecutorConfig(**definitions[eid])
+        return CodeExecutorConfig(**definitions[eid])
 
     return ExecutorRegistry(
         executors=executors,

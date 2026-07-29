@@ -36,7 +36,7 @@ def _expected_bindings(workspace_id: str) -> list[dict]:
         {
             "workflow_key": WORKFLOW_KEY,
             "node_key": "clean_and_parse",
-            "executor_id": "local-default",
+            "executor_id": "code-default",
         },
         {
             "workflow_key": WORKFLOW_KEY,
@@ -46,7 +46,7 @@ def _expected_bindings(workspace_id: str) -> list[dict]:
         {
             "workflow_key": WORKFLOW_KEY,
             "node_key": "assemble_comprehension_info",
-            "executor_id": "local-default",
+            "executor_id": "code-default",
         },
     ]
 
@@ -69,12 +69,12 @@ def test_get_filters_retired_executor_residue(tmp_path) -> None:
         workspace_id = workspace_response.json()["workspace"]["id"]
 
         # Seed rows left behind by the retired `pi` Executor alongside valid
-        # local-default rows, bypassing PUT validation like the legacy writers did.
+        # code-default rows, bypassing PUT validation like the legacy writers did.
         app.state.job_db.replace_workspace_executor_configuration(
             workspace_id,
             [
                 {"executor_id": "pi", "concurrency_limit": 2},
-                {"executor_id": "local-default", "concurrency_limit": 8},
+                {"executor_id": "code-default", "concurrency_limit": 8},
             ],
             [
                 {
@@ -85,7 +85,7 @@ def test_get_filters_retired_executor_residue(tmp_path) -> None:
                 {
                     "workflow_key": WORKFLOW_KEY,
                     "node_key": "fetch_questions",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 },
             ],
             [
@@ -105,13 +105,13 @@ def test_get_filters_retired_executor_residue(tmp_path) -> None:
         config = _get_config(client, workspace_id)
 
     assert config["allocations"] == [
-        {"executor_id": "local-default", "workspace_id": workspace_id, "concurrency_limit": 8},
+        {"executor_id": "code-default", "workspace_id": workspace_id, "concurrency_limit": 8},
     ]
     assert config["bindings"] == [
         {
             "workflow_key": WORKFLOW_KEY,
             "node_key": "fetch_questions",
-            "executor_id": "local-default",
+            "executor_id": "code-default",
         },
     ]
     # The clean_and_parse limit is dropped with its filtered binding.
@@ -128,12 +128,10 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     assert catalog_response.status_code == 200
     catalog = catalog_response.json()["executors"]
     executor_ids = {executor["id"] for executor in catalog}
-    assert "local-default" in executor_ids
-    local_executor = next(executor for executor in catalog if executor["id"] == "local-default")
-    assert local_executor["kind"] == "local"
-    assert "clean_and_parse" in local_executor["capabilities"]
+    assert "code-default" in executor_ids
     code_executor = next(executor for executor in catalog if executor["id"] == "code-default")
     assert code_executor["kind"] == "code"
+    assert "clean_and_parse" in code_executor["capabilities"]
     assert "fetch_questions" in code_executor["capabilities"]
 
     # Create a workspace to configure.
@@ -157,7 +155,6 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     save_payload = {
         "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
-            {"executor_id": "local-default", "concurrency_limit": 8},
             {"executor_id": "code-default", "concurrency_limit": 8},
         ],
         "node_bindings": _expected_bindings(workspace_id),
@@ -177,7 +174,6 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     config = _get_config(client, workspace_id)
     assert _sort(config["allocations"]) == _sort(
         [
-            {"executor_id": "local-default", "workspace_id": workspace_id, "concurrency_limit": 8},
             {"executor_id": "code-default", "workspace_id": workspace_id, "concurrency_limit": 8},
         ]
     )
@@ -190,13 +186,13 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "name": "Must Not Change",
         "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
-            {"executor_id": "local-default", "concurrency_limit": 8},
+            {"executor_id": "code-default", "concurrency_limit": 8},
         ],
         "node_bindings": [
             {
                 "workflow_key": WORKFLOW_KEY,
                 "node_key": "generate_key_info",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             },
         ],
         "node_limits": [],

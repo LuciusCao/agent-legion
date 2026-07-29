@@ -100,12 +100,12 @@ describe('DagNode', () => {
   it('falls back to executorId when workerId is missing', () => {
     renderWithProvider({
       ...baseData,
-      executorId: 'local-default',
+      executorId: 'code-default',
       workerId: null,
     })
     const badge = screen.getByTestId('dag-node-executor-badge')
-    expect(badge).toHaveTextContent('local-default')
-    expect(badge).toHaveAttribute('title', 'local-default')
+    expect(badge).toHaveTextContent('code-default')
+    expect(badge).toHaveAttribute('title', 'code-default')
   })
 
   it('renders the Agent while a request is queued without a Worker', () => {

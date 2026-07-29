@@ -8,8 +8,8 @@ describe('ExecutorAllocationRemovalDialog', () => {
     useSettingStore.setState({
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local' as const,
+          id: 'code-default',
+          kind: 'code' as const,
           capabilities: ['ingest'],
           global_capacity: 4,
         },
@@ -17,7 +17,7 @@ describe('ExecutorAllocationRemovalDialog', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -26,13 +26,13 @@ describe('ExecutorAllocationRemovalDialog', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
         migration_warnings: [],
       },
-      pendingAllocationRemoval: 'local-default',
+      pendingAllocationRemoval: 'code-default',
     })
   })
 
@@ -66,7 +66,7 @@ describe('ExecutorAllocationRemovalDialog', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -75,7 +75,7 @@ describe('ExecutorAllocationRemovalDialog', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [

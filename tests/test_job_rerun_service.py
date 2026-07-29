@@ -109,7 +109,7 @@ def _create_lease(
             (
                 "lease-1",
                 "exec-1",
-                "local-default",
+                "code-default",
                 job["workspace_id"],
                 job["id"],
                 job["workflow_key"],

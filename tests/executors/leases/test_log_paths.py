@@ -23,12 +23,12 @@ def test_claim_lease_persists_relative_log_path(queries: JobQueries) -> None:
     log_path = data_dir / "logs" / "jobs" / "run.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-rel-log", "local-default", workspace_limit=2
+        queries, "ws-rel-log", "code-default", workspace_limit=2
     )
     request = _claim_request(
         workspace_id,
         job_id,
-        executor_id="local-default",
+        executor_id="code-default",
         global_capacity=2,
         log_path=str(log_path),
     )
@@ -51,10 +51,10 @@ def test_finish_lease_persists_relative_log_path(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-rel-finish", "local-default", workspace_limit=2
+        queries, "ws-rel-finish", "code-default", workspace_limit=2
     )
     claim = repo_a.try_claim(
-        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
     )
     assert claim is not None
 
@@ -77,7 +77,7 @@ def test_fail_without_lease_persists_relative_log_path(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-rel-fail", "local-default", workspace_limit=2
+        queries, "ws-rel-fail", "code-default", workspace_limit=2
     )
     data_dir = queries.jobs_dir.parent
     absolute_log = data_dir / "logs" / "error.log"
@@ -102,7 +102,7 @@ def test_try_claim_returns_absolute_log_path_and_persists_relative(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-repo-claim-abs", "local-default", workspace_limit=2
+        queries, "ws-repo-claim-abs", "code-default", workspace_limit=2
     )
     data_dir = queries.jobs_dir.parent
     absolute_log = data_dir / "logs" / "jobs" / "run.log"
@@ -110,7 +110,7 @@ def test_try_claim_returns_absolute_log_path_and_persists_relative(
     request = _claim_request(
         workspace_id,
         job_id,
-        executor_id="local-default",
+        executor_id="code-default",
         global_capacity=2,
         log_path=str(absolute_log),
     )
@@ -132,10 +132,10 @@ def test_finish_lease_canonicalizes_fallback_legacy_absolute_log_path(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-finish-fallback", "local-default", workspace_limit=2
+        queries, "ws-finish-fallback", "code-default", workspace_limit=2
     )
     claim = repo_a.try_claim(
-        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
     )
     assert claim is not None
 
@@ -162,10 +162,10 @@ def test_finish_lease_persists_relative_session_dir(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-rel-session", "local-default", workspace_limit=2
+        queries, "ws-rel-session", "code-default", workspace_limit=2
     )
     claim = repo_a.try_claim(
-        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
     )
     assert claim is not None
 
@@ -190,10 +190,10 @@ def test_finish_lease_rejects_session_dir_outside_jobs(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-invalid-session", "local-default", workspace_limit=2
+        queries, "ws-invalid-session", "code-default", workspace_limit=2
     )
     claim = repo_a.try_claim(
-        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
     )
     assert claim is not None
 

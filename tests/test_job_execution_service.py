@@ -82,7 +82,7 @@ def _create_active_lease(
             (
                 f"lease-{node_key}",
                 f"exec-{node_key}",
-                "local-default",
+                "code-default",
                 job["workspace_id"],
                 job["id"],
                 job["workflow_key"],

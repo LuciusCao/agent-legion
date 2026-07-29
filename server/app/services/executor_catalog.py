@@ -7,13 +7,10 @@ from server.app.settings import Settings
 
 def capability_detail(capability: str, config: Any) -> dict[str, Any]:
     detail: dict[str, Any] = {"name": capability}
-    handler = getattr(config, "handler", None)
     path = getattr(config, "path", None)
     timeout_seconds = getattr(config, "timeout_seconds", None)
     skill = getattr(config, "skill", None)
     tools = getattr(config, "tools", ())
-    if handler:
-        detail["handler"] = handler
     if path:
         detail["path"] = path
         detail["timeout_seconds"] = timeout_seconds

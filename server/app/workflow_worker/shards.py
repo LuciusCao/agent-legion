@@ -83,7 +83,7 @@ def claim_shard_node(
             _fail_node(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
             return True
         local_node_limit: int | None = None
-        if executor.kind == "local":
+        if executor.kind == "code":
             local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
         elif has_local_node_limit(conn, workspace_id, workflow_key, node_key):
             _fail_node(

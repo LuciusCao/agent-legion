@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import textwrap
 import threading
 import time
 from pathlib import Path
@@ -15,8 +16,12 @@ from server.app.executors.cancellation import (
     CancelledError,
     SubprocessTracker,
 )
-from server.app.executors.config import OpenClawCapabilityConfig, PiCapabilityConfig
-from server.app.executors.local import LocalExecutor
+from server.app.executors.code import CodeExecutor
+from server.app.executors.config import (
+    CodeCapabilityConfig,
+    OpenClawCapabilityConfig,
+    PiCapabilityConfig,
+)
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.openclaw import OpenClawExecutor
 from server.app.executors.openclaw_runner import OpenClawRunner
@@ -82,26 +87,46 @@ class TestSubprocessTracker:
         tracker.unregister("e1")
 
 
-# Handlers used by isolated-local tests.  They are referenced by import path so
-# the multiprocessing child can resolve them after spawn.
+# Code node bodies used by the isolated-code tests. They are written to node
+# files under tmp_path (which doubles as the repo root) so the multiprocessing
+# child can load them by path after spawn.
 
-
-def cooperative_handler(
-    _job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None
-) -> None:
-    runtime = runtime or {}
-    token = runtime.get("cancellation")
+_COOPERATIVE_NODE = """
+def run(job, job_dir, runtime):
+    token = (runtime or {}).get("cancellation")
     if token is not None:
         token.raise_if_cancelled()
     (job_dir / "out.json").write_text("{}", encoding="utf-8")
+"""
+
+_BLOCKED_NODE = """
+import time
 
 
-def blocked_handler(_job: dict[str, Any], _job_dir: Path, _runtime: dict[str, Any] | None) -> None:
+def run(job, job_dir, runtime):
     while True:
         time.sleep(10)
+"""
 
 
-def _local_context(
+def _code_executor(
+    repo_root: Path,
+    capability: str,
+    node_body: str,
+    *,
+    cancellation_grace_seconds: float = 0.5,
+) -> CodeExecutor:
+    node_name = f"node_{capability}.py"
+    (repo_root / node_name).write_text(textwrap.dedent(node_body), encoding="utf-8")
+    return CodeExecutor(
+        "code-default",
+        {capability: CodeCapabilityConfig(path=node_name)},
+        repo_root=repo_root,
+        cancellation_grace_seconds=cancellation_grace_seconds,
+    )
+
+
+def _code_context(
     tmp_path: Path,
     execution_id: str,
     capability: str,
@@ -112,7 +137,7 @@ def _local_context(
         execution_id=execution_id,
         lease_id="lease-1",
         node_run_id=1,
-        executor_id="local-default",
+        executor_id="code-default",
         workspace_id="ws-a",
         job_id="job-1",
         workflow_key="test",
@@ -128,44 +153,29 @@ def _local_context(
     )
 
 
-class TestLocalExecutorIsolation:
-    def test_local_executor_rejects_non_importable_handler(self) -> None:
-        with pytest.raises(ValueError, match="must be importable"):
-            LocalExecutor(
-                "local-default",
-                {"unsafe": lambda _job, _job_dir, _runtime: None},
+class TestCodeExecutorIsolation:
+    def test_code_executor_rejects_path_outside_repo_root(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="inside the repository root"):
+            CodeExecutor(
+                "code-default",
+                {"unsafe": CodeCapabilityConfig(path="nodes/missing.py")},
+                repo_root=tmp_path,
             )
 
-    def test_local_executor_rejects_handler_from_missing_module(self) -> None:
-        def handler(_job, _job_dir, _runtime) -> None:
-            return None
-
-        handler.__module__ = "module_that_does_not_exist"
-        handler.__qualname__ = "handler"
-
-        with pytest.raises(ValueError, match="must be importable"):
-            LocalExecutor("local-default", {"unsafe": handler})
-
     @pytest.mark.slow
-    def test_local_executor_runs_handler_in_isolated_child(self, tmp_path: Path) -> None:
-        executor = LocalExecutor(
-            "local-default",
-            {"cooperative": cooperative_handler},
-            cancellation_grace_seconds=0.5,
-        )
-        ctx = _local_context(tmp_path, "exec-cooperative", "cooperative", ("out.json",))
+    def test_code_executor_runs_node_in_isolated_child(self, tmp_path: Path) -> None:
+        executor = _code_executor(tmp_path, "cooperative", _COOPERATIVE_NODE)
+        ctx = _code_context(tmp_path, "exec-cooperative", "cooperative", ("out.json",))
         result = executor.execute(ctx)
         assert result.status == "completed"
         assert (ctx.job_dir / "out.json").is_file()
 
     @pytest.mark.slow
-    def test_local_executor_cancels_blocked_child(self, tmp_path: Path) -> None:
-        executor = LocalExecutor(
-            "local-default",
-            {"blocked": blocked_handler},
-            cancellation_grace_seconds=0.3,
+    def test_code_executor_cancels_blocked_child(self, tmp_path: Path) -> None:
+        executor = _code_executor(
+            tmp_path, "blocked", _BLOCKED_NODE, cancellation_grace_seconds=0.3
         )
-        ctx = _local_context(tmp_path, "exec-blocked", "blocked", ("out.json",))
+        ctx = _code_context(tmp_path, "exec-blocked", "blocked", ("out.json",))
         result_holder: dict[str, ExecutionResult] = {}
 
         def run() -> None:
@@ -180,14 +190,12 @@ class TestLocalExecutorIsolation:
         assert result_holder["result"].status == "cancelled"
 
     @pytest.mark.slow
-    def test_local_executor_pre_start_cancellation(self, tmp_path: Path) -> None:
-        executor = LocalExecutor(
-            "local-default",
-            {"cooperative": cooperative_handler},
-            cancellation_grace_seconds=0.3,
+    def test_code_executor_pre_start_cancellation(self, tmp_path: Path) -> None:
+        executor = _code_executor(
+            tmp_path, "cooperative", _COOPERATIVE_NODE, cancellation_grace_seconds=0.3
         )
         executor.cancel("exec-pre")
-        ctx = _local_context(tmp_path, "exec-pre", "cooperative", ("out.json",))
+        ctx = _code_context(tmp_path, "exec-pre", "cooperative", ("out.json",))
         result = executor.execute(ctx)
         assert result.status == "cancelled"
         assert result.exit_code == -1

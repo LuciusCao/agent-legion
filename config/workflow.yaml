@@ -89,26 +89,20 @@ executors:
             subject_id:
               type: string
               description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
-  local-default:
-    kind: local
-    global_capacity: 128
-    # 每个 capability 可设 timeout_seconds（单次隔离执行的墙钟上限，超时判
-    # failed/timeout 并强杀子进程）；缺省回退 executor 默认值 3600s。
-    capabilities:
       clean_and_parse:
-        handler: question_comprehension_info.clean_and_parse
+        path: workflow_nodes/question_clean_parse.py
       classify_comprehension_eligibility:
-        handler: question_comprehension_info.classify_comprehension_eligibility
+        path: workflow_nodes/comprehension_classify.py
       finalize_non_uploadable:
-        handler: question_comprehension_info.finalize_non_uploadable
+        path: workflow_nodes/comprehension_finalize.py
       assemble_comprehension_info:
-        handler: question_comprehension_info.assemble_comprehension_info
+        path: workflow_nodes/comprehension_assemble.py
       transcribe_video:
-        handler: video_knowledge.transcribe_video
+        path: workflow_nodes/video_transcribe.py
       assemble_video_metadata:
-        handler: video_knowledge.assemble_video_metadata
+        path: workflow_nodes/video_assemble.py
       package_video_job:
-        handler: video_knowledge.package_video_job
+        path: workflow_nodes/video_package.py
 heartbeat_interval_seconds: 10
 lease_ttl_seconds: 90
 heartbeat_failure_threshold: 3

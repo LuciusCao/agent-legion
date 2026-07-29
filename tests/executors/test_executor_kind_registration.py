@@ -5,7 +5,6 @@ import pytest
 from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
 from server.app.executors.config import (
     CodeExecutorConfig,
-    LocalExecutorConfig,
     OpenClawExecutorConfig,
     PiExecutorConfig,
 )
@@ -20,7 +19,8 @@ from server.app.executors.pi import PiExecutor
 
 
 def test_builtin_kinds_registered() -> None:
-    assert {"local", "code", "pi", "openclaw"} <= set(registered_kind_names())
+    assert {"code", "pi", "openclaw"} <= set(registered_kind_names())
+    assert "local" not in registered_kind_names()
     assert "remote" not in registered_kind_names()
 
 
@@ -31,7 +31,6 @@ def test_unknown_kind_rejected_at_config_load() -> None:
 
 def test_config_parsing_equivalent_to_discriminated_union() -> None:
     raw = {
-        "loc": {"kind": "local", "global_capacity": 2, "capabilities": {"c": {"handler": "h"}}},
         "code": {
             "kind": "code",
             "global_capacity": 2,
@@ -50,7 +49,6 @@ def test_config_parsing_equivalent_to_discriminated_union() -> None:
         },
     }
     defs = load_executor_definitions(raw)
-    assert isinstance(defs["loc"], LocalExecutorConfig)
     assert isinstance(defs["code"], CodeExecutorConfig)
     assert isinstance(defs["p"], PiExecutorConfig)
     assert isinstance(defs["oc"], OpenClawExecutorConfig)

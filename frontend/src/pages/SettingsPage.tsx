@@ -47,7 +47,7 @@ export function SettingsPage() {
     fetchWorkflowDefinition,
   } = useSettingStore()
 
-  const localBoundNodeKeys = useMemo(() => {
+  const codeBoundNodeKeys = useMemo(() => {
     if (!workflowDefinition) return new Set<string>()
     const allocatedIds = new Set(
       executorConfiguration.allocations.map((a) => a.executor_id)
@@ -64,13 +64,13 @@ export function SettingsPage() {
           const executor = executorCatalog.find(
             (e) => e.id === binding.executor_id
           )
-          return executor?.kind === 'local'
+          return executor?.kind === 'code'
         })
         .map((node) => node.key)
     )
   }, [workflowDefinition, executorConfiguration, executorCatalog])
 
-  const hasLocalNodes = localBoundNodeKeys.size > 0
+  const hasCodeNodes = codeBoundNodeKeys.size > 0
 
   const hasNodeConfig = Object.keys(settings.nodeConfigSchemas ?? {}).length > 0
 
@@ -83,9 +83,12 @@ export function SettingsPage() {
       { id: 'executors', label: '执行器' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
+      ...(hasCodeNodes
+        ? [{ id: 'code-node-concurrency', label: '代码节点并发' }]
+        : []),
       { id: 'danger-zone', label: '危险操作' },
     ],
-    [hasNodeConfig, isAdmin]
+    [hasCodeNodes, hasNodeConfig, isAdmin]
   )
 
   const { activeSection, contentRef, scrollToSection } =
@@ -204,6 +207,13 @@ export function SettingsPage() {
             <WorkerTokensSection />
           </section>
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
+          {hasCodeNodes && (
+            <section id="code-node-concurrency" className={styles.section}>
+              <h2 className={styles.sectionTitle}>代码节点并发</h2>
+              <hr className={styles.sectionDivider} />
+              <LocalNodeLimitSection />
+            </section>
+          )}
 
           <section id="danger-zone" className={styles.section}>
             <h2 className={styles.sectionTitle}>危险操作</h2>
