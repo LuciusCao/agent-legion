@@ -7,18 +7,80 @@ ROOT_DIR="$(git rev-parse --show-toplevel)"
 # runs the quick gate so slow checks stay off the maintainer machine.
 gate="quick"
 has_update=0
+force_full=0
+changed_paths=""
 zero_sha="0000000000000000000000000000000000000000"
 
 while read -r local_ref local_sha remote_ref remote_sha; do
-  _="$local_ref $remote_sha"
+  _="$local_ref"
   if [[ -z "$local_sha" || "$local_sha" == "$zero_sha" ]]; then
     continue
   fi
   has_update=1
+  if [[ "$remote_sha" == "$zero_sha" ]]; then
+    # New branch/tag: no remote base to diff against.
+    force_full=1
+    continue
+  fi
+  if ! paths="$(git diff --name-only "$remote_sha...$local_sha" 2>/dev/null)"; then
+    force_full=1
+    continue
+  fi
+  changed_paths+="$paths"$'\n'
 done
 
 if [[ "$has_update" -eq 0 ]]; then
   exit 0
+fi
+
+# Pick the quick-gate lanes from the pushed paths. CI runs every lane for each
+# PR/push, so this only trims the local feedback loop; anything ambiguous
+# (new refs, failed diff, shared files) falls back to all lanes.
+compute_lanes() {
+  local saw_frontend=0
+  local saw_backend=0
+  local saw_non_docs=0
+  local saw_any=0
+  local path
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    saw_any=1
+    case "$path" in
+      # Shared/global files: both lanes, no trimming.
+      pyproject.toml|uv.lock|Makefile|scripts/*|.githooks/*|.github/*|config/*|frontend/package.json|frontend/package-lock.json)
+        echo "backend frontend"
+        return
+        ;;
+      frontend/*)
+        saw_frontend=1
+        saw_non_docs=1
+        ;;
+      docs/*|*.md)
+        ;;
+      *)
+        saw_backend=1
+        saw_non_docs=1
+        ;;
+    esac
+  done <<<"$changed_paths"
+
+  if [[ "$saw_any" -eq 0 ]]; then
+    echo "backend frontend"
+  elif [[ "$saw_non_docs" -eq 0 ]]; then
+    echo "static"
+  elif [[ "$saw_frontend" -eq 1 && "$saw_backend" -eq 0 ]]; then
+    echo "frontend"
+  elif [[ "$saw_frontend" -eq 0 && "$saw_backend" -eq 1 ]]; then
+    echo "backend"
+  else
+    echo "backend frontend"
+  fi
+}
+
+if [[ "$force_full" -eq 1 ]]; then
+  lanes="backend frontend"
+else
+  lanes="$(compute_lanes)"
 fi
 
 while IFS= read -r name; do
@@ -27,4 +89,4 @@ while IFS= read -r name; do
   fi
 done < <(git rev-parse --local-env-vars)
 
-exec "$ROOT_DIR/scripts/run-local-gate.sh" "$gate"
+exec "$ROOT_DIR/scripts/run-local-gate.sh" "$gate" "$lanes"

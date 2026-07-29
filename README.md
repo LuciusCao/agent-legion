@@ -358,7 +358,10 @@ the versioned `.githooks/` implementation from the current worktree when that br
 older worktrees without `.githooks/` remain unaffected. Successful gate evidence is shared:
 
 - pre-commit runs `scripts/check-fast.sh` for lint, formatting, and type feedback;
-- pre-push runs `scripts/check-quick.sh` for all branches;
+- pre-push runs `scripts/check-quick.sh` for all branches, trimmed to the lanes
+  affected by the pushed paths (frontend-only pushes skip the backend pytest lane;
+  docs-only pushes run static checks only; shared files and new refs always run
+  all lanes);
 - the full gate (`scripts/check.sh` backend lane, frontend build) and the extended stress gate
   (`scripts/check-ci.sh`) run on GitHub Actions — see `.github/workflows/quality-gate.yml` —
   for pull requests and pushes to `develop`, `main`, or `master`;

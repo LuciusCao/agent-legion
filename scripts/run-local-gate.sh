@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ "$#" -ne 1 || ("$1" != "quick" && "$1" != "full") ]]; then
-  echo "Usage: $0 <quick|full>" >&2
+if [[ "$#" -lt 1 || "$#" -gt 2 || ("$1" != "quick" && "$1" != "full") ]]; then
+  echo "Usage: $0 <quick|full> [lanes]" >&2
   exit 2
 fi
 
 gate="$1"
+# Lane selector for the quick gate (see scripts/check-quick.sh). The full gate
+# always runs every lane.
+lanes="${2:-backend frontend}"
+case "$lanes" in
+  "backend frontend"|"backend"|"frontend"|"static") ;;
+  *)
+    echo "Unsupported lanes: $lanes" >&2
+    exit 2
+    ;;
+esac
+if [[ "$gate" == "full" && "$lanes" != "backend frontend" ]]; then
+  echo "Lane selection is only supported for the quick gate." >&2
+  exit 2
+fi
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 
@@ -22,7 +36,7 @@ if [[ "$common_dir" != /* ]]; then
   common_dir="$ROOT_DIR/$common_dir"
 fi
 
-fingerprint_input="gate=$gate"$'\n'
+fingerprint_input="gate=$gate"$'\n'"lanes=$lanes"$'\n'
 fingerprint_paths=(
   scripts/check-fast.sh
   scripts/check-quick.sh
@@ -66,8 +80,8 @@ case "$gate" in
 esac
 
 started_at="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-echo "Running local $gate gate for ${head_sha:0:12}..."
-"$gate_script"
+echo "Running local $gate gate for ${head_sha:0:12} (lanes: $lanes)..."
+GATE_LANES="$lanes" "$gate_script"
 
 if [[ -n "$(git status --porcelain --untracked-files=normal)" ]]; then
   echo "Local $gate gate changed the worktree; refusing to record passing evidence." >&2
