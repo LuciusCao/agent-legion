@@ -23,7 +23,12 @@ SHARED_FILES = {
 
 def _resolve_local_repo(repo_url: str) -> Path | None:
     parsed = urlparse(repo_url)
-    return Path(parsed.path).expanduser().resolve() if parsed.scheme == "file" else None
+    if parsed.scheme == "file":
+        return Path(parsed.path).expanduser().resolve()
+    if parsed.scheme:
+        return None
+    path = Path(repo_url).expanduser()
+    return path.resolve() if path.is_absolute() else None
 
 
 def _load_config(path: Path) -> dict:

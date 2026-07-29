@@ -137,13 +137,19 @@ were deleted — a missing base URL is now a hard error, not a silent default.
 `load_settings` rejects a yaml `cms:` section containing `token` or
 `token_gen` with a migration message.
 
-**How to migrate.** Move the static token to env `VIDEO_HIVE_CMS_TOKEN` (or
-`BASECMS_TOKEN`), or — preferred for workspace-scoped setups — bind it in the
-workspace resource config, where it is stored encrypted in the vault. Move the
-four `token_gen` keys to env `BASECMS_APP_ID` / `BASECMS_NONCE` /
-`BASECMS_SECRET` / `BASECMS_TOKEN_URL`. Set the CMS base URL explicitly via
-`cms.base_url` in `config/agent_legion.yaml` (or env `BASECMS_BASE_URL`), or via
+**How to migrate.** Move the static token to env `CMS_TOKEN` (or
+`VIDEO_HIVE_CMS_TOKEN`), or — preferred for workspace-scoped setups — bind it
+in the workspace resource config, where it is stored encrypted in the vault.
+Move the four `token_gen` keys to env `CMS_APP_ID` / `CMS_NONCE` /
+`CMS_SECRET` / `CMS_TOKEN_URL`. Set the CMS base URL explicitly via
+`cms.base_url` in `config/agent_legion.yaml` (or env `CMS_BASE_URL`), or via
 an `api_url` workspace binding.
+
+> Renamed in the open-source de-identification pass (D3): `CMS_*` is the
+> authoritative prefix; the old `BASECMS_*` names still work as deprecated
+> aliases. If your local `.env` still uses `BASECMS_*`, rename the keys to
+> `CMS_*` — alias-only setups log a deprecation warning, and setting both
+> names with different values is a startup error.
 
 **Why.** Tokens previously had five competing sources (yaml, two env names,
 token_gen, vault) and base URLs four, including a hardcoded internal host
@@ -410,7 +416,7 @@ workflows:
   pi:
     binary: pi
     provider: gateway
-    model: your-model-b
+    model: your-model
     thinking: low
     timeout_seconds: 900
     environment:
@@ -438,6 +444,15 @@ For example:
 ```
 
 Skill sources are declared in `config/skills.yaml` and pinned by `config/skills.lock`.
+
+The shipped declarations use machine-independent `~/...` paths (expanded per
+user at resolve time), so skill checkouts under
+`~/.agents/skills/agent-legion/<workflow>/<capability>/` work with zero extra
+configuration. To keep skills elsewhere, point a skill's `repo` at any git URL
+or local path (absolute or `~/...`) and run `make skills-lock` to refresh the
+lock. The `openclaw.skill_safety.repos` allowlist in
+`config/agent_legion.yaml` uses the same `~/...` form; both sides are expanded
+to absolute paths before they are matched.
 
 Every skill repo must contain:
 
