@@ -10,13 +10,12 @@ def _worker_schema() -> str:
     return f"agent_legion_test_{worker}"
 
 
-# Tests must never fall back to the ambient AGENT_LEGION_DATABASE_URL (or its
-# deprecated VIDEO_HIVE_DATABASE_URL alias): those vars point at the dev/prod
-# database in real shells, and agent loops exporting them have already wiped
-# dev-schema state by running the suite against it. Only an explicit
-# VIDEO_HIVE_TEST_DATABASE_URL may redirect the test database.
+# Tests must never fall back to the ambient AGENT_LEGION_DATABASE_URL: that var
+# points at the dev/prod database in real shells, and agent loops exporting it
+# have already wiped dev-schema state by running the suite against it. Only an
+# explicit AGENT_LEGION_TEST_DATABASE_URL may redirect the test database.
 BASE_DATABASE_URL = os.environ.get(
-    "VIDEO_HIVE_TEST_DATABASE_URL",
+    "AGENT_LEGION_TEST_DATABASE_URL",
     "postgresql://127.0.0.1:5432/agent_legion_test",
 )
 TEST_SCHEMA = _worker_schema()

@@ -73,7 +73,7 @@ review_keywords:
 ```
 
 ```python
-# Wrong: Generic Workspace route imports a Video Hive phase.
+# Wrong: Generic Workspace route imports a legacy video pipeline phase.
 from server.app.pipeline.download import download_video
 ```
 
@@ -98,7 +98,7 @@ LocalExecutor(...).execute(context)
 - Secret 值必须经 vault（Fernet 加密落 `workspace_secrets`），配置与快照只存
   `secret_ref`，不得明文落库、出 API 或进日志（VAULT-SECRET-001）。
 - Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS token 只走 env
-  （`VIDEO_HIVE_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
+  （`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
   workspace resource binding + vault；
   yaml 出现 `cms.token` / `cms.token_gen` 启动即报错（G2），`openclaw.skill_safety`
   写 `ref` 启动即报错（G3，ref 以 `config/skills.lock` 为唯一权威）。

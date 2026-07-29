@@ -38,7 +38,7 @@ from scripts.architecture.phase6 import (
     check_job_execution_direct_executor_calls,
     check_route_dag_and_deletion,
     check_schema_mutation_locations,
-    check_workspace_video_hive_imports,
+    check_workspace_legacy_video_imports,
 )
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.service_boundaries import check_service_import_boundaries
@@ -162,7 +162,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_frontend_executor_types(root))
     errors.extend(check_legacy_modules_absent(root))
     errors.extend(check_forbidden_patterns(root))
-    errors.extend(check_workspace_video_hive_imports(root))
+    errors.extend(check_workspace_legacy_video_imports(root))
     errors.extend(check_job_execution_direct_executor_calls(root))
     errors.extend(check_video_legacy(root))
     errors.extend(check_route_dag_and_deletion(root))

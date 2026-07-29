@@ -1,6 +1,6 @@
 # Agent Legion
 
-Local processing console for educational videos. It processes knowledge videos through the `video_knowledge` workspace workflow — download, transcribe, review, and package completed JSON for handoff — and runs other workspace-scoped DAG workflows such as `question_comprehension_info`. (Formerly Video Hive.)
+Local processing console for educational videos. It processes knowledge videos through the `video_knowledge` workspace workflow — download, transcribe, review, and package completed JSON for handoff — and runs other workspace-scoped DAG workflows such as `question_comprehension_info`.
 
 ## Technology Stack
 
@@ -93,7 +93,7 @@ make upload-workspace-package # 从 workspace zip 直接上传审题信息
 Configuration is split by domain into files under `config/`:
 
 - `config/app.yaml`: PostgreSQL URL, application paths, HTTP settings, log/run-dir cleanup, monitoring, and token-usage pricing.
-- `config/agent_legion.yaml`: ASR, CMS, resource providers (path/url_key plus the typed `config_schema` each provider accepts), and OpenClaw settings. (Formerly `config/video_hive.yaml`; the old file name still loads with a warning during the transition window, and both files existing at once is a startup error.)
+- `config/agent_legion.yaml`: ASR, CMS, resource providers (path/url_key plus the typed `config_schema` each provider accepts), and OpenClaw settings.
 - `config/workflow.yaml`: agent catalog (`agents`), agent worker registration (`agent_workers`), workspace executors (`executors`; local executor concurrency is `executors.local-default.global_capacity`), workflow runtime, and Pi agent settings.
 - `config/workflows/*.yaml`: workflow DAG definitions; nodes declare only `capability`.
 - `config/skills.yaml` / `config/skills.lock`: skill source declarations and resolved versions for Pi agent nodes. The lock file is the single authority for skill refs; writing a `ref` into yaml is a startup error (see the G3 note below).
@@ -106,8 +106,7 @@ startup. Two sections are env-only by design: `vault` (master key) and `auth`
 `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE` and
 `AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`, and are rejected by the owned-key
 check if written into a yaml file. Likewise the database URL is governed by
-env: `AGENT_LEGION_DATABASE_URL` is authoritative and `VIDEO_HIVE_DATABASE_URL`
-a deprecated alias — set at most one; conflicting values fail startup (config
+env: `AGENT_LEGION_DATABASE_URL` is the single authoritative variable (config
 governance G4).
 
 Edit `config/agent_legion.yaml` for:
@@ -138,7 +137,7 @@ were deleted — a missing base URL is now a hard error, not a silent default.
 `token_gen` with a migration message.
 
 **How to migrate.** Move the static token to env `CMS_TOKEN` (or
-`VIDEO_HIVE_CMS_TOKEN`), or — preferred for workspace-scoped setups — bind it
+`AGENT_LEGION_CMS_TOKEN`), or — preferred for workspace-scoped setups — bind it
 in the workspace resource config, where it is stored encrypted in the vault.
 Move the four `token_gen` keys to env `CMS_APP_ID` / `CMS_NONCE` /
 `CMS_SECRET` / `CMS_TOKEN_URL`. Set the CMS base URL explicitly via
@@ -166,12 +165,11 @@ writing a `ref` into the yaml section is a startup error.
 
 ### Config file and env naming (config governance G4)
 
-`config/video_hive.yaml` was renamed to `config/agent_legion.yaml`. The old
-file name still loads with a deprecation warning during the transition window;
-both files existing at once is a startup error. The database URL env var
-follows the same rename: `AGENT_LEGION_DATABASE_URL` is authoritative,
-`VIDEO_HIVE_DATABASE_URL` is a deprecated alias, and setting both to
-different values fails startup.
+The canonical split config files are `config/app.yaml`,
+`config/agent_legion.yaml`, and `config/workflow.yaml`; no legacy file names
+are accepted. The database URL env var is `AGENT_LEGION_DATABASE_URL`, the
+single authoritative variable — the pre-rename env names are no
+longer read.
 
 ## Video Intake
 
@@ -366,7 +364,7 @@ older worktrees without `.githooks/` remain unaffected. Successful gate evidence
   worktrees can reuse an unchanged result;
 - pre-push refuses a dirty worktree so the verified commit is exactly the commit being pushed.
 
-Set `VIDEO_HIVE_LOCAL_GATE_FORCE=1` to force a fresh pre-push verification for an unchanged
+Set `AGENT_LEGION_LOCAL_GATE_FORCE=1` to force a fresh pre-push verification for an unchanged
 commit. See [Local Quality Gates](docs/architecture/local-quality-gates.md) for the GitLab setup
 and operating policy used when no CI runner is available.
 

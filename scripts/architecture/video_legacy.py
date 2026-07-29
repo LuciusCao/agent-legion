@@ -1,4 +1,4 @@
-"""Architecture guards against reintroduction of legacy Video Hive runtime dependencies."""
+"""Architecture guards against reintroduction of legacy video runtime dependencies."""
 
 # ruff: noqa: SIM905
 
@@ -89,7 +89,7 @@ def check_video_capabilities_import_boundaries(root: Path) -> list[str]:
 
 
 def check_legacy_video_route_imports(root: Path) -> list[str]:
-    """Production code must not reintroduce legacy Video Hive route modules."""
+    """Production code must not reintroduce legacy video route modules."""
     errors: list[str] = []
     for path in _source_files(root, "server/app/**/*.py"):
         rel_path = path.relative_to(root).as_posix()
@@ -108,7 +108,7 @@ def check_legacy_video_route_imports(root: Path) -> list[str]:
 
 
 def check_video_legacy(root: Path) -> list[str]:
-    """Run all legacy Video Hive reintroduction guards."""
+    """Run all legacy video reintroduction guards."""
     return (
         check_video_capabilities_import_boundaries(root)
         + check_legacy_video_route_imports(root)

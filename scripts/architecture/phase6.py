@@ -18,10 +18,10 @@ _WORKSPACE_MODULE_PREFIXES = tuple(
     """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_ server/app/services/workspace_ server/app/services/executor_catalog.py server/app/services/workflow_catalog.py""".split()
 )
 
-_VIDEO_HIVE_MODULE_PREFIXES = tuple("""server.app.pipeline.""".split())
+_LEGACY_VIDEO_MODULE_PREFIXES = tuple("""server.app.pipeline.""".split())
 
-_VIDEO_HIVE_EXACT = frozenset({"server.app.pipeline"})
-_VIDEO_HIVE_EXCEPTIONS: set[tuple[str, str]] = set()
+_LEGACY_VIDEO_EXACT = frozenset({"server.app.pipeline"})
+_LEGACY_VIDEO_EXCEPTIONS: set[tuple[str, str]] = set()
 
 _JOB_SERVICE_PREFIX = "server/app/services/job_"
 _DIRECT_EXECUTOR_MODULE_PREFIXES = tuple(
@@ -54,12 +54,12 @@ def _is_workspace_module(rel_path: str) -> bool:
     )
 
 
-def _is_video_hive_import(module: str) -> bool:
+def _is_legacy_video_import(module: str) -> bool:
     if module == "server.app.pipeline.package" or module.startswith("server.app.pipeline.package."):
         return False
-    if module in _VIDEO_HIVE_EXACT:
+    if module in _LEGACY_VIDEO_EXACT:
         return True
-    return any(module.startswith(prefix) for prefix in _VIDEO_HIVE_MODULE_PREFIXES)
+    return any(module.startswith(prefix) for prefix in _LEGACY_VIDEO_MODULE_PREFIXES)
 
 
 def _is_direct_executor_import(module: str) -> bool:
@@ -73,7 +73,7 @@ def _source_files(root: Path, *globs: str) -> list[Path]:
     return sorted(paths)
 
 
-def check_workspace_video_hive_imports(root: Path) -> list[str]:
+def check_workspace_legacy_video_imports(root: Path) -> list[str]:
     errors: list[str] = []
     for path in _source_files(root, "server/app/**/*.py"):
         rel_path = path.relative_to(root).as_posix()
@@ -86,11 +86,11 @@ def check_workspace_video_hive_imports(root: Path) -> list[str]:
             continue
         modules = imported_modules(tree)
         for module, lineno in modules.items():
-            if _is_video_hive_import(module):
-                if (rel_path, module) in _VIDEO_HIVE_EXCEPTIONS:
+            if _is_legacy_video_import(module):
+                if (rel_path, module) in _LEGACY_VIDEO_EXCEPTIONS:
                     continue
                 errors.append(
-                    f"{rel_path}:{lineno}: Video Hive phase/service import {module!r} "
+                    f"{rel_path}:{lineno}: legacy video phase/service import {module!r} "
                     "in generic Workspace module"
                 )
     return errors

@@ -64,7 +64,7 @@ def test_yaml_declarations_match_previous_hardcoded_version():
 
 
 def test_load_settings_exposes_repo_declarations(tmp_path, monkeypatch):
-    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     settings = load_settings(data_dir=tmp_path / "data")
     assert settings.resource_providers.providers == EXPECTED_PROVIDERS
     assert settings.resource_providers.schemas == EXPECTED_SCHEMAS
@@ -124,7 +124,7 @@ def test_invalid_config_schema_rejected():
 
 
 def test_load_settings_accepts_valid_resource_provider_declarations(tmp_path, monkeypatch):
-    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     config_path = tmp_path / "app.yaml"
     config_path.write_text(
         "database: {url: postgresql://configured/app}\n"
@@ -162,7 +162,7 @@ def test_load_settings_accepts_valid_resource_provider_declarations(tmp_path, mo
 
 
 def test_load_settings_rejects_invalid_resource_provider_declarations(tmp_path, monkeypatch):
-    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     config_path = tmp_path / "app.yaml"
     config_path.write_text(
         "database: {url: postgresql://configured/app}\n"

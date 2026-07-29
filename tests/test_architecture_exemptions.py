@@ -244,7 +244,7 @@ def test_file_budget_requires_ceiling(write_exemptions, exemptions_root):
                     "check": "architecture.file_budget",
                     "path": "server/app/example.py",
                     "reason": "Oversized module needs staged split.",
-                    "owner": "video-hive",
+                    "owner": "agent-legion",
                     "remove_when": "docs/superpowers/plans/example.md#task-3",
                 }
             ]
@@ -263,7 +263,7 @@ def test_file_budget_rejects_invalid_ceiling(write_exemptions, exemptions_root, 
                     "check": "architecture.file_budget",
                     "path": "server/app/example.py",
                     "reason": "Oversized module needs staged split.",
-                    "owner": "video-hive",
+                    "owner": "agent-legion",
                     "remove_when": "docs/superpowers/plans/example.md#task-3",
                     "ceiling": bad_ceiling,
                 }
@@ -286,7 +286,7 @@ def test_file_budget_ceiling_below_actual_rejected(write_exemptions, exemptions_
                     "check": "architecture.file_budget",
                     "path": "server/app/example.py",
                     "reason": "Oversized module needs staged split.",
-                    "owner": "video-hive",
+                    "owner": "agent-legion",
                     "remove_when": "docs/superpowers/plans/example.md#task-3",
                     "ceiling": 50,
                 }
@@ -316,7 +316,7 @@ def test_non_file_budget_exemption_rejects_ceiling(write_exemptions, exemptions_
                     "check": check,
                     "path": "server/app/example.py",
                     "reason": "Specific technical reason.",
-                    "owner": "video-hive",
+                    "owner": "agent-legion",
                     "remove_when": "docs/superpowers/plans/example.md#task-3",
                     "ceiling": 100,
                 }
@@ -339,7 +339,7 @@ def test_file_budget_valid_ceiling_accepted(write_exemptions, exemptions_root):
                     "check": "architecture.file_budget",
                     "path": "server/app/example.py",
                     "reason": "Oversized module needs staged split.",
-                    "owner": "video-hive",
+                    "owner": "agent-legion",
                     "remove_when": "docs/superpowers/plans/example.md#task-3",
                     "ceiling": 100,
                 }
