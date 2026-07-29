@@ -23,6 +23,10 @@ env:
   # check-skills-shared.py compares skill repos at machine-local paths
   # (~/.agents/skills/...) that only exist on maintainer machines.
   AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK: "1"
+  # config/workflow.yaml points agent_workers.register_token_file at the
+  # gitignored deploy/secrets/; a dummy inline token keeps settings from
+  # reading the absent file. Not a real secret — CI-only placeholder.
+  AGENT_LEGION_WORKER_REGISTER_TOKEN: ci-only-dummy-register-token
 
 jobs:
   backend:
