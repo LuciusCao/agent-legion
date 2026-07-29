@@ -233,6 +233,50 @@ def test_tilde_local_source_can_be_managed_in_place(
     assert (repo / ".git").is_dir()
 
 
+def test_normalize_repo_expands_tilde_per_user(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_home = tmp_path / "home"
+    monkeypatch.setenv("HOME", str(fake_home))
+    manager = SkillManager(
+        config_path=tmp_path / "skills.yaml",
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    assert manager._normalize_repo("~/.agents/skills/agent-legion/wf/cap") == str(
+        (fake_home / ".agents" / "skills" / "agent-legion" / "wf" / "cap").resolve()
+    )
+
+
+@pytest.mark.parametrize(
+    "repo",
+    [
+        "file:///nonexistent/repo.git",
+        "https://example.com/skills.git",
+        "git@example.com:skills.git",
+    ],
+)
+def test_normalize_repo_leaves_urls_untouched(tmp_path: Path, repo: str) -> None:
+    manager = SkillManager(
+        config_path=tmp_path / "skills.yaml",
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    assert manager._normalize_repo(repo) == repo
+
+
+def test_normalize_repo_resolves_absolute_path(tmp_path: Path) -> None:
+    manager = SkillManager(
+        config_path=tmp_path / "skills.yaml",
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    assert manager._normalize_repo(str(tmp_path / "repo")) == str((tmp_path / "repo").resolve())
+
+
 def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
