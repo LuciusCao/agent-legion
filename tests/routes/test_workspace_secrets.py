@@ -125,19 +125,16 @@ def test_secrets_non_member_gets_404(admin_client, vault_key):
     )
 
 
-def test_resource_binding_secret_saved_to_vault_not_settings(admin_client, app, vault_key):
+def test_node_config_secret_saved_to_vault_not_settings(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
 
     saved = admin_client.patch(
-        f"/api/workspaces/{workspace_id}/settings/resources",
+        f"/api/workspaces/{workspace_id}/settings/nodes",
         json={
-            "resources": {
-                "question_detail": {
-                    "enabled": True,
-                    "config": {
-                        "api_url": "http://cms.example.com/question/detail",
-                        "token": PLAINTEXT,
-                    },
+            "nodeConfig": {
+                "fetch_questions": {
+                    "api_url": "http://cms.example.com/question/detail",
+                    "token": PLAINTEXT,
                 }
             }
         },
@@ -148,100 +145,108 @@ def test_resource_binding_secret_saved_to_vault_not_settings(admin_client, app, 
     fetched = admin_client.get(f"/api/workspaces/{workspace_id}/settings")
     assert fetched.status_code == 200
     assert PLAINTEXT not in fetched.text
-    config = fetched.json()["settings"]["resources"]["question_detail"]["config"]
+    config = fetched.json()["settings"]["nodeConfig"]["fetch_questions"]
     assert config["token"] == {"secret_set": True}
     assert config["api_url"] == "http://cms.example.com/question/detail"
 
     # Persistence holds only the secret_ref marker; plaintext lives in the vault.
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["resource_config"]["resources"]["question_detail"]["config"]
-    assert stored["token"] == {"secret_ref": "resource:question_detail:token"}
-    assert PLAINTEXT not in str(workspace["resource_config"])
+    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
+    assert stored["token"] == {
+        "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+    }
+    assert PLAINTEXT not in str(workspace["node_config"])
     listed = admin_client.get(f"/api/workspaces/{workspace_id}/secrets")
     assert [entry["name"] for entry in listed.json()["secrets"]] == [
-        "resource:question_detail:token"
+        "node:question_comprehension_info:fetch_questions:token"
     ]
 
 
-def test_resource_binding_resave_without_secret_keeps_ref(admin_client, app, vault_key):
+def test_node_config_resave_without_secret_keeps_ref(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
-    patch = {"resources": {"question_detail": {"enabled": True, "config": {"token": PLAINTEXT}}}}
+    patch = {"nodeConfig": {"fetch_questions": {"token": PLAINTEXT}}}
     assert (
-        admin_client.patch(
-            f"/api/workspaces/{workspace_id}/settings/resources", json=patch
-        ).status_code
+        admin_client.patch(f"/api/workspaces/{workspace_id}/settings/nodes", json=patch).status_code
         == 200
     )
 
     resaved = admin_client.patch(
-        f"/api/workspaces/{workspace_id}/settings/resources",
-        json={
-            "resources": {
-                "question_detail": {
-                    "enabled": True,
-                    "config": {"api_url": "http://cms.example.com/other"},
-                }
-            }
-        },
+        f"/api/workspaces/{workspace_id}/settings/nodes",
+        json={"nodeConfig": {"fetch_questions": {"api_url": "http://cms.example.com/other"}}},
     )
     assert resaved.status_code == 200, resaved.text
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["resource_config"]["resources"]["question_detail"]["config"]
-    assert stored["token"] == {"secret_ref": "resource:question_detail:token"}
+    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
+    assert stored["token"] == {
+        "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+    }
 
 
-def test_resource_binding_masked_echo_keeps_stored_ref(admin_client, app, vault_key):
+def test_node_config_masked_echo_keeps_stored_ref(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
     assert (
         admin_client.patch(
-            f"/api/workspaces/{workspace_id}/settings/resources",
-            json={
-                "resources": {"question_detail": {"enabled": True, "config": {"token": PLAINTEXT}}}
-            },
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"token": PLAINTEXT}}},
         ).status_code
         == 200
     )
     masked = admin_client.get(f"/api/workspaces/{workspace_id}/settings").json()["settings"][
-        "resources"
+        "nodeConfig"
     ]
 
     resaved = admin_client.patch(
-        f"/api/workspaces/{workspace_id}/settings/resources",
-        json={"resources": masked},
+        f"/api/workspaces/{workspace_id}/settings/nodes",
+        json={"nodeConfig": masked},
     )
     assert resaved.status_code == 200, resaved.text
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["resource_config"]["resources"]["question_detail"]["config"]
-    assert stored["token"] == {"secret_ref": "resource:question_detail:token"}
+    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
+    assert stored["token"] == {
+        "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+    }
 
 
-def test_resource_binding_empty_secret_clears_vault_entry(admin_client, app, vault_key):
+def test_node_config_empty_secret_clears_vault_entry(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
     assert (
         admin_client.patch(
-            f"/api/workspaces/{workspace_id}/settings/resources",
+            f"/api/workspaces/{workspace_id}/settings/nodes",
             json={
-                "resources": {"question_detail": {"enabled": True, "config": {"token": PLAINTEXT}}}
+                "nodeConfig": {
+                    "fetch_questions": {
+                        "api_url": "http://cms.example.com/question/detail",
+                        "token": PLAINTEXT,
+                    }
+                }
             },
         ).status_code
         == 200
     )
 
     cleared = admin_client.patch(
-        f"/api/workspaces/{workspace_id}/settings/resources",
-        json={"resources": {"question_detail": {"enabled": True, "config": {"token": ""}}}},
+        f"/api/workspaces/{workspace_id}/settings/nodes",
+        json={
+            "nodeConfig": {
+                "fetch_questions": {
+                    "api_url": "http://cms.example.com/question/detail",
+                    "token": "",
+                }
+            }
+        },
     )
     assert cleared.status_code == 200, cleared.text
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["resource_config"]["resources"]["question_detail"]["config"]
+    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
     assert "token" not in stored
+    assert stored["api_url"] == "http://cms.example.com/question/detail"
     listed = admin_client.get(f"/api/workspaces/{workspace_id}/secrets")
     assert listed.json() == {"secrets": []}
-    config = cleared.json()["settings"]["resources"]["question_detail"]["config"]
+    config = cleared.json()["settings"]["nodeConfig"]["fetch_questions"]
     assert config["token"] == {"secret_set": False}
 
 
-def test_resource_binding_save_without_master_key_fails(admin_client, monkeypatch):
+def test_node_config_save_without_master_key_fails(admin_client, monkeypatch):
     # See test_secret_put_requires_master_key: patch the resolver, not env.
     monkeypatch.setattr(
         "server.app.services.vault.resolve_master_key", lambda *_args, **_kwargs: None
@@ -249,8 +254,8 @@ def test_resource_binding_save_without_master_key_fails(admin_client, monkeypatc
     workspace_id = _create_workspace(admin_client)
 
     response = admin_client.patch(
-        f"/api/workspaces/{workspace_id}/settings/resources",
-        json={"resources": {"question_detail": {"enabled": True, "config": {"token": PLAINTEXT}}}},
+        f"/api/workspaces/{workspace_id}/settings/nodes",
+        json={"nodeConfig": {"fetch_questions": {"token": PLAINTEXT}}},
     )
 
     assert response.status_code == 400

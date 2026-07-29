@@ -6,7 +6,6 @@ import {
 import type { components } from '../../../generated/api'
 import type {
   WorkspaceSettings,
-  ResourceProvidersResponse,
   WorkflowResponse,
   WorkspaceResponse,
 } from '../../../types'
@@ -84,19 +83,6 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
         }
         const message = err instanceof Error ? err.message : '加载设置失败'
         set({ saveError: message })
-      }
-    },
-
-    async fetchResourceProviders() {
-      try {
-        const result = await api<ResourceProvidersResponse>(
-          '/api/resource-providers'
-        )
-        if (result && typeof result === 'object' && 'providers' in result) {
-          set({ resourceProviders: result.providers })
-        }
-      } catch {
-        // Silently fail
       }
     },
 

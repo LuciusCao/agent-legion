@@ -27,7 +27,7 @@ def test_schema_v25_recorded() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "local_executor_removal"
+    assert row["name"] == "node_cms_config"
 
 
 def test_schema_v23_workspace_scope_objects_exist() -> None:

@@ -56,39 +56,67 @@ executors:
     capabilities:
       fetch_questions:
         path: workflow_nodes/question_intake.py
-        # Non-secret CMS query selectors the node may tune (spec D15). Values
-        # resolve along node config → workspace override → intake freeze and
-        # win over resource bindings / global cms defaults; the token stays in
-        # the resource binding + vault chain (spec D16).
+        # CMS connection for this node: non-secret selectors plus the
+        # vault-backed token (secret: true). Values resolve along schema
+        # defaults → node config → workspace override and win over the global
+        # cms: defaults; the token is stored Fernet-encrypted in the
+        # workspace vault and injected in memory at dispatch (VAULT-SECRET-001).
         config_schema:
           type: object
           properties:
+            base_url:
+              type: string
+              description: CMS 服务根地址（覆盖全局 cms.base_url，用于派生各端点 URL）
+            api_url:
+              type: string
+              description: 题目详情端点完整 URL（优先于 base_url 派生）
+            question_list_url:
+              type: string
+              description: 知识点题目列表端点完整 URL（优先于 base_url 派生）
+            token:
+              type: string
+              secret: true
+              description: CMS 访问 token（存入 workspace vault，只写不读）
             bank_version:
               type: string
-              description: CMS 题库版本（覆盖 resource binding 与全局 cms 默认值）
+              description: CMS 题库版本（覆盖全局 cms 默认值）
             country_id:
               type: string
-              description: CMS 国家/地区 ID（覆盖 resource binding 与全局 cms 默认值）
+              description: CMS 国家/地区 ID（覆盖全局 cms 默认值）
             subject_id:
               type: string
-              description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
+              description: CMS 学科 ID（覆盖全局 cms 默认值）
+            page_size:
+              type: integer
+              minimum: 1
+              maximum: 500
+              description: 知识点题目列表分页大小（覆盖全局 cms 默认值）
       download_video:
         path: workflow_nodes/video_download.py
-        # Non-secret CMS query selectors the node may tune (spec D15), used
-        # when resolving knowledge codes against the CMS at execution time;
-        # the token stays in the resource binding + vault chain (spec D16).
+        # CMS connection for resolving knowledge codes at execution time;
+        # same vault-backed token semantics as fetch_questions.
         config_schema:
           type: object
           properties:
+            base_url:
+              type: string
+              description: CMS 服务根地址（覆盖全局 cms.base_url，用于派生端点 URL）
+            api_url:
+              type: string
+              description: 知识点详情端点完整 URL（优先于 base_url 派生）
+            token:
+              type: string
+              secret: true
+              description: CMS 访问 token（存入 workspace vault，只写不读）
             bank_version:
               type: string
-              description: CMS 题库版本（覆盖 resource binding 与全局 cms 默认值）
+              description: CMS 题库版本（覆盖全局 cms 默认值）
             country_id:
               type: string
-              description: CMS 国家/地区 ID（覆盖 resource binding 与全局 cms 默认值）
+              description: CMS 国家/地区 ID（覆盖全局 cms 默认值）
             subject_id:
               type: string
-              description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
+              description: CMS 学科 ID（覆盖全局 cms 默认值）
       clean_and_parse:
         path: workflow_nodes/question_clean_parse.py
       classify_comprehension_eligibility:

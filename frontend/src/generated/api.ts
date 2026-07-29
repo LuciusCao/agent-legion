@@ -401,23 +401,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/global-services': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Global Services */
-    get: operations['get_global_services_api_global_services_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/health': {
     parameters: {
       query?: never
@@ -649,23 +632,6 @@ export interface paths {
     }
     /** Get Metrics Overview */
     get: operations['get_metrics_overview_api_metrics_overview_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/resource-providers': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Resource Providers */
-    get: operations['get_resource_providers_api_resource_providers_get']
     put?: never
     post?: never
     delete?: never
@@ -1686,19 +1652,6 @@ export interface components {
       /** Worker Id */
       worker_id: string
     }
-    /** CmsServiceStatus */
-    CmsServiceStatus: {
-      /** Baseurl */
-      baseUrl: string
-      /** Env */
-      env: string
-      /** Healthy */
-      healthy: boolean | null
-      /** Lastcheckedat */
-      lastCheckedAt: string | null
-      /** Tokenconfigured */
-      tokenConfigured: boolean
-    }
     /** ContinueJobRequest */
     ContinueJobRequest: Record<string, never>
     /** CreateAgentRegisterTokenRequest */
@@ -1849,10 +1802,6 @@ export interface components {
     FailedNodeRunsResponse: {
       /** Runs */
       runs: components['schemas']['FailedNodeRunItem'][]
-    }
-    /** GlobalServicesResponse */
-    GlobalServicesResponse: {
-      cms: components['schemas']['CmsServiceStatus']
     }
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -2504,49 +2453,6 @@ export interface components {
       allowed_workspaces: string[]
       /** Worker Token */
       worker_token: string
-    }
-    /**
-     * ResourceBinding
-     * @description Per-provider binding stored under resource_config["resources"].
-     *
-     *     Extra keys (e.g. provider) are preserved as-is.
-     */
-    ResourceBinding: {
-      /** Config */
-      config?: {
-        [key: string]: unknown
-      }
-      /**
-       * Enabled
-       * @default false
-       */
-      enabled: boolean
-    } & {
-      [key: string]: unknown
-    }
-    /** ResourceProviderDefinition */
-    ResourceProviderDefinition: {
-      /** Config Schema */
-      config_schema?: {
-        [key: string]: unknown
-      }
-      /** Defaultparams */
-      defaultParams: {
-        [key: string]: string
-      }
-      /** Key */
-      key: string
-      /** Paramkeys */
-      paramKeys: string[]
-      /** Path */
-      path: string
-      /** Provider */
-      provider: string
-    }
-    /** ResourceProvidersResponse */
-    ResourceProvidersResponse: {
-      /** Providers */
-      providers: components['schemas']['ResourceProviderDefinition'][]
     }
     /** RunToRequest */
     RunToRequest: {
@@ -3327,10 +3233,6 @@ export interface components {
       labelOverrides?: {
         [key: string]: string
       } | null
-      /** Resources */
-      resources?: {
-        [key: string]: unknown
-      } | null
       /** Workflowkey */
       workflowKey?: string | null
     }
@@ -3554,10 +3456,6 @@ export interface components {
       labelOverrides: {
         [key: string]: string
       }
-      /** Resources */
-      resources: {
-        [key: string]: components['schemas']['ResourceBinding']
-      }
       /** Workflowkey */
       workflowKey: string
     }
@@ -3583,10 +3481,6 @@ export interface components {
         [key: string]: {
           [key: string]: unknown
         }
-      } | null
-      /** Resources */
-      resources?: {
-        [key: string]: unknown
       } | null
       /** Workflowkey */
       workflowKey?: string | null
@@ -4342,26 +4236,6 @@ export interface operations {
       }
     }
   }
-  get_global_services_api_global_services_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['GlobalServicesResponse']
-        }
-      }
-    }
-  }
   health_api_health_get: {
     parameters: {
       query?: never
@@ -4836,26 +4710,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_resource_providers_api_resource_providers_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ResourceProvidersResponse']
         }
       }
     }

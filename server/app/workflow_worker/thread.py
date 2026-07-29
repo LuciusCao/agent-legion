@@ -93,9 +93,7 @@ class WorkflowWorkerThread:
         return {eid: self.registry.global_capacity(eid) or 0 for eid in self.registry.definitions()}
 
     def start(self) -> None:
-        self._definitions = list_registered_workflows(
-            self.settings.root_dir, self.settings.resource_providers.providers
-        )
+        self._definitions = list_registered_workflows(self.settings.root_dir)
         self._ensure_pools()
 
         def _loop() -> None:

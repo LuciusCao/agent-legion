@@ -18,6 +18,7 @@ from server.app.config_schema import (
     config_schema_defaults,
     validate_config_values,
 )
+from server.app.services.node_secrets import strip_secret_fields
 from server.app.workflows.schema import WorkflowDefinition
 
 
@@ -115,19 +116,28 @@ def resolve_node_config(
     node_config: Mapping[str, Any],
     workspace_override: Mapping[str, Any],
 ) -> dict[str, Any]:
-    """Merge defaults → node config → workspace override, validating each layer."""
+    """Merge defaults → node config → workspace override, validating each layer.
+
+    Secret fields are vault-managed markers; they bypass validation (VAULT-SECRET-001).
+    """
     if not config_schema:
         if node_config or workspace_override:
             raise ConfigSchemaError("node declares config but its capability has no config_schema")
         return {}
-    validate_config_values(config_schema, dict(node_config), partial=True, path="node config")
+    plain_node = strip_secret_fields(config_schema, dict(node_config))
+    plain_override = strip_secret_fields(config_schema, dict(workspace_override))
+    validate_config_values(config_schema, plain_node, partial=True, path="node config")
     validate_config_values(
-        config_schema, dict(workspace_override), partial=True, path="workspace node config"
+        config_schema, plain_override, partial=True, path="workspace node config"
     )
     effective = config_schema_defaults(config_schema)
-    effective.update(node_config)
-    effective.update(workspace_override)
-    return validate_config_values(config_schema, effective)
+    effective.update(plain_node)
+    effective.update(plain_override)
+    validated = validate_config_values(config_schema, effective)
+    for key, value in {**node_config, **workspace_override}.items():
+        if key not in plain_node and key not in plain_override:
+            validated[key] = value
+    return validated
 
 
 def resolve_workflow_node_configs(

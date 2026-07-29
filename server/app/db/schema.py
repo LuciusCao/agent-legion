@@ -6,6 +6,7 @@ from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.migrations import (
     migrate_code_executor_bindings,
     migrate_local_executor_removal,
+    migrate_node_cms_config,
     migrate_workspace_cms_config,
 )
 from server.app.db.transaction import write_transaction
@@ -59,8 +60,9 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_workspace_secrets(conn)
             migrate_code_executor_bindings(conn)
             migrate_local_executor_removal(conn)
+            migrate_node_cms_config(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "local_executor_removal"),
+                (SCHEMA_VERSION, "node_cms_config"),
             )

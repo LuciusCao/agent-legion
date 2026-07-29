@@ -46,13 +46,11 @@ const defaultState: SettingState = {
     intakeModes: [],
     labelOverrides: {},
     workflowKey: '',
-    resources: {},
   },
   originalWorkspaceName: '测试空间',
   originalWorkspaceDescription: '测试描述',
   originalSettings: null,
   isDirty: false,
-  resourceProviders: [],
   workflowDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,
@@ -88,7 +86,6 @@ const defaultState: SettingState = {
   setNodeLimit: vi.fn(),
   setAgentCapacity: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue(undefined),
-  fetchResourceProviders: vi.fn().mockResolvedValue(undefined),
   fetchWorkflowDefinition: vi.fn().mockResolvedValue(undefined),
   saveAll: vi.fn().mockResolvedValue(undefined),
   testConnection: vi.fn().mockResolvedValue(undefined),
@@ -281,15 +278,6 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('calls fetchResourceProviders on mount', async () => {
-    const fetchResourceProviders = vi.fn().mockResolvedValue(undefined)
-    useSettingStore.setState({ fetchResourceProviders })
-    renderPage()
-    await waitFor(() => {
-      expect(fetchResourceProviders).toHaveBeenCalled()
-    })
-  })
-
   it('calls test connection and shows status change', async () => {
     const testConnection = vi.fn().mockResolvedValue(undefined)
     useSettingStore.setState({ testConnection })
@@ -356,48 +344,6 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Server Error')).toBeInTheDocument()
     })
-  })
-
-  it('renders resource provider params when intake mode is checked', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        intake: {
-          modes: [
-            {
-              key: 'by_knowledge',
-              label: '按知识点',
-              input_field: 'knowledge_codes',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [],
-      },
-      resourceProviders: [
-        {
-          key: 'question_detail',
-          provider: 'cms.question.detail',
-          path: '/question/detail',
-          defaultParams: { bank_version: 'v5' },
-          paramKeys: ['bank_version', 'country_id'],
-        },
-      ],
-      settings: {
-        ...defaultState.settings,
-        intakeModes: ['by_knowledge'],
-        resources: {
-          question_detail: { enabled: true, config: {} },
-        },
-      },
-    })
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('cms.question.detail')).toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('bank_version')).toBeInTheDocument()
-    expect(screen.getByLabelText('country_id')).toBeInTheDocument()
   })
 
   it('renders checked checkbox for enabled intake modes', async () => {
@@ -531,7 +477,6 @@ describe('SettingsPage', () => {
       intakeModes: [],
       labelOverrides: {},
       workflowKey: 'sample_workflow',
-      resources: {},
     }
     useSettingStore.setState({
       ...defaultState,

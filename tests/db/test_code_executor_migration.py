@@ -34,10 +34,10 @@ def test_schema_v25_recorded() -> None:
     assert SCHEMA_VERSION == 25
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
-            "select name from schema_migrations where version=?", (SCHEMA_VERSION,)
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "local_executor_removal"
+    assert row["name"] == "node_cms_config"
 
 
 def test_migration_rebinds_first_nodes_and_copies_concurrency() -> None:

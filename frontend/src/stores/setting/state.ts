@@ -1,8 +1,4 @@
-import type {
-  WorkspaceSettings,
-  ResourceProviderDefinition,
-  WorkflowDefinitionRecord,
-} from '../../types'
+import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../../types'
 import type {
   ExecutorDefinition,
   WorkspaceExecutorConfiguration,
@@ -28,7 +24,6 @@ export type SettingState = {
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
-  resourceProviders: ResourceProviderDefinition[]
   workflowDefinition: WorkflowDefinitionRecord | null
   testStatus: TestStatus
   executorCatalog: ExecutorDefinition[]
@@ -56,7 +51,6 @@ export type SettingState = {
     limit: number | null
   ) => void
   fetchSettings: (workspaceId: string) => Promise<void>
-  fetchResourceProviders: () => Promise<void>
   fetchWorkflowDefinition: () => Promise<void>
   saveAll: () => Promise<void>
   testConnection: () => Promise<void>
@@ -76,7 +70,6 @@ export const defaultSettings: WorkspaceSettings = {
   intakeModes: [],
   labelOverrides: {},
   workflowKey: '',
-  resources: {},
 }
 
 export const defaultExecutorConfiguration: WorkspaceExecutorConfiguration = {

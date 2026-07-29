@@ -189,7 +189,7 @@ openclaw:
     assert "asr.provider" in fields
 
 
-def test_cms_credentials_allowed_when_no_cms_resource(tmp_path, monkeypatch):
+def test_cms_credentials_allowed_when_no_cms_endpoint(tmp_path, monkeypatch):
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
@@ -199,7 +199,7 @@ def test_cms_credentials_allowed_when_no_cms_resource(tmp_path, monkeypatch):
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_credentials_warning_when_cms_resource_enabled(tmp_path, monkeypatch, caplog):
+def test_cms_credentials_warning_when_cms_endpoint_configured(tmp_path, monkeypatch, caplog):
     # Set these to empty strings so the real .env file cannot populate them.
     for env_key in (
         "CMS_TOKEN",
@@ -219,51 +219,18 @@ def test_cms_credentials_warning_when_cms_resource_enabled(tmp_path, monkeypatch
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
-    # Workspace vault bindings cannot be pre-checked at startup, so missing
-    # env-level credentials only log a warning instead of failing startup.
+    # Workspace node config tokens live in the vault and cannot be pre-checked
+    # at startup, so missing env-level credentials only log a warning instead
+    # of failing startup.
     with caplog.at_level(logging.WARNING, logger="server.app.executors.runtime_config"):
         _load_and_validate(tmp_path, monkeypatch, config)
 
     messages = [record.getMessage() for record in caplog.records]
     assert any("cms.token" in message and "vault" in message for message in messages)
-
-
-def test_cms_credentials_warning_for_provider_keyed_defaults(tmp_path, monkeypatch, caplog):
-    # Set these to empty strings so the real .env file cannot populate them.
-    for env_key in (
-        "CMS_TOKEN",
-        "CMS_APP_ID",
-        "CMS_NONCE",
-        "CMS_SECRET",
-        "CMS_TOKEN_URL",
-        "BASECMS_TOKEN",
-        "BASECMS_APP_ID",
-        "BASECMS_NONCE",
-        "BASECMS_SECRET",
-        "BASECMS_TOKEN_URL",
-    ):
-        monkeypatch.setenv(env_key, "")
-    binary = _make_executable(tmp_path / "whisper-cli")
-    model = tmp_path / "model.bin"
-    model.write_text("model", encoding="utf-8")
-    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
-"""
-
-    with caplog.at_level(logging.WARNING, logger="server.app.executors.runtime_config"):
-        _load_and_validate(tmp_path, monkeypatch, config)
-
-    assert any("cms.token" in record.getMessage() for record in caplog.records)
 
 
 def test_aggregate_invalid_fields_in_one_exception(tmp_path, monkeypatch):
@@ -305,10 +272,8 @@ def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch)
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     with pytest.raises(StartupValidationError) as exc_info:
@@ -321,23 +286,21 @@ resource_providers:
     assert "openclaw.cwd" in message
 
 
-def test_cms_resource_accepts_cms_token_env(tmp_path, monkeypatch):
+def test_cms_endpoint_accepts_cms_token_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CMS_TOKEN", "cms-token")
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_resource_accepts_basecms_token_alias(tmp_path, monkeypatch):
+def test_cms_endpoint_accepts_basecms_token_alias(tmp_path, monkeypatch):
     # Deprecated BASECMS_* aliases still satisfy the credential check (D3);
     # blank the CMS_* names so the worktree .env cannot add a conflicting
     # dual assignment.
@@ -349,16 +312,14 @@ def test_cms_resource_accepts_basecms_token_alias(tmp_path, monkeypatch):
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_resource_accepts_cms_token_gen_env(tmp_path, monkeypatch):
+def test_cms_endpoint_accepts_cms_token_gen_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CMS_APP_ID", "app-id")
     monkeypatch.setenv("CMS_NONCE", "nonce")
     monkeypatch.setenv("CMS_SECRET", "cms-secret")
@@ -368,10 +329,8 @@ def test_cms_resource_accepts_cms_token_gen_env(tmp_path, monkeypatch):
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     _load_and_validate(tmp_path, monkeypatch, config)

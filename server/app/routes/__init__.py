@@ -28,7 +28,6 @@ from .packages import create_packages_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
-from .workflow_resource_providers import create_workflow_resource_providers_router
 from .workflow_revisions import create_workflow_revisions_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
 from .workspace_configuration import create_workspace_configuration_router
@@ -80,7 +79,6 @@ def create_router(
     if ops_metrics is not None:
         secured(create_metrics_router(ops_metrics))
     secured(create_workflow_catalog_router(workflow_catalog, settings))
-    secured(create_workflow_resource_providers_router(workflow_catalog, settings))
     workspaces_router = create_workspaces_router(
         workspace_configuration, settings, job_event_manager=job_event_manager
     )

@@ -28,7 +28,6 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                     "intakeModes": ["batch_by_ids"],
                     "labelOverrides": {"batch_by_ids": "Video IDs"},
                     "workflowKey": "question_comprehension_info",
-                    "resources": {"question_detail": {"enabled": True, "config": {}}},
                 },
                 "executor_allocations": [
                     {"executor_id": "code-default", "concurrency_limit": 4},

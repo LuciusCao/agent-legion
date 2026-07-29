@@ -135,7 +135,7 @@ top-level keys and anything else fails startup:
 | File | Owns |
 |------|------|
 | `config/app.yaml` | database URL, paths, HTTP, cleanup, monitoring |
-| `config/agent_legion.yaml` | ASR, CMS, resource providers, OpenClaw |
+| `config/agent_legion.yaml` | ASR, CMS, OpenClaw |
 | `config/workflow.yaml` | agent catalog, agent workers, executors, Pi/velites runtime |
 | `config/workflows/*.yaml` | workflow DAG definitions |
 | `config/skills.yaml` + `skills.lock` | skill sources and pinned refs |

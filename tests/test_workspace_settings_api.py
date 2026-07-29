@@ -21,9 +21,9 @@ def test_workspace_settings_round_trip(tmp_path):
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
         connection = c.patch(
-            f"/api/workspaces/{workspace_id}/settings/connection",
+            f"/api/workspaces/{workspace_id}/settings/nodes",
             json={
-                "resources": {"question_detail": {"enabled": True, "config": {}}},
+                "nodeConfig": {"fetch_questions": {"bank_version": "v6"}},
             },
         )
         intake = c.patch(
@@ -48,7 +48,8 @@ def test_workspace_settings_round_trip(tmp_path):
     settings = fetched.json()["settings"]
     assert "cmsUrl" not in settings
     assert "cmsToken" not in settings
-    assert settings["resources"]["question_detail"]["enabled"] is True
+    assert "resources" not in settings
+    assert settings["nodeConfig"]["fetch_questions"]["bank_version"] == "v6"
     assert settings["entityType"] == "video"
     assert settings["intakeModes"] == ["batch_by_ids"]
     assert settings["labelOverrides"] == {"batch_by_ids": "输入 ID"}
@@ -164,7 +165,8 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         assert saved_executor.status_code == 200
         assert saved_executor.json()["settings"]["nodeConfig"] == {
             "generate_key_info": {"max_items": 5},
-            "fetch_questions": {"bank_version": "v6"},
+            # The secret token surfaces as a write-only marker (VAULT-SECRET-001).
+            "fetch_questions": {"bank_version": "v6", "token": {"secret_set": False}},
         }
 
         cleared = c.patch(
@@ -214,7 +216,7 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
     assert unknown_node.status_code == 400
 
 
-def test_workspace_settings_resources_are_schema_validated(tmp_path):
+def test_workspace_settings_node_config_is_schema_validated_and_masked(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
@@ -226,28 +228,28 @@ def test_workspace_settings_resources_are_schema_validated(tmp_path):
 
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
         assert fetched.status_code == 200
-        resource_schemas = fetched.json()["settings"]["resourceSchemas"]
-        assert set(resource_schemas) == {"question_detail", "by_knowledge", "knowledge_video"}
-        assert "page_size" in resource_schemas["by_knowledge"]["schema"]["properties"]
+        node_schemas = fetched.json()["settings"]["nodeConfigSchemas"]
+        assert "page_size" in node_schemas["fetch_questions"]["properties"]
+        assert node_schemas["fetch_questions"]["properties"]["token"]["secret"] is True
 
         bad_type = c.patch(
-            f"/api/workspaces/{workspace_id}/settings/resources",
-            json={"resources": {"by_knowledge": {"enabled": True, "config": {"page_size": "x"}}}},
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"page_size": "x"}}},
         )
         unknown_key = c.patch(
-            f"/api/workspaces/{workspace_id}/settings/resources",
-            json={"resources": {"question_detail": {"enabled": True, "config": {"evil": 1}}}},
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"evil": 1}}},
         )
         ok = c.patch(
-            f"/api/workspaces/{workspace_id}/settings/resources",
-            json={"resources": {"by_knowledge": {"enabled": True, "config": {"page_size": 100}}}},
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"page_size": 100}}},
         )
 
     assert bad_type.status_code == 400
     assert unknown_key.status_code == 400
     assert ok.status_code == 200
     # Secret schema fields surface as write-only markers in the payload.
-    assert ok.json()["settings"]["resources"]["by_knowledge"]["config"] == {
+    assert ok.json()["settings"]["nodeConfig"]["fetch_questions"] == {
         "page_size": 100,
         "token": {"secret_set": False},
     }

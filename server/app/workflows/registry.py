@@ -1,7 +1,5 @@
 import contextlib
-from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
 
 from server.app.workflows.definition import WorkflowDefinition, load_workflow_definition
 
@@ -14,22 +12,18 @@ WORKFLOW_FILES = {
 def load_registered_workflow(
     root_dir: Path,
     workflow_key: str,
-    resource_providers: Mapping[str, Any] | None = None,
 ) -> WorkflowDefinition:
     filename = WORKFLOW_FILES.get(workflow_key)
     if filename is None:
         raise KeyError(workflow_key)
-    return load_workflow_definition(
-        root_dir / "config" / "workflows" / filename, resource_providers
-    )
+    return load_workflow_definition(root_dir / "config" / "workflows" / filename)
 
 
 def list_registered_workflows(
     root_dir: Path,
-    resource_providers: Mapping[str, Any] | None = None,
 ) -> list[WorkflowDefinition]:
     workflows: list[WorkflowDefinition] = []
     for key in WORKFLOW_FILES:
         with contextlib.suppress(KeyError, FileNotFoundError):
-            workflows.append(load_registered_workflow(root_dir, key, resource_providers))
+            workflows.append(load_registered_workflow(root_dir, key))
     return workflows
