@@ -3,10 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
-from server.app.db.migrations import migrate_workspace_cms_config
+from server.app.db.migrations import (
+    migrate_code_executor_bindings,
+    migrate_workspace_cms_config,
+)
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 23
+SCHEMA_VERSION = 24
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 # Vault (schema v16): idempotent DDL lives here because the architecture gate
@@ -53,8 +56,9 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
             migrate_workspace_cms_config(conn)
             migrate_workspace_secrets(conn)
+            migrate_code_executor_bindings(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "ops_metric_samples_workspace_scope"),
+                (SCHEMA_VERSION, "code_executor_bindings"),
             )

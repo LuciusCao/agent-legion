@@ -441,7 +441,6 @@ def test_local_executor_config_binds_question_comprehension_info_handlers():
     assert local.kind == "local"
 
     for capability in (
-        "fetch_questions",
         "clean_and_parse",
         "classify_comprehension_eligibility",
         "finalize_non_uploadable",
@@ -451,6 +450,12 @@ def test_local_executor_config_binds_question_comprehension_info_handlers():
         assert handler.startswith("question_comprehension_info."), (
             f"capability {capability!r} must bind to question_comprehension_info, got {handler!r}"
         )
+
+    # fetch_questions moved to the code executor: a repo-relative node path
+    # instead of an in-process handler.
+    code = config["code-default"]
+    assert code.kind == "code"
+    assert code.capabilities["fetch_questions"].path == "workflow_nodes/question_intake.py"
 
 
 def test_classify_comprehension_eligibility_marks_pure_calculation_non_uploadable(tmp_path):

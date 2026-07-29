@@ -218,7 +218,7 @@ def test_batch_with_entity_question_batch_by_ids(tmp_path):
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["source_id"] for job in body["jobs"]] == ["Q1", "Q2"]
-    assert [job["title"] for job in body["jobs"]] == ["Q1", "Q2"]
+    assert [job["title"] for job in body["jobs"]] == ["Question Q1", "Question Q2"]
     payload = json.loads(body["batch"]["source_payload_json"])
     assert payload["entity"] == "question"
     assert payload["question_ids"] == ["Q1", "Q2"]

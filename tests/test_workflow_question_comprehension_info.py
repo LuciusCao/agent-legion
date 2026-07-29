@@ -7,8 +7,8 @@ from server.app.executors.cancellation import CancellationToken, CancelledError
 from server.app.workflows.question_comprehension_info import (
     assemble_comprehension_info,
     clean_and_parse,
-    fetch_questions,
 )
+from workflow_nodes import question_intake
 
 
 def _write_questions_json(artifact_dir: Path, questions: list) -> None:
@@ -22,7 +22,7 @@ def _write_questions_json(artifact_dir: Path, questions: list) -> None:
 def test_fetch_questions_without_cms(tmp_path):
     job = {"source_id": "q1", "title": "Title", "source_type": "question"}
     artifact_dir = tmp_path / "artifacts"
-    fetch_questions(job, artifact_dir, context={})
+    question_intake.run(job, artifact_dir, {})
 
     out_path = artifact_dir / "questions.json"
     assert out_path.is_file()
@@ -50,13 +50,13 @@ def test_fetch_questions_with_cms(tmp_path):
     }
 
     with (
-        patch("server.app.workflows.question_comprehension_info.get_token", return_value="token"),
+        patch("workflow_nodes.question_intake.get_token", return_value="token"),
         patch(
-            "server.app.workflows.question_comprehension_info.fetch_question_detail",
+            "workflow_nodes.question_intake.fetch_question_detail",
             return_value=detail,
         ) as mock_fetch,
     ):
-        fetch_questions(job, artifact_dir, context={"settings_config": settings_config})
+        question_intake.run(job, artifact_dir, {"settings_config": settings_config})
 
     mock_fetch.assert_called_once_with("q1", "https://cms.example.com", "token")
     data = __import__("json").loads((artifact_dir / "questions.json").read_text(encoding="utf-8"))

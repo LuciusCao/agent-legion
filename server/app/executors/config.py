@@ -11,6 +11,10 @@ from pydantic import (
 )
 
 from server.app.config_schema import validate_config_schema
+from server.app.executors.code_config import (  # noqa: F401  (re-export)
+    CodeCapabilityConfig,
+    CodeExecutorConfig,
+)
 
 
 class LocalCapabilityConfig(BaseModel):
@@ -105,5 +109,7 @@ class OpenClawExecutorConfig(BaseModel):
         return value
 
 
-ExecutorConfig = LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig
+ExecutorConfig = (
+    LocalExecutorConfig | CodeExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig
+)
 """Union of the built-in executor config models, for type annotations only."""

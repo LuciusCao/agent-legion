@@ -193,6 +193,9 @@ server/app/
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
+| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/agent_stock.py |
+| CodeCapabilityConfig | BaseModel | path: str, timeout_seconds: int, config_schema: dict[str, Any] | app/executors/code_config.py |
+| CodeExecutorConfig | BaseModel | kind: Literal['code'], global_capacity: int, capabilities: dict[str, CodeCapa... | app/executors/code_config.py |
 | LocalCapabilityConfig | BaseModel | handler: str, timeout_seconds: float | None, isolation: Literal['process', 't... | app/executors/config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
 | OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
@@ -235,8 +238,8 @@ server/app/
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
 | HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None | app/routes/common.py |
-| ExecutorCapabilityResponse | BaseModel | name: str, handler: str | None, skill: str | None, tools: list[str], provider... | app/routes/executor_catalog_contracts.py |
-| ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['local', 'pi', 'openclaw'], global_capacity: int, capa... | app/routes/executor_catalog_contracts.py |
+| ExecutorCapabilityResponse | BaseModel | name: str, handler: str | None, path: str | None, timeout_seconds: int | None... | app/routes/executor_catalog_contracts.py |
+| ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['local', 'code', 'pi', 'openclaw'], global_capacity: i... | app/routes/executor_catalog_contracts.py |
 | ExecutorCatalogResponse | BaseModel | executors: list[ExecutorDefinitionResponse], agents: list[AgentDefinitionResp... | app/routes/executor_catalog_contracts.py |
 | ExecutorAllocationRequest | BaseModel | executor_id: str, concurrency_limit: int | app/routes/executor_contracts.py |
 | NodeBindingRequest | BaseModel | workflow_key: str, node_key: str, executor_id: str | app/routes/executor_contracts.py |
@@ -403,12 +406,12 @@ server/app/
 - `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 `config/workflow.yaml` 中 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
-  - 视频 Job 由 `video_knowledge` workflow 的 handler 节点（`download_video`、`transcribe_video`、Agent 阶段、`assemble_video_metadata`、`package_video_job`）处理。
+  - 视频 Job 由 `video_knowledge` workflow 的节点（`download_video`（code executor）、`transcribe_video`、Agent 阶段、`assemble_video_metadata`、`package_video_job`）处理。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
 - 视频 Job 的 `content_type` 固定为 `knowledge`（`video_capabilities/contracts.py` 强制校验），pipeline 节点序列：
 
   **Knowledge videos (`knowledge`):**
-  1. `download_video` — 下载 MP4；`batch_by_knowledge` 模式下先经 resource binding + vault 把 `knowledge_code` 解析为播放地址（见下文 Job Intake 资源解析）
+  1. `download_video` — 下载 MP4（`code` executor，代码在 `workflow_nodes/video_download.py`）；`batch_by_knowledge` 模式下先经 resource binding + vault 把 `knowledge_code` 解析为播放地址（见下文 Job Intake 资源解析）
   2. `transcribe_video` — 生成 `subtitles.srt` 与 `transcription.json`
   3. `subtitle_review` — openclaw agent
   4. `chapter_generate` — openclaw agent
@@ -426,15 +429,16 @@ server/app/
 
 Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）：
 
-- `phase="intake"`：intake 期经 `resolve_cms_resource` + vault 解析（question 侧；`batch_by_knowledge` 是 1:N fan-out，job 数依赖 CMS 响应，必须在 intake 解析）。
-- `phase="node"`：intake 只做无外部调用的 fan-out（1:1 模式），candidate 只携带 opaque `source_ref`；解析下沉到声明了 `resources: [<resource_key>]` 的 DAG 节点执行期，经 workspace binding + vault 完成（video `batch_by_knowledge` 的 `knowledge_code → 播放地址` 在 `download_video` 节点解析并回写 `video_input.json`）。
+- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经 workspace binding + vault 完成。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
 - `phase=None`：direct 模式，不访问外部资源。
+
+`phase="intake"`（intake 期经 `resolve_cms_resource` + vault 解析、CMS 1:N fan-out）已从 question resolver 退役：intake 不再调用 CMS，非法 id/code 在执行期以 job 失败暴露。
 
 接入新内容类型只需三步：在 `config/agent_legion.yaml` 声明 `resource_providers` 条目、在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并声明 `resources:`。Intake 快照只冻结 `resource_config` / `node_config` 与 `secret_ref`，不再冻结 `cms_config`。
 
 ## Database
 
-- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前 `SCHEMA_VERSION = 21`）：
+- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前 `SCHEMA_VERSION = 22`）：
   - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `resource_config_json`, `default_entity`, `intake_config_json`）。`resource_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（兼容窗口内老明文仍可读，见下文 Secrets Vault）
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表

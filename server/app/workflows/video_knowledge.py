@@ -5,11 +5,9 @@ from pathlib import Path
 from typing import Any
 
 from server.app.pipeline.assemble import assemble_video
-from server.app.pipeline.download import download_video as legacy_download_video
 from server.app.pipeline.transcribe import run_transcription_with_providers
 from server.app.settings import load_settings
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
-from server.app.workflows.video_knowledge_source import resolve_knowledge_source
 from server.app.workflows.video_knowledge_transcription import build_default_providers
 
 
@@ -20,16 +18,6 @@ def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
 
 def _video_id(video_input: VideoKnowledgeInput, job: dict[str, Any]) -> str:
     return video_input.legacy_video_id or str(job.get("id") or "") or video_input.external_id
-
-
-def download_video(
-    job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None = None
-) -> None:
-    video_input = _load_video_input(job_dir)
-    if not video_input.source_url:
-        video_input = resolve_knowledge_source(job, job_dir, video_input, runtime or {})
-    output_path = job_dir / "source.mp4"
-    legacy_download_video(video_input.source_url, output_path)
 
 
 def transcribe_video(

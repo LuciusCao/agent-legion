@@ -1,4 +1,4 @@
-"""Data migrations applied alongside the idempotent DDL replay."""
+"""Data migration applied alongside the idempotent DDL replay (v15)."""
 
 from __future__ import annotations
 

@@ -426,27 +426,10 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     assert results[0]["reason_code"] == "node_not_found"
 
 
-def test_batch_rerun_mixed_node_availability(tmp_path, monkeypatch):
+def test_batch_rerun_mixed_node_availability(tmp_path):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Reading {question_id}",
-            normalized={},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True

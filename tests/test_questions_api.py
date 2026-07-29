@@ -101,28 +101,14 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
 
 
 def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
-    from server.app.cms.question import CmsQuestionDetail
-
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     app.state.settings.config["cms"] = {}
 
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id, title=question_id, normalized={}, payload=None
-        )
-
-    with (
-        authenticate_client(TestClient(app)) as c,
-        # Intake is mocked: without cms.base_url the real CMS boundary now
-        # fails loudly (no fallback host), which is covered by
-        # tests/test_fetch_url.py. This test only checks the detail endpoint.
-        patch(
-            "server.app.services.job_intake_resolution.fetch_question_detail",
-            fake_fetch_question_detail,
-        ),
-        patch("server.app.services.job_intake_resolution.get_token", lambda env, config: "token"),
-    ):
+    with authenticate_client(TestClient(app)) as c:
+        # Intake is node-phase now: it builds opaque candidates without calling
+        # the CMS, so no intake mocking is needed. This test only checks the
+        # detail endpoint's empty-config behavior.
         c.post(
             "/api/workspaces",
             json={"name": "Math", "default_workflow_key": "question_comprehension_info"},

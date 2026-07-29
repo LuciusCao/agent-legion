@@ -50,17 +50,12 @@ agent_workers:
   max_archive_bytes: 67108864
   min_protocol_version: 1
 executors:
-  local-default:
-    kind: local
-    global_capacity: 128
-    # 每个 capability 可设 timeout_seconds（单次隔离执行的墙钟上限，超时判
-    # failed/timeout 并强杀子进程）；缺省回退 executor 默认值 3600s。
+  code-default:
+    kind: code
+    global_capacity: 16
     capabilities:
       fetch_questions:
-        handler: question_comprehension_info.fetch_questions
-        # Runs in the executor pool thread (no child-process spawn): trusted,
-        # fast, pure-code handler; cooperative cancellation only.
-        isolation: thread
+        path: workflow_nodes/question_intake.py
         # Non-secret CMS query selectors the node may tune (spec D15). Values
         # resolve along node config → workspace override → intake freeze and
         # win over resource bindings / global cms defaults; the token stays in
@@ -77,16 +72,8 @@ executors:
             subject_id:
               type: string
               description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
-      clean_and_parse:
-        handler: question_comprehension_info.clean_and_parse
-      classify_comprehension_eligibility:
-        handler: question_comprehension_info.classify_comprehension_eligibility
-      finalize_non_uploadable:
-        handler: question_comprehension_info.finalize_non_uploadable
-      assemble_comprehension_info:
-        handler: question_comprehension_info.assemble_comprehension_info
       download_video:
-        handler: video_knowledge.download_video
+        path: workflow_nodes/video_download.py
         # Non-secret CMS query selectors the node may tune (spec D15), used
         # when resolving knowledge codes against the CMS at execution time;
         # the token stays in the resource binding + vault chain (spec D16).
@@ -102,6 +89,20 @@ executors:
             subject_id:
               type: string
               description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
+  local-default:
+    kind: local
+    global_capacity: 128
+    # 每个 capability 可设 timeout_seconds（单次隔离执行的墙钟上限，超时判
+    # failed/timeout 并强杀子进程）；缺省回退 executor 默认值 3600s。
+    capabilities:
+      clean_and_parse:
+        handler: question_comprehension_info.clean_and_parse
+      classify_comprehension_eligibility:
+        handler: question_comprehension_info.classify_comprehension_eligibility
+      finalize_non_uploadable:
+        handler: question_comprehension_info.finalize_non_uploadable
+      assemble_comprehension_info:
+        handler: question_comprehension_info.assemble_comprehension_info
       transcribe_video:
         handler: video_knowledge.transcribe_video
       assemble_video_metadata:

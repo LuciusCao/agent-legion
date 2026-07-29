@@ -31,6 +31,7 @@ from server.app.services._failure_classification_markers import (
     _PROVIDER_CONTENT_FILTER_MARKER,
     _RESOURCE_LIMIT_MARKERS,
     _REVIEW_REJECTED_MARKERS,
+    _SOURCE_MISSING_MARKERS,
     _SQLITE_MARKERS,
     _TERMINATED_WORD_RE,
     _UNPACK_FAILURE,
@@ -61,7 +62,7 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
         return CATEGORY_BUSINESS, "output_invalid"
     if "All transcription providers failed" in message:
         return CATEGORY_BUSINESS, "transcription_input"
-    if "HTTPError: 404" in message:
+    if any(marker in message for marker in _SOURCE_MISSING_MARKERS):
         return CATEGORY_BUSINESS, "source_missing"
 
     exited = _PROCESS_EXITED_RE.match(message)

@@ -7,8 +7,8 @@ def test_list_executors_endpoint(client):
     assert agent["provider"] == "gateway"
     # yaml 默认 model 已清空（issue #13）：占位符 model 在 enqueue 被拒。
     assert agent["model"] == ""
-    executor = data["executors"][0]
-    assert executor["id"] == "local-default"
+    executors = {item["id"]: item for item in data["executors"]}
+    executor = executors["local-default"]
     assert executor["kind"] == "local"
     assert executor["global_capacity"] == 128
     assert executor["capabilities"] == [
@@ -16,15 +16,19 @@ def test_list_executors_endpoint(client):
         "assemble_video_metadata",
         "classify_comprehension_eligibility",
         "clean_and_parse",
-        "download_video",
-        "fetch_questions",
         "finalize_non_uploadable",
         "package_video_job",
         "transcribe_video",
     ]
+    code_executor = executors["code-default"]
+    assert code_executor["kind"] == "code"
+    assert code_executor["global_capacity"] == 16
+    assert code_executor["capabilities"] == ["download_video", "fetch_questions"]
     assert {
         "name": "fetch_questions",
-        "handler": "question_comprehension_info.fetch_questions",
+        "handler": None,
+        "path": "workflow_nodes/question_intake.py",
+        "timeout_seconds": 600,
         "skill": None,
         "tools": [],
         "provider": None,
@@ -32,7 +36,7 @@ def test_list_executors_endpoint(client):
         "thinking": None,
         "skill_ref": None,
         "skill_commit": None,
-    } in executor["capability_details"]
+    } in code_executor["capability_details"]
 
 
 def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):

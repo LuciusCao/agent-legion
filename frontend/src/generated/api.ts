@@ -1766,6 +1766,8 @@ export interface components {
       model?: string | null
       /** Name */
       name: string
+      /** Path */
+      path?: string | null
       /** Provider */
       provider?: string | null
       /** Skill */
@@ -1776,6 +1778,8 @@ export interface components {
       skill_ref?: string | null
       /** Thinking */
       thinking?: string | null
+      /** Timeout Seconds */
+      timeout_seconds?: number | null
       /** Tools */
       tools?: string[]
     }
@@ -1800,7 +1804,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'local' | 'pi' | 'openclaw'
+      kind: 'local' | 'code' | 'pi' | 'openclaw'
     }
     /** ExecutorRuntimeStatus */
     ExecutorRuntimeStatus: {
@@ -2020,7 +2024,7 @@ export interface components {
       /** Executor Id */
       executor_id?: string | null
       /** Executor Kind */
-      executor_kind?: ('local' | 'pi' | 'openclaw') | null
+      executor_kind?: ('local' | 'code' | 'pi' | 'openclaw') | null
       /** Finished At */
       finished_at?: string | null
       /** Id */
