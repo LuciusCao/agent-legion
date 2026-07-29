@@ -13,9 +13,19 @@ provide.
 | Event | Gate | Command / CI job |
 | --- | --- | --- |
 | Commit | Fast | `scripts/check-fast.sh` |
-| Push (any branch) | Quick | `scripts/check-quick.sh` |
+| Push (any branch) | Quick, lanes trimmed by pushed paths | `scripts/check-quick.sh` |
 | PR / push to `develop`, `main`, `master` | Full | CI jobs `backend` + `frontend` |
 | Push to protected branches, manual dispatch | Extended | CI job `ci-extended` |
+
+The pre-push hook diffs the pushed commits against their remote base and runs
+only the affected quick-gate lanes locally: frontend-only changes skip the
+backend pytest lane (~7 min to ~1.5 min), docs-only changes run static checks
+only, and backend-only changes skip Vitest. New branches/tags, shared files
+(`pyproject.toml`, `uv.lock`, `scripts/`, `.github/`, `config/`, …), mixed
+diffs, and any diff failure fall back to all lanes. CI always runs every lane,
+so trimming never weakens the server-side boundary. The lane set is part of
+the local evidence fingerprint, so evidence from a trimmed run is never reused
+for a different lane set.
 
 Install the repository-managed hooks once from a worktree that contains `.githooks/`:
 
