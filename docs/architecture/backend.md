@@ -161,6 +161,8 @@ server/app/
 | GET | `/workflows` | `list_workflows` | routes/workflow_catalog.py |
 | GET | `/workflows/{workflow_key}` | `get_workflow` | routes/workflow_catalog.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/compare` | `compare_workflow_draft_route` | routes/workflow_draft_compare.py |
+| GET | `/workflow-nodes/files/{file_path:path}` | `read_workflow_node_file` | routes/workflow_node_files.py |
+| PUT | `/workflow-nodes/files/{file_path:path}` | `update_workflow_node_file` | routes/workflow_node_files.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/active` | `get_active_workflow_revision` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/{revision_id}` | `get_workflow_revision_detail` | routes/workflow_revisions.py |
@@ -342,6 +344,10 @@ server/app/
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, after: list[str], inputs: list[str], o... | app/routes/workflow_node_contracts.py |
+| WorkflowNodeCapabilityReference | BaseModel | executor_id: str, capability: str | app/routes/workflow_node_file_contracts.py |
+| WorkflowNodeFileResponse | BaseModel | path: str, content: str, capabilities: list[WorkflowNodeCapabilityReference] | app/routes/workflow_node_file_contracts.py |
+| WorkflowNodeFileUpdateRequest | BaseModel | content: str | app/routes/workflow_node_file_contracts.py |
+| WorkflowNodeFileUpdateResponse | BaseModel | path: str, capabilities: list[WorkflowNodeCapabilityReference] | app/routes/workflow_node_file_contracts.py |
 | WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, workflow_key: str, version: int, status: str, def... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionsResponse | BaseModel | revisions: list[WorkflowRevisionSummary] | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftRequest | BaseModel | definition_yaml: str | app/routes/workflow_revisions_contracts.py |

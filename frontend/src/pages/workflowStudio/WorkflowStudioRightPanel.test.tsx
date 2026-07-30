@@ -1,6 +1,26 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioRightPanel } from './WorkflowStudioRightPanel'
+import { api } from '../../api'
+import type { UserResponse } from '../../api/authApi'
+import { useAuthStore } from '../../stores/authStore'
+import { useSettingStore } from '../../stores/settingStore'
+import type { WorkspaceSettings } from '../../types'
+
+vi.mock('../../api', () => ({
+  api: vi.fn(),
+}))
+
+const mockApi = vi.mocked(api)
+
+const adminUser: UserResponse = {
+  id: 'u1',
+  username: 'admin',
+  display_name: 'Admin',
+  role: 'admin',
+  disabled_at: null,
+  created_at: '2026-01-01T00:00:00Z',
+}
 
 const workflow = {
   key: 'video_knowledge',
@@ -34,21 +54,48 @@ const executorCatalog = [
   },
 ]
 
+const baseSettings: WorkspaceSettings = {
+  entityType: 'question',
+  intakeModes: [],
+  labelOverrides: {},
+  workflowKey: '',
+}
+
+function renderPanel(
+  overrides?: Partial<Parameters<typeof WorkflowStudioRightPanel>[0]>
+) {
+  return render(
+    <WorkflowStudioRightPanel
+      workflow={workflow}
+      executorCatalog={executorCatalog}
+      agentCatalog={[]}
+      selectedNodeKey="fetch_questions"
+      readOnly={false}
+      definitionYaml="key: video_knowledge\n"
+      setDefinitionYaml={vi.fn()}
+      onClose={vi.fn()}
+      {...overrides}
+    />
+  )
+}
+
 describe('WorkflowStudioRightPanel', () => {
+  beforeEach(() => {
+    mockApi.mockReset()
+    useAuthStore.setState({ user: null, status: 'unknown' })
+    useSettingStore.setState({ workspaceId: null, settings: baseSettings })
+    mockApi.mockResolvedValue({
+      path: 'workflow_nodes/fetch_questions.py',
+      content: 'def run(inputs):\n    return {}\n',
+      capabilities: [
+        { executor_id: 'code-default', capability: 'fetch_questions' },
+      ],
+    })
+  })
+
   it('contains only the selected node configuration', () => {
     const onClose = vi.fn()
-    render(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        executorCatalog={executorCatalog}
-        agentCatalog={[]}
-        selectedNodeKey="fetch_questions"
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        onClose={onClose}
-      />
-    )
+    renderPanel({ onClose })
 
     expect(screen.getByRole('region', { name: '节点配置' })).toBeInTheDocument()
     expect(screen.getByText('基本设置')).toBeInTheDocument()
@@ -67,5 +114,54 @@ describe('WorkflowStudioRightPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '关闭节点配置' }))
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('shows code and config cards for a code-bound node with a config schema', async () => {
+    useAuthStore.setState({ user: adminUser, status: 'authenticated' })
+    useSettingStore.setState({
+      workspaceId: 'ws1',
+      settings: {
+        ...baseSettings,
+        nodeConfig: { fetch_questions: { bank_version: 'v2' } },
+        nodeConfigSchemas: {
+          fetch_questions: {
+            type: 'object',
+            properties: {
+              bank_version: { type: 'string', description: '题库版本' },
+            },
+          },
+        },
+      },
+    })
+    renderPanel()
+
+    expect(screen.getByRole('region', { name: '节点代码' })).toBeInTheDocument()
+    expect(
+      await screen.findByText('def run(inputs):', { exact: false })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('region', { name: '节点配置 fetch_questions' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('textbox', { name: 'bank_version' })).toHaveValue(
+      'v2'
+    )
+  })
+
+  it('hides both cards without admin role, code path, or config schema', () => {
+    renderPanel({
+      executorCatalog: [
+        {
+          ...executorCatalog[0],
+          capability_details: [{ name: 'fetch_questions', path: null }],
+        },
+      ],
+    })
+
+    expect(
+      screen.queryByRole('region', { name: '节点代码' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('region', { name: '节点配置 fetch_questions' })
+    ).not.toBeInTheDocument()
   })
 })

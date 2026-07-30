@@ -15,7 +15,6 @@ import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { DangerZone } from '../components/settings/DangerZone'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
-import { NodeConfigSection } from '../components/settings/NodeConfigSection'
 import { WorkerTokensSection } from '../components/settings/WorkerTokensSection'
 import { WorkspaceMembersSection } from '../components/settings/WorkspaceMembersSection'
 import styles from './SettingsPage.module.css'
@@ -70,13 +69,10 @@ export function SettingsPage() {
 
   const hasCodeNodes = codeBoundNodeKeys.size > 0
 
-  const hasNodeConfig = Object.keys(settings.nodeConfigSchemas ?? {}).length > 0
-
   const navItems = useMemo(
     () => [
       { id: 'basic-info', label: '基础信息' },
       { id: 'intake-config', label: '接入与资源' },
-      ...(hasNodeConfig ? [{ id: 'node-config', label: '节点配置' }] : []),
       { id: 'workflow', label: '工作流' },
       { id: 'executors', label: '执行器' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
@@ -86,7 +82,7 @@ export function SettingsPage() {
         : []),
       { id: 'danger-zone', label: '危险操作' },
     ],
-    [hasCodeNodes, hasNodeConfig, isAdmin]
+    [hasCodeNodes, isAdmin]
   )
 
   const { activeSection, contentRef, scrollToSection } =
@@ -172,12 +168,6 @@ export function SettingsPage() {
             isSaving={isSaving}
             setSettings={setSettings}
             onTestConnection={testConnection}
-          />
-
-          <NodeConfigSection
-            workspaceId={workspaceId}
-            settings={settings}
-            workflowDefinition={workflowDefinition}
           />
 
           <WorkflowSection

@@ -1,14 +1,9 @@
 import { useState } from 'react'
 import { Button } from '@mui/material'
 import { api } from '../../api'
-import styles from '../../pages/SettingsPage.module.css'
 import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
-import type {
-  ConfigSchema,
-  WorkflowDefinitionRecord,
-  WorkspaceSettings,
-} from '../../types'
+import type { ConfigSchema, WorkspaceSettings } from '../../types'
 import { SchemaConfigForm } from './SchemaConfigForm'
 
 type SettingsResponse = { settings?: Partial<WorkspaceSettings> }
@@ -16,7 +11,7 @@ type SettingsResponse = { settings?: Partial<WorkspaceSettings> }
 // Merge the server-returned node-config keys into the setting store without
 // clobbering unrelated unsaved edits, and keep originalSettings in sync so
 // the page-level dirty flag is unaffected by a successful node save.
-function applySavedSettings(saved: Partial<WorkspaceSettings>) {
+export function applySavedSettings(saved: Partial<WorkspaceSettings>) {
   const state = useSettingStore.getState()
   const merge = (base: WorkspaceSettings | null): WorkspaceSettings | null =>
     base
@@ -40,7 +35,7 @@ interface CardProps {
   initialValues: Record<string, unknown>
 }
 
-function NodeConfigCard({
+export function NodeConfigCard({
   workspaceId,
   nodeKey,
   label,
@@ -115,44 +110,5 @@ function NodeConfigCard({
         </div>
       )}
     </div>
-  )
-}
-
-interface SectionProps {
-  workspaceId: string
-  settings: WorkspaceSettings
-  workflowDefinition?: WorkflowDefinitionRecord | null
-}
-
-export function NodeConfigSection({
-  workspaceId,
-  settings,
-  workflowDefinition,
-}: SectionProps) {
-  const schemas = settings.nodeConfigSchemas ?? {}
-  const nodeKeys = Object.keys(schemas)
-  if (nodeKeys.length === 0) return null
-
-  const labelFor = (nodeKey: string) =>
-    workflowDefinition?.nodes.find((node) => node.key === nodeKey)?.label ||
-    nodeKey
-
-  return (
-    <section id="node-config" className={styles.section}>
-      <h2 className={styles.sectionTitle}>节点配置</h2>
-      <hr className={styles.sectionDivider} />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-        {nodeKeys.map((nodeKey) => (
-          <NodeConfigCard
-            key={nodeKey}
-            workspaceId={workspaceId}
-            nodeKey={nodeKey}
-            label={labelFor(nodeKey)}
-            schema={schemas[nodeKey]}
-            initialValues={settings.nodeConfig?.[nodeKey] ?? {}}
-          />
-        ))}
-      </div>
-    </section>
   )
 }

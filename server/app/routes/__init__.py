@@ -28,6 +28,7 @@ from .packages import create_packages_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
+from .workflow_node_files import create_workflow_node_files_router
 from .workflow_revisions import create_workflow_revisions_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
 from .workspace_configuration import create_workspace_configuration_router
@@ -63,6 +64,9 @@ def create_router(
     router.include_router(create_common_router())
     router.include_router(create_agents_router(agent_manager))
     router.include_router(create_token_usage_pricing_router(job_db, settings))
+    # Global admin endpoint (not workspace-scoped): the sub-router enforces
+    # require_admin itself, so it must not go through secured().
+    router.include_router(create_workflow_node_files_router(settings))
     secured(create_packages_router(job_db, settings, job_packages))
     secured(create_worker_router(workspace_worker_control))
     if (
