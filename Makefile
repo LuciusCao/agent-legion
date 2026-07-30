@@ -30,9 +30,11 @@ AGENT_WORKER_CONFIG ?= config/agent-worker.yaml
 AGENT_WORKER_STATE_DIR ?= data/agent-worker-service
 AGENT_WORKER_UI_HOST ?= 127.0.0.1
 AGENT_WORKER_UI_PORT ?= 8787
+# macOS 下批跑期间防止系统睡眠（lid close / idle）；非 macOS 环境为空。
+CAFFEINATE := $(shell command -v caffeinate 2>/dev/null)
 .PHONY: dev-worker
-dev-worker: ## 启动本机 Worker Service 与控制台
-	$(UV) run python -m worker.service \
+dev-worker: ## 启动本机 Worker Service 与控制台（macOS 下经 caffeinate 防睡眠）
+	$(if $(CAFFEINATE),$(CAFFEINATE) -is ,)$(UV) run python -m worker.service \
 		--config "$(AGENT_WORKER_CONFIG)" --state-dir "$(AGENT_WORKER_STATE_DIR)" \
 		--host "$(AGENT_WORKER_UI_HOST)" --port "$(AGENT_WORKER_UI_PORT)"
 

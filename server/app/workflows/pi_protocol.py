@@ -8,9 +8,24 @@ persisted and shipped to workers.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from server.app.workflows.pi_model_error import detect_model_error, fold_model_error
+
+__all__ = [
+    "JOB_DIR_PLACEHOLDER",
+    "PROMPT_FILE_PLACEHOLDER",
+    "PROMPT_INSTRUCTION",
+    "SESSION_DIR_PLACEHOLDER",
+    "SESSION_NAME_PLACEHOLDER",
+    "SKILL_DIR_PLACEHOLDER",
+    "build_command",
+    "build_prompt",
+    "detect_model_error",
+    "fold_model_error",
+    "render_command_spec",
+]
 
 PROMPT_INSTRUCTION = "Execute the attached node instructions."
 
@@ -85,57 +100,6 @@ def build_command(
             cmd.extend([flag, value])
     cmd.extend([f"@{prompt_file}", PROMPT_INSTRUCTION])
     return cmd
-
-
-def detect_model_error(events_file: Path) -> str | None:
-    """Scan Pi JSONL events for model-call failures reported by the CLI.
-
-    Pi can exit with code 0 even when the upstream model request fails
-    (e.g. a 400 from the provider). In that case the events file contains
-    assistant messages whose ``stopReason`` is ``error`` and which carry an
-    ``errorMessage``. Detecting this prevents us from reporting a misleading
-    "Missing outputs" error when the agent never had a chance to run.
-
-    Pi auto-retries transient failures (e.g. "terminated"), so an error only
-    counts when no later assistant message succeeds; recovered retries pass.
-    """
-    if not events_file.is_file():
-        return None
-    last_error: str | None = None
-    try:
-        with events_file.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                messages: list[dict[str, Any]] = []
-                # message_start / message_end / turn_end wrap the assistant msg
-                msg = event.get("message") or {}
-                if not isinstance(msg, dict):
-                    turn_end = event.get("turn_end") or {}
-                    msg = turn_end.get("message") if isinstance(turn_end, dict) else {}
-                if isinstance(msg, dict):
-                    messages.append(msg)
-
-                # message_update events nest under assistantMessageEvent
-                assistant_event = event.get("assistantMessageEvent") or {}
-                if isinstance(assistant_event, dict):
-                    nested = assistant_event.get("message") or {}
-                    if isinstance(nested, dict):
-                        messages.append(nested)
-
-                for msg in messages:
-                    if msg.get("errorMessage"):
-                        last_error = str(msg["errorMessage"])
-                    elif msg.get("stopReason") in ("stop", "toolUse"):
-                        last_error = None
-    except Exception:
-        return None
-    return last_error
 
 
 def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:

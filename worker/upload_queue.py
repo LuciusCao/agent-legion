@@ -28,8 +28,10 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from server.app.services.pi_event_compression import compress_pi_events
-from server.app.workflows.pi_protocol import detect_model_error
+from server.app.services.pi_event_compression import (
+    compress_pi_events,
+    scan_and_compress_pi_events,
+)
 from worker.execution_lifecycle import heartbeat_loop
 from worker.host_transfer import HostRequestError
 
@@ -206,10 +208,13 @@ class UploadQueue:
         job_dir = task.execution_dir / "job"
         run_dir = job_dir / "runs" / task.node_key / "worker"
         events = run_dir / "events.jsonl"
-        # Pi exits 0 even when the model call fails (e.g. provider 401); scan
-        # before compression rewrites the events file.
-        model_error = detect_model_error(events) if task.exit_code == 0 else None
-        compress_pi_events(events)
+        # Pi exits 0 even when the model call fails (e.g. provider 401); one
+        # pass folds the model-error scan into the compression rewrite.
+        if task.exit_code == 0:
+            model_error, _, _ = scan_and_compress_pi_events(events)
+        else:
+            model_error = None
+            compress_pi_events(events)
         outputs = [
             name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()
         ]
