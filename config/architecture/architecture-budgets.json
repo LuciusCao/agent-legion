@@ -496,6 +496,7 @@
     "server/app/agent_claim_compatibility.py": 64,
     "server/app/agent_completion.py": 165,
     "server/app/agent_dispatch.py": 137,
+    "server/app/agent_result_commit.py": 78,
     "server/app/agent_worker_capacity.py": 40,
     "server/app/agent_worker_declarations.py": 72,
     "server/app/agent_workers.py": 266,
@@ -616,7 +617,7 @@
     "server/app/routes/agent_catalog_contracts.py": 27,
     "server/app/routes/agent_worker_metrics.py": 51,
     "server/app/routes/agent_worker_results.py": 78,
-    "server/app/routes/agent_workers.py": 295,
+    "server/app/routes/agent_workers.py": 274,
     "server/app/routes/agent_workers_contracts.py": 113,
     "server/app/routes/agents.py": 65,
     "server/app/routes/artifacts.py": 46,
@@ -855,6 +856,7 @@
     "worker/status_reader.py": 43,
     "worker/supervisor.py": 231,
     "worker/transfer_controls.py": 53,
+    "worker/upload_heartbeat.py": 50,
     "worker/upload_queue.py": 332,
     "worker/worker_declarations.py": 59
   }

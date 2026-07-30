@@ -2,14 +2,15 @@ from __future__ import annotations
 
 import hmac
 import re
-import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from fastapi.responses import FileResponse
+from starlette import concurrency
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_completion import AgentCompletionHandler
+from server.app.agent_result_commit import commit_agent_result
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
@@ -229,9 +230,6 @@ def create_agent_workers_router(
         worker = authorize_worker(request)
         worker_id = str(worker["worker_id"])
         lease_id = require_lease_id(request)
-        payload = broker.claimed_payload(execution_id, worker_id)
-        if payload is None or str(payload["lease_id"]) != lease_id:
-            raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
         # Validate metadata fully BEFORE writing the archive: malformed input
         # must produce a 400, never a 500 with an orphan file on disk.
         try:
@@ -247,39 +245,20 @@ def create_agent_workers_router(
             raise HTTPException(status_code=413, detail="Agent result archive too large")
         if broker.bundle_dir is None:
             raise HTTPException(status_code=500, detail="Agent bundle storage is unavailable")
-        archive_name = f"{execution_id}.{uuid.uuid4().hex}.result.tar.gz"
-        archive_path = broker.bundle_dir / archive_name
-        succeeded = False
-        try:
-            archive_path.parent.mkdir(parents=True, exist_ok=True)
-            archive_path.write_bytes(body)
-            # finish() commits the lease/node terminal state first; mark_done()
-            # then closes the request (bound to lease_id in SQL). A crash
-            # between the two leaves a claimed request whose lease is no
-            # longer active, which the sweeper closes instead of requeueing.
-            finished = completion.finish(
-                lease_id=lease_id,
-                worker_id=worker_id,
-                job_id=str(payload["job_id"]),
-                node_key=str(payload["node_key"]),
-                manifest=payload["manifest"],
-                outcome=outcome,
-                archive_name=archive_name,
-            )
-            if not finished:
-                raise HTTPException(status_code=409, detail="execution lease is no longer active")
-            if broker.mark_done(execution_id, worker_id, lease_id, record) is None:
-                raise HTTPException(status_code=409, detail="execution is no longer owned")
-            succeeded = True
-        finally:
-            # The archive name is unique to this attempt — always reclaim it.
-            broker.discard_result_archive(archive_name)
-            if succeeded:
-                # Only a fully committed result retires the shared execution
-                # bundle. On 409/500 paths the bundle must survive for
-                # re-queued attempts; terminal-request bundles are reaped by
-                # the sweeper (AgentExecutionBroker.reap_terminal_bundles).
-                broker.retire_bundle(str(payload["manifest"].get("bundle_name", "")))
+        # The blocking DB/disk commit runs in the threadpool: at agent scale
+        # (multiple reports per second) holding the event loop here stalls
+        # every heartbeat, claim, and dashboard stream behind it.
+        await concurrency.run_in_threadpool(
+            commit_agent_result,
+            broker,
+            completion,
+            execution_id,
+            worker_id,
+            lease_id,
+            outcome,
+            record,
+            body,
+        )
         return Response(status_code=204)
 
     return router

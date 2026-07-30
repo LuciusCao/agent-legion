@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from worker import upload_queue
+from worker.execution_lifecycle import heartbeat_loop
 from worker.status import ExecutionStatusReporter
 from worker.upload_queue import PENDING_FILENAME, UploadQueue, UploadTask
 
@@ -21,6 +22,7 @@ class QueueFakeClient:
         self.heartbeats = 0
         self.report_status = report_status
         self.report_errors = 0
+        self.heartbeats_at_report: list[int] = []
 
     def upload_artifact(self, path: Path) -> str:
         data = path.read_bytes()
@@ -31,6 +33,7 @@ class QueueFakeClient:
     def report(
         self, execution_id: str, lease_id: str, metadata: dict, archive: Path
     ) -> tuple[int, bytes]:
+        self.heartbeats_at_report.append(self.heartbeats)
         if self.report_errors > 0:
             self.report_errors -= 1
             raise RuntimeError("download failed: /x: timed out")
@@ -150,6 +153,61 @@ def test_report_transient_error_retries_until_success(
     queue.shutdown()
     assert len(client.reports) == 1
     assert not (work_root / "exec-1").exists()
+
+
+def test_heartbeat_quiesced_before_report(tmp_path: Path) -> None:
+    """The report is the last proof of life: no beat may race its commit,
+    or the loser's 409 logs a spurious "lost ownership"."""
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    task = _task(work_root)
+    # Simulate the live heartbeat handed over by the execution thread.
+    beat = threading.Thread(
+        target=heartbeat_loop,
+        args=(
+            client,
+            task.execution_id,
+            task.lease_id,
+            task.heartbeat_stop,
+            0.05,
+            threading.Event(),
+        ),
+        daemon=True,
+    )
+    task.heartbeat_thread = beat
+    beat.start()
+    observed: dict[str, bool] = {}
+    real_report = client.report
+
+    def report(*args: object) -> tuple[int, bytes]:
+        observed["stop_set"] = task.heartbeat_stop.is_set()
+        observed["beat_alive"] = beat.is_alive()
+        return real_report(*args)  # type: ignore[arg-type]
+
+    client.report = report  # type: ignore[method-assign]
+    queue = _queue(client)
+    queue.submit(task)
+    queue.shutdown()
+    assert observed == {"stop_set": True, "beat_alive": False}
+
+
+def test_heartbeat_resumes_during_report_backoff(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A transient report failure must re-arm the lease heartbeat for the
+    backoff window — an unbounded backoff chain can outlive the lease TTL."""
+    monkeypatch.setattr(upload_queue, "_RETRY_BASE_SECONDS", 0.2)
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    client = QueueFakeClient()
+    client.report_errors = 1
+    queue = _queue(client)  # heartbeat interval 0.05s << 0.2s backoff
+    queue.submit(_task(work_root))
+    queue.shutdown()
+    assert len(client.reports) == 1
+    first_attempt, second_attempt = client.heartbeats_at_report
+    assert second_attempt > first_attempt  # beats resumed during the backoff
 
 
 def test_restore_requeues_pending_markers(tmp_path: Path) -> None:
