@@ -423,3 +423,92 @@ def test_terminate_child_kills_stubborn_process() -> None:
 
     assert process.terminated
     assert process.killed
+
+
+def _test_hung_handler(_job: dict, _job_dir: Path, _runtime: dict | None) -> None:
+    # Simulates the zombie case: a handler that never returns and never
+    # checks its cancellation token.
+    while True:
+        time.sleep(0.05)
+
+
+def test_local_executor_timeout_kills_hung_handler(context: ExecutionContext) -> None:
+    executor = LocalExecutor(
+        "local",
+        {"fetch": _test_hung_handler},
+        cancellation_grace_seconds=0.2,
+        default_timeout_seconds=0.4,
+    )
+    started = time.monotonic()
+    result = executor.execute(replace(context, capability="fetch"))
+    elapsed = time.monotonic() - started
+
+    assert result.status == "failed"
+    assert "timed out" in result.error_message
+    assert elapsed < 10  # the deadline, not the handler, ended the run
+    assert context.execution_id not in executor._tokens
+
+
+def test_local_executor_capability_timeout_overrides_default(context: ExecutionContext) -> None:
+    executor = LocalExecutor(
+        "local",
+        {"fetch": _test_hung_handler},
+        cancellation_grace_seconds=0.2,
+        capability_timeouts={"fetch": 0.4},
+        default_timeout_seconds=3600.0,
+    )
+    started = time.monotonic()
+    result = executor.execute(replace(context, capability="fetch"))
+    elapsed = time.monotonic() - started
+
+    assert result.status == "failed"
+    assert "timed out" in result.error_message
+    assert "0.4s" in result.error_message
+    assert elapsed < 10
+
+
+def test_local_executor_without_timeout_completes(context: ExecutionContext) -> None:
+    executor = LocalExecutor(
+        "local",
+        {"fetch": _test_slow_handler},
+        default_timeout_seconds=30.0,
+    )
+    result = executor.execute(replace(context, capability="fetch", expected_outputs=()))
+    assert result.status == "completed"
+
+
+def test_build_local_executor_passes_capability_timeouts() -> None:
+    from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+    from server.app.executors.kinds import RuntimeDependencies
+    from server.app.executors.local import build_local_executor
+
+    config = LocalExecutorConfig(
+        kind="local",
+        global_capacity=1,
+        capabilities={
+            "fetch": LocalCapabilityConfig(
+                handler="tests.executors.test_local_executor._test_module_level_handler",
+                timeout_seconds=12.0,
+            ),
+            "other": LocalCapabilityConfig(
+                handler="tests.executors.test_local_executor._test_module_level_handler",
+            ),
+        },
+    )
+    executor = build_local_executor("local-default", config, RuntimeDependencies())
+
+    assert executor._capability_timeouts == {"fetch": 12.0}
+    assert executor._default_timeout_seconds > 0
+
+
+def test_local_capability_config_timeout_validation() -> None:
+    import pydantic
+
+    from server.app.executors.config import LocalCapabilityConfig
+
+    assert LocalCapabilityConfig(handler="a.b").timeout_seconds is None
+    assert LocalCapabilityConfig(handler="a.b", timeout_seconds=5).timeout_seconds == 5
+    with pytest.raises(pydantic.ValidationError):
+        LocalCapabilityConfig(handler="a.b", timeout_seconds=0)
+    with pytest.raises(pydantic.ValidationError):
+        LocalCapabilityConfig(handler="a.b", timeout_seconds=-1)
