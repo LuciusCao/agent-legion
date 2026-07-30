@@ -16,6 +16,7 @@ from server.app.auth.service import build_auth_service
 from server.app.db.connection import close_database_pools
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
+from server.app.executors._pi_skill import build_skill_manager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime import ExecutionRuntime
@@ -39,7 +40,6 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings, load_settings, validate_settings
-from server.app.skills.manager import SkillManager
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
@@ -57,11 +57,7 @@ def build_executor_registry(
     all workspaces. Runtime dependencies (Pi binary, OpenClaw template, local
     handlers) are injected here so adapters remain environment-agnostic.
     """
-    skill_manager = SkillManager(
-        config_path=settings.root_dir / "config" / "skills.yaml",
-        lock_path=settings.root_dir / "config" / "skills.lock",
-        base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
-    )
+    skill_manager = build_skill_manager(settings.root_dir)
     runtime = RuntimeDependencies(
         local_handlers=build_local_handlers(settings),
         pi_runtime=settings.executor_runtime.workflows.pi,
@@ -124,6 +120,7 @@ def create_app(
         artifact_store,
         settings.jobs_dir,
         settings.data_dir / "agent_bundles",
+        skill_manager=build_skill_manager(settings.root_dir),
     )
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
