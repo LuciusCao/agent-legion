@@ -29,8 +29,10 @@ from worker.cleanup import (
     clean_work_root,
     sweep_stale_executions,
 )
+from worker.event_filter import spawn_event_pump
 from worker.execution_lifecycle import heartbeat_loop, terminate, wait_for_exit
 from worker.execution_prepare import prepare_execution
+from worker.fd_limits import raise_fd_limit
 from worker.host_client import Client, WorkerAuthError
 from worker.host_status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
@@ -127,14 +129,17 @@ def run_execution(
                     command,
                     cwd=job_dir,
                     env=env,
-                    stdout=output,
+                    stdout=subprocess.PIPE,
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
+                # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
+                pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
                 timeout = int(manifest.get("pi", {}).get("timeout_seconds", 600))
                 exit_code, report_result = wait_for_exit(
                     proc, timeout, shutdown, shutdown_grace, ownership_lost
                 )
+                pump.join(timeout=10)
             if report_result:
                 task = UploadTask(
                     execution_id=execution_id,
@@ -200,6 +205,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run an Agent Legion Worker")
     parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
     args = parser.parse_args()
+    try:
+        soft, hard = raise_fd_limit()
+        print(f"worker fd limit: soft={soft} hard={hard}", flush=True)
+    except (OSError, ValueError) as exc:
+        print(f"worker fd limit raise failed; continuing with defaults: {exc}", flush=True)
     config = runtime_controls.load_config(args.config)
     transfer = load_transfer_controls(args.config)
     client = Client(str(config["host_url"]), transfer_timeout=transfer.transfer_timeout_seconds)
