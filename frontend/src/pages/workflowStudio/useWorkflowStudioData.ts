@@ -5,6 +5,7 @@ import type {
   WorkflowRevisionSummary,
 } from '../../types'
 import { useFetchWorkflowRevisionDetail } from './useFetchWorkflowRevisionDetail'
+import { useStudioNodeSettings } from './useStudioNodeSettings'
 
 type LoadState = 'loading' | 'ready' | 'empty' | 'error'
 
@@ -41,6 +42,7 @@ export function useWorkflowStudioData(workspaceId: string | undefined) {
     }
     void reload()
   }, [reload, workspaceId])
+  useStudioNodeSettings(workspaceId)
   const fetchRevisionDetail = useFetchWorkflowRevisionDetail(workspaceId)
   return {
     loadState,

@@ -1,0 +1,46 @@
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.path {
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: #1a1c1e;
+  word-break: break-all;
+}
+.hint {
+  font-size: 12px;
+  color: #43474e;
+}
+.code {
+  margin: 0;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  background: #fafafa;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre;
+}
+.editor {
+  width: 100%;
+  min-height: 220px;
+  padding: 8px;
+  border: 1px solid #c7c7c7;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+}
+.error {
+  font-size: 12px;
+  color: #d32f2f;
+}
