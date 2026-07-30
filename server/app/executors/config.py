@@ -16,6 +16,9 @@ from server.app.config_schema import validate_config_schema
 class LocalCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     handler: str = Field(min_length=1)
+    # Wall-clock limit for one isolated run of this capability; absent falls
+    # back to the executor default (local.DEFAULT_TIMEOUT_SECONDS).
+    timeout_seconds: float | None = Field(default=None, gt=0)
     # Non-secret tunable parameters for the node_config chain (spec D15);
     # secrets stay in resource bindings / the vault (spec D16).
     config_schema: dict[str, Any] = Field(default_factory=dict)

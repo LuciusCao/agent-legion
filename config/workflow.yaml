@@ -53,6 +53,8 @@ executors:
   local-default:
     kind: local
     global_capacity: 128
+    # 每个 capability 可设 timeout_seconds（单次隔离执行的墙钟上限，超时判
+    # failed/timeout 并强杀子进程）；缺省回退 executor 默认值 3600s。
     capabilities:
       fetch_questions:
         handler: question_comprehension_info.fetch_questions
