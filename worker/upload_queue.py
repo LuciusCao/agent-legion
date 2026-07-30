@@ -9,12 +9,11 @@ into a transfer storm against the Host.
 
 Durability: every task writes an ``upload_pending.json`` marker into its
 execution dir before entering the queue; the marker is removed only after
-the Host accepts the result (or the lease is gone and the result is moot).
-A crashed Worker rescans the work root on startup and re-queues survivors.
+the Host accepts the result. A crashed Worker rescans it on startup.
 
 Lease ownership: the per-execution heartbeat started at claim time keeps
-beating until the report resolves — the heartbeat stop event is handed to
-the queue task, never stopped by the execution thread.
+beating through the upload. It is quiesced for the final report and resumed
+only while a transient report failure backs off (worker/upload_heartbeat.py).
 """
 
 from __future__ import annotations
@@ -32,8 +31,8 @@ from server.app.services.pi_event_compression import (
     compress_pi_events,
     scan_and_compress_pi_events,
 )
-from worker.execution_lifecycle import heartbeat_loop
 from worker.host_transfer import HostRequestError
+from worker.upload_heartbeat import quiesce_heartbeat, quiesce_task_heartbeat, start_heartbeat
 
 PENDING_FILENAME = "upload_pending.json"
 _PENDING_VERSION = 1
@@ -41,6 +40,7 @@ _PENDING_VERSION = 1
 _RETRY_BASE_SECONDS = 2.0
 _RETRY_CAP_SECONDS = 60.0
 _MAX_ERROR_MESSAGE_CHARS = 4000
+_HEARTBEAT_JOIN_SECONDS = 5.0
 
 
 @dataclass
@@ -161,37 +161,26 @@ class UploadQueue:
         return restored
 
     def shutdown(self) -> None:
-        # Tasks watch the shared stop event and bail out of retry loops
-        # quickly, leaving their markers for the next startup's restore.
+        # Tasks watch the shared stop event and bail out of retry loops quickly.
         self._pool.shutdown(wait=True)
 
     def _run(self, task: UploadTask) -> None:
         if task.heartbeat_thread is None:
-            # Restored from disk: resume heartbeating so a still-live lease
-            # survives the upload; a dead lease turns the report into a 409
-            # discard. Live tasks keep the heartbeat they were handed.
-            task.heartbeat_thread = threading.Thread(
-                target=heartbeat_loop,
-                args=(
-                    self._client,
-                    task.execution_id,
-                    task.lease_id,
-                    task.heartbeat_stop,
-                    self._heartbeat_interval,
-                    threading.Event(),
-                ),
-                daemon=True,
+            # Restored from disk: resume heartbeating so the lease survives.
+            task.heartbeat_thread = start_heartbeat(
+                self._client,
+                task.execution_id,
+                task.lease_id,
+                task.heartbeat_stop,
+                self._heartbeat_interval,
             )
             self._status.start(task.execution_id, **task.status_fields)
-            task.heartbeat_thread.start()
         try:
             self._deliver(task)
         except Exception as exc:
             print(f"upload task crashed for {task.execution_id}: {exc}", flush=True)
         finally:
-            task.heartbeat_stop.set()
-            if task.heartbeat_thread is not None:
-                task.heartbeat_thread.join(timeout=2)
+            quiesce_heartbeat(task.heartbeat_stop, task.heartbeat_thread, 2)
             self._status.finish(task.execution_id)
             with self._lock:
                 self._depth -= 1
@@ -279,6 +268,10 @@ class UploadQueue:
                 return  # shutting down mid-upload; marker stays for restore
             uploaded[name] = ref
         metadata["output_artifacts"] = uploaded
+        # Quiesce the heartbeat before the final report: a beat racing the
+        # commit loses the row lock and logs a spurious "lost ownership" 409.
+        # Resume only while a transient report failure backs off.
+        quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
         backoff = _RETRY_BASE_SECONDS
         while not self._stop.is_set():
             try:
@@ -290,8 +283,18 @@ class UploadQueue:
                     f"result report retry for {task.execution_id}: {exc}",
                     flush=True,
                 )
+                # An unbounded backoff chain can outlive the lease TTL.
+                task.heartbeat_stop = threading.Event()
+                task.heartbeat_thread = start_heartbeat(
+                    self._client,
+                    task.execution_id,
+                    task.lease_id,
+                    task.heartbeat_stop,
+                    self._heartbeat_interval,
+                )
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, _RETRY_CAP_SECONDS)
+                quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
                 continue
             if status_code == 204:
                 break

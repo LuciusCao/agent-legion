@@ -75,19 +75,19 @@ def claim_in_transaction(
     # Candidates are read WITHOUT row locks (a bounded per-workspace window
     # keeps small workspaces visible behind a deep queue); only the single
     # row actually being claimed is locked below, by PK. Capacity is
-    # workspace-level: a workspace without a workspace_agent_capacities row
-    # has no configured limit and is treated as unlimited. Eligibility is
-    # decided once per workspace and the lateral branch reads only each
-    # workspace's queued head (idx_agent_requests_queued_head) — the old
-    # per-row count subquery made every claim O(queue depth).
+    # workspace-level (no workspace_agent_capacities row = unlimited).
+    # Eligibility is an EXISTS probe per workspaces row — a `distinct
+    # workspace_id` scan would walk the entire queued index on every claim.
     candidates = conn.execute(
         """
         with eligible_workspaces as (
-          select q.workspace_id
-          from (select distinct workspace_id from agent_execution_requests where state='queued') q
-          left join workspace_agent_capacities w on w.workspace_id=q.workspace_id
-          where (select count(*) from agent_execution_requests active
-                 where active.workspace_id=q.workspace_id and active.state='claimed'
+          select ws.id as workspace_id
+          from workspaces ws
+          left join workspace_agent_capacities w on w.workspace_id=ws.id
+          where exists (select 1 from agent_execution_requests q
+                        where q.workspace_id=ws.id and q.state='queued')
+            and (select count(*) from agent_execution_requests active
+                 where active.workspace_id=ws.id and active.state='claimed'
                 ) < coalesce(w.max_concurrency, 2147483647)
         )
         select r.*, wr.definition_json as revision_definition_json
