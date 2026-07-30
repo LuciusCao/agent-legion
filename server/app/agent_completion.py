@@ -9,7 +9,9 @@ from server.app.agent_bundle import AgentBundleError, extract_agent_result
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
 from server.app.services.artifact_store import ArtifactStore
+from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.output_validation import validate_worker_outputs
 
 
 @dataclass(frozen=True)
@@ -72,11 +74,13 @@ class AgentCompletionHandler:
         artifact_store: ArtifactStore,
         jobs_dir: Path,
         bundle_dir: Path,
+        skill_manager: SkillManager | None = None,
     ) -> None:
         self.leases = leases
         self.artifact_store = artifact_store
         self.jobs_dir = jobs_dir
         self.bundle_dir = bundle_dir
+        self.skill_manager = skill_manager
 
     def finish(
         self,
@@ -123,6 +127,11 @@ class AgentCompletionHandler:
         missing = [name for name in expected if name not in produced]
         if status == "completed" and missing:
             status, exit_code, error = "failed", 1, f"Missing outputs: {', '.join(missing)}"
+        # Worker results are untrusted: validate Host-side like the Pi runner.
+        if status == "completed" and self.skill_manager is not None:
+            validation_error = validate_worker_outputs(self.skill_manager, manifest, job_dir)
+            if validation_error:
+                status, exit_code, error = "failed", 1, validation_error
         return self.leases.finish(
             lease_id,
             ExecutionResult(
