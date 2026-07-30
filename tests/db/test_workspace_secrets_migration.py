@@ -20,14 +20,14 @@ def test_workspace_secrets_table_exists() -> None:
     assert columns == {"workspace_id", "name", "ciphertext", "created_at", "updated_at"}
 
 
-def test_schema_v17_recorded() -> None:
-    assert SCHEMA_VERSION == 17
+def test_schema_v18_recorded() -> None:
+    assert SCHEMA_VERSION == 18
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=?", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "agent_request_reporting_state"
+    assert row["name"] == "agent_claim_queue_index"
 
 
 def test_migrate_workspace_secrets_is_idempotent() -> None:

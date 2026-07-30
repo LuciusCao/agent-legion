@@ -85,6 +85,8 @@ class AgentExecutionBroker:
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
         self._fairness_counter = itertools.count()
+        # Incremental bundle-GC cursor, see _agent_broker_reaper.
+        self._reap_watermark: datetime | None = None
 
     def has_active_request(self, job_id: str, node_key: str) -> bool:
         with read_connection(self.database_dsn) as conn:

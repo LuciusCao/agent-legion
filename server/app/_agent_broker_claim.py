@@ -76,30 +76,33 @@ def claim_in_transaction(
     # keeps small workspaces visible behind a deep queue); only the single
     # row actually being claimed is locked below, by PK. Capacity is
     # workspace-level: a workspace without a workspace_agent_capacities row
-    # has no configured limit and is treated as unlimited.
+    # has no configured limit and is treated as unlimited. Eligibility is
+    # decided once per workspace and the lateral branch reads only each
+    # workspace's queued head (idx_agent_requests_queued_head) — the old
+    # per-row count subquery made every claim O(queue depth).
     candidates = conn.execute(
         """
-        select * from (
-          select r.*, d.runtime, d.capability, d.definition_json,
-                 wr.definition_json as revision_definition_json,
-                 row_number() over (
-                   partition by r.workspace_id
-                   order by r.queued_at, r.execution_id
-                 ) as workspace_rank
-          from agent_execution_requests r
-          join agent_definitions d on d.agent_id=r.agent_id and d.definition_hash=r.agent_definition_hash and d.enabled=1
-          join jobs j on j.id=r.job_id
-          left join workflow_revisions wr on wr.id=j.workflow_revision_id
-          left join workspace_agent_capacities w on w.workspace_id=r.workspace_id
-          where r.state='queued'
-            and (
-              select count(*) from agent_execution_requests active
-              where active.workspace_id=r.workspace_id and active.state='claimed'
-            ) < coalesce(w.max_concurrency, 2147483647)
-        ) windowed
-        where workspace_rank <= ?
-        order by queued_at, execution_id
-        limit ?
+        with eligible_workspaces as (
+          select q.workspace_id
+          from (select distinct workspace_id from agent_execution_requests where state='queued') q
+          left join workspace_agent_capacities w on w.workspace_id=q.workspace_id
+          where (select count(*) from agent_execution_requests active
+                 where active.workspace_id=q.workspace_id and active.state='claimed'
+                ) < coalesce(w.max_concurrency, 2147483647)
+        )
+        select r.*, wr.definition_json as revision_definition_json
+        from eligible_workspaces ws
+        cross join lateral (
+          select r2.*, d.runtime, d.capability, d.definition_json
+          from agent_execution_requests r2
+          join agent_definitions d
+            on d.agent_id=r2.agent_id and d.definition_hash=r2.agent_definition_hash and d.enabled=1
+          where r2.workspace_id=ws.workspace_id and r2.state='queued'
+          order by r2.queued_at, r2.execution_id limit ?
+        ) r
+        join jobs j on j.id=r.job_id
+        left join workflow_revisions wr on wr.id=j.workflow_revision_id
+        order by r.queued_at, r.execution_id limit ?
         """,
         (_CANDIDATES_PER_WORKSPACE, _CANDIDATE_WINDOW),
     ).fetchall()
