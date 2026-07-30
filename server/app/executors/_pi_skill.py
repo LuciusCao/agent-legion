@@ -57,3 +57,12 @@ def resolve_skill_dir(
     except Exception:
         skill_manager.cleanup_execution(execution_id)
         raise
+
+
+def build_skill_manager(root_dir: Path) -> SkillManager:
+    """Project-standard SkillManager: repo-pinned config, shared user-level base dir."""
+    return SkillManager(
+        config_path=root_dir / "config" / "skills.yaml",
+        lock_path=root_dir / "config" / "skills.lock",
+        base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
+    )
