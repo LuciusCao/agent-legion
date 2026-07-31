@@ -24,6 +24,7 @@ from server.app._agent_broker_claim import (
     ClaimRacedError,
     claim_in_transaction,
 )
+from server.app._agent_broker_empty import EmptyClaimTrigger
 from server.app._agent_broker_reaper import _SAFE_BUNDLE_NAME
 from server.app.agent_worker_capacity import touch_worker
 from server.app.db.connection import DatabaseDsn
@@ -87,6 +88,8 @@ class AgentExecutionBroker:
         self._fairness_counter = itertools.count()
         # Incremental bundle-GC cursor, see _agent_broker_reaper.
         self._reap_watermark: datetime | None = None
+        # Debounced empty-claim restock signal, see _agent_broker_empty.
+        self.empty_claim = EmptyClaimTrigger()
 
     def has_active_request(self, job_id: str, node_key: str) -> bool:
         with read_connection(self.database_dsn) as conn:
@@ -168,6 +171,10 @@ class AgentExecutionBroker:
                 claimed = claim_in_transaction(self, conn, worker_id, declared_max_concurrency)
         except ClaimRacedError:
             return None
+        if claimed is None:
+            # Demand signal: a Worker found no work; restock immediately when
+            # the queue is truly empty (debounced, see _agent_broker_empty).
+            self.empty_claim.note_empty_claim(self.database_dsn)
         # Record only after the commit has succeeded, never inside the tx.
         if claimed is not None:
             record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
@@ -175,11 +182,8 @@ class AgentExecutionBroker:
         return claimed
 
     def _notify_worker_poll(self, worker_id: str, claimed: AgentClaim | None) -> None:
-        """Mirror Worker presence/capacity into the status panel.
-
-        An idle Worker polls claim every few seconds, so every poll registers
-        one panel row per workspace the Worker may serve ("name busy/cap");
-        a successful claim additionally marks the row busy."""
+        """Mirror Worker presence/capacity into the status panel: every idle
+        poll registers one row per servable workspace; a claim marks busy."""
         manager = self.agent_status
         if manager is None:
             return
@@ -213,11 +217,8 @@ class AgentExecutionBroker:
         return _agent_broker_release.release_slot(self, execution_id, worker_id, lease_id)
 
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
-        """Renew the lease; bound to the current lease_id so zombie attempts
-        from a requeued execution cannot keep a re-claimed lease alive.
-
-        Route note (routes owner): the heartbeat endpoint must accept the
-        worker's current lease_id and pass it through."""
+        """Renew the lease, bound to the current lease_id so zombie attempts
+        from a requeued execution cannot keep a re-claimed lease alive."""
         expires_at = datetime.now(UTC) + timedelta(seconds=self.lease_ttl_seconds)
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
@@ -262,10 +263,7 @@ class AgentExecutionBroker:
         self, execution_id: str, worker_id: str, lease_id: str, outcome: Mapping[str, Any]
     ) -> str | None:
         """Close the request; bound to the current lease_id so a late result
-        from a previous attempt is rejected after a requeue/re-claim.
-
-        Route note (routes owner): the result endpoint must require the
-        worker's lease_id (header or metadata) and pass it through."""
+        from a previous attempt is rejected after a requeue/re-claim."""
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id, agent_id, workspace_id from agent_execution_requests"

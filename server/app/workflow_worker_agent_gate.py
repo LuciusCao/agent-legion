@@ -52,6 +52,16 @@ class AgentPassState:
         self.pool_full = False
         self.stock_gated = 0
 
+    def force_refresh(self) -> None:
+        """Expire the stock snapshot so the next pass reloads it (restock signal)."""
+        self.stock_loaded_at = 0.0
+
+
+def request_restock(worker: WorkflowWorkerThread) -> None:
+    """Empty-claim signal: expire the stock snapshot and wake the poll loop."""
+    worker._agent_pass.force_refresh()
+    worker._wake_event.set()
+
 
 def prepare_agent_pass(
     worker: WorkflowWorkerThread, queues: dict[str, deque[ReadyCandidate]]

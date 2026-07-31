@@ -12,6 +12,7 @@ from server.app.workflow_worker_agent_gate import (
     AgentPassState,
     agent_claim_allowed,
     prepare_agent_pass,
+    request_restock,
 )
 from server.app.workflow_worker_ready_cache import ReadyCandidate
 from server.app.workflow_worker_routing import NodeRoute
@@ -159,3 +160,21 @@ def test_agent_claim_allowed_gates() -> None:
 
     state.stock_snapshot = None
     assert agent_claim_allowed(worker, "ws1", "job1", "fetch", "agent-x") is True
+
+
+def test_force_refresh_expires_stock_snapshot() -> None:
+    state = AgentPassState(
+        stock_snapshot=StockSnapshot(config=AgentStockConfig()),
+        stock_loaded_at=123.0,
+    )
+    state.force_refresh()
+    assert state.stock_loaded_at == 0.0
+    assert state.stock_snapshot is not None  # kept; reloaded by the next pass
+
+
+def test_request_restock_expires_snapshot_and_wakes_worker() -> None:
+    worker = _worker()
+    worker._agent_pass.stock_loaded_at = 123.0
+    request_restock(worker)
+    assert worker._agent_pass.stock_loaded_at == 0.0
+    worker._wake_event.set.assert_called_once_with()
