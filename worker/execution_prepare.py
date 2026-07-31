@@ -76,7 +76,6 @@ def prepare_execution(
         if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
             raise RuntimeError(f"artifact digest mismatch: {name}")
     command_spec = manifest["command_spec"]
-    prompt_file.write_text(str(command_spec["prompt"]), encoding="utf-8")
     paths = {
         "job_dir": str(job_dir),
         "skill_dir": str(extracted / "skill"),
@@ -84,5 +83,6 @@ def prepare_execution(
         "session_name": f"agent-legion-{execution_id}",
         "prompt_file": str(prompt_file),
     }
+    prompt_file.write_text(substitute(str(command_spec["prompt"]), paths), encoding="utf-8")
     command = [substitute(str(part), paths) for part in command_spec["command"]]
     return PreparedExecution(manifest=manifest, command=command)

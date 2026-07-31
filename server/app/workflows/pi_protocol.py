@@ -58,6 +58,8 @@ def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) ->
             "Never write outputs into the run/session directory (runs/); "
             "all declared outputs must live at the top level of the working directory. "
             "Do not modify inputs or create undeclared root-level artifacts. "
+            "Do not read, search, or modify anything outside the working directory "
+            "and the skill directory. "
             "Finish after all required outputs are written and correct."
         ),
     ]

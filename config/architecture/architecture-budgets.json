@@ -876,6 +876,7 @@
     "worker/client.py": 80,
     "worker/config_store.py": 189,
     "worker/event_filter.py": 79,
+    "worker/execution_heartbeat.py": 60,
     "worker/execution_lifecycle.py": 86,
     "worker/execution_prepare.py": 98,
     "worker/executor.py": 358,
