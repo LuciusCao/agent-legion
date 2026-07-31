@@ -172,6 +172,8 @@ def test_heartbeat_quiesced_before_report(tmp_path: Path) -> None:
             task.heartbeat_stop,
             0.05,
             threading.Event(),
+            {"proc": None},
+            threading.Event(),
         ),
         daemon=True,
     )

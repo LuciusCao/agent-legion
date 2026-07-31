@@ -30,7 +30,8 @@ from worker.cleanup import (
     sweep_stale_executions,
 )
 from worker.event_filter import spawn_event_pump
-from worker.execution_lifecycle import heartbeat_loop, terminate, wait_for_exit
+from worker.execution_heartbeat import start_heartbeat
+from worker.execution_lifecycle import terminate, wait_for_exit
 from worker.execution_prepare import prepare_execution
 from worker.fd_limits import raise_fd_limit
 from worker.host_client import Client, WorkerAuthError
@@ -77,21 +78,8 @@ def run_execution(
         "run_dir": str(run_dir),
     }
     status.start(execution_id, **status_fields)
-    stop_heartbeat = threading.Event()
     ownership_lost = threading.Event()
-    heartbeat = threading.Thread(
-        target=heartbeat_loop,
-        args=(
-            client,
-            execution_id,
-            lease_id,
-            stop_heartbeat,
-            heartbeat_interval,
-            ownership_lost,
-        ),
-        daemon=True,
-    )
-    heartbeat.start()
+    heartbeat = start_heartbeat(client, execution_id, lease_id, heartbeat_interval, ownership_lost)
     proc: subprocess.Popen[bytes] | None = None
     task: UploadTask | None = None
     try:
@@ -133,6 +121,7 @@ def run_execution(
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
+                heartbeat.proc_ref["proc"] = proc
                 # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
                 pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
                 timeout = int(manifest.get("pi", {}).get("timeout_seconds", 600))
@@ -189,14 +178,19 @@ def run_execution(
             if released == 409:
                 task = None
         if task is not None:
-            task.heartbeat_stop = stop_heartbeat
-            task.heartbeat_thread = heartbeat
-            uploads.submit(task)
+            task.heartbeat_stop = heartbeat.stop
+            task.heartbeat_thread = heartbeat.thread
+            heartbeat.adopt()
+            try:
+                uploads.submit(task)
+            except Exception:
+                heartbeat.adopted.clear()
+                raise
             return
     # Local discard: lease lost or release rejected — stop heartbeating and
     # drop the execution dir; the Host requeues after the lease expires.
-    stop_heartbeat.set()
-    heartbeat.join(timeout=2)
+    heartbeat.stop.set()
+    heartbeat.thread.join(timeout=2)
     status.finish(execution_id)
     shutil.rmtree(execution_dir, ignore_errors=True)
 

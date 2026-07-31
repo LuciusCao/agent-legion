@@ -25,6 +25,7 @@ def start_heartbeat(
     thread = threading.Thread(
         target=heartbeat_loop,
         args=(client, execution_id, lease_id, stop, interval, threading.Event()),
+        kwargs={"proc_ref": {"proc": None}, "adopted": threading.Event()},
         daemon=True,
     )
     thread.start()

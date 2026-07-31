@@ -39,6 +39,10 @@ def test_build_prompt_contains_all_sections(tmp_path: Path) -> None:
     assert "- a.txt" in prompt
     assert "- out.json" in prompt
     assert "Additional node instructions:\nbe careful" in prompt
+    assert (
+        "Do not read, search, or modify anything outside the working directory "
+        "and the skill directory." in prompt
+    )
     assert prompt.endswith("\n")
 
 
