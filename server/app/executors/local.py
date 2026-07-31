@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 import multiprocessing
 import threading
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from typing import Any
 
-from server.app.executors import _local_isolated
+from server.app.executors import _local_isolated, _local_thread
 from server.app.executors._local_isolated import (  # noqa: F401  (re-exports)
     LocalHandler,
     _handler_key,
@@ -43,6 +43,7 @@ class LocalExecutor:
         resource_providers: ResourceProviderDeclarations | None = None,
         capability_timeouts: Mapping[str, float] | None = None,
         default_timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        thread_capabilities: Iterable[str] | None = None,
     ) -> None:
         self.id = id
         self.handlers = dict(handlers)
@@ -73,6 +74,7 @@ class LocalExecutor:
         self.cancellation_grace_seconds = cancellation_grace_seconds
         self._capability_timeouts = dict(capability_timeouts or {})
         self._default_timeout_seconds = default_timeout_seconds
+        self._thread_capabilities = set(thread_capabilities or ())
         self._cancelled: set[str] = set()
         self._tokens: dict[str, CancellationToken] = {}
         self._watchers: dict[str, threading.Thread] = {}
@@ -98,6 +100,9 @@ class LocalExecutor:
                 error_message=f"capability {context.capability!r} is not supported",
                 log_path=str(context.log_path),
             )
+
+        if context.capability in self._thread_capabilities:
+            return _local_thread.execute_in_thread(self, context, handler)
 
         key = self._handler_keys.get(context.capability)
         if key is None:  # guarded by constructor validation
@@ -203,6 +208,11 @@ def build_local_executor(
             capability: cap_config.timeout_seconds
             for capability, cap_config in config.capabilities.items()
             if cap_config.timeout_seconds is not None
+        },
+        thread_capabilities={
+            capability
+            for capability, cap_config in config.capabilities.items()
+            if cap_config.isolation == "thread"
         },
     )
 

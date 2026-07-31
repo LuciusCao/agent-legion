@@ -28,6 +28,7 @@ from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
+from server.app.scheduler_wakeup import register_wakeup, unregister_wakeup
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
@@ -176,6 +177,8 @@ def create_app(
                     workflow_worker_thread.start()
                 except Exception:
                     logging.getLogger(__name__).exception("workflow worker failed to start")
+                else:
+                    register_wakeup(workflow_worker_thread.wake)
         background_tasks.start(app)
         try:
             yield
@@ -184,6 +187,7 @@ def create_app(
             if sweeper_thread is not None:
                 sweeper_thread.stop()
             if workflow_worker_thread is not None:
+                unregister_wakeup(workflow_worker_thread.wake)
                 workflow_worker_thread.stop()
             close_database_pools()
 

@@ -19,6 +19,12 @@ class LocalCapabilityConfig(BaseModel):
     # Wall-clock limit for one isolated run of this capability; absent falls
     # back to the executor default (local.DEFAULT_TIMEOUT_SECONDS).
     timeout_seconds: float | None = Field(default=None, gt=0)
+    # "thread" runs the handler directly in the executor pool thread: no
+    # process isolation, no wall-clock kill (timeout_seconds does not apply),
+    # and stdout is not redirected into the node log file (use logging).
+    # Only for trusted, fast, pure-code handlers. Default keeps every run in
+    # an isolated child process.
+    isolation: Literal["process", "thread"] = "process"
     # Non-secret tunable parameters for the node_config chain (spec D15);
     # secrets stay in resource bindings / the vault (spec D16).
     config_schema: dict[str, Any] = Field(default_factory=dict)

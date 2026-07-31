@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_registry import RESOLVERS, ResolverSpec
 from server.app.services.job_intake_video import write_video_input
@@ -137,6 +138,8 @@ class JobIntakeQueue:
         if entity == "video" and str(batch["workflow_key"]) == "video_knowledge":
             for candidate, job in zip(candidates, jobs, strict=True):
                 write_video_input(resolve_job_dir(job, self.settings.jobs_dir), candidate)
+        if jobs:
+            notify_schedulable_work()
         if self.job_event_buffer is not None and jobs:
             self.job_event_buffer.record_jobs_created(
                 str(batch["workspace_id"]), [str(job["id"]) for job in jobs]

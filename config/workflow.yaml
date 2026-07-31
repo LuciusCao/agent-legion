@@ -58,6 +58,9 @@ executors:
     capabilities:
       fetch_questions:
         handler: question_comprehension_info.fetch_questions
+        # Runs in the executor pool thread (no child-process spawn): trusted,
+        # fast, pure-code handler; cooperative cancellation only.
+        isolation: thread
         # Non-secret CMS query selectors the node may tune (spec D15). Values
         # resolve along node config → workspace override → intake freeze and
         # win over resource bindings / global cms defaults; the token stays in
