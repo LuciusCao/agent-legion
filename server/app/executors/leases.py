@@ -59,11 +59,14 @@ class ExecutorLeaseRepository:
         except Exception:
             logger.exception("Failed to broadcast job update for %s", job_id)
 
-    # Write paths delegate to _lease_write_paths so each retry attempt runs the
-    # full connect-and-transact unit on a fresh connection.
+    # Write paths delegate to _lease_write_paths (one connect-and-transact
+    # unit per call, retried on database conflicts).
 
     def try_claim(self, request: LeaseClaimRequest) -> ClaimedExecution | None:
         return retry_on_database_conflict(lambda: _lease_write_paths.try_claim(self, request))
+
+    def try_claim_many(self, requests: list[LeaseClaimRequest]) -> list[ClaimedExecution | None]:
+        return retry_on_database_conflict(lambda: _lease_write_paths.try_claim_many(self, requests))
 
     def heartbeat(self, lease_id: str, ttl_seconds: int) -> bool:
         return retry_on_database_conflict(

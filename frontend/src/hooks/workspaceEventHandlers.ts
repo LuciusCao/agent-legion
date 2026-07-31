@@ -22,7 +22,7 @@ export async function loadWorkspaceJobsSnapshot(
   workspaceId: string,
   isStale: () => boolean
 ): Promise<void> {
-  const first = await fetchJobsSnapshot(workspaceId, 200, undefined)
+  const first = await fetchJobsSnapshot(workspaceId, 500, undefined)
   if (isStale()) return
   useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
     ...useWorkspaceStore.getState().workspaceStats[workspaceId],
@@ -34,7 +34,7 @@ export async function loadWorkspaceJobsSnapshot(
 
   let cursor = first.next_cursor
   while (cursor) {
-    const snapshot = await fetchJobsSnapshot(workspaceId, 200, cursor)
+    const snapshot = await fetchJobsSnapshot(workspaceId, 500, cursor)
     if (isStale()) return
     useJobStore.getState().appendJobsSnapshot(workspaceId, snapshot.jobs)
     if (!snapshot.next_cursor) break

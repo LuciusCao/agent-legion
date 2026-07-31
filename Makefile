@@ -18,9 +18,13 @@ export UV_CACHE_DIR
 sync: ## 同步 Python 依赖 (uv sync)
 	$(UV) sync
 
+# 本地执行器每个隔离子进程都要消耗文件描述符（管道/信号量/日志），macOS
+# 默认软限制 256 会在高并发下触发 EMFILE；开发进程统一抬高。
+DEV_NOFILE_LIMIT ?= 65535
+
 .PHONY: dev-backend
 dev-backend: ## 启动后端开发服务器 (127.0.0.1:8000)
-	$(UV) run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port 8000
+	ulimit -n $(DEV_NOFILE_LIMIT); $(UV) run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port 8000
 
 .PHONY: dev-frontend
 dev-frontend: ## 启动前端开发服务器
@@ -34,7 +38,7 @@ AGENT_WORKER_UI_PORT ?= 8787
 CAFFEINATE := $(shell command -v caffeinate 2>/dev/null)
 .PHONY: dev-worker
 dev-worker: ## 启动本机 Worker Service 与控制台（macOS 下经 caffeinate 防睡眠）
-	$(if $(CAFFEINATE),$(CAFFEINATE) -is ,)$(UV) run python -m worker.service \
+	ulimit -n $(DEV_NOFILE_LIMIT); $(if $(CAFFEINATE),$(CAFFEINATE) -is ,)$(UV) run python -m worker.service \
 		--config "$(AGENT_WORKER_CONFIG)" --state-dir "$(AGENT_WORKER_STATE_DIR)" \
 		--host "$(AGENT_WORKER_UI_HOST)" --port "$(AGENT_WORKER_UI_PORT)"
 

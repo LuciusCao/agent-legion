@@ -76,7 +76,7 @@ describe('useWorkspaceEvents', () => {
     })
 
     await waitFor(() => {
-      expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1', 200, undefined)
+      expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1', 500, undefined)
       expect(useJobStore.getState().jobsById.j1?.status).toBe('running')
     })
     expect(mockFetchJobs).not.toHaveBeenCalled()

@@ -14,12 +14,15 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.executors.models import ConfigurationFailureRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.node_config import (
-    batch_source_payload,
     dispatch_effective_config,
     executor_definition_capability_schema,
+)
+from server.app.workflow_worker_agent_claim import (
+    cached_batch_payload,
+    claim_agent_node,
+    fail_node_config,
 )
 from server.app.workflow_worker_executor_claim import claim_executor_node
 from server.app.workflow_worker_routing import resolve_node_route
@@ -33,18 +36,43 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+def claim_ready_queues(
+    worker: WorkflowWorkerThread,
+    workspaces: dict[str, dict[str, Any]],
+    queues: dict[str, deque[ReadyCandidate]],
+    snapshot: CapacitySnapshot,
+) -> int:
+    """Drain the ready queues round-robin: one claim per workspace per round.
+
+    Returns the number of submitted claims. Candidates whose claim fails are
+    dropped for this pass; the next poll pass re-evaluates them from fresh
+    state.
+    """
+    claims = 0
+    while queues:
+        round_claimed = False
+        for workspace_id in worker._round_robin.order(list(queues)):
+            queue = queues.get(workspace_id)
+            if queue is None or worker._is_paused(workspace_id):
+                continue
+            if claim_next_candidate(worker, workspaces[workspace_id], queue, snapshot):
+                round_claimed = True
+                claims += 1
+                worker._round_robin.complete_pass(workspace_id)
+            if not queue:
+                del queues[workspace_id]
+        if not round_claimed:
+            break
+    return claims
+
+
 def claim_next_candidate(
     worker: WorkflowWorkerThread,
     workspace: dict[str, Any],
     candidates: deque[ReadyCandidate],
     snapshot: CapacitySnapshot,
 ) -> bool:
-    """Pop candidates until one claim is submitted; return True on a claim.
-
-    Candidates whose claim fails (capacity lost to a race, stale execution
-    target, ...) are dropped for this pass; the next poll pass re-evaluates
-    them from fresh state.
-    """
+    """Pop candidates until one claim is submitted; return True on a claim."""
     while candidates:
         candidate = candidates.popleft()
         if try_claim_and_submit(
@@ -60,30 +88,6 @@ def claim_next_candidate(
         ):
             return True
     return False
-
-
-def _fail_node_config(
-    worker: WorkflowWorkerThread,
-    workspace_id: str,
-    job: dict[str, Any],
-    workflow_key: str,
-    node: WorkflowNode,
-    log_path: Path,
-    message: str,
-) -> bool:
-    """Fail a node that can never run due to configuration, without a lease."""
-    worker.leases.fail_without_lease(
-        ConfigurationFailureRequest(
-            workspace_id=workspace_id,
-            job_id=job["id"],
-            workflow_key=workflow_key,
-            node_key=node.key,
-            capability=node.capability,
-            log_path=str(log_path),
-        ),
-        message,
-    )
-    return True
 
 
 def try_claim_and_submit(
@@ -113,52 +117,33 @@ def try_claim_and_submit(
 
     resolved = resolve_node_route(worker, workspace_id, workflow_key, node_key, node.capability)
     if resolved.kind == "error":
-        return _fail_node_config(
+        return fail_node_config(
             worker, workspace_id, job, workflow_key, node, log_path, resolved.error_message
         )
     if resolved.kind == "agent":
-        agent_id = resolved.target_id
-        definition_config = worker.settings.agent_definitions.get(agent_id)
-        if definition_config is None:  # resolve_node_route already validated this
-            return _fail_node_config(
-                worker,
-                workspace_id,
-                job,
-                workflow_key,
-                node,
-                log_path,
-                f"Invalid Agent route {agent_id!r}",
-            )
-        if worker.agent_dispatch is None:
-            raise RuntimeError("Agent dispatch service is not configured")
-        try:
-            node_config = dispatch_effective_config(
-                definition_config.config_schema,
-                node,
-                workflow_key,
-                workspace,
-                batch_source_payload(worker.job_db, job),
-            )
-            return worker.agent_dispatch.enqueue(
-                agent_id=agent_id,
-                definition=definition_config,
-                workspace=workspace,
-                job=job,
-                workflow_key=workflow_key,
-                node=node,
-                job_dir=job_dir,
-                log_path=log_path,
-                inputs=inputs,
-                node_config=node_config,
-            )
-        except ValueError as exc:
-            # Route/definition/capacity drift must fail THIS node, not
-            # abort the whole poll pass and starve every workspace.
-            return _fail_node_config(
-                worker, workspace_id, job, workflow_key, node, log_path, str(exc)
-            )
+        return claim_agent_node(
+            worker,
+            workspace,
+            job,
+            node,
+            job_dir,
+            log_path,
+            inputs,
+            resolved.target_id,
+            workflow_key,
+        )
 
     executor_id = resolved.target_id
+
+    # Cheap gate before config resolution: when the pass snapshot says this
+    # executor/workspace is out of capacity, the claim cannot succeed
+    # (claim_executor_node re-checks authoritatively), so skip the per-pop
+    # batch lookup and config resolution for the thousands of doomed
+    # candidates that pile up behind a saturated executor.
+    if worker.registry.global_capacity(executor_id) is None:
+        return False
+    if not snapshot.has_capacity(executor_id, workspace_id):
+        return False
 
     try:
         node_config = dispatch_effective_config(
@@ -168,12 +153,12 @@ def try_claim_and_submit(
             node,
             workflow_key,
             workspace,
-            batch_source_payload(worker.job_db, job),
+            cached_batch_payload(worker, job),
         )
     except ValueError as exc:
-        return _fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
-    return claim_executor_node(
+    claimed = claim_executor_node(
         worker,
         workspace,
         job,
@@ -189,3 +174,6 @@ def try_claim_and_submit(
         snapshot,
         node_config,
     )
+    if claimed:
+        worker._pass_claim_counts[executor_id] = worker._pass_claim_counts.get(executor_id, 0) + 1
+    return claimed

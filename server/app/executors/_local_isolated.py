@@ -137,19 +137,26 @@ def execute_isolated(
     parent_conn, child_conn = multiprocessing.Pipe()
     child_token = CancellationToken(multiprocessing.Event())
     executor._tokens[context.execution_id] = child_token
-
-    runtime = executor._build_runtime(context, child_token)
-    process = multiprocessing.Process(
-        target=_run_handler,
-        args=(
-            handler_key,
-            dict(context.job),
-            str(context.job_dir),
-            runtime,
-            child_conn,
-        ),
-    )
-    process.start()
+    try:
+        runtime = executor._build_runtime(context, child_token)
+        process = multiprocessing.Process(
+            target=_run_handler,
+            args=(
+                handler_key,
+                dict(context.job),
+                str(context.job_dir),
+                runtime,
+                child_conn,
+            ),
+        )
+        process.start()
+    except Exception:
+        # Setup failures (e.g. EMFILE under load) must not leak the token,
+        # the semaphore Event, or the pipe ends into the executor's maps.
+        executor._tokens.pop(context.execution_id, None)
+        parent_conn.close()
+        child_conn.close()
+        raise
     child_conn.close()
 
     parent_token = (

@@ -1,9 +1,8 @@
 """Write-path transaction bodies for ExecutorLeaseRepository.
 
-Each function owns its connect-and-transact unit via
-``server.app.db.transaction.write_transaction`` (commit on success, rollback
-on error), so the repository can retry the whole unit on transient PostgreSQL
-transaction conflicts and every attempt starts from a fresh connection.
+Each function owns its connect-and-transact unit via ``write_transaction``
+(commit on success, rollback on error), so the repository can retry the whole
+unit on transient PostgreSQL transaction conflicts.
 """
 
 from __future__ import annotations
@@ -38,13 +37,22 @@ if TYPE_CHECKING:
 def try_claim(repo: ExecutorLeaseRepository, request: LeaseClaimRequest) -> ClaimedExecution | None:
     with write_transaction(repo.path) as conn:
         result = claim_lease(conn, request, repo.data_dir)
-    # claim_lease returns None without modifying any rows, so letting the
-    # block above commit an empty transaction is equivalent to the old
-    # explicit rollback. Broadcast only after the commit has succeeded,
-    # never inside the transaction.
+    # claim_lease returns None without modifying any rows; committing the empty
+    # transaction is equivalent to the old rollback. Broadcast only post-commit.
     if result is not None:
         repo._broadcast_job_update(str(result.job_id))
     return result
+
+
+def try_claim_many(
+    repo: ExecutorLeaseRepository, requests: list[LeaseClaimRequest]
+) -> list[ClaimedExecution | None]:
+    """Claim a batch of nodes in one transaction; None entries on capacity loss."""
+    with write_transaction(repo.path) as conn:
+        results = [claim_lease(conn, request, repo.data_dir) for request in requests]
+    for job_id in {str(result.job_id) for result in results if result is not None}:
+        repo._broadcast_job_update(job_id)
+    return results
 
 
 def heartbeat(repo: ExecutorLeaseRepository, lease_id: str, ttl_seconds: int) -> bool:
