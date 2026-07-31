@@ -8,7 +8,7 @@ the authoritative schema exported from the Rust code
 drift fails here instead of at runtime.
 
 Consumer surface (re-verify against the code when updating this file):
-- ``server/app/services/pi_event_scan.py:24-36`` — event-type allowlist
+- ``server/app/services/pi_event_scan.py:27-43`` — event-type allowlist
 - ``server/app/services/token_usage.py:57-76,134-142`` — usage/provider/model
 - ``server/app/workflows/pi_model_error.py:15-44`` — errorMessage/stopReason
 - ``server/app/services/job_log_renderer.py:86,120-182`` — render fields
@@ -36,6 +36,7 @@ VELITES_EVENT_TYPES = {
     "turn_end",
     "message_start",
     "message_end",
+    "auto_retry_start",
     "tool_execution_start",
     "tool_execution_end",
 }
@@ -89,7 +90,7 @@ def _message_schema(schema: dict[str, Any], event_def: str) -> dict[str, Any]:
 
 
 def test_event_types_cover_host_allowlist(schema: dict[str, Any]) -> None:
-    """pi_event_scan.py:24-36 — every allowlisted type must exist in the schema."""
+    """pi_event_scan.py:27-43 — every allowlisted type must exist in the schema."""
     consts = _event_type_consts(schema)
     assert consts == VELITES_EVENT_TYPES
     assert consts >= set(RELEVANT_EVENT_TYPES)
@@ -139,6 +140,17 @@ def test_error_message_field_optional(schema: dict[str, Any]) -> None:
         message = _message_schema(schema, event_def)
         assert "errorMessage" in message["properties"], f"{event_def} message.errorMessage"
         assert "errorMessage" not in message.get("required", [])
+
+
+def test_auto_retry_start_contract(schema: dict[str, Any]) -> None:
+    """Pi-compatible retry observability: auto_retry_start carries the attempt counter."""
+    assert "auto_retry_start" in RELEVANT_EVENT_TYPES, (
+        "pi_event_scan.py allowlist must keep auto_retry_start in compressed events.jsonl"
+    )
+    event = schema["$defs"]["AutoRetryStartEvent"]
+    properties = event["properties"]
+    assert properties["attempt"]["type"] == "integer"
+    assert "attempt" in event["required"]
 
 
 def test_tool_execution_end_contract(schema: dict[str, Any]) -> None:

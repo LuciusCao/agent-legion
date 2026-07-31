@@ -16,7 +16,7 @@ pub mod tools;
 use anyhow::{anyhow, Context};
 
 use crate::cli::Cli;
-use crate::events::StdoutJsonlSink;
+use crate::events::{EventSink, StdoutJsonlSink};
 use crate::tools::ToolKind;
 
 /// Run one headless session from parsed CLI args. Returns the process exit
@@ -100,11 +100,32 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
                 credentials.api_key,
                 std::time::Duration::from_secs(cli.timeout_seconds),
             )?;
+            // Pi-compatible retry observability: each failed transient
+            // attempt emits `message_end`(error) + `auto_retry_start` before
+            // the backoff sleep, straight to stdout. The sink is stateless,
+            // and ordering against the agent loop's sink is guaranteed
+            // because the loop is awaiting this call while the callback runs.
+            let provider_name = config.provider_name.clone();
+            let model = config.model.clone();
             let retrying = provider::retry::RetryProvider::new(
                 provider,
                 cli.max_retries,
                 std::time::Duration::from_millis(DEFAULT_RETRY_BASE_DELAY_MS),
-            );
+            )
+            .with_on_attempt_failed(move |attempt, max_attempts, delay, err| {
+                let events = events::retry_attempt_events(
+                    &provider_name,
+                    &model,
+                    attempt,
+                    max_attempts,
+                    delay.as_millis() as u64,
+                    &err.to_string(),
+                );
+                let mut sink = StdoutJsonlSink::new();
+                for event in &events {
+                    sink.emit(event);
+                }
+            });
             agent::run(config, &retrying, &mut sink).await
         }
         other => Err(anyhow!(

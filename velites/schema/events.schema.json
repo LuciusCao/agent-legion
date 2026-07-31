@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Event",
-  "description": "The velites/json1 event stream: exactly these nine event types, NDJSON on\nstdout, one JSON object per line.",
+  "description": "The velites/json1 event stream: exactly these ten event types, NDJSON on\nstdout, one JSON object per line.",
   "oneOf": [
     {
       "type": "object",
@@ -99,6 +99,19 @@
       "properties": {
         "type": {
           "type": "string",
+          "const": "auto_retry_start"
+        }
+      },
+      "$ref": "#/$defs/AutoRetryStartEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
           "const": "tool_execution_start"
         }
       },
@@ -146,6 +159,40 @@
     "AgentStartEvent": {
       "description": "`agent_start` event: emitted once before the first turn.",
       "type": "object"
+    },
+    "AutoRetryStartEvent": {
+      "description": "`auto_retry_start` event (pi-compatible): emitted right after the error\n`message_end` of a failed transient attempt, before the backoff sleep.\nThere is intentionally no `auto_retry_end` — Pi doesn't have one either;\nthe Host's `fold_model_error` treats the next successful assistant\n`message_end` (`stopReason=stop|toolUse`) as \"recovered\".",
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "description": "1-based retry counter (pi wire field).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "delayMs": {
+          "description": "Backoff delay before the retry fires, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "error": {
+          "description": "Short description of the transient error that triggered the retry.",
+          "type": "string"
+        },
+        "maxAttempts": {
+          "description": "Total attempts allowed, initial call included.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "attempt",
+        "maxAttempts",
+        "delayMs",
+        "error"
+      ]
     },
     "ContentBlock": {
       "description": "Content block of a message (pi-compatible shapes).",

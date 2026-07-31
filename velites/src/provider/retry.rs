@@ -1,15 +1,25 @@
 //! Internal retry wrapper (design §4 错误语义): transient model-call
 //! failures (network errors, timeouts, 429, 5xx, interrupted streams) are
-//! retried with exponential backoff INSIDE the harness, so a recovered call
-//! never surfaces in the event stream — matching Pi, where a later
-//! `stopReason=stop|toolUse` clears any transient error the Host recorded.
-//! Deterministic failures (4xx other than 429) pass through untouched and
-//! end the run as `stopReason=error` + `errorMessage` with exit 0.
+//! retried with exponential backoff INSIDE the harness. Each failed attempt
+//! surfaces the pi-compatible `message_end` (stopReason=error) +
+//! `auto_retry_start` event pair via `on_attempt_failed`, so a recovered
+//! call is visible to the Host — which clears the recorded transient error
+//! on the next successful `message_end` (`fold_model_error`), exactly like
+//! it does for Node Pi. Deterministic failures (4xx other than 429) pass
+//! through untouched and end the run as `stopReason=error` + `errorMessage`
+//! with exit 0.
 
 use std::time::Duration;
 
 use super::{CompletionRequest, Provider, ProviderError};
 use crate::events::Message;
+
+/// Callback fired for each failed transient attempt BEFORE the backoff sleep,
+/// as `(retry_number, max_attempts, delay, error)` — `retry_number` is the
+/// 1-based retry counter and `max_attempts` counts the initial call. Used to
+/// emit the pi-compatible `message_end` + `auto_retry_start` event pair (see
+/// `events::retry_attempt_events`).
+pub type OnAttemptFailed = Box<dyn Fn(u32, u32, Duration, &ProviderError) + Send + Sync>;
 
 /// Retries `ProviderError::is_retryable()` failures with exponential backoff
 /// (`base_delay * 2^attempt`), up to `max_retries` extra attempts.
@@ -17,6 +27,7 @@ pub struct RetryProvider<P> {
     inner: P,
     max_retries: u32,
     base_delay: Duration,
+    on_attempt_failed: Option<OnAttemptFailed>,
 }
 
 impl<P> RetryProvider<P> {
@@ -25,7 +36,16 @@ impl<P> RetryProvider<P> {
             inner,
             max_retries,
             base_delay,
+            on_attempt_failed: None,
         }
+    }
+
+    pub fn with_on_attempt_failed(
+        mut self,
+        callback: impl Fn(u32, u32, Duration, &ProviderError) + Send + Sync + 'static,
+    ) -> Self {
+        self.on_attempt_failed = Some(Box::new(callback));
+        self
     }
 }
 
@@ -43,6 +63,9 @@ impl<P: Provider> Provider for RetryProvider<P> {
                         self.max_retries + 1,
                         delay.as_millis(),
                     );
+                    if let Some(callback) = &self.on_attempt_failed {
+                        callback(attempt, self.max_retries + 1, delay, &err);
+                    }
                     tokio::time::sleep(delay).await;
                 }
                 Err(err) => return Err(err),
@@ -98,6 +121,39 @@ mod tests {
         );
         let message = provider.complete(&request("m")).await.unwrap();
         assert_eq!(message.stop_reason, Some(crate::events::StopReason::Stop));
+    }
+
+    #[tokio::test]
+    async fn callback_fires_per_failed_attempt_before_sleep() {
+        use std::sync::{Arc, Mutex};
+
+        type Seen = Arc<Mutex<Vec<(u32, u32, Duration, String)>>>;
+        let seen: Seen = Arc::new(Mutex::new(Vec::new()));
+        let recorder = Arc::clone(&seen);
+        let provider = RetryProvider::new(
+            FlakyProvider {
+                calls: AtomicUsize::new(0),
+                fail_times: 2,
+            },
+            3,
+            Duration::from_millis(5),
+        )
+        .with_on_attempt_failed(move |attempt, max_attempts, delay, err| {
+            recorder
+                .lock()
+                .unwrap()
+                .push((attempt, max_attempts, delay, err.to_string()));
+        });
+        provider.complete(&request("m")).await.unwrap();
+
+        let seen = seen.lock().unwrap();
+        assert_eq!(seen.len(), 2);
+        assert_eq!(seen[0].0, 1, "1-based retry counter");
+        assert_eq!(seen[1].0, 2);
+        assert_eq!(seen[0].1, 4, "max attempts = retries + initial call");
+        assert_eq!(seen[0].2, Duration::from_millis(5));
+        assert_eq!(seen[1].2, Duration::from_millis(10), "exponential backoff");
+        assert!(seen[0].3.contains("boom"));
     }
 
     #[tokio::test]
