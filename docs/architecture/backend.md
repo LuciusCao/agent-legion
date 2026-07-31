@@ -192,6 +192,7 @@ server/app/
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw'], skill: str, tools: tuple... | app/agent_catalog.py |
+| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/agent_stock.py |
 | LocalCapabilityConfig | BaseModel | handler: str, timeout_seconds: float | None, isolation: Literal['process', 't... | app/executors/config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
 | OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |

@@ -62,10 +62,11 @@ def log_pass_end(
     candidates: int,
     claim_seconds: float,
     claim_counts: dict[str, int],
+    stock_gated: int = 0,
 ) -> None:
     logger.info(
         "pass end: scan=%.2fs jobs=%d ready_cache hit=%d miss=%d running_jobs=%d"
-        " claims=%d candidates=%d claim_loop=%.2fs by_target=%s",
+        " claims=%d candidates=%d claim_loop=%.2fs stock_gated=%d by_target=%s",
         scan_seconds,
         jobs,
         ready_stats.get("hit", 0),
@@ -74,5 +75,6 @@ def log_pass_end(
         claims,
         candidates,
         claim_seconds,
+        stock_gated,
         dict(sorted(claim_counts.items())),
     )

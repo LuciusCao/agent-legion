@@ -1,9 +1,8 @@
 """Agent-route claim submission for the workflow worker's ready candidates.
 
-Split from ``workflow_worker_schedule`` to keep both modules within their size
-budgets. Hosts the per-pass batch-payload memoization shared by the agent and
-executor claim paths, and the no-lease configuration-failure write used when a
-candidate can never run.
+Split from ``workflow_worker_schedule`` for size. Hosts the per-pass
+batch-payload memoization shared by the agent and executor claim paths, and
+the no-lease configuration-failure write used when a candidate can never run.
 """
 
 from __future__ import annotations
@@ -13,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.services.node_config import batch_source_payload, dispatch_effective_config
+from server.app.workflow_worker_agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
@@ -22,9 +22,8 @@ if TYPE_CHECKING:
 def cached_batch_payload(
     worker: WorkflowWorkerThread, job: dict[str, Any]
 ) -> dict[str, Any] | None:
-    """Per-pass memoized ``batch_source_payload``: the claim loop pops thousands
-    of ready candidates per pass and jobs share a handful of intake batches, so
-    one batch lookup per pass per batch replaces one per candidate."""
+    """Per-pass memoized ``batch_source_payload``: jobs share a handful of
+    intake batches, so one lookup per batch per pass replaces one per candidate."""
     batch_id = job.get("batch_id")
     if not batch_id:
         return None
@@ -86,10 +85,9 @@ def claim_agent_node(
     if worker.agent_dispatch is None:
         raise RuntimeError("Agent dispatch service is not configured")
     dispatch = worker.agent_dispatch
-    # Cheap gate before config resolution: most repeated pops of this
-    # candidate already have an active request and will be rejected by
-    # enqueue anyway (its own has_active_request stays authoritative).
-    if dispatch.broker.has_active_request(str(job["id"]), node.key):
+    # Per-pass in-memory gates (batched active filter + stock limit); the
+    # enqueue re-check on the pool thread stays authoritative.
+    if not agent_claim_allowed(worker, str(workspace_id), str(job["id"]), node.key, agent_id):
         return False
     try:
         node_config = dispatch_effective_config(
@@ -124,6 +122,8 @@ def claim_agent_node(
     # Staging + bundling run off the poll thread; the broker's one-active-
     # request index dedups a resubmission if the next pass arrives first.
     if not dispatch.enqueue_pool.submit(_enqueue):
+        # Pool backlog full: skip this pass's remaining agent candidates.
+        worker._agent_pass.pool_full = True
         return False
     key = f"agent:{agent_id}"
     worker._pass_claim_counts[key] = worker._pass_claim_counts.get(key, 0) + 1

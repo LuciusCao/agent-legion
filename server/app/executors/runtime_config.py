@@ -8,6 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.agent_stock import AgentStockConfig
 from server.app.cms.auth import cms_token_available
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 
@@ -87,6 +88,7 @@ class ExecutorRuntimeConfig(BaseModel):
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
     agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
+    agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
 
 
 class StartupValidationError(Exception):
