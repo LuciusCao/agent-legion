@@ -70,6 +70,8 @@ def create_jobs_router(
             payload.job_ids,
             payload.node_key,
             from_failed_node=payload.from_failed_node,
+            job_filter=payload.resolved_filter(),
+            exclude_ids=payload.exclude_ids,
         )
         return BatchJobMutationResponse(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
@@ -81,7 +83,12 @@ def create_jobs_router(
         payload: BatchJobIdsRequest,
     ) -> BatchJobMutationResponse:
         require_workflows_enabled(settings)
-        results = job_deletion.batch_delete(workspace_id, payload.job_ids)
+        results = job_deletion.batch_delete(
+            workspace_id,
+            payload.job_ids,
+            job_filter=payload.resolved_filter(),
+            exclude_ids=payload.exclude_ids,
+        )
         return BatchJobMutationResponse(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
         )
@@ -190,6 +197,8 @@ def create_jobs_router(
             payload.job_ids,
             payload.target_node_key,
             payload.start_node_key,
+            job_filter=payload.resolved_filter(),
+            exclude_ids=payload.exclude_ids,
         )
         return BatchJobMutationResponse(
             results=[JobMutationResultResponse.model_validate(result) for result in results]

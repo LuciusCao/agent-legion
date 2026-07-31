@@ -1,6 +1,10 @@
 import { clearJobsPackedStatus } from '../../../api/jobApi'
 import type { WorkspacePackageStatusResetResult } from '../../../types/jobTypes'
 import { useUiStore } from '../../uiStore'
+import {
+  refreshAfterBatchOperation,
+  resolveBatchTarget,
+} from './selectionModeState'
 import type { JobState, JobStoreSet } from '../state'
 
 export type ClearPackedActions = {
@@ -12,19 +16,18 @@ export type ClearPackedActions = {
 export function clearPackedActions(set: JobStoreSet, get: () => JobState) {
   return {
     async batchClearPacked(workspaceId: string) {
-      const ids = Array.from(get().selectedIds)
-      if (ids.length === 0)
-        return { results: [], succeeded_count: 0, failed_count: 0 }
+      const target = resolveBatchTarget(get())
+      if (!target) return { results: [], succeeded_count: 0, failed_count: 0 }
       set({ batchClearPackedLoading: true })
       try {
-        const data = await clearJobsPackedStatus(workspaceId, ids)
+        const data = await clearJobsPackedStatus(workspaceId, target)
         useUiStore
           .getState()
           .showToast(
             `已清空打包状态：成功 ${data.succeeded_count} 项，失败 ${data.failed_count} 项`,
             data.failed_count > 0 ? 'error' : 'success'
           )
-        await get().fetchJobs(workspaceId)
+        await refreshAfterBatchOperation(get, workspaceId)
         return data
       } catch (err) {
         const message =

@@ -1,13 +1,15 @@
-from collections.abc import Callable
+from collections.abc import Callable, Collection
 from datetime import UTC, datetime
 from typing import Any
 
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.services._job_rerun_by_failure import rerun_by_failure_category as _rerun_by_failure
 from server.app.services._job_rerun_single import execute_rerun, resolve_rerun_node
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 
@@ -95,20 +97,18 @@ class JobRerunService:
     def batch_rerun(
         self,
         workspace_id: str,
-        job_ids: list[str],
+        job_ids: list[str] | None = None,
         node_key: str | None = None,
         *,
         from_failed_node: bool = False,
+        job_filter: JobListFilter | None = None,
+        exclude_ids: Collection[str] = (),
     ) -> list[dict[str, Any]]:
+        ids = resolve_batch_selection(self.job_db, workspace_id, job_ids, job_filter, exclude_ids)
         results: list[dict[str, Any]] = []
-        for job_id in self._normalize_values(job_ids):
+        for job_id in self._normalize_values(ids):
             results.append(
-                self.rerun(
-                    workspace_id,
-                    job_id,
-                    node_key,
-                    from_failed_node=from_failed_node,
-                )
+                self.rerun(workspace_id, job_id, node_key, from_failed_node=from_failed_node)
             )
         return results
 

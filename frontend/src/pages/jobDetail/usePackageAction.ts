@@ -18,7 +18,7 @@ export function usePackageAction(
     if (!workspaceId || !jobId) return
     setActionLoading(true)
     try {
-      const result = await packageJobs(workspaceId, [jobId])
+      const result = await packageJobs(workspaceId, { jobIds: [jobId] })
       if (result.download_url) {
         window.open(result.download_url, '_blank')
       }
@@ -42,7 +42,7 @@ export function useClearPackedAction(
     if (!workspaceId || !jobId) return
     setActionLoading(true)
     try {
-      await clearJobsPackedStatus(workspaceId, [jobId])
+      await clearJobsPackedStatus(workspaceId, { jobIds: [jobId] })
       await refreshDetail()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))

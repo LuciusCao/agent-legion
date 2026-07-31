@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from typing import Literal, Self
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, model_validator
+
+from server.app.routes.job_batch_filter_contracts import JobSelectionMixin
 
 
 class JobMutationResultResponse(BaseModel):
@@ -18,8 +20,7 @@ class BatchJobMutationResponse(BaseModel):
     results: list[JobMutationResultResponse]
 
 
-class JobBatchRerunRequest(BaseModel):
-    job_ids: list[str] = Field(default_factory=list)
+class JobBatchRerunRequest(JobSelectionMixin):
     node_key: str | None = None
     from_failed_node: bool = False
 
@@ -35,8 +36,8 @@ class JobBatchRerunRequest(BaseModel):
 
 
 # Deletion is a distinct mutation contract and may diverge in validation rules.
-class BatchJobIdsRequest(BaseModel):
-    job_ids: list[str] = Field(default_factory=list)
+class BatchJobIdsRequest(JobSelectionMixin):
+    pass
 
 
 class RunToRequest(BaseModel):
@@ -48,7 +49,6 @@ class ContinueJobRequest(BaseModel):
     pass
 
 
-class BatchRunToRequest(BaseModel):
-    job_ids: list[str]
+class BatchRunToRequest(JobSelectionMixin):
     target_node_key: str
     start_node_key: str | None = None

@@ -27,6 +27,7 @@ const mockFetchJobs = vi.mocked(fetchJobs)
 const mockRerunJobsByFailure = vi.mocked(rerunJobsByFailure)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
+const mockRefreshFirstPage = vi.fn()
 
 describe('jobStore rerunByFailureCategory', () => {
   beforeEach(() => {
@@ -38,10 +39,17 @@ describe('jobStore rerunByFailureCategory', () => {
       isLoading: false,
       error: null,
       selectedIds: new Set(['j1', 'j2']),
+      selectionMode: 'explicit',
+      selectionFilter: null,
+      excludedIds: new Set(),
+      selectionCount: null,
       selectMode: true,
+      refreshFirstPage: mockRefreshFirstPage,
     })
     mockFetchJobs.mockReset()
     mockFetchJobs.mockResolvedValue({ jobs: [] })
+    mockRefreshFirstPage.mockReset()
+    mockRefreshFirstPage.mockResolvedValue(undefined)
     mockRerunJobsByFailure.mockReset()
     mockShowToast.mockReset()
     mockGetState.mockReturnValue(
@@ -84,9 +92,9 @@ describe('jobStore rerunByFailureCategory', () => {
       '重跑完成：成功 1 项，跳过 1 项',
       'success'
     )
-    expect(useJobStore.getState().selectedIds.has('j1')).toBe(false)
-    expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
-    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
+    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('mentions upstream reruns in the toast when rerun_nodes exceed the failed node', async () => {
