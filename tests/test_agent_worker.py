@@ -134,7 +134,11 @@ def test_run_execution_completed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     monkeypatch.delenv("LLM_GATEWAY_TOKEN", raising=False)
     script = _write_executable(
         tmp_path / "fake_pi",
-        '#!/usr/bin/env python3\nfrom pathlib import Path\nPath("output.json").write_text("{}", encoding="utf-8")\n',
+        "#!/usr/bin/env python3\nimport time\nfrom pathlib import Path\n"
+        # Give the 0.05s heartbeat loop room to beat at least once before
+        # the process exits; an instant-exit script makes the heartbeat
+        # count assertion below timing-flaky on fast machines.
+        'time.sleep(0.2)\nPath("output.json").write_text("{}", encoding="utf-8")\n',
     )
     client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
     _run(client, tmp_path / "work")
