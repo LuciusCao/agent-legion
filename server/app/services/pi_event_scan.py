@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
 # ``auto_retry_start`` is the pi/velites retry-observability event; it is not
 # rendered, but must survive compression so the retry history stays visible
 # in the compacted events.jsonl.
+# ``outputs_validation`` is the velites output self-check event (M3); not
+# rendered either, but the Host needs it to judge declared-artifact state.
 RELEVANT_EVENT_TYPES = frozenset(
     {
         "session",
@@ -36,6 +38,7 @@ RELEVANT_EVENT_TYPES = frozenset(
         "auto_retry_start",
         "tool_execution_start",
         "tool_execution_end",
+        "outputs_validation",
     }
 )
 

@@ -39,6 +39,7 @@ VELITES_EVENT_TYPES = {
     "auto_retry_start",
     "tool_execution_start",
     "tool_execution_end",
+    "outputs_validation",
 }
 
 # Pi streams carry these delta events; velites deliberately does not.
@@ -171,6 +172,32 @@ def test_tool_execution_start_contract(schema: dict[str, Any]) -> None:
     for field in ("toolCallId", "toolName", "args"):
         assert field in event["properties"], f"tool_execution_start.{field} missing"
         assert field in event["required"]
+
+
+def test_outputs_validation_contract(schema: dict[str, Any]) -> None:
+    """velites output self-check (M3): outputs_validation carries `missing`."""
+    assert "outputs_validation" in RELEVANT_EVENT_TYPES, (
+        "pi_event_scan.py allowlist must keep outputs_validation in compressed events.jsonl"
+    )
+    event = schema["$defs"]["OutputsValidationEvent"]
+    missing = event["properties"]["missing"]
+    assert missing["type"] == "array"
+    assert missing["items"]["type"] == "string"
+    assert "missing" in event["required"]
+
+
+def test_agent_end_reason_contract(schema: dict[str, Any]) -> None:
+    """M3: agent_end gains an optional `reason` (budget_exceeded | cancelled)."""
+    event = schema["$defs"]["AgentEndEvent"]
+    assert "reason" in event["properties"], "agent_end.reason missing"
+    assert "reason" not in event.get("required", []), "reason must stay optional"
+    reason = _deref(schema, _ref_branch(schema, event["properties"]["reason"]))
+    # schemars renders documented unit variants as oneOf+const, otherwise enum.
+    values = set(reason.get("enum", []))
+    for variant in reason.get("oneOf", []):
+        if "const" in variant:
+            values.add(variant["const"])
+    assert {"budget_exceeded", "cancelled"} <= values
 
 
 def test_renderer_consumed_message_fields(schema: dict[str, Any]) -> None:

@@ -59,21 +59,28 @@ pub struct Cli {
     #[arg(long, default_value_t = 3)]
     pub max_retries: u32,
 
-    /// HTTP timeout for a single provider request, in seconds. The default
-    /// matches the gateway's long-generation scenarios (design §7).
+    /// Wall-clock bound for the whole run, in seconds. Also caps each
+    /// provider HTTP request. When the deadline (or any other budget) runs
+    /// out, the model gets one wrap-up turn before the run ends with
+    /// `agent_end{reason: "budget_exceeded"}`. The default matches the
+    /// gateway's long-generation scenarios (design §7).
     #[arg(long, default_value_t = 600)]
     pub timeout_seconds: u64,
 
-    /// Maximum agent turns (assistant completions) before the loop ends.
+    /// Maximum agent turns (assistant completions) before the budget is
+    /// exhausted (one wrap-up turn follows, then the run ends).
     #[arg(long)]
     pub max_turns: Option<u32>,
 
-    /// Maximum cumulative tokens (input+output+cacheRead) before the loop ends.
+    /// Maximum cumulative tokens (input+output+cacheRead) before the budget
+    /// is exhausted (one wrap-up turn follows, then the run ends).
     #[arg(long)]
     pub max_tokens: Option<u64>,
 
-    /// Files that must exist when the run ends. Repeatable. Parsed in M1;
-    /// the enforcement/remediation semantics land in M3.
+    /// Files that must exist when the run ends. Repeatable. Paths must
+    /// resolve inside the working directory (same sandbox as the tools);
+    /// missing files trigger one remediation turn, and an
+    /// `outputs_validation` event reports the final state.
     #[arg(long = "require-output")]
     pub require_output: Vec<PathBuf>,
 

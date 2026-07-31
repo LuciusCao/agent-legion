@@ -462,3 +462,30 @@ invariants:
       - kind: integration
         target: tests/test_configuration_loader.py
         gate: quick
+
+  - id: EXEC-EVENT-SCHEMA-001
+    statement: "The velites event stream schema (velites/schema/events.schema.json, exported from velites/src/events.rs) stays wire-compatible with the Host consumers: every pi_event_scan allowlisted type exists in the schema and the consumed fields (usage/provider/model/stopReason/errorMessage/tool metadata, retry and outputs_validation payloads) keep their names and types; delta events (message_update/tool_execution_update) never appear."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/executors/test_velites_event_contract.py
+        gate: quick
+
+  - id: EXEC-HARNESS-ISOLATION-001
+    statement: "velites has zero auto-discovery: agent context comes only from --system-prompt, explicit --skill directories, and the @prompt instruction — an AGENTS.md (or any other file) in the working directory is never read into provider requests or the event stream. The absence is structural (no discovery code exists), not a disabled feature."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_no_auto_discovery
+        gate: quick
+
+  - id: EXEC-HARNESS-BUDGET-001
+    statement: "velites run budgets (--max-turns, --max-tokens, wall-clock deadline) are enforced inside the agent loop: exhaustion injects exactly one wrap-up turn and the run always terminates with agent_end carrying reason=budget_exceeded, never by silent truncation or outer hard-kill alone."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_budget_exhaustion_marks_agent_end
+        gate: quick

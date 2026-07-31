@@ -92,12 +92,13 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 | 事件 | 消费方 | 关键字段 |
 |---|---|---|
 | `session` | `pi_event_scan.py` allowlist / 日志渲染 | `sessionId`（可用 `--name` 等价标识） |
-| `agent_start` / `agent_end` | 日志渲染 | `messages`、`error` |
+| `agent_start` / `agent_end` | 日志渲染 | `messages`、`error`；M3 起 `agent_end` 增加可选 `reason`（`budget_exceeded` / `cancelled`，正常结束与模型错误时缺省） |
 | `turn_start` / `turn_end` | 日志渲染 | `turnIndex`、`message`、`toolResults` |
 | `message_start` | 日志渲染 | `message` |
 | `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage` |
 | `auto_retry_start` | 重试可观测性（pi 兼容，无渲染） | `attempt`（1 起）、`maxAttempts`、`delayMs`、`error` |
 | `tool_execution_start` / `tool_execution_end` | 日志渲染 | `toolCallId`、`toolName`、`args`、`result.content`、`isError` |
+| `outputs_validation` | 输出自检结果（velites 扩展，无渲染） | `missing`（字符串数组）；只要给了 `--require-output` 且运行正常结束/预算耗尽结束就**总是**发出（含 `missing: []`），便于 Host 明确判定；取消或未恢复的模型错误路径不发 |
 
 ### 明确不发
 
@@ -113,7 +114,9 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
   velites 同样不发）；
 - 未恢复：最后一条 assistant message 带 `stopReason=error` + `errorMessage`，
   **exit 0**（复刻 Pi"模型 400 也 exit 0"，Host 靠事件流判失败）；
-- exit ≠ 0 仅用于 harness 自身故障（参数错误、内部 panic、被信号终止）。
+- 取消（SIGTERM 优雅收尾，§5）：`agent_end{reason: "cancelled"}`，**exit 0**——
+  取消是 Host 主动行为而非 harness 故障（M3 已决）；
+- exit ≠ 0 仅用于 harness 自身故障（参数错误、内部 panic、被信号硬终止）。
 
 ### Schema 治理
 
@@ -130,9 +133,9 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 
 | 特性 | 设计 | 现状对照 |
 |---|---|---|
-| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline；耗尽时 loop 内优雅终止（先给模型一个收尾轮写出已声明产物），`agent_end` 带 `budget_exceeded` 原因；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
-| 优雅取消 | SIGTERM 被 loop 捕获：当前 tool call 完成后（或可中断点）发出 `agent_end{reason:"cancelled"}` 再退出；SIGKILL 兜底语义不变 | 现在 cancel = 进程组强杀，无事件收尾 |
-| 输出自检 | `--require-output <file>`（可多次）；loop 结束前自检缺失项，有缺失则注入系统消息给**一次**补救轮，最终发 `outputs_validation{missing:[...]}` 事件 | 现在 Host 事后扫 job_dir 才发现缺失 |
+| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 同时界定整个 run 的墙钟上限与单次 provider HTTP 超时）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
+| 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 | 现在 cancel = 进程组强杀，无事件收尾 |
+| 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定） | 现在 Host 事后扫 job_dir 才发现缺失 |
 | 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） | Pi 靠 4 个 `--no-*` flag 维持；pi_agent_rust 无开关（PoC 的 P0 阻断项） |
 | 无 delta | 见 §4 | 现在 99% 的 stdout 体积是被丢弃的 delta |
 
@@ -165,7 +168,8 @@ velites --mode json \
 - `thinking` 参数按 provider 映射（初期只支持 gateway 现有映射，PoC 已验证）；
 - 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
   （PoC P2 发现），模型白名单在 `config/workflow.yaml` 侧约束并写进运维文档；
-- HTTP 超时可配（默认 600 s，对齐 gateway 长生成场景），`retry{max_retries, backoff}` 可配。
+- HTTP 超时可配（`--timeout-seconds`，默认 600 s，对齐 gateway 长生成场景；M3 起
+  该值同时是整个 run 的 wall-clock 预算，见 §5 预算内建），`retry{max_retries, backoff}` 可配。
 
 ### 凭据配置（简化版，评审确认）
 

@@ -6,6 +6,7 @@ use velites::tools::{resolve_in_cwd, ToolContext, ToolKind};
 fn ctx(cwd: &std::path::Path) -> ToolContext {
     ToolContext {
         cwd: cwd.canonicalize().unwrap(),
+        cancel: velites::cancel::CancelToken::default(),
     }
 }
 
