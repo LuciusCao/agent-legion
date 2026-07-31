@@ -3,6 +3,7 @@ import {
   computeFilterCounts,
   computeFilteredJobIds,
 } from '../filterLogic/incrementalFilters'
+import { clearedSelectionState } from './selectionModeState'
 
 export function updateFilterConfig(
   state: JobState,
@@ -11,7 +12,7 @@ export function updateFilterConfig(
   const filterConfig = { ...state.filterConfig, ...config }
   return {
     filterConfig,
-    selectedIds: new Set(),
+    ...clearedSelectionState(),
     filteredJobIds: computeFilteredJobIds(
       state.jobIds,
       state.jobsById,

@@ -12,6 +12,11 @@ import {
   clearSucceededSelection,
 } from './mutationResults'
 import { countMutationResults, makeMutationToast } from '../mutationHelpers'
+import {
+  refreshAfterBatchOperation,
+  resolveBatchTarget,
+  resolveOpTarget,
+} from './selectionModeState'
 import type { JobState, JobStoreSet } from '../state'
 
 export function batchActions(set: JobStoreSet, get: () => JobState) {
@@ -22,16 +27,16 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       fromFailedNode?: boolean,
       jobIds?: string[]
     ) {
-      const ids = jobIds ?? Array.from(get().selectedIds)
-      if (ids.length === 0) return { results: [] }
+      const target = resolveOpTarget(get(), jobIds)
+      if (!target) return { results: [] }
       set({ batchRerunLoading: true })
       try {
-        const data = await batchRerunJobs(workspaceId, nodeKey, ids, {
+        const data = await batchRerunJobs(workspaceId, nodeKey, target, {
           fromFailedNode,
         })
         const results = data.results ?? []
         applyMutationResults(set, results, '重跑')
-        await get().fetchJobs(workspaceId)
+        await refreshAfterBatchOperation(get, workspaceId)
         return data
       } catch (err) {
         const message =
@@ -44,11 +49,11 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       }
     },
     async batchDelete(workspaceId: string) {
-      const ids = Array.from(get().selectedIds)
-      if (ids.length === 0) return { results: [] }
+      const target = resolveBatchTarget(get())
+      if (!target) return { results: [] }
       set({ batchDeleteLoading: true })
       try {
-        const data = await batchDeleteJobs(workspaceId, ids)
+        const data = await batchDeleteJobs(workspaceId, target)
         const results = data.results ?? []
         const succeededIds = new Set(
           results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
@@ -61,6 +66,7 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
             makeMutationToast('删除', counts),
             counts.failed > 0 ? 'error' : 'success'
           )
+        await refreshAfterBatchOperation(get, workspaceId)
         return data
       } catch (err) {
         const message =
@@ -74,12 +80,11 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
     },
 
     async batchPackage(workspaceId: string) {
-      const ids = Array.from(get().selectedIds)
-      if (ids.length === 0)
-        return { results: [], succeeded_count: 0, failed_count: 0 }
+      const target = resolveBatchTarget(get())
+      if (!target) return { results: [], succeeded_count: 0, failed_count: 0 }
       set({ batchPackageLoading: true })
       try {
-        const data = await packageJobs(workspaceId, ids)
+        const data = await packageJobs(workspaceId, target)
         const results = data.results ?? []
         clearSucceededSelection(set, results)
         useUiStore
@@ -88,7 +93,7 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
             `打包完成：成功 ${data.succeeded_count} 项，失败 ${data.failed_count} 项`,
             data.failed_count > 0 ? 'error' : 'success'
           )
-        await get().fetchJobs(workspaceId)
+        await refreshAfterBatchOperation(get, workspaceId)
         return data
       } catch (err) {
         const message =
@@ -106,19 +111,19 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       targetNodeKey: string,
       startNodeKey?: string
     ) {
-      const ids = Array.from(get().selectedIds)
-      if (ids.length === 0) return { results: [] }
+      const target = resolveBatchTarget(get())
+      if (!target) return { results: [] }
       set({ batchRunToLoading: true })
       try {
         const data = await batchRunToJobs(
           workspaceId,
           targetNodeKey,
-          ids,
+          target,
           startNodeKey
         )
         const results = data.results ?? []
         applyMutationResults(set, results, '运行到')
-        await get().fetchJobs(workspaceId)
+        await refreshAfterBatchOperation(get, workspaceId)
         return data
       } catch (err) {
         const message =

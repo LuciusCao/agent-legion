@@ -1,10 +1,15 @@
 import { rerunJobsByFailure } from '../../../api/failureApi'
+import { targetBody } from '../../../api/batchTarget'
 import type {
   JobRerunByFailureRequest,
   RerunByFailureInput,
 } from '../../../types/failureTypes'
 import { useUiStore } from '../../uiStore'
 import { applyMutationResults } from './mutationResults'
+import {
+  refreshAfterBatchOperation,
+  resolveOpTarget,
+} from './selectionModeState'
 import type { JobState, JobStoreSet } from '../state'
 
 export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
@@ -13,14 +18,14 @@ export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
       workspaceId: string,
       input: RerunByFailureInput
     ) {
-      const ids = input.jobIds ?? Array.from(get().selectedIds)
-      if (ids.length === 0) return { results: [] }
+      const target = resolveOpTarget(get(), input.jobIds)
+      if (!target) return { results: [] }
       set({ batchRerunLoading: true })
       try {
         const body: JobRerunByFailureRequest = {
           category: input.category,
           strategy: 'auto',
-          job_ids: ids,
+          ...targetBody(target),
         }
         const data = await rerunJobsByFailure(workspaceId, body)
         const results = data.results ?? []
@@ -35,7 +40,7 @@ export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
           '重跑',
           hasUpstreamRerun ? '，含上游节点重跑' : ''
         )
-        await get().fetchJobs(workspaceId)
+        await refreshAfterBatchOperation(get, workspaceId)
         return data
       } catch (err) {
         const message =

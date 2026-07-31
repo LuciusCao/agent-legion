@@ -1,12 +1,9 @@
-import { useState } from 'react'
 import { Button } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import type { FailureCategory } from '../types/failureTypes'
-import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
+import type { WorkflowNodesByKey } from './JobRerunDialog'
 import type { FailureCategoryContext } from './JobRerunDialog/useFailureCategories'
-import { JobRunToDialog } from './JobRunToDialog'
-import { JobActionBarUpgrade } from './JobActionBarUpgrade'
-import { canContinueJob, computeActionDisabled } from './jobActionEligibility'
+import { JobActionBarActions } from './JobActionBarActions'
 import styles from './JobActionBar.module.css'
 
 export {
@@ -32,6 +29,12 @@ export type JobActionBarProps = {
   filters?: JobActionBarFilter[]
   onExitSelectMode?: () => void
   failureContext?: FailureCategoryContext
+  /**
+   * Selection count when the selection is filter-based ('allMatching'
+   * mode); null/undefined means an explicit id selection. Filter-based
+   * selections disable actions that need per-job client-side eligibility.
+   */
+  allMatchingCount?: number | null
   onRerun: (
     nodeKey: string | null,
     fromFailedNode?: boolean,
@@ -47,33 +50,10 @@ export type JobActionBarProps = {
   itemLabel?: string
 }
 
-export function JobActionBar({
-  jobs,
-  selectedCount,
-  workflowDefinition,
-  workflowNodesByKey,
-  mode = jobs.length > 1 ? 'batch' : 'single',
-  loading = false,
-  filters,
-  onExitSelectMode,
-  failureContext,
-  onRerun,
-  onRunTo,
-  onContinue,
-  onPackage,
-  onClearPacked,
-  onDelete,
-  onUpgradeWorkflow,
-  itemLabel = '任务',
-}: JobActionBarProps) {
-  const [rerunOpen, setRerunOpen] = useState(false)
-  const [runToOpen, setRunToOpen] = useState(false)
-  const isBatch = mode === 'batch'
+export function JobActionBar(props: JobActionBarProps) {
+  const { jobs, selectedCount, mode, filters } = props
+  const isBatch = (mode ?? (jobs.length > 1 ? 'batch' : 'single')) === 'batch'
   const count = selectedCount ?? jobs.length
-
-  const disabled = computeActionDisabled(jobs, loading)
-  const handleRunTo = (targetKey: string, startKey?: string) =>
-    onRunTo?.(targetKey, startKey)
 
   return (
     <div className={styles.actionBar} data-testid="job-action-bar">
@@ -96,89 +76,7 @@ export function JobActionBar({
         </div>
       )}
 
-      <div className={styles.actions}>
-        {isBatch && (
-          <JobActionBarUpgrade
-            jobs={jobs}
-            itemLabel={itemLabel}
-            loading={loading}
-            onUpgradeWorkflow={onUpgradeWorkflow}
-          />
-        )}
-        <Button
-          variant="outlined"
-          onClick={() => setRerunOpen(true)}
-          disabled={disabled.rerun}
-        >
-          重跑
-        </Button>
-        <Button
-          variant="outlined"
-          onClick={() => setRunToOpen(true)}
-          disabled={disabled.runTo}
-        >
-          运行到
-        </Button>
-        {!isBatch && jobs.some((job) => canContinueJob(job)) && (
-          <Button
-            variant="outlined"
-            onClick={onContinue}
-            disabled={disabled.continue}
-          >
-            继续完整流程
-          </Button>
-        )}
-        <Button
-          variant="outlined"
-          onClick={onPackage}
-          disabled={disabled.package}
-        >
-          打包
-        </Button>
-        {onClearPacked && (
-          <Button
-            variant="outlined"
-            onClick={onClearPacked}
-            disabled={disabled.clearPacked}
-          >
-            清空打包状态
-          </Button>
-        )}
-        <Button
-          variant="outlined"
-          color="error"
-          onClick={onDelete}
-          disabled={disabled.delete}
-        >
-          删除
-        </Button>
-        {isBatch && onExitSelectMode && (
-          <Button variant="outlined" onClick={onExitSelectMode}>
-            退出
-          </Button>
-        )}
-      </div>
-
-      <JobRerunDialog
-        open={rerunOpen}
-        jobs={jobs}
-        workflowDefinition={workflowDefinition}
-        workflowNodesByKey={workflowNodesByKey}
-        itemLabel={itemLabel}
-        allowFailedNodeMode={mode === 'batch'}
-        failureContext={failureContext}
-        onClose={() => setRerunOpen(false)}
-        onConfirm={onRerun}
-      />
-      <JobRunToDialog
-        open={runToOpen}
-        jobs={jobs}
-        workflowDefinition={workflowDefinition}
-        workflowNodesByKey={workflowNodesByKey}
-        itemLabel={itemLabel}
-        onClose={() => setRunToOpen(false)}
-        onConfirm={handleRunTo}
-      />
+      <JobActionBarActions {...props} isBatch={isBatch} />
     </div>
   )
 }

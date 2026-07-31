@@ -129,7 +129,8 @@ server/app/
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
 | GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/job_invalid_paths.py |
-| GET | `/workspaces/{workspace_id}/jobs/snapshot` | `snapshot_workspace_jobs` | routes/job_snapshot.py |
+| GET | `/workspaces/{workspace_id}/jobs/snapshot` | `snapshot_workspace_jobs` | routes/job_list.py |
+| GET | `/workspaces/{workspace_id}/jobs/facets` | `workspace_job_facets` | routes/job_list.py |
 | POST | `/workspaces/{workspace_id}/events/stress` | `record_stress_events` | routes/job_stress_events.py |
 | POST | `/jobs/{job_id}/upgrade-workflow` | `upgrade_job_workflow` | routes/job_workflow_upgrade.py |
 | GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
@@ -251,6 +252,8 @@ server/app/
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | JobRerunByFailureRequest | BaseModel | category: Literal['technical', 'business', 'unknown'], strategy: Literal['aut... | app/routes/failed_node_run_contracts.py |
 | JobRerunByFailureResponse | BaseModel | results: list[JobRerunByFailureResultResponse] | app/routes/failed_node_run_contracts.py |
+| JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
+| JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
 | JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
 | WorkspaceCreateRequest | BaseModel | name: str, default_workflow_key: str, default_entity: str, resource_config: d... | app/routes/job_contracts.py |
@@ -271,13 +274,12 @@ server/app/
 | ResourceProvidersResponse | BaseModel | providers: list[ResourceProviderDefinition] | app/routes/job_contracts.py |
 | GlobalServicesResponse | BaseModel | cms: CmsServiceStatus | app/routes/job_contracts.py |
 | ExecutionControlSummaryResponse | BaseModel | mode: Literal['full', 'until_node'], target_node_key: str | None, paused: boo... | app/routes/job_execution_control_contracts.py |
+| JobsPageResponse | BaseModel | workspace_id: str, revision: int, total: int | None, stats: dict[str, int], j... | app/routes/job_list_contracts.py |
+| JobFacetsResponse | BaseModel | workspace_id: str, total: int, status_counts: dict[str, int], version_counts:... | app/routes/job_list_contracts.py |
 | JobMutationResultResponse | BaseModel | job_id: str, operation: Literal['rerun', 'run_to', 'continue', 'delete', 'pac... | app/routes/job_operation_contracts.py |
 | BatchJobMutationResponse | BaseModel | results: list[JobMutationResultResponse] | app/routes/job_operation_contracts.py |
-| JobBatchRerunRequest | BaseModel | job_ids: list[str], node_key: str | None, from_failed_node: bool | app/routes/job_operation_contracts.py |
-| BatchJobIdsRequest | BaseModel | job_ids: list[str] | app/routes/job_operation_contracts.py |
 | RunToRequest | BaseModel | target_node_key: str, start_node_key: str | None | app/routes/job_operation_contracts.py |
 | ContinueJobRequest | BaseModel | — | app/routes/job_operation_contracts.py |
-| BatchRunToRequest | BaseModel | job_ids: list[str], target_node_key: str, start_node_key: str | None | app/routes/job_operation_contracts.py |
 | StressEventRecord | BaseModel | job_id: str, kind: str | app/routes/job_stress_events.py |
 | StressEventBatchRequest | BaseModel | events: list[StressEventRecord] | app/routes/job_stress_events.py |
 | StressEventBatchResponse | BaseModel | recorded: int, recorded_at: float | app/routes/job_stress_events.py |
@@ -292,7 +294,6 @@ server/app/
 | JobDetailResponse | BaseModel | job: JobSummaryResponse, nodes: list[JobNodeResponse], runs: list[NodeRunResp... | app/routes/job_view_contracts.py |
 | MetricBucket | BaseModel | bucket_start: str, online_workers: int, online_workers_max: int, active_execu... | app/routes/metrics_contracts.py |
 | OpsMetricsResponse | BaseModel | granularity: Literal['6h', '24h', '30d'], buckets: list[MetricBucket] | app/routes/metrics_contracts.py |
-| WorkspacePackageRequest | BaseModel | job_ids: list[str] | app/routes/package_contracts.py |
 | WorkspacePackageResultResponse | BaseModel | job_id: str, status: Literal['succeeded', 'failed'], reason_code: str | None,... | app/routes/package_contracts.py |
 | WorkspacePackageResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |
 | WorkspacePackageStatusResetResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |

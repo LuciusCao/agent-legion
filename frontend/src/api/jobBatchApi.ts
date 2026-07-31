@@ -1,6 +1,6 @@
 import { api } from './core'
+import { targetBody, type BatchJobTarget } from './batchTarget'
 import type {
-  BatchJobIdsRequest,
   BatchJobMutationResult,
   BatchRunToRequest,
   JobBatchRerunRequest,
@@ -10,11 +10,11 @@ import type {
 export async function batchRunToJobs(
   workspaceId: string,
   targetNodeKey: string,
-  jobIds: string[],
+  target: BatchJobTarget,
   startNodeKey?: string | null
 ): Promise<BatchJobMutationResult> {
   const body: BatchRunToRequest = {
-    job_ids: jobIds,
+    ...targetBody(target),
     target_node_key: targetNodeKey,
   }
   if (startNodeKey != null) {
@@ -32,11 +32,11 @@ export async function batchRunToJobs(
 export async function batchRerunJobs(
   workspaceId: string,
   nodeKey: string | null,
-  jobIds: string[],
+  target: BatchJobTarget,
   options?: { fromFailedNode?: boolean }
 ): Promise<BatchJobMutationResult> {
   const body: JobBatchRerunRequest = {
-    job_ids: jobIds,
+    ...targetBody(target),
     from_failed_node: options?.fromFailedNode ?? false,
   }
   if (nodeKey != null) body.node_key = nodeKey
@@ -48,28 +48,26 @@ export async function batchRerunJobs(
 
 export async function packageJobs(
   workspaceId: string,
-  jobIds: string[]
+  target: BatchJobTarget
 ): Promise<WorkspacePackageResult> {
-  const body: BatchJobIdsRequest = { job_ids: jobIds }
   return api<WorkspacePackageResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/package`,
     {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify(targetBody(target)),
     }
   )
 }
 
 export async function batchDeleteJobs(
   workspaceId: string,
-  jobIds: string[]
+  target: BatchJobTarget
 ): Promise<BatchJobMutationResult> {
-  const body: BatchJobIdsRequest = { job_ids: jobIds }
   return api<BatchJobMutationResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch`,
     {
       method: 'DELETE',
-      body: JSON.stringify(body),
+      body: JSON.stringify(targetBody(target)),
     }
   )
 }

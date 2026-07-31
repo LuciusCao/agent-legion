@@ -10,6 +10,7 @@ import {
 interface BatchDeleteDialogProps {
   open: boolean
   count: number
+  allMatching?: boolean
   onClose: () => void
   onConfirm: () => Promise<void>
 }
@@ -17,6 +18,7 @@ interface BatchDeleteDialogProps {
 export function BatchDeleteDialog({
   open,
   count,
+  allMatching = false,
   onClose,
   onConfirm,
 }: BatchDeleteDialogProps) {
@@ -37,7 +39,14 @@ export function BatchDeleteDialog({
     <Dialog open={open} onClose={onClose}>
       <DialogTitle>确认删除</DialogTitle>
       <DialogContent>
-        <p>确定删除 {count} 个资源？本地视频和处理产物目录也会删除。</p>
+        {allMatching ? (
+          <p>
+            将对符合筛选条件的 {count} 个 job
+            执行删除。本地视频和处理产物目录也会删除。
+          </p>
+        ) : (
+          <p>确定删除 {count} 个资源？本地视频和处理产物目录也会删除。</p>
+        )}
       </DialogContent>
       <DialogActions>
         <Button variant="text" onClick={onClose} disabled={isDeleting}>

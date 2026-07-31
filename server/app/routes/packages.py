@@ -8,6 +8,7 @@ from ..services.job_packages import (
     WorkspacePackageLockedError,
     WorkspacePackageNotFoundError,
 )
+from ..services.job_selection_resolver import EmptyJobSelectionError
 from ..settings import Settings
 from ..storage_paths import ManagedPathError, resolve_data_path, resolve_package_file
 from .package_clear_packed import register_clear_packed_route
@@ -99,9 +100,15 @@ def create_packages_router(
     def package_workspace_jobs(
         workspace_id: str, request: WorkspacePackageRequest
     ) -> WorkspacePackageResponse:
-        if not request.job_ids:
-            raise HTTPException(status_code=400, detail="No job_ids provided")
-        package_result = job_packages.package(workspace_id, request.job_ids)
+        try:
+            package_result = job_packages.package(
+                workspace_id,
+                request.job_ids,
+                job_filter=request.resolved_filter(),
+                exclude_ids=request.exclude_ids,
+            )
+        except EmptyJobSelectionError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from None
         return WorkspacePackageResponse(
             results=[
                 WorkspacePackageResultResponse.model_validate(result)

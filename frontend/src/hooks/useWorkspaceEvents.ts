@@ -4,6 +4,7 @@ import { useExecutorsStore } from '../stores/executorsStore'
 import { createRealtimeChannel } from '../lib/realtime'
 import { handleWorkspaceEvent } from './workspaceEventHandlers'
 import { refreshWorkspaceEvents } from './workspaceEventRefresh'
+import { refreshJobFacets } from './workspaceFacetsRefresh'
 import {
   createLoadSnapshot,
   enqueuePendingEvent,
@@ -26,22 +27,17 @@ export function useWorkspaceEvents(
     const maxPendingEvents = 1000
     let closed = false
     let stale = false
-    const refresh = (includeJobs: boolean) =>
-      refreshWorkspaceEvents(
-        workspaceId,
-        includeJobs,
-        statsOnly,
-        () => stale || closed
-      )
+    const refresh = () =>
+      refreshWorkspaceEvents(workspaceId, () => stale || closed)
 
     const scheduleJobRefresh = () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
-        // Job list changes already arrive as job_patch_batch events; refresh stats only.
-        void refresh(false)
-        // Worker assignment may change with job updates; refresh alongside
-        // the job snapshot (same 750ms debounce tier, inside refreshWorkers).
+        // Job list changes arrive as job_patch_batch; refresh stats + facets.
+        void refresh()
+        void refreshJobFacets(workspaceId, statsOnly, () => stale || closed)
+        // Worker assignment may change with job updates (same debounce tier).
         void useExecutorsStore.getState().refreshWorkers()
       }, jobUpdateRefreshDelay)
     }
@@ -53,7 +49,7 @@ export function useWorkspaceEvents(
         statsOnly,
         scheduleJobRefresh,
         loadSnapshot,
-        () => void refresh(false)
+        () => void refresh()
       )
     }
 
@@ -72,8 +68,7 @@ export function useWorkspaceEvents(
         const event = new MessageEvent('message', { data })
         if (snapshotLoadingRef.current) {
           if (!enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)) {
-            // Queue overflowed: drop it and resync from a fresh snapshot
-            // rather than silently losing patch revisions.
+            // Queue overflowed: resync from a fresh snapshot instead of losing patch revisions.
             pendingEventsRef.current = []
             void loadSnapshot()
           }
@@ -85,7 +80,7 @@ export function useWorkspaceEvents(
         if (status !== 'open') return
         if (statsOnly) {
           snapshotLoadingRef.current = false
-          void refresh(false)
+          void refresh()
         } else {
           void loadSnapshot()
         }

@@ -1,4 +1,4 @@
-import { fetchJobs, fetchWorkspaceStats } from '../api'
+import { fetchWorkspaceStats } from '../api'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 
@@ -14,18 +14,12 @@ export function mergeWorkspaceEventStats(
 
 export async function refreshWorkspaceEvents(
   workspaceId: string,
-  includeJobs: boolean,
-  statsOnly: boolean,
   isInactive: () => boolean
 ) {
   try {
     const stats = await fetchWorkspaceStats(workspaceId)
     if (isInactive()) return
     useWorkspaceStore.getState().setWorkspaceStats(workspaceId, stats)
-    if (!includeJobs || statsOnly) return
-    const jobsData = await fetchJobs(workspaceId)
-    if (isInactive()) return
-    useJobStore.getState().setJobsAndFinishLoading(jobsData.jobs)
   } catch (err) {
     useJobStore
       .getState()

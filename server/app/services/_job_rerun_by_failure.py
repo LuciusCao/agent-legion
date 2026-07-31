@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
+from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.services._job_rerun_single import execute_rerun
+from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.workflow_branching import upstream_nodes
 
@@ -28,13 +31,16 @@ def rerun_by_failure_category(
     strategy: str = "auto",
     job_ids: list[str] | tuple[str, ...] = (),
     workflow_key: str | None = None,
+    job_filter: JobListFilter | None = None,
+    exclude_ids: Collection[str] = (),
 ) -> list[dict[str, Any]]:
     """Rerun the latest failed node runs of one category, one result per job."""
     resolved = _AUTO_STRATEGIES.get(category, "rerun_self") if strategy == "auto" else strategy
     runs = service.job_db.list_failed_node_runs(
         workspace_id, category=category, workflow_key=workflow_key
     )
-    requested = [value.strip() for value in job_ids if value.strip()]
+    ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
+    requested = [value.strip() for value in ids if value.strip()]
     allowed = set(requested)
     failed_nodes_by_job: dict[str, list[str]] = {}
     for run in runs:
