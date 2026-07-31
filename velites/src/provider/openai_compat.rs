@@ -268,11 +268,7 @@ impl Aggregated {
     }
 
     fn apply_chunk(&mut self, chunk: &Value) -> Result<(), ProviderError> {
-        if let Some(error) = chunk.get("error") {
-            let detail = error
-                .get("message")
-                .and_then(Value::as_str)
-                .unwrap_or("unknown stream error");
+        if let Some(detail) = extract_error_detail(chunk) {
             return Err(ProviderError::Call(format!("stream error: {detail}")));
         }
         if let Some(usage) = chunk.get("usage") {
@@ -292,6 +288,27 @@ impl Aggregated {
         }
         Ok(())
     }
+}
+
+/// Extract an upstream error detail from a response/chunk body. Recognizes
+/// the OpenAI shape `{"error": {"message": ...}}` and the gateway's
+/// non-standard `{"code": <non-zero>, "msg": ...}` (sqai returns HTTP 200
+/// with this body for dead models, e.g. doubao-seed-2.1-turbo-2).
+fn extract_error_detail(value: &Value) -> Option<String> {
+    if let Some(error) = value.get("error") {
+        let detail = error
+            .get("message")
+            .and_then(Value::as_str)
+            .unwrap_or("unknown error");
+        return Some(detail.to_string());
+    }
+    let code = value.get("code").and_then(Value::as_i64).unwrap_or(0);
+    if code != 0 {
+        if let Some(msg) = value.get("msg").and_then(Value::as_str) {
+            return Some(format!("code={code}: {msg}"));
+        }
+    }
+    None
 }
 
 /// usage.input ← prompt_tokens, usage.output ← completion_tokens,
@@ -320,11 +337,7 @@ fn parse_usage(usage: &Value) -> Usage {
 fn parse_non_streaming(body: &str) -> Result<Aggregated, ProviderError> {
     let value: Value = serde_json::from_str(body)
         .map_err(|err| ProviderError::Call(format!("invalid JSON response: {err}")))?;
-    if let Some(error) = value.get("error") {
-        let detail = error
-            .get("message")
-            .and_then(Value::as_str)
-            .unwrap_or("unknown error");
+    if let Some(detail) = extract_error_detail(&value) {
         return Err(ProviderError::Call(format!(
             "HTTP 200 error body: {detail}"
         )));
@@ -493,6 +506,33 @@ fn wire_tool(spec: &super::ToolSpec) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extract_error_detail_openai_shape() {
+        let value = json!({"error": {"message": "bad api key"}});
+        assert_eq!(extract_error_detail(&value).as_deref(), Some("bad api key"));
+        assert_eq!(extract_error_detail(&json!({"choices": []})), None);
+    }
+
+    #[test]
+    fn extract_error_detail_gateway_code_msg_shape() {
+        // sqai gateway answers HTTP 200 with this body for dead models.
+        let value = json!({"code": 1, "msg": "model error.", "data": {}});
+        assert_eq!(
+            extract_error_detail(&value).as_deref(),
+            Some("code=1: model error.")
+        );
+        // code=0 is success, not an error.
+        assert_eq!(extract_error_detail(&json!({"code": 0, "msg": "ok"})), None);
+    }
+
+    #[test]
+    fn non_streaming_gateway_error_body_surfaced() {
+        let err = parse_non_streaming(r#"{"code":1,"msg":"model error.","data":{}}"#)
+            .err()
+            .expect("gateway error body must fail");
+        assert!(err.to_string().contains("model error."));
+    }
 
     #[test]
     fn parse_usage_prefers_gateway_cache_field() {
