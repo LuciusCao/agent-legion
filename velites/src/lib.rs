@@ -5,6 +5,8 @@
 //! spawning the binary.
 
 pub mod agent;
+pub mod budget;
+pub mod cancel;
 pub mod cli;
 pub mod config;
 pub mod events;
@@ -20,8 +22,10 @@ use crate::events::{EventSink, StdoutJsonlSink};
 use crate::tools::ToolKind;
 
 /// Run one headless session from parsed CLI args. Returns the process exit
-/// code: 0 even for unrecovered model errors (Pi semantics); non-zero only
-/// for harness failures (bad args, fixture errors, I/O).
+/// code: 0 even for unrecovered model errors (Pi semantics) and for
+/// SIGTERM-cancelled runs (cancellation is a deliberate Host action, not a
+/// harness fault); non-zero only for harness failures (bad args, fixture
+/// errors, I/O).
 pub async fn run(cli: Cli) -> anyhow::Result<u8> {
     let cwd = std::env::current_dir()
         .context("failed to resolve current directory")?
@@ -75,11 +79,15 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         system_prompt,
         instruction,
         tools,
-        max_turns: cli.max_turns,
-        max_tokens: cli.max_tokens,
+        budget: budget::Budget::new(
+            cli.max_turns,
+            cli.max_tokens,
+            std::time::Duration::from_secs(cli.timeout_seconds),
+        ),
         require_output: cli.require_output.clone(),
         session,
         cwd,
+        cancel: cancel::CancelToken::install_sigterm_handler(),
     };
 
     let mut sink = StdoutJsonlSink::new();

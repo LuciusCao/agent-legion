@@ -145,14 +145,32 @@ pub struct SessionEvent {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentStartEvent {}
 
+/// Why the run ended early. Absent on a normal completion or an unrecovered
+/// model error (the `error` field covers that path); present only when the
+/// harness itself cut the run short (design §5 controllability).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum EndReason {
+    /// A run budget (turns / tokens / wall-clock deadline) was exhausted;
+    /// the model got one wrap-up turn before the loop ended.
+    BudgetExceeded,
+    /// SIGTERM requested cancellation; the loop stopped at the next
+    /// checkpoint (turn boundary or after the current tool execution).
+    Cancelled,
+}
+
 /// `agent_end` event: final line of the stream. `error` is present only when
 /// the run ended with an unrecovered model error (exit code stays 0, matching
-/// Pi; the Host judges failure from the event stream).
+/// Pi; the Host judges failure from the event stream). `reason` is present
+/// only on budget exhaustion or cancellation (exit code also stays 0 — see
+/// `cancel.rs`).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentEndEvent {
     pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<EndReason>,
 }
 
 /// `turn_start` event.
@@ -271,8 +289,20 @@ pub struct ToolExecutionEndEvent {
     pub output_bytes: u64,
 }
 
-/// The velites/json1 event stream: exactly these ten event types, NDJSON on
-/// stdout, one JSON object per line.
+/// `outputs_validation` event (velites extension, design §5 输出自检):
+/// emitted right before `agent_end` whenever `--require-output` was given and
+/// the run ended normally or by budget exhaustion — always emitted in that
+/// case so the Host can decide explicitly, with `missing` listing the
+/// declared artifacts (relative paths as passed on the CLI) that still do not
+/// exist after the single remediation turn. Not emitted on cancellation or
+/// unrecovered model error.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+pub struct OutputsValidationEvent {
+    pub missing: Vec<String>,
+}
+
+/// The velites/json1 event stream: exactly these eleven event types, NDJSON
+/// on stdout, one JSON object per line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -286,6 +316,7 @@ pub enum Event {
     AutoRetryStart(AutoRetryStartEvent),
     ToolExecutionStart(ToolExecutionStartEvent),
     ToolExecutionEnd(ToolExecutionEndEvent),
+    OutputsValidation(OutputsValidationEvent),
 }
 
 /// Export the JSON Schema for the event stream (used by the `velites-schema`
@@ -455,6 +486,44 @@ mod tests {
     }
 
     #[test]
+    fn agent_end_reason_and_outputs_validation_wire_shape() {
+        let event = Event::AgentEnd(AgentEndEvent {
+            messages: Vec::new(),
+            error: None,
+            reason: Some(EndReason::BudgetExceeded),
+        });
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["type"], "agent_end");
+        assert_eq!(value["reason"], "budget_exceeded");
+        assert!(value.get("error").is_none());
+
+        let event = Event::AgentEnd(AgentEndEvent {
+            messages: Vec::new(),
+            error: None,
+            reason: Some(EndReason::Cancelled),
+        });
+        assert_eq!(serde_json::to_value(&event).unwrap()["reason"], "cancelled");
+
+        // Normal end: reason is skipped, not null.
+        let event = Event::AgentEnd(AgentEndEvent {
+            messages: Vec::new(),
+            error: None,
+            reason: None,
+        });
+        assert!(serde_json::to_value(&event)
+            .unwrap()
+            .get("reason")
+            .is_none());
+
+        let event = Event::OutputsValidation(OutputsValidationEvent {
+            missing: vec!["out/result.json".into()],
+        });
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["type"], "outputs_validation");
+        assert_eq!(value["missing"][0], "out/result.json");
+    }
+
+    #[test]
     fn event_type_tags_match_pi_allowlist() {
         // Must match RELEVANT_EVENT_TYPES in server/app/services/pi_event_scan.py.
         let tags = [
@@ -468,6 +537,7 @@ mod tests {
             "auto_retry_start",
             "tool_execution_start",
             "tool_execution_end",
+            "outputs_validation",
         ];
         let schema = serde_json::to_value(schemars::schema_for!(Event)).unwrap();
         for tag in tags {

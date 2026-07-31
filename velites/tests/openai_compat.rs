@@ -289,11 +289,11 @@ async fn unrecovered_error_ends_run_with_exit_0() {
         system_prompt: "sys".into(),
         instruction: "do something".into(),
         tools: vec![ToolKind::Read],
-        max_turns: None,
-        max_tokens: None,
+        budget: velites::budget::Budget::new(None, None, std::time::Duration::from_secs(600)),
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        cancel: velites::cancel::CancelToken::default(),
     };
     let mut sink = MemorySink::default();
     let exit = velites::agent::run(config, &provider, &mut sink)
@@ -364,11 +364,11 @@ async fn full_tool_round_over_gateway() {
         system_prompt: "sys".into(),
         instruction: "read in.txt".into(),
         tools: vec![ToolKind::Read],
-        max_turns: Some(5),
-        max_tokens: None,
+        budget: velites::budget::Budget::new(Some(5), None, std::time::Duration::from_secs(600)),
         require_output: Vec::new(),
         session: None,
         cwd,
+        cancel: velites::cancel::CancelToken::default(),
     };
     let mut sink = MemorySink::default();
     let exit = velites::agent::run(config, &provider, &mut sink)
@@ -492,11 +492,11 @@ fn agent_config(dir: &tempfile::TempDir) -> velites::agent::AgentConfig {
         system_prompt: "sys".into(),
         instruction: "do something".into(),
         tools: vec![ToolKind::Read],
-        max_turns: None,
-        max_tokens: None,
+        budget: velites::budget::Budget::new(None, None, std::time::Duration::from_secs(600)),
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        cancel: velites::cancel::CancelToken::default(),
     }
 }
 
@@ -514,6 +514,7 @@ fn event_types(events: &[Event]) -> Vec<&'static str> {
             Event::AutoRetryStart(_) => "auto_retry_start",
             Event::ToolExecutionStart(_) => "tool_execution_start",
             Event::ToolExecutionEnd(_) => "tool_execution_end",
+            Event::OutputsValidation(_) => "outputs_validation",
         })
         .collect()
 }

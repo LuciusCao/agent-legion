@@ -248,7 +248,7 @@ fn unknown_flags_are_rejected() {
 }
 
 #[test]
-fn max_turns_ends_the_loop() {
+fn max_turns_triggers_wrap_up_and_budget_exceeded() {
     let dir = tempfile::tempdir().unwrap();
     let cwd = dir.path();
     write(&cwd.join("prompt.md"), "Loop forever.");
@@ -258,7 +258,7 @@ fn max_turns_ends_the_loop() {
   "responses": [
     {"content": [{"type": "toolCall", "name": "read", "arguments": {"path": "prompt.md"}}]},
     {"content": [{"type": "toolCall", "name": "read", "arguments": {"path": "prompt.md"}}]},
-    {"content": [{"type": "text", "text": "should never be used"}]}
+    {"content": [{"type": "text", "text": "wrapping up"}]}
   ]
 }"#,
     );
@@ -266,8 +266,27 @@ fn max_turns_ends_the_loop() {
     let output = run_velites(cwd, &cwd.join("fixture.json"), &["--max-turns", "2"]);
     assert!(output.status.success());
     let events = parse_events(&output.stdout);
+    // Two budgeted turns + one wrap-up turn.
     let turn_starts = events.iter().filter(|e| e["type"] == "turn_start").count();
-    assert_eq!(turn_starts, 2);
-    assert_eq!(events.last().unwrap()["type"], "agent_end");
-    assert!(events.last().unwrap().get("error").is_none());
+    assert_eq!(turn_starts, 3);
+    let agent_end = events.last().unwrap();
+    assert_eq!(agent_end["type"], "agent_end");
+    assert_eq!(agent_end["reason"], "budget_exceeded");
+    assert!(agent_end.get("error").is_none());
+    // The wrap-up notice was injected as a user message.
+    let history = agent_end["messages"].as_array().unwrap();
+    let notice = history
+        .iter()
+        .find(|m| {
+            m["role"] == "user"
+                && m["content"][0]["text"]
+                    .as_str()
+                    .unwrap()
+                    .contains("FINAL turn")
+        })
+        .expect("budget wrap-up notice missing from history");
+    assert!(notice["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("--max-turns"));
 }

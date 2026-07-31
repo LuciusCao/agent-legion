@@ -1,9 +1,9 @@
 //! `bash` tool: run a command in the working directory with inherited env.
 //!
-//! The child is put in its own process group; on timeout the whole group
-//! receives SIGTERM, then SIGKILL after a grace period (Pi semantics,
-//! design §8). stdout+stderr volume is reported as `output_bytes`
-//! (measurement only, no truncation in M1).
+//! The child is put in its own process group; on timeout OR cancellation the
+//! whole group receives SIGTERM, then SIGKILL after a grace period (Pi
+//! semantics, design §8). stdout+stderr volume is reported as `output_bytes`
+//! (measurement only, no truncation).
 
 use std::time::Duration;
 
@@ -30,6 +30,29 @@ fn kill_process_group(pid: u32, signal: libc::c_int) {
     }
 }
 
+/// TERM → grace → KILL the child's process group, then reap it.
+async fn terminate(child: &mut tokio::process::Child, pid: Option<u32>) {
+    #[cfg(unix)]
+    {
+        if let Some(pid) = pid {
+            kill_process_group(pid, libc::SIGTERM);
+        }
+        if tokio::time::timeout(TERM_GRACE, child.wait())
+            .await
+            .is_err()
+        {
+            if let Some(pid) = pid {
+                kill_process_group(pid, libc::SIGKILL);
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = child.start_kill();
+    }
+    let _ = child.wait().await;
+}
+
 async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     let command = args
         .get("command")
@@ -48,7 +71,8 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         // Env is inherited by default; kill_on_drop is a safety net for
-        // harness shutdown, the timeout path below handles the normal case.
+        // harness shutdown, the terminate path below handles timeout and
+        // cancellation.
         .kill_on_drop(true);
     #[cfg(unix)]
     cmd.process_group(0);
@@ -71,32 +95,23 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
 
     let timeout = Duration::from_secs(timeout_secs);
     let mut timed_out = false;
-    let status = match tokio::time::timeout(timeout, child.wait()).await {
-        Ok(status) => Some(status?),
-        Err(_) => {
+    let mut cancelled = false;
+    // `Child::wait` is cancel-safe, so racing it against the timeout and the
+    // cancellation token loses nothing on the dropped branch.
+    let status = tokio::select! {
+        status = child.wait() => Some(status?),
+        _ = tokio::time::sleep(timeout) => {
             timed_out = true;
-            #[cfg(unix)]
-            {
-                if let Some(pid) = pid {
-                    kill_process_group(pid, libc::SIGTERM);
-                }
-                if tokio::time::timeout(TERM_GRACE, child.wait())
-                    .await
-                    .is_err()
-                {
-                    if let Some(pid) = pid {
-                        kill_process_group(pid, libc::SIGKILL);
-                    }
-                }
-            }
-            #[cfg(not(unix))]
-            {
-                let _ = child.start_kill();
-            }
-            let _ = child.wait().await;
+            None
+        }
+        _ = ctx.cancel.wait() => {
+            cancelled = true;
             None
         }
     };
+    if timed_out || cancelled {
+        terminate(&mut child, pid).await;
+    }
 
     let stdout = stdout_task
         .await
@@ -127,6 +142,12 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         text.push_str(&format!(
             "Command timed out after {timeout_secs}s (process group terminated)."
         ));
+    } else if cancelled {
+        is_error = true;
+        if !text.is_empty() {
+            text.push('\n');
+        }
+        text.push_str("Command cancelled (process group terminated).");
     } else if let Some(status) = status {
         if !status.success() {
             is_error = true;

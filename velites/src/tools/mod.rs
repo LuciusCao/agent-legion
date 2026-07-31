@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 
 use serde_json::Value;
 
+use crate::cancel::CancelToken;
 use crate::events::ContentBlock;
 use crate::provider::ToolSpec;
 
@@ -20,6 +21,10 @@ use crate::provider::ToolSpec;
 pub struct ToolContext {
     /// Canonicalized working directory; the sandbox root.
     pub cwd: PathBuf,
+    /// Cancellation flag; `bash` watches it while a child runs (TERM → grace
+    /// → KILL on cancel, same as the timeout path). A default token is never
+    /// cancelled.
+    pub cancel: CancelToken,
 }
 
 /// Outcome of one tool execution. Tool failures are reported as

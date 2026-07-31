@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Event",
-  "description": "The velites/json1 event stream: exactly these ten event types, NDJSON on\nstdout, one JSON object per line.",
+  "description": "The velites/json1 event stream: exactly these eleven event types, NDJSON\non stdout, one JSON object per line.",
   "oneOf": [
     {
       "type": "object",
@@ -132,11 +132,24 @@
       "required": [
         "type"
       ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "outputs_validation"
+        }
+      },
+      "$ref": "#/$defs/OutputsValidationEvent",
+      "required": [
+        "type"
+      ]
     }
   ],
   "$defs": {
     "AgentEndEvent": {
-      "description": "`agent_end` event: final line of the stream. `error` is present only when\nthe run ended with an unrecovered model error (exit code stays 0, matching\nPi; the Host judges failure from the event stream).",
+      "description": "`agent_end` event: final line of the stream. `error` is present only when\nthe run ended with an unrecovered model error (exit code stays 0, matching\nPi; the Host judges failure from the event stream). `reason` is present\nonly on budget exhaustion or cancellation (exit code also stays 0 — see\n`cancel.rs`).",
       "type": "object",
       "properties": {
         "error": {
@@ -150,6 +163,16 @@
           "items": {
             "$ref": "#/$defs/Message"
           }
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "required": [
@@ -254,6 +277,21 @@
         }
       ]
     },
+    "EndReason": {
+      "description": "Why the run ended early. Absent on a normal completion or an unrecovered\nmodel error (the `error` field covers that path); present only when the\nharness itself cut the run short (design §5 controllability).",
+      "oneOf": [
+        {
+          "description": "A run budget (turns / tokens / wall-clock deadline) was exhausted;\nthe model got one wrap-up turn before the loop ended.",
+          "type": "string",
+          "const": "budget_exceeded"
+        },
+        {
+          "description": "SIGTERM requested cancellation; the loop stopped at the next\ncheckpoint (turn boundary or after the current tool execution).",
+          "type": "string",
+          "const": "cancelled"
+        }
+      ]
+    },
     "Message": {
       "description": "One conversation message. Assistant metadata (`usage`, `provider`, `model`,\n`stopReason`, `errorMessage`) and tool-result metadata (`toolCallId`,\n`toolName`, `isError`) are only present on the roles they apply to; `None`\nfields are skipped on the wire.",
       "type": "object",
@@ -351,6 +389,21 @@
       },
       "required": [
         "message"
+      ]
+    },
+    "OutputsValidationEvent": {
+      "description": "`outputs_validation` event (velites extension, design §5 输出自检):\nemitted right before `agent_end` whenever `--require-output` was given and\nthe run ended normally or by budget exhaustion — always emitted in that\ncase so the Host can decide explicitly, with `missing` listing the\ndeclared artifacts (relative paths as passed on the CLI) that still do not\nexist after the single remediation turn. Not emitted on cancellation or\nunrecovered model error.",
+      "type": "object",
+      "properties": {
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "missing"
       ]
     },
     "Role": {
