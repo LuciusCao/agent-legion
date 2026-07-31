@@ -31,8 +31,11 @@
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
   的 `backend` + `frontend` job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
-  对所有分支跑 quick gate（按推送路径裁剪 lane：纯前端改动跳过 backend pytest、
-  docs 改动只跑静态、共享文件/新分支一律全量）；full / ci-extended gate 由 GitHub CI 执行。
+  默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
+  裁剪 lane：纯前端改动跳过 backend pytest、docs 改动只跑静态、共享文件/新分支一律
+  全量）。用 `AGENT_LEGION_GATE_LEVEL=quick`（完整 quick 套件）或
+  `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次推送。full gate 由
+  GitHub CI 在 PR/push 执行；ci-extended 压力门改为 nightly + 手动 dispatch。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
 

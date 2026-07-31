@@ -35,14 +35,33 @@ run_static_checks() {
 }
 
 run_tests() {
-  echo "=== Python Tests + Coverage ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
-    --ignore=tests/full \
-    --ignore=tests/ci \
-    -m "not repository_gate" \
-    -n auto \
-    --cov=server \
-    --cov-report=term-missing
+  # GATE_TIER=smoke runs the curated fast subset (membership lives in
+  # tests/conftest.py) without coverage — the 85% coverage floor only makes
+  # sense for the full suite, which remains the CI boundary.
+  case "${GATE_TIER:-full}" in
+    smoke)
+      echo "=== Python Smoke Tests (no coverage) ==="
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        --ignore=tests/full \
+        --ignore=tests/ci \
+        -m "smoke and not repository_gate" \
+        -n auto
+      ;;
+    full)
+      echo "=== Python Tests + Coverage ==="
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        --ignore=tests/full \
+        --ignore=tests/ci \
+        -m "not repository_gate" \
+        -n auto \
+        --cov=server \
+        --cov-report=term-missing
+      ;;
+    *)
+      echo "Unsupported GATE_TIER: ${GATE_TIER}" >&2
+      exit 2
+      ;;
+  esac
 }
 
 case "${BACKEND_GATE_PHASE:-all}" in

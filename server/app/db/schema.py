@@ -31,7 +31,12 @@ def migrate_workspace_secrets(conn: DatabaseConnection) -> None:
 def init_db(database_dsn: DatabaseDsn) -> None:
     """Initialize or upgrade the PostgreSQL schema under a migration lock."""
     with write_transaction(database_dsn) as conn:
-        conn.execute("select pg_advisory_xact_lock(hashtext('agent-legion-schema'))")
+        # Serialize migrations per database, not cluster-wide: worktrees run
+        # against dedicated databases (tests/postgres_support.py derives one
+        # per worktree) and must not queue on each other's schema lock.
+        conn.execute(
+            "select pg_advisory_xact_lock(hashtext('agent-legion-schema-' || current_database()))"
+        )
         conn.execute(
             """
             create table if not exists schema_migrations (
