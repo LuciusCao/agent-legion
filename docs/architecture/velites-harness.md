@@ -96,6 +96,7 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 | `turn_start` / `turn_end` | 日志渲染 | `turnIndex`、`message`、`toolResults` |
 | `message_start` | 日志渲染 | `message` |
 | `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage` |
+| `auto_retry_start` | 重试可观测性（pi 兼容，无渲染） | `attempt`（1 起）、`maxAttempts`、`delayMs`、`error` |
 | `tool_execution_start` / `tool_execution_end` | 日志渲染 | `toolCallId`、`toolName`、`args`、`result.content`、`isError` |
 
 ### 明确不发
@@ -105,8 +106,11 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 
 ### 错误语义（与 `pi_model_error.py` 对齐）
 
-- 模型调用失败先内部重试（指数退避，上限可配）；恢复后续跑，最终 assistant message
-  `stopReason` 为 `stop`/`toolUse`——Host 据此清除瞬时错误；
+- 模型调用失败先内部重试（指数退避，上限可配）；每个失败的 transient attempt 在
+  退避 sleep 前发出一对 pi 兼容事件：assistant `message_end`（`stopReason=error` +
+  `errorMessage`，usage 为 0）+ `auto_retry_start`；恢复后续跑，最终 assistant message
+  `stopReason` 为 `stop`/`toolUse`——Host 据此清除瞬时错误（pi 无 `auto_retry_end`，
+  velites 同样不发）；
 - 未恢复：最后一条 assistant message 带 `stopReason=error` + `errorMessage`，
   **exit 0**（复刻 Pi"模型 400 也 exit 0"，Host 靠事件流判失败）；
 - exit ≠ 0 仅用于 harness 自身故障（参数错误、内部 panic、被信号终止）。

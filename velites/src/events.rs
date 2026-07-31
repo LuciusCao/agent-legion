@@ -187,6 +187,59 @@ pub struct MessageEndEvent {
     pub message: Message,
 }
 
+/// `auto_retry_start` event (pi-compatible): emitted right after the error
+/// `message_end` of a failed transient attempt, before the backoff sleep.
+/// There is intentionally no `auto_retry_end` — Pi doesn't have one either;
+/// the Host's `fold_model_error` treats the next successful assistant
+/// `message_end` (`stopReason=stop|toolUse`) as "recovered".
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoRetryStartEvent {
+    /// 1-based retry counter (pi wire field).
+    pub attempt: u32,
+    /// Total attempts allowed, initial call included.
+    pub max_attempts: u32,
+    /// Backoff delay before the retry fires, in milliseconds.
+    pub delay_ms: u64,
+    /// Short description of the transient error that triggered the retry.
+    pub error: String,
+}
+
+/// The pi-compatible event pair for one failed transient attempt: an
+/// assistant `message_end` (`stopReason=error` + `errorMessage`, zero usage)
+/// followed by `auto_retry_start`. Mirrors what Node Pi emits on a retry
+/// (see `tests/workflows/test_pi_protocol.py` "error recovered by retry"),
+/// so the Host failure detection needs zero changes.
+///
+/// No `message_start` skeleton precedes the pair: the agent loop already
+/// emitted one for the turn, and every Host consumer (`fold_model_error`,
+/// `token_usage`, `job_log_renderer`) reads only `message_end` — the pi
+/// fixture shows the retry pair without an intermediate `message_start`.
+pub fn retry_attempt_events(
+    provider: &str,
+    model: &str,
+    attempt: u32,
+    max_attempts: u32,
+    delay_ms: u64,
+    error: &str,
+) -> [Event; 2] {
+    let mut message = Message::bare(Role::Assistant, Vec::new());
+    message.usage = Some(Usage::default());
+    message.provider = Some(provider.to_string());
+    message.model = Some(model.to_string());
+    message.stop_reason = Some(StopReason::Error);
+    message.error_message = Some(error.to_string());
+    [
+        Event::MessageEnd(MessageEndEvent { message }),
+        Event::AutoRetryStart(AutoRetryStartEvent {
+            attempt,
+            max_attempts,
+            delay_ms,
+            error: error.to_string(),
+        }),
+    ]
+}
+
 /// `tool_execution_start` event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct ToolExecutionStartEvent {
@@ -218,7 +271,7 @@ pub struct ToolExecutionEndEvent {
     pub output_bytes: u64,
 }
 
-/// The velites/json1 event stream: exactly these nine event types, NDJSON on
+/// The velites/json1 event stream: exactly these ten event types, NDJSON on
 /// stdout, one JSON object per line.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -230,6 +283,7 @@ pub enum Event {
     TurnEnd(TurnEndEvent),
     MessageStart(MessageStartEvent),
     MessageEnd(MessageEndEvent),
+    AutoRetryStart(AutoRetryStartEvent),
     ToolExecutionStart(ToolExecutionStartEvent),
     ToolExecutionEnd(ToolExecutionEndEvent),
 }
@@ -285,6 +339,22 @@ impl EventSink for MemorySink {
     }
 }
 
+/// Shared in-memory sink (tests): one handle drives the agent loop, a clone
+/// is moved into the retry callback, and all events land in one ordered vec.
+#[derive(Debug, Clone, Default)]
+pub struct SharedMemorySink {
+    pub events: std::sync::Arc<std::sync::Mutex<Vec<Event>>>,
+}
+
+impl EventSink for SharedMemorySink {
+    fn emit(&mut self, event: &Event) {
+        self.events
+            .lock()
+            .expect("sink poisoned")
+            .push(event.clone());
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -325,6 +395,29 @@ mod tests {
         assert_eq!(value["message"]["content"][2]["type"], "toolCall");
         // errorMessage must be skipped when None.
         assert!(value["message"].get("errorMessage").is_none());
+    }
+
+    #[test]
+    fn retry_attempt_events_match_pi_retry_pattern() {
+        // Pi pattern: error message_end, then auto_retry_start (see
+        // tests/workflows/test_pi_protocol.py "error recovered by retry").
+        let [error_end, retry_start] =
+            retry_attempt_events("gateway", "kimi-k2.6", 1, 4, 2000, "terminated");
+        let error_end = serde_json::to_value(&error_end).unwrap();
+        assert_eq!(error_end["type"], "message_end");
+        assert_eq!(error_end["message"]["role"], "assistant");
+        assert_eq!(error_end["message"]["stopReason"], "error");
+        assert_eq!(error_end["message"]["errorMessage"], "terminated");
+        assert_eq!(error_end["message"]["provider"], "gateway");
+        assert_eq!(error_end["message"]["model"], "kimi-k2.6");
+        assert_eq!(error_end["message"]["usage"]["input"], 0);
+
+        let retry_start = serde_json::to_value(&retry_start).unwrap();
+        assert_eq!(retry_start["type"], "auto_retry_start");
+        assert_eq!(retry_start["attempt"], 1);
+        assert_eq!(retry_start["maxAttempts"], 4);
+        assert_eq!(retry_start["delayMs"], 2000);
+        assert_eq!(retry_start["error"], "terminated");
     }
 
     #[test]
@@ -372,6 +465,7 @@ mod tests {
             "turn_end",
             "message_start",
             "message_end",
+            "auto_retry_start",
             "tool_execution_start",
             "tool_execution_end",
         ];

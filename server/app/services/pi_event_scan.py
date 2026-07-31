@@ -21,6 +21,9 @@ logger = logging.getLogger(__name__)
 # Event types that the job log renderer consumes.  All message_update deltas
 # (thinking_delta, text_delta, toolcall_delta, ...) are discarded because the
 # final state is captured in message_end events.
+# ``auto_retry_start`` is the pi/velites retry-observability event; it is not
+# rendered, but must survive compression so the retry history stays visible
+# in the compacted events.jsonl.
 RELEVANT_EVENT_TYPES = frozenset(
     {
         "session",
@@ -30,6 +33,7 @@ RELEVANT_EVENT_TYPES = frozenset(
         "turn_end",
         "message_start",
         "message_end",
+        "auto_retry_start",
         "tool_execution_start",
         "tool_execution_end",
     }

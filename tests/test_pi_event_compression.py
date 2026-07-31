@@ -97,3 +97,42 @@ def test_scan_and_compress_skips_missing_file(tmp_path):
     from server.app.services.pi_event_compression import scan_and_compress_pi_events
 
     assert scan_and_compress_pi_events(tmp_path / "missing.jsonl") == (None, 0, 0)
+
+
+def test_scan_and_compress_velites_retry_stream_judged_recovered(tmp_path):
+    # velites retry pattern (same as Node Pi): each failed transient attempt
+    # emits an error message_end + auto_retry_start; the later successful
+    # message_end clears the error, so the run is judged recovered — and
+    # auto_retry_start must survive compression (pi_event_scan allowlist).
+    from server.app.services.pi_event_compression import scan_and_compress_pi_events
+
+    events = tmp_path / "events.jsonl"
+    events.write_text(
+        "\n".join(
+            [
+                '{"type":"session","sessionId":"s1"}',
+                '{"type":"message_start","message":{"role":"assistant"}}',
+                '{"type":"message_end","message":{"role":"assistant","stopReason":"error","errorMessage":"provider call failed (transient): terminated"}}',
+                '{"type":"auto_retry_start","attempt":1,"maxAttempts":4,"delayMs":1000,"error":"terminated"}',
+                '{"type":"message_end","message":{"role":"assistant","stopReason":"stop","usage":{"input":1,"output":1,"cacheRead":0}}}',
+                '{"type":"agent_end"}',
+            ]
+        )
+        + "\n"
+    )
+    model_error, original, compressed = scan_and_compress_pi_events(events)
+    assert model_error is None, "recovered retry must not be judged a model failure"
+    assert original > 0 and compressed > 0
+
+    kept_types = [
+        json.loads(line)["type"] for line in events.read_text(encoding="utf-8").strip().splitlines()
+    ]
+    assert "auto_retry_start" in kept_types
+    assert kept_types == [
+        "session",
+        "message_start",
+        "message_end",
+        "auto_retry_start",
+        "message_end",
+        "agent_end",
+    ]

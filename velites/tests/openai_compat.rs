@@ -7,7 +7,10 @@ use std::time::Duration;
 
 use common::{MockResponse, MockServer};
 use serde_json::{json, Value};
-use velites::events::{ContentBlock, Event, MemorySink, Message, StopReason};
+use velites::events::{
+    AutoRetryStartEvent, ContentBlock, Event, EventSink, MemorySink, Message, SharedMemorySink,
+    StopReason,
+};
 use velites::provider::openai_compat::OpenAiCompatProvider;
 use velites::provider::retry::RetryProvider;
 use velites::provider::{CompletionRequest, Provider, ToolSpec};
@@ -451,4 +454,224 @@ async fn stream_ending_without_finish_reason_is_transient() {
     assert!(err.is_retryable());
     assert!(err.to_string().contains("finish_reason"), "got: {err}");
     assert_eq!(server.recorded().len(), 2, "initial attempt + one retry");
+}
+
+// --- Retry observability (pi-compatible auto_retry_start events) -----------
+
+/// Retry provider whose failed transient attempts emit the pi-compatible
+/// `message_end`(error) + `auto_retry_start` pair into the shared sink —
+/// the same wiring `lib::run` uses with `StdoutJsonlSink`.
+fn retrying_with_events(
+    server: &MockServer,
+    max_retries: u32,
+    sink: SharedMemorySink,
+) -> RetryProvider<OpenAiCompatProvider> {
+    RetryProvider::new(provider(server), max_retries, Duration::from_millis(1))
+        .with_on_attempt_failed(move |attempt, max_attempts, delay, err| {
+            let events = velites::events::retry_attempt_events(
+                "gateway",
+                "kimi-k2.6",
+                attempt,
+                max_attempts,
+                delay.as_millis() as u64,
+                &err.to_string(),
+            );
+            let mut sink = sink.clone();
+            for event in &events {
+                sink.emit(event);
+            }
+        })
+}
+
+fn agent_config(dir: &tempfile::TempDir) -> velites::agent::AgentConfig {
+    velites::agent::AgentConfig {
+        name: Some("retry-obs".into()),
+        provider_name: "gateway".into(),
+        model: "kimi-k2.6".into(),
+        thinking: None,
+        system_prompt: "sys".into(),
+        instruction: "do something".into(),
+        tools: vec![ToolKind::Read],
+        max_turns: None,
+        max_tokens: None,
+        require_output: Vec::new(),
+        session: None,
+        cwd: dir.path().to_path_buf(),
+    }
+}
+
+fn event_types(events: &[Event]) -> Vec<&'static str> {
+    events
+        .iter()
+        .map(|event| match event {
+            Event::Session(_) => "session",
+            Event::AgentStart(_) => "agent_start",
+            Event::AgentEnd(_) => "agent_end",
+            Event::TurnStart(_) => "turn_start",
+            Event::TurnEnd(_) => "turn_end",
+            Event::MessageStart(_) => "message_start",
+            Event::MessageEnd(_) => "message_end",
+            Event::AutoRetryStart(_) => "auto_retry_start",
+            Event::ToolExecutionStart(_) => "tool_execution_start",
+            Event::ToolExecutionEnd(_) => "tool_execution_end",
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn retry_events_emitted_and_run_recovers() {
+    // Two failed transient attempts (500, interrupted stream), third call
+    // succeeds: two (error message_end + auto_retry_start) pairs, then the
+    // normal completion — the Host clears the recorded error on the final
+    // stop, exactly like the Node Pi retry pattern.
+    let ok = sse_body(&[
+        json!({"choices": [{"delta": {"content": "recovered"}, "finish_reason": "stop"}]}),
+        json!({"choices": [], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}),
+    ]);
+    let server = MockServer::start(vec![
+        MockResponse::json(500, r#"{"error":{"message":"upstream boom"}}"#),
+        MockResponse::truncated_sse(ok.clone(), 30),
+        MockResponse::sse(ok),
+    ])
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut sink = SharedMemorySink::default();
+    let provider = retrying_with_events(&server, 3, sink.clone());
+    let exit = velites::agent::run(agent_config(&dir), &provider, &mut sink)
+        .await
+        .unwrap();
+    assert_eq!(exit, 0);
+
+    let events = sink.events.lock().unwrap();
+    assert_eq!(
+        event_types(&events),
+        vec![
+            "session",
+            "agent_start",
+            "turn_start",
+            "message_start",
+            "message_end",      // attempt 1 failed (HTTP 500)
+            "auto_retry_start", // attempt 1
+            "message_end",      // attempt 2 failed (interrupted stream)
+            "auto_retry_start", // attempt 2
+            "message_end",      // attempt 3 recovered
+            "turn_end",
+            "agent_end",
+        ]
+    );
+
+    let message_ends: Vec<&Message> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::MessageEnd(payload) => Some(&payload.message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(message_ends.len(), 3);
+    for failed in &message_ends[..2] {
+        assert_eq!(failed.stop_reason, Some(StopReason::Error));
+        assert!(failed.error_message.is_some(), "errorMessage required");
+        assert_eq!(failed.provider.as_deref(), Some("gateway"));
+        assert_eq!(failed.model.as_deref(), Some("kimi-k2.6"));
+    }
+    assert!(message_ends[0]
+        .error_message
+        .as_deref()
+        .unwrap_or_default()
+        .contains("500"));
+    assert_eq!(message_ends[2].stop_reason, Some(StopReason::Stop));
+
+    let attempts: Vec<u32> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::AutoRetryStart(AutoRetryStartEvent { attempt, .. }) => Some(*attempt),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(attempts, vec![1, 2]);
+
+    let agent_end = events
+        .iter()
+        .find_map(|event| match event {
+            Event::AgentEnd(payload) => Some(payload),
+            _ => None,
+        })
+        .unwrap();
+    assert!(
+        agent_end.error.is_none(),
+        "recovered run has no agent_end error"
+    );
+    assert_eq!(server.recorded().len(), 3, "2 failures + 1 success");
+}
+
+#[tokio::test]
+async fn retry_events_exhausted_ends_with_terminal_error_exit_0() {
+    // Every attempt fails transiently: N retry pairs, then the agent loop's
+    // terminal error message_end + agent_end.error, exit still 0.
+    let server = MockServer::start(vec![
+        MockResponse::json(500, r#"{"error":{"message":"upstream boom"}}"#),
+        MockResponse::json(500, r#"{"error":{"message":"upstream boom"}}"#),
+        MockResponse::json(500, r#"{"error":{"message":"upstream boom"}}"#),
+    ])
+    .await;
+
+    let dir = tempfile::tempdir().unwrap();
+    let mut sink = SharedMemorySink::default();
+    let provider = retrying_with_events(&server, 2, sink.clone());
+    let exit = velites::agent::run(agent_config(&dir), &provider, &mut sink)
+        .await
+        .unwrap();
+    assert_eq!(exit, 0);
+
+    let events = sink.events.lock().unwrap();
+    assert_eq!(
+        event_types(&events),
+        vec![
+            "session",
+            "agent_start",
+            "turn_start",
+            "message_start",
+            "message_end",      // attempt 1 failed
+            "auto_retry_start", // attempt 1
+            "message_end",      // attempt 2 failed
+            "auto_retry_start", // attempt 2
+            "message_end",      // attempt 3 failed: retries exhausted, terminal
+            "turn_end",
+            "agent_end",
+        ]
+    );
+
+    let message_ends: Vec<&Message> = events
+        .iter()
+        .filter_map(|event| match event {
+            Event::MessageEnd(payload) => Some(&payload.message),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(message_ends.len(), 3);
+    for failed in &message_ends {
+        assert_eq!(failed.stop_reason, Some(StopReason::Error));
+        assert!(failed.error_message.is_some());
+    }
+
+    let retries = events
+        .iter()
+        .filter(|event| matches!(event, Event::AutoRetryStart(_)))
+        .count();
+    assert_eq!(retries, 2, "one auto_retry_start per retried attempt");
+
+    let agent_end = events
+        .iter()
+        .find_map(|event| match event {
+            Event::AgentEnd(payload) => Some(payload),
+            _ => None,
+        })
+        .unwrap();
+    assert!(agent_end
+        .error
+        .as_deref()
+        .unwrap_or_default()
+        .contains("500"));
+    assert_eq!(server.recorded().len(), 3, "initial attempt + 2 retries");
 }
