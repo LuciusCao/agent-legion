@@ -97,7 +97,6 @@ class WorkflowWorkerThread:
             self.settings.root_dir, self.settings.resource_providers.providers
         )
         self._ensure_pools()
-        self._maintenance.run_backfill()
 
         def _loop() -> None:
             while not self.stop_event.is_set():

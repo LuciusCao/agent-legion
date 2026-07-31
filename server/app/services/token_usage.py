@@ -7,8 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from psycopg import Error
-
 from server.app.db.connection import DatabaseConnection
 from server.app.services.token_usage_pricing import calculate_cost, load_pricing_config
 from server.app.services.token_usage_response import (
@@ -17,7 +15,6 @@ from server.app.services.token_usage_response import (
     usage_dict,
 )
 from server.app.services.token_usage_workspace import build_workspace_usage_response
-from server.app.storage_paths import ManagedPathError, resolve_data_path
 
 logger = logging.getLogger(__name__)
 
@@ -224,63 +221,6 @@ def persist_node_run_usage(conn: DatabaseConnection, summary: TokenUsageSummary)
     )
 
 
-def backfill_missing_token_usage(conn: DatabaseConnection, data_dir: Path, limit: int = 500) -> int:
-    """Backfill token usage for completed/failed node runs that lack a summary row.
-
-    Returns the number of rows persisted. Missing run directories and missing
-    ``events.jsonl`` are skipped silently because they are normal for cleaned-up
-    historical runs.
-    """
-    rows = conn.execute(
-        """
-        select
-          nr.id as node_run_id,
-          nr.job_id,
-          nr.node_key,
-          nr.run_dir,
-          nr.skill_version,
-          j.workspace_id
-        from node_runs as nr
-        join jobs as j on j.id = nr.job_id
-        where not exists (
-          select 1 from node_run_token_usage where node_run_id = nr.id
-        )
-          and nr.status in ('completed', 'failed')
-          and nr.run_dir != ''
-        order by nr.id
-        limit ?
-        """,
-        (max(1, limit),),
-    ).fetchall()
-
-    # Parse phase first (pure file reads, no writes) so that the implicit write
-    # transaction opened by the first persist is not held while parsing files.
-    summaries: list[TokenUsageSummary] = []
-    for row in rows:
-        try:
-            run_dir = resolve_data_path(row["run_dir"], data_dir, allow_missing=False)
-        except (ManagedPathError, FileNotFoundError):
-            continue
-
-        node_run = dict(row)
-        summary = parse_run_usage(run_dir, node_run)
-        if summary is None:
-            continue
-        summaries.append(
-            TokenUsageSummary(**{**summary.__dict__, "workspace_id": str(row["workspace_id"])})
-        )
-
-    persisted = 0
-    for summary in summaries:
-        try:
-            persist_node_run_usage(conn, summary)
-            persisted += 1
-        except Error:
-            logger.exception("Failed to persist token usage for run %s", summary.node_run_id)
-
-    return persisted
-
-
 _NO_USAGE_REASON = "no token usage recorded for run"
 
 
@@ -409,7 +349,6 @@ __all__ = [
     "TokenUsageSummary",
     "parse_run_usage",
     "persist_node_run_usage",
-    "backfill_missing_token_usage",
     "calculate_cost",
     "load_pricing_config",
     "build_run_usage_response",
