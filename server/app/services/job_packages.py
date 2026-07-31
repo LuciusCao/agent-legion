@@ -4,6 +4,10 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.pipeline.package import WORKSPACE_PACKAGE_FILES, create_workspace_package
+from server.app.services.job_selection_resolver import (
+    EmptyJobSelectionError,
+    resolve_batch_selection,
+)
 from server.app.services.workspace_package_artifacts import workspace_artifact_names
 from server.app.services.workspace_package_clear_packed import (
     WorkspacePackageClearPackedMixin,
@@ -29,12 +33,18 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
     def list_workspace_packages(self, workspace_id: str, limit: int = 10) -> list[dict[str, Any]]:
         return self.job_db.list_workspace_packages(workspace_id, limit=limit)
 
-    def package(self, workspace_id: str, job_ids: list[str]) -> JobPackageResult:
+    def package(
+        self, workspace_id: str, job_ids: list[str] | None = None, **kwargs: Any
+    ) -> JobPackageResult:
+        """Package the selected jobs; kwargs take job_filter/exclude_ids."""
+        ids = resolve_batch_selection(self.job_db, workspace_id, job_ids, **kwargs)
+        if not ids:
+            raise EmptyJobSelectionError("No job_ids provided or matched by the filter")
         results: list[JobPackageItemResult] = []
         eligible_jobs: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        for job_id in job_ids:
+        for job_id in ids:
             normalized = job_id.strip()
             if not normalized or normalized in seen:
                 continue

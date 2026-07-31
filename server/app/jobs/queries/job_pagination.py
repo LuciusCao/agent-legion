@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.jobs.queries.job_filtering import JobListFilter, filter_clauses
 
 
 def list_jobs_paginated(
@@ -10,9 +11,14 @@ def list_jobs_paginated(
     workspace_id: str,
     limit: int,
     cursor: str | None = None,
+    filter: JobListFilter | None = None,
 ) -> tuple[list[dict[str, Any]], str | None]:
     clauses = ["workspace_id=?"]
     params: list[Any] = [workspace_id]
+    if filter is not None:
+        extra_clauses, extra_params = filter_clauses(filter)
+        clauses.extend(extra_clauses)
+        params.extend(extra_params)
     if cursor:
         created_at, job_id = cursor.split("|", 1)
         clauses.append("(created_at < ? or (created_at = ? and id < ?))")

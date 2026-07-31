@@ -4,6 +4,10 @@ import type {
   JobFilterNodeOption,
   WorkflowVersionOptions,
 } from '../filterLogic/types'
+import {
+  nodeKeysFromFacets,
+  versionOptionsFromFacets,
+} from '../filterLogic/facets'
 
 export function makeSelectNodeOptions(
   workflowDefinition: WorkflowDefinitionRecord | null
@@ -15,7 +19,9 @@ export function makeSelectNodeOptions(
   }
 
   return function selectNodeOptions(state: JobState): JobFilterNodeOption[] {
-    const nodeKeys = state.optionAccumulator.nodeKeys
+    const nodeKeys = state.facets
+      ? nodeKeysFromFacets(state.facets)
+      : state.optionAccumulator.nodeKeys
     const cached = cache.get(nodeKeys)
     if (cached) return cached
 
@@ -32,5 +38,7 @@ export function makeSelectNodeOptions(
 export function selectWorkflowVersionOptions(
   state: JobState
 ): WorkflowVersionOptions {
-  return state.optionAccumulator.workflowVersionOptions
+  return state.facets
+    ? versionOptionsFromFacets(state.facets)
+    : state.optionAccumulator.workflowVersionOptions
 }

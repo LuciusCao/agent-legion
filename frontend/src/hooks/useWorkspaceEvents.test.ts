@@ -12,8 +12,25 @@ vi.mock('../api')
 
 const mockFetchJobs = vi.mocked(api.fetchJobs)
 const mockFetchJobsSnapshot = vi.mocked(api.fetchJobsSnapshot)
+const mockFetchJobFacets = vi.mocked(api.fetchJobFacets)
 const mockFetchWorkspaceStats = vi.mocked(api.fetchWorkspaceStats)
 const makeJob = createJobSummary
+
+const emptyFacets = {
+  workspace_id: 'ws1',
+  total: 0,
+  status_counts: {},
+  version_counts: {},
+  node_counts: {},
+}
+
+const emptyFilterParams = {
+  status: null,
+  search: null,
+  workflow_version: null,
+  workflow_version_none: false,
+  active_node_key: null,
+}
 
 describe('useWorkspaceEvents', () => {
   const originalEventSource = globalThis.EventSource
@@ -39,6 +56,7 @@ describe('useWorkspaceEvents', () => {
       jobs: [],
       next_cursor: null,
     })
+    mockFetchJobFacets.mockResolvedValue(emptyFacets)
     mockFetchWorkspaceStats.mockResolvedValue({
       job_stats: {},
     } as WorkspaceStats)
@@ -76,7 +94,12 @@ describe('useWorkspaceEvents', () => {
     })
 
     await waitFor(() => {
-      expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1', 500, undefined)
+      expect(mockFetchJobsSnapshot).toHaveBeenCalledWith(
+        'ws1',
+        500,
+        undefined,
+        emptyFilterParams
+      )
       expect(useJobStore.getState().jobsById.j1?.status).toBe('running')
     })
     expect(mockFetchJobs).not.toHaveBeenCalled()
@@ -445,5 +468,66 @@ describe('useWorkspaceEvents', () => {
     await waitFor(() => {
       expect(useJobStore.getState().jobsById.j2.status).toBe('completed')
     })
+  })
+
+  it('loads only the first snapshot page and fetches facets', async () => {
+    mockFetchJobsSnapshot.mockResolvedValueOnce({
+      workspace_id: 'ws1',
+      revision: 3,
+      stats: { running: 1 },
+      total: 900,
+      jobs: [makeJob({ id: 'j1', workspace_id: 'ws1', status: 'running' })],
+      next_cursor: 'cursor-page-2',
+    })
+
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+    })
+
+    await waitFor(() => {
+      expect(useJobStore.getState().isLoading).toBe(false)
+    })
+    // No next_cursor loop: the remaining pages load via infinite scroll.
+    expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(1)
+    expect(mockFetchJobFacets).toHaveBeenCalledWith('ws1', emptyFilterParams)
+    const state = useJobStore.getState()
+    expect(state.hasMore).toBe(true)
+    expect(state.nextCursor).toBe('cursor-page-2')
+    expect(state.totalJobs).toBe(900)
+  })
+
+  it('debounces a facet refresh after a job patch batch', async () => {
+    vi.useFakeTimers()
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(mockFetchJobFacets).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'job_patch_batch',
+            workspace_id: 'ws1',
+            revision: 2,
+            jobs: [makeJob({ id: 'j1', workspace_id: 'ws1' })],
+            deleted_job_ids: [],
+          }),
+        })
+      )
+    })
+    expect(mockFetchJobFacets).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(mockFetchJobFacets).toHaveBeenCalledTimes(2)
   })
 })

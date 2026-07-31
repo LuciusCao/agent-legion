@@ -2,6 +2,7 @@ import { upgradeJobWorkflow } from '../../../api/jobWorkflowUpgradeApi'
 import type { JobMutationResult } from '../../../types/jobTypes'
 import { useUiStore } from '../../uiStore'
 import { applyMutationResults } from './mutationResults'
+import { refreshAfterBatchOperation } from './selectionModeState'
 import type { JobState, JobStoreSet } from '../state'
 
 export function upgradeActions(set: JobStoreSet, get: () => JobState) {
@@ -25,7 +26,7 @@ export function upgradeActions(set: JobStoreSet, get: () => JobState) {
           }
         }
         applyMutationResults(set, results, '升级 workflow')
-        await get().fetchJobs(workspaceId)
+        await refreshAfterBatchOperation(get, workspaceId)
         return { results }
       } catch (err) {
         const message =
