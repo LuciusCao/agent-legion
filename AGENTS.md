@@ -33,10 +33,11 @@
   的 `backend` + `frontend` job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
   默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
-  裁剪 lane：纯前端改动跳过 backend pytest、docs 改动只跑静态、共享文件/新分支一律
-  全量）。用 `AGENT_LEGION_GATE_LEVEL=quick`（完整 quick 套件）或
-  `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次推送。full gate 由
-  GitHub CI 在 PR/push 执行；ci-extended 压力门改为 nightly + 手动 dispatch。
+  裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
+  改动只跑静态、共享文件/新分支一律全量）。用 `AGENT_LEGION_GATE_LEVEL=quick`
+  （完整 quick 套件）或 `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次
+  推送。full gate 由 GitHub CI 在 PR/push 执行；ci-extended 压力门改为
+  nightly + 手动 dispatch。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试
@@ -70,6 +71,14 @@
   声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
   workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
   （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
+- velites（`velites/` crate，pi 的自研 Rust 替代）：Workspace Executor 扩展链不变
+  （capability → executor → allocation → binding → local limit），harness flavor
+  切换只经 `workflows.pi.flavor` 配置，workflow 节点不感知 harness 实现。
+  事件 schema 改动必须同步 `velites/schema/events.schema.json`
+  （`cargo run --bin velites-schema -- schema/events.schema.json`）并保证契约测试
+  （`velites/tests/schema_current.rs`、`golden_events.rs`）通过；事件流只保留 Host
+  消费的 pi 兼容子集，禁止引入 delta 事件（`message_update` /
+  `tool_execution_update`）。
 
 典型反例：
 

@@ -9,6 +9,14 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+# velites: self-contained Rust agent harness binary (pi replacement, M4
+# rollout). Built in its own stage so the worker image ships only the static
+# binary without a Rust toolchain. velites/target is excluded via .dockerignore.
+FROM rust:1-bookworm AS velites-build
+WORKDIR /src
+COPY velites/ ./velites/
+RUN cargo build --release --locked --manifest-path velites/Cargo.toml
+
 FROM python:${PYTHON_VERSION}-slim-bookworm AS host
 ARG UV_VERSION=0.11.21
 ENV PYTHONUNBUFFERED=1 \
@@ -31,6 +39,11 @@ COPY --from=frontend /usr/local/ /usr/local/
 RUN pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" \
     && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && pi --version
+# velites harness binary. Transition flavor: pi above stays installed and
+# remains the default executor; switch a deployment by setting
+# `workflows.pi.flavor: velites` (see docs/architecture/velites-harness.md).
+# Once the rollout completes, drop the npm install + pi --version lines above.
+COPY --from=velites-build /src/velites/target/release/velites /usr/local/bin/velites
 WORKDIR /app
 COPY worker /app/worker
 COPY server/__init__.py /app/server/__init__.py

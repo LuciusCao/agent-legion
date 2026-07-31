@@ -9,15 +9,21 @@ fi
 gate="$1"
 # Lane selector for the quick gate (see scripts/check-quick.sh). The full gate
 # always runs every lane.
-lanes="${2:-backend frontend}"
-case "$lanes" in
-  "backend frontend"|"backend"|"frontend"|"static") ;;
-  *)
-    echo "Unsupported lanes: $lanes" >&2
-    exit 2
-    ;;
-esac
-if [[ "$gate" == "full" && "$lanes" != "backend frontend" ]]; then
+lanes="${2:-backend frontend rust}"
+if [[ "$lanes" == "static" ]]; then
+  :
+else
+  for lane in $lanes; do
+    case "$lane" in
+      backend|frontend|rust) ;;
+      *)
+        echo "Unsupported lanes: $lanes" >&2
+        exit 2
+        ;;
+    esac
+  done
+fi
+if [[ "$gate" == "full" && "$lanes" != "backend frontend rust" ]]; then
   echo "Lane selection is only supported for the quick gate." >&2
   exit 2
 fi
@@ -66,6 +72,8 @@ fingerprint_paths=(
   frontend/vite.config.ts
   config/architecture/architecture-invariants.yaml
   config/architecture/architecture-exemptions.yaml
+  velites/Cargo.toml
+  velites/Cargo.lock
 )
 
 for path in "${fingerprint_paths[@]}"; do
@@ -74,7 +82,7 @@ for path in "${fingerprint_paths[@]}"; do
   fi
 done
 
-for command_name in uv python3 node npm; do
+for command_name in uv python3 node npm cargo rustc; do
   if command -v "$command_name" >/dev/null 2>&1; then
     version="$($command_name --version 2>&1 || true)"
     fingerprint_input+="$command_name=${version%%$'\n'*}"$'\n'
