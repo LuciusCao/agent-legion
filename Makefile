@@ -87,6 +87,10 @@ worker-logs: ## 通过本地 Worker Service 查看最近日志
 	$(UV) run python -m worker.cli logs
 
 # 质量门
+.PHONY: check-smoke
+check-smoke: ## 运行冒烟质量门（静态 + smoke 测试层）
+	GATE_TIER=smoke ./scripts/check-quick.sh
+
 .PHONY: check-quick
 check-quick: ## 运行快速质量门
 	./scripts/check-quick.sh

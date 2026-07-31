@@ -5,6 +5,9 @@ on:
     branches: [develop, main, master]
   push:
     branches: [develop, main, master]
+  # Nightly run: the only scheduled trigger for the ci-extended stress job.
+  schedule:
+    - cron: '23 3 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -124,9 +127,9 @@ jobs:
 
   ci-extended:
     name: ci-extended
-    # Repeated stress scenarios; too slow for the PR loop. Runs on branch
-    # pushes and manual dispatch, matching the old manual check-ci.sh policy.
-    if: github.event_name != 'pull_request'
+    # Repeated stress scenarios; too slow for the PR/push loop. Runs nightly
+    # (schedule) and on manual dispatch, replacing the old per-push policy.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:

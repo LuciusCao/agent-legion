@@ -37,6 +37,7 @@ markers = [
   "ci_extended: repeated stress scenarios for CI",
   "slow: tests involving real subprocesses or long sleeps",
   "repository_gate: whole-repository checks executed separately by the quality gate",
+  "smoke: curated fast high-value tests for the pre-push smoke tier (assigned in tests/conftest.py)",
 ]
 filterwarnings = [
   "error::ResourceWarning:sqlite3",

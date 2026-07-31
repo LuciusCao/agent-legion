@@ -3,9 +3,25 @@ set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 # The full gate for protected branches (develop/main/release/tags) runs in
-# GitHub Actions (.github/workflows/quality-gate.yml); local pre-push always
-# runs the quick gate so slow checks stay off the maintainer machine.
-gate="quick"
+# GitHub Actions (.github/workflows/quality-gate.yml); local pre-push keeps
+# only the fast feedback loop on the maintainer machine.
+# AGENT_LEGION_GATE_LEVEL picks the local level:
+#   smoke (default) — static checks + the curated smoke test tier;
+#   quick           — static checks + the full quick test suite;
+#   full            — the whole local full gate (scripts/check.sh).
+# CI runs every lane of the full quick gate regardless, so the smoke default
+# never weakens the server-side boundary.
+level="${AGENT_LEGION_GATE_LEVEL:-smoke}"
+case "$level" in
+  smoke) gate="quick"; tier="smoke" ;;
+  quick) gate="quick"; tier="full" ;;
+  full)  gate="full";  tier="full" ;;
+  *)
+    echo "Unsupported AGENT_LEGION_GATE_LEVEL: $level (expected smoke|quick|full)" >&2
+    exit 2
+    ;;
+esac
+export GATE_TIER="$tier"
 has_update=0
 force_full=0
 changed_paths=""
