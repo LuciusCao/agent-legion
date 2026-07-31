@@ -15,6 +15,7 @@ from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
+from server.app.workflow_worker_agent_gate import AgentPassState, prepare_agent_pass
 from server.app.workflow_worker_claim_flush import PreparedClaim, flush_prepared_claims
 from server.app.workflow_worker_execution import reap_futures
 from server.app.workflow_worker_maintenance import WorkflowMaintenance
@@ -50,8 +51,7 @@ class WorkflowWorkerThread:
         self.agent_manager = agent_manager
         self.agent_dispatch = agent_dispatch
         self.stop_event = threading.Event()
-        # Set whenever a claimed execution finishes or new schedulable work is
-        # reported; the poll loop waits on this instead of the idle backoff.
+        # Set when work finishes or arrives; the poll loop waits on this.
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._definitions: list[WorkflowDefinition] = []
@@ -59,20 +59,18 @@ class WorkflowWorkerThread:
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
-        # Cross-pass caches: parsed workflow definitions keyed by
-        # workflow_definition_hash, and ready-node evaluations keyed by job
-        # id, reused while a job's lightweight scan mark is unchanged.
+        # Cross-pass caches: parsed workflow definitions by definition hash,
+        # and ready-node evaluations by job id (scan-mark keyed).
         self._definition_cache: dict[str, WorkflowDefinition | None] = {}
         self._job_evals: dict[str, tuple[tuple[Any, ...], list[Any]]] = {}
         self._last_ready_stats: dict[str, int] = {"hit": 0, "miss": 0}
-        # Short-TTL node routing resolutions for the claim path; see
-        # server.app.workflow_worker_routing.
+        # Short-TTL route cache; see server.app.workflow_worker_routing.
         self._route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
-        # Per-pass state (cleared in _poll): memoized intake batch payloads,
-        # pass claim statistics, and buffered claims leased at pass end.
+        # Per-pass state (cleared in _poll).
         self._batch_payload_cache: dict[str, dict[str, Any] | None] = {}
         self._pass_claim_counts: dict[str, int] = {}
         self._pending_claims: list[PreparedClaim] = []
+        self._agent_pass = AgentPassState()
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
@@ -116,6 +114,7 @@ class WorkflowWorkerThread:
 
     def _poll(self) -> bool:
         self._batch_payload_cache, self._pass_claim_counts, self._pending_claims = {}, {}, []
+        self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
         if not self._definitions:
             return False
@@ -134,6 +133,7 @@ class WorkflowWorkerThread:
         scan_seconds = time.monotonic() - scan_started
         total_candidates = sum(len(queue) for queue in queues.values())
         log_pass_start(pass_logger(self.settings), jobs_by_workspace, queues, scan_seconds)
+        prepare_agent_pass(self, queues)
         claim_started = time.monotonic()
         claims = claim_ready_queues(self, workspaces, queues, snapshot)
         flush_prepared_claims(self)
@@ -159,6 +159,7 @@ class WorkflowWorkerThread:
             candidates=total_candidates,
             claim_seconds=claim_seconds,
             claim_counts=self._pass_claim_counts,
+            stock_gated=self._agent_pass.stock_gated,
         )
         if scan_seconds > 15:
             logger.warning("slow workflow worker pass: " + pass_stats[0], *pass_stats[1:])
@@ -196,9 +197,8 @@ class WorkflowWorkerThread:
         self._wake_event.set()
         if self._thread is not None:
             self._thread.join(timeout=timeout)
-        # Request cancellation for any still-active executions so adapters can
-        # terminate their children and finish leases within a bounded grace
-        # period instead of blocking on the full executor timeout.
+        # Cancel still-active executions so adapters terminate children and
+        # finish leases within a bounded grace period.
         grace = getattr(self.runtime, "cancellation_grace_seconds", 5)
         for execution_id in list(self._futures):
             try:

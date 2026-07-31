@@ -121,6 +121,10 @@ def try_claim_and_submit(
             worker, workspace_id, job, workflow_key, node, log_path, resolved.error_message
         )
     if resolved.kind == "agent":
+        # Once the enqueue pool filled up this pass, skip remaining agent
+        # candidates outright (route came from the TTL cache: zero DB).
+        if worker._agent_pass.pool_full is True:
+            return False
         return claim_agent_node(
             worker,
             workspace,
