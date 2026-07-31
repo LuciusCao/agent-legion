@@ -1,5 +1,7 @@
 import { createOptionAccumulator } from './filterLogic/optionAccumulator'
 import { computeFilterCounts } from './filterLogic/incrementalFilters'
+import { initialPaginationState } from './paginationTypes'
+import { initialSelectionModeState } from './selectionModeTypes'
 
 export const initialFilterConfig = {
   status: null,
@@ -24,4 +26,6 @@ export const initialJobDataState = {
   expandedId: null,
   filterConfig: { ...initialFilterConfig },
   selectMode: false,
+  ...initialPaginationState,
+  ...initialSelectionModeState,
 }

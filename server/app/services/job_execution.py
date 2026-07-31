@@ -10,6 +10,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.job_events import broadcast_job_update, record_job_update
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.services._job_batch_ops import batch_run_to as _batch_run_to
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -295,11 +296,10 @@ class JobExecutionService:
     def batch_run_to(
         self,
         workspace_id: str,
-        job_ids: list[str],
+        job_ids: list[str] | None,
         target_node_key: str,
         start_node_key: str | None = None,
+        **kwargs: Any,
     ) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        for job_id in job_ids:
-            results.append(self.run_to(workspace_id, job_id, target_node_key, start_node_key))
-        return results
+        """Run the selected jobs to a target node; kwargs take job_filter/exclude_ids."""
+        return _batch_run_to(self, workspace_id, job_ids, target_node_key, start_node_key, **kwargs)
