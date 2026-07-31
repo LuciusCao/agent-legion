@@ -21,6 +21,22 @@ if [[ "$gate" == "full" && "$lanes" != "backend frontend" ]]; then
   echo "Lane selection is only supported for the quick gate." >&2
   exit 2
 fi
+# Test tier for the quick gate's backend lane: smoke (curated fast subset, no
+# coverage) or full (whole quick suite with coverage). The full gate always
+# runs the full tier. The tier is part of the evidence fingerprint below.
+tier="${GATE_TIER:-full}"
+case "$tier" in
+  smoke|full) ;;
+  *)
+    echo "Unsupported GATE_TIER: $tier" >&2
+    exit 2
+    ;;
+esac
+if [[ "$gate" == "full" && "$tier" != "full" ]]; then
+  echo "The full gate does not support the smoke tier." >&2
+  exit 2
+fi
+export GATE_TIER="$tier"
 ROOT_DIR="$(git rev-parse --show-toplevel)"
 cd "$ROOT_DIR"
 

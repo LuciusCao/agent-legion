@@ -358,13 +358,17 @@ the versioned `.githooks/` implementation from the current worktree when that br
 older worktrees without `.githooks/` remain unaffected. Successful gate evidence is shared:
 
 - pre-commit runs `scripts/check-fast.sh` for lint, formatting, and type feedback;
-- pre-push runs `scripts/check-quick.sh` for all branches, trimmed to the lanes
-  affected by the pushed paths (frontend-only pushes skip the backend pytest lane;
-  docs-only pushes run static checks only; shared files and new refs always run
-  all lanes);
-- the full gate (`scripts/check.sh` backend lane, frontend build) and the extended stress gate
-  (`scripts/check-ci.sh`) run on GitHub Actions — see `.github/workflows/quality-gate.yml` —
-  for pull requests and pushes to `develop`, `main`, or `master`;
+- pre-push defaults to the smoke level: static checks plus the curated smoke
+  test tier (`GATE_TIER=smoke`, membership in `tests/conftest.py`), trimmed to
+  the lanes affected by the pushed paths (frontend-only pushes skip the backend
+  pytest lane; docs-only pushes run static checks only; shared files and new
+  refs always run all lanes). Set `AGENT_LEGION_GATE_LEVEL=quick` to run the
+  full quick suite or `AGENT_LEGION_GATE_LEVEL=full` for the local full gate
+  on a single push;
+- the full gate (`scripts/check.sh` backend lane, frontend build) runs on
+  GitHub Actions — see `.github/workflows/quality-gate.yml` — for pull
+  requests and pushes to `develop`, `main`, or `master`; the extended stress
+  gate (`tests/ci -m ci_extended`) runs nightly and on manual dispatch;
 - successful pre-push evidence is cached by commit SHA in the Git common directory, so all
   worktrees can reuse an unchanged result;
 - pre-push refuses a dirty worktree so the verified commit is exactly the commit being pushed.

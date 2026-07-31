@@ -54,6 +54,37 @@ def pytest_configure() -> None:
             os.environ[key] = ""
 
 
+# Smoke tier (GATE_TIER=smoke, used by pre-push): a small set of fast,
+# high-value tests that keeps the local push feedback loop around a minute
+# while the full quick suite stays the CI boundary. Membership is path-based:
+# every architecture governance test is smoke by default, plus one core
+# behavioral file per subsystem. Add new entries here when a new subsystem
+# gains tests; keep the tier under ~90s.
+_SMOKE_TEST_FILES = frozenset(
+    {
+        "tests/routes/test_auth_routes.py",
+        "tests/routes/jobs/test_job_lifecycle.py",
+        "tests/services/test_vault.py",
+        "tests/executors/test_shard_contract.py",
+        "tests/executors/test_executor_kinds.py",
+        "tests/executors/leases/test_claim_basics.py",
+        "tests/workflows/test_sharding.py",
+        "tests/db/test_retry.py",
+    }
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    root = config.rootpath
+    for item in items:
+        try:
+            rel = item.path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if rel in _SMOKE_TEST_FILES or item.path.name.startswith("test_architecture_"):
+            item.add_marker(pytest.mark.smoke)
+
+
 @pytest.fixture(autouse=True)
 def _isolate_postgres_database():
     close_database_pools()

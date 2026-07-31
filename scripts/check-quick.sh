@@ -93,6 +93,7 @@ run_round() {
 
 run_round "static-check" "static" "static"
 if [[ "$GATE_LANES" != "static" ]]; then
+  echo "Backend test tier: ${GATE_TIER:-full}"
   run_round "test" "test" "test"
 fi
 
