@@ -1,0 +1,33 @@
+[package]
+name = "velites"
+version = "0.1.0"
+edition = "2021"
+description = "Agent Legion lightweight agent harness (headless, pi-compatible event stream)"
+license = "MIT"
+
+[lib]
+name = "velites"
+path = "src/lib.rs"
+
+[[bin]]
+name = "velites"
+path = "src/main.rs"
+
+[[bin]]
+name = "velites-schema"
+path = "src/bin/velites_schema.rs"
+
+[dependencies]
+anyhow = "1"
+clap = { version = "4", features = ["derive"] }
+futures-util = "0.3"
+libc = "0.2"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream"] }
+schemars = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["full"] }
+
+[dev-dependencies]
+tempfile = "3"
