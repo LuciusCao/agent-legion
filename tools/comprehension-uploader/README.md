@@ -26,16 +26,52 @@ max_retries: 3
 
 ## Authentication
 
-The tool follows the same CMS token flow used by the rest of the project. It
-automatically loads `.env` if present.
+The CMS side issues component JWTs through a user-login flow (see the internal
+"使用用户组件接口步骤" doc):
+
+1. `POST {login_url}` with `{app_id, account_type, uname, password}` →
+   `data.user_token` (success `code=200`).
+2. `POST {auth_url}` with `{user_token, app_id}` → `data.token`, a 24h RS256
+   JWT (success `code=0`).
+3. Component APIs take it as `Authorization: Bearer <jwt>`.
+
+The tool runs this flow automatically and loads `.env` if present.
 
 Priority:
 
-1. `CMS_TOKEN` environment variable (or `.env` entry).
-2. Generated token from `CMS_APP_ID`, `CMS_NONCE`, `CMS_SECRET`,
-   `CMS_TOKEN_URL`. The generation is the same HMAC-SHA256 flow as
-   `server/app/cms/auth.py`.
-3. Optional `token` / `token_gen` overrides in `config.yaml`.
+1. `CMS_TOKEN` environment variable (or `.env` entry) — supply a JWT directly.
+2. `token` in `config.yaml`.
+3. The `user_auth` section below, with `CMS_USER_NAME` / `CMS_USER_PASSWORD`
+   from the environment (or `.env`).
+4. Legacy HMAC generation from `CMS_APP_ID`, `CMS_NONCE`, `CMS_SECRET`,
+   `CMS_TOKEN_URL` — deprecated; CMS no longer issues tokens this way. The old
+   `BASECMS_*` names remain as deprecated aliases (set at most one name per
+   key).
+
+```yaml
+user_auth:
+  app_id: 1001               # component app id
+  account_type: 1            # 1=student, 2=parent
+  client_params: '{"source":"..."}'  # optional, see below
+  login_url: "http://<user-center-host>/user/user/login"
+  login_resolve_ip: "10.0.0.1"  # optional, see below
+  auth_url: "https://<addons-gateway>/common/v1/auth"
+```
+
+Note the user-center domain table already carries a `/user` prefix, so the
+full login path is `<domain>/user` + `/user/login`. Some deployments reject
+logins that lack a `client_params` source with `code=-9980440`
+("相关教育培训服务已终止") **before** checking the password — if you see that
+code for a known-good account, set `client_params` (e.g. `{"source":"SPAD"}`).
+
+`login_url` / `auth_url` are environment-specific. The internal user-center
+host has no public DNS: set `login_resolve_ip` to the IP from infra and the
+tool dials that IP while preserving the `Host` header (same effect as
+`curl --resolve`), so you do not need to edit `/etc/hosts`.
+
+Put the account password in `.env` as `CMS_USER_PASSWORD` (and optionally the
+account name as `CMS_USER_NAME`) — never in a tracked config file. Note that 5
+consecutive login failures lock the account for 30 minutes.
 
 Typical usage with the project's `.env`:
 
@@ -53,9 +89,8 @@ make upload WORKSPACE=ws-123 CONFIG=config.prod.yaml PACKAGE=package.jsonl
 make scan-comprehension CONFIG=config.prod.yaml OUTPUT=stale.json
 ```
 
-No extra `export` is needed as long as `CMS_APP_ID`, `CMS_NONCE`,
-`CMS_SECRET`, and `CMS_TOKEN_URL` are set in `.env`. The old `BASECMS_*`
-names remain as deprecated aliases (set at most one name per key).
+No extra `export` is needed as long as `CMS_USER_NAME` and `CMS_USER_PASSWORD`
+are set in `.env`.
 
 ### Work with a workspace package zip
 

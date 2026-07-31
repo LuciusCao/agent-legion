@@ -7,6 +7,7 @@ import os
 import time
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import requests
 
@@ -95,6 +96,109 @@ def _token_gen_config(config: dict[str, Any]) -> dict[str, str]:
     }
 
 
+# Env names for the user-login JWT flow (no legacy aliases; these are new).
+_USER_AUTH_ENV = {
+    "uname": "CMS_USER_NAME",
+    "password": "CMS_USER_PASSWORD",
+}
+
+
+def _user_auth_config(config: dict[str, Any]) -> dict[str, Any]:
+    cfg = config.get("user_auth") or {}
+    return {
+        "app_id": cfg.get("app_id"),
+        "account_type": int(cfg.get("account_type") or 1),
+        "uname": str(os.environ.get(_USER_AUTH_ENV["uname"]) or cfg.get("uname") or ""),
+        "password": str(os.environ.get(_USER_AUTH_ENV["password"]) or cfg.get("password") or ""),
+        "login_url": str(cfg.get("login_url") or ""),
+        "login_resolve_ip": str(cfg.get("login_resolve_ip") or ""),
+        "auth_url": str(cfg.get("auth_url") or ""),
+        "client_params": str(cfg.get("client_params") or ""),
+    }
+
+
+def _user_auth_configured(config: dict[str, Any]) -> bool:
+    if config.get("user_auth"):
+        return True
+    return any(os.environ.get(env) for env in _USER_AUTH_ENV.values())
+
+
+def _resolve_host(url: str, ip: str) -> tuple[str, dict[str, str]]:
+    """Rewrite url to dial ip directly while preserving the Host header.
+
+    The user-center hosts are internal domains without public DNS; the ops
+    doc requires binding the host to a fixed IP (like curl --resolve).
+    """
+    if not ip:
+        return url, {}
+    parts = urlsplit(url)
+    host = parts.hostname or ""
+    netloc = f"{ip}:{parts.port}" if parts.port else ip
+    headers = {"Host": f"{host}:{parts.port}" if parts.port else host}
+    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, parts.fragment)), headers
+
+
+def _generate_user_jwt(config: dict[str, Any]) -> str:
+    """Obtain a component JWT via user-center login + token exchange.
+
+    Flow (see the internal "使用用户组件接口步骤" doc):
+      1. POST {login_url} {app_id, account_type, uname, password}
+         -> data.user_token (success code == 200)
+      2. POST {auth_url} {user_token, app_id}
+         -> data.token, an RS256 JWT valid for 24h (success code == 0)
+    """
+    cfg = _user_auth_config(config)
+    required = ("app_id", "uname", "password", "login_url", "auth_url")
+    missing = [k for k in required if not cfg[k]]
+    if missing:
+        raise AuthError(
+            f"Missing user auth configuration: {', '.join(missing)}. "
+            "Provide them via config.user_auth; uname/password may also come "
+            "from CMS_USER_NAME / CMS_USER_PASSWORD (or .env)."
+        )
+
+    session = requests.Session()
+    # The user-center hosts are internal; a local HTTP proxy would break them.
+    session.trust_env = False
+
+    login_url, login_headers = _resolve_host(cfg["login_url"], cfg["login_resolve_ip"])
+    login_payload: dict[str, Any] = {
+        "app_id": cfg["app_id"],
+        "account_type": cfg["account_type"],
+        "uname": cfg["uname"],
+        "password": cfg["password"],
+    }
+    if cfg["client_params"]:
+        # e.g. '{"source":"SPAD"}' — required by the user-center biz gate.
+        login_payload["client_params"] = cfg["client_params"]
+    resp = session.post(
+        login_url,
+        json=login_payload,
+        headers={"Content-Type": "application/json", **login_headers},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    data = result.get("data")
+    user_token = data.get("user_token") if isinstance(data, dict) else None
+    if result.get("code") != 200 or not user_token:
+        raise AuthError(f"User login failed: {json.dumps(result, ensure_ascii=False)}")
+
+    resp = session.post(
+        cfg["auth_url"],
+        json={"user_token": user_token, "app_id": cfg["app_id"]},
+        headers={"Content-Type": "application/json"},
+        timeout=10,
+    )
+    resp.raise_for_status()
+    result = resp.json()
+    data = result.get("data")
+    token = data.get("token") if isinstance(data, dict) else None
+    if result.get("code") != 0 or not token:
+        raise AuthError(f"JWT exchange failed: {json.dumps(result, ensure_ascii=False)}")
+    return str(token)
+
+
 def _generate_token(config: dict[str, Any]) -> str:
     cfg = _token_gen_config(config)
     missing = [k for k, v in cfg.items() if not v]
@@ -142,12 +246,19 @@ def get_token(config: dict[str, Any]) -> str:
     Priority:
       1. Environment variable CMS_TOKEN (deprecated alias BASECMS_TOKEN).
       2. Direct token configured at config.token.
-      3. Generated token using CMS_APP_ID / CMS_NONCE / CMS_SECRET.
+      3. User-login JWT flow (config.user_auth, or CMS_USER_NAME /
+         CMS_USER_PASSWORD): /user/login -> /v1/auth -> 24h JWT. This is the
+         flow the CMS side currently supports.
+      4. Legacy HMAC token generation using CMS_APP_ID / CMS_NONCE /
+         CMS_SECRET — deprecated, upstream no longer issues tokens this way.
     """
     _maybe_load_dotenv()
 
     direct_token = _resolve_cms_env("CMS_TOKEN") or (config.get("token") if config else None)
     if direct_token:
         return str(direct_token)
+
+    if _user_auth_configured(config):
+        return _generate_user_jwt(config)
 
     return _generate_token(config)
