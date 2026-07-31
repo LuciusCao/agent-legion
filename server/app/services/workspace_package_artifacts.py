@@ -14,22 +14,16 @@ VIDEO_KNOWLEDGE_PACKAGE_FILES = [
     "package_manifest.json",
 ]
 
-_VIDEO_KNOWLEDGE_KEY = "video_knowledge"
-
 
 def workspace_artifact_names(
     root_dir: Path, workflow_keys: set[str], base_names: set[str]
 ) -> list[str]:
-    """Return the curated list of artifact names for packaging.
+    """Return the curated artifact list for packaging.
 
-    ``video_knowledge`` packages use a fixed deliverable list
-    (``VIDEO_KNOWLEDGE_PACKAGE_FILES``); intermediate node outputs such as
-    ``source.mp4`` or ``video_input.json`` are never packaged.
-
-    For other workflows, ``base_names`` preserves existing question-job
-    packaging behavior and each workflow's declared node outputs are merged in.
+    ``video_knowledge`` packages use the fixed ``VIDEO_KNOWLEDGE_PACKAGE_FILES``
+    list; other workflows merge ``base_names`` with declared node outputs.
     """
-    if workflow_keys and workflow_keys <= {_VIDEO_KNOWLEDGE_KEY}:
+    if workflow_keys and workflow_keys <= {"video_knowledge"}:
         return list(VIDEO_KNOWLEDGE_PACKAGE_FILES)
     names = set(base_names)
     for workflow_key in workflow_keys:

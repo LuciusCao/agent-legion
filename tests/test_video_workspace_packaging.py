@@ -6,6 +6,7 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_packages import JobPackageService
+from server.app.services.workspace_package_artifacts import VIDEO_KNOWLEDGE_PACKAGE_FILES
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.registry import load_registered_workflow
@@ -38,16 +39,18 @@ def _create_video_knowledge_job(
 def _write_video_artifacts(job: dict[str, Any], settings: Settings) -> None:
     job_dir = resolve_job_dir(job, settings.jobs_dir)
     job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / "source.mp4").write_text("fake video bytes", encoding="utf-8")
+    # Deliverables that must be packaged.
+    (job_dir / "chapters.json").write_text(json.dumps({"chapters": []}), encoding="utf-8")
+    (job_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
     (job_dir / "subtitles.srt").write_text(
         "1\n00:00:00,000 --> 00:00:01,000\nsubtitle\n",
         encoding="utf-8",
     )
+    (job_dir / "transcription.json").write_text(json.dumps({"segments": []}), encoding="utf-8")
     (job_dir / "metadata.json").write_text(
         json.dumps({"title": job["title"]}),
         encoding="utf-8",
     )
-    (job_dir / "report.md").write_text("# Video report", encoding="utf-8")
     (job_dir / "upload_params.json").write_text(
         json.dumps({"external_id": job["source_id"]}),
         encoding="utf-8",
@@ -56,6 +59,12 @@ def _write_video_artifacts(job: dict[str, Any], settings: Settings) -> None:
         json.dumps({"job_id": job["id"], "files": []}),
         encoding="utf-8",
     )
+    # Intermediate artifacts that must NOT be packaged.
+    (job_dir / "source.mp4").write_text("fake video bytes", encoding="utf-8")
+    (job_dir / "video_input.json").write_text(json.dumps({}), encoding="utf-8")
+    (job_dir / "report.md").write_text("# Video report", encoding="utf-8")
+    (job_dir / "chapters_raw.json").write_text(json.dumps({}), encoding="utf-8")
+    (job_dir / "subtitles_reviewed.srt").write_text("reviewed\n", encoding="utf-8")
 
 
 def test_video_knowledge_workspace_package_includes_deliverables(
@@ -83,9 +92,10 @@ def test_video_knowledge_workspace_package_includes_deliverables(
         prefix = f"{job['id']}/"
 
         assert "manifest.json" in names
-        assert f"{prefix}metadata.json" in names
-        assert f"{prefix}report.md" in names
-        assert f"{prefix}upload_params.json" in names
-        assert f"{prefix}package_manifest.json" in names
-        assert f"{prefix}source.mp4" in names
-        assert f"{prefix}subtitles.srt" in names
+        for name in VIDEO_KNOWLEDGE_PACKAGE_FILES:
+            assert f"{prefix}{name}" in names
+        job_entries = {n for n in names if n.startswith(prefix)}
+        assert job_entries == {f"{prefix}{name}" for name in VIDEO_KNOWLEDGE_PACKAGE_FILES}
+        assert f"{prefix}source.mp4" not in names
+        assert f"{prefix}video_input.json" not in names
+        assert f"{prefix}report.md" not in names
