@@ -6,6 +6,7 @@
 
 pub mod agent;
 pub mod cli;
+pub mod config;
 pub mod events;
 pub mod provider;
 pub mod session;
@@ -91,8 +92,28 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
             let provider = provider::stub::StubProvider::from_fixture(fixture)?;
             agent::run(config, &provider, &mut sink).await
         }
+        "gateway" | "openai_compat" => {
+            let credentials = config::resolve()?;
+            let provider = provider::openai_compat::OpenAiCompatProvider::new(
+                cli.provider.clone(),
+                credentials.base_url,
+                credentials.api_key,
+                std::time::Duration::from_secs(cli.timeout_seconds),
+            )?;
+            let retrying = provider::retry::RetryProvider::new(
+                provider,
+                cli.max_retries,
+                std::time::Duration::from_millis(DEFAULT_RETRY_BASE_DELAY_MS),
+            );
+            agent::run(config, &retrying, &mut sink).await
+        }
         other => Err(anyhow!(
-            "provider `{other}` is not implemented yet (M2); available: stub"
+            "unknown provider `{other}`; available: stub, gateway, openai_compat"
         )),
     }
 }
+
+/// Base delay for the internal exponential backoff on transient provider
+/// errors (`base * 2^attempt`). Not a CLI flag on purpose: only the retry
+/// COUNT is an operator concern (`--max-retries`).
+const DEFAULT_RETRY_BASE_DELAY_MS: u64 = 1_000;

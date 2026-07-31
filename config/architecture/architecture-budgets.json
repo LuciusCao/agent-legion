@@ -502,6 +502,7 @@
     "scripts/stress/_stress_metrics.py": 56,
     "scripts/stress/run_e2e_stress.py": 372,
     "scripts/stress/simulate_agents.py": 411,
+    "scripts/velites_diff_events.py": 231,
     "scripts/verify_specs.py": 260,
     "scripts/view-session.py": 266,
     "server/app/__init__.py": 11,

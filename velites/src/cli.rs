@@ -39,8 +39,9 @@ pub struct Cli {
     #[arg(long, value_delimiter = ',', default_value = "read,write,bash")]
     pub tools: Vec<String>,
 
-    /// Provider name. M1 implements `stub` (fixture-driven, no LLM); the
-    /// OpenAI-compatible `gateway` provider lands in M2.
+    /// Provider name: `stub` (fixture-driven, no LLM) or `gateway` /
+    /// `openai_compat` (OpenAI-compatible SSE chat completions; credentials
+    /// from ~/.velites/config.json or VELITES_BASE_URL/VELITES_API_KEY).
     #[arg(long)]
     pub provider: String,
 
@@ -51,6 +52,17 @@ pub struct Cli {
     /// Thinking/reasoning effort; mapped per provider (ignored by stub).
     #[arg(long)]
     pub thinking: Option<String>,
+
+    /// Maximum retries for transient model-call failures (network errors,
+    /// 429, 5xx, interrupted streams) with exponential backoff. Deterministic
+    /// failures (other 4xx) are never retried.
+    #[arg(long, default_value_t = 3)]
+    pub max_retries: u32,
+
+    /// HTTP timeout for a single provider request, in seconds. The default
+    /// matches the gateway's long-generation scenarios (design §7).
+    #[arg(long, default_value_t = 600)]
+    pub timeout_seconds: u64,
 
     /// Maximum agent turns (assistant completions) before the loop ends.
     #[arg(long)]
