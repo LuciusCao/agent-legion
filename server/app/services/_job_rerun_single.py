@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.job_events import broadcast_job_update, record_job_update
 from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.workflow_branching import downstream_nodes
@@ -135,6 +136,7 @@ def execute_rerun(
         )
 
     commit_staged_outputs(staged, job_id, "rerun")
+    notify_schedulable_work()
     if service.job_event_buffer is not None:
         record_job_update(service.job_db, service.job_event_buffer, job_id)
     elif service.job_event_manager is not None:

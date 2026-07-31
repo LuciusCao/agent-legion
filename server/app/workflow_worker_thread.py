@@ -50,9 +50,8 @@ class WorkflowWorkerThread:
         self.agent_manager = agent_manager
         self.agent_dispatch = agent_dispatch
         self.stop_event = threading.Event()
-        # Set whenever a claimed execution finishes; the poll loop waits on
-        # this so freed capacity is refilled immediately instead of after the
-        # idle backoff.
+        # Set whenever a claimed execution finishes or new schedulable work is
+        # reported; the poll loop waits on this instead of the idle backoff.
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._definitions: list[WorkflowDefinition] = []
@@ -70,8 +69,7 @@ class WorkflowWorkerThread:
         # server.app.workflow_worker_routing.
         self._route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
         # Per-pass state (cleared in _poll): memoized intake batch payloads,
-        # claim statistics for the pass file log, and buffered executor
-        # claims leased in one batch transaction at pass end.
+        # pass claim statistics, and buffered claims leased at pass end.
         self._batch_payload_cache: dict[str, dict[str, Any] | None] = {}
         self._pass_claim_counts: dict[str, int] = {}
         self._pending_claims: list[PreparedClaim] = []
@@ -79,6 +77,10 @@ class WorkflowWorkerThread:
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
         return settings.executor_runtime.workflows.enabled
+
+    def wake(self) -> None:
+        """Wake the poll loop immediately; registered via scheduler_wakeup."""
+        self._wake_event.set()
 
     def _ensure_pools(self) -> None:
         for executor_id in self.registry.definitions():
@@ -106,8 +108,6 @@ class WorkflowWorkerThread:
                 except Exception:
                     logger.exception("workflow worker poll failed")
                     processed = False
-                # _wake_event is also set by finishing executions, refilling
-                # freed capacity without waiting out the full idle backoff.
                 self._wake_event.wait(0.2 if processed else 3)
                 self._wake_event.clear()
 
