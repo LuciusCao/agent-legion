@@ -36,7 +36,10 @@ def test_quick_gate_starts_backend_and_frontend_lanes_concurrently(tmp_path: Pat
     _write_executable(
         scripts / "check-quick-backend.sh",
         "#!/usr/bin/env bash\n"
-        "for attempt in $(seq 1 100); do\n"
+        # 20s margin (was 5s): under a loaded gate the stub frontend lane can
+        # take several seconds to be scheduled; the concurrency assertion only
+        # needs "backend did not exit before frontend started", not a tight race.
+        "for attempt in $(seq 1 400); do\n"
         '  [[ -f "$GATE_MARKER" ]] && exit 0\n'
         "  sleep 0.05\n"
         "done\n"
