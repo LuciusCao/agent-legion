@@ -55,6 +55,7 @@ fi
 compute_lanes() {
   local saw_frontend=0
   local saw_backend=0
+  local saw_rust=0
   local saw_non_docs=0
   local saw_any=0
   local path
@@ -62,10 +63,14 @@ compute_lanes() {
     [[ -z "$path" ]] && continue
     saw_any=1
     case "$path" in
-      # Shared/global files: both lanes, no trimming.
+      # Shared/global files: all lanes, no trimming.
       pyproject.toml|uv.lock|Makefile|scripts/*|.githooks/*|.github/*|config/*|frontend/package.json|frontend/package-lock.json)
-        echo "backend frontend"
+        echo "backend frontend rust"
         return
+        ;;
+      velites/*)
+        saw_rust=1
+        saw_non_docs=1
         ;;
       frontend/*)
         saw_frontend=1
@@ -81,20 +86,20 @@ compute_lanes() {
   done <<<"$changed_paths"
 
   if [[ "$saw_any" -eq 0 ]]; then
-    echo "backend frontend"
+    echo "backend frontend rust"
   elif [[ "$saw_non_docs" -eq 0 ]]; then
     echo "static"
-  elif [[ "$saw_frontend" -eq 1 && "$saw_backend" -eq 0 ]]; then
-    echo "frontend"
-  elif [[ "$saw_frontend" -eq 0 && "$saw_backend" -eq 1 ]]; then
-    echo "backend"
   else
-    echo "backend frontend"
+    local lanes=""
+    [[ "$saw_backend" -eq 1 ]] && lanes="backend"
+    [[ "$saw_frontend" -eq 1 ]] && lanes="${lanes:+$lanes }frontend"
+    [[ "$saw_rust" -eq 1 ]] && lanes="${lanes:+$lanes }rust"
+    echo "$lanes"
   fi
 }
 
 if [[ "$force_full" -eq 1 ]]; then
-  lanes="backend frontend"
+  lanes="backend frontend rust"
 else
   lanes="$(compute_lanes)"
 fi

@@ -78,6 +78,7 @@ class AgentDispatchService:
                 "log_path": str(log_path),
                 "pi": {
                     "binary": pi.binary,
+                    "flavor": pi.flavor,
                     "provider": node.execution.provider or pi.provider,
                     "model": node.execution.model or pi.model,
                     "thinking": node.execution.thinking or pi.thinking,

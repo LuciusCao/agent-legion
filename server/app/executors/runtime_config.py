@@ -4,9 +4,9 @@ import os
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from server.app.agent_stock import AgentStockConfig
 from server.app.cms.auth import cms_token_available
@@ -17,12 +17,21 @@ class PiRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     binary: str = "pi"
+    # Headless harness 选择（设计文档 velites-harness.md §9）；非法值 fail-fast。
+    flavor: Literal["pi", "velites"] = "pi"
     provider: str = ""
     model: str = ""
     thinking: str = ""
     timeout_seconds: int = Field(default=600, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
     environment: dict[str, str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _velites_default_binary(self) -> PiRuntimeConfig:
+        # binary 仍是默认值时跟随 flavor，保证 `flavor: pi` 单字段回退。
+        if self.flavor == "velites" and self.binary == "pi":
+            return self.model_copy(update={"binary": "velites"})
+        return self
 
 
 class OpenClawSkillSafetyRepo(BaseModel):

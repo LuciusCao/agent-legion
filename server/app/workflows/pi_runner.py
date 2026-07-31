@@ -7,6 +7,7 @@ import os
 import subprocess
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +55,7 @@ class PiRunner:
         skill_version: str = "",
         config: PiConfig | None = None,
         additional_prompt: str = "",
+        node_config: Mapping[str, Any] | None = None,
     ) -> PiRunResult:
         run_config = config or self.config
         if job_dir is None:
@@ -95,6 +97,8 @@ class PiRunner:
             tools=tools or ["read", "write", "bash"],
             session_name=session_name,
             prompt_file=prompt_file,
+            expected_outputs=outputs,
+            node_config=node_config,
         )
 
         run_record: dict[str, Any] | None = None

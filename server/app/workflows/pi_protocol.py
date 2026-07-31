@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.workflows.pi_model_error import detect_model_error, fold_model_error
+from server.app.workflows.velites_command import build_command_for_flavor
 
 __all__ = [
     "JOB_DIR_PLACEHOLDER",
@@ -108,19 +109,22 @@ def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:
     """Render prompt/command with path placeholders for Agent bundle shipping.
 
     The returned spec never includes ``pi.environment``; workers merge env from
-    the manifest themselves.
+    the manifest themselves. The command argv follows ``pi.flavor`` (pi |
+    velites); the placeholder mechanism is flavor-neutral.
     """
     job_dir = Path(JOB_DIR_PLACEHOLDER)
     skill_dir = Path(SKILL_DIR_PLACEHOLDER)
     return {
         "version": 1,
         "prompt": build_prompt(manifest, job_dir=job_dir, skill_dir=skill_dir),
-        "command": build_command(
+        "command": build_command_for_flavor(
             manifest,
             skill_dir=skill_dir,
             session_dir=Path(SESSION_DIR_PLACEHOLDER),
             session_name=SESSION_NAME_PLACEHOLDER,
             prompt_file=Path(PROMPT_FILE_PLACEHOLDER),
+            prompt_instruction=PROMPT_INSTRUCTION,
+            pi_fallback=build_command,
         ),
         "prompt_instruction": PROMPT_INSTRUCTION,
     }

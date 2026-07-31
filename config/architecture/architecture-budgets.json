@@ -862,6 +862,7 @@
     "server/app/workflows/skill_version_fallbacks.py": 50,
     "server/app/workflows/skills.py": 38,
     "server/app/workflows/validator.py": 36,
+    "server/app/workflows/velites_command.py": 113,
     "server/app/workflows/video_knowledge.py": 115,
     "server/app/workflows/video_knowledge_source.py": 63,
     "server/app/workflows/workflow_branching.py": 86,
