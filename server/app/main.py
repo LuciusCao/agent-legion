@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,7 @@ from server.app.settings import Settings, load_settings, validate_settings
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
+from server.app.workflow_worker_agent_gate import request_restock
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 
 
@@ -52,12 +54,7 @@ def build_executor_registry(
     job_db: Any | None = None,
     artifact_store: ArtifactStore | None = None,
 ) -> ExecutorRegistry:
-    """Build the application-wide executor registry from settings.
-
-    The registry is constructed once per application lifecycle and reused across
-    all workspaces. Runtime dependencies (Pi binary, OpenClaw template, local
-    handlers) are injected here so adapters remain environment-agnostic.
-    """
+    """Build the application-wide executor registry from settings (once per app)."""
     skill_manager = build_skill_manager(settings.root_dir)
     runtime = RuntimeDependencies(
         local_handlers=build_local_handlers(settings),
@@ -148,9 +145,8 @@ def create_app(
                     heartbeat_failure_threshold=settings.executor_runtime.heartbeat_failure_threshold,
                     cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
                 )
-                # The sweeper owns all lease hygiene (startup + interval sweeps,
-                # Agent claim recovery). With sweeper_enabled=False an external
-                # sweeper process must run instead (multi-replica deployments).
+                # The sweeper owns all lease hygiene; sweeper_enabled=False means
+                # an external sweeper process (multi-replica deployments).
                 if settings.executor_runtime.sweeper_enabled:
                     sweeper_thread = SweeperThread(
                         executor_leases,
@@ -179,6 +175,10 @@ def create_app(
                     logging.getLogger(__name__).exception("workflow worker failed to start")
                 else:
                     register_wakeup(workflow_worker_thread.wake)
+                    # Empty Worker claims demand immediate restocking (debounced).
+                    agent_broker.empty_claim.on_empty_queue = partial(
+                        request_restock, workflow_worker_thread
+                    )
         background_tasks.start(app)
         try:
             yield
