@@ -200,7 +200,7 @@ server/app/
 | LocalExecutorConfig | BaseModel | kind: Literal['local'], global_capacity: int, capabilities: dict[str, LocalCa... | app/executors/config.py |
 | PiExecutorConfig | BaseModel | kind: Literal['pi'], global_capacity: int, capabilities: dict[str, PiCapabili... | app/executors/config.py |
 | OpenClawExecutorConfig | BaseModel | kind: Literal['openclaw'], agent_id: str, global_capacity: int, capabilities:... | app/executors/config.py |
-| PiRuntimeConfig | BaseModel | binary: str, flavor: Literal['pi', 'velites'], provider: str, model: str, thi... | app/executors/runtime_config.py |
+| PiRuntimeConfig | BaseModel | flavor: Literal['pi', 'velites'], binary: str, provider: str, model: str, thi... | app/executors/runtime_config.py |
 | OpenClawSkillSafetyRepo | BaseModel | path: str | app/executors/runtime_config.py |
 | OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[OpenClawSkillSafetyRepo] | app/executors/runtime_config.py |
 | OpenClawRuntimeConfig | BaseModel | command_template: tuple[str, ...], cwd: str, timeout_seconds: int, cancellati... | app/executors/runtime_config.py |

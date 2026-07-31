@@ -6,7 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from server.app.agent_stock import AgentStockConfig
 from server.app.cms.auth import cms_token_available
@@ -16,9 +16,9 @@ from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 class PiRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    binary: str = "pi"
     # Headless harness 选择（设计文档 velites-harness.md §9）；非法值 fail-fast。
     flavor: Literal["pi", "velites"] = "pi"
+    binary: str = Field(default="pi", validate_default=True)
     provider: str = ""
     model: str = ""
     thinking: str = ""
@@ -26,12 +26,10 @@ class PiRuntimeConfig(BaseModel):
     cancellation_grace_seconds: int = Field(default=5, ge=0)
     environment: dict[str, str] = Field(default_factory=dict)
 
-    @model_validator(mode="after")
-    def _velites_default_binary(self) -> PiRuntimeConfig:
-        # binary 仍是默认值时跟随 flavor，保证 `flavor: pi` 单字段回退。
-        if self.flavor == "velites" and self.binary == "pi":
-            return self.model_copy(update={"binary": "velites"})
-        return self
+    @field_validator("binary")
+    @classmethod
+    def _flavor_binary(cls, value: str, info: ValidationInfo) -> str:
+        return "velites" if info.data.get("flavor") == "velites" and value == "pi" else value
 
 
 class OpenClawSkillSafetyRepo(BaseModel):

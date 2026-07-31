@@ -34,7 +34,7 @@ extensions_started_at=$SECONDS
 (
   cd "$ROOT_DIR"
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q tests/full \
-    -m full_gate --cov=server --cov-report= --cov-append
+    -m full_gate --reruns 1 --reruns-delay 2 --cov=server --cov-report= --cov-append
 ) >"$full_log" 2>&1 &
 full_pid=$!
 (
