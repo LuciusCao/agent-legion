@@ -354,6 +354,27 @@ def test_local_executor_execute_raises_for_unimportable_handler_key(
         executor.execute(replace(context, capability="fetch"))
 
 
+def test_execute_isolated_setup_failure_leaves_no_token_leak(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Setup failures (e.g. EMFILE) must not leak tokens/semaphores/pipes."""
+    from server.app.executors._local_isolated import execute_isolated
+
+    executor = LocalExecutor("local", {"fetch": _test_module_level_handler})
+
+    def _boom(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        raise OSError(24, "Too many open files")
+
+    monkeypatch.setattr(executor, "_build_runtime", _boom)
+    with pytest.raises(OSError, match="Too many open files"):
+        execute_isolated(
+            executor,
+            replace(context, capability="fetch"),
+            "tests.executors.test_local_executor._test_module_level_handler",
+        )
+    assert executor._tokens == {}
+
+
 class _FakeConn:
     """Minimal pipe-end stand-in with scripted poll/recv behavior."""
 

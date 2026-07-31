@@ -94,7 +94,7 @@ def test_saturated_executor_skips_scan_and_claims(
     assert worker.leases.active_counts("local-default")["global"] == 1
 
     scan_calls = _count_calls(monkeypatch, worker, "_runnable_workspaces")
-    claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim")
+    claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim_many")
 
     assert worker._poll() is False
     assert scan_calls["count"] == 0
@@ -126,7 +126,7 @@ def test_global_capacity_precheck_allows_exactly_one_claim(
 ) -> None:
     worker, ws, block_event = _setup(tmp_path, capacity=1, workspace_limit=3, job_count=3)
 
-    claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim")
+    claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim_many")
 
     assert worker._poll() is True
     assert claim_calls["count"] == 1
@@ -141,7 +141,7 @@ def test_workspace_allocation_precheck_allows_exactly_one_claim(
 ) -> None:
     worker, ws, block_event = _setup(tmp_path, capacity=3, workspace_limit=1, job_count=3)
 
-    claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim")
+    claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim_many")
 
     assert worker._poll() is True
     assert claim_calls["count"] == 1

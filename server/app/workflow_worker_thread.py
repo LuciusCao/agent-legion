@@ -15,11 +15,13 @@ from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
+from server.app.workflow_worker_claim_flush import PreparedClaim, flush_prepared_claims
 from server.app.workflow_worker_execution import reap_futures
 from server.app.workflow_worker_maintenance import WorkflowMaintenance
+from server.app.workflow_worker_pass_log import log_pass_end, log_pass_start, pass_logger
 from server.app.workflow_worker_ready import build_ready_queues
 from server.app.workflow_worker_routing import NodeRoute
-from server.app.workflow_worker_schedule import claim_next_candidate
+from server.app.workflow_worker_schedule import claim_ready_queues
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import list_registered_workflows
 
@@ -67,6 +69,12 @@ class WorkflowWorkerThread:
         # Short-TTL node routing resolutions for the claim path; see
         # server.app.workflow_worker_routing.
         self._route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
+        # Per-pass state (cleared in _poll): memoized intake batch payloads,
+        # claim statistics for the pass file log, and buffered executor
+        # claims leased in one batch transaction at pass end.
+        self._batch_payload_cache: dict[str, dict[str, Any] | None] = {}
+        self._pass_claim_counts: dict[str, int] = {}
+        self._pending_claims: list[PreparedClaim] = []
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
@@ -98,9 +106,8 @@ class WorkflowWorkerThread:
                 except Exception:
                     logger.exception("workflow worker poll failed")
                     processed = False
-                # Wait on the wake event (set by finishing executions and by
-                # stop()) so freed capacity is refilled without waiting out
-                # the full idle backoff.
+                # _wake_event is also set by finishing executions, refilling
+                # freed capacity without waiting out the full idle backoff.
                 self._wake_event.wait(0.2 if processed else 3)
                 self._wake_event.clear()
 
@@ -108,60 +115,54 @@ class WorkflowWorkerThread:
         self._thread.start()
 
     def _poll(self) -> bool:
+        self._batch_payload_cache, self._pass_claim_counts, self._pending_claims = {}, {}, []
         self._maintenance.maybe_cleanup()
         if not self._definitions:
             return False
 
         if not self._pools:
             self._ensure_pools()
-
         reap_futures(self)
 
-        # Cheap capacity gate: when every executor is saturated, skip the
-        # expensive job scan for this tick (maintenance above still runs).
         snapshot = load_capacity_snapshot(self.leases.path, self._executor_capacities())
         if not snapshot.has_any_capacity() and not self.settings.agent_definitions:
             return False
 
-        # One job scan per pass. Jobs are evaluated exactly once into a ready
-        # queue per workspace; rounds then pop one candidate per workspace,
-        # preserving round-robin fairness without re-scanning jobs. The
-        # capacity snapshot is refreshed on the next poll.
-        claimed_any = False
         scan_started = time.monotonic()
         runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
         workspaces, queues = build_ready_queues(self, runnable_workspaces, jobs_by_workspace)
         scan_seconds = time.monotonic() - scan_started
-        claims = 0
-        while queues:
-            round_claimed = False
-            for workspace_id in self._round_robin.order(list(queues)):
-                queue = queues.get(workspace_id)
-                if queue is None or self._is_paused(workspace_id):
-                    continue
-                if claim_next_candidate(self, workspaces[workspace_id], queue, snapshot):
-                    round_claimed = True
-                    claimed_any = True
-                    claims += 1
-                    self._round_robin.complete_pass(workspace_id)
-                if not queue:
-                    del queues[workspace_id]
-            if not round_claimed:
-                break
+        total_candidates = sum(len(queue) for queue in queues.values())
+        log_pass_start(pass_logger(self.settings), jobs_by_workspace, queues, scan_seconds)
+        claim_started = time.monotonic()
+        claims = claim_ready_queues(self, workspaces, queues, snapshot)
+        flush_prepared_claims(self)
+        claim_seconds = time.monotonic() - claim_started
+        jobs_count = sum(len(v) for v in jobs_by_workspace.values())
         eval_stats = getattr(self, "_last_ready_stats", {})
         pass_stats = (
             "scan=%.2fs jobs=%d ready_cache hit=%d miss=%d running_jobs=%d claims=%d",
             scan_seconds,
-            sum(len(v) for v in jobs_by_workspace.values()),
+            jobs_count,
             eval_stats.get("hit", 0),
             eval_stats.get("miss", 0),
             eval_stats.get("running", 0),
             claims,
         )
         logger.info("workflow worker pass: " + pass_stats[0], *pass_stats[1:])
+        log_pass_end(
+            pass_logger(self.settings),
+            scan_seconds=scan_seconds,
+            jobs=jobs_count,
+            ready_stats=eval_stats,
+            claims=claims,
+            candidates=total_candidates,
+            claim_seconds=claim_seconds,
+            claim_counts=self._pass_claim_counts,
+        )
         if scan_seconds > 15:
             logger.warning("slow workflow worker pass: " + pass_stats[0], *pass_stats[1:])
-        return claimed_any
+        return claims > 0
 
     def _is_paused(self, workspace_id: str) -> bool:
         control = self.workspace_worker_control
@@ -172,12 +173,17 @@ class WorkflowWorkerThread:
     ) -> tuple[list[str], dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]]]:
         workspace_ids: list[str] = []
         jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]] = {}
+        # is_paused opens a DB connection per call; memoize per pass instead
+        # of paying it once per job.
+        paused: dict[str, bool] = {}
         for definition in self._definitions:
             for job in self.job_db.list_active_job_marks(definition.key):
                 if not (workspace_id := job.get("workspace_id")):
                     continue
                 workspace_id = str(workspace_id)
-                if self._is_paused(workspace_id):
+                if workspace_id not in paused:
+                    paused[workspace_id] = self._is_paused(workspace_id)
+                if paused[workspace_id]:
                     continue
                 if workspace_id not in jobs_by_workspace:
                     workspace_ids.append(workspace_id)

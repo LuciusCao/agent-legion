@@ -55,6 +55,7 @@ def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
         first_data = first.json()
         assert len(first_data["jobs"]) == 2
         assert first_data["next_cursor"] is not None
+        assert first_data["stats"] == {"pending": 5}
 
         second = client.get(
             f"/api/workspaces/{workspace['id']}/jobs/snapshot?limit=2&cursor={first_data['next_cursor']}"
@@ -63,6 +64,9 @@ def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
         second_data = second.json()
         assert len(second_data["jobs"]) == 2
         assert second_data["next_cursor"] is not None
+        # Stats are only computed for the first page; cursor pages skip the
+        # workspace-wide aggregation.
+        assert second_data["stats"] == {}
 
         third = client.get(
             f"/api/workspaces/{workspace['id']}/jobs/snapshot?limit=2&cursor={second_data['next_cursor']}"

@@ -341,8 +341,15 @@ create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status
 create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
 create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
 create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
+-- Snapshot pagination (list_jobs_paginated) and the legacy unbounded job list
+-- both filter by workspace and order by (created_at desc, id desc); without
+-- this index every page re-sorts all jobs of the workspace.
+create index if not exists idx_jobs_workspace_created_at on jobs(workspace_id, created_at desc, id desc);
 create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
 create index if not exists idx_node_runs_job_id on node_runs(job_id);
+-- get_latest_node_run_for_workspace orders by started_at desc with limit 1;
+-- the index lets Postgres walk runs newest-first instead of sorting them all.
+create index if not exists idx_node_runs_started_at on node_runs(started_at desc);
 create index if not exists idx_node_runs_status_finished_at on node_runs(status, finished_at);
 create index if not exists idx_jobs_status on jobs(status);
 create index if not exists idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at);

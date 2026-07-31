@@ -9,6 +9,7 @@ from server.app.agent_artifacts import stage_agent_inputs
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_bundle import build_agent_bundle
 from server.app.agent_catalog import AgentDefinition
+from server.app.agent_dispatch_pool import AgentEnqueuePool
 from server.app.config_schema import manifest_safe_config
 from server.app.executors._pi_skill import build_skill_manager, get_skill_version, resolve_skill_dir
 from server.app.executors.models import ExecutionContext
@@ -32,6 +33,7 @@ class AgentDispatchService:
         self.broker = broker
         self.artifact_store = artifact_store
         self.skill_manager = build_skill_manager(settings.root_dir)
+        self.enqueue_pool = AgentEnqueuePool()
 
     def enqueue(
         self,
