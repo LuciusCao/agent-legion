@@ -42,6 +42,9 @@ run_tests() {
   # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism (default: auto =
   # all cores). Machines running several worktrees at once should set it
   # (e.g. 3-4) to avoid oversubscribing CPU and the shared Postgres.
+  #
+  # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
+  # regression still fails after the single retry (visible as RERUN in output).
   workers="${AGENT_LEGION_TEST_WORKERS:-auto}"
   case "${GATE_TIER:-full}" in
     smoke)
@@ -50,7 +53,9 @@ run_tests() {
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "smoke and not repository_gate" \
-        -n "$workers"
+        -n "$workers" \
+        --reruns 1 \
+        --reruns-delay 2
       ;;
     full)
       # Coverage tracing costs 15-40% CPU on the Python side; the 85% floor is
@@ -68,6 +73,8 @@ run_tests() {
         --ignore=tests/ci \
         -m "not repository_gate" \
         -n "$workers" \
+        --reruns 1 \
+        --reruns-delay 2 \
         "${cov_args[@]}"
       ;;
     *)

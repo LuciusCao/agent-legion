@@ -25,6 +25,7 @@ dev = [
   "mypy>=2.1.0",
   "pytest",
   "pytest-cov>=7.1.0",
+  "pytest-rerunfailures>=15.0",
   "pytest-xdist>=3.8.0",
   "ruff",
 ]
