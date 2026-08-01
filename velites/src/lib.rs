@@ -119,11 +119,13 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         }
         "gateway" | "openai_compat" => {
             let credentials = config::resolve()?;
+            // No HTTP-layer total timeout: long generations stream for many
+            // minutes; the run wall-clock budget (cli.timeout_seconds, §5)
+            // lives in the agent loop's deadline, not here.
             let provider = provider::openai_compat::OpenAiCompatProvider::new(
                 cli.provider.clone(),
                 credentials.base_url,
                 credentials.api_key,
-                std::time::Duration::from_secs(cli.timeout_seconds),
             )?;
             // Pi-compatible retry observability: each failed transient
             // attempt emits `message_end`(error) + `auto_retry_start` before

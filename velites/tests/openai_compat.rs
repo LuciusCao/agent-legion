@@ -17,13 +17,7 @@ use velites::provider::{CompletionRequest, Provider, ToolSpec};
 use velites::tools::ToolKind;
 
 fn provider(server: &MockServer) -> OpenAiCompatProvider {
-    OpenAiCompatProvider::new(
-        "gateway".into(),
-        server.url.clone(),
-        "sk-test".into(),
-        Duration::from_secs(10),
-    )
-    .unwrap()
+    OpenAiCompatProvider::new("gateway".into(), server.url.clone(), "sk-test".into()).unwrap()
 }
 
 fn retrying(server: &MockServer, max_retries: u32) -> RetryProvider<OpenAiCompatProvider> {
@@ -223,6 +217,78 @@ async fn interrupted_stream_is_retried_and_recovers() {
 
     assert_eq!(message.stop_reason, Some(StopReason::Stop));
     assert_eq!(server.recorded().len(), 2, "interrupted attempt + retry");
+}
+
+#[tokio::test]
+async fn gateway_close_before_any_chunk_is_transient_with_root_cause() {
+    // The observed production failure (2026-08-01 replay): gateway answers
+    // 200, goes silent ~52s, then closes the connection without a single
+    // body byte. reqwest flattens this to "error decoding response body";
+    // the source chain must surface hyper's root cause, and the error must
+    // stay retryable (Host treats mid-connection failure as transient).
+    let body = sse_body(&[json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})]);
+    let server = MockServer::start(vec![MockResponse::truncated_sse(body, 0)]).await;
+
+    let messages = vec![Message::user("hi".into())];
+    let err = provider(&server)
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap_err();
+
+    assert!(err.is_retryable(), "mid-connection close must retry: {err}");
+    // The mock advertises Content-Length, so hyper's root cause is the
+    // length-framing variant; a chunked gateway stream says "connection
+    // closed before message completed" instead. Either way the cause must
+    // be visible below reqwest's flattened top-level message.
+    assert!(
+        err.to_string()
+            .contains("end of file before message length reached"),
+        "root cause must be exposed, got: {err}"
+    );
+}
+
+#[tokio::test]
+async fn silent_stream_hits_read_idle_timeout() {
+    // Headers arrive, then total silence: the per-read idle timeout fires
+    // (transient) instead of hanging until the run deadline.
+    let body = sse_body(&[json!({"choices": [{"delta": {}, "finish_reason": "stop"}]})]);
+    let server = MockServer::start(vec![MockResponse::stalled_sse(
+        body,
+        Duration::from_secs(30),
+    )])
+    .await;
+    let provider = provider(&server).with_read_idle_timeout(Duration::from_millis(100));
+
+    let messages = vec![Message::user("hi".into())];
+    let err = provider
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap_err();
+
+    assert!(err.is_retryable(), "idle timeout must be transient: {err}");
+    assert!(err.to_string().contains("stream idle"), "got: {err}");
+}
+
+#[tokio::test]
+async fn malformed_sse_data_chunk_is_transient_not_fatal() {
+    // Proxy/gateway corruption can mangle a data payload's JSON. That is
+    // stream corruption (retryable), not a deterministic model failure.
+    let server = MockServer::start(vec![
+        MockResponse::sse("data: {\"choices\":[{\"delta\":{\"content\":\"par"),
+        MockResponse::sse(sse_body(&[json!({
+            "choices": [{"delta": {"content": "ok"}, "finish_reason": "stop"}]
+        })])),
+    ])
+    .await;
+
+    let messages = vec![Message::user("hi".into())];
+    let message = retrying(&server, 3)
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap();
+
+    assert_eq!(message.stop_reason, Some(StopReason::Stop));
+    assert_eq!(server.recorded().len(), 2, "corrupted attempt + retry");
 }
 
 #[tokio::test]

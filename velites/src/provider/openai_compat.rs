@@ -4,6 +4,12 @@
 //! aggregates the chunk stream into ONE final assistant message — velites
 //! never emits delta events, so the caller only sees the completed message.
 //!
+//! Timeout structure (design §7): connect timeout bounds connection setup
+//! only; a per-read idle timeout bounds silence BETWEEN chunks; there is
+//! deliberately NO whole-request timeout — long generations stream for many
+//! minutes and the run-level wall-clock budget is the agent loop's deadline
+//! (`--timeout-seconds`, design §5), not the HTTP layer's.
+//!
 //! Dialect tolerances (per the PoC report, docs/architecture/velites-poc-report.md):
 //!
 //! - Some models behind the gateway answer `application/json` instead of SSE
@@ -11,6 +17,11 @@
 //!   parsed as a plain non-streaming chat completion.
 //! - Non-standard SSE lines (`event:`, comments starting with `:`, blank
 //!   keep-alive lines) are skipped; only `data:` payloads are interpreted.
+//! - A `data:` payload that fails JSON parsing is treated as TRANSIENT
+//!   stream corruption (proxy/gateway mangling), never as a deterministic
+//!   call failure.
+//! - Chunk boundaries may split multi-byte UTF-8 sequences; lines are
+//!   assembled from raw bytes and decoded only once complete.
 //! - Reasoning text arrives as `delta.reasoning_content` (kimi/deepseek
 //!   dialect) or `delta.reasoning`; both fold into a `thinking` block.
 //! - Cache-read tokens arrive as `usage.prompt_cache_hit_tokens`
@@ -31,22 +42,27 @@ use serde_json::{json, Map, Value};
 use super::{CompletionRequest, Provider, ProviderError};
 use crate::events::{ContentBlock, Message, Role, StopReason, Usage};
 
+/// Bounds connection setup; streaming itself has no total deadline.
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// Bounds silence between SSE chunks. Generous on purpose: reasoning models
+/// can pause between chunks, and the gateway kills dead streams well before
+/// this fires (observed ~52s). The run wall-clock budget caps total time.
+const DEFAULT_READ_IDLE_TIMEOUT: Duration = Duration::from_secs(180);
+
 pub struct OpenAiCompatProvider {
     /// Name reported in message metadata (`gateway` / `openai_compat`).
     name: String,
     endpoint: String,
     api_key: String,
     client: reqwest::Client,
+    read_idle_timeout: Duration,
 }
 
 impl OpenAiCompatProvider {
-    pub fn new(
-        name: String,
-        base_url: String,
-        api_key: String,
-        timeout: Duration,
-    ) -> anyhow::Result<Self> {
-        let client = reqwest::Client::builder().timeout(timeout).build()?;
+    pub fn new(name: String, base_url: String, api_key: String) -> anyhow::Result<Self> {
+        let client = reqwest::Client::builder()
+            .connect_timeout(CONNECT_TIMEOUT)
+            .build()?;
         let base = base_url.trim_end_matches('/');
         let endpoint = if base.ends_with("/chat/completions") {
             base.to_string()
@@ -58,7 +74,14 @@ impl OpenAiCompatProvider {
             endpoint,
             api_key,
             client,
+            read_idle_timeout: DEFAULT_READ_IDLE_TIMEOUT,
         })
+    }
+
+    /// Override the per-read idle timeout (tests).
+    pub fn with_read_idle_timeout(mut self, timeout: Duration) -> Self {
+        self.read_idle_timeout = timeout;
+        self
     }
 
     fn build_body(&self, req: &CompletionRequest<'_>) -> Value {
@@ -125,7 +148,7 @@ impl Provider for OpenAiCompatProvider {
                 .map_err(|err| classify_transport_error(&err))?;
             parse_non_streaming(&body)?
         } else {
-            read_sse_stream(response).await?
+            read_sse_stream(response, self.read_idle_timeout).await?
         };
 
         let stop_reason = match aggregated.finish_reason.as_deref() {
@@ -156,10 +179,40 @@ impl Provider for OpenAiCompatProvider {
     }
 }
 
-/// reqwest send/read failures are transient except body-decode determinism;
-/// in practice every transport error here is worth one retry.
+/// reqwest send/read failures are transient (connection reset, mid-stream
+/// close, timeouts): retrying the identical request is safe, and the Host's
+/// model-error folding treats mid-connection failure as transient too.
+/// reqwest's top-level Display flattens everything into "error decoding
+/// response body", so walk the source chain to expose the actionable root
+/// cause (hyper IncompleteMessage, OS reset, ...).
 fn classify_transport_error(err: &reqwest::Error) -> ProviderError {
-    ProviderError::Transient(format!("transport error: {err}"))
+    let kind = if err.is_connect() {
+        "connect"
+    } else if err.is_timeout() {
+        "timeout"
+    } else {
+        "transport"
+    };
+    ProviderError::Transient(format!("{kind} error: {err} ({})", source_chain(err)))
+}
+
+/// Render the std::error::Error source chain below the top-level error,
+/// deduplicated against itself (some wrappers repeat the same message).
+fn source_chain(err: &dyn std::error::Error) -> String {
+    let mut causes: Vec<String> = Vec::new();
+    let mut source = err.source();
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        if causes.last() != Some(&text) {
+            causes.push(text);
+        }
+        source = cause.source();
+    }
+    if causes.is_empty() {
+        "no underlying cause".to_string()
+    } else {
+        causes.join(" <== ")
+    }
 }
 
 /// 429 and 5xx are transient; other 4xx (401/403/404, unknown model, bad
@@ -388,25 +441,66 @@ fn parse_non_streaming(body: &str) -> Result<Aggregated, ProviderError> {
     Ok(aggregated)
 }
 
+/// Assemble SSE lines from raw byte chunks. Chunk boundaries may split a
+/// multi-byte UTF-8 sequence, so decoding happens only once a full line
+/// (newline-terminated) has arrived — a valid UTF-8 line never contains a
+/// partial character.
+#[derive(Default)]
+struct SseLineBuffer {
+    buffer: Vec<u8>,
+}
+
+impl SseLineBuffer {
+    /// Append one TCP chunk; returns every line completed by it.
+    fn push(&mut self, chunk: &[u8]) -> Vec<String> {
+        self.buffer.extend_from_slice(chunk);
+        let mut lines = Vec::new();
+        while let Some(pos) = self.buffer.iter().position(|b| *b == b'\n') {
+            let line: Vec<u8> = self.buffer.drain(..=pos).collect();
+            lines.push(String::from_utf8_lossy(&line[..line.len() - 1]).into_owned());
+        }
+        lines
+    }
+
+    /// Flush a trailing line without a newline terminator, if any.
+    fn finish(&mut self) -> Option<String> {
+        if self.buffer.is_empty() {
+            None
+        } else {
+            let rest = std::mem::take(&mut self.buffer);
+            Some(String::from_utf8_lossy(&rest).into_owned())
+        }
+    }
+}
+
 /// Read an SSE response body to completion, folding every `data:` payload
 /// into the aggregate. Blank lines, comments (`:`), and non-data fields
-/// (`event:`, `id:`, `retry:`) are skipped.
-async fn read_sse_stream(response: reqwest::Response) -> Result<Aggregated, ProviderError> {
+/// (`event:`, `id:`, `retry:`) are skipped. Each read is bounded by
+/// `idle_timeout`: total silence longer than that means a dead stream.
+async fn read_sse_stream(
+    response: reqwest::Response,
+    idle_timeout: Duration,
+) -> Result<Aggregated, ProviderError> {
     let mut aggregated = Aggregated::default();
-    let mut buffer = String::new();
+    let mut lines = SseLineBuffer::default();
     let mut stream = response.bytes_stream();
-    while let Some(chunk) = stream.next().await {
+    loop {
+        let next = match tokio::time::timeout(idle_timeout, stream.next()).await {
+            Ok(next) => next,
+            Err(_) => {
+                return Err(ProviderError::Transient(format!(
+                    "stream idle for over {}s",
+                    idle_timeout.as_secs()
+                )));
+            }
+        };
+        let Some(chunk) = next else { break };
         let chunk = chunk.map_err(|err| classify_transport_error(&err))?;
-        buffer.push_str(&String::from_utf8_lossy(&chunk));
-        while let Some(pos) = buffer.find('\n') {
-            let line = buffer[..pos].to_string();
-            buffer.drain(..=pos);
+        for line in lines.push(&chunk) {
             apply_sse_line(&mut aggregated, &line)?;
         }
     }
-    // Flush a trailing line without a newline terminator.
-    if !buffer.is_empty() {
-        let rest = std::mem::take(&mut buffer);
+    if let Some(rest) = lines.finish() {
         apply_sse_line(&mut aggregated, &rest)?;
     }
     Ok(aggregated)
@@ -425,8 +519,15 @@ fn apply_sse_line(aggregated: &mut Aggregated, line: &str) -> Result<(), Provide
     if payload.is_empty() || payload == "[DONE]" {
         return Ok(());
     }
-    let chunk: Value = serde_json::from_str(payload)
-        .map_err(|err| ProviderError::Call(format!("invalid SSE data JSON: {err}")))?;
+    // A data payload that fails JSON parsing mid-stream is proxy/gateway
+    // corruption (chunked-encoding mangling, truncation), not a model
+    // contract violation — transient, so the retry layer re-asks cleanly.
+    let chunk: Value = serde_json::from_str(payload).map_err(|err| {
+        ProviderError::Transient(format!(
+            "malformed SSE data chunk: {err}: {}",
+            truncate(payload, 200)
+        ))
+    })?;
     aggregated.apply_chunk(&chunk)
 }
 
@@ -441,13 +542,6 @@ fn wire_message(message: &Message) -> Value {
             let mut wire = Map::new();
             wire.insert("role".into(), json!("assistant"));
             let text = joined_text(message);
-            if text.is_empty() {
-                wire.insert("content".into(), Value::Null);
-            } else {
-                wire.insert("content".into(), json!(text));
-            }
-            // Thinking blocks are not sent back: OpenAI-compatible endpoints
-            // treat reasoning as ephemeral per-turn state.
             let tool_calls: Vec<Value> = message
                 .content
                 .iter()
@@ -467,6 +561,23 @@ fn wire_message(message: &Message) -> Value {
                     _ => None,
                 })
                 .collect();
+            if text.is_empty() {
+                // `content: null` is only safe alongside tool_calls: the
+                // gateway instantly kills the SSE stream (HTTP 200, then a
+                // mid-chunk connection close) when a tool-call-less assistant
+                // message carries null content — verified 2026-08-01 against
+                // the production gateway. A thinking-only assistant message
+                // (thinking blocks are not sent back) must degrade to "".
+                if tool_calls.is_empty() {
+                    wire.insert("content".into(), json!(""));
+                } else {
+                    wire.insert("content".into(), Value::Null);
+                }
+            } else {
+                wire.insert("content".into(), json!(text));
+            }
+            // Thinking blocks are not sent back: OpenAI-compatible endpoints
+            // treat reasoning as ephemeral per-turn state.
             if !tool_calls.is_empty() {
                 wire.insert("tool_calls".into(), Value::Array(tool_calls));
             }
@@ -671,9 +782,87 @@ mod tests {
     }
 
     #[test]
+    fn sse_line_buffer_keeps_multibyte_utf8_intact_across_chunks() {
+        // A Chinese character split across two TCP chunks must not become
+        // U+FFFD replacement garbage (production streams are Chinese-heavy).
+        let line = "data: {\"choices\":[{\"delta\":{\"content\":\"你好\"}}]}\n";
+        let bytes = line.as_bytes();
+        // Split inside the multi-byte encoding of 你 (E4 BD A0).
+        let split = bytes
+            .windows(1)
+            .position(|w| w == b"\xBD")
+            .expect("test line must contain a split point");
+        let mut buffer = SseLineBuffer::default();
+        assert!(
+            buffer.push(&bytes[..split]).is_empty(),
+            "no complete line yet"
+        );
+        let lines = buffer.push(&bytes[split..]);
+        assert_eq!(lines.len(), 1);
+        assert!(lines[0].contains("你好"), "got: {}", lines[0]);
+        assert!(buffer.finish().is_none());
+    }
+
+    #[test]
+    fn sse_line_buffer_flushes_unterminated_tail() {
+        let mut buffer = SseLineBuffer::default();
+        let lines = buffer.push(b"data: [DONE]\ndata: tail");
+        assert_eq!(lines, vec!["data: [DONE]".to_string()]);
+        let rest = buffer.finish().expect("tail must flush");
+        assert_eq!(rest, "data: tail");
+    }
+
+    #[test]
+    fn malformed_sse_data_chunk_is_transient() {
+        let mut aggregated = Aggregated::default();
+        let err = apply_sse_line(&mut aggregated, "data: {\"choices\":[{\"delta\":")
+            .expect_err("malformed JSON must fail");
+        assert!(err.is_retryable(), "stream corruption is transient: {err}");
+        assert!(
+            err.to_string().contains("malformed SSE data chunk"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
     fn truncate_is_char_boundary_safe() {
         assert_eq!(truncate("héllo", 2), "hé");
         assert_eq!(truncate("héllo", 3), "hél");
         assert_eq!(truncate("hi", 500), "hi");
+    }
+
+    #[test]
+    fn wire_assistant_without_text_degrades_to_empty_string_not_null() {
+        // A thinking-only assistant message must NOT serialize as
+        // `content: null` — the gateway kills the SSE stream for
+        // tool-call-less null content (verified against production gateway).
+        let thinking_only = Message::bare(
+            Role::Assistant,
+            vec![ContentBlock::Thinking {
+                thinking: "hmm".into(),
+            }],
+        );
+        let wire = wire_message(&thinking_only);
+        assert_eq!(wire["content"], json!(""));
+        assert!(wire.get("tool_calls").is_none());
+
+        // With tool calls, null content stays (OpenAI-conventional and
+        // accepted by the gateway).
+        let with_call = Message::bare(
+            Role::Assistant,
+            vec![
+                ContentBlock::Thinking {
+                    thinking: "hmm".into(),
+                },
+                ContentBlock::ToolCall {
+                    id: "c1".into(),
+                    name: "read".into(),
+                    arguments: json!({"path": "a"}),
+                },
+            ],
+        );
+        let wire = wire_message(&with_call);
+        assert_eq!(wire["content"], Value::Null);
+        assert_eq!(wire["tool_calls"][0]["id"], json!("c1"));
     }
 }

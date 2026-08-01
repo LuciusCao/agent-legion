@@ -44,6 +44,10 @@ pub struct MockResponse {
     /// (the advertised Content-Length still covers the full body, so the
     /// client sees a truncated stream).
     pub truncate_at: Option<usize>,
+    /// Send headers, then stay silent for this long before the body
+    /// (simulating a stalled stream; the client gives up first when its
+    /// idle timeout is shorter).
+    pub stall: Option<std::time::Duration>,
 }
 
 impl MockResponse {
@@ -53,6 +57,7 @@ impl MockResponse {
             content_type: "text/event-stream",
             body: body.into(),
             truncate_at: None,
+            stall: None,
         }
     }
 
@@ -62,6 +67,7 @@ impl MockResponse {
             content_type: "application/json",
             body: body.into(),
             truncate_at: None,
+            stall: None,
         }
     }
 
@@ -70,6 +76,14 @@ impl MockResponse {
     pub fn truncated_sse(body: impl Into<String>, n: usize) -> Self {
         Self {
             truncate_at: Some(n),
+            ..Self::sse(body)
+        }
+    }
+
+    /// An SSE response that sends headers then goes silent for `d`.
+    pub fn stalled_sse(body: impl Into<String>, d: std::time::Duration) -> Self {
+        Self {
+            stall: Some(d),
             ..Self::sse(body)
         }
     }
@@ -153,6 +167,9 @@ async fn handle_connection(
         body.len(),
     );
     socket.write_all(header.as_bytes()).await?;
+    if let Some(stall) = response.stall {
+        tokio::time::sleep(stall).await;
+    }
     let written = match response.truncate_at {
         Some(n) => &body[..n.min(body.len())],
         None => body,

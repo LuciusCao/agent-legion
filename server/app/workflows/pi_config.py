@@ -18,10 +18,10 @@ class PiConfig:
     timeout_seconds: int = 600
     cancellation_grace_seconds: int = 5
     environment: dict[str, str] = field(default_factory=dict)
+    velites_no_sandbox: bool = False
 
     @classmethod
     def from_runtime(cls, config: PiRuntimeConfig) -> PiConfig:
-        """Build an immutable PiConfig from a validated PiRuntimeConfig."""
         return cls(
             binary=config.binary,
             flavor=config.flavor,
@@ -31,6 +31,7 @@ class PiConfig:
             timeout_seconds=config.timeout_seconds,
             cancellation_grace_seconds=config.cancellation_grace_seconds,
             environment=dict(config.environment),
+            velites_no_sandbox=config.velites_no_sandbox,
         )
 
     @classmethod
@@ -39,7 +40,6 @@ class PiConfig:
         binary = raw.get("binary")
         if not binary or not isinstance(binary, str):
             raise ValueError("Pi binary is required")
-        # 未知 flavor fail-fast（与 PiRuntimeConfig 的 Literal 校验同一惯例）。
         flavor = str(raw.get("flavor", "pi")).strip() or "pi"
         if flavor not in ("pi", "velites"):
             raise ValueError(f"Pi flavor must be 'pi' or 'velites', got {flavor!r}")
@@ -59,6 +59,7 @@ class PiConfig:
             thinking=str(raw.get("thinking", "low")),
             timeout_seconds=timeout,
             environment={str(k): str(v) for k, v in env.items()},
+            velites_no_sandbox=bool(raw.get("velites_no_sandbox", False)),
         )
 
 

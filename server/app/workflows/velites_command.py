@@ -97,6 +97,8 @@ def build_velites_command(
     timeout = pi.get("timeout_seconds")
     if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > 0:
         cmd.extend(["--timeout-seconds", str(timeout)])
+    if pi.get("velites_no_sandbox"):
+        cmd.append("--no-sandbox")
     for output in manifest.get("expected_outputs") or []:
         cmd.extend(["--require-output", str(output)])
     cmd.extend([f"@{prompt_file}", prompt_instruction])
