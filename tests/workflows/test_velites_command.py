@@ -166,6 +166,18 @@ def test_flavor_dispatch_rejects_unknown_flavor() -> None:
         _dispatch(manifest)
 
 
+def test_velites_no_sandbox_escape_hatch() -> None:
+    # 默认不发 --no-sandbox（沙箱开启）。
+    assert "--no-sandbox" not in _dispatch(MANIFEST)
+    # 配置逃生门：runtime → PiConfig → manifest → argv 全链路透传。
+    manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "velites_no_sandbox": True}}
+    assert "--no-sandbox" in _dispatch(manifest)
+    config = PiConfig.from_runtime(PiRuntimeConfig(flavor="velites", velites_no_sandbox=True))
+    assert config.velites_no_sandbox is True
+    cmd = build_pi_command(config, tools=["read"], **KW)
+    assert "--no-sandbox" in cmd
+
+
 def test_build_pi_command_velites_flavor() -> None:
     config = PiConfig(
         binary="velites",
