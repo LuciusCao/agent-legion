@@ -24,7 +24,7 @@ else
 fi
 
 echo "=== Parallel Quick Gate ==="
-echo "Running parallel static-check and test rounds; lane output is buffered."
+echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
 # Space-separated lane selector: "backend frontend rust" (default, full quick
@@ -77,7 +77,13 @@ run_round() {
     echo "Skipping backend ${round} lane (GATE_LANES=$GATE_LANES)."
   fi
   if lane_enabled frontend; then
+    frontend_api_check="${FRONTEND_API_CHECK:-1}"
+    if [[ "$round" == "static-check" && -z "${FRONTEND_API_CHECK:-}" ]] && lane_enabled backend; then
+      # api:check boots the backend app; the integration step below runs it once.
+      frontend_api_check=0
+    fi
     FRONTEND_GATE_PHASE="$frontend_phase" \
+      FRONTEND_API_CHECK="$frontend_api_check" \
       FRONTEND_TEST_MODE="${FRONTEND_TEST_MODE:-test}" \
       "$ROOT_DIR/scripts/check-quick-frontend.sh" >"$frontend_log" 2>&1 &
     frontend_pid=$!
@@ -129,6 +135,13 @@ run_round() {
 }
 
 run_round "static-check" "static" "static"
+# Integration step: the OpenAPI contract spans backend (schema export boots the
+# full app) and frontend (type generation), so it runs once here instead of
+# competing for CPU/memory inside the parallel static round.
+if lane_enabled backend && lane_enabled frontend; then
+  FRONTEND_GATE_PHASE="api-contract" \
+    "$ROOT_DIR/scripts/check-quick-frontend.sh"
+fi
 if [[ "$GATE_LANES" != "static" ]]; then
   echo "Backend test tier: ${GATE_TIER:-full}"
   run_round "test" "test" "test"
