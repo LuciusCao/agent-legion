@@ -3,13 +3,17 @@
 //! The child is put in its own process group; on timeout OR cancellation the
 //! whole group receives SIGTERM, then SIGKILL after a grace period (Pi
 //! semantics, design §8). stdout+stderr volume is reported as `output_bytes`
-//! (measurement only, no truncation).
+//! (pre-truncation measurement). Output is truncated from the tail to 2000
+//! lines or 50KB, whichever is hit first (pi-aligned, design §8); when
+//! truncated, the full output is written to a temp file and the notice
+//! points at it.
 
 use std::time::Duration;
 
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
+use super::truncate::{self, TruncatedBy};
 use super::{ToolContext, ToolError, ToolOutput};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
@@ -142,6 +146,42 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         text.push_str(&stderr_text);
     }
 
+    // Tail truncation keeps the end of the output (errors/results live
+    // there); the full output goes to a temp file the notice points at.
+    let truncation = truncate::truncate_tail(&text);
+    if truncation.truncated {
+        // Size of the original last line (a trailing newline is not a line).
+        let trimmed = text.strip_suffix('\n').unwrap_or(&text);
+        let last_line_size = trimmed.rsplit('\n').next().unwrap_or("").len();
+        let full_output = write_full_output(&text);
+        let path_note = match &full_output {
+            Some(path) => format!(" Full output: {}", path.display()),
+            None => String::new(),
+        };
+        text = truncation.content;
+        if truncation.last_line_partial {
+            text.push_str(&format!(
+                "\n\n[Showing last {} of line {} (line is {}).{}]",
+                truncate::format_size(truncation.output_bytes),
+                truncation.total_lines,
+                truncate::format_size(last_line_size),
+                path_note,
+            ));
+        } else {
+            let start_line = truncation.total_lines - truncation.output_lines + 1;
+            let limit_note = match truncation.truncated_by {
+                Some(TruncatedBy::Bytes) => {
+                    format!(" ({} limit)", truncate::MAX_BYTES_DISPLAY)
+                }
+                _ => String::new(),
+            };
+            text.push_str(&format!(
+                "\n\n[Showing lines {}-{} of {}{}.{}]",
+                start_line, truncation.total_lines, truncation.total_lines, limit_note, path_note,
+            ));
+        }
+    }
+
     let mut is_error = false;
     if timed_out {
         is_error = true;
@@ -179,4 +219,17 @@ fn exit_code_display(status: std::process::ExitStatus) -> String {
         Some(code) => code.to_string(),
         None => "terminated by signal".to_string(),
     }
+}
+
+/// Write the full (untruncated) output to a `velites-bash-*` file in the
+/// system temp dir; `None` when the write fails (notice then omits the
+/// path, same content either way).
+fn write_full_output(content: &str) -> Option<std::path::PathBuf> {
+    let nanos = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let path =
+        std::env::temp_dir().join(format!("velites-bash-{}-{nanos}.log", std::process::id()));
+    std::fs::write(&path, content).ok().map(|_| path)
 }

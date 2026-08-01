@@ -134,7 +134,7 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 
 | 特性 | 设计 | 现状对照 |
 |---|---|---|
-| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 同时界定整个 run 的墙钟上限与单次 provider HTTP 超时）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
+| 预算内建 | `--max-turns`、`--max-tokens`（按 usage 累计）、wall-clock deadline（复用 `--timeout-seconds`，M3 起该 flag 界定整个 run 的墙钟上限；**不再**兼任单次 provider HTTP 总超时——总超时会掐断长生成流，HTTP 层改为 connect 超时 + chunk 间 idle 超时，见 §7）；每次模型调用**前**检查，耗尽时注入一条收尾消息给模型**一个**收尾轮写出已声明产物，然后结束，`agent_end{reason: "budget_exceeded"}`（M3 实现为可选 `reason` 字段，取 `budget_exceeded` / `cancelled` 两值，替代布尔 flag 方案）；预算值走 `AgentDefinition.config_schema` 解析链成为节点标准可调参数 | 现在只有外层 wall-clock 强杀 |
 | 优雅取消 | SIGTERM 被 loop 捕获：检查点在 turn 边界与每次工具执行完成后（模型调用也可被中断）；bash 工具正在跑时走既有 TERM→grace→KILL 进程组清理；收尾发出 `agent_end{reason:"cancelled"}` 再退出，**exit 0**（取消是 Host 主动行为，非 harness 故障；M3 已决）；SIGKILL 兜底语义不变 | 现在 cancel = 进程组强杀，无事件收尾 |
 | 输出自检 | `--require-output <file>`（可多次）；loop 正常结束前自检缺失项（路径走工具同款 cwd 沙箱校验，逃逸路径启动即报错），有缺失则注入系统消息给**一次**补救轮；最终**总是**发 `outputs_validation{missing:[...]}` 事件（`missing` 可为空，M3 已决：显式事件便于 Host 判定） | 现在 Host 事后扫 job_dir 才发现缺失 |
 | 零自动发现 | 不读 AGENTS.md/CLAUDE.md、不扫描 skill/扩展/模板目录、不读用户级配置；上下文 = `--system-prompt` + `--skill` + `@prompt.md`，无第三个来源（代码层不存在发现逻辑，而非"有逻辑加开关"） | Pi 靠 4 个 `--no-*` flag 维持；pi_agent_rust 无开关（PoC 的 P0 阻断项） |
@@ -143,7 +143,8 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 评审后调整的两项：
 
 - **上下文体积护栏 → 移至 §12 开放问题**：先做度量（工具层只记录输出体积指标，
-  不截断），M2 用真实负载分布决定是否设阈值；
+  不截断），用真实负载分布决定是否设阈值（2026-08-01 已拍板：按 pi 对齐的
+  2000 行 / 50KB 双阈值截断，见 §8 与 §12）；
 - **密钥管理 → 降级为普通配置项**（见 §7），不作为治理特性。
 
 ### 沙箱：文件系统边界 OS 级强制（M4.5，已拍板）
@@ -211,8 +212,17 @@ velites --mode json \
 - `thinking` 参数按 provider 映射（初期只支持 gateway 现有映射，PoC 已验证）；
 - 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
   （PoC P2 发现），模型白名单在 `config/workflow.yaml` 侧约束并写进运维文档；
-- HTTP 超时可配（`--timeout-seconds`，默认 600 s，对齐 gateway 长生成场景；M3 起
-  该值同时是整个 run 的 wall-clock 预算，见 §5 预算内建），`retry{max_retries, backoff}` 可配。
+- HTTP 层**不设整请求总超时**（总超时会掐断几分钟的长生成流；2026-08-01
+  回放事故证实 gateway 会在上游失败时直接掐流）：内建 connect 超时 10s +
+  chunk 间读 idle 超时 180s（思考模型的 chunk 间隔可能较长；run 级墙钟上限由
+  `--timeout-seconds` 预算兜底，见 §5 预算内建），`retry{max_retries, backoff}` 可配。
+  SSE 健壮性：传输错误沿 source chain 暴露根因（reqwest 顶层 Display 会抹平为
+  "error decoding response body"）；`data:` 载荷 JSON 解析失败按瞬时流损坏处理
+  （transient，可重试），不作确定性失败；行拼装按字节缓冲，跨 chunk 的多字节
+  UTF-8 不会被切坏。
+- 网关兼容性（2026-08-01 回放事故定位）：无 tool_calls 的 assistant 消息**禁止**
+  发 `content: null`——gateway 收到后先回 200 再立即掐断连接（0 字节），重试
+  无果；thinking-only 消息（thinking 不回传）序列化降级为 `""`。
 
 ### 凭据配置（简化版，评审确认）
 
@@ -229,9 +239,24 @@ velites --mode json \
 - **bash**：`cwd=job_dir`，env 继承父进程；超时 → 进程组 TERM → grace → KILL（对齐
   Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
   必须能跑 `python3`（skill scripts 依赖，worker 镜像已具备）；
-- **体积度量（不设截断）**：所有工具的输入/输出体积记入 `tool_execution_end`
-  （如 `output_bytes`、`truncated: false` 预留字段），为 §12 的护栏决策积累
-  真实分布数据。
+- **输出截断（pi 对齐）**：工具输出按双阈值截断——2000 行 或 50KB
+  （50×1024 字节），任一先到即截，语义与 pi `truncate.js` 完全一致
+  （实现集中在 `velites/src/tools/truncate.rs`）：
+  - 截断不切断行（不产生半行）；唯一例外是 bash 末行单行超限的边缘
+    情况——保留该行尾部 50KB（UTF-8 字符边界对齐），并附
+    `[Showing last <size> of line N (line is <size>). Full output: <path>]`；
+  - **read → 截头保留**（truncateHead）：截断后追加
+    `[Showing lines X-Y of N. Use offset=Z to continue.]`（byte 触发时附
+    `(50KB limit)`）；首行单行超 50KB 时不输出内容，改为提示 bash 兜底
+    `sed -n 'Np' <path> | head -c 51200`；用户显式传 `limit` 时先按
+    limit 截取再应用截断，若文件还有剩余则提示
+    `[R more lines in file. Use offset=Z to continue.]`；
+  - **bash → 截尾保留**（truncateTail，错误/结果在尾部）：截断时把完整
+    输出写到系统临时目录的 `velites-bash-*` 文件，追加
+    `[Showing lines A-B of N. Full output: <path>]`（byte 触发附
+    `(50KB limit)`）；
+  - 工具 description 向模型声明截断规则（措辞对齐 pi）；
+  - `output_bytes` 度量保留，语义为截断前体积。
 
 ## 9. 与 Agent Legion 的集成与切换
 
@@ -239,12 +264,21 @@ velites --mode json \
    （`AGENT_LEGION_PI_FLAVOR`）转正为配置项 `workflows.pi.flavor: pi|velites`；
 2. worker bundle：二进制不打进 bundle（bundle 只带 skill + prompt），由 worker 镜像
    或 worker 侧配置提供路径；
-3. 灰度路径：
-   - Phase 0：契约测试 + 真二进制集成测试入库（不启用）；
-   - Phase 1：shadow 对比——同一节点双跑（velites 结果不采用），diff 事件流与产出；
-   - Phase 2：单 capability 金丝雀（建议 `review_subtitles`，PoC 已验证）；
-   - Phase 3：默认切换，Node Pi 保留一个版本周期后移除 flavor；
-4. 回退：`workflows.pi.flavor: pi` 即回退，无数据迁移。
+3. 灰度路径（2026-08-01 评审定稿，替代原 Phase 1/2 设想）：
+   - Phase 0：契约测试 + 真二进制集成测试入库（不启用）——M4 已完成；
+   - Phase 1 shadow = **抽样回放**（不建在线双跑基础设施）：从生产取最近
+     节点运行的 prompt/skill 快照，离线双跑 pi 与 velites，diff 事件流与
+     产出（方法论即 M2 联合验证的固化，工具见 `scripts/velites_replay.py`）；
+   - Phase 2 金丝雀 = **全局 `flavor: velites` + worker agent capacity 压低**
+     （如 4）控制爆炸半径，观察 1–2 天后逐步恢复容量；不按 capability
+     分批（flavor 是全局单开关，评审决定不加 per-capability override）；
+   - Phase 3：容量全量恢复后进入默认，Node Pi 保留一个版本周期后移除 flavor；
+4. 回退：`workflows.pi.flavor: pi` 即回退，无数据迁移；若生产沙箱异常，
+   `workflows.pi.velites_no_sandbox: true` 可免发版降级为无沙箱运行（保留
+   事件契约/预算/取消等全部可控性），为第二级回退；
+5. 部署前置（金丝雀前必须完成）：worker 镜像重建（velites 二进制 +
+   bwrap setuid）；真 worker 容器内跑一个带 bash 工具的最小执行验证
+   bwrap（容器 seccomp 需放行 `unshare`，见 §5 沙箱小节的运行时要求）。
 
 ## 10. Quality Impact
 
@@ -286,10 +320,11 @@ velites --mode json \
 
 ## 12. 风险与开放问题
 
-- **上下文体积护栏（评审保留项，度量先行）**：疑虑是截断可能伤 agent 表现、且阈值
-  缺乏依据（PoC 观测到 630 MB RSS 峰值与上下文膨胀相关，但样本有限）。决策路径：
-  M2 起工具层只度量不截断（§8），用真实负载的输出体积分布决定是否设阈值、
-  阈值多少、截断提示语怎么写；
+- **上下文体积护栏（已拍板：pi 对齐截断）**：原疑虑是截断可能伤 agent 表现、且
+  阈值缺乏依据。2026-08-01 决策：直接对齐 pi 的成熟策略——2000 行 / 50KB
+  （50×1024 字节）双阈值先到即截，read 截头、bash 截尾并落临时文件，提示语与
+  pi 一致（细节见 §8）；截断不切断行（bash 末行单行超限除外）。`output_bytes`
+  继续记录截断前体积，金丝雀期间观察截断触发率与 agent 表现，必要时再调阈值；
 - **SSE 方言**：gateway 背后不同模型的 SSE 细节差异（PoC P2）——M2 用真实模型矩阵
   验证；缓解：解析器对非标准 event 行容错跳过；
 - **thinking 参数映射**：不同后端 wire 参数不同——初期只支持 gateway 当前映射，

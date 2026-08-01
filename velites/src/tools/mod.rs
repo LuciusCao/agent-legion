@@ -7,6 +7,7 @@
 
 pub mod bash;
 pub mod read;
+pub mod truncate;
 pub mod write;
 
 use std::path::{Path, PathBuf};
@@ -40,7 +41,7 @@ pub struct ToolContext {
 pub struct ToolOutput {
     pub content: Vec<ContentBlock>,
     pub is_error: bool,
-    /// Output volume measurement (design §8: measure, do not truncate).
+    /// Output volume before truncation (design §8).
     pub output_bytes: u64,
 }
 
@@ -100,7 +101,11 @@ impl ToolKind {
         let (description, parameters) = match self {
             Self::Read => (
                 "Read a UTF-8 text file inside the working directory. \
-                 Optional 1-based `offset` and `limit` select a line range.",
+                 Optional 1-based `offset` and `limit` select a line range. \
+                 Output is truncated to the first 2000 lines or 50KB \
+                 (whichever is hit first). Use offset/limit for large files; \
+                 when you need the full file, continue with offset until \
+                 complete.",
                 serde_json::json!({
                     "type": "object",
                     "properties": {
@@ -125,8 +130,10 @@ impl ToolKind {
             ),
             Self::Bash => (
                 "Run a bash command in the working directory (env inherited). \
-                 On timeout the whole process group gets SIGTERM, then SIGKILL \
-                 after a grace period.",
+                 Output is truncated to the last 2000 lines or 50KB \
+                 (whichever is hit first); if truncated, the full output is \
+                 saved to a temp file. On timeout the whole process group \
+                 gets SIGTERM, then SIGKILL after a grace period.",
                 serde_json::json!({
                     "type": "object",
                     "properties": {

@@ -113,14 +113,18 @@ async fn read_and_write_inside_cwd_work() {
     assert!(!read_out.is_error);
     assert_eq!(result_text(&read_out), "line1\nline2\nline3");
 
-    // Line range: 1-based offset + limit.
+    // Line range: 1-based offset + limit. The file has more lines after the
+    // selected range, so a continuation notice follows (design §8, pi-aligned).
     let ranged = ToolKind::Read
         .execute(
             &serde_json::json!({"path": "sub/dir/file.txt", "offset": 2, "limit": 1}),
             &ctx(dir.path()),
         )
         .await;
-    assert_eq!(result_text(&ranged), "line2");
+    assert_eq!(
+        result_text(&ranged),
+        "line2\n\n[1 more lines in file. Use offset=3 to continue.]"
+    );
 }
 
 #[tokio::test]
