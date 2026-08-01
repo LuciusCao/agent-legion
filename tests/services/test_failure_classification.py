@@ -1,6 +1,7 @@
 from server.app.services.failure_classification import (
     FAILURE_CATEGORIES,
     classify_failure,
+    is_transient_retryable,
     resolve_failure_fields,
 )
 
@@ -349,3 +350,16 @@ def test_legacy_process_failures_are_technical_execution_error():
         "technical",
         "execution_error",
     )
+
+
+def test_pool_timeout_is_transient_technical():
+    category, detail = classify_failure(1, "PoolTimeout: couldn't get a connection after 10.00 sec")
+    assert category == "technical"
+    assert detail == "db_pool_timeout"
+    assert is_transient_retryable(detail)
+
+
+def test_non_transient_details_are_not_retryable():
+    assert not is_transient_retryable("provider_stream")
+    assert not is_transient_retryable("database")
+    assert not is_transient_retryable("")

@@ -18,7 +18,9 @@ async def run_ops_metrics_loop(ops_metrics: OpsMetricsService) -> None:
     interval = ops_metrics.sample_interval_seconds
     while True:
         try:
-            await asyncio.to_thread(ops_metrics.sample_once)
+            # Catch-up instead of a single "previous minute" write: a slow
+            # cycle must not leave permanent gaps in the series.
+            await asyncio.to_thread(ops_metrics.sample_catch_up)
             await asyncio.to_thread(ops_metrics.cleanup_expired)
         except asyncio.CancelledError:
             raise

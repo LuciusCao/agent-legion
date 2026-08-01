@@ -13,6 +13,16 @@ from server.app.db.rows import configure_connection, string_dict_row
 _POOLS: dict[tuple[int, str], ConnectionPool[Connection[dict[str, Any]]]] = {}
 _POOLS_LOCK = Lock()
 
+_POOL_MAX_SIZE_ENV = "AGENT_LEGION_DB_POOL_MAX_SIZE"
+_DEFAULT_POOL_MAX_SIZE = 32
+
+
+def _pool_max_size() -> int:
+    try:
+        return max(1, int(os.environ.get(_POOL_MAX_SIZE_ENV, "")))
+    except ValueError:
+        return _DEFAULT_POOL_MAX_SIZE
+
 
 def pool_for(dsn: DatabaseDsn) -> ConnectionPool[Connection[dict[str, Any]]]:
     key = (os.getpid(), dsn)
@@ -22,7 +32,7 @@ def pool_for(dsn: DatabaseDsn) -> ConnectionPool[Connection[dict[str, Any]]]:
             pool = ConnectionPool[Connection[dict[str, Any]]](
                 conninfo=dsn,
                 min_size=1,
-                max_size=32,
+                max_size=_pool_max_size(),
                 timeout=10,
                 open=True,
                 kwargs={"row_factory": string_dict_row},

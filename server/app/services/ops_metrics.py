@@ -17,6 +17,7 @@ from typing import Any, Literal
 from server.app.agent_workers import _ONLINE_THRESHOLD_SECONDS
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
+from server.app.services._ops_metrics_catchup import sample_catch_up as _sample_catch_up
 from server.app.services._ops_metrics_sampling import _EMPTY_TOKENS, _upsert_sample
 
 Granularity = Literal["6h", "24h", "30d"]
@@ -159,6 +160,10 @@ class OpsMetricsService:
                     active_executions=claimed_by_worker.get(worker_id, 0),
                     tokens=tokens_by_worker.get(worker_id, _EMPTY_TOKENS),
                 )
+
+    def sample_catch_up(self, now: datetime | None = None) -> int:
+        """Persist every missing minute bucket since the last written sample."""
+        return _sample_catch_up(self, now)
 
     def cleanup_expired(self, now: datetime | None = None) -> int:
         cutoff = (now or datetime.now(UTC)) - timedelta(days=self._retention_days)

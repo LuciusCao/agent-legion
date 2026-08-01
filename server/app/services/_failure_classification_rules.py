@@ -56,6 +56,9 @@ _INTERACTION_CONTRACT_RE = re.compile(r"^Interaction \d+.*(is missing|has unknow
 
 TIMEOUT_EXIT_CODE = 124
 
+DETAIL_DB_POOL_TIMEOUT = "db_pool_timeout"
+TRANSIENT_RETRY_DETAILS = frozenset({DETAIL_DB_POOL_TIMEOUT})
+
 
 def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, str]:
     """Map one failed run's exit code and message to (category, detail)."""
@@ -128,6 +131,9 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
 
     if any(marker in message for marker in _SQLITE_MARKERS):
         return CATEGORY_TECHNICAL, "database"
+
+    if "PoolTimeout" in message or "connection pool exhausted" in message:
+        return CATEGORY_TECHNICAL, DETAIL_DB_POOL_TIMEOUT
 
     if any(marker in message for marker in _NETWORK_MARKERS):
         return CATEGORY_TECHNICAL, "network"
