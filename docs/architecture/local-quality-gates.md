@@ -13,19 +13,29 @@ provide.
 | Event | Gate | Command / CI job |
 | --- | --- | --- |
 | Commit | Fast | `scripts/check-fast.sh` |
-| Push (any branch) | Quick, lanes trimmed by pushed paths | `scripts/check-quick.sh` |
+| Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
+| Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: full quick suite, lanes trimmed | `scripts/check-quick.sh` |
+| Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
 | PR / push to `develop`, `main`, `master` | Full | CI jobs `backend` + `frontend` |
-| Push to protected branches, manual dispatch | Extended | CI job `ci-extended` |
+| Nightly schedule, manual dispatch | Extended | CI job `ci-extended` |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
 only the affected quick-gate lanes locally: frontend-only changes skip the
-backend pytest lane (~7 min to ~1.5 min), docs-only changes run static checks
-only, and backend-only changes skip Vitest. New branches/tags, shared files
+backend pytest lane, docs-only changes run static checks only, and
+backend-only changes skip Vitest. New branches/tags, shared files
 (`pyproject.toml`, `uv.lock`, `scripts/`, `.github/`, `config/`, …), mixed
-diffs, and any diff failure fall back to all lanes. CI always runs every lane,
-so trimming never weakens the server-side boundary. The lane set is part of
-the local evidence fingerprint, so evidence from a trimmed run is never reused
-for a different lane set.
+diffs, and any diff failure fall back to all lanes. CI always runs every lane
+of the full quick suite, so trimming never weakens the server-side boundary.
+The lane set and the test tier are part of the local evidence fingerprint, so
+evidence from a trimmed run is never reused for a different lane set or tier.
+
+The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
+curated subset — every architecture governance test plus one core behavioral
+file per subsystem, assigned by path in `tests/conftest.py`
+(`_SMOKE_TEST_FILES`) and selected with `-m "smoke and not repository_gate"`.
+It runs without coverage because the 85% floor only applies to the full
+suite. Keep the tier under ~90 seconds: when adding tests for a new
+subsystem, add one core file to the smoke set rather than raising the budget.
 
 Install the repository-managed hooks once from a worktree that contains `.githooks/`:
 
@@ -41,7 +51,7 @@ unaffected. Passing evidence is shared through the same Git common directory.
 ## CI Workflow
 
 `.github/workflows/quality-gate.yml` runs on pull requests and pushes to
-`develop` / `main` / `master`, plus manual dispatch:
+`develop` / `main` / `master`, nightly (schedule), plus manual dispatch:
 
 - **backend** — static checks (ruff, format, mypy, architecture contracts,
   invariant registry, spec health), the full pytest suite with coverage, and
@@ -49,9 +59,8 @@ unaffected. Passing evidence is shared through the same Git common directory.
   is the backend lane of `scripts/check.sh`.
 - **frontend** — generated API contract, prettier, ESLint, `tsc`, Vitest with
   coverage, and the production bundle (`npm run build:bundle`).
-- **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Skipped on pull
-  requests; runs on branch pushes and manual dispatch, matching the old manual
-  `scripts/check-ci.sh` policy.
+- **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Runs only on
+  the nightly schedule and manual dispatch; PR and push runs skip it.
 
 CI environment notes:
 
@@ -105,18 +114,22 @@ The `ci-extended` CI job covers the areas that previously required a manual
 - filesystem deletion, path validation, or artifact recovery;
 - release tags or a large multi-branch integration.
 
-Because the job runs on every push to protected branches, no manual step is
-needed anymore; use `workflow_dispatch` to run it against any other ref. If a
-deterministic test cannot run in the CI environment, record the exact failure
-in the pull request and rerun where the required resource is available. Do not
-record passing evidence for a partial gate.
+The job runs on the nightly schedule, so no manual step is needed for routine
+work; use `workflow_dispatch` to run it against any ref before a risky merge
+(schema migrations, executor concurrency, filesystem deletion, release
+tags). If a deterministic test cannot run in the CI environment, record the
+exact failure in the pull request and rerun where the required resource is
+available. Do not record passing evidence for a partial gate.
 
 ## Quality Impact
 
 - Fast feedback remains cheap enough to run on every commit; pushes only wait
-  for the quick gate locally.
-- The slow full gate and stress evidence run on every PR/push server-side,
-  instead of blocking the maintainer machine or relying on manual runs.
+  for the smoke tier locally (~1-2 min instead of the full quick suite).
+- The full quick suite remains the CI boundary on every PR/push, so regressions
+  missed by the smoke tier are still caught server-side before merge.
+- Stress evidence runs nightly instead of on every push, trading same-day
+  detection for a much cheaper push loop; risky changes can trigger it on
+  demand via `workflow_dispatch`.
 - Hooks can still be bypassed with `--no-verify`; the required status checks
   on GitHub are the actual merge boundary.
 - CI runs in a clean environment (fresh Postgres, no local skill repos, no

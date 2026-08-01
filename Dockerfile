@@ -9,6 +9,14 @@ RUN npm ci
 COPY frontend/ ./
 RUN npm run build
 
+# velites: self-contained Rust agent harness binary (pi replacement, M4
+# rollout). Built in its own stage so the worker image ships only the static
+# binary without a Rust toolchain. velites/target is excluded via .dockerignore.
+FROM rust:1-bookworm AS velites-build
+WORKDIR /src
+COPY velites/ ./velites/
+RUN cargo build --release --locked --manifest-path velites/Cargo.toml
+
 FROM python:${PYTHON_VERSION}-slim-bookworm AS host
 ARG UV_VERSION=0.11.21
 ENV PYTHONUNBUFFERED=1 \
@@ -28,9 +36,24 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS worker
 ARG NODE_VERSION=22.17.0
 ARG PI_VERSION=0.80.10
 COPY --from=frontend /usr/local/ /usr/local/
-RUN pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" \
+# bubblewrap is velites' Linux sandbox backend (EXEC-HARNESS-SANDBOX-001);
+# the harness fails closed at startup without it unless --no-sandbox is set.
+# Runtime requirements: bwrap needs either its setuid bit or unprivileged
+# user namespaces, and a seccomp profile that allows unshare/clone — the
+# default Docker seccomp profile blocks unshare, so deployments must relax
+# it (validated on the real worker before M5; see velites-harness.md §5).
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bubblewrap \
+    && rm -rf /var/lib/apt/lists/* \
+    && chmod u+s /usr/bin/bwrap \
+    && pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" \
     && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && pi --version
+# velites harness binary. Transition flavor: pi above stays installed and
+# remains the default executor; switch a deployment by setting
+# `workflows.pi.flavor: velites` (see docs/architecture/velites-harness.md).
+# Once the rollout completes, drop the npm install + pi --version lines above.
+COPY --from=velites-build /src/velites/target/release/velites /usr/local/bin/velites
 WORKDIR /app
 COPY worker /app/worker
 COPY server/__init__.py /app/server/__init__.py

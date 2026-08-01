@@ -252,7 +252,7 @@ create table if not exists agent_execution_requests (
   agent_definition_hash text not null,
   node_concurrency_limit integer not null check(node_concurrency_limit > 0),
   state text not null default 'queued'
-    check(state in ('queued', 'claimed', 'done', 'cancelled')),
+    check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled')),
   worker_id text,
   lease_id text,
   node_run_id bigint,
@@ -266,16 +266,34 @@ create table if not exists agent_execution_requests (
 );
 alter table agent_execution_requests add column if not exists lease_id text;
 alter table agent_execution_requests add column if not exists node_run_id bigint;
+-- State evolution: 'reporting' (result upload pending; execution slot released).
+-- Drop/re-add so databases created before this state existed pick it up.
+alter table agent_execution_requests drop constraint if exists agent_execution_requests_state_check;
+alter table agent_execution_requests add constraint agent_execution_requests_state_check
+  check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled'));
 
 create index if not exists idx_agent_requests_claim
   on agent_execution_requests(state, queued_at, execution_id);
+-- Claim candidate lookup walks only the per-workspace queued head (schema
+-- v18); a full queued scan priced every row and made claims O(queue depth).
+create index if not exists idx_agent_requests_queued_head
+  on agent_execution_requests(workspace_id, queued_at, execution_id)
+  where state = 'queued';
 create index if not exists idx_agent_requests_node_active
   on agent_execution_requests(workspace_id, workflow_key, node_key, state);
 create index if not exists idx_agent_requests_worker_active
   on agent_execution_requests(worker_id, state);
+-- One active request per node; 'reporting' still owns the node until the
+-- result commits, so it must block re-enqueue too.
+drop index if exists idx_agent_requests_one_active_node;
 create unique index if not exists idx_agent_requests_one_active_node
   on agent_execution_requests(job_id, node_key)
-  where state in ('queued', 'claimed');
+  where state in ('queued', 'claimed', 'reporting');
+-- Stockpile gate's done-rate window scan (schema v20,
+-- server.app.agent_stock); partial, so only done rows pay for it.
+create index if not exists idx_agent_requests_done_recent
+  on agent_execution_requests(finished_at)
+  where state = 'done';
 
 create table if not exists job_event_seq (
   id integer primary key check(id = 1),
@@ -328,8 +346,15 @@ create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status
 create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
 create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
 create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
+-- Snapshot pagination (list_jobs_paginated) and the legacy unbounded job list
+-- both filter by workspace and order by (created_at desc, id desc); without
+-- this index every page re-sorts all jobs of the workspace.
+create index if not exists idx_jobs_workspace_created_at on jobs(workspace_id, created_at desc, id desc);
 create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
 create index if not exists idx_node_runs_job_id on node_runs(job_id);
+-- get_latest_node_run_for_workspace orders by started_at desc with limit 1;
+-- the index lets Postgres walk runs newest-first instead of sorting them all.
+create index if not exists idx_node_runs_started_at on node_runs(started_at desc);
 create index if not exists idx_node_runs_status_finished_at on node_runs(status, finished_at);
 create index if not exists idx_jobs_status on jobs(status);
 create index if not exists idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at);

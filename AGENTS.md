@@ -8,6 +8,7 @@
 - 每次独立开发任务优先在新的 git worktree 中进行。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免 SQLite、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
+- 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`（缺这两个文件会导致 pytest/服务启动即失败）。手工初始化时必须自行补上这两个 secrets 文件。
 - 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（不要用 tracked 的 `config/app.yaml` 里的共享库）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
 - 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并在首次测试运行时自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
 - 不要污染主工作区或他人 worktree 的运行时数据。
@@ -31,10 +32,19 @@
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
   的 `backend` + `frontend` job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
-  对所有分支跑 quick gate（按推送路径裁剪 lane：纯前端改动跳过 backend pytest、
-  docs 改动只跑静态、共享文件/新分支一律全量）；full / ci-extended gate 由 GitHub CI 执行。
+  默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
+  裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
+  改动只跑静态、共享文件/新分支一律全量）。用 `AGENT_LEGION_GATE_LEVEL=quick`
+  （完整 quick 套件）或 `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次
+  推送。full gate 由 GitHub CI 在 PR/push 执行；ci-extended 压力门改为
+  nightly + 手动 dispatch。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
+- 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试
+  清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema`
+  走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由
+  CI 与 `./scripts/check.sh` 强制）。多 worktree 并行时用 `AGENT_LEGION_TEST_WORKERS`
+  限制 pytest worker 数（默认 `-n auto` 吃满所有核）。
 
 ## 5. Architecture Governance
 
@@ -61,6 +71,14 @@
   声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
   workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
   （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
+- velites（`velites/` crate，pi 的自研 Rust 替代）：Workspace Executor 扩展链不变
+  （capability → executor → allocation → binding → local limit），harness flavor
+  切换只经 `workflows.pi.flavor` 配置，workflow 节点不感知 harness 实现。
+  事件 schema 改动必须同步 `velites/schema/events.schema.json`
+  （`cargo run --bin velites-schema -- schema/events.schema.json`）并保证契约测试
+  （`velites/tests/schema_current.rs`、`golden_events.rs`）通过；事件流只保留 Host
+  消费的 pi 兼容子集，禁止引入 delta 事件（`message_update` /
+  `tool_execution_update`）。
 
 典型反例：
 

@@ -57,10 +57,14 @@ class JobPatchQueryService(JobQueryService):
         revision = self._job_event_buffer.current_revision() if self._job_event_buffer else 0
         jobs, next_cursor = list_jobs_paginated(self.job_db, workspace_id, limit, cursor)
         jobs = summarize_paginated_jobs(self, self.job_db, jobs)
+        # Job stats are only consumed from the first snapshot page; computing
+        # them on cursor pages repeats a full per-status aggregation over the
+        # workspace for no benefit.
+        stats = self.job_db.count_jobs_by_status(workspace_id) if cursor is None else {}
         return {
             "workspace_id": workspace_id,
             "revision": revision,
-            "stats": self.job_db.count_jobs_by_status(workspace_id),
+            "stats": stats,
             "jobs": jobs,
             "next_cursor": next_cursor,
         }

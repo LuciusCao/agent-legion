@@ -30,7 +30,8 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
     with write_transaction(broker.database_dsn) as conn:
         rows = conn.execute(
             "select * from agent_execution_requests"
-            " where state='claimed' and heartbeat_at<? for update skip locked",
+            " where state in ('claimed', 'reporting') and heartbeat_at<?"
+            " for update skip locked",
             (cutoff,),
         ).fetchall()
         for row in rows:
@@ -49,7 +50,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 conn.execute(
                     "update agent_execution_requests set state='done',"
                     " finished_at=current_timestamp"
-                    " where execution_id=? and state='claimed'",
+                    " where execution_id=? and state in ('claimed', 'reporting')",
                     (row["execution_id"],),
                 )
                 released.append((str(row["worker_id"]), str(row["workspace_id"])))

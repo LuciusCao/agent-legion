@@ -32,4 +32,13 @@ heartbeat_interval_seconds: 15
 # below the container stop_grace_period (30s in deploy/compose.worker.yaml) so
 # result reporting still fits in the budget.
 shutdown_grace_seconds: 25
+# Result delivery shaping (all optional). Agent 进程退出后立即释放执行槽位，
+# 压缩/归档/上传/上报由有界上传队列完成（upload_pending.json 落盘，重启恢复）；
+# 队列打满 upload_backlog_limit 时暂停领取新任务（缺省 = 2 × max_concurrency）。
+# upload_max_concurrency: 4
+# download_max_concurrency: 8
+# upload_backlog_limit: 20
+# 传输类调用（bundle/artifact 下载、artifact/result 上传）的单次 socket 超时秒数；
+# 控制类调用（claim/heartbeat/release-slot）固定 30s。
+# transfer_timeout_seconds: 120
 environment: {}

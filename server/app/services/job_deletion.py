@@ -14,6 +14,7 @@ from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.services._job_batch_ops import batch_delete as _batch_delete
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_artifact_gc import gc_deleted_job_artifacts, read_artifact_candidates
 from server.app.settings import Settings
@@ -177,16 +178,11 @@ class JobDeletionService:
             self.job_event_manager.broadcast_job_deleted(workspace_id, job_id, stats)
         return self._result(job_id, "succeeded")
 
-    def batch_delete(self, workspace_id: str, job_ids: list[str]) -> list[JobDeleteResult]:
-        results: list[JobDeleteResult] = []
-        seen: set[str] = set()
-        for job_id in job_ids:
-            normalized = job_id.strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            results.append(self.delete(workspace_id, normalized))
-        return results
+    def batch_delete(
+        self, workspace_id: str, job_ids: list[str] | None = None, **kwargs: Any
+    ) -> list[JobDeleteResult]:
+        """Delete the selected jobs; kwargs take job_filter/exclude_ids."""
+        return _batch_delete(self, workspace_id, job_ids, **kwargs)
 
     @staticmethod
     def _prune_empty_trash(path: Path) -> None:

@@ -57,8 +57,8 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["ref"] == "v1.3.8"
-    assert data["commit"].startswith("5c5eae7")
+    assert data["ref"] == "v1.3.9"
+    assert data["commit"].startswith("54cf560")
     assert data["available"] is True
     assert any(item["path"] == "SKILL.md" for item in data["files"])
 

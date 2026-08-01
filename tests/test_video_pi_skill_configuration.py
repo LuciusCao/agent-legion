@@ -10,23 +10,23 @@ ROOT = Path(__file__).resolve().parents[1]
 VIDEO_SKILLS = {
     "video_knowledge/review_subtitles": {
         "repo_suffix": ".agents/skills/agent-legion/video_knowledge/review_subtitles",
-        "ref": "v1.0.2",
-        "commit": "b5cbf8b0b3aef150facda444630dd4a198485842",
+        "ref": "v1.0.3",
+        "commit": "52115e1d932c23b672405fe83811e334d60bf439",
     },
     "video_knowledge/generate_chapters": {
         "repo_suffix": ".agents/skills/agent-legion/video_knowledge/generate_chapters",
-        "ref": "v1.0.1",
-        "commit": "81e9a58a4fa3d0ef0d7b677e34708c6accfe0816",
+        "ref": "v1.0.2",
+        "commit": "957768e8e0e0ed731f3e07ac0111f961d8f42ae9",
     },
     "video_knowledge/generate_interactions": {
         "repo_suffix": ".agents/skills/agent-legion/video_knowledge/generate_interactions",
-        "ref": "v1.0.2",
-        "commit": "afb50c54ec0f1f87851c39debe306a3e027c07b4",
+        "ref": "v1.0.3",
+        "commit": "7e51c9880a03f15219163a544716e8b9247f2e93",
     },
     "video_knowledge/review_video_content": {
         "repo_suffix": ".agents/skills/agent-legion/video_knowledge/review_video_content",
-        "ref": "v1.0.3",
-        "commit": "b319ca1fa1a93d14b1c59469655ff0aaeaecc6a5",
+        "ref": "v1.0.4",
+        "commit": "af37359538553cc1ccdf04292079abc19efac221",
     },
 }
 

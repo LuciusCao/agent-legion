@@ -5,9 +5,9 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import time
 import uuid
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +18,7 @@ from server.app.services.pi_event_compression import compress_pi_events
 from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
 from server.app.services.token_usage_capture import capture_and_persist_token_usage
 from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
+from server.app.workflows.output_validation import run_output_validator
 from server.app.workflows.pi_command_builder import build_pi_command
 from server.app.workflows.pi_config import PiConfig, PiRunResult
 from server.app.workflows.pi_prompt import build_pi_prompt
@@ -54,6 +55,7 @@ class PiRunner:
         skill_version: str = "",
         config: PiConfig | None = None,
         additional_prompt: str = "",
+        node_config: Mapping[str, Any] | None = None,
     ) -> PiRunResult:
         run_config = config or self.config
         if job_dir is None:
@@ -95,6 +97,8 @@ class PiRunner:
             tools=tools or ["read", "write", "bash"],
             session_name=session_name,
             prompt_file=prompt_file,
+            expected_outputs=outputs,
+            node_config=node_config,
         )
 
         run_record: dict[str, Any] | None = None
@@ -174,21 +178,10 @@ class PiRunner:
                     error_message = f"Missing outputs after Pi run: {', '.join(missing)}"
 
         if exit_code == 0:
-            validator = skill_dir / "scripts" / "validate_output.py"
-            if validator.is_file():
-                try:
-                    val_proc = subprocess.run(
-                        [sys.executable, str(validator), str(job_dir)],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
-                    if val_proc.returncode != 0:
-                        exit_code = 1
-                        error_message = f"Output validation failed: {val_proc.stderr.strip()}"
-                except Exception as exc:
-                    exit_code = 1
-                    error_message = f"Validator error: {exc}"
+            validation_error = run_output_validator(skill_dir, job_dir)
+            if validation_error:
+                exit_code = 1
+                error_message = validation_error
 
         end_time = datetime.datetime.now(datetime.UTC).isoformat()
         run_meta = {

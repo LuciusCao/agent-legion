@@ -4,6 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Worker 控制台</title>
+    <link rel="stylesheet" href="/assets/vendor/uPlot.min.css" />
     <link rel="stylesheet" href="/assets/styles.css" />
   </head>
   <body>
@@ -197,9 +198,9 @@
               <div class="section-heading">
                 <div><p class="eyebrow">MONITORING</p><h2>容量与吞吐</h2></div>
                 <div class="granularity-switch" role="group" aria-label="时间粒度">
-                  <button class="chip active" data-granularity="minute">6h</button>
-                  <button class="chip" data-granularity="hour">24h</button>
-                  <button class="chip" data-granularity="day">7d</button>
+                  <button class="chip active" data-granularity="6h">6h</button>
+                  <button class="chip" data-granularity="24h">24h</button>
+                  <button class="chip" data-granularity="30d">30d</button>
                 </div>
               </div>
               <p id="metrics-error" class="error" role="alert"></p>
@@ -225,6 +226,7 @@
     <script>
       window.__WORKER_CONTROL_TOKEN__ = "__WORKER_CONTROL_TOKEN__";
     </script>
+    <script src="/assets/vendor/uPlot.iife.min.js"></script>
     <script type="module" src="/assets/app.js"></script>
   </body>
 </html>

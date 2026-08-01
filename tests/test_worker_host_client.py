@@ -1,4 +1,4 @@
-"""Unit tests for the Worker Host client (worker/host_client.py)."""
+"""Unit tests for the Worker Host client (worker/host_client.py + host_transfer.py)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from worker import host_client
+from worker import host_transfer
 from worker.host_client import Client, WorkerAuthError
 
 
@@ -20,7 +20,7 @@ def _artifact(tmp_path: Path) -> Path:
 
 def _patch_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     sleeps: list[float] = []
-    monkeypatch.setattr(host_client.time, "sleep", sleeps.append)
+    monkeypatch.setattr(host_transfer.time, "sleep", sleeps.append)
     return sleeps
 
 
@@ -132,14 +132,14 @@ def test_get_ops_metrics_uses_worker_scoped_endpoint(
 
     def fake_request(self, method: str, path: str, **kwargs) -> tuple[int, bytes]:
         seen.append((method, path))
-        return 200, b'{"granularity":"minute","buckets":[]}'
+        return 200, b'{"granularity":"6h","buckets":[]}'
 
     monkeypatch.setattr(Client, "request", fake_request)
 
-    payload = Client("http://host", "worker-token").get_ops_metrics("minute", 6, 7)
+    payload = Client("http://host", "worker-token").get_ops_metrics("6h")
 
-    assert payload["granularity"] == "minute"
-    assert seen == [("GET", "/api/agent-workers/self/metrics?granularity=minute&hours=6&days=7")]
+    assert payload["granularity"] == "6h"
+    assert seen == [("GET", "/api/agent-workers/self/metrics?granularity=6h")]
 
 
 def test_get_ops_metrics_rejects_invalid_worker_token(
@@ -148,4 +148,4 @@ def test_get_ops_metrics_rejects_invalid_worker_token(
     monkeypatch.setattr(Client, "request", lambda *args, **kwargs: (401, b"invalid token"))
 
     with pytest.raises(WorkerAuthError):
-        Client("http://host", "bad-token").get_ops_metrics("hour", 24, 7)
+        Client("http://host", "bad-token").get_ops_metrics("24h")

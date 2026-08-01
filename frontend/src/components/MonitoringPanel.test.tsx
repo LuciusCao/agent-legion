@@ -21,12 +21,11 @@ function bucket(offsetMinutes: number, overrides = {}) {
   }
 }
 
-const mockFetchOpsMetrics = vi.fn(
-  (params: { granularity: string; hours?: number; days?: number }) =>
-    Promise.resolve({
-      granularity: params.granularity,
-      buckets: [bucket(4), bucket(3), bucket(2), bucket(1)],
-    })
+const mockFetchOpsMetrics = vi.fn((params: { granularity: string }) =>
+  Promise.resolve({
+    granularity: params.granularity,
+    buckets: [bucket(4), bucket(3), bucket(2), bucket(1)],
+  })
 )
 
 vi.mock('../api/metrics', () => ({
@@ -72,8 +71,7 @@ describe('MonitoringPanel', () => {
       screen.getByRole('img', { name: 'Token 吞吐量趋势' })
     ).toBeInTheDocument()
     expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-      granularity: 'minute',
-      hours: 6,
+      granularity: '6h',
     })
   })
 
@@ -82,19 +80,17 @@ describe('MonitoringPanel', () => {
     render(<MonitoringPanel />)
 
     await screen.findByTestId('online-workers-summary')
-    await user.click(screen.getByRole('button', { name: '天 · 近 7 天' }))
+    await user.click(screen.getByRole('button', { name: '近 30 天' }))
 
     await waitFor(() => {
       expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-        granularity: 'day',
-        days: 7,
+        granularity: '30d',
       })
     })
-    await user.click(screen.getByRole('button', { name: '小时 · 近 24 小时' }))
+    await user.click(screen.getByRole('button', { name: '近 24 小时' }))
     await waitFor(() => {
       expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-        granularity: 'hour',
-        hours: 24,
+        granularity: '24h',
       })
     })
   })
@@ -124,8 +120,7 @@ describe('MonitoringPanel', () => {
 
     await waitFor(() => {
       expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
-        granularity: 'minute',
-        hours: 6,
+        granularity: '6h',
         worker_id: 'worker-1',
       })
     })
@@ -143,7 +138,7 @@ describe('MonitoringPanel', () => {
 
   it('renders a zero-filled fixed window when no buckets', async () => {
     mockFetchOpsMetrics.mockResolvedValueOnce({
-      granularity: 'minute',
+      granularity: '6h',
       buckets: [],
     })
 

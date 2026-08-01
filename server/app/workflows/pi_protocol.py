@@ -8,9 +8,25 @@ persisted and shipped to workers.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
+
+from server.app.workflows.pi_model_error import detect_model_error, fold_model_error
+from server.app.workflows.velites_command import build_command_for_flavor
+
+__all__ = [
+    "JOB_DIR_PLACEHOLDER",
+    "PROMPT_FILE_PLACEHOLDER",
+    "PROMPT_INSTRUCTION",
+    "SESSION_DIR_PLACEHOLDER",
+    "SESSION_NAME_PLACEHOLDER",
+    "SKILL_DIR_PLACEHOLDER",
+    "build_command",
+    "build_prompt",
+    "detect_model_error",
+    "fold_model_error",
+    "render_command_spec",
+]
 
 PROMPT_INSTRUCTION = "Execute the attached node instructions."
 
@@ -43,6 +59,8 @@ def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) ->
             "Never write outputs into the run/session directory (runs/); "
             "all declared outputs must live at the top level of the working directory. "
             "Do not modify inputs or create undeclared root-level artifacts. "
+            "Do not read, search, or modify anything outside the working directory "
+            "and the skill directory. "
             "Finish after all required outputs are written and correct."
         ),
     ]
@@ -87,74 +105,26 @@ def build_command(
     return cmd
 
 
-def detect_model_error(events_file: Path) -> str | None:
-    """Scan Pi JSONL events for model-call failures reported by the CLI.
-
-    Pi can exit with code 0 even when the upstream model request fails
-    (e.g. a 400 from the provider). In that case the events file contains
-    assistant messages whose ``stopReason`` is ``error`` and which carry an
-    ``errorMessage``. Detecting this prevents us from reporting a misleading
-    "Missing outputs" error when the agent never had a chance to run.
-
-    Pi auto-retries transient failures (e.g. "terminated"), so an error only
-    counts when no later assistant message succeeds; recovered retries pass.
-    """
-    if not events_file.is_file():
-        return None
-    last_error: str | None = None
-    try:
-        with events_file.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                messages: list[dict[str, Any]] = []
-                # message_start / message_end / turn_end wrap the assistant msg
-                msg = event.get("message") or {}
-                if not isinstance(msg, dict):
-                    turn_end = event.get("turn_end") or {}
-                    msg = turn_end.get("message") if isinstance(turn_end, dict) else {}
-                if isinstance(msg, dict):
-                    messages.append(msg)
-
-                # message_update events nest under assistantMessageEvent
-                assistant_event = event.get("assistantMessageEvent") or {}
-                if isinstance(assistant_event, dict):
-                    nested = assistant_event.get("message") or {}
-                    if isinstance(nested, dict):
-                        messages.append(nested)
-
-                for msg in messages:
-                    if msg.get("errorMessage"):
-                        last_error = str(msg["errorMessage"])
-                    elif msg.get("stopReason") in ("stop", "toolUse"):
-                        last_error = None
-    except Exception:
-        return None
-    return last_error
-
-
 def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:
     """Render prompt/command with path placeholders for Agent bundle shipping.
 
     The returned spec never includes ``pi.environment``; workers merge env from
-    the manifest themselves.
+    the manifest themselves. The command argv follows ``pi.flavor`` (pi |
+    velites); the placeholder mechanism is flavor-neutral.
     """
     job_dir = Path(JOB_DIR_PLACEHOLDER)
     skill_dir = Path(SKILL_DIR_PLACEHOLDER)
     return {
         "version": 1,
         "prompt": build_prompt(manifest, job_dir=job_dir, skill_dir=skill_dir),
-        "command": build_command(
+        "command": build_command_for_flavor(
             manifest,
             skill_dir=skill_dir,
             session_dir=Path(SESSION_DIR_PLACEHOLDER),
             session_name=SESSION_NAME_PLACEHOLDER,
             prompt_file=Path(PROMPT_FILE_PLACEHOLDER),
+            prompt_instruction=PROMPT_INSTRUCTION,
+            pi_fallback=build_command,
         ),
         "prompt_instruction": PROMPT_INSTRUCTION,
     }

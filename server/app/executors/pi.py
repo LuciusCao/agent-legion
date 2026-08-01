@@ -100,6 +100,7 @@ class PiExecutor:
                 skill_version=skill_version,
                 config=run_config,
                 additional_prompt=additional_prompt,
+                node_config=dict(context.node_config),
             )
 
             return to_execution_result(result, context)

@@ -5,9 +5,15 @@ from __future__ import annotations
 import json
 from typing import Any
 
+import pytest
+
 from server.app.db.migrations import migrate_workspace_cms_config
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
+
+# These tests ALTER TABLE workspaces (legacy cms_config_json column) and never
+# drop it; TRUNCATE-based isolation would leak the column into later tests.
+pytestmark = pytest.mark.fresh_schema
 
 
 def _add_legacy_column(conn: Any) -> None:

@@ -1,16 +1,19 @@
 from __future__ import annotations
 
-import contextlib
-import importlib
 import logging
 import multiprocessing
-import os
-import sys
 import threading
-from collections.abc import Callable, Mapping
-from pathlib import Path
-from typing import Any, cast
+from collections.abc import Iterable, Mapping
+from typing import Any
 
+from server.app.executors import _local_isolated, _local_thread
+from server.app.executors._local_isolated import (  # noqa: F401  (re-exports)
+    LocalHandler,
+    _handler_key,
+    _resolve_handler,
+    _run_handler,
+    _watch_parent_token,
+)
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
@@ -19,100 +22,10 @@ from server.app.workflows.resource_providers import ResourceProviderDeclarations
 
 logger = logging.getLogger(__name__)
 
-LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
-
-
-def _handler_key(handler: LocalHandler) -> str | None:
-    """Return an importable path for *handler* when it can be resolved in a child.
-
-    Lambdas and other non-serializable callables return ``None`` so executor
-    construction can reject handlers that would bypass process isolation.
-    """
-    qualname = getattr(handler, "__qualname__", "")
-    module = getattr(handler, "__module__", "")
-    if not module or not qualname or "<lambda>" in qualname or "<locals>" in qualname:
-        return None
-    return f"{module}.{qualname}"
-
-
-def _resolve_handler(handler_key: str) -> LocalHandler:
-    """Resolve a handler by its importable path.
-
-    Repository handlers are registered as ``module.function`` under
-    ``server.app.workflows``; tests and other callers may use a fully-qualified
-    module path.
-    """
-    if "." not in handler_key:
-        module_path = "__mp_main__"
-        func_name = handler_key
-    else:
-        module_path, func_name = handler_key.rsplit(".", 1)
-    try:
-        module = importlib.import_module(module_path)
-    except ModuleNotFoundError:
-        module = importlib.import_module(f"server.app.workflows.{module_path}")
-    handler = getattr(module, func_name)
-    if not callable(handler):
-        raise ValueError(f"Handler {handler_key!r} is not callable")
-    return cast(LocalHandler, handler)
-
-
-def _run_handler(
-    handler_key: str,
-    job: dict[str, Any],
-    job_dir_str: str,
-    runtime: dict[str, Any],
-    conn: Any,
-) -> None:
-    """Target run in an isolated multiprocessing child."""
-    log_path = runtime.get("log_path")
-    if log_path:
-        try:
-            log_fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-            os.dup2(log_fd, 1)
-            os.dup2(log_fd, 2)
-            os.close(log_fd)
-            getattr(sys.stdout, "reconfigure", lambda **_: None)(line_buffering=True)
-            getattr(sys.stderr, "reconfigure", lambda **_: None)(line_buffering=True)
-            logging.basicConfig(
-                level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True
-            )
-        except Exception:
-            logger.exception("Failed to redirect run log to %s", log_path)
-
-    prefix = f"[local:{runtime.get('node_key', '')}]"
-    logger.info("%s start capability=%s", prefix, runtime.get("capability", ""))
-
-    error_message = ""
-    try:
-        handler = _resolve_handler(handler_key)
-        job_db_path = runtime.pop("_job_db_path", None)
-        jobs_dir = runtime.pop("_jobs_dir", None)
-        if job_db_path and jobs_dir:
-            from server.app.jobs import JobQueries
-
-            runtime["job_db"] = JobQueries(str(job_db_path), Path(jobs_dir))
-        job_dir = Path(job_dir_str)
-        handler(job, job_dir, runtime)
-        logger.info("%s completed", prefix)
-        conn.send(("ok", None))
-    except Exception as exc:
-        error_message = f"{type(exc).__name__}: {exc}"
-        logger.error("%s failed: %s", prefix, error_message)
-        logger.exception("Isolated handler %s failed", handler_key)
-        with contextlib.suppress(Exception):
-            conn.send(("error", error_message))
-    finally:
-        with contextlib.suppress(Exception):
-            conn.close()
-
-
-def _watch_parent_token(parent_token: CancellationToken, child_token: CancellationToken) -> None:
-    """Propagate cancellation from the runtime token to the child token."""
-    while not child_token.is_cancelled():
-        if parent_token.wait(timeout=0.1):
-            child_token.cancel()
-            break
+# Fallback wall-clock limit for one isolated local run; a capability's
+# LocalCapabilityConfig.timeout_seconds overrides it. This is the backstop
+# that keeps a hung handler from living forever as an orphaned child.
+DEFAULT_TIMEOUT_SECONDS = 3600.0
 
 
 class LocalExecutor:
@@ -128,6 +41,9 @@ class LocalExecutor:
         job_db: Any | None = None,
         cancellation_grace_seconds: float = 5,
         resource_providers: ResourceProviderDeclarations | None = None,
+        capability_timeouts: Mapping[str, float] | None = None,
+        default_timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+        thread_capabilities: Iterable[str] | None = None,
     ) -> None:
         self.id = id
         self.handlers = dict(handlers)
@@ -156,6 +72,9 @@ class LocalExecutor:
         self.resource_providers = resource_providers or ResourceProviderDeclarations()
         self.job_db = job_db
         self.cancellation_grace_seconds = cancellation_grace_seconds
+        self._capability_timeouts = dict(capability_timeouts or {})
+        self._default_timeout_seconds = default_timeout_seconds
+        self._thread_capabilities = set(thread_capabilities or ())
         self._cancelled: set[str] = set()
         self._tokens: dict[str, CancellationToken] = {}
         self._watchers: dict[str, threading.Thread] = {}
@@ -181,6 +100,9 @@ class LocalExecutor:
                 error_message=f"capability {context.capability!r} is not supported",
                 log_path=str(context.log_path),
             )
+
+        if context.capability in self._thread_capabilities:
+            return _local_thread.execute_in_thread(self, context, handler)
 
         key = self._handler_keys.get(context.capability)
         if key is None:  # guarded by constructor validation
@@ -217,93 +139,7 @@ class LocalExecutor:
         return runtime
 
     def _execute_isolated(self, context: ExecutionContext, handler_key: str) -> ExecutionResult:
-        context.job_dir.mkdir(parents=True, exist_ok=True)
-        context.log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        parent_conn, child_conn = multiprocessing.Pipe()
-        child_token = CancellationToken(multiprocessing.Event())
-        self._tokens[context.execution_id] = child_token
-
-        runtime = self._build_runtime(context, child_token)
-        process = multiprocessing.Process(
-            target=_run_handler,
-            args=(
-                handler_key,
-                dict(context.job),
-                str(context.job_dir),
-                runtime,
-                child_conn,
-            ),
-        )
-        process.start()
-        child_conn.close()
-
-        parent_token = (
-            context.runtime.get("cancellation") if isinstance(context.runtime, Mapping) else None
-        )
-        watcher: threading.Thread | None = None
-        if parent_token is not None:
-            watcher = threading.Thread(
-                target=_watch_parent_token,
-                args=(parent_token, child_token),
-                daemon=True,
-            )
-            watcher.start()
-            self._watchers[context.execution_id] = watcher
-
-        cancelled = False
-        try:
-            while process.is_alive():
-                if child_token.is_cancelled():
-                    cancelled = True
-                    self._terminate_child(process)
-                    break
-                if parent_conn.poll(0.05):
-                    break
-                if not process.is_alive():
-                    break
-
-            if cancelled:
-                return ExecutionResult(
-                    status="cancelled",
-                    exit_code=-1,
-                    error_message="execution was cancelled",
-                    log_path=str(context.log_path),
-                )
-
-            result: tuple[str, str] | None = None
-            try:
-                if parent_conn.poll(0.5):
-                    result = parent_conn.recv()
-            except EOFError:
-                result = None
-
-            if result is None:
-                return ExecutionResult(
-                    status="failed",
-                    exit_code=1,
-                    error_message="isolated handler did not return a result",
-                    log_path=str(context.log_path),
-                )
-
-            status, payload = result
-            if status == "error":
-                return ExecutionResult(
-                    status="failed",
-                    exit_code=1,
-                    error_message=payload,
-                    log_path=str(context.log_path),
-                )
-
-            return self._check_outputs(context)
-        finally:
-            if process.is_alive():
-                self._terminate_child(process)
-            if watcher is not None:
-                child_token.cancel()
-                watcher.join(timeout=0.5)
-            self._tokens.pop(context.execution_id, None)
-            self._watchers.pop(context.execution_id, None)
+        return _local_isolated.execute_isolated(self, context, handler_key)
 
     def _terminate_child(self, process: multiprocessing.process.BaseProcess) -> None:
         process.terminate()
@@ -368,6 +204,16 @@ def build_local_executor(
         job_db=deps.job_db,
         cancellation_grace_seconds=deps.cancellation_grace_seconds,
         resource_providers=deps.resource_providers,
+        capability_timeouts={
+            capability: cap_config.timeout_seconds
+            for capability, cap_config in config.capabilities.items()
+            if cap_config.timeout_seconds is not None
+        },
+        thread_capabilities={
+            capability
+            for capability, cap_config in config.capabilities.items()
+            if cap_config.isolation == "thread"
+        },
     )
 
 

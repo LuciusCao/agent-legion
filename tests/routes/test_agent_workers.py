@@ -125,7 +125,7 @@ def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Pat
 
     with TestClient(app) as client:
         token = _register(client)["worker_token"]
-        path = "/api/agent-workers/self/metrics?granularity=minute&hours=1&worker_id=other-worker"
+        path = "/api/agent-workers/self/metrics?granularity=6h&worker_id=other-worker"
         own = client.get(path, headers={"X-Agent-Worker-Token": token})
         anonymous = client.get(path)
         invalid = client.get(path, headers={"X-Agent-Worker-Token": "bad-token"})
@@ -222,6 +222,43 @@ def test_heartbeat_requires_and_validates_lease_id(tmp_path: Path) -> None:
             headers={**auth, "X-Agent-Lease-Id": claimed["lease_id"]},
         )
         assert ok.status_code == 204
+
+
+def test_release_slot_requires_and_validates_lease_id(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        claimed = _claim(client, token)
+        execution_id = claimed["execution_id"]
+        auth = {"X-Agent-Worker-Token": token}
+        url = f"/api/agent-executions/{execution_id}/release-slot"
+
+        missing = client.post(url, headers=auth)
+        assert missing.status_code == 400
+
+        wrong = client.post(url, headers={**auth, "X-Agent-Lease-Id": "not-the-lease"})
+        assert wrong.status_code == 409
+
+        ok = client.post(url, headers={**auth, "X-Agent-Lease-Id": claimed["lease_id"]})
+        assert ok.status_code == 204
+
+        # Released executions still accept the result report (reporting state).
+        report = client.post(
+            f"/api/agent-executions/{execution_id}/result",
+            headers={
+                **auth,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": json.dumps({"status": "completed", "exit_code": 0}),
+            },
+            content=_empty_archive(),
+        )
+        assert report.status_code == 204
+
+        # And the slot is gone afterwards: a second release is a conflict.
+        again = client.post(url, headers={**auth, "X-Agent-Lease-Id": claimed["lease_id"]})
+        assert again.status_code == 409
 
 
 def test_protocol_floor_is_enforced_after_registration(tmp_path: Path) -> None:
