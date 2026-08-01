@@ -708,7 +708,9 @@ describe('SettingsPage', () => {
         },
       ],
     })
-  })
+    // Generous timeout: this full-page interaction chain exceeds vitest's
+    // 5s default on loaded parallel-gate machines (local gate flake 2026-08-01).
+  }, 30000)
 
   it('confirms executor allocation removal from SettingsPage', async () => {
     useSettingStore.setState({
