@@ -83,6 +83,7 @@ class AgentDispatchService:
                     "model": node.execution.model or pi.model,
                     "thinking": node.execution.thinking or pi.thinking,
                     "timeout_seconds": pi.timeout_seconds,
+                    "velites_no_sandbox": pi.velites_no_sandbox,
                 },
                 "pi_defaults": {
                     "provider": pi.provider,

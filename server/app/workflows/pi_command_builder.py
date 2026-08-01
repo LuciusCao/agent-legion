@@ -20,21 +20,21 @@ def build_pi_command(
     expected_outputs: Iterable[str] = (),
     node_config: Mapping[str, Any] | None = None,
 ) -> list[str]:
-    manifest = {
-        "tools": tools,
-        "expected_outputs": list(expected_outputs),
-        "config": dict(node_config or {}),
-        "pi": {
-            "binary": config.binary,
-            "provider": config.provider,
-            "model": config.model,
-            "thinking": config.thinking,
-            "flavor": config.flavor,
-            "timeout_seconds": config.timeout_seconds,
-        },
-    }
     return build_command_for_flavor(
-        manifest,
+        {
+            "tools": tools,
+            "expected_outputs": list(expected_outputs),
+            "config": dict(node_config or {}),
+            "pi": {
+                "binary": config.binary,
+                "provider": config.provider,
+                "model": config.model,
+                "thinking": config.thinking,
+                "flavor": config.flavor,
+                "timeout_seconds": config.timeout_seconds,
+                "velites_no_sandbox": config.velites_no_sandbox,
+            },
+        },
         skill_dir=skill_dir,
         session_dir=session_dir,
         session_name=session_name,
