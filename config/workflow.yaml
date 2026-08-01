@@ -118,6 +118,9 @@ workflows:
     # docs/architecture/velites-harness.md）。缺省 pi；非法值启动即报错（fail-fast）。
     # 切到 velites 时 binary 未显式覆盖则自动用 velites 二进制；`flavor: pi` 单字段即回退。
     flavor: pi
+    # velites 逃生门：true 时 velites 命令追加 --no-sandbox（生产沙箱异常时
+    # 免发版降级为无沙箱运行，仍保留事件契约/预算/取消等全部可控性）。
+    velites_no_sandbox: false
     binary: pi
     provider: gateway
     model: your-model

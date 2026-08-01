@@ -16,8 +16,7 @@ from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 class PiRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # Headless harness 选择（设计文档 velites-harness.md §9）；非法值 fail-fast。
-    flavor: Literal["pi", "velites"] = "pi"
+    flavor: Literal["pi", "velites"] = "pi"  # Headless harness 选择（设计 §9）；非法值 fail-fast
     binary: str = Field(default="pi", validate_default=True)
     provider: str = ""
     model: str = ""
@@ -25,6 +24,7 @@ class PiRuntimeConfig(BaseModel):
     timeout_seconds: int = Field(default=600, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
     environment: dict[str, str] = Field(default_factory=dict)
+    velites_no_sandbox: bool = False  # 逃生门：velites 下传 --no-sandbox（沙箱降级免发版）
 
     @field_validator("binary")
     @classmethod
