@@ -281,18 +281,23 @@ def test_maintenance_cleanup_runs_off_caller_thread(tmp_path: Path) -> None:
         return (0, 0)
 
     settings = MagicMock()
-    settings.config = {}
+    # interval 0: on fresh-boot Linux CI runners time.monotonic() (≈ uptime)
+    # is smaller than the default 3600s interval, so maybe_cleanup would skip
+    # the thread entirely and started.wait() would time out deterministically.
+    settings.config = {"cleanup": {"interval_seconds": 0}}
     settings.data_dir = tmp_path
     maintenance = WorkflowMaintenance(MagicMock(), settings)
 
     with patch("server.app.workflow_worker_maintenance.cleanup_old_logs", side_effect=_cleanup):
         maintenance.maybe_cleanup()
-        assert started.wait(timeout=5)
+        # Generous wait: thread startup/scheduling can be delayed on loaded
+        # parallel-gate runners.
+        assert started.wait(timeout=30)
         # A second invocation while the first is still running must not
         # launch another cleanup thread.
         maintenance.maybe_cleanup()
         release.set()
-        deadline = time.monotonic() + 5
+        deadline = time.monotonic() + 30
         while maintenance._cleanup_running and time.monotonic() < deadline:
             time.sleep(0.01)
 
