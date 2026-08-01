@@ -70,6 +70,30 @@ def test_quick_gate_reports_each_lane_status(tmp_path: Path) -> None:
     assert "backend=7 frontend=0" in result.stderr
 
 
+def test_quick_gate_hoists_api_contract_out_of_parallel_static_round(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    gate_log = tmp_path / "gate.log"
+
+    _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(
+        scripts / "check-quick-frontend.sh",
+        "#!/usr/bin/env bash\n"
+        "printf '%s:%s\\n' \"${FRONTEND_GATE_PHASE:-unset}\" "
+        '"${FRONTEND_API_CHECK:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_LOG": str(gate_log)})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8").splitlines()
+    # The static lane skips the inline api:check; the contract runs exactly
+    # once as the integration step between the static and test rounds.
+    assert calls == ["static:0", "api-contract:unset", "test:1"]
+
+
 def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     frontend = tmp_path / "frontend"

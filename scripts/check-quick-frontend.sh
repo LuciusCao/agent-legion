@@ -14,8 +14,14 @@ case "${FRONTEND_TEST_MODE:-test}" in
 esac
 
 run_static_checks() {
-  echo "=== Generated API Contract ==="
-  npm run api:check
+  # api:check boots the full backend app (create_app) to export the OpenAPI
+  # schema. The local quick gate hoists it into a sequential integration step
+  # (FRONTEND_API_CHECK=0) so the parallel lanes stay light; CI calls this
+  # script directly and keeps the default inline behavior.
+  if [[ "${FRONTEND_API_CHECK:-1}" == "1" ]]; then
+    echo "=== Generated API Contract ==="
+    npm run api:check
+  fi
 
   echo "=== Frontend Format ==="
   npm run format:check
@@ -34,6 +40,10 @@ run_tests() {
 
 case "${FRONTEND_GATE_PHASE:-all}" in
   static) run_static_checks ;;
+  api-contract)
+    echo "=== Generated API Contract ==="
+    npm run api:check
+    ;;
   test) run_tests ;;
   all)
     run_static_checks
