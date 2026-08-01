@@ -36,7 +36,12 @@ FROM python:${PYTHON_VERSION}-slim-bookworm AS worker
 ARG NODE_VERSION=22.17.0
 ARG PI_VERSION=0.80.10
 COPY --from=frontend /usr/local/ /usr/local/
-RUN pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" \
+# bubblewrap is velites' Linux sandbox backend (EXEC-HARNESS-SANDBOX-001);
+# the harness fails closed at startup without it unless --no-sandbox is set.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends bubblewrap \
+    && rm -rf /var/lib/apt/lists/* \
+    && pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" \
     && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && pi --version
 # velites harness binary. Transition flavor: pi above stays installed and
