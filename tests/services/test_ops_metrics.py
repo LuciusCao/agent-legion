@@ -412,3 +412,29 @@ def test_service_reads_monitoring_config_defaults() -> None:
     assert service.sample_interval_seconds == 60
     custom = _service({"monitoring": {"sample_interval_seconds": 15, "retention_days": 3}})
     assert custom.sample_interval_seconds == 15
+
+
+def test_sample_catch_up_backfills_missing_minutes() -> None:
+    service = _service()
+    service.sample_once(_NOW)
+    written = service.sample_catch_up(_NOW + timedelta(minutes=3))
+    assert written == 3
+    for offset in range(1, 4):
+        row = _fetch_sample(_bucket_start(_NOW) + timedelta(minutes=offset))
+        assert row is not None, f"missing bucket +{offset}min"
+
+
+def test_sample_catch_up_is_idempotent() -> None:
+    service = _service()
+    first = service.sample_catch_up(_NOW)
+    assert first == 10  # empty table: only the capped horizon is written
+    assert service.sample_catch_up(_NOW) == 0
+
+
+def test_sample_catch_up_caps_backfill_horizon() -> None:
+    service = _service()
+    service.sample_once(_NOW)
+    written = service.sample_catch_up(_NOW + timedelta(minutes=60))
+    assert written == 10
+    # Buckets older than the horizon stay empty: no fabricated history.
+    assert _fetch_sample(_bucket_start(_NOW) + timedelta(minutes=1)) is None

@@ -12,6 +12,7 @@ from server.app.executors.models import ExecutionResult
 from server.app.services._failure_classification_rules import (
     FAILURE_CATEGORIES,
     TIMEOUT_EXIT_CODE,
+    TRANSIENT_RETRY_DETAILS,
     classify_failure,
 )
 
@@ -20,8 +21,14 @@ __all__ = [
     "TIMEOUT_EXIT_CODE",
     "classify_execution_result",
     "classify_failure",
+    "is_transient_retryable",
     "resolve_failure_fields",
 ]
+
+
+def is_transient_retryable(failure_detail: str) -> bool:
+    """Transient details retry at the lease finish path instead of failing the job."""
+    return failure_detail in TRANSIENT_RETRY_DETAILS
 
 
 def resolve_failure_fields(

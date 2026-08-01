@@ -12,6 +12,7 @@ from server.app.executors._lease_control import (
 )
 from server.app.executors._lease_shards import finish_shard_execution
 from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transient_retry import try_return_node_to_pending
 from server.app.executors._path_canonicalization import canonicalize_finish_paths
 from server.app.executors.models import ExecutionResult
 from server.app.services import failure_classification
@@ -89,6 +90,10 @@ def finish_lease(
         ),
     )
     if finish_shard_execution(conn, lease, result, now_str):
+        return True
+
+    if try_return_node_to_pending(conn, lease, result, failure_category, failure_detail):
+        _sync_job_status(conn, lease["job_id"])
         return True
 
     conn.execute(

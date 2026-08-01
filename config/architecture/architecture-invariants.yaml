@@ -388,6 +388,18 @@ invariants:
         target: tests/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
         gate: quick
 
+  - id: DB-FAILURE-002
+    statement: "Transient failures (failure_detail in TRANSIENT_RETRY_DETAILS, currently only db_pool_timeout) return the job_node to 'pending' at the lease finish path for up to 3 total attempts instead of failing the job; every attempt stays recorded as its own failed node_run, and the final attempt fails node and job permanently."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_failure_classification.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/leases/test_failure_classification_persistence.py
+        gate: quick
+
   - id: EXEC-SHARD-001
     statement: "Shard executions must go through ExecutorLeaseRepository.try_claim with one lease per shard; fan-out paths that bypass the capacity system are forbidden."
     owner: architecture
