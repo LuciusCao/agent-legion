@@ -14,7 +14,9 @@ cleanup_coverage() {
 trap cleanup_coverage EXIT
 
 echo "=== Quick Gate ==="
-FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
+# The full local gate keeps coverage semantics: check-quick.sh skips backend
+# coverage by default, so re-enable it here for the combined report below.
+AGENT_LEGION_COV=1 FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-full.XXXXXX")"
 cleanup_logs() {

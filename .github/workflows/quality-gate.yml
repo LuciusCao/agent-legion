@@ -67,6 +67,9 @@ jobs:
 
       - name: Backend tests
         run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        env:
+          # Local quick gate skips coverage; CI feeds the combined 85% floor.
+          AGENT_LEGION_COV: "1"
 
       - name: Full gate evidence (tests/full)
         run: uv run pytest -q tests/full -m full_gate --cov=server --cov-report= --cov-append

@@ -38,6 +38,11 @@ run_tests() {
   # GATE_TIER=smoke runs the curated fast subset (membership lives in
   # tests/conftest.py) without coverage — the 85% coverage floor only makes
   # sense for the full suite, which remains the CI boundary.
+  #
+  # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism (default: auto =
+  # all cores). Machines running several worktrees at once should set it
+  # (e.g. 3-4) to avoid oversubscribing CPU and the shared Postgres.
+  workers="${AGENT_LEGION_TEST_WORKERS:-auto}"
   case "${GATE_TIER:-full}" in
     smoke)
       echo "=== Python Smoke Tests (no coverage) ==="
@@ -45,17 +50,25 @@ run_tests() {
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "smoke and not repository_gate" \
-        -n auto
+        -n "$workers"
       ;;
     full)
-      echo "=== Python Tests + Coverage ==="
+      # Coverage tracing costs 15-40% CPU on the Python side; the 85% floor is
+      # enforced by CI and scripts/check.sh, so the local quick gate skips it
+      # unless AGENT_LEGION_COV=1.
+      cov_args=()
+      if [[ "${AGENT_LEGION_COV:-0}" == "1" ]]; then
+        echo "=== Python Tests + Coverage ==="
+        cov_args=(--cov=server --cov-report=term-missing)
+      else
+        echo "=== Python Tests (coverage off; set AGENT_LEGION_COV=1 to enable) ==="
+      fi
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
         -m "not repository_gate" \
-        -n auto \
-        --cov=server \
-        --cov-report=term-missing
+        -n "$workers" \
+        "${cov_args[@]}"
       ;;
     *)
       echo "Unsupported GATE_TIER: ${GATE_TIER}" >&2
