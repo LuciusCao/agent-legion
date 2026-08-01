@@ -60,7 +60,7 @@ def hook_repo(tmp_path: Path) -> tuple[Path, Path]:
             repo / "scripts" / script_name,
             "#!/usr/bin/env bash\n"
             'if [[ -n "${GIT_DIR:-}${GIT_WORK_TREE:-}" ]]; then exit 99; fi\n'
-            f'printf \'{gate} %s\\n\' "${{GATE_LANES:-backend frontend}}" >>"$GATE_LOG"\n',
+            f'printf \'{gate} %s\\n\' "${{GATE_LANES:-backend frontend rust}}" >>"$GATE_LOG"\n',
         )
 
     _run(["git", "init", "-q"], cwd=repo)
@@ -133,7 +133,7 @@ def test_feature_push_runs_quick_gate_once_and_reuses_evidence(
         env=_hook_env(gate_log),
     )
 
-    assert gate_log.read_text(encoding="utf-8").splitlines() == ["quick backend frontend"]
+    assert gate_log.read_text(encoding="utf-8").splitlines() == ["quick backend frontend rust"]
     assert "Running local quick gate" in first.stdout
     assert "reusing cached evidence" in second.stdout
 
@@ -151,7 +151,7 @@ def test_protected_ref_push_runs_quick_gate(hook_repo: tuple[Path, Path], remote
         env=_hook_env(gate_log),
     )
 
-    assert gate_log.read_text(encoding="utf-8").splitlines() == ["quick backend frontend"]
+    assert gate_log.read_text(encoding="utf-8").splitlines() == ["quick backend frontend rust"]
     assert "Running local quick gate" in result.stdout
 
 
@@ -161,8 +161,10 @@ def test_protected_ref_push_runs_quick_gate(hook_repo: tuple[Path, Path], remote
         (["frontend/src/App.tsx"], "frontend"),
         (["server/app/main.py"], "backend"),
         (["docs/architecture/backend.md"], "static"),
-        (["scripts/check.sh"], "backend frontend"),
+        (["scripts/check.sh"], "backend frontend rust"),
         (["frontend/src/App.tsx", "server/app/main.py"], "backend frontend"),
+        (["velites/src/main.rs"], "rust"),
+        (["velites/src/main.rs", "server/app/main.py"], "backend rust"),
     ],
 )
 def test_pre_push_selects_lanes_from_pushed_paths(

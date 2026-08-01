@@ -1,7 +1,8 @@
 import type { JobState } from '../state'
 import { isCurrentWorkspace } from './fetchStateHelpers'
 import { filtersForWorkspace } from './workspaceFilterState'
-import { computeFilterCounts } from '../filterLogic/incrementalFilters'
+import { resetJobListForFilterChange } from './paginationState'
+import { clearedSelectionState } from './selectionModeState'
 export { finishJobFetch, failJobFetch } from './fetchResult'
 
 export const resetForWorkspace =
@@ -10,17 +11,9 @@ export const resetForWorkspace =
     const keep = isCurrentWorkspace(state, ws)
     const filterConfig = filtersForWorkspace(state, ws)
     return {
-      error: null,
-      isLoading: true,
-      jobs: [],
-      jobsById: {},
-      jobIds: [],
-      jobIndexById: {},
-      filteredJobIds: [],
-      filterCounts: computeFilterCounts([], {}, filterConfig),
-      optionAccumulator: state.optionAccumulator,
+      ...resetJobListForFilterChange({ ...state, filterConfig }),
       jobsWorkspaceId: ws,
-      selectedIds: keep ? state.selectedIds : new Set<string>(),
+      ...(keep ? { selectedIds: state.selectedIds } : clearedSelectionState()),
       filterConfig,
     }
   }

@@ -316,6 +316,36 @@ invariants:
         target: tests/full/test_agent_worker_control_plane.py::test_scoped_register_token_lifecycle
         gate: full
 
+  - id: EXEC-REPORTING-001
+    statement: "Agent execution capacity (Worker machine domain and Workspace domain) is accounted from agent_execution_requests state='claimed' only; a Worker whose Agent process exited flips the request to 'reporting' via release-slot, which frees capacity immediately while the lease stays owned (heartbeat/claimed_payload/mark_done accept 'reporting', the one-active-node unique index and has_active_request block re-enqueue, and the expiry sweep requeues stale 'reporting' claims exactly like 'claimed' ones)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py::test_release_slot_requires_and_validates_lease_id
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_worker.py
+        gate: quick
+      - kind: integration
+        target: tests/test_worker_upload_queue.py
+        gate: quick
+
+  - id: EXEC-VALIDATION-001
+    statement: "A node run may complete only after the node skill's deterministic scripts/validate_output.py passes against the job directory: the local Pi runner validates after process exit, and the Host re-validates Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted); validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_completion_validation.py
+        gate: quick
+      - kind: integration
+        target: tests/test_pi_runner.py
+        gate: quick
+
   - id: EXEC-KIND-001
     statement: "Executor kinds must resolve through the kinds registry (register_kind/build_executor); isinstance dispatch chains over executor config types are forbidden in registry.py."
     owner: workspace-executor
@@ -431,4 +461,46 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/test_configuration_loader.py
+        gate: quick
+
+  - id: EXEC-EVENT-SCHEMA-001
+    statement: "The velites event stream schema (velites/schema/events.schema.json, exported from velites/src/events.rs) stays wire-compatible with the Host consumers: every pi_event_scan allowlisted type exists in the schema and the consumed fields (usage/provider/model/stopReason/errorMessage/tool metadata, retry and outputs_validation payloads) keep their names and types; delta events (message_update/tool_execution_update) never appear."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/executors/test_velites_event_contract.py
+        gate: quick
+
+  - id: EXEC-HARNESS-ISOLATION-001
+    statement: "velites has zero auto-discovery: agent context comes only from --system-prompt, explicit --skill directories, and the @prompt instruction — an AGENTS.md (or any other file) in the working directory is never read into provider requests or the event stream. The absence is structural (no discovery code exists), not a disabled feature."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_no_auto_discovery
+        gate: quick
+
+  - id: EXEC-HARNESS-BUDGET-001
+    statement: "velites run budgets (--max-turns, --max-tokens, wall-clock deadline) are enforced inside the agent loop: exhaustion injects exactly one wrap-up turn and the run always terminates with agent_end carrying reason=budget_exceeded, never by silent truncation or outer hard-kill alone."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_budget_exhaustion_marks_agent_end
+        gate: quick
+
+  - id: EXEC-HARNESS-SANDBOX-001
+    statement: "velites confines the bash tool in a default-on OS-level filesystem sandbox (macOS seatbelt via sandbox-exec, Linux bubblewrap): reads are limited to the working directory, the session dir, explicit --skill dirs and system paths; writes are limited to the working directory, the session dir and $TMPDIR//tmp — escapes surface as tool_execution_end{isError: true}. When the sandbox backend is unavailable the harness fails closed (non-zero exit before the agent loop) and never degrades to an unsandboxed run; --no-sandbox is the only escape hatch."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_sandbox_unavailable_fails_closed
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_no_sandbox_escape_hatch
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_bash_sandbox_blocks_escape_macos
         gate: quick

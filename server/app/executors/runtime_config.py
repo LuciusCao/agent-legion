@@ -4,10 +4,11 @@ import os
 import shutil
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from server.app.agent_stock import AgentStockConfig
 from server.app.cms.auth import cms_token_available
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 
@@ -15,13 +16,20 @@ from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 class PiRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    binary: str = "pi"
+    # Headless harness 选择（设计文档 velites-harness.md §9）；非法值 fail-fast。
+    flavor: Literal["pi", "velites"] = "pi"
+    binary: str = Field(default="pi", validate_default=True)
     provider: str = ""
     model: str = ""
     thinking: str = ""
     timeout_seconds: int = Field(default=600, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
     environment: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("binary")
+    @classmethod
+    def _flavor_binary(cls, value: str, info: ValidationInfo) -> str:
+        return "velites" if info.data.get("flavor") == "velites" and value == "pi" else value
 
 
 class OpenClawSkillSafetyRepo(BaseModel):
@@ -87,6 +95,7 @@ class ExecutorRuntimeConfig(BaseModel):
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
     agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
+    agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
 
 
 class StartupValidationError(Exception):

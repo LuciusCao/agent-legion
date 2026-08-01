@@ -20,14 +20,25 @@ def test_workspace_secrets_table_exists() -> None:
     assert columns == {"workspace_id", "name", "ciphertext", "created_at", "updated_at"}
 
 
-def test_schema_v16_recorded() -> None:
-    assert SCHEMA_VERSION == 16
+def test_schema_v20_recorded() -> None:
+    assert SCHEMA_VERSION == 20
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=?", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "workspace_secrets"
+    assert row["name"] == "agent_requests_done_recent_index"
+
+
+def test_agent_requests_done_recent_index_exists() -> None:
+    """Schema v20: partial index backing the stockpile done-rate window scan."""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select indexname from pg_indexes"
+            " where schemaname=current_schema()"
+            " and indexname='idx_agent_requests_done_recent'"
+        ).fetchone()
+    assert row is not None
 
 
 def test_migrate_workspace_secrets_is_idempotent() -> None:

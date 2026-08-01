@@ -1,6 +1,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
+from functools import partial
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +17,7 @@ from server.app.auth.service import build_auth_service
 from server.app.db.connection import close_database_pools
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
+from server.app.executors._pi_skill import build_skill_manager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime import ExecutionRuntime
@@ -27,6 +29,7 @@ from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
+from server.app.scheduler_wakeup import register_wakeup, unregister_wakeup
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
@@ -39,10 +42,10 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings, load_settings, validate_settings
-from server.app.skills.manager import SkillManager
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
+from server.app.workflow_worker_agent_gate import request_restock
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 
 
@@ -51,17 +54,8 @@ def build_executor_registry(
     job_db: Any | None = None,
     artifact_store: ArtifactStore | None = None,
 ) -> ExecutorRegistry:
-    """Build the application-wide executor registry from settings.
-
-    The registry is constructed once per application lifecycle and reused across
-    all workspaces. Runtime dependencies (Pi binary, OpenClaw template, local
-    handlers) are injected here so adapters remain environment-agnostic.
-    """
-    skill_manager = SkillManager(
-        config_path=settings.root_dir / "config" / "skills.yaml",
-        lock_path=settings.root_dir / "config" / "skills.lock",
-        base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
-    )
+    """Build the application-wide executor registry from settings (once per app)."""
+    skill_manager = build_skill_manager(settings.root_dir)
     runtime = RuntimeDependencies(
         local_handlers=build_local_handlers(settings),
         pi_runtime=settings.executor_runtime.workflows.pi,
@@ -124,6 +118,7 @@ def create_app(
         artifact_store,
         settings.jobs_dir,
         settings.data_dir / "agent_bundles",
+        skill_manager=build_skill_manager(settings.root_dir),
     )
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
@@ -150,9 +145,8 @@ def create_app(
                     heartbeat_failure_threshold=settings.executor_runtime.heartbeat_failure_threshold,
                     cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
                 )
-                # The sweeper owns all lease hygiene (startup + interval sweeps,
-                # Agent claim recovery). With sweeper_enabled=False an external
-                # sweeper process must run instead (multi-replica deployments).
+                # The sweeper owns all lease hygiene; sweeper_enabled=False means
+                # an external sweeper process (multi-replica deployments).
                 if settings.executor_runtime.sweeper_enabled:
                     sweeper_thread = SweeperThread(
                         executor_leases,
@@ -179,6 +173,12 @@ def create_app(
                     workflow_worker_thread.start()
                 except Exception:
                     logging.getLogger(__name__).exception("workflow worker failed to start")
+                else:
+                    register_wakeup(workflow_worker_thread.wake)
+                    # Empty Worker claims demand immediate restocking (debounced).
+                    agent_broker.empty_claim.on_empty_queue = partial(
+                        request_restock, workflow_worker_thread
+                    )
         background_tasks.start(app)
         try:
             yield
@@ -187,6 +187,7 @@ def create_app(
             if sweeper_thread is not None:
                 sweeper_thread.stop()
             if workflow_worker_thread is not None:
+                unregister_wakeup(workflow_worker_thread.wake)
                 workflow_worker_thread.stop()
             close_database_pools()
 

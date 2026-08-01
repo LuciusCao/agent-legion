@@ -30,6 +30,10 @@ class GivenContent(BaseModel):
     model_config = ConfigDict(extra="forbid", strict=True)
     text: str
     position: Position
+    # Optional cross-type annotations emitted by newer pipeline versions.
+    fingerprint: str | None = None
+    derived_text: str | None = None
+    source_text: str | None = None
 
 
 class HiddenContent(BaseModel):
@@ -38,6 +42,9 @@ class HiddenContent(BaseModel):
     source_text: str
     position: Position
     derivation: str | None = None
+    # Optional cross-type annotations emitted by newer pipeline versions.
+    fingerprint: str | None = None
+    text: str | None = None
 
 
 class KeyInfoItem(BaseModel):
@@ -70,6 +77,9 @@ class PossibleErrorItem(BaseModel):
     error_description: str
     cognitive_basis: str
     related_key_info_ids: list[str]
+    # Optional annotations emitted by newer pipeline versions.
+    reason: str | None = None
+    cognitive_basis_type: str | None = None
 
 
 class ComprehensionDataV1(BaseModel):

@@ -6,7 +6,7 @@ import { MonitoringPage } from './MonitoringPage'
 
 vi.mock('../api/metrics', () => ({
   fetchOpsMetrics: vi.fn().mockResolvedValue({
-    granularity: 'minute',
+    granularity: '6h',
     buckets: [],
   }),
 }))

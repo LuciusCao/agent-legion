@@ -18,9 +18,18 @@ def heartbeat_loop(
     stop: threading.Event,
     interval: float,
     ownership_lost: threading.Event,
+    proc_ref: dict[str, subprocess.Popen[bytes] | None],
+    adopted: threading.Event,
 ) -> None:
-    """Beat until stopped; only 401/409 (ownership lost) stops the thread."""
+    """Beat until stopped; 401/409 or a dead, unadopted agent process stops it."""
     while not stop.wait(interval):
+        proc = proc_ref.get("proc")
+        if proc is not None and proc.poll() is not None and not adopted.is_set():
+            print(
+                f"heartbeat stopping for {execution_id}: agent process exited unadopted",
+                flush=True,
+            )
+            return
         try:
             status = client.heartbeat(execution_id, lease_id)
         except Exception as exc:  # transient network error: keep beating

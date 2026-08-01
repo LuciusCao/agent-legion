@@ -13,7 +13,7 @@ def claimed_worker_map(db_path: str, job_id: str) -> dict[str, str]:
             " from executor_leases l"
             " join agent_execution_requests r on r.execution_id = l.execution_id"
             " where l.job_id = ? and l.status = 'active'"
-            " and r.state = 'claimed' and r.worker_id is not null"
+            " and r.state in ('claimed', 'reporting') and r.worker_id is not null"
             " order by l.acquired_at, l.id",
             (job_id,),
         ).fetchall()

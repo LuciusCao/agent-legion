@@ -47,6 +47,7 @@ const mockContinueJob = vi.mocked(continueJob)
 const mockBatchRunToJobs = vi.mocked(batchRunToJobs)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
+const mockRefreshFirstPage = vi.fn()
 
 describe('jobStore', () => {
   beforeEach(() => {
@@ -55,6 +56,10 @@ describe('jobStore', () => {
       isLoading: false,
       error: null,
       selectedIds: new Set(),
+      selectionMode: 'explicit',
+      selectionFilter: null,
+      excludedIds: new Set(),
+      selectionCount: null,
       expandedId: null,
       filterConfig: {
         status: null,
@@ -64,8 +69,11 @@ describe('jobStore', () => {
       },
       batchRunToLoading: false,
       continueLoading: false,
+      refreshFirstPage: mockRefreshFirstPage,
     })
     mockFetchJobs.mockReset()
+    mockRefreshFirstPage.mockReset()
+    mockRefreshFirstPage.mockResolvedValue(undefined)
     mockBatchRerunJobs.mockReset()
     mockBatchDeleteJobs.mockReset()
     mockClearJobsPackedStatus.mockReset()
@@ -86,7 +94,7 @@ describe('jobStore', () => {
     expect(useJobStore.getState().selectedIds.has('j1')).toBe(false)
   })
 
-  it('selects all visible jobs', () => {
+  it('selects all matching jobs via the current filter', () => {
     useJobStore.setState(
       normalizeJobs([
         makeJob({ id: 'j1', status: 'pending' }),
@@ -94,7 +102,8 @@ describe('jobStore', () => {
       ])
     )
     useJobStore.getState().selectAll()
-    expect(useJobStore.getState().selectedIds.size).toBe(2)
+    expect(useJobStore.getState().selectionMode).toBe('allMatching')
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
   })
 
   it('filters by status', () => {
@@ -207,7 +216,7 @@ describe('jobStore', () => {
     expect(useJobStore.getState().expandedId).toBeNull()
   })
 
-  it('calls batch rerun endpoint and clears succeeded jobs from selection', async () => {
+  it('calls batch rerun endpoint and clears the selection afterwards', async () => {
     useJobStore.setState({
       ...normalizeJobs([
         makeJob({ id: 'j1', status: 'failed' }),
@@ -228,12 +237,13 @@ describe('jobStore', () => {
     expect(mockBatchRerunJobs).toHaveBeenCalledWith(
       'ws1',
       'extract',
-      ['j1', 'j2'],
+      { jobIds: ['j1', 'j2'] },
       { fromFailedNode: undefined }
     )
-    expect(useJobStore.getState().selectedIds.size).toBe(1)
-    expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(true)
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
+    expect(mockFetchJobs).not.toHaveBeenCalled()
     expect(mockShowToast).toHaveBeenCalledWith(
       '重跑完成：成功 1 项，跳过 1 项',
       'success'
@@ -291,12 +301,14 @@ describe('jobStore', () => {
 
     await useJobStore.getState().batchDelete('ws1')
 
-    expect(mockBatchDeleteJobs).toHaveBeenCalledWith('ws1', ['j1', 'j2', 'j3'])
+    expect(mockBatchDeleteJobs).toHaveBeenCalledWith('ws1', {
+      jobIds: ['j1', 'j2', 'j3'],
+    })
     expect(useJobStore.getState().jobs).toHaveLength(2)
     expect(useJobStore.getState().jobs.some((j) => j.id === 'j1')).toBe(false)
-    expect(useJobStore.getState().selectedIds.size).toBe(2)
-    expect(useJobStore.getState().selectedIds.has('j1')).toBe(false)
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(true)
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
     expect(mockShowToast).toHaveBeenCalledWith(
       '删除完成：成功 1 项，跳过 1 项，失败 1 项',
       'error'
@@ -339,10 +351,11 @@ describe('jobStore', () => {
 
     const result = await useJobStore.getState().batchPackage('ws1')
 
-    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', ['j1', 'j2'])
+    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', {
+      jobIds: ['j1', 'j2'],
+    })
     expect(result.download_url).toBe('/api/workspaces/ws1/packages/pkg.zip')
-    expect(useJobStore.getState().selectedIds.size).toBe(1)
-    expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(true)
     expect(mockShowToast).toHaveBeenCalledWith(
       '打包完成：成功 1 项，失败 1 项',
@@ -372,14 +385,16 @@ describe('jobStore', () => {
 
     await useJobStore.getState().batchPackage('ws1')
 
-    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', ['j1', 'j2'])
+    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', {
+      jobIds: ['j1', 'j2'],
+    })
     expect(mockShowToast).toHaveBeenCalledWith(
       '打包完成：成功 1 项，失败 1 项',
       'error'
     )
   })
 
-  it('clears packed status and refreshes jobs without changing selection', async () => {
+  it('clears packed status, refreshes the first page and clears selection', async () => {
     useJobStore.setState({
       ...normalizeJobs([
         makeJob({ id: 'j1', status: 'completed', packed: 1 }),
@@ -399,9 +414,12 @@ describe('jobStore', () => {
 
     await useJobStore.getState().batchClearPacked('ws1')
 
-    expect(mockClearJobsPackedStatus).toHaveBeenCalledWith('ws1', ['j1', 'j2'])
-    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
-    expect(useJobStore.getState().selectedIds).toEqual(new Set(['j1', 'j2']))
+    expect(mockClearJobsPackedStatus).toHaveBeenCalledWith('ws1', {
+      jobIds: ['j1', 'j2'],
+    })
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
+    expect(mockFetchJobs).not.toHaveBeenCalled()
+    expect(useJobStore.getState().selectedIds).toEqual(new Set())
     expect(mockShowToast).toHaveBeenCalledWith(
       '已清空打包状态：成功 2 项，失败 0 项',
       'success'
@@ -486,7 +504,7 @@ describe('jobStore', () => {
     expect(mockBatchRunToJobs).toHaveBeenCalledWith(
       'ws1',
       'review',
-      ['j1'],
+      { jobIds: ['j1'] },
       'extract'
     )
     expect(useJobStore.getState().selectedIds.size).toBe(0)
@@ -497,7 +515,7 @@ describe('jobStore', () => {
     )
   })
 
-  it('preserves skipped selections after batch run-to', async () => {
+  it('clears the selection after batch run-to partial results', async () => {
     useJobStore.setState({
       ...normalizeJobs([
         makeJob({ id: 'j1', status: 'failed' }),
@@ -515,8 +533,7 @@ describe('jobStore', () => {
 
     await useJobStore.getState().batchRunTo('ws1', 'review')
 
-    expect(useJobStore.getState().selectedIds.size).toBe(1)
-    expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(true)
   })
 
@@ -538,7 +555,7 @@ describe('jobStore', () => {
     )
   })
 
-  it('refreshes jobs immediately after batch run-to', async () => {
+  it('refreshes the first page immediately after batch run-to', async () => {
     useJobStore.setState({
       ...normalizeJobs([makeJob({ id: 'j1', status: 'failed' })]),
       selectedIds: new Set(['j1']),
@@ -550,7 +567,8 @@ describe('jobStore', () => {
 
     await useJobStore.getState().batchRunTo('ws1', 'review')
 
-    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
+    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('does nothing when batch run-to is invoked with empty selection', async () => {

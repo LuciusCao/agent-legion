@@ -47,6 +47,10 @@ class WorkerSupervisor:
         self._failed_reason: str | None = None
         self._warned_divergence = False
 
+    def _log(self, message: str) -> None:
+        """Append one panel log line with a local-time timestamp prefix."""
+        self._logs.append(f"[{time.strftime('%H:%M:%S')}] {message}")
+
     def start(self) -> None:
         with self._op_lock:
             self._shutdown = False
@@ -63,11 +67,11 @@ class WorkerSupervisor:
             config = self.store.read()
             token_file = Path(str(config["register_token_file"]))
             if not token_file.is_file():
-                self._logs.append(f"配置等待中：注册密钥文件不存在：{token_file}")
+                self._log(f"配置等待中：注册密钥文件不存在：{token_file}")
                 return
             if not self._warned_divergence and self._mounted_config_diverged():
                 self._warned_divergence = True
-                self._logs.append(
+                self._log(
                     "警告：挂载的配置文件与本地状态副本不一致，挂载修改不会自动生效；"
                     "可用 workerctl configure 覆盖，或删除状态文件后重启以重新导入"
                 )
@@ -132,10 +136,10 @@ class WorkerSupervisor:
             return
         for line in process.stdout:
             with self._lock:
-                self._logs.append(line.rstrip())
+                self._log(line.rstrip())
         exit_code = process.wait()
         with self._lock:
-            self._logs.append(f"Worker 执行进程已退出，退出码 {exit_code}")
+            self._log(f"Worker 执行进程已退出，退出码 {exit_code}")
             if generation == self._generation:
                 (self.store.state_dir / STATUS_FILENAME).unlink(missing_ok=True)
                 (self.store.state_dir / METRICS_FILENAME).unlink(missing_ok=True)
@@ -146,7 +150,7 @@ class WorkerSupervisor:
                 self._failed_reason = (
                     "Host 拒绝注册或 Worker 已被吊销（退出码 2），请修正配置后手动重启"
                 )
-                self._logs.append(self._failed_reason)
+                self._log(self._failed_reason)
                 return
             if self._started_at is not None and time.time() - self._started_at >= _STABLE_AFTER:
                 self._restart_count = 0
@@ -156,9 +160,7 @@ class WorkerSupervisor:
                 _RESTART_BACKOFF_MAX,
             )
             self._next_restart_delay = delay
-            self._logs.append(
-                f"{delay:.0f} 秒后自动重启 Worker 执行进程（第 {self._restart_count} 次）"
-            )
+            self._log(f"{delay:.0f} 秒后自动重启 Worker 执行进程（第 {self._restart_count} 次）")
         if self._restart_event.wait(delay):
             return
         with self._op_lock:

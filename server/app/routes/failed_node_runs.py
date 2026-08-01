@@ -66,6 +66,8 @@ def create_failed_node_runs_router(
             strategy=payload.strategy,
             job_ids=payload.job_ids,
             workflow_key=payload.workflow_key,
+            job_filter=payload.filter.to_filter() if payload.filter is not None else None,
+            exclude_ids=payload.exclude_ids,
         )
         return JobRerunByFailureResponse(
             results=[JobRerunByFailureResultResponse.model_validate(result) for result in results]

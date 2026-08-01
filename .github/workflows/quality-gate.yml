@@ -5,6 +5,9 @@ on:
     branches: [develop, main, master]
   push:
     branches: [develop, main, master]
+  # Nightly run: the only scheduled trigger for the ci-extended stress job.
+  schedule:
+    - cron: '23 3 * * *'
   workflow_dispatch:
 
 concurrency:
@@ -59,11 +62,24 @@ jobs:
 
       - run: uv sync
 
+      # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
+      # fail-closed: the tests/full e2e and bwrap-gated cargo tests need a
+      # real bubblewrap binary on the runner. Ubuntu 24.04 restricts
+      # unprivileged userns via AppArmor ("bwrap: setting up uid map:
+      # Permission denied"); setuid bwrap sidesteps that on the CI VM.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s "$(command -v bwrap)"
+
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
 
       - name: Backend tests
         run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        env:
+          # Local quick gate skips coverage; CI feeds the combined 85% floor.
+          AGENT_LEGION_COV: "1"
 
       - name: Full gate evidence (tests/full)
         run: uv run pytest -q tests/full -m full_gate --cov=server --cov-report= --cov-append
@@ -122,11 +138,47 @@ jobs:
         run: npm run build:bundle
         working-directory: frontend
 
+  rust:
+    name: rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      # Cold build is ~14 min; the cache is mandatory, not optional.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: velites
+
+      # Enables the bwrap-gated sandbox integration tests in cargo test.
+      # Ubuntu 24.04 restricts unprivileged userns via AppArmor ("bwrap:
+      # setting up uid map: Permission denied"); setuid bwrap sidesteps it.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s "$(command -v bwrap)"
+
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+        working-directory: velites
+
+      - name: cargo clippy
+        run: cargo clippy --all-targets --locked -- -D warnings
+        working-directory: velites
+
+      - name: cargo test
+        run: cargo test --locked
+        working-directory: velites
+
   ci-extended:
     name: ci-extended
-    # Repeated stress scenarios; too slow for the PR loop. Runs on branch
-    # pushes and manual dispatch, matching the old manual check-ci.sh policy.
-    if: github.event_name != 'pull_request'
+    # Repeated stress scenarios; too slow for the PR/push loop. Runs nightly
+    # (schedule) and on manual dispatch, replacing the old per-push policy.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     services:

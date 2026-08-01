@@ -4,7 +4,9 @@ import { fetchActions } from './actions/fetchActions'
 import { snapshotActions } from './actions/snapshotActions'
 import { appendActions } from './actions/appendActions'
 import { patchActions } from './actions/patchActions'
+import { paginationActions } from './actions/paginationActions'
 import { selectionActions } from './actions/selectionActions'
+import { selectionModeActions } from './actions/selectionModeActions'
 import { batchActions } from './actions/batchActions'
 import { rerunByFailureActions } from './actions/rerunByFailureActions'
 import { clearPackedActions } from './actions/clearPackedActions'
@@ -24,7 +26,9 @@ export const useJobStore = create<JobState>((set, get) => ({
   ...snapshotActions(set),
   ...appendActions(set),
   ...patchActions(set),
+  ...paginationActions(set, get),
   ...selectionActions(set, get),
+  ...selectionModeActions(set, get),
   ...batchActions(set, get),
   ...rerunByFailureActions(set, get),
   ...clearPackedActions(set, get),

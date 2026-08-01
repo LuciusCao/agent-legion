@@ -3,13 +3,26 @@
 
 api_base_url: "https://addons-api-pre.example.com/questionsource"
 
-# Authentication:
-#   The tool reads CMS_TOKEN from the environment (or .env) first.
-#   If CMS_TOKEN is not set, it generates a token using:
-#     CMS_APP_ID, CMS_NONCE, CMS_SECRET, CMS_TOKEN_URL
-#   (BASECMS_* names remain as deprecated aliases.)
-#   You can also override the token generation parameters below.
+# Authentication (priority order):
+#   1. CMS_TOKEN from the environment (or .env): use a ready-made JWT.
+#   2. token: below.
+#   3. user_auth: user-login JWT flow (the auth the CMS side currently supports):
+#        POST {login_url} {app_id, account_type, uname, password} -> data.user_token
+#        POST {auth_url}  {user_token, app_id}                   -> data.token (24h JWT)
+#      uname/password come from CMS_USER_NAME / CMS_USER_PASSWORD (or .env);
+#      never put the password in a tracked config file.
+#   4. token_gen: legacy HMAC flow (deprecated; CMS no longer issues these).
+#      BASECMS_* names remain as deprecated aliases for the CMS_* env vars.
 # token: "hardcoded-token-only-for-local-tests"
+# user_auth:
+#   app_id: 1001
+#   account_type: 1            # 1=student, 2=parent
+#   client_params: '{"source":"..."}'   # optional; some deployments reject
+#                                       # logins without it (code -9980440)
+#   login_url: "http://study-user-api-pre.internal.example.com/user/user/login"
+#   login_resolve_ip: "10.0.0.1"   # optional: bind the internal login host to
+#                                  # this IP when DNS does not resolve it
+#   auth_url: "https://addons-api-pre.example.com/common/v1/auth"
 # token_gen:
 #   app_id: "..."
 #   nonce: "..."

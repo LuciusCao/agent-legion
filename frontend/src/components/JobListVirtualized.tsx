@@ -1,6 +1,8 @@
 import { useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { useJobStore } from '../stores/jobStore'
 import { JobListVirtualRowById } from './JobListVirtualRowById'
+import { useJobListLoadMore } from './useJobListLoadMore'
 import styles from './JobList.module.css'
 
 interface JobListVirtualizedProps {
@@ -19,6 +21,7 @@ export function JobListVirtualized({
   onToggleSelect,
 }: JobListVirtualizedProps) {
   const parentRef = useRef<HTMLDivElement>(null)
+  const loadingMore = useJobStore((state) => state.loadingMore)
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is known to be safe here
   const rowVirtualizer = useVirtualizer({
     count: jobIds.length,
@@ -26,6 +29,9 @@ export function JobListVirtualized({
     getScrollElement: () => parentRef.current,
     overscan: 8,
   })
+  const virtualItems = rowVirtualizer.getVirtualItems()
+  const lastIndex = virtualItems[virtualItems.length - 1]?.index ?? -1
+  useJobListLoadMore(workspaceId, jobIds.length, lastIndex)
   return (
     <div ref={parentRef} className={styles.list} role="list">
       <div
@@ -35,7 +41,7 @@ export function JobListVirtualized({
           width: '100%',
         }}
       >
-        {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+        {virtualItems.map((virtualRow) => {
           const jobId = jobIds[virtualRow.index]
           if (!jobId) return null
           return (
@@ -51,6 +57,7 @@ export function JobListVirtualized({
           )
         })}
       </div>
+      {loadingMore && <div className={styles.loadingMore}>加载中…</div>}
     </div>
   )
 }

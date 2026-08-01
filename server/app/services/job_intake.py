@@ -6,6 +6,7 @@ from typing import Any
 
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
+from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_enqueue import enqueue_intake_batch
@@ -167,6 +168,8 @@ class JobIntakeService:
             workspace_id=workspace_id,
             revision=active_revision,
         )
+        if jobs:
+            notify_schedulable_work()
 
         if entity == "video" and workflow_key == "video_knowledge":
             for candidate, job in zip(candidates, jobs, strict=True):

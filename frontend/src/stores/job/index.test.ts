@@ -152,7 +152,12 @@ describe('useJobStore batchUpgradeWorkflow', () => {
       jobs,
       optionAccumulator: createOptionAccumulator(jobs),
       selectedIds: new Set(['j1', 'j2']),
+      selectionMode: 'explicit' as const,
+      selectionFilter: null,
+      excludedIds: new Set<string>(),
+      selectionCount: null,
       jobsWorkspaceId: 'ws1',
+      refreshFirstPage: vi.fn(),
     })
     vi.mocked(upgradeJobWorkflow).mockReset()
   })
@@ -182,7 +187,7 @@ describe('useJobStore batchUpgradeWorkflow', () => {
     expect(useJobStore.getState().selectMode).toBe(false)
   })
 
-  it('keeps failed jobs selected and reports failure', async () => {
+  it('reports per-job failures and clears the selection afterwards', async () => {
     vi.mocked(upgradeJobWorkflow)
       .mockResolvedValueOnce({
         job_id: 'j1',
@@ -201,6 +206,6 @@ describe('useJobStore batchUpgradeWorkflow', () => {
       .batchUpgradeWorkflow('ws1', ['j1', 'j2'])
 
     expect(result.results[1].status).toBe('failed')
-    expect(useJobStore.getState().selectedIds).toEqual(new Set(['j2']))
+    expect(useJobStore.getState().selectedIds).toEqual(new Set())
   })
 })

@@ -291,15 +291,26 @@ Quick gate (for daily development):
 ./scripts/check-quick.sh
 ```
 
-Runs two buffered parallel rounds: backend/frontend static checks first, then pytest/Vitest. The
-backend side covers Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture invariant checks
+Runs two buffered parallel rounds: backend/frontend/rust static checks first, then pytest/Vitest/cargo test. The
+backend side covers Ruff lint + format check, Python tests (no coverage by default; set
+`AGENT_LEGION_COV=1` to enable — the `fail_under = 85` floor is enforced by CI and
+`scripts/check.sh`), mypy, architecture invariant checks
 (`scripts/check_invariants.py`), shared skill asset checks (`scripts/check-skills-shared.py`), the
 whole-repository architecture contract check (`scripts/check_architecture.py`), and spec health
 (`scripts/verify_specs.py --check`). The frontend lane covers generated API drift, Prettier,
-ESLint, typecheck, and Vitest without coverage. Vitest uses its thread pool to reduce per-file
+ESLint, typecheck, and Vitest without coverage. The rust lane covers `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, and `cargo test` in `velites/` (skipped with a
+notice when cargo is not installed). Vitest uses its thread pool to reduce per-file
 process startup overhead while retaining file isolation. Repository-wide architecture assertions are
 excluded from the parallel pytest run because the backend lane executes the authoritative scan
 once after pytest.
+
+pytest runs under xdist with `-n auto` (all cores). On machines running several worktrees in
+parallel, cap it with `AGENT_LEGION_TEST_WORKERS` (e.g. `export AGENT_LEGION_TEST_WORKERS=4`) to
+avoid oversubscribing CPU and the shared Postgres. Backend test isolation is TRUNCATE-based:
+the per-worker schema is built once per pytest session and each test empties all tables
+(~50ms vs ~2.3s for a full rebuild). Tests that mutate DDL must opt into a full rebuild with
+`@pytest.mark.fresh_schema` (see `tests/db/test_workspace_cms_migration.py`).
 
 `mypy` runs with unreachable-code warnings enabled. When it flags code behind
 dynamic JSON, database, or framework boundaries, first check whether the type
@@ -324,7 +335,7 @@ Full gate (before committing or handing off):
 ./scripts/check.sh
 ```
 
-Runs the parallel quick gate with frontend coverage enabled, then runs full-gate backend evidence
+Runs the parallel quick gate with backend (`AGENT_LEGION_COV=1`) and frontend coverage enabled, then runs full-gate backend evidence
 and the frontend production bundle in parallel. Frontend tests and TypeScript typechecking are not
 repeated: coverage replaces the quick Vitest invocation, while the production extension only runs
 `vite build`. The non-blocking dependency vulnerability audit remains available through
@@ -358,13 +369,17 @@ the versioned `.githooks/` implementation from the current worktree when that br
 older worktrees without `.githooks/` remain unaffected. Successful gate evidence is shared:
 
 - pre-commit runs `scripts/check-fast.sh` for lint, formatting, and type feedback;
-- pre-push runs `scripts/check-quick.sh` for all branches, trimmed to the lanes
-  affected by the pushed paths (frontend-only pushes skip the backend pytest lane;
-  docs-only pushes run static checks only; shared files and new refs always run
-  all lanes);
-- the full gate (`scripts/check.sh` backend lane, frontend build) and the extended stress gate
-  (`scripts/check-ci.sh`) run on GitHub Actions — see `.github/workflows/quality-gate.yml` —
-  for pull requests and pushes to `develop`, `main`, or `master`;
+- pre-push defaults to the smoke level: static checks plus the curated smoke
+  test tier (`GATE_TIER=smoke`, membership in `tests/conftest.py`), trimmed to
+  the lanes affected by the pushed paths (frontend-only pushes skip the backend
+  pytest lane; `velites/`-only pushes run just the rust lane; docs-only pushes
+  run static checks only; shared files and new refs always run all lanes). Set
+  `AGENT_LEGION_GATE_LEVEL=quick` to run the full quick suite or
+  `AGENT_LEGION_GATE_LEVEL=full` for the local full gate on a single push;
+- the full gate (`scripts/check.sh` backend lane, frontend build) runs on
+  GitHub Actions — see `.github/workflows/quality-gate.yml` — for pull
+  requests and pushes to `develop`, `main`, or `master`; the extended stress
+  gate (`tests/ci -m ci_extended`) runs nightly and on manual dispatch;
 - successful pre-push evidence is cached by commit SHA in the Git common directory, so all
   worktrees can reuse an unchanged result;
 - pre-push refuses a dirty worktree so the verified commit is exactly the commit being pushed.
@@ -483,6 +498,39 @@ Rerunning a node deletes that node's and all downstream nodes' declared outputs 
 ### Authentication
 
 Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
+
+## velites Agent Harness
+
+velites is Agent Legion's own lightweight agent harness — a single static Rust binary in
+`velites/` — built to replace the Node Pi CLI as the headless executor for workflow agent
+nodes. Each Pi node execution today pays a Node cold start plus module load (~1.5–1.7 s CPU)
+and ~93 MB average RSS per process; velites targets <50 ms cold start and a fraction of the
+memory while emitting the exact pi-compatible event stream the host already consumes (see
+[docs/architecture/velites-harness.md](docs/architecture/velites-harness.md)).
+
+Current status: **flavor rollout in progress**. pi remains the default executor; velites is
+enabled per deployment via `workflows.pi.flavor: velites` and `workflows.pi.flavor: pi` rolls
+back with no data migration. The worker Docker image ships both binaries during the
+transition.
+
+Build and test locally (stable toolchain):
+
+```bash
+cd velites
+cargo build --release          # binary at velites/target/release/velites
+cargo test                     # includes the event-schema contract tests
+```
+
+The event schema is derived from the serde definitions in `velites/src/events.rs`; after
+changing events, regenerate the committed schema and keep the contract tests green:
+
+```bash
+cd velites
+cargo run --bin velites-schema -- schema/events.schema.json
+```
+
+The quick gate (`scripts/check-quick.sh`) and CI run `cargo fmt --check`,
+`cargo clippy --all-targets -- -D warnings`, and `cargo test` as the rust lane.
 
 ## User Authentication
 

@@ -14,21 +14,17 @@ from typing import Any, Protocol
 from worker.status import ENV_VAR
 
 METRICS_FILENAME = "ops_metrics.json"
-METRIC_WINDOWS = (
-    ("minute", 6, 7),
-    ("hour", 24, 7),
-    ("day", 6, 7),
-)
+METRIC_WINDOWS = ("6h", "24h", "30d")
 _REFRESH_SECONDS = 60.0
 
 
 class MetricsClient(Protocol):
-    def get_ops_metrics(self, granularity: str, hours: int, days: int) -> dict[str, Any]: ...
+    def get_ops_metrics(self, granularity: str) -> dict[str, Any]: ...
 
 
-def metrics_cache_key(granularity: str, hours: int, days: int) -> str:
-    window = days if granularity == "day" else hours
-    return f"{granularity}:{window}"
+def metrics_cache_key(granularity: str) -> str:
+    # 窗口由 granularity 唯一决定（6h/24h/30d），不再带 hours/days 参数。
+    return granularity
 
 
 def metrics_cache_path(state_dir: Path) -> Path:
@@ -71,13 +67,13 @@ class WorkerMetricsCache:
         if current < self._next_refresh:
             return
         errors: list[str] = []
-        for granularity, hours, days in METRIC_WINDOWS:
+        for granularity in METRIC_WINDOWS:
             try:
-                payload = client.get_ops_metrics(granularity, hours, days)
+                payload = client.get_ops_metrics(granularity)
             except Exception as exc:  # noqa: BLE001 - one failed window must not block Worker status
                 errors.append(f"{granularity}: {exc}")
             else:
-                self._snapshots[metrics_cache_key(granularity, hours, days)] = payload
+                self._snapshots[metrics_cache_key(granularity)] = payload
         self._next_refresh = current + self._refresh_seconds
         self.publish(self._snapshots, "; ".join(errors) or None)
 

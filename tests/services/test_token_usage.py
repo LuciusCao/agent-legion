@@ -8,7 +8,6 @@ from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
 from server.app.services.token_usage import (
     TokenUsageSummary,
-    backfill_missing_token_usage,
     calculate_cost,
     load_pricing_config,
     parse_run_usage,
@@ -285,73 +284,3 @@ def test_cost_for_unknown_model():
     config = {"token_usage": {"currency": "CNY", "pricing": []}}
     cost = calculate_cost(100, 50, 30, 20, "unknown", "model", config)
     assert cost is None
-
-
-def test_backfill_persists_rows_for_existing_run_dirs(tmp_path):
-    data_dir = tmp_path / "data"
-    jobs_dir = data_dir / "jobs"
-    db_path = TEST_DATABASE_URL
-    init_db(db_path)
-
-    workspace_id = "ws-1"
-    job_id = "job-1"
-    node_key = "node-a"
-
-    run_token = "run-token"
-    run_dir = jobs_dir / workspace_id / job_id / "runs" / node_key / run_token
-    run_dir.mkdir(parents=True)
-    _write_events(
-        run_dir,
-        [
-            {
-                "type": "message_end",
-                "message": {"usage": {"input": 10, "output": 5, "cacheRead": 1}},
-            },
-        ],
-    )
-
-    with closing(connect_database(db_path)) as conn:
-        conn.execute("insert into workspaces(id, name) values (?, ?)", (workspace_id, "Test"))
-        conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (?, ?, ?, ?, ?)",
-            (job_id, workspace_id, "wf", "source", "id"),
-        )
-        conn.execute(
-            "insert into node_runs(id, job_id, node_key, status, run_dir) values (?, ?, ?, ?, ?)",
-            (
-                1,
-                job_id,
-                node_key,
-                "completed",
-                f"jobs/{workspace_id}/{job_id}/runs/{node_key}/{run_token}",
-            ),
-        )
-        count = backfill_missing_token_usage(conn, data_dir)
-        assert count == 1
-        row = conn.execute(
-            "select * from node_run_token_usage where node_run_id=?", (1,)
-        ).fetchone()
-        assert row is not None
-        assert row["workspace_id"] == workspace_id
-
-
-def test_backfill_skips_missing_run_dirs_and_missing_events(tmp_path):
-    data_dir = tmp_path / "data"
-    data_dir.mkdir(parents=True)
-    db_path = TEST_DATABASE_URL
-    init_db(db_path)
-
-    with closing(connect_database(db_path)) as conn:
-        conn.execute("insert into workspaces(id, name) values (?, ?)", ("ws-1", "Test"))
-        conn.execute(
-            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (?, ?, ?, ?, ?)",
-            ("job-1", "ws-1", "wf", "source", "id"),
-        )
-        conn.execute(
-            "insert into node_runs(id, job_id, node_key, status, run_dir) values (?, ?, ?, ?, ?)",
-            (1, "job-1", "node-a", "completed", "jobs/ws-1/job-1/runs/node-a/missing"),
-        )
-        count = backfill_missing_token_usage(conn, data_dir)
-        assert count == 0

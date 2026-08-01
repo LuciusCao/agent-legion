@@ -3,8 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
+import { useJobFilterRefetch } from './useJobFilterRefetch'
 import { useWorkspacePackageActions } from './useWorkspacePackageActions'
 import { useWorkspaceRerunActions } from './useWorkspaceRerunActions'
+import { useWorkspaceSelection } from './useWorkspaceSelection'
 import { JobFilterBar } from '../components/JobFilterBar'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
@@ -26,9 +28,7 @@ export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const { fetchWorkspaceStats, workspaceStats } = useWorkspaceStore()
-  const jobsById = useJobStore((state) => state.jobsById)
   const jobIds = useJobStore((state) => state.jobIds)
-  const selectedIds = useJobStore((state) => state.selectedIds)
   const filterConfig = useJobStore((state) => state.filterConfig)
   const setFilterConfig = useJobStore((state) => state.setFilterConfig)
   const selectAll = useJobStore((state) => state.selectAll)
@@ -56,6 +56,7 @@ export default function WorkspaceMainPage() {
     useState<WorkflowDefinitionRecord | null>(null)
   const [workflowError, setWorkflowError] = useState<string | null>(null)
   useWorkspaceEvents(workspaceId)
+  useJobFilterRefetch(workspaceId)
 
   useEffect(() => {
     if (workspaceId) {
@@ -86,14 +87,14 @@ export default function WorkspaceMainPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
   const filterCounts = useJobStore(selectFilterCounts)
-  const totalJobs = jobIds.length
-  const selectedJobs = useMemo(
-    () =>
-      Array.from(selectedIds)
-        .map((id) => jobsById[id])
-        .filter((job): job is NonNullable<typeof job> => job !== undefined),
-    [selectedIds, jobsById]
-  )
+  const totalJobs = useJobStore((state) => state.totalJobs) ?? jobIds.length
+  const filtersActive =
+    filterConfig.status !== null ||
+    filterConfig.search.trim() !== '' ||
+    filterConfig.workflowVersion !== null ||
+    filterConfig.activeNodeKey !== null
+  const { selectedJobs, selectedCount, allMatchingCount } =
+    useWorkspaceSelection()
 
   const workflowNodesByKey = useMemo(() => {
     if (!workflowDefinition) return {}
@@ -150,7 +151,8 @@ export default function WorkspaceMainPage() {
         <>
           <JobActionBar
             jobs={selectedJobs}
-            selectedCount={selectedIds.size}
+            selectedCount={selectedCount}
+            allMatchingCount={allMatchingCount}
             workflowDefinition={workflowDefinition}
             workflowNodesByKey={workflowNodesByKey}
             mode="batch"
@@ -174,7 +176,8 @@ export default function WorkspaceMainPage() {
           />
           <BatchDeleteDialog
             open={deleteDialogOpen}
-            count={selectedIds.size}
+            count={selectedCount}
+            allMatching={allMatchingCount != null}
             onClose={() => setDeleteDialogOpen(false)}
             onConfirm={handleDeleteConfirm}
           />
@@ -195,7 +198,10 @@ export default function WorkspaceMainPage() {
         />
       </section>
 
-      {filteredJobIds.length === 0 && totalJobs === 0 && !jobsLoading ? (
+      {filteredJobIds.length === 0 &&
+      totalJobs === 0 &&
+      !jobsLoading &&
+      !filtersActive ? (
         <section className={styles.section}>
           <EmptyStateGuide steps={emptyStateSteps} />
         </section>
