@@ -1,32 +1,41 @@
-"""HTTP client for the Worker's pull protocol against the Host."""
+"""HTTP client for the Worker's pull protocol against the Host.
+
+Control calls (register/claim/heartbeat/metrics) live here; retried bulk
+transfers (download/upload/report/release-slot) come from the
+``TransferOperations`` mixin in ``worker.host_transfer``.
+"""
 
 from __future__ import annotations
 
 import json
-import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
 from typing import Any
+
+from worker.host_transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
 PROTOCOL_VERSION = 1
 
-# Artifact upload retry: transient Host 5xx / connection failures get
-# exponential backoff before the run is reported as failed.
-_UPLOAD_MAX_ATTEMPTS = 3
-_UPLOAD_BACKOFF_BASE_SECONDS = 1.0
+DEFAULT_TIMEOUT = 30
 
 
 class WorkerAuthError(RuntimeError):
     """Server rejected this Worker as unknown or revoked; re-registration is required."""
 
 
-class Client:
-    def __init__(self, host: str, token: str = "", timeout: float = 30) -> None:
+class Client(TransferOperations):
+    def __init__(
+        self,
+        host: str,
+        token: str = "",
+        timeout: float = DEFAULT_TIMEOUT,
+        transfer_timeout: float = DEFAULT_TRANSFER_TIMEOUT,
+    ) -> None:
         self.host = host.rstrip("/")
         self.token = token
         self.timeout = timeout
+        self.transfer_timeout = transfer_timeout
 
     def request(
         self,
@@ -35,6 +44,7 @@ class Client:
         *,
         data: bytes | None = None,
         headers: dict[str, str] | None = None,
+        timeout: float | None = None,
     ) -> tuple[int, bytes]:
         request = urllib.request.Request(
             f"{self.host}{path}",
@@ -46,7 +56,9 @@ class Client:
             },
         )
         try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+            with urllib.request.urlopen(
+                request, timeout=self.timeout if timeout is None else timeout
+            ) as response:
                 return response.status, response.read()
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()
@@ -117,45 +129,15 @@ class Client:
             raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
         return json.loads(body)
 
-    def get_ops_metrics(self, granularity: str, hours: int, days: int) -> dict[str, Any]:
+    def get_ops_metrics(self, granularity: str) -> dict[str, Any]:
         """Fetch this Worker's metrics with its issued Worker token."""
-        query = urllib.parse.urlencode({"granularity": granularity, "hours": hours, "days": days})
+        query = urllib.parse.urlencode({"granularity": granularity})
         status, body = self.request("GET", f"/api/agent-workers/self/metrics?{query}")
         if status in (401, 409):
             raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
         if status != 200:
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
         return json.loads(body)
-
-    def download(self, path: str, destination: Path) -> None:
-        status, body = self.request("GET", path)
-        if status != 200:
-            raise RuntimeError(f"download failed: {path}: HTTP {status}")
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(body)
-
-    def upload_artifact(self, path: Path) -> str:
-        """Upload one output artifact, retrying transient Host failures.
-
-        5xx responses and connection-level errors get exponential backoff
-        (1s, 2s, 4s, …); 4xx and repeated failures raise immediately.
-        """
-        data = path.read_bytes()
-        error = ""
-        for attempt in range(_UPLOAD_MAX_ATTEMPTS):
-            try:
-                status, body = self.request("POST", "/api/artifacts", data=data)
-            except urllib.error.URLError as exc:
-                status, error = 0, str(exc)
-            else:
-                if status == 201:
-                    return f"sha256:{json.loads(body)['hash']}"
-                error = f"HTTP {status}: {body[:200]!r}"
-            retryable = status == 0 or status >= 500
-            if not retryable or attempt + 1 == _UPLOAD_MAX_ATTEMPTS:
-                break
-            time.sleep(_UPLOAD_BACKOFF_BASE_SECONDS * 2**attempt)
-        raise RuntimeError(f"artifact upload failed: {error}")
 
     def heartbeat(self, execution_id: str, lease_id: str) -> int:
         status, _ = self.request(
@@ -164,18 +146,3 @@ class Client:
             headers={"X-Agent-Lease-Id": lease_id},
         )
         return status
-
-    def report(
-        self, execution_id: str, lease_id: str, metadata: dict[str, Any], archive: Path
-    ) -> None:
-        status, body = self.request(
-            "POST",
-            f"/api/agent-executions/{execution_id}/result",
-            data=archive.read_bytes(),
-            headers={
-                "X-Agent-Result": json.dumps(metadata, ensure_ascii=True),
-                "X-Agent-Lease-Id": lease_id,
-            },
-        )
-        if status != 204:
-            raise RuntimeError(f"Agent result failed: HTTP {status}: {body[:300]!r}")

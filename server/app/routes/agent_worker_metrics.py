@@ -1,8 +1,8 @@
 from __future__ import annotations
 
-from typing import Annotated, Any, Literal, Protocol
+from typing import Any, Literal, Protocol
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Request
 
 from server.app.routes.metrics_contracts import MetricBucket, OpsMetricsResponse
 from server.app.services.ops_metrics import OpsMetricsService
@@ -26,17 +26,13 @@ def create_agent_worker_metrics_router(
     @router.get("/agent-workers/self/metrics", response_model=OpsMetricsResponse)
     def get_worker_metrics(
         request: Request,
-        granularity: Literal["minute", "hour", "day"] = "minute",
-        hours: Annotated[int, Query(ge=1, le=24)] = 6,
-        days: Annotated[int, Query(ge=1, le=30)] = 7,
+        granularity: Literal["6h", "24h", "30d"] = "6h",
     ) -> OpsMetricsResponse:
         worker = authorize_worker(request)
         buckets = [
             MetricBucket(**bucket)
             for bucket in ops_metrics.query_series(
                 granularity,
-                hours,
-                days,
                 str(worker["worker_id"]),
             )
         ]

@@ -2,11 +2,13 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
+
+from server.app.routes.job_batch_filter_contracts import JobSelectionMixin
 
 
-class WorkspacePackageRequest(BaseModel):
-    job_ids: list[str] = Field(default_factory=list)
+class WorkspacePackageRequest(JobSelectionMixin):
+    pass
 
 
 class WorkspacePackageResultResponse(BaseModel):

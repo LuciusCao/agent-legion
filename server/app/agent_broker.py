@@ -1,8 +1,8 @@
 """PostgreSQL Agent queue protocol: enqueue, claim, heartbeat, result close.
 
 The claim transaction lives in ``_agent_broker_claim.py``, the periodic
-sweeps in ``_agent_broker_sweepers.py``, and bundle-dir GC in
-``_agent_broker_reaper.py`` — mirroring the ``executors/_lease_*.py`` split.
+sweeps in ``_agent_broker_sweepers.py``, slot release in
+``_agent_broker_release.py``, bundle-dir GC in ``_agent_broker_reaper.py``.
 """
 
 from __future__ import annotations
@@ -18,12 +18,13 @@ from typing import TYPE_CHECKING, Any
 
 from psycopg import IntegrityError
 
-from server.app import _agent_broker_reaper, _agent_broker_sweepers
+from server.app import _agent_broker_reaper, _agent_broker_release, _agent_broker_sweepers
 from server.app._agent_broker_claim import (
     AgentClaim,
     ClaimRacedError,
     claim_in_transaction,
 )
+from server.app._agent_broker_empty import EmptyClaimTrigger
 from server.app._agent_broker_reaper import _SAFE_BUNDLE_NAME
 from server.app.agent_worker_capacity import touch_worker
 from server.app.db.connection import DatabaseDsn
@@ -85,12 +86,16 @@ class AgentExecutionBroker:
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
         self._fairness_counter = itertools.count()
+        # Incremental bundle-GC cursor, see _agent_broker_reaper.
+        self._reap_watermark: datetime | None = None
+        # Debounced empty-claim restock signal, see _agent_broker_empty.
+        self.empty_claim = EmptyClaimTrigger()
 
     def has_active_request(self, job_id: str, node_key: str) -> bool:
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select 1 from agent_execution_requests"
-                " where job_id=? and node_key=? and state in ('queued', 'claimed') limit 1",
+                " where job_id=? and node_key=? and state in ('queued', 'claimed', 'reporting') limit 1",
                 (job_id, node_key),
             ).fetchone()
         return row is not None
@@ -166,6 +171,10 @@ class AgentExecutionBroker:
                 claimed = claim_in_transaction(self, conn, worker_id, declared_max_concurrency)
         except ClaimRacedError:
             return None
+        if claimed is None:
+            # Demand signal: a Worker found no work; restock immediately when
+            # the queue is truly empty (debounced, see _agent_broker_empty).
+            self.empty_claim.note_empty_claim(self.database_dsn)
         # Record only after the commit has succeeded, never inside the tx.
         if claimed is not None:
             record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
@@ -173,11 +182,8 @@ class AgentExecutionBroker:
         return claimed
 
     def _notify_worker_poll(self, worker_id: str, claimed: AgentClaim | None) -> None:
-        """Mirror Worker presence/capacity into the status panel.
-
-        An idle Worker polls claim every few seconds, so every poll registers
-        one panel row per workspace the Worker may serve ("name busy/cap");
-        a successful claim additionally marks the row busy."""
+        """Mirror Worker presence/capacity into the status panel: every idle
+        poll registers one row per servable workspace; a claim marks busy."""
         manager = self.agent_status
         if manager is None:
             return
@@ -206,17 +212,19 @@ class AgentExecutionBroker:
         if self.agent_status is not None:
             self.agent_status.set_idle(worker_id, workspace_id=workspace_id)
 
-    def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
-        """Renew the lease; bound to the current lease_id so zombie attempts
-        from a requeued execution cannot keep a re-claimed lease alive.
+    def release_slot(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
+        """Flip claimed -> reporting, freeing execution capacity (lease stays owned)."""
+        return _agent_broker_release.release_slot(self, execution_id, worker_id, lease_id)
 
-        Route note (routes owner): the heartbeat endpoint must accept the
-        worker's current lease_id and pass it through."""
+    def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
+        """Renew the lease, bound to the current lease_id so zombie attempts
+        from a requeued execution cannot keep a re-claimed lease alive."""
         expires_at = datetime.now(UTC) + timedelta(seconds=self.lease_ttl_seconds)
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id from agent_execution_requests"
-                " where execution_id=? and worker_id=? and lease_id=? and state='claimed'"
+                " where execution_id=? and worker_id=? and lease_id=?"
+                " and state in ('claimed', 'reporting')"
                 " for update",
                 (execution_id, worker_id, lease_id),
             ).fetchone()
@@ -239,7 +247,7 @@ class AgentExecutionBroker:
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select manifest_json, lease_id, job_id, node_key from agent_execution_requests"
-                " where execution_id=? and worker_id=? and state='claimed'",
+                " where execution_id=? and worker_id=? and state in ('claimed', 'reporting')",
                 (execution_id, worker_id),
             ).fetchone()
         if row is None:
@@ -255,14 +263,12 @@ class AgentExecutionBroker:
         self, execution_id: str, worker_id: str, lease_id: str, outcome: Mapping[str, Any]
     ) -> str | None:
         """Close the request; bound to the current lease_id so a late result
-        from a previous attempt is rejected after a requeue/re-claim.
-
-        Route note (routes owner): the result endpoint must require the
-        worker's lease_id (header or metadata) and pass it through."""
+        from a previous attempt is rejected after a requeue/re-claim."""
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id, agent_id, workspace_id from agent_execution_requests"
-                " where execution_id=? and worker_id=? and lease_id=? and state='claimed'"
+                " where execution_id=? and worker_id=? and lease_id=?"
+                " and state in ('claimed', 'reporting')"
                 " for update",
                 (execution_id, worker_id, lease_id),
             ).fetchone()

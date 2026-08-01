@@ -11,6 +11,7 @@ from server.app.executors.runtime_config import PiRuntimeConfig
 @dataclass(frozen=True)
 class PiConfig:
     binary: str = "pi"
+    flavor: str = "pi"  # "pi" | "velites"；合法性由 from_config / PiRuntimeConfig 保证
     provider: str = ""
     model: str = ""
     thinking: str = "low"
@@ -23,6 +24,7 @@ class PiConfig:
         """Build an immutable PiConfig from a validated PiRuntimeConfig."""
         return cls(
             binary=config.binary,
+            flavor=config.flavor,
             provider=config.provider,
             model=config.model,
             thinking=config.thinking or "low",
@@ -37,6 +39,12 @@ class PiConfig:
         binary = raw.get("binary")
         if not binary or not isinstance(binary, str):
             raise ValueError("Pi binary is required")
+        # 未知 flavor fail-fast（与 PiRuntimeConfig 的 Literal 校验同一惯例）。
+        flavor = str(raw.get("flavor", "pi")).strip() or "pi"
+        if flavor not in ("pi", "velites"):
+            raise ValueError(f"Pi flavor must be 'pi' or 'velites', got {flavor!r}")
+        if flavor == "velites" and binary == "pi":
+            binary = "velites"  # 与 PiRuntimeConfig 同一归一化：binary 默认值跟随 flavor
         timeout = raw.get("timeout_seconds", 600)
         if not isinstance(timeout, int) or timeout < 1:
             raise ValueError("Pi timeout_seconds must be a positive integer")
@@ -45,6 +53,7 @@ class PiConfig:
             env = {}
         return cls(
             binary=binary,
+            flavor=flavor,
             provider=str(raw.get("provider", "")),
             model=str(raw.get("model", "")),
             thinking=str(raw.get("thinking", "low")),

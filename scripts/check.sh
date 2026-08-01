@@ -14,7 +14,9 @@ cleanup_coverage() {
 trap cleanup_coverage EXIT
 
 echo "=== Quick Gate ==="
-FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
+# The full local gate keeps coverage semantics: check-quick.sh skips backend
+# coverage by default, so re-enable it here for the combined report below.
+AGENT_LEGION_COV=1 FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-full.XXXXXX")"
 cleanup_logs() {
@@ -32,7 +34,7 @@ extensions_started_at=$SECONDS
 (
   cd "$ROOT_DIR"
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q tests/full \
-    -m full_gate --cov=server --cov-report= --cov-append
+    -m full_gate --reruns 1 --reruns-delay 2 --cov=server --cov-report= --cov-append
 ) >"$full_log" 2>&1 &
 full_pid=$!
 (

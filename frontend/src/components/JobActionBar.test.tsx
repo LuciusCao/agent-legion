@@ -491,3 +491,69 @@ describe('JobActionBar', () => {
     expect(onUpgradeWorkflow).toHaveBeenCalledWith(['j1'])
   })
 })
+
+describe('JobActionBar in allMatching selection mode', () => {
+  function renderAllMatching(onRerun = vi.fn()) {
+    render(
+      <JobActionBar
+        jobs={[makeJob({ id: 'j1', status: 'failed' })]}
+        workflowDefinition={workflow}
+        mode="batch"
+        selectedCount={10}
+        allMatchingCount={10}
+        filters={[{ key: 'clear', label: '取消选择', onClick: vi.fn() }]}
+        onExitSelectMode={vi.fn()}
+        onRerun={onRerun}
+        onRunTo={vi.fn()}
+        onPackage={vi.fn()}
+        onClearPacked={vi.fn()}
+        onDelete={vi.fn()}
+        onUpgradeWorkflow={vi.fn()}
+      />
+    )
+    return { onRerun }
+  }
+
+  it('keeps filter-safe actions enabled and disables per-job actions', () => {
+    renderAllMatching()
+
+    expect(screen.getByText(/已选择 10 项/)).toBeInTheDocument()
+    expect(screen.getByText('删除')).not.toHaveAttribute('disabled')
+    expect(screen.getByText('打包')).not.toHaveAttribute('disabled')
+    expect(screen.getByText('清空打包状态')).not.toHaveAttribute('disabled')
+    expect(screen.getByText('重跑')).not.toHaveAttribute('disabled')
+    expect(screen.getByText('运行到')).toHaveAttribute('disabled')
+    expect(screen.getByText('升级 workflow')).toHaveAttribute('disabled')
+  })
+
+  it('opens the all-matching rerun dialog and confirms full scope', async () => {
+    const { onRerun } = renderAllMatching()
+
+    await act(async () => {
+      screen.getByText('重跑').click()
+    })
+    expect(
+      screen.getByText('将对符合筛选条件的 10 个 job 执行')
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认重跑').click()
+    })
+    expect(onRerun).toHaveBeenCalledWith(null, true, undefined, undefined)
+  })
+
+  it('confirms a specific failure category in allMatching mode', async () => {
+    const { onRerun } = renderAllMatching()
+
+    await act(async () => {
+      screen.getByText('重跑').click()
+    })
+    await act(async () => {
+      screen.getByTestId('rerun-chip-technical').click()
+    })
+    await act(async () => {
+      screen.getByText('确认重跑').click()
+    })
+    expect(onRerun).toHaveBeenCalledWith(null, true, undefined, 'technical')
+  })
+})

@@ -29,6 +29,7 @@ import { makeAgentStatus } from '../testing/workspaceFixtures'
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
 const mockFetchJobsSnapshot = vi.fn()
+const mockFetchJobFacets = vi.fn()
 const mockFetchWorkspaceStats = vi.fn()
 const mockFetchWorkspacePackages = vi.fn()
 const mockFetchWorkflowDefinition = vi.fn()
@@ -44,6 +45,9 @@ vi.mock('../api', () => ({
   fetchJobsSnapshot: (
     ...args: Parameters<typeof import('../api').fetchJobsSnapshot>
   ) => mockFetchJobsSnapshot(...args),
+  fetchJobFacets: (
+    ...args: Parameters<typeof import('../api').fetchJobFacets>
+  ) => mockFetchJobFacets(...args),
   fetchWorkspaceStats: (
     ...args: Parameters<typeof import('../api').fetchWorkspaceStats>
   ) => mockFetchWorkspaceStats(...args),
@@ -181,6 +185,7 @@ describe('WorkspaceMainPage', () => {
     mockApi.mockReset()
     mockFetchJobs.mockReset()
     mockFetchJobsSnapshot.mockReset()
+    mockFetchJobFacets.mockReset()
     mockFetchWorkspaceStats.mockReset()
     mockFetchWorkspacePackages.mockReset()
     mockFetchWorkflowDefinition.mockReset()
@@ -200,6 +205,13 @@ describe('WorkspaceMainPage', () => {
         next_cursor: null,
       })
     )
+    mockFetchJobFacets.mockResolvedValue({
+      workspace_id: 'ws1',
+      total: 0,
+      status_counts: {},
+      version_counts: {},
+      node_counts: {},
+    })
     mockFetchWorkspaceStats.mockResolvedValue(baseStats)
     mockFetchWorkspacePackages.mockResolvedValue({ packages: [] })
     mockFetchWorkflowDefinition.mockResolvedValue({
@@ -221,6 +233,10 @@ describe('WorkspaceMainPage', () => {
       isLoading: false,
       error: null,
       selectedIds: new Set(),
+      selectionMode: 'explicit',
+      selectionFilter: null,
+      excludedIds: new Set(),
+      selectionCount: null,
       expandedId: null,
       filterConfig: {
         status: null,
@@ -409,7 +425,13 @@ describe('WorkspaceMainPage', () => {
     await waitFor(() => {
       expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(1)
     })
-    expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1', 200, undefined)
+    expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1', 500, undefined, {
+      status: null,
+      search: null,
+      workflow_version: null,
+      workflow_version_none: false,
+      active_node_key: null,
+    })
   })
 
   it('search input updates query after debounce', async () => {
@@ -531,9 +553,14 @@ describe('WorkspaceMainPage', () => {
       screen.getByText('重跑 1 个任务').click()
     })
 
-    expect(mockBatchRerunJobs).toHaveBeenCalledWith('ws1', 'extract', ['j1'], {
-      fromFailedNode: false,
-    })
+    expect(mockBatchRerunJobs).toHaveBeenCalledWith(
+      'ws1',
+      'extract',
+      { jobIds: ['j1'] },
+      {
+        fromFailedNode: false,
+      }
+    )
   })
 
   it('opens package download URL after batch package', async () => {
@@ -564,7 +591,7 @@ describe('WorkspaceMainPage', () => {
       screen.getByText('打包').click()
     })
 
-    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', ['j1'])
+    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', { jobIds: ['j1'] })
     expect(openSpy).toHaveBeenCalledWith(
       '/api/workspaces/ws1/packages/pkg.zip',
       '_blank'
@@ -602,7 +629,7 @@ describe('WorkspaceMainPage', () => {
       fireEvent.click(deleteButtons[deleteButtons.length - 1])
     })
 
-    expect(mockBatchDeleteJobs).toHaveBeenCalledWith('ws1', ['j1'])
+    expect(mockBatchDeleteJobs).toHaveBeenCalledWith('ws1', { jobIds: ['j1'] })
   })
 
   it('submits batch run-to with selected target and optional start node', async () => {
@@ -656,12 +683,12 @@ describe('WorkspaceMainPage', () => {
     expect(mockBatchRunToJobs).toHaveBeenCalledWith(
       'ws1',
       'review',
-      ['j1'],
+      { jobIds: ['j1'] },
       undefined
     )
   })
 
-  it('preserves skipped selections after batch run-to partial results', async () => {
+  it('clears the selection after batch run-to partial results', async () => {
     mockBatchRunToJobs.mockResolvedValueOnce({
       results: [
         { job_id: 'j1', operation: 'run_to', status: 'succeeded' },
@@ -711,12 +738,11 @@ describe('WorkspaceMainPage', () => {
     })
 
     await waitFor(() => {
-      expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+      expect(useJobStore.getState().selectedIds.size).toBe(0)
     })
-    expect(useJobStore.getState().selectedIds.has('j1')).toBe(false)
   })
 
-  it('refreshes jobs immediately after batch run-to', async () => {
+  it('refreshes the first page immediately after batch run-to', async () => {
     mockBatchRunToJobs.mockResolvedValueOnce({
       results: [{ job_id: 'j1', operation: 'run_to', status: 'succeeded' }],
     })
@@ -757,8 +783,9 @@ describe('WorkspaceMainPage', () => {
     })
 
     await waitFor(() => {
-      expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+      expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(2)
     })
+    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('submits batch workflow upgrade for outdated jobs', async () => {
@@ -800,6 +827,65 @@ describe('WorkspaceMainPage', () => {
 
     await waitFor(() => {
       expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1')
+    })
+  })
+
+  it('selects all matching jobs and deletes them via a filter payload', async () => {
+    mockBatchDeleteJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'delete', status: 'succeeded' }],
+    })
+    const seed = [
+      makeJob({ id: 'j1', status: 'failed' }),
+      makeJob({ id: 'j2', status: 'failed', source_id: 'Q2' }),
+    ]
+    useJobStore.setState({
+      jobs: seed,
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    seedJobs(seed)
+    await loadJobsViaSSE()
+    act(() => {
+      useJobStore.setState({ totalJobs: 25 })
+    })
+
+    await act(async () => {
+      screen.getByText('全选').click()
+    })
+
+    expect(useJobStore.getState().selectionMode).toBe('allMatching')
+    expect(screen.getByText(/已选择 25 项/)).toBeInTheDocument()
+    expect(screen.getByText('运行到')).toHaveAttribute('disabled')
+    expect(screen.getByText('升级 workflow')).toHaveAttribute('disabled')
+
+    await act(async () => {
+      screen.getByText('删除').click()
+    })
+    expect(
+      screen.getByText(/将对符合筛选条件的 25 个 job 执行删除/)
+    ).toBeInTheDocument()
+
+    const deleteButtons = screen.getAllByText('删除')
+    await act(async () => {
+      fireEvent.click(deleteButtons[deleteButtons.length - 1])
+    })
+
+    expect(mockBatchDeleteJobs).toHaveBeenCalledWith('ws1', {
+      filter: {
+        status: null,
+        search: null,
+        workflow_version: null,
+        workflow_version_none: false,
+        active_node_key: null,
+      },
+      excludeIds: [],
+    })
+    await waitFor(() => {
+      expect(useJobStore.getState().selectionMode).toBe('explicit')
     })
   })
 

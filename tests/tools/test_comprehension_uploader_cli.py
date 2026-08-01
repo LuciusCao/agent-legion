@@ -154,10 +154,13 @@ def test_get_token_rejects_conflicting_dual_assignment(monkeypatch: pytest.Monke
 
 def test_get_token_generates_token(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("CMS_TOKEN", raising=False)
+    monkeypatch.delenv("CMS_USER_NAME", raising=False)
+    monkeypatch.delenv("CMS_USER_PASSWORD", raising=False)
     monkeypatch.setenv("CMS_APP_ID", "app-1")
     monkeypatch.setenv("CMS_NONCE", "nonce-1")
     monkeypatch.setenv("CMS_SECRET", "secret-1")
     monkeypatch.setenv("CMS_TOKEN_URL", "http://auth.example.com/token")
+    monkeypatch.setattr("comprehension_uploader.auth._maybe_load_dotenv", lambda: None)
 
     with patch("comprehension_uploader.auth.requests.post") as mock_post:
         mock_post.return_value.json.return_value = {"data": {"token": "generated-token"}}
@@ -186,9 +189,138 @@ def test_get_token_raises_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("BASECMS_NONCE", raising=False)
     monkeypatch.delenv("BASECMS_SECRET", raising=False)
     monkeypatch.delenv("BASECMS_TOKEN_URL", raising=False)
+    monkeypatch.delenv("CMS_USER_NAME", raising=False)
+    monkeypatch.delenv("CMS_USER_PASSWORD", raising=False)
     monkeypatch.setattr("comprehension_uploader.auth._maybe_load_dotenv", lambda: None)
     with pytest.raises(AuthError):
         get_token({})
+
+
+# ---------------------------------------------------------------------------
+# User-login JWT flow (/user/login -> /v1/auth)
+# ---------------------------------------------------------------------------
+
+
+class _FakeResponse:
+    def __init__(self, payload: dict[str, Any]) -> None:
+        self._payload = payload
+
+    def raise_for_status(self) -> None:
+        return None
+
+    def json(self) -> dict[str, Any]:
+        return self._payload
+
+
+class _FakeSession:
+    def __init__(self, responses: list[dict[str, Any]]) -> None:
+        self.responses = responses
+        self.calls: list[dict[str, Any]] = []
+        self.trust_env = True
+
+    def post(self, url: str, **kwargs: Any) -> _FakeResponse:
+        self.calls.append({"url": url, **kwargs})
+        return _FakeResponse(self.responses[len(self.calls) - 1])
+
+
+def _user_auth_config() -> dict[str, Any]:
+    return {
+        "user_auth": {
+            "app_id": 78002100,
+            "account_type": 1,
+            "client_params": '{"source":"SPAD"}',
+            "login_url": "http://study-user-api.internal.example.com/user/user/login",
+            "auth_url": "https://addons-api.example.com/common/v1/auth",
+        }
+    }
+
+
+def _prepare_user_auth_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CMS_TOKEN", raising=False)
+    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
+    monkeypatch.setenv("CMS_USER_NAME", "student001")
+    monkeypatch.setenv("CMS_USER_PASSWORD", "secret-pw")
+    monkeypatch.setattr("comprehension_uploader.auth._maybe_load_dotenv", lambda: None)
+
+
+def test_get_token_user_auth_flow(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_user_auth_env(monkeypatch)
+    session = _FakeSession(
+        [
+            {"code": 200, "data": {"user_token": "user-token-1"}},
+            {"code": 0, "data": {"token": "jwt-token-1"}},
+        ]
+    )
+    monkeypatch.setattr("comprehension_uploader.auth.requests.Session", lambda: session)
+
+    token = get_token(_user_auth_config())
+
+    assert token == "jwt-token-1"
+    assert session.trust_env is False
+    login_call, auth_call = session.calls
+    assert login_call["url"] == "http://study-user-api.internal.example.com/user/user/login"
+    assert login_call["json"] == {
+        "app_id": 78002100,
+        "account_type": 1,
+        "uname": "student001",
+        "password": "secret-pw",
+        "client_params": '{"source":"SPAD"}',
+    }
+    assert auth_call["url"] == "https://addons-api.example.com/common/v1/auth"
+    assert auth_call["json"] == {"user_token": "user-token-1", "app_id": 78002100}
+
+
+def test_get_token_user_auth_resolve_ip(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_user_auth_env(monkeypatch)
+    session = _FakeSession(
+        [
+            {"code": 200, "data": {"user_token": "user-token-1"}},
+            {"code": 0, "data": {"token": "jwt-token-1"}},
+        ]
+    )
+    monkeypatch.setattr("comprehension_uploader.auth.requests.Session", lambda: session)
+    config = _user_auth_config()
+    config["user_auth"]["login_resolve_ip"] = "10.1.2.3"
+
+    get_token(config)
+
+    login_call = session.calls[0]
+    assert login_call["url"] == "http://10.1.2.3/user/user/login"
+    assert login_call["headers"]["Host"] == "study-user-api.internal.example.com"
+
+
+def test_get_token_user_auth_login_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_user_auth_env(monkeypatch)
+    session = _FakeSession([{"code": -9110004, "data": {}, "message": "账号密码错误"}])
+    monkeypatch.setattr("comprehension_uploader.auth.requests.Session", lambda: session)
+
+    with pytest.raises(AuthError, match="User login failed"):
+        get_token(_user_auth_config())
+
+
+def test_get_token_user_auth_jwt_exchange_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    _prepare_user_auth_env(monkeypatch)
+    session = _FakeSession(
+        [
+            {"code": 200, "data": {"user_token": "user-token-1"}},
+            {"code": 10011, "data": None, "message": "参数错误"},
+        ]
+    )
+    monkeypatch.setattr("comprehension_uploader.auth.requests.Session", lambda: session)
+
+    with pytest.raises(AuthError, match="JWT exchange failed"):
+        get_token(_user_auth_config())
+
+
+def test_get_token_user_auth_missing_password(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("CMS_TOKEN", raising=False)
+    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
+    monkeypatch.delenv("CMS_USER_NAME", raising=False)
+    monkeypatch.delenv("CMS_USER_PASSWORD", raising=False)
+    monkeypatch.setattr("comprehension_uploader.auth._maybe_load_dotenv", lambda: None)
+
+    with pytest.raises(AuthError, match="uname"):
+        get_token(_user_auth_config())
 
 
 # ---------------------------------------------------------------------------

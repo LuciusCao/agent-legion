@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, buildLineChart, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, groupExecutions, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -113,21 +113,21 @@ test("tokensLastHour 只累加最近一小时，全部过旧时回退最后一�
 });
 
 test("bucketLabel 按粒度格式化（无 Z 后缀按本地时区解析，测试与时区无关）", () => {
-  assert.equal(bucketLabel("2026-07-26T05:30:00", "minute"), "05:30");
-  assert.equal(bucketLabel("2026-07-26T05:00:00", "hour"), "05:00");
-  assert.equal(bucketLabel("2026-07-26T00:00:00", "day"), "07-26");
-  assert.equal(bucketLabel("not-a-date", "day"), "not-a-date");
+  assert.equal(bucketLabel("2026-07-26T05:30:00", "6h"), "05:30");
+  assert.equal(bucketLabel("2026-07-26T05:00:00", "24h"), "05:00");
+  assert.equal(bucketLabel("2026-07-26T08:00:00", "30d"), "07-26 08:00");
+  assert.equal(bucketLabel("not-a-date", "30d"), "not-a-date");
 });
 
-test("metricsParams 按粒度带时间窗，固定本机范围 worker_id=self", () => {
-  assert.deepEqual(metricsParams("minute"), { granularity: "minute", hours: 6, worker_id: "self" });
-  assert.deepEqual(metricsParams("hour"), { granularity: "hour", hours: 24, worker_id: "self" });
-  assert.deepEqual(metricsParams("day"), { granularity: "day", days: 7, worker_id: "self" });
+test("metricsParams 固定本机范围 worker_id=self，窗口由粒度唯一决定", () => {
+  assert.deepEqual(metricsParams("6h"), { granularity: "6h", worker_id: "self" });
+  assert.deepEqual(metricsParams("24h"), { granularity: "24h", worker_id: "self" });
+  assert.deepEqual(metricsParams("30d"), { granularity: "30d", worker_id: "self" });
 });
 
-test("fillWindowBuckets 分钟粒度补齐 360 桶，结束于上一个已完成分钟", () => {
+test("fillWindowBuckets 6h 补齐 360 个 1 分钟桶，结束于上一个已完成分钟", () => {
   const now = Date.parse("2026-07-27T10:23:45Z");
-  const filled = fillWindowBuckets([], "minute", now);
+  const filled = fillWindowBuckets([], "6h", now);
   assert.equal(filled.length, 360);
   assert.equal(filled[359].bucket_start, "2026-07-27T10:22:00.000Z");
   assert.equal(filled[0].bucket_start, "2026-07-27T04:23:00.000Z");
@@ -136,20 +136,22 @@ test("fillWindowBuckets 分钟粒度补齐 360 桶，结束于上一个已完成
   assert.equal(filled[0].active_executions, null);
 });
 
-test("fillWindowBuckets 小时/天粒度结束于当前未完成时段", () => {
+test("fillWindowBuckets 24h/30d 结束于当前进行中的桶", () => {
   const now = Date.parse("2026-07-27T10:23:45Z");
-  const hours = fillWindowBuckets([], "hour", now);
-  assert.equal(hours.length, 24);
-  assert.equal(hours[23].bucket_start, "2026-07-27T10:00:00.000Z");
-  const days = fillWindowBuckets([], "day", now);
-  assert.equal(days.length, 7);
-  assert.equal(days[6].bucket_start, "2026-07-27T00:00:00.000Z");
+  const hours = fillWindowBuckets([], "24h", now);
+  assert.equal(hours.length, 288);
+  assert.equal(hours[287].bucket_start, "2026-07-27T10:20:00.000Z");
+  assert.equal(hours[0].bucket_start, "2026-07-26T10:25:00.000Z");
+  const days = fillWindowBuckets([], "30d", now);
+  assert.equal(days.length, 180);
+  assert.equal(days[179].bucket_start, "2026-07-27T08:00:00.000Z");
+  assert.equal(days[0].bucket_start, "2026-06-27T12:00:00.000Z");
 });
 
 test("fillWindowBuckets 保留已有桶、稀疏数据不改变窗口范围", () => {
   const now = Date.parse("2026-07-27T10:23:45Z");
   const sparse = [{ bucket_start: "2026-07-27T08:00:00+00:00", total_tokens: 50, active_executions: 1 }];
-  const filled = fillWindowBuckets(sparse, "minute", now);
+  const filled = fillWindowBuckets(sparse, "6h", now);
   assert.equal(filled.length, 360);
   const hits = filled.filter((b) => b.total_tokens === 50);
   assert.equal(hits.length, 1);
@@ -159,7 +161,7 @@ test("fillWindowBuckets 保留已有桶、稀疏数据不改变窗口范围", ()
 test("fillWindowBuckets 最后真实数据点之后填 null、之前缺失桶填 0", () => {
   const now = Date.parse("2026-07-27T10:23:45Z");
   const sparse = [{ bucket_start: "2026-07-27T08:00:00+00:00", total_tokens: 50, active_executions: 1 }];
-  const filled = fillWindowBuckets(sparse, "minute", now);
+  const filled = fillWindowBuckets(sparse, "6h", now);
   // 08:00 之前的缺失桶：真实无数据，填 0
   assert.equal(filled[0].total_tokens, 0);
   assert.equal(filled[0].active_executions, 0);
@@ -170,87 +172,24 @@ test("fillWindowBuckets 最后真实数据点之后填 null、之前缺失桶填
   assert.equal(last.active_executions, null);
 });
 
-const CHART_BUCKETS = [
-  { bucket_start: "2026-07-26T10:00:00", online_workers: 1, active_executions: 0, total_tokens: 100 },
-  { bucket_start: "2026-07-26T11:00:00", online_workers: 3, active_executions: 2, total_tokens: 500 },
-  { bucket_start: "2026-07-26T12:00:00", online_workers: 2, active_executions: 1, total_tokens: 300 },
-];
-const chartPoints = (key) => CHART_BUCKETS.map((b) => ({ label: bucketLabel(b.bucket_start, "hour"), value: b[key] }));
-
-test("buildLineChart 空数据返回空字符串", () => {
-  assert.equal(buildLineChart([{ name: "x", color: "#fff", points: [] }]), "");
-  assert.equal(buildLineChart([]), "");
-});
-
-test("buildLineChart 双折线：生成两条 polyline、图例与 hover 数值带", () => {
-  const svg = buildLineChart([
-    { name: "在线 Worker", color: "#55e6a6", points: chartPoints("online_workers") },
-    { name: "活跃执行", color: "#f0a83c", points: chartPoints("active_executions") },
+test("chartSeriesData 生成 uPlot 数据：x 为 unix 秒，null 保留为缺口", () => {
+  const buckets = [
+    { bucket_start: "2026-07-26T10:00:00Z", active_executions: 3, input_tokens: 100 },
+    { bucket_start: "2026-07-26T10:05:00Z", active_executions: null, input_tokens: null },
+    { bucket_start: "2026-07-26T10:10:00Z", active_executions: 5, input_tokens: 300 },
+  ];
+  const [x, active, input] = chartSeriesData(buckets, ["active_executions", "input_tokens"]);
+  assert.deepEqual(x, [
+    Date.parse("2026-07-26T10:00:00Z") / 1000,
+    Date.parse("2026-07-26T10:05:00Z") / 1000,
+    Date.parse("2026-07-26T10:10:00Z") / 1000,
   ]);
-  assert.match(svg, /^<svg /);
-  assert.equal(svg.match(/<polyline/g).length, 2);
-  assert.ok(svg.includes('stroke="#55e6a6"'));
-  assert.ok(svg.includes('stroke="#f0a83c"'));
-  assert.ok(svg.includes("在线 Worker"));
-  // 每个 bucket 一条 hover 带，title 含两个系列的数值
-  assert.equal(svg.match(/hover-zone/g).length, 3);
-  assert.ok(svg.includes("在线 Worker: 3"));
-  assert.ok(svg.includes("活跃执行: 2"));
-  // 折线顶点数量与 bucket 数一致
-  assert.equal(svg.match(/\d+\.\d,\d+\.\d/g).length, 6);
+  assert.deepEqual(active, [3, null, 5]);
+  assert.deepEqual(input, [100, null, 300]);
 });
 
-test("buildLineChart 面积图：额外生成 baseline 闭合的 path", () => {
-  const svg = buildLineChart(
-    [{ name: "total_tokens", color: "#62e4ad", points: chartPoints("total_tokens"), area: true }],
-    { formatValue: formatTokens },
-  );
-  assert.ok(svg.includes("<path "));
-  assert.ok(svg.includes(" Z\""));
-  assert.ok(svg.includes("500")); // Y 轴最大值刻度
-  assert.ok(svg.includes("total_tokens: 500"));
-});
-
-test("buildLineChart 转义文本内容，防止 Host 数据注入 markup", () => {
-  const svg = buildLineChart([
-    { name: "<b>x</b>", color: "#fff", points: [{ label: "<script>", value: 1 }] },
-  ]);
-  assert.ok(!svg.includes("<b>x</b>"));
-  assert.ok(svg.includes("&lt;b&gt;"));
-  assert.ok(svg.includes("&lt;script&gt;"));
-});
-
-test("buildLineChart null 缺口：折线拆段不连到 0，hover 显示 —", () => {
-  const points = [
-    { label: "10:00", value: 3 },
-    { label: "11:00", value: 5 },
-    { label: "12:00", value: null },
-    { label: "13:00", value: null },
-  ];
-  const svg = buildLineChart([{ name: "活跃执行", color: "#66e8ad", points, area: true }]);
-  // 缺口后只有一段折线、一段面积
-  assert.equal(svg.match(/<polyline/g).length, 1);
-  assert.equal(svg.match(/<path /g).length, 1);
-  // hover 带仍覆盖全部 bucket，缺口值显示 —
-  assert.equal(svg.match(/hover-zone/g).length, 4);
-  assert.ok(svg.includes("活跃执行: —"));
-  assert.ok(svg.includes("活跃执行: 3"));
-});
-
-test("buildLineChart 中间缺口：折线拆成两段", () => {
-  const points = [
-    { label: "10:00", value: 3 },
-    { label: "11:00", value: null },
-    { label: "12:00", value: 5 },
-  ];
-  const svg = buildLineChart([{ name: "活跃执行", color: "#66e8ad", points }]);
-  assert.equal(svg.match(/<polyline/g).length, 2);
-});
-
-test("buildLineChart 系列全为 null 时返回空字符串（沿用空态）", () => {
-  const points = [
-    { label: "10:00", value: null },
-    { label: "11:00", value: null },
-  ];
-  assert.equal(buildLineChart([{ name: "x", color: "#fff", points }]), "");
+test("hasChartData 任一 key 有非空值即为 true，全 null/空数组为 false", () => {
+  assert.equal(hasChartData([{ active_executions: null }, { active_executions: 2 }], ["active_executions"]), true);
+  assert.equal(hasChartData([{ active_executions: null, input_tokens: null }], ["active_executions", "input_tokens"]), false);
+  assert.equal(hasChartData([], ["active_executions"]), false);
 });

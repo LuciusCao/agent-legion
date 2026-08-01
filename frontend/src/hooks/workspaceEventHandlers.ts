@@ -1,8 +1,8 @@
-import { fetchJobsSnapshot } from '../api'
 import { useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
 import type { JobSummary } from '../types'
 import { mergeWorkspaceEventStats } from './workspaceEventRefresh'
+
+export { loadWorkspaceJobsSnapshot } from './loadWorkspaceJobsSnapshot'
 
 export interface BaseEventPayload {
   type: string
@@ -16,30 +16,6 @@ export interface JobPatchBatchPayload {
   stats?: Record<string, number>
   jobs: JobSummary[]
   deleted_job_ids: string[]
-}
-
-export async function loadWorkspaceJobsSnapshot(
-  workspaceId: string,
-  isStale: () => boolean
-): Promise<void> {
-  const first = await fetchJobsSnapshot(workspaceId, 200, undefined)
-  if (isStale()) return
-  useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
-    ...useWorkspaceStore.getState().workspaceStats[workspaceId],
-    job_stats: first.stats,
-  })
-  useJobStore
-    .getState()
-    .setJobsSnapshot(workspaceId, first.revision, first.jobs)
-
-  let cursor = first.next_cursor
-  while (cursor) {
-    const snapshot = await fetchJobsSnapshot(workspaceId, 200, cursor)
-    if (isStale()) return
-    useJobStore.getState().appendJobsSnapshot(workspaceId, snapshot.jobs)
-    if (!snapshot.next_cursor) break
-    cursor = snapshot.next_cursor
-  }
 }
 
 export function handleWorkspaceEvent(
@@ -68,6 +44,7 @@ export function handleWorkspaceEvent(
           patch.jobs,
           patch.deleted_job_ids || []
         )
+      scheduleJobRefresh()
       return
     }
     if (payload.type === 'resync_required') {

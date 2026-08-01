@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { EventSourceMock } from './testing/eventSourceMock'
+import './test-setup-matchmedia'
 
 let unexpectedConsoleErrors: unknown[][] = []
 let expectedConsoleErrors: RegExp[] = []

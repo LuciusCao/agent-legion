@@ -25,6 +25,7 @@ dev = [
   "mypy>=2.1.0",
   "pytest",
   "pytest-cov>=7.1.0",
+  "pytest-rerunfailures>=15.0",
   "pytest-xdist>=3.8.0",
   "ruff",
 ]
@@ -37,6 +38,8 @@ markers = [
   "ci_extended: repeated stress scenarios for CI",
   "slow: tests involving real subprocesses or long sleeps",
   "repository_gate: whole-repository checks executed separately by the quality gate",
+  "smoke: curated fast high-value tests for the pre-push smoke tier (assigned in tests/conftest.py)",
+  "fresh_schema: rebuild the test schema from scratch instead of TRUNCATE-based reset (for tests that mutate DDL)",
 ]
 filterwarnings = [
   "error::ResourceWarning:sqlite3",

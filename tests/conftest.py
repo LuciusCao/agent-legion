@@ -54,8 +54,39 @@ def pytest_configure() -> None:
             os.environ[key] = ""
 
 
-@pytest.fixture(autouse=True)
-def _isolate_postgres_database():
+# Smoke tier (GATE_TIER=smoke, used by pre-push): a small set of fast,
+# high-value tests that keeps the local push feedback loop around a minute
+# while the full quick suite stays the CI boundary. Membership is path-based:
+# every architecture governance test is smoke by default, plus one core
+# behavioral file per subsystem. Add new entries here when a new subsystem
+# gains tests; keep the tier under ~90s.
+_SMOKE_TEST_FILES = frozenset(
+    {
+        "tests/routes/test_auth_routes.py",
+        "tests/routes/jobs/test_job_lifecycle.py",
+        "tests/services/test_vault.py",
+        "tests/executors/test_shard_contract.py",
+        "tests/executors/test_executor_kinds.py",
+        "tests/executors/leases/test_claim_basics.py",
+        "tests/workflows/test_sharding.py",
+        "tests/db/test_retry.py",
+    }
+)
+
+
+def pytest_collection_modifyitems(config, items):
+    root = config.rootpath
+    for item in items:
+        try:
+            rel = item.path.relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if rel in _SMOKE_TEST_FILES or item.path.name.startswith("test_architecture_"):
+            item.add_marker(pytest.mark.smoke)
+
+
+def _rebuild_schema() -> None:
+    """Drop and recreate the per-xdist-worker schema, then apply full DDL."""
     close_database_pools()
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
@@ -69,10 +100,74 @@ def _isolate_postgres_database():
             f"test database: {exc}"
         )
     init_db(TEST_DATABASE_URL)
+
+
+def _reset_schema_data() -> None:
+    """Empty every table without touching DDL (~50ms vs ~2.3s for a rebuild).
+
+    schema_migrations keeps its row: it is constant after init_db, and tests
+    that re-run init_db rely on it for idempotency. DDL-seeded rows must be
+    restored after the truncate: job_event_seq carries a singleton counter
+    row (postgres_schema.sql) that job intake bumps on every batch.
+    """
+    try:
+        with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
+            tables = [
+                row[0]
+                for row in conn.execute(
+                    "select tablename from pg_tables where schemaname = %s", (TEST_SCHEMA,)
+                ).fetchall()
+                if row[0] != "schema_migrations"
+            ]
+            if tables:
+                conn.execute(
+                    sql.SQL("truncate {} restart identity cascade").format(
+                        sql.SQL(", ").join(sql.Identifier(TEST_SCHEMA, t) for t in tables)
+                    )
+                )
+            conn.execute(
+                sql.SQL(
+                    "insert into {}(id, value) values (1, 0) on conflict(id) do nothing"
+                ).format(sql.Identifier(TEST_SCHEMA, "job_event_seq"))
+            )
+    except psycopg.Error as exc:
+        pytest.fail(
+            "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
+            f"test database: {exc}"
+        )
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _session_test_schema():
+    """Build the per-worker schema once per session and cache agent definitions.
+
+    Per-test isolation is TRUNCATE-based (see _isolate_postgres_database); a
+    full rebuild per test cost ~2.3s and buried the shared Postgres under DDL
+    churn. Tests that mutate DDL must opt into a real rebuild via
+    @pytest.mark.fresh_schema.
+    """
+    _rebuild_schema()
     configured = load_application_config(PROJECT_ROOT).config
-    sync_agent_definitions(TEST_DATABASE_URL, load_agent_definitions(configured.get("agents", {})))
-    yield
+    yield load_agent_definitions(configured.get("agents", {}))
     close_database_pools()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_postgres_database(request, _session_test_schema):
+    fresh = request.node.get_closest_marker("fresh_schema") is not None
+    if fresh:
+        _rebuild_schema()
+    else:
+        close_database_pools()
+        _reset_schema_data()
+    sync_agent_definitions(TEST_DATABASE_URL, _session_test_schema)
+    yield
+    if fresh:
+        # Erase any DDL drift the test left behind so later TRUNCATE-isolated
+        # tests on this worker see the pristine schema.
+        _rebuild_schema()
+    else:
+        close_database_pools()
 
 
 @pytest.fixture(autouse=True)

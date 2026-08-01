@@ -1,6 +1,7 @@
 import type { JobSummary } from '../../../types/jobTypes'
 import type { JobState } from '../state'
 import { applyPatchToAccumulator } from '../filterLogic/optionAccumulator'
+import { applyVisiblePatchJobs } from '../filterLogic/patchVisibility'
 import {
   applyPatchToFilteredIds,
   applyPatchToFilterCounts,
@@ -20,18 +21,18 @@ export function applyJobPatchBatchUpdate(
   const oldJobsById = state.jobsById
   const jobsById = { ...oldJobsById }
   for (const id of deleted) delete jobsById[id]
-  for (const job of patchJobs) jobsById[job.id] = job
+  const filterConfig = state.filterConfig
+  const visibleJobs = applyVisiblePatchJobs(jobsById, patchJobs, filterConfig)
   const { jobs, jobIds, jobIndexById } = buildPatchedCollections(
     state,
     jobsById,
-    patchJobs,
+    visibleJobs,
     deleted
   )
-  const filterConfig = state.filterConfig
   applyPatchToAccumulator(
     state.optionAccumulator,
     oldJobsById,
-    patchJobs,
+    visibleJobs,
     deletedJobIds
   )
   return {
@@ -43,14 +44,14 @@ export function applyJobPatchBatchUpdate(
       state.filteredJobIds,
       jobIndexById,
       oldJobsById,
-      patchJobs,
+      visibleJobs,
       deletedJobIds,
       filterConfig
     ),
     filterCounts: applyPatchToFilterCounts(
       state.filterCounts,
       oldJobsById,
-      patchJobs,
+      visibleJobs,
       deletedJobIds,
       filterConfig
     ),

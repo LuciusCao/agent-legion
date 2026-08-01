@@ -55,6 +55,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-executions/{execution_id}/release-slot': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Release Slot */
+    post: operations['release_slot_api_agent_executions__execution_id__release_slot_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-executions/{execution_id}/result': {
     parameters: {
       query?: never
@@ -1000,6 +1017,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/facets': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Workspace Job Facets */
+    get: operations['workspace_job_facets_api_workspaces__workspace_id__jobs_facets_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/package': {
     parameters: {
       query?: never
@@ -1587,8 +1621,11 @@ export interface components {
     }
     /** BatchJobIdsRequest */
     BatchJobIdsRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
       /** Job Ids */
-      job_ids?: string[]
+      job_ids?: string[] | null
     }
     /** BatchJobMutationResponse */
     BatchJobMutationResponse: {
@@ -1597,8 +1634,11 @@ export interface components {
     }
     /** BatchRunToRequest */
     BatchRunToRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
       /** Job Ids */
-      job_ids: string[]
+      job_ids?: string[] | null
       /** Start Node Key */
       start_node_key?: string | null
       /** Target Node Key */
@@ -1827,13 +1867,16 @@ export interface components {
     }
     /** JobBatchRerunRequest */
     JobBatchRerunRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
       /**
        * From Failed Node
        * @default false
        */
       from_failed_node: boolean
       /** Job Ids */
-      job_ids?: string[]
+      job_ids?: string[] | null
       /** Node Key */
       node_key?: string | null
     }
@@ -1859,6 +1902,46 @@ export interface components {
       nodes: components['schemas']['JobNodeResponse'][]
       /** Runs */
       runs: components['schemas']['NodeRunResponse'][]
+    }
+    /** JobFacetsResponse */
+    JobFacetsResponse: {
+      /** Node Counts */
+      node_counts: {
+        [key: string]: number
+      }
+      /** Status Counts */
+      status_counts: {
+        [key: string]: number
+      }
+      /** Total */
+      total: number
+      /** Version Counts */
+      version_counts: {
+        [key: string]: number
+      }
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * JobFilterPayload
+     * @description Job list filter embedded in batch requests; mirrors the list query params.
+     */
+    JobFilterPayload: {
+      /** Active Node Key */
+      active_node_key?: string | null
+      /** Packed */
+      packed?: number | null
+      /** Search */
+      search?: string | null
+      /** Status */
+      status?: string | null
+      /** Workflow Version */
+      workflow_version?: number | null
+      /**
+       * Workflow Version None
+       * @default false
+       */
+      workflow_version_none: boolean
     }
     /** JobLogResponse */
     JobLogResponse: {
@@ -1957,6 +2040,9 @@ export interface components {
        * @enum {string}
        */
       category: 'technical' | 'business' | 'unknown'
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
       /** Job Ids */
       job_ids?: string[]
       /**
@@ -2083,13 +2169,8 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
-    /** JobsResponse */
-    JobsResponse: {
-      /** Jobs */
-      jobs: components['schemas']['JobSummaryResponse'][]
-    }
-    /** JobsSnapshotResponse */
-    JobsSnapshotResponse: {
+    /** JobsPageResponse */
+    JobsPageResponse: {
       /** Jobs */
       jobs: components['schemas']['JobSummaryResponse'][]
       /** Next Cursor */
@@ -2097,11 +2178,18 @@ export interface components {
       /** Revision */
       revision: number
       /** Stats */
-      stats: {
+      stats?: {
         [key: string]: number
       }
+      /** Total */
+      total?: number | null
       /** Workspace Id */
       workspace_id: string
+    }
+    /** JobsResponse */
+    JobsResponse: {
+      /** Jobs */
+      jobs: components['schemas']['JobSummaryResponse'][]
     }
     /** LogEventResponse */
     LogEventResponse: {
@@ -2244,7 +2332,7 @@ export interface components {
        * Granularity
        * @enum {string}
        */
-      granularity: 'minute' | 'hour' | 'day'
+      granularity: '6h' | '24h' | '30d'
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
@@ -3187,8 +3275,11 @@ export interface components {
     }
     /** WorkspacePackageRequest */
     WorkspacePackageRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
       /** Job Ids */
-      job_ids?: string[]
+      job_ids?: string[] | null
     }
     /** WorkspacePackageResponse */
     WorkspacePackageResponse: {
@@ -3524,6 +3615,35 @@ export interface operations {
       }
     }
   }
+  release_slot_api_agent_executions__execution_id__release_slot_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        execution_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   result_api_agent_executions__execution_id__result_post: {
     parameters: {
       query?: never
@@ -3713,9 +3833,7 @@ export interface operations {
   get_worker_metrics_api_agent_workers_self_metrics_get: {
     parameters: {
       query?: {
-        granularity?: 'minute' | 'hour' | 'day'
-        hours?: number
-        days?: number
+        granularity?: '6h' | '24h' | '30d'
       }
       header?: never
       path?: never
@@ -4510,9 +4628,7 @@ export interface operations {
   get_metrics_overview_api_metrics_overview_get: {
     parameters: {
       query?: {
-        granularity?: 'minute' | 'hour' | 'day'
-        hours?: number
-        days?: number
+        granularity?: '6h' | '24h' | '30d'
         worker_id?: string | null
       }
       header?: never
@@ -5347,6 +5463,44 @@ export interface operations {
       }
     }
   }
+  workspace_job_facets_api_workspaces__workspace_id__jobs_facets_get: {
+    parameters: {
+      query?: {
+        status?: string | null
+        search?: string | null
+        workflow_version?: number | null
+        workflow_version_none?: boolean
+        active_node_key?: string | null
+        packed?: number | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobFacetsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   package_workspace_jobs_api_workspaces__workspace_id__jobs_package_post: {
     parameters: {
       query?: never
@@ -5422,6 +5576,12 @@ export interface operations {
       query?: {
         limit?: number
         cursor?: string | null
+        status?: string | null
+        search?: string | null
+        workflow_version?: number | null
+        workflow_version_none?: boolean
+        active_node_key?: string | null
+        packed?: number | null
       }
       header?: never
       path: {
@@ -5437,7 +5597,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['JobsSnapshotResponse']
+          'application/json': components['schemas']['JobsPageResponse']
         }
       }
       /** @description Validation Error */

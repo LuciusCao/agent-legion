@@ -7,25 +7,18 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { fetchOpsMetrics } from '../api/metrics'
-import type {
-  MetricBucket,
-  OpsGranularity,
-  OpsMetricsResponse,
-} from '../api/metrics'
+import type { OpsGranularity, OpsMetricsResponse } from '../api/metrics'
 import { listAgentWorkers } from '../api/workerTokens'
 import type { AgentWorkerSummary } from '../api/workerTokens'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
+import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
+import type { WindowBucket } from '../lib/opsMetricsBuckets'
 import { MetricsChart } from './MetricsChart'
+import type { ChartSeries } from '../lib/metricsChartOptions'
 import styles from './MonitoringPanel.module.css'
 
 const REFRESH_MS = 30_000
 const HOUR_MS = 3_600_000
-
-const WINDOWS: Record<OpsGranularity, { hours?: number; days?: number }> = {
-  minute: { hours: 6 },
-  hour: { hours: 24 },
-  day: { days: 7 },
-}
 
 function fmt(value: number | null | undefined) {
   return typeof value === 'number' ? value.toLocaleString('zh-CN') : '-'
@@ -38,38 +31,46 @@ function pad(n: number) {
 function makeTimeFormatter(granularity: OpsGranularity) {
   return (iso: string) => {
     const d = new Date(iso)
-    if (granularity === 'day')
-      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-    if (granularity === 'hour')
+    // 30d 的 4 小时桶需要「日期 + 小时」才能区分同一天内的多个桶
+    if (granularity === '30d')
       return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
 }
 
-function latestBucket(buckets: MetricBucket[]): MetricBucket | null {
-  return buckets.length ? buckets[buckets.length - 1] : null
-}
-
-function sumRecentHourTokens(buckets: MetricBucket[]) {
+function sumRecentHourTokens(buckets: WindowBucket[]) {
   if (!buckets.length) return null
   const cutoff = Date.now() - HOUR_MS
   const recent = buckets.filter(
     (b) => new Date(b.bucket_start).getTime() >= cutoff
   )
   const source = recent.length ? recent : [buckets[buckets.length - 1]]
+  // 缺失采样的桶指标字段为 null，求和时按 0 处理（区别于真实 0，仅影响展示）
   return source.reduce(
     (sum, b) => ({
-      input_tokens: sum.input_tokens + b.input_tokens,
-      output_tokens: sum.output_tokens + b.output_tokens,
-      cache_read_tokens: sum.cache_read_tokens + b.cache_read_tokens,
-      total_tokens: sum.total_tokens + b.total_tokens,
+      input_tokens: sum.input_tokens + (b.input_tokens ?? 0),
+      output_tokens: sum.output_tokens + (b.output_tokens ?? 0),
+      cache_read_tokens: sum.cache_read_tokens + (b.cache_read_tokens ?? 0),
+      total_tokens: sum.total_tokens + (b.total_tokens ?? 0),
     }),
     { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, total_tokens: 0 }
   )
 }
 
+// 图表 series 为静态常量，保证引用稳定（MetricsChart 依赖引用相等性决定重建时机）
+const CONCURRENCY_SERIES: ChartSeries[] = [
+  { key: 'online_workers', label: '在线 Worker', color: '#16a34a' },
+  { key: 'active_executions', label: '活跃执行', color: '#2563eb' },
+]
+
+const TOKEN_SERIES: ChartSeries[] = [
+  { key: 'input_tokens', label: '输入', color: '#2563eb' },
+  { key: 'output_tokens', label: '输出', color: '#7c3aed' },
+  { key: 'cache_read_tokens', label: '缓存读', color: '#0891b2' },
+]
+
 export function MonitoringPanel() {
-  const [granularity, setGranularity] = useState<OpsGranularity>('minute')
+  const [granularity, setGranularity] = useState<OpsGranularity>('6h')
   const [workerId, setWorkerId] = useState('')
   const [workers, setWorkers] = useState<AgentWorkerSummary[]>([])
   const [data, setData] = useState<OpsMetricsResponse | null>(null)
@@ -98,7 +99,6 @@ export function MonitoringPanel() {
     const load = () => {
       fetchOpsMetrics({
         granularity,
-        ...WINDOWS[granularity],
         ...(workerId ? { worker_id: workerId } : {}),
       })
         .then((next) => {
@@ -128,7 +128,7 @@ export function MonitoringPanel() {
     () => (data ? fillWindowBuckets(data.buckets, granularity) : []),
     [data, granularity]
   )
-  const latest = latestBucket(buckets)
+  const latest = lastNonNullBucket(buckets)
   const hourlyTokens = sumRecentHourTokens(buckets)
 
   if (error) {
@@ -168,9 +168,9 @@ export function MonitoringPanel() {
             }}
             aria-label="时间粒度"
           >
-            <ToggleButton value="minute">分钟 · 近 6 小时</ToggleButton>
-            <ToggleButton value="hour">小时 · 近 24 小时</ToggleButton>
-            <ToggleButton value="day">天 · 近 7 天</ToggleButton>
+            <ToggleButton value="6h">近 6 小时</ToggleButton>
+            <ToggleButton value="24h">近 24 小时</ToggleButton>
+            <ToggleButton value="30d">近 30 天</ToggleButton>
           </ToggleButtonGroup>
         </div>
       </header>
@@ -222,10 +222,7 @@ export function MonitoringPanel() {
           buckets={buckets}
           ariaLabel="在线 Worker 与活跃执行趋势"
           formatTime={formatTime}
-          series={[
-            { key: 'online_workers', label: '在线 Worker', color: '#16a34a' },
-            { key: 'active_executions', label: '活跃执行', color: '#2563eb' },
-          ]}
+          series={CONCURRENCY_SERIES}
         />
       </div>
 
@@ -235,11 +232,7 @@ export function MonitoringPanel() {
           buckets={buckets}
           ariaLabel="Token 吞吐量趋势"
           formatTime={formatTime}
-          series={[
-            { key: 'input_tokens', label: '输入', color: '#2563eb' },
-            { key: 'output_tokens', label: '输出', color: '#7c3aed' },
-            { key: 'cache_read_tokens', label: '缓存读', color: '#0891b2' },
-          ]}
+          series={TOKEN_SERIES}
         />
       </div>
     </section>
