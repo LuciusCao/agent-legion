@@ -292,7 +292,9 @@ Quick gate (for daily development):
 ```
 
 Runs two buffered parallel rounds: backend/frontend static checks first, then pytest/Vitest. The
-backend side covers Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture invariant checks
+backend side covers Ruff lint + format check, Python tests (no coverage by default; set
+`AGENT_LEGION_COV=1` to enable — the `fail_under = 85` floor is enforced by CI and
+`scripts/check.sh`), mypy, architecture invariant checks
 (`scripts/check_invariants.py`), shared skill asset checks (`scripts/check-skills-shared.py`), the
 whole-repository architecture contract check (`scripts/check_architecture.py`), and spec health
 (`scripts/verify_specs.py --check`). The frontend lane covers generated API drift, Prettier,
@@ -300,6 +302,13 @@ ESLint, typecheck, and Vitest without coverage. Vitest uses its thread pool to r
 process startup overhead while retaining file isolation. Repository-wide architecture assertions are
 excluded from the parallel pytest run because the backend lane executes the authoritative scan
 once after pytest.
+
+pytest runs under xdist with `-n auto` (all cores). On machines running several worktrees in
+parallel, cap it with `AGENT_LEGION_TEST_WORKERS` (e.g. `export AGENT_LEGION_TEST_WORKERS=4`) to
+avoid oversubscribing CPU and the shared Postgres. Backend test isolation is TRUNCATE-based:
+the per-worker schema is built once per pytest session and each test empties all tables
+(~50ms vs ~2.3s for a full rebuild). Tests that mutate DDL must opt into a full rebuild with
+`@pytest.mark.fresh_schema` (see `tests/db/test_workspace_cms_migration.py`).
 
 `mypy` runs with unreachable-code warnings enabled. When it flags code behind
 dynamic JSON, database, or framework boundaries, first check whether the type
@@ -324,7 +333,7 @@ Full gate (before committing or handing off):
 ./scripts/check.sh
 ```
 
-Runs the parallel quick gate with frontend coverage enabled, then runs full-gate backend evidence
+Runs the parallel quick gate with backend (`AGENT_LEGION_COV=1`) and frontend coverage enabled, then runs full-gate backend evidence
 and the frontend production bundle in parallel. Frontend tests and TypeScript typechecking are not
 repeated: coverage replaces the quick Vitest invocation, while the production extension only runs
 `vite build`. The non-blocking dependency vulnerability audit remains available through
