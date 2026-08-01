@@ -38,9 +38,14 @@ ARG PI_VERSION=0.80.10
 COPY --from=frontend /usr/local/ /usr/local/
 # bubblewrap is velites' Linux sandbox backend (EXEC-HARNESS-SANDBOX-001);
 # the harness fails closed at startup without it unless --no-sandbox is set.
+# Runtime requirements: bwrap needs either its setuid bit or unprivileged
+# user namespaces, and a seccomp profile that allows unshare/clone — the
+# default Docker seccomp profile blocks unshare, so deployments must relax
+# it (validated on the real worker before M5; see velites-harness.md §5).
 RUN apt-get update \
     && apt-get install -y --no-install-recommends bubblewrap \
     && rm -rf /var/lib/apt/lists/* \
+    && chmod u+s /usr/bin/bwrap \
     && pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" \
     && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && pi --version

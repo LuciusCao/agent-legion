@@ -174,6 +174,13 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 - 沙箱拒绝表现为工具失败：`tool_execution_end{isError: true}`，错误消息含
   sandbox 拒绝信息，随 events.jsonl 落盘可审计。
 
+Linux 运行时要求（CI run 30683781370 实测）：bwrap 需要 setuid 位或非特权
+user namespace 之一；Ubuntu 24.04 默认通过 AppArmor 限制非特权 userns
+（`bwrap: setting up uid map: Permission denied`），CI 与 worker 镜像统一
+采用 setuid 方案（`chmod u+s /usr/bin/bwrap`）。另外默认 Docker seccomp
+profile 拦截 `unshare`，容器部署需放行（compose 侧配置，M5 灰度前在真
+worker 上验证）。
+
 macOS seatbelt 的两处实现注记（实测 macOS 15，`deny default` 下 dyld/libsystem
 在 exec 时直接 abort/bus error，profile 必须放宽这两处，进程才起得来）：
 `file-read-metadata` 全局放行（仅 stat，读不到文件内容与目录项），
