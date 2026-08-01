@@ -64,9 +64,13 @@ jobs:
 
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
       # fail-closed: the tests/full e2e and bwrap-gated cargo tests need a
-      # real bubblewrap binary on the runner.
+      # real bubblewrap binary on the runner. Ubuntu 24.04 restricts
+      # unprivileged userns via AppArmor ("bwrap: setting up uid map:
+      # Permission denied"); setuid bwrap sidesteps that on the CI VM.
       - name: Install bubblewrap (velites sandbox backend)
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s "$(command -v bwrap)"
 
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
@@ -151,8 +155,12 @@ jobs:
           workspaces: velites
 
       # Enables the bwrap-gated sandbox integration tests in cargo test.
+      # Ubuntu 24.04 restricts unprivileged userns via AppArmor ("bwrap:
+      # setting up uid map: Permission denied"); setuid bwrap sidesteps it.
       - name: Install bubblewrap (velites sandbox backend)
-        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s "$(command -v bwrap)"
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
