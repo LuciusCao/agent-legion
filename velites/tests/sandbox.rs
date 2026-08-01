@@ -7,6 +7,9 @@ fn ctx(cwd: &std::path::Path) -> ToolContext {
     ToolContext {
         cwd: cwd.canonicalize().unwrap(),
         cancel: velites::cancel::CancelToken::default(),
+        // These tests cover the in-process canonicalize sandbox of the
+        // read/write tools, which is independent of the OS-level bash sandbox.
+        sandbox: None,
     }
 }
 

@@ -64,10 +64,19 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         .unwrap_or(DEFAULT_TIMEOUT_SECS)
         .max(1);
 
-    let mut cmd = tokio::process::Command::new("bash");
-    cmd.arg("-c")
-        .arg(command)
-        .current_dir(&ctx.cwd)
+    let mut cmd = {
+        let argv = vec!["bash".to_string(), "-c".to_string(), command.to_string()];
+        // OS-level filesystem sandbox (design §5, M4.5): the whole child
+        // tree inherits the seatbelt/bwrap confinement. `None` = --no-sandbox.
+        let (program, wrapped_argv) = match &ctx.sandbox {
+            Some(sandbox) => sandbox.wrap(&argv),
+            None => (argv[0].clone(), argv[1..].to_vec()),
+        };
+        let mut cmd = tokio::process::Command::new(program);
+        cmd.args(wrapped_argv);
+        cmd
+    };
+    cmd.current_dir(&ctx.cwd)
         .stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::piped())
         // Env is inherited by default; kill_on_drop is a safety net for

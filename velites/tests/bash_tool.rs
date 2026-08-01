@@ -9,6 +9,11 @@ fn ctx(cwd: &std::path::Path) -> ToolContext {
     ToolContext {
         cwd: cwd.canonicalize().unwrap(),
         cancel: velites::cancel::CancelToken::default(),
+        // No OS sandbox here: these tests exercise bash semantics (timeout,
+        // exit codes, output capture), not confinement; the sandbox has its
+        // own integration tests (tests/os_sandbox.rs) and CI's Linux lane
+        // has no bwrap.
+        sandbox: None,
     }
 }
 

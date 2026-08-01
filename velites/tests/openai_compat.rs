@@ -293,6 +293,7 @@ async fn unrecovered_error_ends_run_with_exit_0() {
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
     let mut sink = MemorySink::default();
@@ -368,6 +369,7 @@ async fn full_tool_round_over_gateway() {
         require_output: Vec::new(),
         session: None,
         cwd,
+        sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
     let mut sink = MemorySink::default();
@@ -496,6 +498,7 @@ fn agent_config(dir: &tempfile::TempDir) -> velites::agent::AgentConfig {
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     }
 }

@@ -71,6 +71,11 @@ def _base_args(workdir: Path, fixture: Path) -> list[str]:
         "stub",
         "--stub-fixture",
         str(fixture),
+        # These tests cover controllability, not filesystem confinement.
+        # CI runs on Linux without bubblewrap, where the default-on OS
+        # sandbox fails closed at startup; confinement itself is covered by
+        # test_velites_sandbox.py.
+        "--no-sandbox",
         "@prompt.md",
     ]
 
@@ -307,6 +312,9 @@ def test_no_auto_discovery(tmp_path: Path, velites_binary: Path) -> None:
                 "openai_compat",
                 "--model",
                 "stub-model",
+                # Confinement is out of scope here and fails closed on CI
+                # (Linux without bubblewrap); see test_velites_sandbox.py.
+                "--no-sandbox",
                 "@prompt.md",
             ],
             env_extra={"VELITES_BASE_URL": base_url, "VELITES_API_KEY": "test-key"},

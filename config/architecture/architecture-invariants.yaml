@@ -489,3 +489,18 @@ invariants:
       - kind: integration
         target: tests/executors/test_velites_controllability.py::test_budget_exhaustion_marks_agent_end
         gate: quick
+
+  - id: EXEC-HARNESS-SANDBOX-001
+    statement: "velites confines the bash tool in a default-on OS-level filesystem sandbox (macOS seatbelt via sandbox-exec, Linux bubblewrap): reads are limited to the working directory, the session dir, explicit --skill dirs and system paths; writes are limited to the working directory, the session dir and $TMPDIR//tmp — escapes surface as tool_execution_end{isError: true}. When the sandbox backend is unavailable the harness fails closed (non-zero exit before the agent loop) and never degrades to an unsandboxed run; --no-sandbox is the only escape hatch."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_sandbox_unavailable_fails_closed
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_no_sandbox_escape_hatch
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_bash_sandbox_blocks_escape_macos
+        gate: quick

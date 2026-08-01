@@ -26,6 +26,9 @@ fn run_velites(cwd: &Path, fixture: &Path, extra_args: &[&str]) -> std::process:
         "read,write,bash".into(),
         "--system-prompt".into(),
         "You are a test agent.".into(),
+        // Golden events assert the wire sequence, not confinement; CI's
+        // Linux lane has no bwrap, and the default-on sandbox fails closed.
+        "--no-sandbox".into(),
         "@prompt.md".into(),
         "Execute the attached node instructions.".into(),
     ];

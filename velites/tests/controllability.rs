@@ -18,6 +18,10 @@ fn run_velites(cwd: &Path, fixture: &Path, extra_args: &[&str]) -> std::process:
         "stub".into(),
         "--stub-fixture".into(),
         fixture.to_string_lossy().into_owned(),
+        // These tests exercise controllability, not confinement; CI's Linux
+        // lane has no bwrap, and the default-on sandbox fails closed.
+        // Confinement itself is covered by tests/os_sandbox.rs.
+        "--no-sandbox".into(),
         "@prompt.md".into(),
     ];
     args.extend(extra_args.iter().map(|s| s.to_string()));
