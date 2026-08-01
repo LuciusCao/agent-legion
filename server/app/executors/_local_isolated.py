@@ -73,6 +73,9 @@ def _run_handler(
     conn: Any,
 ) -> None:
     """Target run in an isolated multiprocessing child."""
+    # Cap the child pool: short-lived handlers need few connections, and a
+    # claim wave of children must not exhaust the server connection budget.
+    os.environ.setdefault("AGENT_LEGION_DB_POOL_MAX_SIZE", "4")
     log_path = runtime.get("log_path")
     if log_path:
         try:

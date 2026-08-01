@@ -129,3 +129,43 @@ def test_orphan_recovery_assigns_worker_orphaned(
     assert run["error_message"] == "orphaned recovery"
     assert run["failure_category"] == "technical"
     assert run["failure_detail"] == "worker_orphaned"
+
+
+_POOL_TIMEOUT_MESSAGE = "PoolTimeout: couldn't get a connection after 10.00 sec"
+
+
+def test_transient_db_pool_failure_retries_then_fails(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(queries, "fc-pool", "exec-fc-pool", 1)
+    result = ExecutionResult(status="failed", exit_code=1, error_message=_POOL_TIMEOUT_MESSAGE)
+
+    # First two failures hand the node back to the claimable set.
+    for _ in range(2):
+        claim = repo_a.try_claim(_claim_request(workspace_id, job_id, executor_id="exec-fc-pool"))
+        assert claim is not None
+        assert repo_a.finish(claim.lease_id, result)
+        node = queries.get_job_node(job_id, "review_keywords")
+        assert node is not None
+        assert node["status"] == "pending"
+        assert node["failure_category"] == "technical"
+        assert node["failure_detail"] == "db_pool_timeout"
+        job = queries.get_job(job_id)
+        assert job is not None
+        assert job["status"] != "failed"
+
+    # Third failure is permanent: node and job both fail.
+    claim = repo_a.try_claim(_claim_request(workspace_id, job_id, executor_id="exec-fc-pool"))
+    assert claim is not None
+    assert repo_a.finish(claim.lease_id, result)
+    node = queries.get_job_node(job_id, "review_keywords")
+    assert node is not None
+    assert node["status"] == "failed"
+    job = queries.get_job(job_id)
+    assert job is not None
+    assert job["status"] == "failed"
+
+    # Every attempt stays recorded as its own failed run.
+    runs = [run for run in queries.list_node_runs(job_id) if run["status"] == "failed"]
+    assert len(runs) == 3
+    assert all(run["failure_detail"] == "db_pool_timeout" for run in runs)
