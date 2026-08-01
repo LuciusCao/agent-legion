@@ -62,6 +62,12 @@ jobs:
 
       - run: uv sync
 
+      # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
+      # fail-closed: the tests/full e2e and bwrap-gated cargo tests need a
+      # real bubblewrap binary on the runner.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
+
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
 
@@ -143,6 +149,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: velites
+
+      # Enables the bwrap-gated sandbox integration tests in cargo test.
+      - name: Install bubblewrap (velites sandbox backend)
+        run: sudo apt-get update && sudo apt-get install -y bubblewrap
 
       - name: cargo fmt
         run: cargo fmt --all -- --check
