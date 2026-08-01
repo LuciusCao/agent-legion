@@ -10,12 +10,14 @@ pub mod read;
 pub mod write;
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use serde_json::Value;
 
 use crate::cancel::CancelToken;
 use crate::events::ContentBlock;
 use crate::provider::ToolSpec;
+use crate::sandbox::Sandbox;
 
 /// Execution context shared by all tools.
 pub struct ToolContext {
@@ -25,6 +27,10 @@ pub struct ToolContext {
     /// → KILL on cancel, same as the timeout path). A default token is never
     /// cancelled.
     pub cancel: CancelToken,
+    /// OS-level filesystem sandbox wrapping the `bash` child process
+    /// (`None` = `--no-sandbox`; read/write keep the in-process check above
+    /// either way).
+    pub sandbox: Option<Arc<Sandbox>>,
 }
 
 /// Outcome of one tool execution. Tool failures are reported as

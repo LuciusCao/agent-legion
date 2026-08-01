@@ -11,6 +11,7 @@ pub mod cli;
 pub mod config;
 pub mod events;
 pub mod provider;
+pub mod sandbox;
 pub mod session;
 pub mod skill;
 pub mod tools;
@@ -63,6 +64,21 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         None => None,
     };
 
+    // OS-level filesystem sandbox (design §5, M4.5). Fail-closed: when the
+    // bash tool is enabled and the sandbox backend is unavailable, startup
+    // fails here — before the agent loop — instead of degrading to an
+    // unsandboxed run. `--no-sandbox` is the only escape hatch. Without the
+    // bash tool the sandbox has no enforcement point and is skipped.
+    let sandbox = if cli.no_sandbox || !tools.contains(&ToolKind::Bash) {
+        None
+    } else {
+        Some(std::sync::Arc::new(
+            sandbox::Sandbox::new(&cwd, cli.session_dir.as_deref(), &cli.skill).context(
+                "filesystem sandbox unavailable (fail-closed); pass --no-sandbox to bypass",
+            )?,
+        ))
+    };
+
     let model = cli
         .model
         .clone()
@@ -87,6 +103,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         require_output: cli.require_output.clone(),
         session,
         cwd,
+        sandbox,
         cancel: cancel::CancelToken::install_sigterm_handler(),
     };
 

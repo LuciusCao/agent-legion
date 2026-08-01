@@ -60,6 +60,7 @@ velites/                 # Cargo crate（本仓库根下新目录）
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
     cancel.rs            # 取消/信号
+    sandbox.rs           # 沙箱抽象（seatbelt / bubblewrap，§5）
   tests/                 # Rust 集成测试（含 golden event fixtures）
 ```
 
@@ -145,6 +146,40 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
   不截断），M2 用真实负载分布决定是否设阈值；
 - **密钥管理 → 降级为普通配置项**（见 §7），不作为治理特性。
 
+### 沙箱：文件系统边界 OS 级强制（M4.5，已拍板）
+
+背景：2026-07-31 晚生产事故——一个提示词 bug 导致 pi 递归扫描整个代码仓库
+（find/grep 风暴），CPU 打满、当批节点失败率 40%。pi 没有任何沙箱，agent 的文件
+操作边界只剩提示词自觉。velites 把文件系统边界做成操作系统级强制，提示词失误
+无法突破。
+
+范围（本期只做文件系统）：
+
+- **读**允许：cwd（job 目录）+ session dir + 显式 `--skill` 目录（只读）+
+  系统库/二进制（只读，进程执行必需）；
+- **写**允许：仅 cwd + session dir + `/tmp`（含 `$TMPDIR`）；
+- **网络本轮不限制**（模型调用必须出网，且出口收敛于 gateway；网络策略另行立项）；
+- **默认开启**，`--no-sandbox` 作为运维逃生门（worker 正常路径不传）。
+
+实现：
+
+- `Sandbox` 抽象（`velites/src/sandbox.rs`），按平台二选一：macOS 用
+  `sandbox-exec`（运行时生成 seatbelt profile），Linux 用 `bubblewrap`
+  （worker 镜像需验证 user namespace 可用性）；
+- 生效点：**bash 工具的子进程整体用沙箱包装**（OS 级强制，子进程再 fork 也受限）；
+  read/write 工具维持 §8 的 canonicalize 进程内路径沙箱——两层互补：进程内校验
+  防 read/write 逃逸，seatbelt/bwrap 防 bash 及其子孙进程逃逸；
+- **fail-closed**：沙箱不可用（seatbelt/bwrap 缺失、profile 生成失败、userns 被禁）
+  时启动即 exit≠0 报错，**不降级**为无沙箱运行（逃生门只有显式 `--no-sandbox`）；
+- 沙箱拒绝表现为工具失败：`tool_execution_end{isError: true}`，错误消息含
+  sandbox 拒绝信息，随 events.jsonl 落盘可审计。
+
+macOS seatbelt 的两处实现注记（实测 macOS 15，`deny default` 下 dyld/libsystem
+在 exec 时直接 abort/bus error，profile 必须放宽这两处，进程才起得来）：
+`file-read-metadata` 全局放行（仅 stat，读不到文件内容与目录项），
+`file-read-data` 附加 `(literal "/")`（根目录在启动时被打开）。内容边界不受影响：
+允许根之外的 `open(O_RDONLY)` 与 `readdir` 仍被 EPERM 拒绝。
+
 ## 6. CLI 接口
 
 ```
@@ -154,6 +189,7 @@ velites --mode json \
         --tools read,write,bash \
         --provider gateway --model <m> --thinking low \
         [--max-turns N] [--max-tokens N] [--require-output f ...] \
+        [--no-sandbox] \
         @<run>/prompt.md "Execute the attached node instructions."
 ```
 
@@ -213,6 +249,10 @@ velites --mode json \
     断言首条 message 不含其内容）；
   - `EXEC-HARNESS-BUDGET-001`：预算耗尽必以 `agent_end{budget_exceeded}` 收尾
     （quick：stub provider 集成测试）；
+  - `EXEC-HARNESS-SANDBOX-001`：默认沙箱下 bash 工具无法读写
+    cwd/session dir/`/tmp` 之外的文件（quick：沙箱集成测试——尝试读用户 home
+    敏感路径、写仓库外路径，断言 `tool_execution_end{isError: true}`）；
+    沙箱不可用时 fail-closed（exit≠0），不降级；
 - **测试债偿还**：`tests/executors/` 目前对 pi 全部 fake-binary mock；本期为 velites
   建立真二进制 + stub provider 的集成测试（full lane），pi flavor 维持 mock 至移除；
 - **压力门禁**：并发 RSS/启动延迟基准纳入 stress lane（对照 PoC 基线：单发 RSS
@@ -221,6 +261,8 @@ velites --mode json \
   （`cargo fmt --check`、`clippy -D warnings`、`cargo test`），按路径裁剪；
 - **安全**：secret 不上命令行（`ps` 可见）这一条保留；凭据初期走 0600 配置文件，
   env/vault 为后续扩展（§7）；VAULT-SECRET-001 边界不变化——harness 不接触 vault；
+  文件系统沙箱默认开启（§5 沙箱小节，EXEC-HARNESS-SANDBOX-001），回应 2026-07-31
+  pi 扫全仓库事故；
 - **文档**：README 增 velites 章节；本文件进 `docs/architecture/`；
   AGENTS.md 第 6 节 executor 扩展链补 velites 边界说明。
 
@@ -232,6 +274,7 @@ velites --mode json \
 | M2 契约对齐 | OpenAI 兼容 SSE provider、skill 加载、错误/重试语义 | 真 gateway 跑 `review_subtitles` fixture，与 Node Pi diff 通过 |
 | M3 可控性 | 预算/取消/输出自检 + 工具体积度量 | 三条 invariant 测试入库 |
 | M4 集成 | flavor 配置、Dockerfile rust stage、CI rust lane、集成测试 full lane | `./scripts/check-quick.sh` + full gate 绿 |
+| M4.5 沙箱 | §5 沙箱小节：Sandbox 抽象、macOS seatbelt 先行、Linux bwrap 在 worker 镜像验证、`EXEC-HARNESS-SANDBOX-001` | 沙箱集成测试入库（quick lane）；逃逸尝试全部被拒 |
 | M5 灰度 | shadow → 金丝雀 → 默认 | 生产 64 并发下 RSS/CPU 对比报告 |
 
 ## 12. 风险与开放问题

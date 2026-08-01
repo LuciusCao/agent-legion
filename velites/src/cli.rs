@@ -84,6 +84,13 @@ pub struct Cli {
     #[arg(long = "require-output")]
     pub require_output: Vec<PathBuf>,
 
+    /// Disable the OS-level filesystem sandbox for the bash tool (macOS
+    /// seatbelt / Linux bubblewrap). The sandbox is ON by default and the
+    /// harness fails closed at startup when it is unavailable; this flag is
+    /// the only escape hatch (design §5, M4.5).
+    #[arg(long)]
+    pub no_sandbox: bool,
+
     /// System prompt text. Combined with --skill SKILL.md contents.
     #[arg(long)]
     pub system_prompt: Option<String>,

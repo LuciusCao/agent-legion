@@ -61,6 +61,8 @@ pub struct AgentConfig {
     pub session: Option<SessionLog>,
     /// Canonicalized working directory = tool sandbox root.
     pub cwd: PathBuf,
+    /// OS-level filesystem sandbox for the `bash` tool (`None` = --no-sandbox).
+    pub sandbox: Option<std::sync::Arc<crate::sandbox::Sandbox>>,
     /// Cancellation flag (SIGTERM-driven in the binary; default/disarmed in
     /// library use).
     pub cancel: CancelToken,
@@ -114,6 +116,7 @@ pub async fn run<P: Provider>(
     let tool_ctx = ToolContext {
         cwd: config.cwd.clone(),
         cancel: config.cancel.clone(),
+        sandbox: config.sandbox.clone(),
     };
 
     let mut messages = vec![Message::user(config.instruction.clone())];
