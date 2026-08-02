@@ -182,6 +182,37 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     assert f"rerun:{results / 'quick-reruns.json'}" in calls
 
 
+def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_COV": "1",
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "full",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "--cov=server" in calls
+    assert "--cov-fail-under=0" in calls
+
+
 def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     frontend = tmp_path / "frontend"
