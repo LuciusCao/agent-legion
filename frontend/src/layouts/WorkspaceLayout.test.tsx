@@ -4,7 +4,7 @@ import { Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceLayout from './WorkspaceLayout'
 import appBarStyles from '../components/AppBar.module.css'
-import { createMockUiState } from '../testing/fixtures'
+import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -48,18 +48,26 @@ vi.mock('../stores/workspaceStore', () => ({
   }),
 }))
 
-const setWorkerPausedMock = vi.fn()
 const fetchWorkerStatusMock = vi.fn()
 const setWorkspacePackageDialogOpenMock = vi.fn()
 const setTokenUsageDialogOpenMock = vi.fn()
+
+vi.mock('../stores/agentsStore', () => ({
+  useAgentsStore: (
+    selector?: (state: ReturnType<typeof createMockAgentsState>) => unknown
+  ) => {
+    const state = createMockAgentsState({
+      fetchWorkerStatus: fetchWorkerStatusMock,
+    })
+    return selector ? selector(state) : state
+  },
+}))
 
 vi.mock('../stores/uiStore', () => ({
   useUiStore: (
     selector?: (state: ReturnType<typeof createMockUiState>) => unknown
   ) => {
     const state = createMockUiState({
-      fetchWorkerStatus: fetchWorkerStatusMock,
-      setWorkerPaused: setWorkerPausedMock,
       setWorkspacePackageDialogOpen: setWorkspacePackageDialogOpenMock,
       setTokenUsageDialogOpen: setTokenUsageDialogOpenMock,
     })
@@ -70,7 +78,6 @@ vi.mock('../stores/uiStore', () => ({
 describe('WorkspaceLayout', () => {
   beforeEach(() => {
     mockNavigate.mockClear()
-    setWorkerPausedMock.mockClear()
     fetchWorkerStatusMock.mockClear()
     setWorkspacePackageDialogOpenMock.mockClear()
     setTokenUsageDialogOpenMock.mockClear()

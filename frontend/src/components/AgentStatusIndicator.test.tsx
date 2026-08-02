@@ -3,7 +3,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { useExecutorsStore, type WorkerSummary } from '../stores/executorsStore'
-import { createMockUiState } from '../testing/fixtures'
+import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
 
@@ -49,17 +49,27 @@ let mockAgents: AgentStatus[] = [
   }),
 ]
 
-vi.mock('../stores/uiStore', () => ({
-  useUiStore: (
-    selector?: (state: ReturnType<typeof createMockUiState>) => unknown
+vi.mock('../stores/agentsStore', () => ({
+  useAgentsStore: (
+    selector?: (state: ReturnType<typeof createMockAgentsState>) => unknown
   ) => {
-    const state = createMockUiState({
+    const state = createMockAgentsState({
       workerPausedByWorkspace: mockWorkerPausedByWorkspace,
       agents: mockAgents,
       getWorkerPaused: (workspaceId: string) =>
         mockWorkerPausedByWorkspace[workspaceId] ?? true,
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
+    })
+    return selector ? selector(state) : state
+  },
+}))
+
+vi.mock('../stores/uiStore', () => ({
+  useUiStore: (
+    selector?: (state: ReturnType<typeof createMockUiState>) => unknown
+  ) => {
+    const state = createMockUiState({
       showToast: showToastMock,
     })
     return selector ? selector(state) : state

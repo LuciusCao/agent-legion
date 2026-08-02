@@ -1,4 +1,4 @@
-import type { DagGraphNode } from './DagGraph'
+import type { DagGraphNode } from './dag/DagGraph'
 
 const BASE_HEIGHT = 66
 const DEFINITION_META_HEIGHT = 46
