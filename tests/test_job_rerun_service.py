@@ -5,10 +5,11 @@ from typing import Any
 
 import pytest
 
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
+from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
@@ -114,9 +115,9 @@ def _create_lease(
                 job["workflow_key"],
                 node_key,
                 run["id"],
-                _database_timestamp(now),
-                _database_timestamp(now),
-                _database_timestamp(expires),
+                database_timestamp(now),
+                database_timestamp(now),
+                database_timestamp(expires),
             ),
         )
     return run
@@ -169,19 +170,21 @@ def test_rerun_preserves_ancestors(rerun_service, job):
 
 
 def test_rerun_rejects_running_job(rerun_service, running_job):
-    result = rerun_service.rerun(running_job["workspace_id"], running_job["id"], "fetch_questions")
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(running_job["workspace_id"], running_job["id"], "fetch_questions")
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "busy"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "busy"
 
 
 def test_rerun_rejects_active_lease(rerun_service, job):
     _create_lease(rerun_service.job_db, job, "clean_and_parse", expires_offset_seconds=300)
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "busy"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "busy"
 
 
 def test_rerun_uses_atomic_lease_guarded_mutation(rerun_service, job, monkeypatch):
@@ -225,32 +228,36 @@ def test_rerun_atomic_guard_catches_lease_created_after_precheck(rerun_service, 
 
     monkeypatch.setattr(rerun_service.job_db, "lease_guarded_mutation", race)
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "busy"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "busy"
     assert rerun_service.job_db.get_job_node(job["id"], "clean_and_parse")["status"] == "running"
 
 
 def test_rerun_node_not_found(rerun_service, job):
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "nonexistent")
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(job["workspace_id"], job["id"], "nonexistent")
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "node_not_found"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "node_not_found"
 
 
 def test_rerun_job_not_found(rerun_service):
-    result = rerun_service.rerun("default", "missing", "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun("default", "missing", "clean_and_parse")
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "not_found"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "not_found"
 
 
 def test_rerun_wrong_workspace(rerun_service, job):
-    result = rerun_service.rerun("other", job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun("other", job["id"], "clean_and_parse")
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "wrong_workspace"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "wrong_workspace"
 
 
 def test_rerun_stages_and_removes_artifacts(rerun_service, job, settings):
@@ -319,9 +326,10 @@ def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, settings, 
         _fail,
     )
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
-    assert result["status"] == "failed"
+    assert exc_info.value.status == "failed"
     assert (storage / "questions_parsed.json").read_text() == "understanding"
 
 
@@ -427,19 +435,21 @@ def test_rerun_from_failed_node_uses_failed_node(rerun_service, job):
 
 
 def test_rerun_from_failed_node_skips_non_failed(rerun_service, job):
-    result = rerun_service.rerun(job["workspace_id"], job["id"], from_failed_node=True)
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(job["workspace_id"], job["id"], from_failed_node=True)
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "not_failed"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "not_failed"
 
 
 def test_rerun_from_failed_node_skips_when_no_failed_node(rerun_service, job):
     rerun_service.job_db.update_job_status(job["id"], "failed", "boom")
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], from_failed_node=True)
+    with pytest.raises(JobOperationError) as exc_info:
+        rerun_service.rerun(job["workspace_id"], job["id"], from_failed_node=True)
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "no_failed_node"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "no_failed_node"
 
 
 def test_batch_rerun_from_failed_node_per_job(rerun_service):

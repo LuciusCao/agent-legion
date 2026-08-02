@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.workflow_worker_ready_cache import (
+from server.app.workflow_worker.ready_cache import (
     ReadyCandidate,
     evaluate_job_ready,
     resolve_cached_definition,
@@ -20,7 +20,7 @@ from server.app.workflow_worker_ready_cache import (
 from server.app.workflows.definition import WorkflowDefinition
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 def mark_key(mark: dict[str, Any]) -> tuple[Any, ...]:

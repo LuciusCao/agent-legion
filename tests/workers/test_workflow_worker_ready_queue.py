@@ -5,11 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from server.app import workflow_worker_ready_cache
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.worker_control import WorkspaceWorkerControl
+from server.app.workflow_worker import ready_cache as workflow_worker_ready_cache
 from tests.helpers.executor_worker import (
     allocate,
     bind,

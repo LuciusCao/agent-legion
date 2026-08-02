@@ -1,8 +1,8 @@
 """Lease claim preparation for executor-routed workflow nodes.
 
-Split from ``workflow_worker_schedule`` to keep it within its size budget.
+Split from ``schedule`` to keep it within its size budget.
 Claims are buffered as ``PreparedClaim`` and leased in one batch transaction
-at pass end (``server.app.workflow_worker_claim_flush``); the capacity
+at pass end (``server.app.workflow_worker.claim_flush``); the capacity
 snapshot checks here are optimization hints that skip pointless preparation,
 the lease claim transaction remains the authoritative capacity enforcement.
 """
@@ -14,11 +14,11 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import LeaseClaimRequest
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.workflow_worker_claim_flush import PreparedClaim
+from server.app.workflow_worker.claim_flush import PreparedClaim
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 def claim_executor_node(

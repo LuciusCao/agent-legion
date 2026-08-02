@@ -4,11 +4,12 @@ from typing import Any
 
 import pytest
 
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_execution import JobExecutionService
+from server.app.services.job_operation_error import JobOperationError
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.registry import load_registered_workflow
@@ -87,9 +88,9 @@ def _create_active_lease(
                 job["workflow_key"],
                 node_key,
                 run["id"],
-                _database_timestamp(now),
-                _database_timestamp(now),
-                _database_timestamp(expires),
+                database_timestamp(now),
+                database_timestamp(now),
+                database_timestamp(expires),
             ),
         )
 
@@ -231,18 +232,20 @@ def test_run_to_rejects_start_node_outside_target_closure(
 ):
     job = _create_job(job_db, workspace["id"])
 
-    result = execution_service.run_to(
-        workspace["id"],
-        job["id"],
-        "clean_and_parse",
-        start_node_key="review_possible_errors",
-    )
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(
+            workspace["id"],
+            job["id"],
+            "clean_and_parse",
+            start_node_key="review_possible_errors",
+        )
 
-    assert result["job_id"] == job["id"]
-    assert result["operation"] == "run_to"
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "invalid_start"
-    assert "review_possible_errors" in (result["message"] or "")
+    error = exc_info.value
+    assert error.job_id == job["id"]
+    assert error.operation == "run_to"
+    assert error.status == "failed"
+    assert error.reason_code == "invalid_start"
+    assert "review_possible_errors" in (error.message or "")
 
 
 def test_run_to_rejects_unknown_target(
@@ -250,10 +253,11 @@ def test_run_to_rejects_unknown_target(
 ):
     job = _create_job(job_db, workspace["id"])
 
-    result = execution_service.run_to(workspace["id"], job["id"], "nonexistent_target")
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(workspace["id"], job["id"], "nonexistent_target")
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "node_not_found"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "node_not_found"
 
 
 def test_run_to_rejects_active_lease(
@@ -262,10 +266,11 @@ def test_run_to_rejects_active_lease(
     job = _create_job(job_db, workspace["id"])
     _create_active_lease(job_db, job, "fetch_questions")
 
-    result = execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "busy"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "busy"
 
 
 def test_run_to_uses_atomic_execution_control_mutation(
@@ -314,10 +319,11 @@ def test_run_to_atomic_guard_catches_lease_created_after_precheck(
 
     monkeypatch.setattr(job_db, "apply_run_to_atomic", race)
 
-    result = execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "busy"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "busy"
     assert _node_statuses(job_db, job["id"])["fetch_questions"] == "running"
 
 
@@ -328,10 +334,11 @@ def test_run_to_skips_already_completed_target(
     job_db.update_job_node(job["id"], "fetch_questions", status="completed")
     job_db.update_job_node(job["id"], "clean_and_parse", status="completed")
 
-    result = execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
 
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "target_already_completed"
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "target_already_completed"
 
 
 def test_continue_full_dag_after_target_reached(
@@ -361,10 +368,11 @@ def test_run_to_rejects_wrong_workspace(
 ):
     job = _create_job(job_db, workspace["id"])
 
-    result = execution_service.run_to("other-ws", job["id"], "clean_and_parse")
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.run_to("other-ws", job["id"], "clean_and_parse")
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "wrong_workspace"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "wrong_workspace"
 
 
 def test_continue_rejects_wrong_workspace(
@@ -372,10 +380,11 @@ def test_continue_rejects_wrong_workspace(
 ):
     job = _create_job(job_db, workspace["id"])
 
-    result = execution_service.continue_job("other-ws", job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        execution_service.continue_job("other-ws", job["id"])
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "wrong_workspace"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "wrong_workspace"
 
 
 def test_batch_run_to_returns_mixed_results_in_request_order(

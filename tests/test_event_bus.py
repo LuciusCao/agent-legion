@@ -1,7 +1,7 @@
 import asyncio
 import threading
 
-from server.app.event_bus import _EVICTED, InProcessEventBus
+from server.app.events.bus import _EVICTED, InProcessEventBus
 
 
 def test_subscribe_receive_and_unsubscribe_idempotent():

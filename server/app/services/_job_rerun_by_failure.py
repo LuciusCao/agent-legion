@@ -6,7 +6,7 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services._job_rerun_single import execute_rerun
+from server.app.services._job_rerun_single import execute_rerun_result
 from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.workflow_branching import upstream_nodes
@@ -95,7 +95,7 @@ def _rerun_job_failures(
             if target not in targets:
                 targets.append(target)
 
-    node_results = [execute_rerun(service, job, job_id, target) for target in targets]
+    node_results = [execute_rerun_result(service, job, job_id, target) for target in targets]
     rerun_nodes = [str(r["node_key"]) for r in node_results if r["status"] == "succeeded"]
     failures = [r for r in node_results if r["status"] == "failed"]
     skips = [r for r in node_results if r["status"] == "skipped"]

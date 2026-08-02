@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 
 from server.app.db.transaction import read_connection
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 
 
 @dataclass
@@ -49,7 +49,7 @@ class CapacitySnapshot:
 def load_capacity_snapshot(db_path: str, global_capacities: dict[str, int]) -> CapacitySnapshot:
     """Build a snapshot with two aggregate queries against the lease database."""
     with read_connection(db_path) as conn:
-        now_str = _database_timestamp(datetime.now(UTC))
+        now_str = database_timestamp(datetime.now(UTC))
         active_rows = conn.execute(
             """
             select executor_id, workspace_id, count(*) as cnt

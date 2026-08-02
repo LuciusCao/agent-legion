@@ -2,7 +2,8 @@ import asyncio
 import contextlib
 import json
 
-from server.app.job_events import JobEventBuffer, WorkspaceJobEventAggregator
+from server.app.events.aggregator import WorkspaceJobEventAggregator
+from server.app.events.buffer import JobEventBuffer
 
 
 def test_records_revisions_in_order():

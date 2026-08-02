@@ -3,9 +3,9 @@ from __future__ import annotations
 from collections import deque
 from threading import Lock
 
-from server.app.db.retry import retried_on_database_conflict
+from server.app.db.retry import with_database_conflict_retry
 from server.app.db.transaction import write_transaction
-from server.app.job_event_models import CompactedJobEvents, JobEvent, JobEventKind
+from server.app.events.models import CompactedJobEvents, JobEvent, JobEventKind
 
 
 class JobEventBuffer:
@@ -35,7 +35,7 @@ class JobEventBuffer:
         self._revision = max(self._revision, bumped)
         return self._revision
 
-    @retried_on_database_conflict
+    @with_database_conflict_retry
     def _bump_seq(self, db_path: str) -> int:
         with write_transaction(db_path) as conn:
             row = conn.execute(

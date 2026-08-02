@@ -8,18 +8,18 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 from server.app.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
-from server.app.workflow_worker_agent_gate import (
+from server.app.workflow_worker.agent_gate import (
     AgentPassState,
     agent_claim_allowed,
     prepare_agent_pass,
     request_restock,
 )
-from server.app.workflow_worker_ready_cache import ReadyCandidate
-from server.app.workflow_worker_routing import NodeRoute
+from server.app.workflow_worker.ready_cache import ReadyCandidate
+from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
-_BATCH = "server.app.workflow_worker_agent_gate._agent_broker_batch.active_request_keys"
-_STOCK = "server.app.workflow_worker_agent_gate.load_stock_snapshot"
+_BATCH = "server.app.workflow_worker.agent_gate.batch.active_request_keys"
+_STOCK = "server.app.workflow_worker.agent_gate.load_stock_snapshot"
 
 
 def _node(key: str = "fetch") -> WorkflowNode:
