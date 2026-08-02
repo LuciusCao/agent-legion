@@ -16,10 +16,21 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    process_env = os.environ.copy()
+    for key in (
+        "BACKEND_GATE_PHASE",
+        "FRONTEND_API_CHECK",
+        "FRONTEND_GATE_PHASE",
+        "FRONTEND_TEST_MODE",
+        "GATE_LANES",
+        "GATE_TIER",
+    ):
+        process_env.pop(key, None)
+    process_env.update(env)
     return subprocess.run(
         [str(path)],
         cwd=cwd,
-        env={**os.environ, **env},
+        env=process_env,
         text=True,
         capture_output=True,
         check=False,
