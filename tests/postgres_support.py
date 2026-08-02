@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import os
 import re
 from pathlib import Path
@@ -40,8 +39,9 @@ def ensure_test_database() -> None:
 
     New worktrees get a dedicated database name (see `_worktree_database_name`),
     which would otherwise require a manual `createdb` before the first test run.
-    Connection-time errors do not carry a sqlstate, so instead of probing for
-    the database we simply issue CREATE DATABASE and ignore DuplicateDatabase.
+    Every xdist worker owns a session fixture, so first use can be concurrent.
+    A session-level advisory lock serializes the catalog check and CREATE;
+    closing the maintenance connection releases the lock automatically.
     """
     import psycopg
     from psycopg import sql
@@ -51,11 +51,11 @@ def ensure_test_database() -> None:
     dbname = params.pop("dbname", None)
     if not dbname:
         return
-    with (
-        psycopg.connect(make_conninfo(**params, dbname="postgres"), autocommit=True) as conn,
-        contextlib.suppress(psycopg.errors.DuplicateDatabase),
-    ):
-        conn.execute(sql.SQL("create database {}").format(sql.Identifier(dbname)))
+    with psycopg.connect(make_conninfo(**params, dbname="postgres"), autocommit=True) as conn:
+        conn.execute("select pg_advisory_lock(hashtext(%s))", (dbname,))
+        exists = conn.execute("select 1 from pg_database where datname = %s", (dbname,)).fetchone()
+        if exists is None:
+            conn.execute(sql.SQL("create database {}").format(sql.Identifier(dbname)))
 
 
 # Importing test helpers must remain side-effect free. The root PostgreSQL
