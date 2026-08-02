@@ -6,8 +6,20 @@
 const hasDom = typeof document !== "undefined";
 const form = hasDom ? document.querySelector("#config-form") : null;
 const errorBox = hasDom ? document.querySelector("#form-error") : null;
-const CONTROL_TOKEN = typeof window !== "undefined" ? window.__WORKER_CONTROL_TOKEN__ : undefined;
-const TOKEN_MISSING = !CONTROL_TOKEN || CONTROL_TOKEN === "__WORKER_CONTROL_TOKEN__";
+const injectedToken = typeof window !== "undefined" ? window.__WORKER_CONTROL_TOKEN__ : undefined;
+let CONTROL_TOKEN = !injectedToken || injectedToken === "__WORKER_CONTROL_TOKEN__" ? undefined : injectedToken;
+// 非回环绑定时服务端不再内嵌 token：先读 sessionStorage，否则提示手动输入并记住本次会话。
+if (!CONTROL_TOKEN && hasDom) {
+  CONTROL_TOKEN = window.sessionStorage.getItem("worker-control-token") || undefined;
+  if (!CONTROL_TOKEN) {
+    const entered = window.prompt("请输入 Worker 控制令牌（见 state dir 下的 control_token 文件）");
+    if (entered) {
+      CONTROL_TOKEN = entered;
+      window.sessionStorage.setItem("worker-control-token", entered);
+    }
+  }
+}
+const TOKEN_MISSING = !CONTROL_TOKEN;
 let latestMaxConcurrency = 0;
 // 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
 export const NUMBER_DEFAULTS = { max_concurrency: 1, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
@@ -637,7 +649,7 @@ if (hasDom) {
 
   if (TOKEN_MISSING) {
     setText("status-title", "控制令牌未注入");
-    setText("status-detail", "请通过 Worker Service（默认 http://127.0.0.1:8787/）访问本页面，静态打开 index.html 无法鉴权");
+    setText("status-detail", "请刷新页面并按提示输入控制令牌；本机默认走 http://127.0.0.1:8787/ 访问时自动注入");
     errorBox.textContent = "控制令牌未注入，页面不可用";
   } else {
     Promise.all([loadConfig(), loadStatus(), loadLogs(), loadMetrics()]);
