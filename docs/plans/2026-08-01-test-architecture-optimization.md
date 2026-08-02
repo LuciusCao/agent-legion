@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 1 complete; Phase 2 pending
+状态：Phase 2 local split complete; performance targets open; Phase 3 pending
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -304,14 +304,15 @@ Phase 1 GitHub Actions 验收（2026-08-02，提交 `cded03f8`，三次均通过
 
 任务：
 
-- [ ] 盘点当前 57 个 `.test.ts`，确认至少 46 个不依赖 Testing Library 的候选文件。
-- [ ] 使用 Vitest projects 或文件约定拆分 Node 与 jsdom 环境。
-- [ ] Node 项目只加载必要 setup；jsdom 项目保留 DOM matcher、EventSource、observer mocks。
-- [ ] 在 setup 中补齐受控的 navigation 和 `HTMLMediaElement.play/pause` mock，清除当前通过
+- [x] 盘点当前 57 个 `.test.ts`，确认至少 46 个不依赖 Testing Library 的候选文件。
+- [x] 使用 Vitest projects 或文件约定拆分 Node 与 jsdom 环境。
+- [x] Node 项目只加载必要 setup；jsdom 项目保留 DOM matcher、EventSource、observer mocks。
+- [x] 在 setup 中补齐受控的 navigation 和 `HTMLMediaElement.play/pause` mock，清除当前通过
       测试中的 jsdom error 噪声。
-- [ ] 测量 threads/forks、worker 上限和 GitHub runner 核数的组合，不盲目使用最大并发。
+- [x] 测量本机 threads/forks 与 worker 上限组合，不盲目使用最大并发；GitHub runner 单 job
+      结果保持 open。
 - [ ] 如单 job 仍超过目标，将 logic/component 拆成两个 CI shard，最终合并 coverage。
-- [ ] 保持组件测试用户行为语义，不用大范围 shallow rendering 换取速度。
+- [x] 保持组件测试用户行为语义，不用大范围 shallow rendering 换取速度。
 
 验收：
 
@@ -321,6 +322,29 @@ Phase 1 GitHub Actions 验收（2026-08-02，提交 `cded03f8`，三次均通过
 - 合并后的 coverage 不低于原门槛。
 
 回滚：projects/shard 可退回单 Vitest config；测试文件内容不需要回退。
+
+Phase 2 执行记录（2026-08-02）：
+
+- 57 个 `.test.ts` 中 11 个使用 Testing Library，46 个不使用；运行证据进一步确认其中 7 个
+  仍依赖 `window`、DOMParser 等浏览器 API，最终安全拆分为 39 个 Node logic 文件和 98 个
+  jsdom component 文件。137 files / 1058 tests 全部保留并通过。
+- logic project 只加载 console guard；component project 保留 DOM matcher、matchMedia、
+  EventSource、ResizeObserver 和 IntersectionObserver。document 冒泡末端的 navigation
+  guard 保留 React Router 行为，同时阻止 jsdom 默认页面导航；media play/pause 使用受控 mock。
+- 本机空闲样本对比：threads/10 41.60s、threads/8 41.53s、threads/6 37.50s、threads/5
+  40.30s、forks/6 43.66s，因此固定上限为 6 threads。随后系统 load average 15.66 时出现
+  95.64s 污染样本，不计入性能基线。
+- 带 coverage 的独立运行 137 files / 1058 tests 全通过，statements 85.96%、branches
+  76.94%、functions 84.26%、lines 88.43%，不低于原门槛；日志不再出现 navigation/media
+  `Not implemented`。
+- 本机 35s 中位数和 GitHub CI 150s 尚未验收。最近已知 GitHub 单 job 样本为 365s、381s、
+  385s（中位数 381s）。Vitest raw blob 跨 job 分片涉及短期 artifact 留存，决定延后到
+  Phase 5 CI 拓扑治理，本阶段保持 open。
+- `./scripts/check-quick.sh` 通过：Python 2341 passed、Vitest 1058 passed、Rust 全通过。
+  `./scripts/check.sh` 首跑暴露 Phase 1 遗留的中间 coverage floor 回归；修复 full tier 使用
+  `--cov-fail-under=0` 后，聚焦门禁契约 7 passed，完整门禁通过，backend combined coverage
+  93%、frontend lines 88.43%、production bundle 通过。完整门出现 1 次 rerun，立即带 telemetry
+  复跑 2342 passed、0 rerun，未复现；继续纳入 Phase 5 flaky 观测。
 
 ### Phase 3：修正 coverage 分母并补关键盲区
 
