@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 1 implementation complete; CI median validation pending
+状态：Phase 1 complete; Phase 2 pending
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -263,18 +263,40 @@ uv run pytest -q -m "postgres and not full_gate and not ci_extended" -n 4
 
 Phase 1 本地验证记录（2026-08-02，Darwin arm64，10 logical CPUs）：
 
-- 使用不可达的 `127.0.0.1:1` 数据库 URL，离线 unit 层 1421 passed；两次带 coverage
-  的 wrapper 用时 23.23s / 39.21s，证明 collection 与执行均不会连接 PostgreSQL。
+- 使用不可达的 `127.0.0.1:1` 数据库 URL，初始离线 unit 层 1421 passed；两次带 coverage
+  的 wrapper 用时 23.23s / 39.21s，证明 collection 与执行均不会连接 PostgreSQL。首次
+  建库竞态修复增加 2 个回归用例后，最终 unit 层为 1423 passed。
 - PostgreSQL integration 层 918 passed；无 coverage 用时 55.15s，两次带 coverage
   用时 118.32s / 139.81s。
 - `tests/full -m full_gate` 32 passed（最终 10.04s）；三层最终合并覆盖率 92.88%，高于
   85% 门槛，新拆分的 executor registry factory 覆盖率为 100%。
-- 三层合计 2371 passed，与普通层 2339 加 full 层 32 的重新分层一致；rerun 为 0。
-- 完整普通后端门禁 2339 passed / 73.33s，相比 Phase 0 本机 286.18s 下降约 74%；后端、
+- 最终三层合计 2373 passed，与普通层 2341 加 full 层 32 的重新分层一致；有效采样中
+  未观察到 rerun。
+- 增加竞态回归前的完整普通后端门禁 2339 passed / 73.33s，相比 Phase 0 本机 286.18s
+  下降约 74%；后端、
   前端和 Rust 的跨语言 quick gate 也全部通过（228s）。
 - 架构检查、生成文档检查、ruff 与定向 gate contract 测试通过；`main.py` 的执行器注册
   构建被拆出后从 250 行降至 227 行，并移除了原 246 行文件预算豁免。
-- 仍需在 GitHub Actions 连续运行三次，以中位数验收“Python 普通测试至少下降 25%”。
+
+Phase 1 GitHub Actions 验收（2026-08-02，提交 `cded03f8`，三次均通过）：
+
+| Run | unit | PostgreSQL | full | Python 合计 | backend job | frontend tests | workflow |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| [30740019516](https://github.com/LuciusCao/agent-legion/actions/runs/30740019516) | 100s | 255s | 18s | 373s | 7m43s | 385s | 9m16s |
+| [30740360208](https://github.com/LuciusCao/agent-legion/actions/runs/30740360208) | 90s | 215s | 15s | 320s | 7m22s | 381s | 9m13s |
+| [30740692455](https://github.com/LuciusCao/agent-legion/actions/runs/30740692455) | 83s | 198s | 15s | 296s | 7m03s | 365s | 8m51s |
+| 中位数 | 90s | 215s | 15s | 320s | 7m22s | 381s | 9m13s |
+
+- Python 三层合计中位数由 Phase 0 的 435.94s 降至 320s，下降 26.6%，通过至少 25% 的
+  Phase 1 验收线；最终 combined coverage 为 92.86%，高于 85% 门槛。
+- 首次远端运行
+  [30734593605](https://github.com/LuciusCao/agent-legion/actions/runs/30734593605)
+  暴露 xdist worker 并发首次建库竞态：多个 worker 同时执行 CREATE DATABASE，产生 154
+  个 setup error。`383897dc` 使用 session advisory lock 串行化 catalog check/create，
+  `cded03f8` 隔离 gate-script 子进程环境；全新临时数据库 4-worker 回归 6 passed，完整
+  PostgreSQL 层 918 passed。
+- backend job 中位数由 9m10s 降至 7m22s，但 workflow 关键路径中位数仍为 9m13s；当前
+  瓶颈已经转移到 frontend tests（中位数 381s），由 Phase 2 继续处理。
 
 ### Phase 2：前端 Node/jsdom 分层与执行优化
 
