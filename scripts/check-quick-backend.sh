@@ -114,7 +114,8 @@ run_tests() {
         --reruns 1 \
         --reruns-delay 2 \
         "${telemetry_args[@]}" \
-        "${cov_args[@]}"
+        "${cov_args[@]}" \
+        "${split_cov_floor_args[@]}"
       ;;
     *)
       echo "Unsupported GATE_TIER: ${GATE_TIER}" >&2
