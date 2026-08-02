@@ -24,23 +24,20 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from worker import runtime_controls
-from worker.cleanup import (
-    SWEEP_INTERVAL_SECONDS,
-    clean_work_root,
-    sweep_stale_executions,
-)
+from worker.cleanup import clean_work_root
 from worker.event_filter import spawn_event_pump
-from worker.execution_heartbeat import start_heartbeat
-from worker.execution_lifecycle import terminate, wait_for_exit
+from worker.execution_heartbeat import start_lease_heartbeat
 from worker.execution_prepare import prepare_execution
 from worker.fd_limits import raise_fd_limit
 from worker.host_client import Client, WorkerAuthError
 from worker.host_status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
+from worker.process_lifecycle import terminate, wait_for_exit
 from worker.registration_retry import register_from_config
+from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
-from worker.upload_queue import _MAX_ERROR_MESSAGE_CHARS, UploadQueue, UploadTask
+from worker.upload_queue import MAX_ERROR_MESSAGE_CHARS, UploadQueue, UploadTask
 
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
 load_claim_controls = runtime_controls.load_claim_controls
@@ -79,7 +76,9 @@ def run_execution(
     }
     status.start(execution_id, **status_fields)
     ownership_lost = threading.Event()
-    heartbeat = start_heartbeat(client, execution_id, lease_id, heartbeat_interval, ownership_lost)
+    heartbeat = start_lease_heartbeat(
+        client, execution_id, lease_id, heartbeat_interval, ownership_lost
+    )
     proc: subprocess.Popen[bytes] | None = None
     task: UploadTask | None = None
     try:
@@ -156,7 +155,7 @@ def run_execution(
             prebuilt_metadata={
                 "status": "failed",
                 "exit_code": 1,
-                "error_message": str(exc)[:_MAX_ERROR_MESSAGE_CHARS],
+                "error_message": str(exc)[:MAX_ERROR_MESSAGE_CHARS],
             },
         )
     finally:

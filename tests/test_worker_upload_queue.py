@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from worker import upload_queue
-from worker.execution_lifecycle import heartbeat_loop
+from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
 from worker.status import ExecutionStatusReporter
 from worker.upload_queue import PENDING_FILENAME, UploadQueue, UploadTask
 
@@ -166,14 +166,16 @@ def test_heartbeat_quiesced_before_report(tmp_path: Path) -> None:
     beat = threading.Thread(
         target=heartbeat_loop,
         args=(
-            client,
-            task.execution_id,
-            task.lease_id,
-            task.heartbeat_stop,
-            0.05,
-            threading.Event(),
-            {"proc": None},
-            threading.Event(),
+            HeartbeatConfig(
+                client=client,
+                execution_id=task.execution_id,
+                lease_id=task.lease_id,
+                stop=task.heartbeat_stop,
+                interval=0.05,
+                ownership_lost=threading.Event(),
+                proc_ref={"proc": None},
+                adopted=threading.Event(),
+            ),
         ),
         daemon=True,
     )

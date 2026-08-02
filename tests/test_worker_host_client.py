@@ -8,7 +8,6 @@ from pathlib import Path
 
 import pytest
 
-from worker import host_transfer
 from worker.host_client import Client, WorkerAuthError
 
 
@@ -20,7 +19,7 @@ def _artifact(tmp_path: Path) -> Path:
 
 def _patch_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     sleeps: list[float] = []
-    monkeypatch.setattr(host_transfer.time, "sleep", sleeps.append)
+    monkeypatch.setattr("time.sleep", sleeps.append)
     return sleeps
 
 
