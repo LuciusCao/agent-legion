@@ -97,6 +97,7 @@ def is_scheduler_path(relative_path: str) -> bool:
     return (
         relative_path.endswith("/scheduler.py")
         or relative_path == "server/app/workflow_worker_thread.py"
+        or relative_path == "server/app/workflow_worker/thread.py"
         or relative_path.startswith("server/app/executors/scheduling/")
     )
 

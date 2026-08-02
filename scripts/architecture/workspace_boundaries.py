@@ -1,4 +1,4 @@
-"""Phase 6 architecture ratchets for Workspace Capability Parity.
+"""Workspace boundary ratchets for Workspace Capability Parity.
 
 Protect generic Workspace boundaries, thin routes, and generated transport types.
 """
@@ -153,6 +153,28 @@ def check_frontend_handwritten_job_transports(root: Path) -> list[str]:
                     f"handwritten transport interface {name!r} must be derived from generated "
                     "OpenAPI types (ApiSchemas['...'])"
                 )
+    return errors
+
+
+def check_jobs_route_include_router(root: Path) -> list[str]:
+    """routes/jobs.py must not aggregate routers; compose them in routes/__init__.py."""
+    rel_path = "server/app/routes/jobs.py"
+    path = root / rel_path
+    if not path.exists():
+        return []
+    source = path.read_text(encoding="utf-8")
+    try:
+        tree = ast.parse(source, filename=rel_path)
+    except SyntaxError as exc:
+        return [f"{rel_path}: syntax error ({exc})"]
+    errors: list[str] = []
+    for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+        name = ast.unparse(call.func)
+        if name.endswith("include_router"):
+            errors.append(
+                f"{rel_path}: include_router forbidden; "
+                "compose focused routers in routes/__init__.py"
+            )
     return errors
 
 

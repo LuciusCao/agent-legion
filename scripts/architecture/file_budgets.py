@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from server.app.quality.exemptions import ArchitectureExemption
+from scripts.quality.exemptions import ArchitectureExemption
 
 from .budget_inventory import build_budget_inventory
 from .budget_policy import BudgetPolicy
