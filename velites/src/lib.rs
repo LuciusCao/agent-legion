@@ -64,6 +64,26 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         None => None,
     };
 
+    // Extra read-only roots for the read tool (design §5): the --skill dirs
+    // and the session dir — the same locations the OS sandbox allows reads
+    // from. Both exist by now (each skill's SKILL.md was loaded above and
+    // SessionLog::open created the session dir), so canonicalization matches
+    // the sandbox allowlist exactly.
+    let mut read_roots = Vec::new();
+    for dir in &cli.skill {
+        read_roots
+            .push(dir.canonicalize().with_context(|| {
+                format!("failed to canonicalize skill dir `{}`", dir.display())
+            })?);
+    }
+    if let Some(dir) = &cli.session_dir {
+        read_roots.push(
+            dir.canonicalize().with_context(|| {
+                format!("failed to canonicalize session dir `{}`", dir.display())
+            })?,
+        );
+    }
+
     // OS-level filesystem sandbox (design §5, M4.5). Fail-closed: when the
     // bash tool is enabled and the sandbox backend is unavailable, startup
     // fails here — before the agent loop — instead of degrading to an
@@ -103,6 +123,7 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         require_output: cli.require_output.clone(),
         session,
         cwd,
+        read_roots,
         sandbox,
         cancel: cancel::CancelToken::install_sigterm_handler(),
     };

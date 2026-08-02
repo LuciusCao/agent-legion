@@ -2,8 +2,10 @@
 //!
 //! Sandbox invariant: every path a tool touches must canonicalize to a
 //! location inside the process working directory (the job dir the worker
-//! launched velites in). Escapes (`../`, absolute paths, symlinks) are
-//! rejected before any filesystem mutation happens.
+//! launched velites in) — except READS, which may additionally land inside
+//! the explicit read-only roots (`--skill` directories and the session dir,
+//! design §5). Writes stay cwd-only. Escapes (`../`, absolute paths,
+//! symlinks) are rejected before any filesystem mutation happens.
 
 pub mod bash;
 pub mod read;
@@ -32,6 +34,11 @@ pub struct ToolContext {
     /// (`None` = `--no-sandbox`; read/write keep the in-process check above
     /// either way).
     pub sandbox: Option<Arc<Sandbox>>,
+    /// Canonicalized extra READ-ONLY roots the `read` tool may resolve into
+    /// alongside the cwd: the explicit `--skill` directories and the session
+    /// dir (design §5; mirrors the OS sandbox's read allowlist). The `write`
+    /// tool never consults this list — writes stay cwd-only.
+    pub read_roots: Vec<PathBuf>,
 }
 
 /// Outcome of one tool execution. Tool failures are reported as
@@ -100,7 +107,8 @@ impl ToolKind {
     pub fn spec(self) -> ToolSpec {
         let (description, parameters) = match self {
             Self::Read => (
-                "Read a UTF-8 text file inside the working directory. \
+                "Read a UTF-8 text file inside the working directory or an \
+                 enabled skill directory (read-only). \
                  Optional 1-based `offset` and `limit` select a line range. \
                  Output is truncated to the first 2000 lines or 50KB \
                  (whichever is hit first). Use offset/limit for large files; \
@@ -167,6 +175,26 @@ impl ToolKind {
 /// then re-appends the non-existing tail and checks the result is still
 /// inside the canonicalized root.
 pub fn resolve_in_cwd(cwd_canonical: &Path, raw: &str) -> Result<PathBuf, ToolError> {
+    resolve_within(cwd_canonical, &[], raw)
+}
+
+/// Resolve `raw` for the `read` tool: the path may land inside the cwd OR
+/// any of the canonicalized extra read-only roots (`--skill` dirs, session
+/// dir; design §5). Same escape protection as [`resolve_in_cwd`] — `..`
+/// segments and symlinks that leave every allowed root are rejected.
+pub fn resolve_readable(
+    cwd_canonical: &Path,
+    read_roots: &[PathBuf],
+    raw: &str,
+) -> Result<PathBuf, ToolError> {
+    resolve_within(cwd_canonical, read_roots, raw)
+}
+
+fn resolve_within(
+    cwd_canonical: &Path,
+    extra_roots: &[PathBuf],
+    raw: &str,
+) -> Result<PathBuf, ToolError> {
     let raw_path = Path::new(raw);
     let candidate = if raw_path.is_absolute() {
         raw_path.to_path_buf()
@@ -193,7 +221,9 @@ pub fn resolve_in_cwd(cwd_canonical: &Path, raw: &str) -> Result<PathBuf, ToolEr
         resolved.push(component);
     }
 
-    if resolved.starts_with(cwd_canonical) {
+    let inside = resolved.starts_with(cwd_canonical)
+        || extra_roots.iter().any(|root| resolved.starts_with(root));
+    if inside {
         Ok(resolved)
     } else {
         Err(ToolError::SandboxEscape(raw.to_string()))

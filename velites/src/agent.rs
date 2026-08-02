@@ -61,6 +61,9 @@ pub struct AgentConfig {
     pub session: Option<SessionLog>,
     /// Canonicalized working directory = tool sandbox root.
     pub cwd: PathBuf,
+    /// Canonicalized extra read-only roots for the `read` tool (`--skill`
+    /// dirs + session dir, design §5). Writes never use these.
+    pub read_roots: Vec<PathBuf>,
     /// OS-level filesystem sandbox for the `bash` tool (`None` = --no-sandbox).
     pub sandbox: Option<std::sync::Arc<crate::sandbox::Sandbox>>,
     /// Cancellation flag (SIGTERM-driven in the binary; default/disarmed in
@@ -117,6 +120,7 @@ pub async fn run<P: Provider>(
         cwd: config.cwd.clone(),
         cancel: config.cancel.clone(),
         sandbox: config.sandbox.clone(),
+        read_roots: config.read_roots.clone(),
     };
 
     let mut messages = vec![Message::user(config.instruction.clone())];

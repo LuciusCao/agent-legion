@@ -175,3 +175,49 @@ fn require_output_escape_is_rejected() {
     assert!(!output.status.success());
     assert!(String::from_utf8_lossy(&output.stderr).contains("--require-output"));
 }
+
+#[test]
+fn read_tool_reads_absolute_path_inside_skill_dir() {
+    // End-to-end wiring (design §5): a --skill directory OUTSIDE the job dir
+    // is a read-only root, so the read tool accepts absolute paths into it.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path().join("job");
+    let skill = dir.path().join("skill");
+    std::fs::create_dir(&cwd).unwrap();
+    std::fs::create_dir_all(skill.join("references")).unwrap();
+    write(&cwd.join("prompt.md"), "Read the skill reference.");
+    write(&skill.join("SKILL.md"), "# Demo skill\n");
+    write(&skill.join("references/data.json"), "{\"k\": 1}");
+    let reference = skill.join("references/data.json");
+    write(
+        &cwd.join("fixture.json"),
+        &format!(
+            r#"{{"responses": [
+  {{"content": [{{"type": "toolCall", "name": "read", "arguments": {{"path": "{}"}}}}]}},
+  {{"content": [{{"type": "text", "text": "done"}}], "stopReason": "stop"}}
+]}}"#,
+            reference.display()
+        ),
+    );
+
+    let output = run_velites(
+        &cwd,
+        &cwd.join("fixture.json"),
+        &["--skill", &skill.to_string_lossy()],
+    );
+    assert!(
+        output.status.success(),
+        "velites exited non-zero: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let events = parse_events(&output.stdout);
+    let tool_end = events
+        .iter()
+        .find(|e| e["type"] == "tool_execution_end")
+        .expect("tool_execution_end missing");
+    assert_eq!(
+        tool_end["isError"], false,
+        "read inside --skill dir must succeed: {tool_end}"
+    );
+    assert_eq!(tool_end["result"]["content"][0]["text"], "{\"k\": 1}");
+}
