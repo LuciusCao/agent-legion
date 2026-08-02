@@ -1,10 +1,13 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { useAuthStore } from './authStore'
+import { handleUnauthorized } from '../api/requestAuth'
 import {
+  bootstrap as apiBootstrap,
   fetchBootstrapStatus,
   fetchMe,
   login as apiLogin,
+  logout as apiLogout,
 } from '../api/authApi'
 import type { UserResponse } from '../api/authApi'
 
@@ -36,6 +39,10 @@ beforeEach(() => {
     bootstrapAvailable: null,
   })
   vi.clearAllMocks()
+})
+
+afterEach(() => {
+  vi.unstubAllGlobals()
 })
 
 describe('initialize', () => {
@@ -74,6 +81,18 @@ describe('initialize', () => {
     expect(state.user).toBeNull()
     expect(state.status).toBe('anonymous')
   })
+
+  it('degrades to an unknown bootstrap state when both probes fail', async () => {
+    vi.mocked(fetchBootstrapStatus).mockRejectedValue(new Error('offline'))
+    vi.mocked(fetchMe).mockRejectedValue(new Error('offline'))
+
+    await useAuthStore.getState().initialize()
+
+    const state = useAuthStore.getState()
+    expect(state.bootstrapAvailable).toBeNull()
+    expect(state.user).toBeNull()
+    expect(state.status).toBe('anonymous')
+  })
 })
 
 describe('login', () => {
@@ -104,5 +123,97 @@ describe('login', () => {
     const state = useAuthStore.getState()
     expect(state.user).toBeNull()
     expect(state.status).toBe('anonymous')
+  })
+})
+
+describe('logout', () => {
+  beforeEach(() => {
+    useAuthStore.setState({ user: adminUser, status: 'authenticated' })
+  })
+
+  it('clears the local session after the server logs out', async () => {
+    vi.mocked(apiLogout).mockResolvedValue(undefined)
+
+    await useAuthStore.getState().logout()
+
+    expect(apiLogout).toHaveBeenCalledOnce()
+    expect(useAuthStore.getState()).toMatchObject({
+      user: null,
+      status: 'anonymous',
+    })
+  })
+
+  it('still clears the local session when the server request fails', async () => {
+    vi.mocked(apiLogout).mockRejectedValue(new Error('network unavailable'))
+
+    await expect(useAuthStore.getState().logout()).rejects.toThrow(
+      'network unavailable'
+    )
+    expect(useAuthStore.getState()).toMatchObject({
+      user: null,
+      status: 'anonymous',
+    })
+  })
+})
+
+describe('bootstrap', () => {
+  it('creates the first user and marks bootstrap complete', async () => {
+    vi.mocked(apiBootstrap).mockResolvedValue(adminUser)
+
+    await useAuthStore.getState().bootstrap('admin', 'secret', 'Administrator')
+
+    expect(apiBootstrap).toHaveBeenCalledWith({
+      username: 'admin',
+      password: 'secret',
+      display_name: 'Administrator',
+    })
+    expect(useAuthStore.getState()).toMatchObject({
+      user: adminUser,
+      status: 'authenticated',
+      bootstrapAvailable: false,
+    })
+  })
+
+  it('normalizes a missing display name to an empty string', async () => {
+    vi.mocked(apiBootstrap).mockResolvedValue(adminUser)
+
+    await useAuthStore.getState().bootstrap('admin', 'secret')
+
+    expect(apiBootstrap).toHaveBeenCalledWith({
+      username: 'admin',
+      password: 'secret',
+      display_name: '',
+    })
+  })
+
+  it('propagates bootstrap failures without authenticating', async () => {
+    vi.mocked(apiBootstrap).mockRejectedValue(new Error('already initialized'))
+
+    await expect(
+      useAuthStore.getState().bootstrap('admin', 'secret')
+    ).rejects.toThrow('already initialized')
+    expect(useAuthStore.getState()).toMatchObject({
+      user: null,
+      status: 'unknown',
+      bootstrapAvailable: null,
+    })
+  })
+})
+
+describe('unauthorized session expiry', () => {
+  it('clears the local session and redirects to login', () => {
+    const assign = vi.fn()
+    vi.stubGlobal('window', {
+      location: { pathname: '/workspaces', assign },
+    })
+    useAuthStore.setState({ user: adminUser, status: 'authenticated' })
+
+    handleUnauthorized('/api/workspaces')
+
+    expect(useAuthStore.getState()).toMatchObject({
+      user: null,
+      status: 'anonymous',
+    })
+    expect(assign).toHaveBeenCalledWith('/login')
   })
 })
