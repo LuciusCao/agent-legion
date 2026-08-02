@@ -41,7 +41,7 @@
 
 .summaryGrid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
   border-bottom: 1px solid #e5e7eb;
 }
 
