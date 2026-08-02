@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 2 local split complete; performance targets open; Phase 3 pending
+状态：Phase 3A complete; Phase 3B pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -337,9 +337,11 @@ Phase 2 执行记录（2026-08-02）：
 - 带 coverage 的独立运行 137 files / 1058 tests 全通过，statements 85.96%、branches
   76.94%、functions 84.26%、lines 88.43%，不低于原门槛；日志不再出现 navigation/media
   `Not implemented`。
-- 本机 35s 中位数和 GitHub CI 150s 尚未验收。最近已知 GitHub 单 job 样本为 365s、381s、
-  385s（中位数 381s）。Vitest raw blob 跨 job 分片涉及短期 artifact 留存，决定延后到
-  Phase 5 CI 拓扑治理，本阶段保持 open。
+- 本机 35s 中位数和 GitHub CI 150s 尚未验收。Phase 2 提交后的手动 Quality Gate
+  [30752043022](https://github.com/LuciusCao/agent-legion/actions/runs/30752043022) 全部通过，frontend
+  tests 为 308s；相较此前 365s、381s、385s（中位数 381s）约改善 19%，但仍未达到 150s。
+  Vitest raw blob 跨 job 分片涉及短期 artifact 留存，决定延后到 Phase 5 CI 拓扑治理，本阶段
+  保持 open。
 - `./scripts/check-quick.sh` 通过：Python 2341 passed、Vitest 1058 passed、Rust 全通过。
   `./scripts/check.sh` 首跑暴露 Phase 1 遗留的中间 coverage floor 回归；修复 full tier 使用
   `--cov-fail-under=0` 后，聚焦门禁契约 7 passed，完整门禁通过，backend combined coverage
@@ -352,10 +354,10 @@ Phase 2 执行记录（2026-08-02）：
 
 任务：
 
-- [ ] 前端 coverage 显式 include `src/**/*.{ts,tsx}`。
-- [ ] 明确排除 `.d.ts`、生成代码、测试 support；对 `main.tsx` 等薄启动文件记录是否排除及
+- [x] 前端 coverage 显式 include `src/**/*.{ts,tsx}`。
+- [x] 明确排除 `.d.ts`、生成代码、测试 support；对 `main.tsx` 等薄启动文件记录是否排除及
       理由。
-- [ ] 增加 coverage inventory 测试，防止新的生产文件悄悄不进入分母。
+- [x] 增加 coverage inventory 测试，防止新的生产文件悄悄不进入分母。
 - [ ] 对关键目录设置分区门槛或 changed-lines 门槛；保留现有全局门槛。
 - [ ] 优先补后端 agent dispatch/pool、workflow upgrade、transcription provider、artifact、raw
       log 和 skill fallback 的异常/取消/超时/资源不足分支。
@@ -377,6 +379,25 @@ Phase 2 执行记录（2026-08-02）：
 - 不通过排除文件、`pragma: no cover` 或删除断言维持总覆盖率。
 
 回滚：分区/changed-lines 门槛可先改为非阻塞报告，但显式 coverage inventory 不回滚。
+
+Phase 3A 执行记录（2026-08-02）：
+
+- coverage 显式 include `src/**/*.{ts,tsx}`；排除 `.d.ts`、`src/generated/**`、
+  `src/testing/**`、`src/test-setup*.ts` 和测试文件。生成 API 由 OpenAPI contract gate 保证，
+  `src/testing/` 与 setup 仅服务测试，不属于生产风险分母。
+- `main.tsx`、`App.tsx` 和 `routes/pages.ts` 不排除：root 缺失、应用装配、lazy route 映射均是
+  可观察的启动行为。type-only `.ts` 文件保留在 inventory 中；V8 将无运行时语句的文件按
+  空文件处理，不需要另设路径豁免。
+- inventory checker 在 coverage 后扫描 `src` 并与 `coverage-final.json` 比对；规则测试覆盖
+  生产入口、type-only 文件以及 generated/declaration/test/support 排除。当前 359/359 个
+  候选生产文件全部进入报告。
+- 显式分母后 137 files / 1058 tests 全通过；statements 84.57%、branches 76.48%、functions
+  82.87%、lines 87.12%，仍高于既有全局门槛。旧报告未计入且当前为 0% 的运行时文件为
+  `App.tsx`、`main.tsx`、`LoginPage.tsx`、`SetupPage.tsx`、`routes/pages.ts`，作为 Phase 3B
+  第一个 frontend auth/bootstrap + app startup 补测簇。
+- inventory 自测 3/3 通过，实际报告校验 359/359；`format:check`、lint、typecheck、quick gate
+  和 full gate 全部通过。full gate 的 backend combined coverage 为 93%，前端 production bundle
+  构建成功；依赖审计报告保留为既有的非阻断告警。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
