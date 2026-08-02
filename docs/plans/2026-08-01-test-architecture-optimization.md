@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 3A complete; Phase 3B pending; performance targets open
+状态：Phase 3B auth/bootstrap cluster complete; Phase 3C pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -399,6 +399,20 @@ Phase 3A 执行记录（2026-08-02）：
   和 full gate 全部通过。full gate 的 backend combined coverage 为 93%，前端 production bundle
   构建成功；依赖审计报告保留为既有的非阻断告警。
 
+Phase 3B 执行记录（2026-08-02）：
+
+- 新增 `App.tsx`、`main.tsx`、login/setup 页面和 `routes/pages.ts` 的行为测试：验证 realtime
+  连接清理、pathname 切换关闭对话框、root 挂载/缺失错误、表单校验、HTTP 错误映射、提交后
+  replace navigation，以及全部 lazy page export 实际解析到预期模块。
+- 扩展 `authStore.test.ts`，覆盖双 probe 降级、login 失败、logout finally、首次 bootstrap 的
+  display name 归一化/失败，以及真实 unauthorized handler 的清会话和登录跳转行为。
+- 5 个原 0% 文件的聚焦覆盖率为 statements 97.84%、branches 86.66%、functions 100%、
+  lines 100%；`authStore.ts` 四项均为 100%，满足 auth/bootstrap lines 不低于 80% 的目标。
+- 全量 frontend 为 142 files / 1089 tests，通过且无 rerun；全局覆盖率提升至 statements
+  86.26%、branches 77.10%、functions 84.86%、lines 88.74%，coverage inventory 保持 359/359。
+- `./scripts/check-quick.sh` 328s 通过：backend 2342 passed、frontend 142 files / 1089 tests、
+  Rust 全部通过，未发生 rerun。
+
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
 目的：覆盖 jsdom 无法验证的路由、浏览器 API、SSE 和前后端集成。
@@ -455,10 +469,11 @@ Phase 3A 执行记录（2026-08-02）：
 3. `test(py): classify unit and postgres suites`
 4. `test(frontend): split node and jsdom projects`
 5. `test(frontend): make coverage inventory explicit`
-6. `test: cover critical dispatch and workflow upgrade gaps`
-7. `test(e2e): add deterministic browser smoke flows`
-8. `ci: run browser smoke and nightly stress`
-9. `ci: split test lanes from measured evidence`
+6. `test(frontend): cover auth bootstrap startup paths`
+7. `test: cover critical dispatch and workflow upgrade gaps`
+8. `test(e2e): add deterministic browser smoke flows`
+9. `ci: run browser smoke and nightly stress`
+10. `ci: split test lanes from measured evidence`
 
 每个提交都需在描述中附带修改前后耗时、测试数量、coverage 变化以及是否发生 rerun。
 
