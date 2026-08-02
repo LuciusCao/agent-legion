@@ -46,6 +46,17 @@ run_tests() {
   # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
   # regression still fails after the single retry (visible as RERUN in output).
   workers="${AGENT_LEGION_TEST_WORKERS:-auto}"
+  telemetry_args=()
+  if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
+    result_name="${AGENT_LEGION_TEST_RESULT_NAME:-backend}"
+    mkdir -p "$AGENT_LEGION_TEST_RESULTS_DIR"
+    telemetry_args=(
+      --durations="${AGENT_LEGION_TEST_DURATIONS:-30}"
+      --junitxml="$AGENT_LEGION_TEST_RESULTS_DIR/${result_name}-junit.xml"
+      -p scripts.pytest_telemetry
+    )
+    export AGENT_LEGION_RERUN_REPORT="$AGENT_LEGION_TEST_RESULTS_DIR/${result_name}-reruns.json"
+  fi
   case "${GATE_TIER:-full}" in
     smoke)
       echo "=== Python Smoke Tests (no coverage) ==="
@@ -55,7 +66,8 @@ run_tests() {
         -m "smoke and not repository_gate" \
         -n "$workers" \
         --reruns 1 \
-        --reruns-delay 2
+        --reruns-delay 2 \
+        "${telemetry_args[@]}"
       ;;
     full)
       # Coverage tracing costs 15-40% CPU on the Python side; the 85% floor is
@@ -75,6 +87,7 @@ run_tests() {
         -n "$workers" \
         --reruns 1 \
         --reruns-delay 2 \
+        "${telemetry_args[@]}" \
         "${cov_args[@]}"
       ;;
     *)

@@ -75,6 +75,26 @@ CI environment notes:
 - uv and npm caches are enabled; the first cold run is dominated by downloading
   torch/funasr and takes substantially longer than cached runs.
 
+## Test Telemetry
+
+CI test lanes emit lightweight, aggregate telemetry without retaining raw
+failure or source context as downloadable artifacts:
+
+- backend pytest prints its 30 slowest tests, writes ephemeral JUnit XML, and
+  records pytest-rerunfailures attempts through `scripts.pytest_telemetry`;
+- frontend Vitest writes ephemeral JUnit and JSON reports alongside its normal
+  console and coverage reporters;
+- `scripts/summarize_test_results.py` adds aggregate counts, case time, rerun
+  counts, commit, platform, CPU, and tool versions to the GitHub job summary;
+- raw JUnit, Vitest JSON, and HTML coverage remain on the temporary runner and
+  are not uploaded, because they can contain private test names, failure data,
+  or source context.
+
+The gate scripts only enable file reporters when
+`AGENT_LEGION_TEST_RESULTS_DIR` is set, so ordinary local runs keep their
+existing output and overhead. `AGENT_LEGION_TEST_DURATIONS` controls the pytest
+slow-test count and defaults to 30 in telemetry mode.
+
 ## Exact-Commit Evidence (Local)
 
 Before running a pre-push gate, `scripts/run-local-gate.sh` requires a clean worktree. A successful
