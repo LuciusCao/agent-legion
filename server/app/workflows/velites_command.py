@@ -30,6 +30,10 @@ FLAVOR_VELITES = "velites"
 MAX_TURNS_KEY = "max_turns"
 MAX_TOKENS_KEY = "max_tokens"
 
+# velites CLI 原生支持的 provider 协议名；pi 命名 provider（如 sqai）统一收敛到
+# gateway 单出口（凭据见 ~/.velites/config.json，gateway 按 model 路由上游，§7）。
+VELITES_PROVIDERS = frozenset({"stub", "gateway", "openai_compat"})
+
 
 def build_command_for_flavor(
     manifest: dict[str, Any],
@@ -84,7 +88,10 @@ def build_velites_command(
         "--tools",
         ",".join(manifest["tools"]),
     ]
-    for flag, key in (("--provider", "provider"), ("--model", "model"), ("--thinking", "thinking")):
+    provider = str(pi.get("provider") or "")
+    if provider:
+        cmd.extend(["--provider", provider if provider in VELITES_PROVIDERS else "gateway"])
+    for flag, key in (("--model", "model"), ("--thinking", "thinking")):
         value = str(pi.get(key) or "")
         if value:
             cmd.extend([flag, value])
