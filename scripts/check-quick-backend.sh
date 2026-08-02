@@ -22,7 +22,7 @@ run_static_checks() {
   fi
 
   echo "=== MyPy Type Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app scripts/architecture scripts/quality
 
   echo "=== Architecture Contracts ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_architecture
@@ -52,7 +52,7 @@ run_tests() {
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "smoke and not repository_gate" \
+        -m "smoke" \
         -n "$workers" \
         --reruns 1 \
         --reruns-delay 2
@@ -71,7 +71,6 @@ run_tests() {
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "not repository_gate" \
         -n "$workers" \
         --reruns 1 \
         --reruns-delay 2 \

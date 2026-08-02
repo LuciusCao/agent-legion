@@ -5,6 +5,8 @@ import pytest
 from scripts.check_architecture import check_repository
 from tests.architecture_budget_helpers import write_neutral_budget_governance
 
+pytestmark = pytest.mark.no_db
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -178,7 +180,6 @@ class TestSchemaMutationLocations:
         assert not any("schema mutation" in error for error in errors)
 
 
-@pytest.mark.repository_gate
 def test_phase6_current_repository_has_no_errors():
     errors = check_repository(ROOT)
     phase6_errors = [

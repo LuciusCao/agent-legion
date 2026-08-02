@@ -8,8 +8,8 @@ import logging
 import sys
 from pathlib import Path
 
-from server.app.quality.exemption_age import exemption_age_warnings
-from server.app.quality.exemptions import load_exemptions
+from scripts.quality.exemption_age import exemption_age_warnings
+from scripts.quality.exemptions import load_exemptions
 
 project_root = Path(__file__).resolve().parents[1]
 

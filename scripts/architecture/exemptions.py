@@ -8,7 +8,7 @@ from pathlib import Path
 
 def load_exemptions(root: Path) -> tuple:
     """Load governed architecture exemptions from the YAML registry."""
-    from server.app.quality.exemptions import load_exemptions as _load
+    from scripts.quality.exemptions import load_exemptions as _load
 
     path = root / "config/architecture/architecture-exemptions.yaml"
     if not path.exists():

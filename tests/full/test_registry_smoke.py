@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.quality.invariants import load_registry, validate_registry
+from scripts.quality.invariants import load_registry, validate_registry
 
 
 @pytest.mark.full_gate
