@@ -364,7 +364,11 @@ fn extract_error_detail(value: &Value) -> Option<String> {
     None
 }
 
-/// usage.input ← prompt_tokens, usage.output ← completion_tokens,
+/// usage.input ← prompt_tokens − cacheRead (pi semantics: `input` EXCLUDES
+/// cache-read tokens — the provider's `prompt_tokens` includes them, and
+/// billing counts input and cacheRead separately, so passing prompt_tokens
+/// through unchanged would double-bill the cached part; saturates at 0),
+/// usage.output ← completion_tokens,
 /// usage.cacheRead ← prompt_cache_hit_tokens (gateway) ‖
 /// prompt_tokens_details.cached_tokens (OpenAI) ‖ cached_tokens; 0 if absent.
 fn parse_usage(usage: &Value) -> Usage {
@@ -379,7 +383,7 @@ fn parse_usage(usage: &Value) -> Usage {
                 .unwrap_or(0),
         );
     Usage {
-        input: get("prompt_tokens"),
+        input: get("prompt_tokens").saturating_sub(cache_read),
         output: get("completion_tokens"),
         cache_read,
     }
@@ -653,7 +657,8 @@ mod tests {
             "prompt_cache_hit_tokens": 42,
             "prompt_tokens_details": {"cached_tokens": 7},
         }));
-        assert_eq!(usage.input, 100);
+        // pi 口径: input excludes the cached part (100 − 42).
+        assert_eq!(usage.input, 58);
         assert_eq!(usage.output, 20);
         assert_eq!(usage.cache_read, 42);
     }
@@ -665,8 +670,21 @@ mod tests {
             "completion_tokens": 5,
             "prompt_tokens_details": {"cached_tokens": 3},
         }));
+        assert_eq!(usage.input, 7);
         assert_eq!(usage.cache_read, 3);
         assert_eq!(parse_usage(&json!({})).cache_read, 0);
+    }
+
+    #[test]
+    fn parse_usage_input_saturates_when_cache_exceeds_prompt_tokens() {
+        // Defensive: a misbehaving gateway must not underflow the counter.
+        let usage = parse_usage(&json!({
+            "prompt_tokens": 5,
+            "completion_tokens": 1,
+            "prompt_cache_hit_tokens": 9,
+        }));
+        assert_eq!(usage.input, 0);
+        assert_eq!(usage.cache_read, 9);
     }
 
     #[test]
@@ -747,6 +765,7 @@ mod tests {
         let aggregated = parse_non_streaming(&body).unwrap();
         assert_eq!(aggregated.text, "done");
         assert_eq!(aggregated.thinking, "thought");
+        assert_eq!(aggregated.usage.input, 8);
         assert_eq!(aggregated.usage.cache_read, 1);
         assert_eq!(aggregated.tool_calls[0].name, "write");
         assert_eq!(aggregated.tool_calls[0].arguments, "{\"path\":\"x\"}");

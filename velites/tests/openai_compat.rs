@@ -69,7 +69,8 @@ async fn streaming_chunks_aggregate_into_one_message() {
     assert_eq!(message.provider.as_deref(), Some("gateway"));
     assert_eq!(message.model.as_deref(), Some("kimi-k2.6"));
     let usage = message.usage.unwrap();
-    assert_eq!((usage.input, usage.output, usage.cache_read), (100, 12, 64));
+    // pi 口径: input excludes cache-read tokens (100 − 64).
+    assert_eq!((usage.input, usage.output, usage.cache_read), (36, 12, 64));
     assert_eq!(
         message.content,
         vec![
@@ -194,7 +195,8 @@ async fn non_streaming_json_fallback() {
         }]
     );
     let usage = message.usage.unwrap();
-    assert_eq!((usage.input, usage.output, usage.cache_read), (7, 2, 4));
+    // pi 口径: input excludes cache-read tokens (7 − 4).
+    assert_eq!((usage.input, usage.output, usage.cache_read), (3, 2, 4));
 }
 
 #[tokio::test]
@@ -359,6 +361,7 @@ async fn unrecovered_error_ends_run_with_exit_0() {
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        read_roots: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
@@ -435,6 +438,7 @@ async fn full_tool_round_over_gateway() {
         require_output: Vec::new(),
         session: None,
         cwd,
+        read_roots: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
@@ -564,6 +568,7 @@ fn agent_config(dir: &tempfile::TempDir) -> velites::agent::AgentConfig {
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        read_roots: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     }

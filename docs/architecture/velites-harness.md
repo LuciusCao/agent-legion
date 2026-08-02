@@ -209,6 +209,10 @@ velites --mode json \
 ## 7. Provider 层
 
 - 仅实现 OpenAI chat completions（SSE streaming）；请求/重试/usage 解析一处收敛；
+- usage 口径对齐 pi：`input = prompt_tokens − cacheRead`（provider 的 `prompt_tokens`
+  **含**缓存命中部分，pi 的 `input` 不含；缓存部分只经 `cacheRead` 单列计费，直接透传
+  `prompt_tokens` 会把缓存部分双重计费——2026-08-01 生产数据核对：pi input 27.5k +
+  cache 420k = velites 修复前 input 447k），`saturating_sub` 兜底异常网关；
 - `thinking` 参数按 provider 映射（初期只支持 gateway 现有映射，PoC 已验证）；
 - 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
   （PoC P2 发现），模型白名单在 `config/workflow.yaml` 侧约束并写进运维文档；
@@ -234,8 +238,9 @@ velites --mode json \
 
 ## 8. 工具实现
 
-- **read**：路径必须解析在 cwd 内（拒绝逃逸），支持行区间读取；
-- **write**：tmp + rename 原子写，同 cwd 沙箱；
+- **read**：路径必须解析在 cwd 或任一 `--skill` 目录 / session dir 内（后两者为只读
+  根，与 §5 OS 沙箱的读放行口径一致；`..`/symlink 逃逸一律拒绝），支持行区间读取；
+- **write**：tmp + rename 原子写，仅限 cwd 沙箱（skill/session 目录绝不可写）；
 - **bash**：`cwd=job_dir`，env 继承父进程；超时 → 进程组 TERM → grace → KILL（对齐
   Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
   必须能跑 `python3`（skill scripts 依赖，worker 镜像已具备）；

@@ -1,13 +1,14 @@
 //! `read` tool: sandboxed file read with optional 1-based line range.
 //!
-//! Output is truncated from the head to 2000 lines or 50KB, whichever is
-//! hit first (pi-aligned, design §8); the notice tells the model which
-//! `offset` continues the file.
+//! Paths may resolve inside the cwd or any extra read-only root (`--skill`
+//! dirs, session dir — design §5); escapes are rejected. Output is truncated
+//! from the head to 2000 lines or 50KB, whichever is hit first (pi-aligned,
+//! design §8); the notice tells the model which `offset` continues the file.
 
 use serde_json::Value;
 
 use super::truncate::{self, TruncatedBy};
-use super::{resolve_in_cwd, ToolContext, ToolError, ToolOutput};
+use super::{resolve_readable, ToolContext, ToolError, ToolOutput};
 use crate::events::ContentBlock;
 
 pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
@@ -32,7 +33,7 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
         .and_then(Value::as_u64)
         .map(|n| n as usize);
 
-    let resolved = resolve_in_cwd(&ctx.cwd, path)?;
+    let resolved = resolve_readable(&ctx.cwd, &ctx.read_roots, path)?;
     let text = std::fs::read_to_string(&resolved)?;
     // Same counting as truncate::split_lines: a trailing newline does not
     // add an empty line.
