@@ -21,10 +21,32 @@ function bucket(offsetMinutes: number, overrides = {}) {
   }
 }
 
+// 摘要卡数据由后端 summary 提供（分钟级口径，不随窗口切换），与 buckets 解耦。
+function summary(overrides = {}) {
+  return {
+    online_workers: 3,
+    active_executions: 2,
+    recent_hour_tokens: {
+      input_tokens: 400,
+      output_tokens: 200,
+      cache_read_tokens: 40,
+      total_tokens: 640,
+    },
+    recent_hour_runs: {
+      completed: 5,
+      failed: 1,
+      duration_p50_seconds: 42,
+      duration_p95_seconds: 185,
+    },
+    ...overrides,
+  }
+}
+
 const mockFetchOpsMetrics = vi.fn((params: { granularity: string }) =>
   Promise.resolve({
     granularity: params.granularity,
     buckets: [bucket(4), bucket(3), bucket(2), bucket(1)],
+    summary: summary(),
   })
 )
 
@@ -58,12 +80,19 @@ describe('MonitoringPanel', () => {
     expect(screen.getByTestId('active-executions-summary')).toHaveTextContent(
       '2'
     )
-    // 近 1 小时：4 个 bucket 各 160 total tokens
+    // 近 1 小时 Token：来自 summary.recent_hour_tokens
     expect(screen.getByTestId('hourly-tokens-summary')).toHaveTextContent('640')
     // 细分：输入 400 · 输出 200 · 缓存读 40
     expect(screen.getByText(/输入 400/)).toBeInTheDocument()
     expect(screen.getByText(/输出 200/)).toBeInTheDocument()
     expect(screen.getByText(/缓存读 40/)).toBeInTheDocument()
+    // 近 1 小时 Runs：完成数、失败数与 p50/p95 耗时
+    expect(screen.getByTestId('hourly-runs-summary')).toHaveTextContent(
+      '完成 5'
+    )
+    expect(screen.getByText(/失败 1/)).toBeInTheDocument()
+    expect(screen.getByText(/p50 42s/)).toBeInTheDocument()
+    expect(screen.getByText(/p95 3m 05s/)).toBeInTheDocument()
     expect(
       screen.getByRole('img', { name: '在线 Worker 与活跃执行趋势' })
     ).toBeInTheDocument()
@@ -136,10 +165,71 @@ describe('MonitoringPanel', () => {
     ).toBeInTheDocument()
   })
 
+  it('keeps summary cards stable when granularity changes', async () => {
+    const user = userEvent.setup()
+    render(<MonitoringPanel />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hourly-tokens-summary')).toHaveTextContent(
+        '640'
+      )
+    )
+    await user.click(screen.getByRole('button', { name: '近 30 天' }))
+
+    await waitFor(() => {
+      expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
+        granularity: '30d',
+      })
+    })
+    // 摘要卡读取后端 summary，与窗口粒度无关，切换后数值不变。
+    expect(screen.getByTestId('online-workers-summary')).toHaveTextContent('3')
+    expect(screen.getByTestId('active-executions-summary')).toHaveTextContent(
+      '2'
+    )
+    expect(screen.getByTestId('hourly-tokens-summary')).toHaveTextContent('640')
+    expect(screen.getByTestId('hourly-runs-summary')).toHaveTextContent(
+      '完成 5'
+    )
+  })
+
+  it('renders placeholder when no runs completed in the recent hour', async () => {
+    mockFetchOpsMetrics.mockResolvedValueOnce({
+      granularity: '6h',
+      buckets: [],
+      summary: summary({
+        recent_hour_runs: {
+          completed: 0,
+          failed: 0,
+          duration_p50_seconds: null,
+          duration_p95_seconds: null,
+        },
+      }),
+    })
+
+    render(<MonitoringPanel />)
+
+    await waitFor(() =>
+      expect(screen.getByTestId('hourly-runs-summary')).toHaveTextContent(
+        '完成 0'
+      )
+    )
+    expect(screen.getByText(/失败 0 · p50 - · p95 -/)).toBeInTheDocument()
+  })
+
   it('renders a zero-filled fixed window when no buckets', async () => {
     mockFetchOpsMetrics.mockResolvedValueOnce({
       granularity: '6h',
       buckets: [],
+      summary: summary({
+        online_workers: null,
+        active_executions: null,
+        recent_hour_tokens: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_tokens: 0,
+          total_tokens: 0,
+        },
+      }),
     })
 
     render(<MonitoringPanel />)

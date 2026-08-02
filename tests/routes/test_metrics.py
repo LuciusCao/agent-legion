@@ -74,3 +74,46 @@ def test_metrics_overview_accepts_all_windows(client) -> None:
         response = client.get(f"/api/metrics/overview?granularity={granularity}")
         assert response.status_code == 200
         assert response.json()["granularity"] == granularity
+
+
+def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
+    now = datetime.now(UTC).replace(microsecond=0)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values ('ops-ws', 'Ops') on conflict(id) do nothing",
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
+            " values ('job-1', 'ops-ws', 'questions', 'question', 'job-1')"
+            " on conflict(id) do nothing",
+        )
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, started_at, finished_at)"
+            " values ('job-1', 'generate', 'completed', ?, ?)",
+            (now - timedelta(seconds=20), now - timedelta(seconds=10)),
+        )
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status, started_at, finished_at)"
+            " values ('job-1', 'review', 'failed', ?, ?)",
+            (now - timedelta(seconds=50), now - timedelta(seconds=40)),
+        )
+
+    summaries = []
+    for granularity in ("6h", "24h", "30d"):
+        response = client.get(f"/api/metrics/overview?granularity={granularity}")
+        assert response.status_code == 200
+        summary = response.json()["summary"]
+        assert set(summary) == {
+            "online_workers",
+            "active_executions",
+            "recent_hour_tokens",
+            "recent_hour_runs",
+        }
+        runs = summary["recent_hour_runs"]
+        assert runs["completed"] == 1
+        assert runs["failed"] == 1
+        assert runs["duration_p50_seconds"] == 10.0
+        assert runs["duration_p95_seconds"] == 10.0
+        summaries.append(summary)
+    # 采样器只写 ops_metric_samples，不动 node_runs：runs 摘要跨窗口严格一致。
+    assert [s["recent_hour_runs"] for s in summaries] == [summaries[0]["recent_hour_runs"]] * 3

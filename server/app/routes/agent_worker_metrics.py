@@ -4,7 +4,11 @@ from typing import Any, Literal, Protocol
 
 from fastapi import APIRouter, Request
 
-from server.app.routes.metrics_contracts import MetricBucket, OpsMetricsResponse
+from server.app.routes.metrics_contracts import (
+    MetricBucket,
+    OpsMetricsResponse,
+    OpsMetricsSummary,
+)
 from server.app.services.ops_metrics import OpsMetricsService
 
 
@@ -29,13 +33,11 @@ def create_agent_worker_metrics_router(
         granularity: Literal["6h", "24h", "30d"] = "6h",
     ) -> OpsMetricsResponse:
         worker = authorize_worker(request)
+        worker_id = str(worker["worker_id"])
         buckets = [
-            MetricBucket(**bucket)
-            for bucket in ops_metrics.query_series(
-                granularity,
-                str(worker["worker_id"]),
-            )
+            MetricBucket(**bucket) for bucket in ops_metrics.query_series(granularity, worker_id)
         ]
-        return OpsMetricsResponse(granularity=granularity, buckets=buckets)
+        summary = OpsMetricsSummary(**ops_metrics.query_summary(worker_id))
+        return OpsMetricsResponse(granularity=granularity, buckets=buckets, summary=summary)
 
     return router
