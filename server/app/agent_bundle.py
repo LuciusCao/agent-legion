@@ -4,7 +4,8 @@ import io
 import json
 import shutil
 import tarfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
+from contextlib import contextmanager
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -21,6 +22,15 @@ def _safe_members(tar: tarfile.TarFile) -> Iterable[tarfile.TarInfo]:
         if member.islnk() or member.issym():
             raise AgentBundleError(f"links are not allowed in Agent archives: {member.name!r}")
         yield member
+
+
+@contextmanager
+def cleanup_bundle_on_error(bundle_path: Path) -> Iterator[None]:
+    try:
+        yield
+    except Exception:
+        bundle_path.unlink(missing_ok=True)
+        raise
 
 
 def build_agent_bundle(
