@@ -207,6 +207,19 @@ macOS seatbelt 的两处实现注记（实测 macOS 15，`deny default` 下 dyld
 `file-read-data` 附加 `(literal "/")`（根目录在启动时被打开）。内容边界不受影响：
 允许根之外的 `open(O_RDONLY)` 与 `readdir` 仍被 EPERM 拒绝。
 
+python3 读白名单（2026-08-02 金丝雀事故修复）：uv/Homebrew 系解释器的
+libpython 经 `@rpath` 从安装前缀加载，前缀不在系统读白名单内时沙箱内
+`python3` 直接 dyld 失败。启动时按 which 语义探测 PATH 上的 `python3`
+（纯 PATH 搜索，不起子进程），把两层根以**只读**加入 seatbelt 白名单：
+canonicalize 穿透 `.venv` symlink 得到的安装前缀（`bin` 的父目录）；以及
+当 PATH 条目是 venv（`<venv>/bin/python3` 且存在 `<venv>/pyvenv.cfg`）时的
+venv 根——CPython 的 site.py 先 stat（元数据全局放行）再 open `pyvenv.cfg`，
+不在白名单内会在解释器启动时直接 EPERM 致命失败（B 面验证实测），放行
+venv 根同时保证其 site-packages 可导入。防呆：安装前缀必须真实存在且
+路径含 `python`，否则跳过（避免 `/usr/bin/python3` 误把 `/usr` 加进白名单
+——系统路径本就覆盖）；探测失败静默跳过。Linux 的 `--ro-bind / /`
+天然覆盖所有解释器位置，无需等价逻辑。
+
 ## 6. CLI 接口
 
 ```
