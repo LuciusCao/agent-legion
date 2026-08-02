@@ -1,5 +1,5 @@
 import type { JobDetail } from '../../types/jobTypes'
-import { QuestionContentPanel } from '../../components/QuestionContentPanel'
+import { QuestionContentPanel } from '../../components/question/QuestionContentPanel'
 import { VideoContentPanel } from '../../components/VideoContentPanel'
 
 export interface EntityPanelProps {

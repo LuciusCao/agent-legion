@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import {
   FormControl,
   MenuItem,
@@ -7,13 +7,13 @@ import {
   ToggleButtonGroup,
 } from '@mui/material'
 import { fetchOpsMetrics } from '../api/metrics'
-import type { OpsGranularity, OpsMetricsResponse } from '../api/metrics'
+import type { OpsGranularity } from '../api/metrics'
 import { listAgentWorkers } from '../api/workerTokens'
-import type { AgentWorkerSummary } from '../api/workerTokens'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
 import { MetricsChart } from './MetricsChart'
 import type { ChartSeries } from '../lib/metricsChartOptions'
+import { useAsync } from '../hooks/useAsync'
 import styles from './MonitoringPanel.module.css'
 
 const REFRESH_MS = 30_000
@@ -60,52 +60,20 @@ const TOKEN_SERIES: ChartSeries[] = [
 export function MonitoringPanel() {
   const [granularity, setGranularity] = useState<OpsGranularity>('6h')
   const [workerId, setWorkerId] = useState('')
-  const [workers, setWorkers] = useState<AgentWorkerSummary[]>([])
-  const [data, setData] = useState<OpsMetricsResponse | null>(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    let stale = false
-    listAgentWorkers()
-      .then((list) => {
-        if (!stale) setWorkers(list)
-      })
-      .catch(() => {
-        // Worker 列表拉取失败不阻塞监控数据，仅不提供过滤选项。
-      })
-    return () => {
-      stale = true
-    }
-  }, [])
+  // Worker 列表拉取失败不阻塞监控数据，仅不提供过滤选项（error 不消费）。
+  const { data: workerList } = useAsync(() => listAgentWorkers(), [])
+  const workers = workerList ?? []
 
-  useEffect(() => {
-    let stale = false
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading state tied to fetch lifecycle
-    setLoading(true)
-    setError(null)
-    const load = () => {
+  const { data, loading, error } = useAsync(
+    () =>
       fetchOpsMetrics({
         granularity,
         ...(workerId ? { worker_id: workerId } : {}),
-      })
-        .then((next) => {
-          if (!stale) setData(next)
-        })
-        .catch((err) => {
-          if (!stale) setError(err instanceof Error ? err.message : String(err))
-        })
-        .finally(() => {
-          if (!stale) setLoading(false)
-        })
-    }
-    load()
-    const timer = setInterval(load, REFRESH_MS)
-    return () => {
-      stale = true
-      clearInterval(timer)
-    }
-  }, [granularity, workerId])
+      }),
+    [granularity, workerId],
+    { refetchInterval: REFRESH_MS }
+  )
 
   const formatTime = useMemo(
     () => makeTimeFormatter(granularity),

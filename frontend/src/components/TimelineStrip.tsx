@@ -2,7 +2,7 @@ import React, { useCallback } from 'react'
 import { Chip } from '@mui/material'
 import type { Chapter, InteractionNode } from '../types'
 import { INTERACTION_TYPE_LABELS } from '../labels'
-import { parseTimeSeconds } from '../helpers'
+import { parseTimeSeconds } from '../lib/formatters'
 import styles from './TimelineStrip.module.css'
 
 interface TimelineStripProps {

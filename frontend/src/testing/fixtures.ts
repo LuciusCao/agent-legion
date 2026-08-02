@@ -1,22 +1,31 @@
 import { vi } from 'vitest'
+import type { AgentsState } from '../stores/agentsStore'
 import type { UiState } from '../stores/uiStore'
 import type { JobSummary } from '../types/jobTypes'
 
-export function createMockUiState(partial: Partial<UiState> = {}): UiState {
+export function createMockAgentsState(
+  partial: Partial<AgentsState> = {}
+): AgentsState {
   return {
     agents: [],
+    workerPausedByWorkspace: {},
+    getWorkerPaused: vi.fn(() => false),
+    connectAgentsWs: vi.fn(() => vi.fn()),
+    fetchWorkerStatus: vi.fn(),
+    setWorkerPaused: vi.fn(),
+    ...partial,
+  }
+}
+
+export function createMockUiState(partial: Partial<UiState> = {}): UiState {
+  return {
     addDialogOpen: false,
     addContentType: 'knowledge',
     addDialogContext: 'workspace',
     addDialogWorkspaceId: undefined,
     workspacePackageDialogOpen: false,
     tokenUsageDialogOpen: false,
-    workerPausedByWorkspace: {},
     toast: null,
-    getWorkerPaused: vi.fn(() => false),
-    connectAgentsWs: vi.fn(() => vi.fn()),
-    fetchWorkerStatus: vi.fn(),
-    setWorkerPaused: vi.fn(),
     openAddDialog: vi.fn(),
     closeAddDialog: vi.fn(),
     setAddContentType: vi.fn(),

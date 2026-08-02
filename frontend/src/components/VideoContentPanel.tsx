@@ -12,7 +12,7 @@ import { TimelineStrip } from './TimelineStrip'
 import { SubtitlePanel } from './SubtitlePanel'
 import { NodePanel } from './NodePanel'
 import { CollapsiblePanel } from './CollapsiblePanel'
-import { parseTimeSeconds } from '../helpers'
+import { parseTimeSeconds } from '../lib/formatters'
 import styles from './VideoContentPanel.module.css'
 
 export interface VideoContentPanelProps {
