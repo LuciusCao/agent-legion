@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from server.app.event_bus import EventBus
+from server.app.events.bus import EventBus
 
 
 def build_workspace_stats_batch_payload(

@@ -1,6 +1,6 @@
 """Slot release for the Agent broker: flip claimed -> reporting at process exit.
 
-Mirrors the ``_agent_broker_claim.py`` / ``_agent_broker_sweepers.py`` split:
+Mirrors the ``claim.py`` / ``sweepers.py`` split:
 the :class:`AgentExecutionBroker` method delegates here so the broker module
 stays within its size budget.
 """
@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING
 from server.app.db.transaction import write_transaction
 
 if TYPE_CHECKING:
-    from server.app.agent_broker import AgentExecutionBroker
+    from server.app.agent_broker.broker import AgentExecutionBroker
 
 
 def release_slot(

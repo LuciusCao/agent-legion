@@ -8,15 +8,15 @@ import pytest
 from fastapi import Request
 
 from server.app.db.connection import DatabaseConnection, connect_database
-from server.app.event_bus import _EVICTED, InProcessEventBus, workspace_channel
 from server.app.events import JobEventManager
-from server.app.executors.leases import ExecutorLeaseRepository, _database_timestamp
-from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
-from server.app.job_events import (
+from server.app.events.aggregator import (
     build_job_patch_batch_payload,
     build_resync_required_payload,
     record_job_update,
 )
+from server.app.events.bus import _EVICTED, InProcessEventBus, workspace_channel
+from server.app.executors.leases import ExecutorLeaseRepository, database_timestamp
+from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_patch_queries import JobPatchQueryService
 from server.app.services.job_queries import JobQueryService
@@ -115,7 +115,7 @@ def _insert_workspace_job(conn):
 def _insert_lease(conn, lease_id, expires_at, status="active"):
     _insert_workspace_job(conn)
     now = datetime.now(UTC)
-    now_str = _database_timestamp(now)
+    now_str = database_timestamp(now)
     conn.execute("insert into job_nodes(job_id, node_key, status) values ('j1', 'n1', 'pending')")
     cursor = conn.execute(
         """
@@ -140,7 +140,7 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
             status,
             now_str,
             now_str,
-            _database_timestamp(expires_at),
+            database_timestamp(expires_at),
         ),
     )
 
@@ -363,8 +363,11 @@ def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
         conn.close()
 
     queue = _ws1_queue(manager)
-    result = service.delete("ws1", "j1")
-    assert result["status"] == "failed"
+    from server.app.services.job_operation_error import JobOperationError
+
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete("ws1", "j1")
+    assert exc_info.value.status == "failed"
     assert queue.empty()
 
 
@@ -562,9 +565,12 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
         job_event_manager=manager,
     )
     queue = _ws1_queue(manager)
-    result = service.rerun("ws1", "j1", "node_a")
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "conflict"
+    from server.app.services.job_operation_error import JobOperationError
+
+    with pytest.raises(JobOperationError) as exc_info:
+        service.rerun("ws1", "j1", "node_a")
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "conflict"
     assert queue.empty()
 
 

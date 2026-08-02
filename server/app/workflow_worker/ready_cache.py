@@ -1,6 +1,6 @@
 """Per-job ready evaluation and the definition cache for the workflow worker.
 
-Extracted from ``server.app.workflow_worker_ready`` to keep that module
+Extracted from ``server.app.workflow_worker.ready`` to keep that module
 within its size budget. Snapshot JSON is immutable per
 ``workflow_definition_hash``, so parsed definitions are cached across poll
 passes; the per-job reuse decision itself lives in the caller (dirty
@@ -23,7 +23,7 @@ from server.app.workflows.sharding import has_pending_shards
 from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, evaluate_branches
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 logger = logging.getLogger(__name__)
 

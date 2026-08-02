@@ -37,7 +37,7 @@ from server.app.jobs.queries.workspace_node_bindings import (
     get_local_node_limit,
     has_local_node_limit,
 )
-from server.app.workflow_worker_execution import submit_claim
+from server.app.workflow_worker.execution import submit_claim
 from server.app.workflows.definition import WorkflowNode
 from server.app.workflows.sharding import (
     ShardLimitExceeded,
@@ -46,7 +46,7 @@ from server.app.workflows.sharding import (
 )
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 def claim_shard_node(

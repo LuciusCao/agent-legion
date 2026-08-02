@@ -1,6 +1,6 @@
 """Periodic sweeps for the Agent execution queue.
 
-Split out of ``agent_broker.py`` so the broker module only carries the queue
+Split out of ``broker.py`` so the broker module only carries the queue
 protocol; mirrors the ``executors/_lease_*.py`` layout. Each function opens
 its own transaction and takes the broker instance as its first argument.
 """
@@ -11,13 +11,13 @@ import json
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
-from server.app._agent_broker_claim import cancel_request
+from server.app.agent_broker.claim import cancel_request
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
 from server.app.services import failure_classification
 
 if TYPE_CHECKING:
-    from server.app.agent_broker import AgentExecutionBroker
+    from server.app.agent_broker.broker import AgentExecutionBroker
 
 
 def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:

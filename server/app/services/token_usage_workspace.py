@@ -6,8 +6,8 @@ from typing import Any
 
 from server.app.services.token_usage_pricing import calculate_cost
 from server.app.services.token_usage_response import (
-    _currency_from_config,
     build_aggregate_cost,
+    currency_from_config,
 )
 
 
@@ -415,7 +415,7 @@ def build_workspace_usage_response(
 
     return {
         "workspace_id": workspace_id,
-        "currency": _currency_from_config(config),
+        "currency": currency_from_config(config),
         "summary": {
             "message_count": int(aggregates["message_count"]),
             "input_tokens": int(aggregates["input_tokens"]),

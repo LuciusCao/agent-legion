@@ -10,7 +10,7 @@ from server.app.executors._lease_control import (
     _execution_control_rejects_claim,
     _read_job_execution_control,
 )
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
 from server.app.workflows.sharding import try_start_shard
@@ -95,7 +95,7 @@ def claim_lease(
                 f"persisted {limit_row['concurrency_limit']} vs requested {request.local_node_limit}"
             )
 
-    now_str = _database_timestamp(now)
+    now_str = database_timestamp(now)
     global_count_row = conn.execute(
         """
         select count(*) as cnt
@@ -190,7 +190,7 @@ def claim_lease(
             node_run_id,
             now_str,
             now_str,
-            _database_timestamp(expires_at),
+            database_timestamp(expires_at),
         ),
     )
 

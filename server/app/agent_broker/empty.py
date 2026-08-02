@@ -7,8 +7,8 @@ hit empty claims in a burst, so the signal is debounced: at most one
 restock callback per ``debounce_seconds``, and the expensive production
 side stays bounded by the stockpile gate and the enqueue pool.
 
-Split out of ``agent_broker.py`` so the broker module stays within its size
-budget; mirrors the ``_agent_broker_*`` layout.
+Split out of ``broker.py`` so the broker module stays within its size
+budget; mirrors the sibling module layout.
 """
 
 from __future__ import annotations

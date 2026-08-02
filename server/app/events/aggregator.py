@@ -5,9 +5,9 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any, Protocol
 
-from server.app.event_bus import EventBus, workspace_channel
-from server.app.job_dashboard_events import broadcast_workspace_stats_batch
-from server.app.job_event_buffer import JobEventBuffer
+from server.app.events.buffer import JobEventBuffer
+from server.app.events.bus import EventBus, workspace_channel
+from server.app.events.dashboard import broadcast_workspace_stats_batch
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries

@@ -10,8 +10,8 @@ from typing import Any
 from server.app.db.connection import DatabaseConnection
 from server.app.services.token_usage_pricing import calculate_cost, load_pricing_config
 from server.app.services.token_usage_response import (
-    _currency_from_config,
     build_aggregate_cost,
+    currency_from_config,
     usage_dict,
 )
 from server.app.services.token_usage_workspace import build_workspace_usage_response
@@ -341,7 +341,7 @@ def build_job_usage_response(
         },
         "runs_with_usage": runs_with_usage,
         "runs_without_usage": runs_without_usage,
-        "currency": _currency_from_config(config),
+        "currency": currency_from_config(config),
     }
 
 

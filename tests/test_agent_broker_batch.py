@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from server.app import _agent_broker_batch
-from server.app._agent_broker_batch import active_request_keys
+from server.app.agent_broker import batch
+from server.app.agent_broker.batch import active_request_keys
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -49,7 +49,7 @@ def test_active_states_returned_terminal_states_excluded(job_db) -> None:
 
 
 def test_chunked_query_aggregates_all_chunks(job_db, monkeypatch) -> None:
-    monkeypatch.setattr(_agent_broker_batch, "_CHUNK_SIZE", 1)
+    monkeypatch.setattr(batch, "_CHUNK_SIZE", 1)
     expected = set()
     for index in range(3):
         job_id = f"job-{index}"

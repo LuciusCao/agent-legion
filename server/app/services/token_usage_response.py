@@ -6,7 +6,7 @@ from typing import Any
 from server.app.services.token_usage_pricing import calculate_cost
 
 
-def _currency_from_config(config: dict[str, Any]) -> str:
+def currency_from_config(config: dict[str, Any]) -> str:
     return str(config.get("token_usage", {}).get("currency", "")).strip()
 
 
@@ -83,7 +83,7 @@ def build_aggregate_cost(
 
     return {
         "cost": {
-            "currency": _currency_from_config(config),
+            "currency": currency_from_config(config),
             "input": None,
             "output": None,
             "cache_read": None,

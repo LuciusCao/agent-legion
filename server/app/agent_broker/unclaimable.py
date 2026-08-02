@@ -1,6 +1,6 @@
 """Sweep for queued Agent requests no registered Worker can ever claim.
 
-Split out of ``_agent_broker_sweepers.py`` for the file-size budget; mirrors
+Split out of ``sweepers.py`` for the file-size budget; mirrors
 ``fail_stale_definition_requests`` but judges claimability (resolved model and
 capability against Worker declarations) instead of definition staleness.
 """
@@ -17,7 +17,7 @@ from server.app.executors._failed_node_recording import record_failed_node_witho
 from server.app.services import failure_classification
 
 if TYPE_CHECKING:
-    from server.app.agent_broker import AgentExecutionBroker
+    from server.app.agent_broker.broker import AgentExecutionBroker
 
 # Bounded window per sweep; the periodic caller picks up the rest next round.
 _SWEEP_LIMIT = 256

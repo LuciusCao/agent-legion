@@ -10,7 +10,7 @@ from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import Settings
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import load_registered_workflow
 from server.app.workflows.resource_providers import ResourceProviderDeclarations
