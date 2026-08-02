@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react'
+import { useAgentsStore } from '../stores/agentsStore'
 import { useExecutorsStore } from '../stores/executorsStore'
-import { useUiStore } from '../stores/uiStore'
 import { buildWorkerRows } from './agentWorkerRows'
 import styles from './AgentWorkerStatusList.module.css'
 
@@ -13,7 +13,7 @@ export function AgentWorkerStatusList({
 }: AgentWorkerStatusListProps) {
   const workers = useExecutorsStore((state) => state.workers)
   const refreshWorkers = useExecutorsStore((state) => state.refreshWorkers)
-  const allAgents = useUiStore((state) => state.agents)
+  const allAgents = useAgentsStore((state) => state.agents)
 
   // Backend online threshold is 30s; a 15s poll keeps the status fresh.
   useEffect(() => {
