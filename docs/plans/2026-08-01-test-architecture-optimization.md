@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 3B auth/bootstrap cluster complete; Phase 3C pending; performance targets open
+状态：Phase 3C dispatch cluster complete; Phase 3D workflow upgrade pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -413,6 +413,24 @@ Phase 3B 执行记录（2026-08-02）：
 - `./scripts/check-quick.sh` 328s 通过：backend 2342 passed、frontend 142 files / 1089 tests、
   Rust 全部通过，未发生 rerun。
 
+Phase 3C 执行记录（2026-08-03）：
+
+- `agent_dispatch.py` 与 `agent_dispatch_pool.py` 的既有覆盖率分别为 54% 和 58%；新增 11 个
+  纯单元测试，覆盖 active-request 去重、unsupported runtime、manifest/secret 过滤、bundle 构建、
+  broker 拒绝/异常、staging 失败、缺少 bundle 目录、队列满载以及后台异常后继续消费。
+- 聚焦测试连同 workflow schedule gate 为 22/22；目标模块聚焦覆盖率为 100%/96%，完整
+  backend coverage 轮为 100%/100%，高于关键 dispatch lines 80% 目标。
+- 测试发现 broker 或 bundle 构建异常会遗留 `.tar.gz`；新增 `cleanup_bundle_on_error`，异常时
+  幂等删除完整或半成品归档，skill cleanup 语义保持不变。为满足架构预算，生命周期逻辑归属
+  `agent_bundle.py`；最终 `agent_dispatch.py` 136/137 行、`agent_bundle.py` 60/60 行。
+- 首次 quick gate 426s 通过但出现 1 rerun；telemetry 后端复跑 2353 passed、0 rerun。首次 full
+  gate 随后稳定暴露 `WorkerSupervisor.stop` 返回早于异步 collector 删除 runtime status 的竞态；
+  stop 现在线程同步清理 status/metrics，collector 保留幂等兜底。原失败用例连续 10 次及完整
+  worker service + dispatch 关联测试 51/51 通过，`worker/supervisor.py` 保持 231/231 行预算。
+- 修复后 full gate 退出码 0：其 quick round 449s 通过，backend combined coverage floor、
+  frontend coverage inventory、Rust 和 frontend production bundle 全部通过；依赖审计仍为既有
+  非阻断告警。
+
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
 目的：覆盖 jsdom 无法验证的路由、浏览器 API、SSE 和前后端集成。
@@ -470,10 +488,12 @@ Phase 3B 执行记录（2026-08-02）：
 4. `test(frontend): split node and jsdom projects`
 5. `test(frontend): make coverage inventory explicit`
 6. `test(frontend): cover auth bootstrap startup paths`
-7. `test: cover critical dispatch and workflow upgrade gaps`
-8. `test(e2e): add deterministic browser smoke flows`
-9. `ci: run browser smoke and nightly stress`
-10. `ci: split test lanes from measured evidence`
+7. `test(py): cover agent dispatch failure cleanup`
+8. `fix(worker): clean runtime status synchronously on stop`
+9. `test(py): cover workflow upgrade gaps`
+10. `test(e2e): add deterministic browser smoke flows`
+11. `ci: run browser smoke and nightly stress`
+12. `ci: split test lanes from measured evidence`
 
 每个提交都需在描述中附带修改前后耗时、测试数量、coverage 变化以及是否发生 rerun。
 
