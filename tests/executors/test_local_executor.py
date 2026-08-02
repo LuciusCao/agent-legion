@@ -203,7 +203,8 @@ def test_local_executor_cancel_during_run(context: ExecutionContext) -> None:
     t = threading.Thread(target=run)
     t.start()
     executor.cancel(context.execution_id)
-    t.join(timeout=5)
+    t.join(timeout=30)  # 高负载门禁下线程调度延迟可超 5s（flaky 处置惯例放宽到 30s）
+    assert not t.is_alive(), "cancel 后 execute 未在 30s 内返回"
 
     assert result_holder["result"].status in ("cancelled", "failed")
 
