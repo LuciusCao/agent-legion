@@ -96,10 +96,29 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 | `agent_start` / `agent_end` | 日志渲染 | `messages`、`error`；M3 起 `agent_end` 增加可选 `reason`（`budget_exceeded` / `cancelled`，正常结束与模型错误时缺省） |
 | `turn_start` / `turn_end` | 日志渲染 | `turnIndex`、`message`、`toolResults` |
 | `message_start` | 日志渲染 | `message` |
-| `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage` |
+| `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage`、可选 `timing`（见下） |
 | `auto_retry_start` | 重试可观测性（pi 兼容，无渲染） | `attempt`（1 起）、`maxAttempts`、`delayMs`、`error` |
 | `tool_execution_start` / `tool_execution_end` | 日志渲染 | `toolCallId`、`toolName`、`args`、`result.content`、`isError` |
 | `outputs_validation` | 输出自检结果（velites 扩展，无渲染） | `missing`（字符串数组）；只要给了 `--require-output` 且运行正常结束/预算耗尽结束就**总是**发出（含 `missing: []`），便于 Host 明确判定；取消或未恢复的模型错误路径不发 |
+
+### 请求级计时（velites 扩展，Pi 无对应能力）
+
+assistant `message` 上的可选 `timing` 字段（`src/events.rs` 的 `RequestTiming`），
+由真实 provider（`openai_compat`）在**成功**完成的请求上填充，stub provider 与
+错误 `message_end`（transient 失败 / 未恢复）一律缺省（`None`，wire 上整个键不出现）。
+三个子字段均为 wall-clock 毫秒整数：
+
+| 字段 | 语义 |
+|---|---|
+| `ttfbMs` | POST 发出 → 首个 SSE `data:` chunk（非流式 JSON 回退方言则为 → 响应头） |
+| `streamMs` | 首个 → 末个 SSE `data:` chunk（`[DONE]` 或连接结束） |
+| `totalMs` | POST 发出 → 流结束 |
+
+不变式：`ttfbMs ≤ totalMs`、`streamMs ≤ totalMs`。重试场景每次 attempt 独立计时，
+最终只挂在成功那次的 assistant message 上（`auto_retry_start` 失败对无时间字段）。
+TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计算。
+该字段为 additive 扩展，Host 现有消费方（`token_usage` / `pi_event_scan` /
+`job_log_renderer`）均为 `dict.get` 风格，对未知字段天然容忍。
 
 ### 明确不发
 

@@ -48,6 +48,10 @@ pub struct MockResponse {
     /// (simulating a stalled stream; the client gives up first when its
     /// idle timeout is shorter).
     pub stall: Option<std::time::Duration>,
+    /// Write the body in `chunk_size`-byte pieces, sleeping `delay` before
+    /// each piece after the first (simulating a real token-by-token stream
+    /// so client-side timing measurements have a stable lower bound).
+    pub pace: Option<(usize, std::time::Duration)>,
 }
 
 impl MockResponse {
@@ -58,6 +62,7 @@ impl MockResponse {
             body: body.into(),
             truncate_at: None,
             stall: None,
+            pace: None,
         }
     }
 
@@ -68,6 +73,20 @@ impl MockResponse {
             body: body.into(),
             truncate_at: None,
             stall: None,
+            pace: None,
+        }
+    }
+
+    /// An SSE response whose body drips out in `chunk_size`-byte pieces with
+    /// `delay` between them — a controllable chunk cadence for timing tests.
+    pub fn paced_sse(
+        body: impl Into<String>,
+        chunk_size: usize,
+        delay: std::time::Duration,
+    ) -> Self {
+        Self {
+            pace: Some((chunk_size, delay)),
+            ..Self::sse(body)
         }
     }
 
@@ -174,7 +193,23 @@ async fn handle_connection(
         Some(n) => &body[..n.min(body.len())],
         None => body,
     };
-    socket.write_all(written).await?;
+    match response.pace {
+        Some((chunk_size, delay)) if response.truncate_at.is_none() => {
+            let mut pieces = written.chunks(chunk_size.max(1)).peekable();
+            while let Some(piece) = pieces.next() {
+                if pieces.peek().is_some() {
+                    socket.write_all(piece).await?;
+                    socket.flush().await?;
+                    tokio::time::sleep(delay).await;
+                } else {
+                    socket.write_all(piece).await?;
+                }
+            }
+        }
+        _ => {
+            socket.write_all(written).await?;
+        }
+    }
     socket.flush().await?;
     Ok(())
 }
