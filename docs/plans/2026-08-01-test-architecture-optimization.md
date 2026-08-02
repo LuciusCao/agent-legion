@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 0 implementation complete; CI baseline validation pending
+状态：Phase 0 complete; Phase 1 pending
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -130,7 +130,7 @@ Coverage 必须合并 logic/component 结果，并显式定义生产源码 inclu
 - [x] CI job summary 保留聚合结果；原始 JUnit、Vitest JSON 和 HTML coverage 仅在临时
       runner 中使用，不上传可能包含私有源码或失败上下文的 artifacts。
 - [x] 统计 rerun 次数并在 job summary 中展示。
-- [ ] 连续运行三次基线，记录中位数及最慢 30 个 Python 测试/前端文件。
+- [x] 连续运行三次基线，记录中位数及最慢 30 个 Python 测试/前端文件。
 
 验收：
 
@@ -150,7 +150,74 @@ Phase 0 本地验证记录（2026-08-01，Darwin arm64，10 logical CPUs）：
 - 三 lane 首次 quick gate：frontend 1058 passed，Rust 全部通过；backend 在高负载下出现
   `test_local_executor_cancel_during_run` 时序 flaky。该用例隔离复跑 3/3 通过。
 - backend-only、无 `GATE_LANES` 污染的最终 test phase：2334 passed，286.18s。
-- 仍待分支推送后完成连续三次 GitHub Actions 采样，才能验收 CI 中位数及遥测开销。
+Phase 0 GitHub Actions 基线（2026-08-02，同一提交 `f01b248a`，均通过）：
+
+| Run | backend job | frontend job | ci-extended | Rust | Python test | Vitest |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| [30728743402](https://github.com/LuciusCao/agent-legion/actions/runs/30728743402) | 9m12s | 8m13s | 2m04s | 52s | 435.94s | 292.21s |
+| [30729031946](https://github.com/LuciusCao/agent-legion/actions/runs/30729031946) | 9m10s | 9m25s | 1m16s | 49s | 443.34s | 399.74s |
+| [30729326941](https://github.com/LuciusCao/agent-legion/actions/runs/30729326941) | 6m53s | 9m01s | 1m21s | 49s | 277.76s | 377.91s |
+| 中位数 | 9m10s | 9m01s | 1m21s | 49s | 435.94s | 377.91s |
+
+- 三次关键路径中位数为 9m12s；backend 与 frontend 共同决定关键路径。
+- Python 2333 passed / 1 skipped，Vitest 137 files / 1058 tests，三次均未观察到 rerun。
+- 相对既有 Python 430.45s、Vitest 368.11s 基线，测试级中位数分别增加约 1.3% 和
+  2.7%，低于 5% 遥测开销上限。
+- 第三次 Python 普通测试最慢 30 项如下；57.35s 的 session/setup 成本是首要优化对象：
+
+| 秒 | 阶段 | 测试 |
+| ---: | --- | --- |
+| 57.35 | setup | `test_budget_exhaustion_marks_agent_end` |
+| 3.22 | call | `test_app_startup_preserves_local_executor_configuration_for_workspace` |
+| 2.73 | call | `test_build_openapi_schema_is_deterministic_and_portable` |
+| 2.52 | call | `test_local_executor_without_timeout_completes` |
+| 2.29 | call | `test_rerun_node_mark_for_rerun_value_error` |
+| 2.18 | call | `test_workspace_agent_routes_are_absent_from_openapi` |
+| 1.85 | call | `test_rerun_node_rejects_running_job` |
+| 1.77 | call | `test_delete_job_response_model_is_exposed_in_openapi` |
+| 1.66 | call | `test_batch_rerun_request_order_preserved` |
+| 1.65 | call | `test_job_intake_handles_large_batch_across_default_chunks` |
+| 1.64 | call | `test_workspace_settings_returns_resource_config` |
+| 1.59 | call | `test_batch_rerun_node_not_found_for_one_job` |
+| 1.56 | call | `test_get_job_run_log_returns_404_for_missing_run` |
+| 1.56 | call | `test_workspace_batch_rerun_marks_jobs_queued` |
+| 1.51 | call | `test_get_video_job_source_serves_local_source_mp4` |
+| 1.44 | call | `test_workspace_configuration_rejects_invalid_binding_without_partial_update` |
+| 1.43 | setup | `test_validate_srt_entry_within_limit_passes` |
+| 1.43 | setup | `test_websocket_requires_session` |
+| 1.43 | call | `test_get_job_detail_and_artifact_when_enabled` |
+| 1.42 | call | `test_run_to_rejects_start_outside_target_closure` |
+| 1.36 | call | `test_get_artifact_returns_404` |
+| 1.35 | call | `test_get_job_run_log_rejects_escape` |
+| 1.32 | setup | `test_validate_srt_entry_too_long_fails` |
+| 1.30 | call | `test_job_detail_includes_node_inputs_outputs` |
+| 1.29 | call | `test_executor_stats_available_respects_global_usage_by_other_workspaces` |
+| 1.29 | call | `test_workspace_job_route_manifest` |
+| 1.28 | call | `test_rerun_node_cleanup_failed` |
+| 1.28 | call | `test_list_workspace_runs_filters_by_status_and_node` |
+| 1.28 | call | `test_rerun_node_rollback_on_db_failure` |
+| 1.27 | call | `test_batch_rerun_from_failed_node` |
+
+- 前端原始 JSON 按安全策略不上传；以下最慢 30 个文件来自 Phase 0 本地冷缓存 JSON
+  （121.93s 总耗时），用于模块排序，CI 仅保留 3 次聚合中位数：
+
+| 秒 | 文件 | 秒 | 文件 |
+| ---: | --- | ---: | --- |
+| 7.53 | `SettingsPage.test.tsx` | 1.30 | `JobLogDialog.test.tsx` |
+| 5.90 | `WorkspaceMainPage.test.tsx` | 1.28 | `JobRerunDialog.test.tsx` |
+| 3.64 | `JobDetailPage.test.tsx` | 1.12 | `QuestionContentPanel.regression.test.tsx` |
+| 3.15 | `WorkflowStudioPage.test.tsx` | 1.08 | `JobProgressPanel.test.tsx` |
+| 3.13 | `AddDialog.test.tsx` | 1.06 | `JobDetailActions.test.tsx` |
+| 2.95 | `InteractionOverlay.test.tsx` | 1.03 | `JobRerunDialog.failureCategory.test.tsx` |
+| 1.95 | `SettingsComponents.test.tsx` | 0.98 | `useWorkflowStudio.test.ts` |
+| 1.86 | `JobFilterBar.test.tsx` | 0.86 | `TokenUsageDialog.test.tsx` |
+| 1.65 | `TokenUsagePanel.test.tsx` | 0.86 | `DeleteWorkspaceDialog.test.tsx` |
+| 1.60 | `QuestionContentPanel.test.tsx` | 0.86 | `DagFullscreenDialog.test.tsx` |
+| 1.60 | `JobActionBar.test.tsx` | 0.86 | `AgentStatusIndicator.test.tsx` |
+| 1.47 | `WorkflowPublishReviewDialog.test.tsx` | 0.83 | `useAsync.test.ts` |
+| 1.36 | `MonitoringPanel.test.tsx` | 0.82 | `SchemaConfigForm.test.tsx` |
+| 0.79 | `DagGraph.test.tsx` | 0.79 | `ExecutorAllocationSection.test.tsx` |
+| 0.77 | `VideoContentPanel.test.tsx` | 0.77 | `TokenUsagePage.test.tsx` |
 
 ### Phase 1：解除 Python 单元测试的全局 PostgreSQL 依赖
 
