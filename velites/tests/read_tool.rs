@@ -10,6 +10,7 @@ fn ctx(cwd: &std::path::Path) -> ToolContext {
         // Same rationale as tests/bash_tool.rs: these tests exercise read
         // semantics, not confinement.
         sandbox: None,
+        read_roots: Vec::new(),
     }
 }
 

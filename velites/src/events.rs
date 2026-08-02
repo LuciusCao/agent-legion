@@ -43,9 +43,14 @@ pub enum Role {
 }
 
 /// Token usage of one assistant message. `cacheRead` is camelCase on the wire.
+///
+/// Pi-aligned semantics: `input` EXCLUDES cache-read tokens (the provider's
+/// `prompt_tokens` includes them; subtracting avoids double-billing the
+/// cached part), so `input + cacheRead` reconstructs `prompt_tokens`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
+    /// Non-cached input tokens (pi-aligned; excludes `cacheRead`).
     pub input: u64,
     pub output: u64,
     pub cache_read: u64,
