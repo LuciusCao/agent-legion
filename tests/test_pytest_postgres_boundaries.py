@@ -3,7 +3,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import psycopg
+import pytest
+
 from tests import conftest as test_config
+from tests import postgres_support
 
 ROOT = Path(__file__).resolve().parents[1]
 DIRECT_POSTGRES_IMPORTS = (
@@ -12,6 +16,32 @@ DIRECT_POSTGRES_IMPORTS = (
     "from server.app import main",
     "from scripts.export_openapi import build_openapi_schema",
 )
+
+
+class _QueryResult:
+    def __init__(self, row: tuple[int] | None = None) -> None:
+        self._row = row
+
+    def fetchone(self) -> tuple[int] | None:
+        return self._row
+
+
+class _FakeMaintenanceConnection:
+    def __init__(self, *, database_exists: bool) -> None:
+        self.database_exists = database_exists
+        self.executions: list[tuple[object, object]] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args) -> None:
+        return None
+
+    def execute(self, query, params=None) -> _QueryResult:
+        self.executions.append((query, params))
+        if isinstance(query, str) and "pg_database" in query:
+            return _QueryResult((1,) if self.database_exists else None)
+        return _QueryResult()
 
 
 def test_postgres_support_import_has_no_database_creation_side_effect() -> None:
@@ -27,6 +57,31 @@ def test_postgres_support_import_has_no_database_creation_side_effect() -> None:
     ]
 
     assert "ensure_test_database" not in top_level_calls
+
+
+@pytest.mark.parametrize(("database_exists", "expected_execution_count"), [(False, 3), (True, 2)])
+def test_database_creation_is_serialized_before_catalog_check(
+    monkeypatch: pytest.MonkeyPatch,
+    database_exists: bool,
+    expected_execution_count: int,
+) -> None:
+    connection = _FakeMaintenanceConnection(database_exists=database_exists)
+    monkeypatch.setattr(
+        psycopg,
+        "connect",
+        lambda *args, **kwargs: connection,
+    )
+    monkeypatch.setattr(
+        postgres_support,
+        "BASE_DATABASE_URL",
+        "postgresql://postgres@127.0.0.1/agent_legion_race_test",
+    )
+
+    postgres_support.ensure_test_database()
+
+    assert len(connection.executions) == expected_execution_count
+    assert "pg_advisory_lock" in connection.executions[0][0]
+    assert "pg_database" in connection.executions[1][0]
 
 
 def test_direct_postgres_consumers_are_in_explicit_inventory() -> None:
