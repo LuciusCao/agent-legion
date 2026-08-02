@@ -6,6 +6,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from worker._retry import run_with_retry
 from worker.host_client import Client, WorkerAuthError
 
 
@@ -27,19 +28,23 @@ def register_with_retry(
     stop: threading.Event,
     initial_backoff: float,
 ) -> bool | None:
-    backoff = max(0.2, initial_backoff)
-    while not stop.is_set():
-        try:
-            client.register(config, management_token)
-            return True
-        except WorkerAuthError as exc:
-            print(f"Agent Worker registration rejected: {exc}", flush=True)
-            return False
-        except Exception as exc:
-            print(
+    def attempt() -> bool:
+        client.register(config, management_token)
+        return True
+
+    try:
+        return run_with_retry(
+            attempt,
+            retriable=(Exception,),
+            terminal=(WorkerAuthError,),
+            base_seconds=max(0.2, initial_backoff),
+            cap_seconds=60.0,
+            stop=stop,
+            on_retry=lambda exc, backoff: print(
                 f"Agent Worker registration unavailable: {exc}; retrying in {backoff:.1f}s",
                 flush=True,
-            )
-            stop.wait(backoff)
-            backoff = min(backoff * 2, 60.0)
-    return None
+            ),
+        )
+    except WorkerAuthError as exc:
+        print(f"Agent Worker registration rejected: {exc}", flush=True)
+        return False
