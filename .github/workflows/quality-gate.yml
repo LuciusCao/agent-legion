@@ -80,12 +80,39 @@ jobs:
         env:
           # Local quick gate skips coverage; CI feeds the combined 85% floor.
           AGENT_LEGION_COV: "1"
+          AGENT_LEGION_TEST_RESULTS_DIR: test-results
+          AGENT_LEGION_TEST_RESULT_NAME: backend
 
       - name: Full gate evidence (tests/full)
-        run: uv run pytest -q tests/full -m full_gate --cov=server --cov-report= --cov-append
+        run: |
+          mkdir -p test-results
+          uv run pytest -q tests/full -m full_gate \
+            --durations=30 \
+            --junitxml=test-results/backend-full-junit.xml \
+            -p scripts.pytest_telemetry \
+            --cov=server --cov-report= --cov-append
+        env:
+          AGENT_LEGION_RERUN_REPORT: test-results/backend-full-reruns.json
 
       - name: Combined coverage report
         run: uv run coverage report
+
+      # Only aggregate counts go to the persistent job summary. Raw JUnit and
+      # coverage files remain ephemeral on the runner to avoid retaining
+      # private failure/source context as downloadable artifacts.
+      - name: Backend test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: "1"
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "Backend test evidence" \
+            --junit test-results/backend-junit.xml \
+            --junit test-results/backend-full-junit.xml \
+            --rerun-report test-results/backend-reruns.json \
+            --rerun-report test-results/backend-full-reruns.json \
+            --output test-results/backend-summary.md
+          cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
 
   frontend:
     name: frontend
@@ -133,10 +160,23 @@ jobs:
 
       - name: Frontend tests
         run: FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage ./scripts/check-quick-frontend.sh
+        env:
+          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend
 
       - name: Production bundle
         run: npm run build:bundle
         working-directory: frontend
+
+      - name: Frontend test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: frontend-v8
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "Frontend test evidence" \
+            --junit test-results/frontend/vitest-junit.xml \
+            --output test-results/frontend-summary.md
+          cat test-results/frontend-summary.md >> "$GITHUB_STEP_SUMMARY"
 
   rust:
     name: rust
@@ -208,4 +248,23 @@ jobs:
       - run: uv sync
 
       - name: CI extended architecture evidence
-        run: uv run pytest -q tests/ci -m ci_extended
+        run: |
+          mkdir -p test-results
+          uv run pytest -q tests/ci -m ci_extended \
+            --durations=30 \
+            --junitxml=test-results/ci-extended-junit.xml \
+            -p scripts.pytest_telemetry
+        env:
+          AGENT_LEGION_RERUN_REPORT: test-results/ci-extended-reruns.json
+
+      - name: CI extended test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: "0"
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "CI extended test evidence" \
+            --junit test-results/ci-extended-junit.xml \
+            --rerun-report test-results/ci-extended-reruns.json \
+            --output test-results/ci-extended-summary.md
+          cat test-results/ci-extended-summary.md >> "$GITHUB_STEP_SUMMARY"

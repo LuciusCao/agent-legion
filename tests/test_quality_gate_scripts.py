@@ -129,3 +129,75 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     assert not any("test:coverage" in call for call in calls)
     assert any("pytest -q tests/full" in call for call in calls)
     assert any("coverage report" in call for call in calls)
+
+
+def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    results = tmp_path / "results"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'printf "rerun:%s\\n" "${AGENT_LEGION_RERUN_REPORT:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "AGENT_LEGION_TEST_RESULT_NAME": "quick",
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "smoke",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "--durations=30" in calls
+    assert f"--junitxml={results / 'quick-junit.xml'}" in calls
+    assert "-p scripts.pytest_telemetry" in calls
+    assert f"rerun:{results / 'quick-reruns.json'}" in calls
+
+
+def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    frontend = tmp_path / "frontend"
+    fake_bin = tmp_path / "bin"
+    results = tmp_path / "results"
+    scripts.mkdir()
+    frontend.mkdir()
+    fake_bin.mkdir()
+    frontend_gate = scripts / "check-quick-frontend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-frontend.sh", frontend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "npm",
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        frontend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "FRONTEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "run test -- --reporter=default --reporter=junit" in calls
+    assert f"--outputFile.junit={results / 'vitest-junit.xml'}" in calls
+    assert "--reporter=json" in calls
+    assert f"--outputFile.json={results / 'vitest-results.json'}" in calls

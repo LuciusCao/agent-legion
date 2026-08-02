@@ -35,7 +35,22 @@ run_static_checks() {
 
 run_tests() {
   echo "=== Frontend Tests (${test_command}) ==="
-  npm run "$test_command"
+  reporter_args=()
+  if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
+    mkdir -p "$AGENT_LEGION_TEST_RESULTS_DIR"
+    reporter_args=(
+      --reporter=default
+      --reporter=junit
+      --outputFile.junit="$AGENT_LEGION_TEST_RESULTS_DIR/vitest-junit.xml"
+      --reporter=json
+      --outputFile.json="$AGENT_LEGION_TEST_RESULTS_DIR/vitest-results.json"
+    )
+  fi
+  if (( ${#reporter_args[@]} > 0 )); then
+    npm run "$test_command" -- "${reporter_args[@]}"
+  else
+    npm run "$test_command"
+  fi
 }
 
 case "${FRONTEND_GATE_PHASE:-all}" in

@@ -21,6 +21,7 @@ tools/content-uploader/config.dev.yaml
 tools/content-uploader/config.prod.yaml
 tools/content-uploader/config.yaml
 stress-results/
+test-results/
 deploy/secrets/
 deploy/worker.home.yaml
 deploy/worker.company.yaml

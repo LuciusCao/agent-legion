@@ -71,6 +71,7 @@ export default defineConfig(({ mode }) => {
         provider: 'v8',
         reporter: ['text', 'json', 'html'],
         reportsDirectory: './coverage',
+        reportOnFailure: true,
         thresholds: {
           lines: 86,
           functions: 80,
