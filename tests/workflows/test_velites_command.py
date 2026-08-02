@@ -130,6 +130,17 @@ def test_velites_command_exact_argv() -> None:
         assert flag not in cmd
 
 
+def test_velites_command_maps_named_provider_to_gateway() -> None:
+    # pi 命名 provider（gateway 等，定义在 pi 自己的 models.json）在 velites 侧
+    # 收敛为 gateway 单出口；协议名原样透传。
+    named = {**MANIFEST, "pi": {**MANIFEST["pi"], "provider": "gateway"}}
+    cmd = _dispatch(named)
+    assert cmd[cmd.index("--provider") + 1] == "gateway"
+    for native in ("gateway", "openai_compat", "stub"):
+        passthrough = {**MANIFEST, "pi": {**MANIFEST["pi"], "provider": native}}
+        assert _dispatch(passthrough)[cmd.index("--provider") + 1] == native
+
+
 def test_velites_command_budget_flags_from_node_config() -> None:
     manifest = {**MANIFEST, "config": {"max_turns": 8, "max_tokens": 120000}}
     cmd = _dispatch(manifest)
