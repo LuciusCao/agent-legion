@@ -7,17 +7,18 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
-from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
+from tests.postgres_support import (
+    BASE_DATABASE_URL,
+    TEST_DATABASE_URL,
+    TEST_SCHEMA,
+    ensure_test_database,
+)
 
 os.environ["AGENT_LEGION_DATABASE_URL"] = TEST_DATABASE_URL
+os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"
 
 import psycopg
 from psycopg import sql
-
-with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as _bootstrap_conn:
-    _bootstrap_conn.execute(
-        sql.SQL("create schema if not exists {}").format(sql.Identifier(TEST_SCHEMA))
-    )
 
 from server.app.agent_catalog import load_agent_definitions, sync_agent_definitions
 from server.app.agents import AgentStatusManager
@@ -25,7 +26,6 @@ from server.app.configuration import load_application_config
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 from server.app.jobs import JobQueries
-from server.app.main import create_app
 from server.app.settings import PROJECT_ROOT, load_settings
 
 _CMS_ENV_KEYS = (
@@ -54,22 +54,107 @@ def pytest_configure() -> None:
             os.environ[key] = ""
 
 
-# Smoke tier (GATE_TIER=smoke, used by pre-push): a small set of fast,
-# high-value tests that keeps the local push feedback loop around a minute
-# while the full quick suite stays the CI boundary. Membership is path-based:
-# every architecture governance test is smoke by default, plus one core
-# behavioral file per subsystem. Add new entries here when a new subsystem
-# gains tests; keep the tier under ~90s.
-_SMOKE_TEST_FILES = frozenset(
+# Files that connect to PostgreSQL directly instead of through a root fixture.
+# Keep this inventory explicit so new direct consumers are visible in review;
+# fixture-based consumers are classified by _POSTGRES_FIXTURES below.
+_POSTGRES_TEST_FILES = frozenset(
     {
-        "tests/routes/test_auth_routes.py",
+        "tests/ci/test_executor_worker_stress.py",
+        "tests/db/test_postgres_runtime.py",
+        "tests/db/test_workspace_cms_migration.py",
+        "tests/db/test_workspace_secrets_migration.py",
+        "tests/executors/leases/test_expire_race.py",
+        "tests/executors/leases/test_shard_expiry.py",
+        "tests/executors/test_leases.py",
+        "tests/executors/test_local_executor.py",
+        "tests/full/test_agent_worker_control_plane.py",
+        "tests/full/test_executor_cancellation_recovery.py",
+        "tests/full/test_executor_worker_fairness.py",
+        "tests/full/test_storage_path_corruption.py",
+        "tests/full/test_velites_harness_e2e.py",
+        "tests/full/test_split_config_startup.py",
+        "tests/full/test_workspace_sse.py",
+        "tests/routes/jobs/test_failed_node_runs.py",
+        "tests/routes/jobs/test_intake_modes.py",
+        "tests/routes/jobs/test_job_batches.py",
         "tests/routes/jobs/test_job_lifecycle.py",
-        "tests/services/test_vault.py",
-        "tests/executors/test_shard_contract.py",
-        "tests/executors/test_executor_kinds.py",
-        "tests/executors/leases/test_claim_basics.py",
+        "tests/routes/jobs/test_job_rerun.py",
+        "tests/routes/jobs/test_job_run_to.py",
+        "tests/routes/jobs/test_openapi_contracts.py",
+        "tests/routes/jobs/test_video_jobs_source.py",
+        "tests/routes/jobs/test_workflow_catalog.py",
+        "tests/routes/test_agent_workers.py",
+        "tests/routes/test_video_job_projection.py",
+        "tests/routes/test_workspace_secrets.py",
+        "tests/test_cors.py",
+        "tests/test_questions_api.py",
+        "tests/test_video_job_intake.py",
+        "tests/test_workflow_draft_compare.py",
+        "tests/test_workspace_executor_configuration_flow.py",
+        "tests/test_workspace_job_control_flow.py",
+        "tests/test_workspace_settings_api.py",
+        "tests/routes/jobs/test_workspace_configuration.py",
+        "tests/routes/jobs/test_workspace_crud.py",
+        "tests/routes/test_artifacts_route.py",
+        "tests/routes/test_metrics.py",
+        "tests/routes/test_workspace_agent_routes.py",
+        "tests/services/test_artifact_store.py",
+        "tests/services/test_ops_metrics.py",
+        "tests/services/test_token_usage.py",
+        "tests/test_export_openapi.py",
+        "tests/test_jobs_route_contracts.py",
+        "tests/test_legacy_worker_disabled.py",
+        "tests/test_main.py",
+        "tests/routes/test_misc.py",
+        "tests/services/test_workflow_draft_publish.py",
+        "tests/test_agent_broker.py",
+        "tests/test_agent_broker_batch.py",
+        "tests/test_agent_broker_concurrency.py",
+        "tests/test_agent_broker_empty.py",
+        "tests/test_agent_catalog.py",
+        "tests/test_agent_stock.py",
+        "tests/test_auth_queries.py",
+        "tests/test_db.py",
+        "tests/test_executor_recovery.py",
+        "tests/test_job_event_buffer_db.py",
+        "tests/test_job_events.py",
+        "tests/test_job_log_service.py",
+        "tests/test_job_workflow_upgrade.py",
+        "tests/test_jobs.py",
+        "tests/test_jobs_queries.py",
+        "tests/test_log_cleanup.py",
+        "tests/test_pi_runner.py",
+        "tests/test_question_comprehension_info_workflow.py",
+        "tests/test_relative_path_portability.py",
+        "tests/test_run_dir_cleanup.py",
+        "tests/test_worker_control_db.py",
+        "tests/test_workflow_execution_control.py",
+        "tests/test_workflow_revisions.py",
+        "tests/test_workflow_worker_concurrency.py",
+        "tests/test_workspace_executor_queries.py",
+        "tests/workers/test_scheduler_wakeup.py",
+        "tests/workers/test_workflow_worker_capacity.py",
+        "tests/workers/test_workflow_worker_node_config.py",
+        "tests/workers/test_workflow_worker_ready_queue.py",
+        "tests/workers/test_workflow_worker_thread_local.py",
+        "tests/workers/test_workflow_worker_thread_paths.py",
+        "tests/workers/test_workflow_worker_thread_pi.py",
+        "tests/workflows/test_pi_runner_token_usage.py",
         "tests/workflows/test_sharding.py",
-        "tests/db/test_retry.py",
+    }
+)
+
+_POSTGRES_FIXTURES = frozenset(
+    {
+        "anon_client",
+        "app_factory",
+        "client",
+        "client_factory",
+        "job_db",
+        "queries",
+        "repo_a",
+        "repo_b",
+        "tmp_db",
     }
 )
 
@@ -81,8 +166,12 @@ def pytest_collection_modifyitems(config, items):
             rel = item.path.relative_to(root).as_posix()
         except ValueError:
             continue
-        if rel in _SMOKE_TEST_FILES or item.path.name.startswith("test_architecture_"):
-            item.add_marker(pytest.mark.smoke)
+        if (
+            rel in _POSTGRES_TEST_FILES
+            or _POSTGRES_FIXTURES.intersection(item.fixturenames)
+            or item.get_closest_marker("fresh_schema") is not None
+        ):
+            item.add_marker(pytest.mark.postgres)
 
 
 def _rebuild_schema() -> None:
@@ -137,7 +226,7 @@ def _reset_schema_data() -> None:
         )
 
 
-@pytest.fixture(scope="session", autouse=True)
+@pytest.fixture(scope="session")
 def _session_test_schema():
     """Build the per-worker schema once per session and cache agent definitions.
 
@@ -146,6 +235,7 @@ def _session_test_schema():
     churn. Tests that mutate DDL must opt into a real rebuild via
     @pytest.mark.fresh_schema.
     """
+    ensure_test_database()
     _rebuild_schema()
     configured = load_application_config(PROJECT_ROOT).config
     yield load_agent_definitions(configured.get("agents", {}))
@@ -153,14 +243,19 @@ def _session_test_schema():
 
 
 @pytest.fixture(autouse=True)
-def _isolate_postgres_database(request, _session_test_schema):
+def _isolate_postgres_database(request):
+    if request.node.get_closest_marker("postgres") is None:
+        yield
+        return
+
+    agent_definitions = request.getfixturevalue("_session_test_schema")
     fresh = request.node.get_closest_marker("fresh_schema") is not None
     if fresh:
         _rebuild_schema()
     else:
         close_database_pools()
         _reset_schema_data()
-    sync_agent_definitions(TEST_DATABASE_URL, _session_test_schema)
+    sync_agent_definitions(TEST_DATABASE_URL, agent_definitions)
     yield
     if fresh:
         # Erase any DDL drift the test left behind so later TRUNCATE-isolated
@@ -268,6 +363,8 @@ def agent_manager():
 
 @pytest.fixture
 def app_factory(tmp_path):
+    from server.app.main import create_app
+
     def factory(*, workflows_enabled=None, configure=None):
         app = create_app(data_dir=tmp_path, start_worker=False)
         if workflows_enabled is not None:

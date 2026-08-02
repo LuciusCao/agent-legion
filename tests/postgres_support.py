@@ -58,6 +58,6 @@ def ensure_test_database() -> None:
         conn.execute(sql.SQL("create database {}").format(sql.Identifier(dbname)))
 
 
-# Every consumer of this module is a test module that needs the database to
-# exist, so ensure it at import time; this is a no-op once the database exists.
-ensure_test_database()
+# Importing test helpers must remain side-effect free. The root PostgreSQL
+# session fixture creates the per-worktree database only when a test is marked
+# ``postgres``; pure collection and unit runs must work with PostgreSQL offline.

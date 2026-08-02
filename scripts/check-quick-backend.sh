@@ -35,9 +35,10 @@ run_static_checks() {
 }
 
 run_tests() {
-  # GATE_TIER=smoke runs the curated fast subset (membership lives in
-  # tests/conftest.py) without coverage — the 85% coverage floor only makes
-  # sense for the full suite, which remains the CI boundary.
+  # GATE_TIER=smoke/unit runs every non-PostgreSQL test against an intentionally
+  # unreachable database URL. This is marker-based membership rather than a
+  # file allowlist, and proves the pure layer remains independently runnable.
+  # The 85% coverage floor remains a full-suite CI boundary.
   #
   # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism (default: auto =
   # all cores). Machines running several worktrees at once should set it
@@ -57,26 +58,51 @@ run_tests() {
     )
     export AGENT_LEGION_RERUN_REPORT="$AGENT_LEGION_TEST_RESULTS_DIR/${result_name}-reruns.json"
   fi
+  cov_args=()
+  if [[ "${AGENT_LEGION_COV:-0}" == "1" ]]; then
+    cov_args=(--cov=server --cov-report=term-missing)
+    if [[ "${AGENT_LEGION_COV_APPEND:-0}" == "1" ]]; then
+      cov_args+=(--cov-append)
+    fi
+  fi
+  split_cov_floor_args=()
+  if [[ "${AGENT_LEGION_COV:-0}" == "1" ]]; then
+    split_cov_floor_args=(--cov-fail-under=0)
+  fi
   case "${GATE_TIER:-full}" in
-    smoke)
-      echo "=== Python Smoke Tests (no coverage) ==="
-      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+    smoke|unit)
+      echo "=== Python Unit Tests (PostgreSQL offline) ==="
+      AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
+        UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "smoke and not repository_gate" \
+        -m "not postgres and not repository_gate" \
         -n "$workers" \
         --reruns 1 \
         --reruns-delay 2 \
-        "${telemetry_args[@]}"
+        "${telemetry_args[@]}" \
+        "${cov_args[@]}" \
+        "${split_cov_floor_args[@]}"
+      ;;
+    postgres)
+      echo "=== Python PostgreSQL Tests ==="
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        --ignore=tests/full \
+        --ignore=tests/ci \
+        -m "postgres and not repository_gate" \
+        -n "$workers" \
+        --reruns 1 \
+        --reruns-delay 2 \
+        "${telemetry_args[@]}" \
+        "${cov_args[@]}" \
+        "${split_cov_floor_args[@]}"
       ;;
     full)
       # Coverage tracing costs 15-40% CPU on the Python side; the 85% floor is
       # enforced by CI and scripts/check.sh, so the local quick gate skips it
       # unless AGENT_LEGION_COV=1.
-      cov_args=()
       if [[ "${AGENT_LEGION_COV:-0}" == "1" ]]; then
         echo "=== Python Tests + Coverage ==="
-        cov_args=(--cov=server --cov-report=term-missing)
       else
         echo "=== Python Tests (coverage off; set AGENT_LEGION_COV=1 to enable) ==="
       fi

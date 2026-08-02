@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 0 complete; Phase 1 pending
+状态：Phase 1 implementation complete; CI median validation pending
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -225,15 +225,15 @@ Phase 0 GitHub Actions 基线（2026-08-02，同一提交 `f01b248a`，均通过
 
 任务：
 
-- [ ] 将 conftest 模块导入阶段的 schema 创建移动到惰性 session fixture。
-- [ ] 引入 `postgres` marker，并提供明确的数据库隔离 fixture。
-- [ ] 非数据库测试不请求 `_session_test_schema`，不执行 TRUNCATE、连接池关闭或 agent
+- [x] 将 conftest 模块导入阶段的 schema 创建移动到惰性 session fixture。
+- [x] 引入 `postgres` marker，并提供明确的数据库隔离 fixture。
+- [x] 非数据库测试不请求 `_session_test_schema`，不执行 TRUNCATE、连接池关闭或 agent
       definition 同步。
-- [ ] `client`、`job_db` 和数据库 query fixture 自动依赖 `postgres` 隔离。
-- [ ] 盘点直接访问数据库但未通过 fixture 的测试，逐文件显式标记。
-- [ ] 保留 `fresh_schema`：DDL 测试执行前后重建 schema，不能退化为普通 TRUNCATE。
-- [ ] 增加一个无 PostgreSQL collection/unit gate，证明纯测试不会意外连库。
-- [ ] 将 smoke 成员从易遗漏的单一文件白名单演进为“稳定 marker + 分层路径”，同时保留
+- [x] `client`、`job_db` 和数据库 query fixture 自动依赖 `postgres` 隔离。
+- [x] 盘点直接访问数据库但未通过 fixture 的测试，逐文件显式标记。
+- [x] 保留 `fresh_schema`：DDL 测试执行前后重建 schema，不能退化为普通 TRUNCATE。
+- [x] 增加一个无 PostgreSQL collection/unit gate，证明纯测试不会意外连库。
+- [x] 将 smoke 成员从易遗漏的单一文件白名单演进为“稳定 marker + 分层路径”，同时保留
       90 秒预算。
 
 建议命令形态：
@@ -260,6 +260,21 @@ uv run pytest -q -m "postgres and not full_gate and not ci_extended" -n 4
   autouse。
 
 回滚：恢复数据库 fixture 的 autouse 调用；marker 和遥测可以保留。
+
+Phase 1 本地验证记录（2026-08-02，Darwin arm64，10 logical CPUs）：
+
+- 使用不可达的 `127.0.0.1:1` 数据库 URL，离线 unit 层 1421 passed；两次带 coverage
+  的 wrapper 用时 23.23s / 39.21s，证明 collection 与执行均不会连接 PostgreSQL。
+- PostgreSQL integration 层 918 passed；无 coverage 用时 55.15s，两次带 coverage
+  用时 118.32s / 139.81s。
+- `tests/full -m full_gate` 32 passed（最终 10.04s）；三层最终合并覆盖率 92.88%，高于
+  85% 门槛，新拆分的 executor registry factory 覆盖率为 100%。
+- 三层合计 2371 passed，与普通层 2339 加 full 层 32 的重新分层一致；rerun 为 0。
+- 完整普通后端门禁 2339 passed / 73.33s，相比 Phase 0 本机 286.18s 下降约 74%；后端、
+  前端和 Rust 的跨语言 quick gate 也全部通过（228s）。
+- 架构检查、生成文档检查、ruff 与定向 gate contract 测试通过；`main.py` 的执行器注册
+  构建被拆出后从 250 行降至 227 行，并移除了原 246 行文件预算豁免。
+- 仍需在 GitHub Actions 连续运行三次，以中位数验收“Python 普通测试至少下降 25%”。
 
 ### Phase 2：前端 Node/jsdom 分层与执行优化
 

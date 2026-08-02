@@ -75,13 +75,22 @@ jobs:
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
 
-      - name: Backend tests
+      - name: Backend unit tests (PostgreSQL offline)
         run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
         env:
-          # Local quick gate skips coverage; CI feeds the combined 85% floor.
           AGENT_LEGION_COV: "1"
           AGENT_LEGION_TEST_RESULTS_DIR: test-results
-          AGENT_LEGION_TEST_RESULT_NAME: backend
+          AGENT_LEGION_TEST_RESULT_NAME: backend-unit
+          GATE_TIER: unit
+
+      - name: Backend PostgreSQL tests
+        run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        env:
+          AGENT_LEGION_COV: "1"
+          AGENT_LEGION_COV_APPEND: "1"
+          AGENT_LEGION_TEST_RESULTS_DIR: test-results
+          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres
+          GATE_TIER: postgres
 
       - name: Full gate evidence (tests/full)
         run: |
@@ -107,9 +116,11 @@ jobs:
         run: |
           uv run python scripts/summarize_test_results.py \
             --title "Backend test evidence" \
-            --junit test-results/backend-junit.xml \
+            --junit test-results/backend-unit-junit.xml \
+            --junit test-results/backend-postgres-junit.xml \
             --junit test-results/backend-full-junit.xml \
-            --rerun-report test-results/backend-reruns.json \
+            --rerun-report test-results/backend-unit-reruns.json \
+            --rerun-report test-results/backend-postgres-reruns.json \
             --rerun-report test-results/backend-full-reruns.json \
             --output test-results/backend-summary.md
           cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
