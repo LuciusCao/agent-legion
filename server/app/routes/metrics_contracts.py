@@ -4,6 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from server.app.routes.metrics_summary_contracts import OpsMetricsSummary
+
 
 class MetricBucket(BaseModel):
     bucket_start: str
@@ -20,3 +22,4 @@ class MetricBucket(BaseModel):
 class OpsMetricsResponse(BaseModel):
     granularity: Literal["6h", "24h", "30d"]
     buckets: list[MetricBucket]
+    summary: OpsMetricsSummary

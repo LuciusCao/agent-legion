@@ -12,16 +12,23 @@ import { listAgentWorkers } from '../api/workerTokens'
 import type { AgentWorkerSummary } from '../api/workerTokens'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
-import type { WindowBucket } from '../lib/opsMetricsBuckets'
 import { MetricsChart } from './MetricsChart'
 import type { ChartSeries } from '../lib/metricsChartOptions'
 import styles from './MonitoringPanel.module.css'
 
 const REFRESH_MS = 30_000
-const HOUR_MS = 3_600_000
 
 function fmt(value: number | null | undefined) {
   return typeof value === 'number' ? value.toLocaleString('zh-CN') : '-'
+}
+
+// 耗时展示：不足 1 分钟按秒，否则「Xm YYs」；无数据（窗口内无完成 run）显示占位符。
+function fmtDuration(seconds: number | null | undefined) {
+  if (typeof seconds !== 'number') return '-'
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const minutes = Math.floor(seconds / 60)
+  const rest = Math.round(seconds % 60)
+  return `${minutes}m ${pad(rest)}s`
 }
 
 function pad(n: number) {
@@ -36,25 +43,6 @@ function makeTimeFormatter(granularity: OpsGranularity) {
       return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
     return `${pad(d.getHours())}:${pad(d.getMinutes())}`
   }
-}
-
-function sumRecentHourTokens(buckets: WindowBucket[]) {
-  if (!buckets.length) return null
-  const cutoff = Date.now() - HOUR_MS
-  const recent = buckets.filter(
-    (b) => new Date(b.bucket_start).getTime() >= cutoff
-  )
-  const source = recent.length ? recent : [buckets[buckets.length - 1]]
-  // 缺失采样的桶指标字段为 null，求和时按 0 处理（区别于真实 0，仅影响展示）
-  return source.reduce(
-    (sum, b) => ({
-      input_tokens: sum.input_tokens + (b.input_tokens ?? 0),
-      output_tokens: sum.output_tokens + (b.output_tokens ?? 0),
-      cache_read_tokens: sum.cache_read_tokens + (b.cache_read_tokens ?? 0),
-      total_tokens: sum.total_tokens + (b.total_tokens ?? 0),
-    }),
-    { input_tokens: 0, output_tokens: 0, cache_read_tokens: 0, total_tokens: 0 }
-  )
 }
 
 // 图表 series 为静态常量，保证引用稳定（MetricsChart 依赖引用相等性决定重建时机）
@@ -128,8 +116,12 @@ export function MonitoringPanel() {
     () => (data ? fillWindowBuckets(data.buckets, granularity) : []),
     [data, granularity]
   )
+  // 窗口峰值仍从当前窗口的 buckets 推导；卡片主值统一走后端 summary（分钟级
+  // 样本 + node_runs 现算），不随窗口粒度切换而变化。
   const latest = lastNonNullBucket(buckets)
-  const hourlyTokens = sumRecentHourTokens(buckets)
+  const summary = data?.summary
+  const hourlyTokens = summary?.recent_hour_tokens
+  const hourlyRuns = summary?.recent_hour_runs
 
   if (error) {
     return <p className={styles.error}>监控数据加载失败：{error}</p>
@@ -182,7 +174,7 @@ export function MonitoringPanel() {
             className={styles.metricValue}
             data-testid="online-workers-summary"
           >
-            {fmt(latest?.online_workers)}
+            {fmt(summary?.online_workers)}
           </div>
           <div className={styles.metricMeta}>
             窗口峰值 {fmt(latest?.online_workers_max)}
@@ -194,7 +186,7 @@ export function MonitoringPanel() {
             className={styles.metricValue}
             data-testid="active-executions-summary"
           >
-            {fmt(latest?.active_executions)}
+            {fmt(summary?.active_executions)}
           </div>
           <div className={styles.metricMeta}>
             窗口峰值 {fmt(latest?.active_executions_max)}
@@ -212,6 +204,17 @@ export function MonitoringPanel() {
             输入 {fmt(hourlyTokens?.input_tokens)} · 输出{' '}
             {fmt(hourlyTokens?.output_tokens)} · 缓存读{' '}
             {fmt(hourlyTokens?.cache_read_tokens)}
+          </div>
+        </div>
+        <div className={styles.metric}>
+          <div className={styles.metricLabel}>近 1 小时 Runs</div>
+          <div className={styles.metricValue} data-testid="hourly-runs-summary">
+            完成 {fmt(hourlyRuns?.completed)}
+          </div>
+          <div className={styles.metricMeta}>
+            失败 {fmt(hourlyRuns?.failed)} · p50{' '}
+            {fmtDuration(hourlyRuns?.duration_p50_seconds)} · p95{' '}
+            {fmtDuration(hourlyRuns?.duration_p95_seconds)}
           </div>
         </div>
       </div>
