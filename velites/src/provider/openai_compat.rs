@@ -34,13 +34,13 @@
 //! field, so this is the conservative default — validate against the real
 //! gateway before flipping to a dialect-specific field.
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::StreamExt;
 use serde_json::{json, Map, Value};
 
 use super::{CompletionRequest, Provider, ProviderError};
-use crate::events::{ContentBlock, Message, Role, StopReason, Usage};
+use crate::events::{ContentBlock, Message, RequestTiming, Role, StopReason, Usage};
 
 /// Bounds connection setup; streaming itself has no total deadline.
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
@@ -119,6 +119,8 @@ impl Provider for OpenAiCompatProvider {
         // (dependency set unchanged since M1).
         let body = serde_json::to_vec(&self.build_body(req))
             .expect("request body serialization cannot fail");
+        // Request-level timing starts at the POST, before connect+TLS.
+        let started = Instant::now();
         let response = self
             .client
             .post(&self.endpoint)
@@ -128,6 +130,8 @@ impl Provider for OpenAiCompatProvider {
             .send()
             .await
             .map_err(|err| classify_transport_error(&err))?;
+        // reqwest resolves `send()` once response headers arrive.
+        let headers_at = Instant::now();
 
         let status = response.status();
         if !status.is_success() {
@@ -141,15 +145,18 @@ impl Provider for OpenAiCompatProvider {
             .and_then(|value| value.to_str().ok())
             .is_some_and(|value| value.contains("application/json"));
 
-        let aggregated = if is_json {
+        let (aggregated, first_chunk_at) = if is_json {
+            // Non-streaming fallback (PoC P2): the whole body is one "chunk",
+            // so headers double as the first-byte mark.
             let body = response
                 .text()
                 .await
                 .map_err(|err| classify_transport_error(&err))?;
-            parse_non_streaming(&body)?
+            (parse_non_streaming(&body)?, Some(headers_at))
         } else {
             read_sse_stream(response, self.read_idle_timeout).await?
         };
+        let ended = Instant::now();
 
         let stop_reason = match aggregated.finish_reason.as_deref() {
             Some("stop") => StopReason::Stop,
@@ -175,8 +182,21 @@ impl Provider for OpenAiCompatProvider {
         message.provider = Some(self.name.clone());
         message.model = Some(req.model.to_string());
         message.stop_reason = Some(stop_reason);
+        // Timing is attached only here, on the success path: every error
+        // branch above returns early, and retried attempts surface as
+        // pi-compatible error events without timing (see retry_attempt_events).
+        let first_chunk_at = first_chunk_at.unwrap_or(headers_at);
+        message.timing = Some(RequestTiming {
+            ttfb_ms: millis(first_chunk_at.saturating_duration_since(started)),
+            stream_ms: millis(ended.saturating_duration_since(first_chunk_at)),
+            total_ms: millis(ended.saturating_duration_since(started)),
+        });
         Ok(message)
     }
+}
+
+fn millis(duration: Duration) -> u64 {
+    u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
 }
 
 /// reqwest send/read failures are transient (connection reset, mid-stream
@@ -481,12 +501,16 @@ impl SseLineBuffer {
 /// into the aggregate. Blank lines, comments (`:`), and non-data fields
 /// (`event:`, `id:`, `retry:`) are skipped. Each read is bounded by
 /// `idle_timeout`: total silence longer than that means a dead stream.
+///
+/// Returns the aggregate plus the instant the first `data:` payload arrived
+/// (None when the stream carried none), feeding request-level timing.
 async fn read_sse_stream(
     response: reqwest::Response,
     idle_timeout: Duration,
-) -> Result<Aggregated, ProviderError> {
+) -> Result<(Aggregated, Option<Instant>), ProviderError> {
     let mut aggregated = Aggregated::default();
     let mut lines = SseLineBuffer::default();
+    let mut first_chunk_at: Option<Instant> = None;
     let mut stream = response.bytes_stream();
     loop {
         let next = match tokio::time::timeout(idle_timeout, stream.next()).await {
@@ -501,27 +525,34 @@ async fn read_sse_stream(
         let Some(chunk) = next else { break };
         let chunk = chunk.map_err(|err| classify_transport_error(&err))?;
         for line in lines.push(&chunk) {
-            apply_sse_line(&mut aggregated, &line)?;
+            if apply_sse_line(&mut aggregated, &line)? && first_chunk_at.is_none() {
+                first_chunk_at = Some(Instant::now());
+            }
         }
     }
     if let Some(rest) = lines.finish() {
-        apply_sse_line(&mut aggregated, &rest)?;
+        if apply_sse_line(&mut aggregated, &rest)? && first_chunk_at.is_none() {
+            first_chunk_at = Some(Instant::now());
+        }
     }
-    Ok(aggregated)
+    Ok((aggregated, first_chunk_at))
 }
 
-fn apply_sse_line(aggregated: &mut Aggregated, line: &str) -> Result<(), ProviderError> {
+/// Fold one SSE line into the aggregate. Returns `Ok(true)` when the line was
+/// a JSON `data:` payload (the timing layer counts the first one as TTFB);
+/// blank lines, comments, other fields, and `data: [DONE]` are `Ok(false)`.
+fn apply_sse_line(aggregated: &mut Aggregated, line: &str) -> Result<bool, ProviderError> {
     let line = line.trim_end_matches('\r');
     if line.is_empty() || line.starts_with(':') {
-        return Ok(());
+        return Ok(false);
     }
     let Some(payload) = line.strip_prefix("data:") else {
         // event: / id: / retry: and any non-standard field — ignored.
-        return Ok(());
+        return Ok(false);
     };
     let payload = payload.trim_start();
     if payload.is_empty() || payload == "[DONE]" {
-        return Ok(());
+        return Ok(false);
     }
     // A data payload that fails JSON parsing mid-stream is proxy/gateway
     // corruption (chunked-encoding mangling, truncation), not a model
@@ -532,7 +563,8 @@ fn apply_sse_line(aggregated: &mut Aggregated, line: &str) -> Result<(), Provide
             truncate(payload, 200)
         ))
     })?;
-    aggregated.apply_chunk(&chunk)
+    aggregated.apply_chunk(&chunk)?;
+    Ok(true)
 }
 
 /// Convert a velites message into the OpenAI wire shape.
