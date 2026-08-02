@@ -51,6 +51,9 @@ run_tests() {
   else
     npm run "$test_command"
   fi
+  if [[ "$test_command" == "test:coverage" ]]; then
+    npm run test:coverage-inventory
+  fi
 }
 
 case "${FRONTEND_GATE_PHASE:-all}" in
