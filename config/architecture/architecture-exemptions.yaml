@@ -22,17 +22,6 @@ exemptions:
   owner: workspace-executor
   remove_when: issues/open/032-P2-event-driven-worker.md
 - check: architecture.file_budget
-  path: server/app/main.py
-  reason: Task 9 of the phase1 event-bus plan (complete) converged the six route
-    service constructions from routes/__init__.py into create_app; the remaining
-    path under budget is extracting an AppContainer composition module. Agent
-    Worker composition wires the PostgreSQL broker, catalog sync, artifact
-    store, completion handler, and Host scheduler in one lifecycle. The ceiling
-    holds actual + buffer until that extraction lands.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 246
-- check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
     in worker_control_state (upsert on pause/resume, uncached reads on is_paused);

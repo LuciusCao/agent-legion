@@ -27,19 +27,19 @@ if [[ "$gate" == "full" && "$lanes" != "backend frontend rust" ]]; then
   echo "Lane selection is only supported for the quick gate." >&2
   exit 2
 fi
-# Test tier for the quick gate's backend lane: smoke (curated fast subset, no
-# coverage) or full (whole quick suite with coverage). The full gate always
-# runs the full tier. The tier is part of the evidence fingerprint below.
+# Test tier for the quick gate's backend lane: smoke/unit (all pure tests with
+# PostgreSQL offline) or full (whole quick suite). The full gate always runs
+# the full tier. The tier is part of the evidence fingerprint below.
 tier="${GATE_TIER:-full}"
 case "$tier" in
-  smoke|full) ;;
+  smoke|unit|postgres|full) ;;
   *)
     echo "Unsupported GATE_TIER: $tier" >&2
     exit 2
     ;;
 esac
 if [[ "$gate" == "full" && "$tier" != "full" ]]; then
-  echo "The full gate does not support the smoke tier." >&2
+  echo "The full gate only supports the full tier." >&2
   exit 2
 fi
 export GATE_TIER="$tier"

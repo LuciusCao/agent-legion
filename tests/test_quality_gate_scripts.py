@@ -161,7 +161,10 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "PostgreSQL offline" in result.stdout
     calls = gate_log.read_text(encoding="utf-8")
+    assert "not postgres and not repository_gate" in calls
+    assert "smoke and not repository_gate" not in calls
     assert "--durations=30" in calls
     assert f"--junitxml={results / 'quick-junit.xml'}" in calls
     assert "-p scripts.pytest_telemetry" in calls

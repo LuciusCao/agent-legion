@@ -29,13 +29,13 @@ of the full quick suite, so trimming never weakens the server-side boundary.
 The lane set and the test tier are part of the local evidence fingerprint, so
 evidence from a trimmed run is never reused for a different lane set or tier.
 
-The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
-curated subset — every architecture governance test plus one core behavioral
-file per subsystem, assigned by path in `tests/conftest.py`
-(`_SMOKE_TEST_FILES`) and selected with `-m "smoke and not repository_gate"`.
-It runs without coverage because the 85% floor only applies to the full
-suite. Keep the tier under ~90 seconds: when adding tests for a new
-subsystem, add one core file to the smoke set rather than raising the budget.
+The smoke tier (`GATE_TIER=smoke`, also accepted as `unit`) runs the complete
+PostgreSQL-offline unit layer, selected with
+`-m "not postgres and not repository_gate"`. It points the test database URL
+at an unreachable loopback port, so an accidental database dependency fails
+the gate instead of silently using a developer database. It runs without
+coverage locally because the 85% floor applies to the combined CI suite, and
+must remain under the 90-second pre-push budget.
 
 Install the repository-managed hooks once from a worktree that contains `.githooks/`:
 
@@ -54,9 +54,10 @@ unaffected. Passing evidence is shared through the same Git common directory.
 `develop` / `main` / `master`, nightly (schedule), plus manual dispatch:
 
 - **backend** — static checks (ruff, format, mypy, architecture contracts,
-  invariant registry, spec health), the full pytest suite with coverage, and
-  the `tests/full -m full_gate` evidence with a combined coverage report. This
-  is the backend lane of `scripts/check.sh`.
+  invariant registry, spec health), a PostgreSQL-offline unit layer, a
+  PostgreSQL integration layer, and the `tests/full -m full_gate` evidence.
+  Coverage is appended across all three layers and enforced on the combined
+  report. This is the backend lane of `scripts/check.sh`.
 - **frontend** — generated API contract, prettier, ESLint, `tsc`, Vitest with
   coverage, and the production bundle (`npm run build:bundle`).
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Runs only on
@@ -65,8 +66,9 @@ unaffected. Passing evidence is shared through the same Git common directory.
 CI environment notes:
 
 - Each job gets a fresh `postgres:17` service container; `AGENT_LEGION_DATABASE_URL`
-  and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database is created
-  automatically by `tests/postgres_support.py`.
+  and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database and worker
+  schemas are created lazily when the PostgreSQL layer starts; importing the
+  test support module and running the unit layer never connects to PostgreSQL.
 - The frontend job also needs Python + Postgres because `npm run api:check`
   regenerates the OpenAPI schema through `create_app`.
 - `AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK=1` skips `check-skills-shared.py` in CI:
@@ -80,8 +82,9 @@ CI environment notes:
 CI test lanes emit lightweight, aggregate telemetry without retaining raw
 failure or source context as downloadable artifacts:
 
-- backend pytest prints its 30 slowest tests, writes ephemeral JUnit XML, and
-  records pytest-rerunfailures attempts through `scripts.pytest_telemetry`;
+- each backend unit, PostgreSQL, and full pytest layer prints its 30 slowest
+  tests, writes ephemeral JUnit XML, and records pytest-rerunfailures attempts
+  through `scripts.pytest_telemetry`;
 - frontend Vitest writes ephemeral JUnit and JSON reports alongside its normal
   console and coverage reporters;
 - `scripts/summarize_test_results.py` adds aggregate counts, case time, rerun
@@ -143,10 +146,10 @@ available. Do not record passing evidence for a partial gate.
 
 ## Quality Impact
 
-- Fast feedback remains cheap enough to run on every commit; pushes only wait
-  for the smoke tier locally (~1-2 min instead of the full quick suite).
-- The full quick suite remains the CI boundary on every PR/push, so regressions
-  missed by the smoke tier are still caught server-side before merge.
+- Fast feedback remains cheap enough to run on every commit; pushes wait for
+  the complete PostgreSQL-offline unit layer rather than a curated file sample.
+- CI adds the PostgreSQL and full layers on every PR/push, so database and
+  cross-control-plane regressions are still caught server-side before merge.
 - Stress evidence runs nightly instead of on every push, trading same-day
   detection for a much cheaper push loop; risky changes can trigger it on
   demand via `workflow_dispatch`.

@@ -369,8 +369,9 @@ the versioned `.githooks/` implementation from the current worktree when that br
 older worktrees without `.githooks/` remain unaffected. Successful gate evidence is shared:
 
 - pre-commit runs `scripts/check-fast.sh` for lint, formatting, and type feedback;
-- pre-push defaults to the smoke level: static checks plus the curated smoke
-  test tier (`GATE_TIER=smoke`, membership in `tests/conftest.py`), trimmed to
+- pre-push defaults to the smoke level: static checks plus the complete
+  PostgreSQL-offline unit tier (`GATE_TIER=smoke`, selected by the `postgres`
+  boundary in `tests/conftest.py`), trimmed to
   the lanes affected by the pushed paths (frontend-only pushes skip the backend
   pytest lane; `velites/`-only pushes run just the rust lane; docs-only pushes
   run static checks only; shared files and new refs always run all lanes). Set
