@@ -113,6 +113,12 @@ class WorkerSupervisor:
             process.kill()
             with suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=_KILL_WAIT)
+        if process.poll() is not None:
+            self._cleanup_runtime_files()
+
+    def _cleanup_runtime_files(self) -> None:
+        for filename in (STATUS_FILENAME, METRICS_FILENAME):
+            (self.store.state_dir / filename).unlink(missing_ok=True)
 
     def restart(self) -> None:
         # 操作锁把 stop（含等待）+ start 做成临界区，避免返回 200 但仍跑旧配置。
@@ -141,8 +147,7 @@ class WorkerSupervisor:
         with self._lock:
             self._log(f"Worker 执行进程已退出，退出码 {exit_code}")
             if generation == self._generation:
-                (self.store.state_dir / STATUS_FILENAME).unlink(missing_ok=True)
-                (self.store.state_dir / METRICS_FILENAME).unlink(missing_ok=True)
+                self._cleanup_runtime_files()
             if generation != self._generation or self._shutdown:
                 return
             self._exit_code = exit_code
