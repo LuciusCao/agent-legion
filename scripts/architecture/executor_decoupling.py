@@ -1,11 +1,22 @@
-"""Phase 5 architecture ratchets for Workspace Executor governance.
+"""Legacy Executor decoupling ratchets for Workspace Executor governance.
 
-These checks prevent reintroduction of legacy Pipeline runner/concurrency fields
-and legacy Workspace Agent assignment modules.
+These checks prevent reintroduction of legacy Pipeline runner/concurrency fields,
+legacy Workspace Agent assignment modules, and runner/agent branching in the
+workflow worker thread.
 """
 
+import ast
 import re
 from pathlib import Path
+
+from scripts.architecture.helpers import accesses_runner_or_agent
+
+# The worker thread is being consolidated from a flat module into a package;
+# until the move lands, both layouts are valid check targets.
+_WORKFLOW_WORKER_THREAD_FILES = (
+    "server/app/workflow_worker_thread.py",
+    "server/app/workflow_worker/thread.py",
+)
 
 _FORBIDDEN_PATTERNS = {
     "node.runner literal": re.compile(r"['\"]runner['\"]"),
@@ -52,6 +63,26 @@ def check_legacy_modules_absent(root: Path) -> list[str]:
     for rel_path in _LEGACY_MODULES:
         if (root / rel_path).exists():
             errors.append(f"{rel_path}: legacy module must be removed")
+    return errors
+
+
+def check_workflow_worker_capability_branching(root: Path) -> list[str]:
+    """WorkflowWorkerThread must branch on capability, not .runner or .agent."""
+    errors: list[str] = []
+    for rel_path in _WORKFLOW_WORKER_THREAD_FILES:
+        path = root / rel_path
+        if not path.exists():
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel_path)
+        except SyntaxError as exc:
+            errors.append(f"{rel_path}: syntax error ({exc})")
+            continue
+        for lineno in accesses_runner_or_agent(tree):
+            errors.append(
+                f"{rel_path}:{lineno}: "
+                "WorkflowWorkerThread must branch on capability, not .runner or .agent"
+            )
     return errors
 
 

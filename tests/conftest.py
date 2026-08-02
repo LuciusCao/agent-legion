@@ -154,6 +154,11 @@ def _session_test_schema():
 
 @pytest.fixture(autouse=True)
 def _isolate_postgres_database(request, _session_test_schema):
+    if request.node.get_closest_marker("no_db") is not None:
+        # Tests marked no_db never touch the database (pure static governance
+        # checks, fully mocked script tests); skip TRUNCATE-based isolation.
+        yield
+        return
     fresh = request.node.get_closest_marker("fresh_schema") is not None
     if fresh:
         _rebuild_schema()

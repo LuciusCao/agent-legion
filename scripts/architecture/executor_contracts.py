@@ -1,3 +1,9 @@
+"""Executor contract ratchets for Workspace Executor governance.
+
+These checks keep executor response models typed, frontend executor types derived
+from generated OpenAPI types, and workspace saves inside the aggregate transaction.
+"""
+
 import ast
 import re
 from pathlib import Path
