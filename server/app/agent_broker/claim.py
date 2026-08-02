@@ -1,6 +1,6 @@
 """Atomic claim transaction for the Agent execution queue.
 
-Split out of ``agent_broker.py`` so the broker module only carries the queue
+Split out of ``broker.py`` so the broker module only carries the queue
 protocol; mirrors the ``executors/_lease_*.py`` layout. Functions take the
 broker instance as their first argument and must run inside the caller's
 transaction unless noted otherwise.
@@ -19,7 +19,7 @@ from server.app import agent_claim_compatibility
 from server.app.agent_worker_capacity import sync_declared_capacity, touch_worker
 
 if TYPE_CHECKING:
-    from server.app.agent_broker import AgentExecutionBroker
+    from server.app.agent_broker.broker import AgentExecutionBroker
 
 _CANDIDATE_WINDOW = 256
 _CANDIDATES_PER_WORKSPACE = 8

@@ -21,7 +21,7 @@ from server.app.jobs.queries.workspace_node_bindings import (
 )
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 ROUTE_CACHE_TTL_SECONDS = 30.0
 

@@ -1,8 +1,8 @@
 """PostgreSQL Agent queue protocol: enqueue, claim, heartbeat, result close.
 
-The claim transaction lives in ``_agent_broker_claim.py``, the periodic
-sweeps in ``_agent_broker_sweepers.py``, slot release in
-``_agent_broker_release.py``, bundle-dir GC in ``_agent_broker_reaper.py``.
+The claim transaction lives in ``claim.py``, the periodic
+sweeps in ``sweepers.py``, slot release in
+``release.py``, bundle-dir GC in ``reaper.py``.
 """
 
 from __future__ import annotations
@@ -18,18 +18,18 @@ from typing import TYPE_CHECKING, Any
 
 from psycopg import IntegrityError
 
-from server.app import _agent_broker_reaper, _agent_broker_release, _agent_broker_sweepers
-from server.app._agent_broker_claim import (
+from server.app.agent_broker import reaper, release, sweepers
+from server.app.agent_broker.claim import (
     AgentClaim,
     ClaimRacedError,
     claim_in_transaction,
 )
-from server.app._agent_broker_empty import EmptyClaimTrigger
-from server.app._agent_broker_reaper import _SAFE_BUNDLE_NAME
+from server.app.agent_broker.empty import EmptyClaimTrigger
+from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.agent_worker_capacity import touch_worker
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.job_events import record_job_update
+from server.app.events.aggregator import record_job_update
 
 if TYPE_CHECKING:
     from server.app.agents import AgentStatusManager
@@ -86,9 +86,9 @@ class AgentExecutionBroker:
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
         self._fairness_counter = itertools.count()
-        # Incremental bundle-GC cursor, see _agent_broker_reaper.
+        # Incremental bundle-GC cursor, see reaper.
         self._reap_watermark: datetime | None = None
-        # Debounced empty-claim restock signal, see _agent_broker_empty.
+        # Debounced empty-claim restock signal, see empty.
         self.empty_claim = EmptyClaimTrigger()
 
     def has_active_request(self, job_id: str, node_key: str) -> bool:
@@ -173,7 +173,7 @@ class AgentExecutionBroker:
             return None
         if claimed is None:
             # Demand signal: a Worker found no work; restock immediately when
-            # the queue is truly empty (debounced, see _agent_broker_empty).
+            # the queue is truly empty (debounced, see empty).
             self.empty_claim.note_empty_claim(self.database_dsn)
         # Record only after the commit has succeeded, never inside the tx.
         if claimed is not None:
@@ -214,7 +214,7 @@ class AgentExecutionBroker:
 
     def release_slot(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Flip claimed -> reporting, freeing execution capacity (lease stays owned)."""
-        return _agent_broker_release.release_slot(self, execution_id, worker_id, lease_id)
+        return release.release_slot(self, execution_id, worker_id, lease_id)
 
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Renew the lease, bound to the current lease_id so zombie attempts
@@ -285,11 +285,11 @@ class AgentExecutionBroker:
 
     def sweep_expired_claims(self) -> list[str]:
         """Requeue Worker-lost claims without leaving the workflow node running."""
-        return _agent_broker_sweepers.sweep_expired_claims(self)
+        return sweepers.sweep_expired_claims(self)
 
     def fail_stale_definition_requests(self) -> list[str]:
         """Fail queued requests whose pinned Agent definition is gone or disabled."""
-        return _agent_broker_sweepers.fail_stale_definition_requests(self)
+        return sweepers.fail_stale_definition_requests(self)
 
     def discard_result_archive(self, archive_name: str) -> None:
         """Reclaim a per-attempt result archive; names are unique per attempt."""
@@ -303,6 +303,4 @@ class AgentExecutionBroker:
 
     def reap_terminal_bundles(self, *, archive_max_age_seconds: float = 3600) -> int:
         """Reclaim bundle-dir files that no live execution can still need."""
-        return _agent_broker_reaper.reap_terminal_bundles(
-            self, archive_max_age_seconds=archive_max_age_seconds
-        )
+        return reaper.reap_terminal_bundles(self, archive_max_age_seconds=archive_max_age_seconds)

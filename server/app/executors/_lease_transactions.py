@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 from server.app.db.connection import DatabaseConnection
 
 
-def _database_timestamp(dt: datetime) -> str:
+def database_timestamp(dt: datetime) -> str:
     """Normalize timestamps at the application's stable string boundary."""
     return dt.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
 

@@ -4,9 +4,9 @@ from datetime import UTC, datetime, timedelta
 
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_claims import claim_lease
-from server.app.executors._lease_control import _sync_job_status
+from server.app.executors._lease_control import sync_job_status
 from server.app.executors._lease_write_paths import _recover_orphaned_job
-from server.app.executors.leases import ExecutorLeaseRepository, _database_timestamp
+from server.app.executors.leases import ExecutorLeaseRepository, database_timestamp
 from server.app.executors.models import (
     ExecutionResult,
     LeaseClaimRequest,
@@ -33,7 +33,7 @@ def test_sync_job_status_returns_queued_when_nodes_remain(
         conn.execute("commit")
 
     with queries.connect() as conn:
-        _sync_job_status(conn, job_id)
+        sync_job_status(conn, job_id)
         conn.commit()
 
     job = queries.get_job(job_id)
@@ -59,7 +59,7 @@ def test_sync_job_status_keeps_running_when_another_node_is_running(
         conn.execute("commit")
 
     with queries.connect() as conn:
-        _sync_job_status(conn, job_id)
+        sync_job_status(conn, job_id)
         conn.commit()
 
     job = queries.get_job(job_id)
@@ -85,7 +85,7 @@ def test_sync_job_status_keeps_paused_when_execution_paused(
         conn.execute("commit")
 
     with queries.connect() as conn:
-        _sync_job_status(conn, job_id)
+        sync_job_status(conn, job_id)
         conn.commit()
 
     job = queries.get_job(job_id)
@@ -111,7 +111,7 @@ def test_sync_job_status_failed_when_any_node_failed(
         conn.execute("commit")
 
     with queries.connect() as conn:
-        _sync_job_status(conn, job_id)
+        sync_job_status(conn, job_id)
         conn.commit()
 
     job = queries.get_job(job_id)
@@ -251,7 +251,7 @@ def test_recover_skips_jobs_with_active_lease(
             values (?, ?, 'running', ?, ?)
             returning id
             """,
-            (job_id, "node_a", _database_timestamp(datetime.now(UTC)), "/tmp/run.log"),
+            (job_id, "node_a", database_timestamp(datetime.now(UTC)), "/tmp/run.log"),
         )
         node_run_id = cursor.fetchone()["id"]
         conn.execute(
@@ -271,9 +271,9 @@ def test_recover_skips_jobs_with_active_lease(
                 "question_comprehension_info",
                 "node_a",
                 node_run_id,
-                _database_timestamp(datetime.now(UTC)),
-                _database_timestamp(datetime.now(UTC)),
-                _database_timestamp(datetime.now(UTC) + timedelta(seconds=60)),
+                database_timestamp(datetime.now(UTC)),
+                database_timestamp(datetime.now(UTC)),
+                database_timestamp(datetime.now(UTC) + timedelta(seconds=60)),
             ),
         )
         conn.execute("commit")
@@ -293,7 +293,7 @@ def test_recover_orphaned_running_jobs_marks_running_node_runs_failed(
         queries, "ws-orphan-runs", "exec-orphan-runs", 1, node_keys=["node_a", "node_b"]
     )
     now = datetime.now(UTC)
-    now_str = _database_timestamp(now)
+    now_str = database_timestamp(now)
     with queries.connect() as conn:
         conn.execute(
             "update job_nodes set status='running' where job_id=? and node_key=?",
@@ -362,7 +362,7 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
         conn.execute("update jobs set status='running' where id=?", (job_id,))
         conn.execute("commit")
 
-    now_str = _database_timestamp(datetime.now(UTC))
+    now_str = database_timestamp(datetime.now(UTC))
     with write_transaction(queries.path) as conn1:
         candidates = conn1.execute(
             """

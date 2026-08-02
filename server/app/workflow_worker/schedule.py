@@ -4,7 +4,7 @@ Extracted from the worker thread to keep it within its size budget. The
 capacity snapshot checks here are optimization hints that skip pointless
 ``try_claim`` write-lock acquisitions; the lease claim transaction remains the
 authoritative capacity enforcement. Ready candidates are collected once per
-poll pass by ``server.app.workflow_worker_ready``.
+poll pass by ``server.app.workflow_worker.ready``.
 """
 
 from __future__ import annotations
@@ -19,19 +19,19 @@ from server.app.services.node_config import (
     dispatch_effective_config,
     executor_definition_capability_schema,
 )
-from server.app.workflow_worker_agent_claim import (
+from server.app.workflow_worker.agent_claim import (
     cached_batch_payload,
     claim_agent_node,
     fail_node_config,
 )
-from server.app.workflow_worker_executor_claim import claim_executor_node
-from server.app.workflow_worker_routing import resolve_node_route
-from server.app.workflow_worker_shards import assemble_reduce_inputs, claim_shard_node
+from server.app.workflow_worker.executor_claim import claim_executor_node
+from server.app.workflow_worker.routing import resolve_node_route
+from server.app.workflow_worker.shards import assemble_reduce_inputs, claim_shard_node
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_ready import ReadyCandidate
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.ready import ReadyCandidate
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 logger = logging.getLogger(__name__)
 

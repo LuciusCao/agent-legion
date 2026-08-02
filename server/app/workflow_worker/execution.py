@@ -1,7 +1,7 @@
 """Execution submission and future reaping for the workflow worker.
 
 Extracted from the worker thread to keep it within its size budget. Claiming
-lives in ``server.app.workflow_worker_schedule``; once a lease is claimed the
+lives in ``server.app.workflow_worker.schedule``; once a lease is claimed the
 functions here submit the execution to the executor pool and reap finished
 futures.
 """
@@ -16,10 +16,10 @@ from server.app.executors.models import (
     ExecutionContext,
     ExecutionResult,
 )
-from server.app.workflow_worker_agent_status import agent_status_scope
+from server.app.workflow_worker.agent_status import agent_status_scope
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 logger = logging.getLogger(__name__)
 

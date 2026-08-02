@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING
 from server.app.db.transaction import read_connection
 
 if TYPE_CHECKING:
-    from server.app.agent_broker import AgentExecutionBroker
+    from server.app.agent_broker.broker import AgentExecutionBroker
 
 _SAFE_BUNDLE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 

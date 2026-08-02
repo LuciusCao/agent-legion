@@ -10,11 +10,11 @@ from unittest.mock import MagicMock, patch
 
 from server.app.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.workflow_worker_agent_claim import cached_batch_payload
-from server.app.workflow_worker_agent_gate import AgentPassState
-from server.app.workflow_worker_maintenance import WorkflowMaintenance
-from server.app.workflow_worker_routing import NodeRoute
-from server.app.workflow_worker_schedule import try_claim_and_submit
+from server.app.workflow_worker.agent_claim import cached_batch_payload
+from server.app.workflow_worker.agent_gate import AgentPassState
+from server.app.workflow_worker.maintenance import WorkflowMaintenance
+from server.app.workflow_worker.routing import NodeRoute
+from server.app.workflow_worker.schedule import try_claim_and_submit
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
 
@@ -251,7 +251,7 @@ def test_executor_claim_counts_pass_claim(tmp_path: Path) -> None:
     worker.registry.global_capacity.return_value = 2
     worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
 
-    with patch("server.app.workflow_worker_schedule.claim_executor_node", return_value=True):
+    with patch("server.app.workflow_worker.schedule.claim_executor_node", return_value=True):
         claimed = try_claim_and_submit(
             worker,
             {"id": "ws1"},
@@ -288,7 +288,7 @@ def test_maintenance_cleanup_runs_off_caller_thread(tmp_path: Path) -> None:
     settings.data_dir = tmp_path
     maintenance = WorkflowMaintenance(MagicMock(), settings)
 
-    with patch("server.app.workflow_worker_maintenance.cleanup_old_logs", side_effect=_cleanup):
+    with patch("server.app.workflow_worker.maintenance.cleanup_old_logs", side_effect=_cleanup):
         maintenance.maybe_cleanup()
         # Generous wait: thread startup/scheduling can be delayed on loaded
         # parallel-gate runners.

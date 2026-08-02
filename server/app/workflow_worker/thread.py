@@ -6,7 +6,7 @@ import time
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import Any
 
-from server.app.agent_dispatch import AgentDispatchService
+from server.app.agent_broker import AgentDispatchService
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
@@ -15,14 +15,14 @@ from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
-from server.app.workflow_worker_agent_gate import AgentPassState, prepare_agent_pass
-from server.app.workflow_worker_claim_flush import PreparedClaim, flush_prepared_claims
-from server.app.workflow_worker_execution import reap_futures
-from server.app.workflow_worker_maintenance import WorkflowMaintenance
-from server.app.workflow_worker_pass_log import log_pass_end, log_pass_start, pass_logger
-from server.app.workflow_worker_ready import build_ready_queues
-from server.app.workflow_worker_routing import NodeRoute
-from server.app.workflow_worker_schedule import claim_ready_queues
+from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_pass
+from server.app.workflow_worker.claim_flush import PreparedClaim, flush_prepared_claims
+from server.app.workflow_worker.execution import reap_futures
+from server.app.workflow_worker.maintenance import WorkflowMaintenance
+from server.app.workflow_worker.pass_log import log_pass_end, log_pass_start, pass_logger
+from server.app.workflow_worker.ready import build_ready_queues
+from server.app.workflow_worker.routing import NodeRoute
+from server.app.workflow_worker.schedule import claim_ready_queues
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import list_registered_workflows
 
@@ -64,7 +64,7 @@ class WorkflowWorkerThread:
         self._definition_cache: dict[str, WorkflowDefinition | None] = {}
         self._job_evals: dict[str, tuple[tuple[Any, ...], list[Any]]] = {}
         self._last_ready_stats: dict[str, int] = {"hit": 0, "miss": 0}
-        # Short-TTL route cache; see server.app.workflow_worker_routing.
+        # Short-TTL route cache; see server.app.workflow_worker.routing.
         self._route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
         # Per-pass state (cleared in _poll).
         self._batch_payload_cache: dict[str, dict[str, Any] | None] = {}

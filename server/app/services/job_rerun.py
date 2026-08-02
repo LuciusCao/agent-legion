@@ -9,6 +9,7 @@ from server.app.jobs.queries.job_filtering import JobListFilter
 from server.app.services._job_rerun_by_failure import rerun_by_failure_category as _rerun_by_failure
 from server.app.services._job_rerun_single import execute_rerun, resolve_rerun_node
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
@@ -40,23 +41,6 @@ class JobRerunService:
             return datetime.fromtimestamp(self.clock(), tz=UTC)
         return datetime.now(UTC)
 
-    def _result(
-        self,
-        job_id: str,
-        status: str,
-        node_key: str | None = None,
-        reason_code: str | None = None,
-        message: str | None = None,
-    ) -> dict[str, Any]:
-        return {
-            "job_id": job_id,
-            "operation": "rerun",
-            "status": status,
-            "node_key": node_key,
-            "reason_code": reason_code,
-            "message": message,
-        }
-
     def _job_has_running_nodes(self, job_id: str) -> bool:
         return any(node["status"] == "running" for node in self.job_db.list_job_nodes(job_id))
 
@@ -67,26 +51,23 @@ class JobRerunService:
         node_key: str | None = None,
         *,
         from_failed_node: bool = False,
-    ) -> dict[str, Any]:
+    ) -> JobOperationResult:
         job = self.job_db.get_job(job_id)
         if job is None:
-            return self._result(job_id, "failed", node_key, "not_found", "Job not found")
+            raise JobOperationError(
+                job_id, "rerun", "failed", node_key, "not_found", "Job not found"
+            )
         if job["workspace_id"] != workspace_id:
-            return self._result(
+            raise JobOperationError(
                 job_id,
+                "rerun",
                 "failed",
                 node_key,
                 "wrong_workspace",
                 f"Job does not belong to workspace {workspace_id}",
             )
 
-        actual_node_key, error = resolve_rerun_node(
-            self.job_db, job_id, job, node_key, from_failed_node
-        )
-        if error is not None:
-            return error
-        assert actual_node_key is not None
-
+        actual_node_key = resolve_rerun_node(self.job_db, job_id, job, node_key, from_failed_node)
         return execute_rerun(self, job, job_id, actual_node_key)
 
     def rerun_by_failure_category(
@@ -103,13 +84,16 @@ class JobRerunService:
         from_failed_node: bool = False,
         job_filter: JobListFilter | None = None,
         exclude_ids: Collection[str] = (),
-    ) -> list[dict[str, Any]]:
+    ) -> list[JobOperationResult]:
         ids = resolve_batch_selection(self.job_db, workspace_id, job_ids, job_filter, exclude_ids)
-        results: list[dict[str, Any]] = []
+        results: list[JobOperationResult] = []
         for job_id in self._normalize_values(ids):
-            results.append(
-                self.rerun(workspace_id, job_id, node_key, from_failed_node=from_failed_node)
-            )
+            try:
+                results.append(
+                    self.rerun(workspace_id, job_id, node_key, from_failed_node=from_failed_node)
+                )
+            except JobOperationError as exc:
+                results.append(exc.to_result())
         return results
 
     @staticmethod

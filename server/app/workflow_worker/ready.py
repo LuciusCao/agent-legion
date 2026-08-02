@@ -1,7 +1,7 @@
 """Ready-queue assembly for the workflow worker.
 
 Per-pass scan and per-job evaluation live in
-``server.app.workflow_worker_scan`` / ``server.app.workflow_worker_ready_cache``;
+``server.app.workflow_worker.scan`` / ``server.app.workflow_worker.ready_cache``;
 this module only groups each workspace's ready candidates into the queues the
 claim loop drains, and prunes cached evaluations of jobs that left the
 runnable set.
@@ -12,14 +12,14 @@ from __future__ import annotations
 from collections import deque
 from typing import TYPE_CHECKING, Any
 
-from server.app.workflow_worker_ready_cache import (
-    ReadyCandidate,  # noqa: F401  (re-exported for workflow_worker_schedule)
+from server.app.workflow_worker.ready_cache import (
+    ReadyCandidate,  # noqa: F401  (re-exported for workflow_worker.schedule)
 )
-from server.app.workflow_worker_scan import collect_ready_candidates, is_runnable
+from server.app.workflow_worker.scan import collect_ready_candidates, is_runnable
 from server.app.workflows.definition import WorkflowDefinition
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 def build_ready_queues(

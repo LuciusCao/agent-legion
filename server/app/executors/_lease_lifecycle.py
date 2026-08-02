@@ -8,10 +8,10 @@ from typing import Any
 from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
-    _sync_job_status,
+    sync_job_status,
 )
 from server.app.executors._lease_shards import finish_shard_execution
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors._lease_transient_retry import try_return_node_to_pending
 from server.app.executors._path_canonicalization import canonicalize_finish_paths
 from server.app.executors.models import ExecutionResult
@@ -38,7 +38,7 @@ def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -
         set heartbeat_at=?, expires_at=?
         where id=? and status='active'
         """,
-        (_database_timestamp(now), _database_timestamp(expires_at), lease_id),
+        (database_timestamp(now), database_timestamp(expires_at), lease_id),
     )
     return True
 
@@ -47,7 +47,7 @@ def finish_lease(
     conn: DatabaseConnection, lease_id: str, result: ExecutionResult, data_dir: Path | None = None
 ) -> bool:
     now = datetime.now(UTC)
-    now_str = _database_timestamp(now)
+    now_str = database_timestamp(now)
     lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
     if lease is None or lease["status"] != "active":
         return False
@@ -93,7 +93,7 @@ def finish_lease(
         return True
 
     if try_return_node_to_pending(conn, lease, result, failure_category, failure_detail):
-        _sync_job_status(conn, lease["job_id"])
+        sync_job_status(conn, lease["job_id"])
         return True
 
     conn.execute(
@@ -112,7 +112,7 @@ def finish_lease(
             lease["node_key"],
         ),
     )
-    _sync_job_status(conn, lease["job_id"])
+    sync_job_status(conn, lease["job_id"])
 
     if result.status == "completed":
         _pause_job_on_target_completion(conn, lease["job_id"], lease["node_key"], now_str)
@@ -121,7 +121,7 @@ def finish_lease(
 
 
 def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
-    now_str = _database_timestamp(now)
+    now_str = database_timestamp(now)
     # Agent Worker leases ('agent:%') are owned by the Agent broker sweep
     # (requeue-with-retry semantics); expiring them here would fail the node
     # and job while the broker later requeues the request, leaving the job
@@ -201,7 +201,7 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
                     row["node_key"],
                 ),
             )
-            _sync_job_status(conn, str(row["job_id"]))
+            sync_job_status(conn, str(row["job_id"]))
         return True
     conn.execute(
         """
@@ -211,7 +211,7 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
         """,
         (now_str, row["job_id"], row["node_key"]),
     )
-    _sync_job_status(conn, row["job_id"])
+    sync_job_status(conn, row["job_id"])
     conn.execute(
         """
         update jobs

@@ -13,11 +13,11 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ExecutionContext, LeaseClaimRequest
-from server.app.workflow_worker_execution import submit_claim
+from server.app.workflow_worker.execution import submit_claim
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 @dataclass

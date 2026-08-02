@@ -4,7 +4,7 @@ Three cheap in-memory gates keep the poll thread off the database when
 thousands of agent candidates pile up behind saturated Workers:
 
 - a batched active-request filter: one chunked query per pass (see
-  ``server.app._agent_broker_batch``) replaces one ``has_active_request``
+  ``server.app.agent_broker.batch``) replaces one ``has_active_request``
   round-trip per candidate;
 - an enqueue-pool-full flag: once the bounded enqueue pool rejects a
   submission, the remaining agent candidates of this pass are skipped
@@ -22,14 +22,14 @@ import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-from server.app import _agent_broker_batch
+from server.app.agent_broker import batch
 from server.app.agent_stock import StockSnapshot, load_stock_snapshot
 
 if TYPE_CHECKING:
     from collections import deque
 
-    from server.app.workflow_worker_ready import ReadyCandidate
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.ready import ReadyCandidate
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 @dataclass
@@ -74,9 +74,7 @@ def prepare_agent_pass(
     if not job_ids:
         return
     state = worker._agent_pass
-    state.active_nodes = _agent_broker_batch.active_request_keys(
-        dispatch.broker.database_dsn, sorted(job_ids)
-    )
+    state.active_nodes = batch.active_request_keys(dispatch.broker.database_dsn, sorted(job_ids))
     config = worker.settings.executor_runtime.agent_stock
     if not config.enabled:
         state.stock_snapshot = None

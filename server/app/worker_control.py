@@ -5,11 +5,11 @@ import socket
 import threading
 from datetime import UTC, datetime
 
-from server.app.db.retry import retried_on_database_conflict
+from server.app.db.retry import with_database_conflict_retry
 from server.app.db.transaction import read_connection, write_transaction
 
 
-@retried_on_database_conflict
+@with_database_conflict_retry
 def _persist_pause(db_path: str, scope: str, paused: bool, process_id: str) -> None:
     now = datetime.now(UTC)
     with write_transaction(db_path) as conn:

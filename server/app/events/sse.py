@@ -5,7 +5,7 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-from server.app.event_bus import _EVICTED, EventBus, workspace_channel
+from server.app.events.bus import _EVICTED, EventBus, workspace_channel
 
 
 class JobEventManager:

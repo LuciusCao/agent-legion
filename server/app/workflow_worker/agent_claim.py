@@ -1,6 +1,6 @@
 """Agent-route claim submission for the workflow worker's ready candidates.
 
-Split from ``workflow_worker_schedule`` for size. Hosts the per-pass
+Split from ``schedule`` for size. Hosts the per-pass
 batch-payload memoization shared by the agent and executor claim paths, and
 the no-lease configuration-failure write used when a candidate can never run.
 """
@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.services.node_config import batch_source_payload, dispatch_effective_config
-from server.app.workflow_worker_agent_gate import agent_claim_allowed
+from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
 
 if TYPE_CHECKING:
-    from server.app.workflow_worker_thread import WorkflowWorkerThread
+    from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 def cached_batch_payload(
