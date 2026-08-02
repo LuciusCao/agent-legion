@@ -13,11 +13,12 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run --pool=threads --maxWorkers=6",
     "test:coverage": "vitest run --coverage --pool=threads --maxWorkers=6",
+    "test:coverage-inventory": "node --test scripts/coverage-inventory.test.mjs && node scripts/coverage-inventory.mjs",
     "stress:workspace": "playwright test stress/",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write src",
-    "format:check": "prettier --check src"
+    "lint": "eslint src/ scripts/",
+    "lint:fix": "eslint src/ scripts/ --fix",
+    "format": "prettier --write src scripts",
+    "format:check": "prettier --check src scripts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",

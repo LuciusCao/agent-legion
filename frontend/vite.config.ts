@@ -114,6 +114,7 @@ export default defineConfig(({ mode }) => {
       ],
       coverage: {
         provider: 'v8',
+        include: ['src/**/*.{ts,tsx}'],
         reporter: ['text', 'json', 'html'],
         reportsDirectory: './coverage',
         reportOnFailure: true,
@@ -126,9 +127,9 @@ export default defineConfig(({ mode }) => {
         exclude: [
           'node_modules/',
           'src/**/*.d.ts',
-          'src/test-setup.ts',
-          'src/test-setup-console.ts',
-          'src/test-setup-node.ts',
+          'src/generated/**',
+          'src/testing/**',
+          'src/test-setup*.ts',
           'src/**/*.test.ts',
           'src/**/*.test.tsx',
         ],
