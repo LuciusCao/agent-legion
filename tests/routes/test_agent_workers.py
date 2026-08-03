@@ -90,6 +90,40 @@ def test_agent_worker_register_and_claim_api(tmp_path: Path) -> None:
     assert app.state.job_db.get_job_node("job-1", "generate")["status"] == "running"
 
 
+def test_agent_worker_register_accepts_velites_runtime(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2, runtime="velites")
+
+    with TestClient(app) as client:
+        token = _register(client, runtimes=["pi", "velites"])["worker_token"]
+        worker = client.get("/api/agent-workers/self", headers={"X-Agent-Worker-Token": token})
+        claimed = _claim(client, token)
+
+    assert worker.status_code == 200
+    assert worker.json()["runtimes"] == ["pi", "velites"]
+    assert claimed["agent_id"] == "generator-v1"
+    assert app.state.job_db.get_job_node("job-1", "generate")["status"] == "running"
+
+
+def test_agent_worker_register_rejects_unknown_runtime(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/agent-workers/register",
+            headers={"X-Agent-Worker-Register-Token": "management-secret"},
+            json={
+                "worker_id": "home-mini",
+                "name": "Home Mac mini",
+                "runtimes": ["rust"],
+                "max_concurrency": 1,
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "runtimes must contain pi, openclaw and/or velites"
+
+
 def test_worker_can_read_only_its_own_status_with_issued_token(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
 

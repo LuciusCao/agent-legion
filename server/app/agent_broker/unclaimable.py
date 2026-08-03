@@ -1,17 +1,18 @@
 """Sweep for queued Agent requests no registered Worker can ever claim.
 
 Split out of ``sweepers.py`` for the file-size budget; mirrors
-``fail_stale_definition_requests`` but judges claimability (resolved model and
-capability against Worker declarations) instead of definition staleness.
+``fail_stale_definition_requests`` but judges claimability (definition runtime,
+resolved model and capability against Worker declarations) instead of
+definition staleness.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from server.app import agent_claim_compatibility
+from server.app.agent_broker.unclaimable_reasons import WorkerDeclarations, unmatched_reasons
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
 from server.app.services import failure_classification
@@ -40,22 +41,23 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
     failed: list[str] = []
     with write_transaction(broker.database_dsn) as conn:
         worker_rows = conn.execute(
-            "select capabilities_json, models_json from agent_workers where revoked_at is null"
+            "select capabilities_json, models_json, runtimes_json"
+            " from agent_workers where revoked_at is null"
         ).fetchall()
         if not worker_rows:
             return failed
-        worker_capabilities: set[str] = set()
-        worker_models: set[tuple[str, str]] = set()
+        workers: list[WorkerDeclarations] = []
         for worker_row in worker_rows:
             capabilities, models = agent_claim_compatibility.worker_declarations(worker_row)
-            worker_capabilities |= capabilities
-            worker_models |= models
+            runtimes = set(json.loads(worker_row["runtimes_json"] or "[]"))
+            workers.append((runtimes, capabilities, models))
         # Requests whose pinned definition is disabled/changed are excluded
         # by the enabled-definition join: ``fail_stale_definition_requests``
         # owns them. The revision join mirrors the claim candidate query.
         rows = conn.execute(
             """
             select r.execution_id, r.job_id, r.node_key, r.manifest_json, d.capability,
+                   d.runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
             join agent_definitions d
@@ -72,7 +74,7 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         ).fetchall()
         for row in rows:
             manifest = agent_claim_compatibility.live_claim_manifest(row)
-            reasons = _unmatched_reasons(row, manifest, worker_capabilities, worker_models)
+            reasons = unmatched_reasons(row, manifest, workers)
             if not reasons:
                 continue
             error = (
@@ -107,32 +109,3 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
                 )
             failed.append(str(row["execution_id"]))
     return failed
-
-
-def _unmatched_reasons(
-    candidate: Mapping[str, Any],
-    manifest: Mapping[str, Any],
-    worker_capabilities: set[str],
-    worker_models: set[tuple[str, str]],
-) -> list[str]:
-    """Why the Worker declarations cannot run the candidate; empty = runnable.
-
-    Probes ``worker_can_run`` with a universal declaration for one dimension
-    at a time, so the matching semantics (wildcards included) stay defined in
-    exactly one place. An empty provider/model never matches a concrete Worker
-    declaration and therefore reports as unclaimable.
-    """
-    can_run = agent_claim_compatibility.worker_can_run
-    if can_run(candidate, manifest, worker_capabilities, worker_models):
-        return []
-    reasons: list[str] = []
-    # A universal declaration for one dimension isolates the other: if the
-    # probe still fails, the real declarations mismatch on that dimension.
-    if not can_run(candidate, manifest, worker_capabilities, {("*", "*")}):
-        reasons.append(f"capability {candidate['capability']!r} not declared by any Worker")
-    if not can_run(candidate, manifest, {"*"}, worker_models):
-        pi = manifest.get("pi") or {}
-        provider = str(pi.get("provider") or "")
-        model = str(pi.get("model") or "")
-        reasons.append(f"model {provider}/{model} not declared by any Worker")
-    return reasons
