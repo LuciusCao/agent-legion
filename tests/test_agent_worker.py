@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import stat
 import subprocess
 import sys
@@ -556,6 +557,9 @@ def _run_main(
     )
     monkeypatch.setattr(agent_worker, "Client", lambda host, **kwargs: fake)
     fake.register = lambda config, token: "worker-token"  # type: ignore[attr-defined]
+    # main() 的启动预检会探测 PATH 上的 runtime 二进制；测试与真实机器环境
+    # 无关，统一打桩为全部存在（预检自身的用例单独覆盖）。
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/bin/{binary}")
     config_path = _write_main_config(tmp_path)
     if config_updates:
         config = json.loads(config_path.read_text(encoding="utf-8"))
