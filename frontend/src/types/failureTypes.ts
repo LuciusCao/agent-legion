@@ -14,6 +14,7 @@ export type FailureCategory = JobRerunByFailureRequest['category']
 export type RerunByFailureInput = {
   category: FailureCategory
   jobIds?: string[]
+  fromNodeKey?: string
 }
 
 export type RerunByFailureCategoryAction = (

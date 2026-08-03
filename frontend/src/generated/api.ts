@@ -2047,6 +2047,8 @@ export interface components {
       /** Exclude Ids */
       exclude_ids?: string[]
       filter?: components['schemas']['JobFilterPayload'] | null
+      /** From Node Key */
+      from_node_key?: string | null
       /** Job Ids */
       job_ids?: string[]
       /**
