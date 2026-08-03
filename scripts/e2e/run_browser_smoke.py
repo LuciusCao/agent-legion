@@ -17,7 +17,6 @@ import http.server
 import json
 import logging
 import os
-import re
 import shutil
 import signal
 import socket
@@ -29,6 +28,11 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from scripts.e2e._database import db_dsn, e2e_database_name, reset_database  # noqa: E402
+
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 RESULTS_DIR = FRONTEND_DIR / "e2e-results"
 DATA_DIR = PROJECT_ROOT / "data" / "e2e-smoke"
@@ -54,47 +58,6 @@ _CMS_ENV_KEYS = (
     "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
     "AGENT_LEGION_REMOTE_WORKER_TOKEN",
 )
-
-
-def _e2e_database_name() -> str:
-    # Dedicated per-worktree database, mirroring tests/postgres_support.py but
-    # with its own prefix so E2E runtime state never mixes with pytest state.
-    slug = re.sub(r"[^a-zA-Z0-9_]", "_", PROJECT_ROOT.name).lower()
-    return f"agent_legion_e2e_{slug}"
-
-
-def _reset_database(db_name: str) -> None:
-    """Reset the E2E database to empty state.
-
-    Creates the database on first use; afterwards wipes all tables with
-    TRUNCATE (same isolation style as tests/conftest.py). DROP/CREATE was
-    measurably slower (tens of seconds on a loaded machine) because the drop
-    forces buffer flushes, while TRUNCATE stays sub-second.
-    """
-    import psycopg
-    from psycopg import sql
-
-    logger.info("Resetting E2E database %s", db_name)
-    with psycopg.connect("postgresql://127.0.0.1:5432/postgres", autocommit=True) as conn:
-        conn.execute("select pg_advisory_lock(hashtext(%s))", (db_name,))
-        exists = conn.execute("select 1 from pg_database where datname = %s", (db_name,)).fetchone()
-        if exists is None:
-            conn.execute(sql.SQL("create database {}").format(sql.Identifier(db_name)))
-            return
-    with psycopg.connect(f"postgresql://127.0.0.1:5432/{db_name}", autocommit=True) as conn:
-        tables = [
-            row[0]
-            for row in conn.execute(
-                "select tablename from pg_tables where schemaname = 'public'"
-            ).fetchall()
-        ]
-        if not tables:
-            return
-        conn.execute(
-            sql.SQL("truncate table {} restart identity cascade").format(
-                sql.SQL(", ").join(sql.Identifier(table) for table in tables)
-            )
-        )
 
 
 def _find_free_port() -> int:
@@ -145,7 +108,7 @@ def _backend_env(port: int, db_name: str, cms_base_url: str) -> dict[str, str]:
     env.update(
         {
             "AGENT_LEGION_SKIP_DOTENV": "1",
-            "AGENT_LEGION_DATABASE_URL": f"postgresql://127.0.0.1:5432/{db_name}",
+            "AGENT_LEGION_DATABASE_URL": db_dsn(db_name),
             "AGENT_LEGION_DATA_DIR": str(DATA_DIR),
             "AGENT_LEGION_WORKER_REGISTER_TOKEN": "ci-only-dummy-register-token",
             "CMS_BASE_URL": cms_base_url,
@@ -241,7 +204,7 @@ def main() -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
     started = time.monotonic()
-    db_name = _e2e_database_name()
+    db_name = e2e_database_name(PROJECT_ROOT)
     backend_port = _find_free_port()
     frontend_port = _find_free_port()
     cms_stub_port = _find_free_port()
@@ -255,7 +218,7 @@ def main() -> int:
     returncode = 1
 
     try:
-        _reset_database(db_name)
+        reset_database(db_name)
         if DATA_DIR.exists():
             shutil.rmtree(DATA_DIR)
         DATA_DIR.mkdir(parents=True)

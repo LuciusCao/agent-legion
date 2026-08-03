@@ -626,6 +626,23 @@ Phase 4A 执行记录（2026-08-03，确定性浏览器 smoke + 本地 runner）
   最终 full gate 退出码 0：backend 2385 passed / 236.49s、frontend 154 files /
   1147 tests、Rust 全部通过、full_gate 32 passed / 16.08s、combined coverage 93.46%，
   0 rerun。E2E 暂未进 CI（Phase 4B 接线）， rerun/workflow upgrade spec 待补。
+- GitHub Actions 验收（提交 `693d8eae`）：run
+  [30792108977](https://github.com/LuciusCao/agent-legion/actions/runs/30792108977)
+  backend、frontend、rust、ci-extended 全部通过。
+
+Phase 4B 执行记录（2026-08-03，PR smoke CI 接线）：
+
+- runner 的 PG 连接改为 env 可注入：`AGENT_LEGION_E2E_ADMIN_DSN`（默认本机无密码
+  DSN，CI 注入 `postgres:postgres`），数据库逻辑拆出 `scripts/e2e/_database.py`
+  （runner 增至 336 行超 332 预算，按纪律拆分而非抬 ceiling；285+69 行，预算
+  重登记 295/79）。拆分后本地复跑 2 passed / 8.3s。
+- `quality-gate.yml` 新增 `e2e-smoke` job：postgres:17 service、uv sync、npm ci、
+  `playwright install --with-deps chromium`、跑 runner，timeout 15 分钟；失败时上传
+  `frontend/e2e-results/`（trace/截图/后端与 preview 日志，retention 5 天，仅 failure）。
+  gate 契约测试（`test_quality_gate_scripts.py`、`test_invariant_registry.py`）确认
+  新 job 不破坏既有契约；required checks 同步更新留待 Phase 5 统一处理。
+- full gate 退出码 0：backend 2385 passed / 128.80s、frontend 154 files / 1147 tests、
+  Rust 全部通过、full_gate 32 passed / 11.55s、combined coverage 93.50%，0 rerun。
 
 ### Phase 5：CI 拆分、依赖去重与 flaky 治理
 
