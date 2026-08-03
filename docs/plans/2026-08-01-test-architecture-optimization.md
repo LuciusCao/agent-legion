@@ -449,6 +449,10 @@ Phase 3D 执行记录（2026-08-03）：
   高于 85% floor，目标两模块在合并报告中保持 100%；frontend coverage inventory、Rust 与
   production bundle 全部通过；pip 审计子进程在本机 ensurepip SIGABRT 下按既有语义记为
   非阻断告警，npm 审计仍为既有非阻断告警。
+- GitHub Actions 验收（提交 `506a3cca`）：run
+  [30777220296](https://github.com/LuciusCao/agent-legion/actions/runs/30777220296)
+  首次 frontend job 因 Docker Hub 拉取 `postgres:17` 连续超时失败（基础设施抖动，与改动无关），
+  `--failed` 重跑后 backend、frontend、rust、ci-extended 全部通过。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
