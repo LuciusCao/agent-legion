@@ -19,8 +19,8 @@ env:
   # at the default location so astral-sh/setup-uv caching covers it.
   UV_CACHE_DIR: /home/runner/.cache/uv
   # Fresh per-run databases on the service container below. export_openapi's
-  # create_app writes worker_control_state at startup, so the backend job
-  # (which hosts the api:check contract step) needs a live database.
+  # create_app writes worker_control_state at startup, so the backend-postgres
+  # job (which hosts the api:check contract step) needs a live database.
   AGENT_LEGION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_ci
   AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_test_ci
   # check-skills-shared.py compares skill repos at machine-local paths
@@ -32,10 +32,81 @@ env:
   AGENT_LEGION_WORKER_REGISTER_TOKEN: ci-only-dummy-register-token
 
 jobs:
-  backend:
-    name: backend
+  # Backend is sharded by database dependency (test architecture plan, Phase
+  # 5C): backend-unit runs the static checks and the PostgreSQL-offline unit
+  # tier with no service container, while backend-postgres keeps Postgres and
+  # hosts the api:check contract step (Python env + Postgres + node_modules)
+  # plus the full-gate layer. Each tier writes its own coverage data file via
+  # COVERAGE_FILE; backend-unit uploads its data + JUnit/rerun telemetry as
+  # 1-day artifacts, and backend-postgres downloads them at the end to combine
+  # all shards and enforce the 85% floor once — the same combined-coverage
+  # semantics the single job previously got from AGENT_LEGION_COV_APPEND.
+  backend-unit:
+    name: backend-unit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Backend static checks
+        run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
+
+      - name: Backend unit tests (PostgreSQL offline)
+        run: |
+          mkdir -p coverage-data
+          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        env:
+          AGENT_LEGION_COV: "1"
+          AGENT_LEGION_TEST_RESULTS_DIR: test-results
+          AGENT_LEGION_TEST_RESULT_NAME: backend-unit
+          COVERAGE_FILE: coverage-data/backend-unit.coverage
+          GATE_TIER: unit
+
+      # Artifacts carry only data files (coverage data = paths + line counts,
+      # no source; JUnit/rerun telemetry), retention 1 day per the repository
+      # artifact policy. backend-postgres downloads them for the combined
+      # coverage floor and the aggregate summary.
+      - name: Upload unit shard coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-unit-coverage
+          path: coverage-data/backend-unit.coverage
+          retention-days: 1
+
+      - name: Upload unit shard test telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-unit-telemetry
+          path: |
+            test-results/backend-unit-junit.xml
+            test-results/backend-unit-reruns.json
+          retention-days: 1
+
+      - name: Backend unit test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: "1"
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "Backend unit test evidence" \
+            --junit test-results/backend-unit-junit.xml \
+            --rerun-report test-results/backend-unit-reruns.json \
+            --output test-results/backend-unit-summary.md
+          cat test-results/backend-unit-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  backend-postgres:
+    name: backend-postgres
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
     services:
       postgres:
         image: postgres:17
@@ -83,34 +154,26 @@ jobs:
           sudo apt-get update && sudo apt-get install -y bubblewrap
           sudo chmod u+s "$(command -v bwrap)"
 
-      - name: Backend static checks
-        run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
-
       # api:check boots create_app to export the OpenAPI schema, so it lives
-      # in this job (Python env + Postgres) instead of the frontend jobs.
+      # in this job (Python env + Postgres) instead of backend-unit or the
+      # frontend jobs.
       - name: API contract check
         run: FRONTEND_GATE_PHASE=api-contract ./scripts/check-quick-frontend.sh
 
-      - name: Backend unit tests (PostgreSQL offline)
-        run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
-        env:
-          AGENT_LEGION_COV: "1"
-          AGENT_LEGION_TEST_RESULTS_DIR: test-results
-          AGENT_LEGION_TEST_RESULT_NAME: backend-unit
-          GATE_TIER: unit
-
       - name: Backend PostgreSQL tests
-        run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        run: |
+          mkdir -p coverage-data
+          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
         env:
           AGENT_LEGION_COV: "1"
-          AGENT_LEGION_COV_APPEND: "1"
           AGENT_LEGION_TEST_RESULTS_DIR: test-results
           AGENT_LEGION_TEST_RESULT_NAME: backend-postgres
+          COVERAGE_FILE: coverage-data/backend-postgres.coverage
           GATE_TIER: postgres
 
       - name: Full gate evidence (tests/full)
         run: |
-          mkdir -p test-results
+          mkdir -p coverage-data test-results
           uv run pytest -q tests/full -m full_gate \
             --durations=30 \
             --junitxml=test-results/backend-full-junit.xml \
@@ -118,13 +181,40 @@ jobs:
             --cov=server --cov-report= --cov-append
         env:
           AGENT_LEGION_RERUN_REPORT: test-results/backend-full-reruns.json
+          COVERAGE_FILE: coverage-data/backend-full.coverage
 
+      # backend-unit (~3 min) finishes long before this job reaches the merge
+      # (~8 min in), so its artifacts are always available here. If the unit
+      # job failed before uploading, failing this step keeps the gate red
+      # instead of computing the floor on partial coverage data.
+      - name: Download unit shard coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-unit-coverage
+          path: coverage-data
+
+      - name: Download unit shard test telemetry
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-unit-telemetry
+          path: test-results
+
+      # Merging the shard data files replaces the old single-job
+      # AGENT_LEGION_COV_APPEND flow; `coverage report` enforces the 85% floor
+      # (pyproject [tool.coverage.report] fail_under) once, against the
+      # combined data, exactly as before.
       - name: Combined coverage report
-        run: uv run coverage report
+        run: |
+          for shard in coverage-data/*.coverage; do
+            cp "$shard" ".coverage.$(basename "$shard" .coverage)"
+          done
+          uv run coverage combine
+          uv run coverage report
 
       # Only aggregate counts go to the persistent job summary. Raw JUnit and
-      # coverage files remain ephemeral on the runner to avoid retaining
-      # private failure/source context as downloadable artifacts.
+      # coverage files stay off the persistent record: the unit shard's copies
+      # are 1-day artifacts, everything else remains ephemeral on the runner.
       - name: Backend test summary
         if: always()
         env:
@@ -146,8 +236,8 @@ jobs:
   # parallel jobs, each emitting a blob report that embeds raw V8 coverage.
   # frontend-coverage then merges the blobs and enforces the global coverage
   # thresholds + inventory once, against the combined data. The OpenAPI
-  # contract check lives in the backend job (Phase 5A), so these jobs need
-  # neither Python nor Postgres.
+  # contract check lives in the backend-postgres job (Phase 5A/5C), so these
+  # jobs need neither Python nor Postgres.
   frontend-logic:
     name: frontend-logic
     runs-on: ubuntu-latest
@@ -164,7 +254,7 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
-      # FRONTEND_API_CHECK=0: the contract check runs in the backend job.
+      # FRONTEND_API_CHECK=0: the contract check runs in the backend-postgres job.
       - name: Frontend static checks
         run: FRONTEND_GATE_PHASE=static FRONTEND_TEST_MODE=coverage FRONTEND_API_CHECK=0 ./scripts/check-quick-frontend.sh
 

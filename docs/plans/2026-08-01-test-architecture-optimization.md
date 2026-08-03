@@ -718,8 +718,8 @@ Phase 4C 执行记录（2026-08-03，rerun smoke + nightly stress/多浏览器�
 - 任一 rerun 在 CI 页面可见并能定位到 test id。
 - frontend job 不再为非前端工作重复启动重型依赖，或有数据证明保留更快。
 - required checks 和 branch protection 在 job 改名/拆分后同步更新。
-  （Phase 5A/5B 注记：required checks 需在合并时同步为 frontend-logic / frontend-component /
-  backend-*。）
+  （Phase 5 最终注记：required checks 需在合并时同步为 backend-unit / backend-postgres /
+  frontend-logic / frontend-component / frontend-coverage / rust / e2e-smoke。）
 
 回滚：保留旧聚合 job 一段迁移期；新并行 job 稳定后再调整 required checks。
 
