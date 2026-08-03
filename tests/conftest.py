@@ -83,6 +83,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/jobs/test_openapi_contracts.py",
         "tests/routes/jobs/test_video_jobs_source.py",
         "tests/routes/jobs/test_workflow_catalog.py",
+        "tests/routes/jobs/test_workflow_upgrade.py",
         "tests/routes/test_agent_workers.py",
         "tests/routes/test_video_job_projection.py",
         "tests/routes/test_workspace_secrets.py",
