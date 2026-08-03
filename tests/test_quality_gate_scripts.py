@@ -25,6 +25,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "FRONTEND_TEST_MODE",
         "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
+        "GATE_SHARD",
         "GATE_TIER",
     ):
         process_env.pop(key, None)
@@ -293,3 +294,50 @@ def test_frontend_gate_shards_project_and_defers_coverage_enforcement(tmp_path: 
     assert "--coverage.thresholds.branches=0" in calls
     assert "--coverage.thresholds.statements=0" in calls
     assert "run test:coverage-inventory" not in calls
+
+
+def _run_backend_gate_with_fake_uv(tmp_path: Path, env: dict[str, str]) -> str:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'printf "shard:%s\\n" "${GATE_SHARD:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "postgres",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            **env,
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    return gate_log.read_text(encoding="utf-8")
+
+
+def test_backend_postgres_tier_loads_shard_plugin_when_gate_shard_set(tmp_path: Path) -> None:
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_SHARD": "1/2"})
+
+    assert "-p scripts.pytest_gate_shard" in calls
+    assert "shard:1/2" in calls
+    assert "postgres and not repository_gate" in calls
+
+
+def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(tmp_path: Path) -> None:
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {})
+
+    assert "scripts.pytest_gate_shard" not in calls
+    assert "shard:unset" in calls
+    assert "postgres and not repository_gate" in calls
