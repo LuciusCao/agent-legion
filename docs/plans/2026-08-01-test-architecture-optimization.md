@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 3C dispatch cluster complete; Phase 3D workflow upgrade pending; performance targets open
+状态：Phase 3D workflow upgrade cluster complete; remaining coverage clusters pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -430,6 +430,25 @@ Phase 3C 执行记录（2026-08-03）：
 - 修复后 full gate 退出码 0：其 quick round 449s 通过，backend combined coverage floor、
   frontend coverage inventory、Rust 和 frontend production bundle 全部通过；依赖审计仍为既有
   非阻断告警。
+
+Phase 3D 执行记录（2026-08-03）：
+
+- `routes/job_workflow_upgrade.py` 此前从未被任何测试导入，`services/job_workflow_upgrade.py`
+  为 95%（缺成功升级后的事件通知分支 94/96 行）。新增 7 个用例：service 层覆盖
+  `job_event_buffer.record_job_updated` 与 `job_event_manager.broadcast_job_updated` 两条
+  通知路径（含 workspace/job 标识与 stats 断言）；route 层新文件
+  `tests/routes/jobs/test_workflow_upgrade.py`（已加入 conftest `_POSTGRES_TEST_FILES`
+  显式清单）覆盖 stale job 升级 200 并回读 detail 确认 revision 切换与
+  `is_workflow_outdated=False`、already current 400、missing job 404、workflows 未启用 404，
+  以及 service `not_found` 到 404 的映射（route 存在性检查与 service 复查之间的竞态分支）。
+- 聚焦覆盖率两个模块均为 100%（route 21/21、service 44/44），高于 workflow upgrade
+  lines 不低于 80% 的关键模块目标；聚焦套件连续三次复跑 14/14 通过。
+- quick gate 153s 通过：backend 2360 passed（Phase 3C 的 2353 + 7 新增）、frontend
+  142 files / 1089 tests、Rust 全部通过，未发生 rerun。
+- full gate 退出码 0：full_gate 层 32 passed / 10.87s，backend combined coverage 93.11%
+  高于 85% floor，目标两模块在合并报告中保持 100%；frontend coverage inventory、Rust 与
+  production bundle 全部通过；pip 审计子进程在本机 ensurepip SIGABRT 下按既有语义记为
+  非阻断告警，npm 审计仍为既有非阻断告警。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
