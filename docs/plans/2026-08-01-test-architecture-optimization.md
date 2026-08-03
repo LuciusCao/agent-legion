@@ -519,6 +519,29 @@ Phase 3I 执行记录（2026-08-03，前端 workflow upgrade 簇）：
   Rust 全部通过、full_gate 32 passed / 10.41s、backend combined coverage 93.49%、frontend
   lines 88.9%（3B 的 88.74% 之上）、coverage inventory 359/359、production bundle 通过，
   0 rerun。
+- GitHub Actions 验收（提交 `50331308`）：run
+  [30783279514](https://github.com/LuciusCao/agent-legion/actions/runs/30783279514)
+  backend、frontend、rust、ci-extended 全部通过。
+
+Phase 3J 执行记录（2026-08-03，前端 API transport 簇）：
+
+- `src/api/` 下 10 个 0% 文件与 `jobBatchApi`（10%）补齐契约测试：新增
+  `authApi`、`failureApi`、`jobClearPackedApi`、`jobFacets`、`jobSnapshot`、`metrics`、
+  `tokenUsage`、`workflow_draft_compare`、`workflows`、`jobBatchApi` 共 10 个测试文件
+  38 个用例，全部沿用 fetch mock 约定跑在 node project（不占用 jsdom）。覆盖 URL 编码、
+  query 构造（含 `packed` 数值 0/1 与 `workflow_version_none` 必填的生成类型约束）、
+  POST/PUT/PATCH/DELETE body 契约、返回值拆包（`data.user`、`members ?? []` 等）与错误透传。
+  聚焦覆盖率：10 个目标文件全部 100% statements/lines（authApi 分支经 `?? []` 默认路径
+  补测后同样覆盖）。
+- 过程中对照 `src/generated/api.ts` 修正多处类型误用：`LoginRequest` 无 `display_name`、
+  `UserCreateRequest`/`BootstrapRequest` 必填 `display_name`/`role`、成员 role 枚举为
+  `editor|viewer`、`JobRerunByFailureRequest` 必填 `category`/`strategy`、`packed` 为
+  number。印证了「transport 类型必须从 generated 派生」的纪律。
+- full gate 退出码 0：backend 2378 passed（2 rerun，本机负载 40+ 下恢复，本地未设
+  `AGENT_LEGION_TEST_RESULTS_DIR` 无 JUnit，具体用例以 CI 遥测为准，并入 Phase 5 flaky
+  观测）、frontend 154 files / 1133 tests（1095 + 38 新增）、Rust 全部通过、full_gate
+  32 passed / 20.12s、backend combined coverage 93.46%、frontend lines 90.04%
+  （3I 的 88.9% → 90.04%）、coverage inventory 359/359、production bundle 通过。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
