@@ -483,6 +483,27 @@ Phase 3F 执行记录（2026-08-03）：
   142 files / 1089 tests、Rust 全部通过、full_gate 32 passed / 17.34s、combined coverage
   93.35%，0 rerun。
 
+Phase 3G 执行记录（2026-08-03）：
+
+- `services/job_log_raw.py` 基线 67%；既有 `test_job_log_service.py` 已覆盖日志读取与路径
+  校验，缺 missing run 404、空 log_path、run_dir/events.jsonl 回退与最终空串分支。新增
+  `tests/services/test_job_log_raw.py` 6 个纯单元用例（stub job_db + tmp data_dir）覆盖上述
+  分支；与既有套件合并后模块 100%（33/33）。
+- full gate 第一次复跑因我在 gate 运行期间写入 Phase 3H 文件触发 postgres inventory 审计
+  竞态失败（隔离复跑通过，操作失误已纠正）；随后两次在 export_openapi 阶段 PoolTimeout，
+  定位为 worktree 运行时库 `agent_legion_test_architecture_optimization` 被外部 drop，重建后
+  恢复。该暴露「共享 PG 上运行时库可被任意实例 drop」的脆弱性，并入 Phase 5 观测。
+- 最终 full gate 退出码 0：backend 2378 passed（含 3H 新增）、frontend 142 files /
+  1089 tests、Rust 全部通过、full_gate 32 passed / 15.97s、combined coverage 93.50%，
+  0 rerun。
+
+Phase 3H 执行记录（2026-08-03）：
+
+- `agent_artifacts.py` 基线 38%（dispatch 测试均 mock `stage_agent_inputs`）；新增
+  `tests/services/test_agent_artifacts.py`（已加入 `_POSTGRES_TEST_FILES`）2 个用例：输入文件
+  上传为内容寻址 blob + `artifact_refs` 落库 + manifest 改写为 `refs` 模式，以及空 inputs 的
+  空映射。聚焦覆盖率 100%（13/13），与 3G 共用同一次 full gate（指标见上）。
+
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
 目的：覆盖 jsdom 无法验证的路由、浏览器 API、SSE 和前后端集成。
