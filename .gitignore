@@ -22,6 +22,7 @@ tools/comprehension-uploader/config.prod.yaml
 tools/comprehension-uploader/config.yaml
 stress-results/
 test-results/
+e2e-results/
 deploy/secrets/
 deploy/worker.home.yaml
 deploy/worker.company.yaml
