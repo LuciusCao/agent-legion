@@ -23,9 +23,14 @@ class DatabaseRow(dict[str, Any]):
 
 
 def _row_value(value: Any) -> Any:
-    """Preserve the application's existing timestamp-string boundary."""
+    """Render datetimes as ISO-8601 UTC strings with an explicit offset.
+
+    The ``+00:00`` suffix keeps the timezone on the wire: browsers parse
+    offset-less strings as local time, which shifted every timestamp by the
+    host offset (e.g. +8h in CST).
+    """
     if isinstance(value, datetime):
-        return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+        return value.astimezone(UTC).isoformat()
     return value
 
 
