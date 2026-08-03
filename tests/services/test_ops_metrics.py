@@ -447,13 +447,29 @@ def _insert_node_run(
     finished_at: datetime | None,
     *,
     job_id: str = "job-1",
+    agent_run: bool = True,
 ) -> None:
+    # agent_run=True 时补一行 agent_execution_requests：summary 的 Agent runs
+    # 口径只统计有执行请求引用的 run（Host 本地 handler 代码节点没有）。
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status, started_at, finished_at)"
             " values (?, ?, 'generate', ?, ?, ?)",
             (run_id, job_id, status, started_at, finished_at),
         )
+        if agent_run:
+            conn.execute(
+                """
+                insert into agent_execution_requests(
+                    execution_id, workspace_id, job_id, workflow_key, node_key,
+                    agent_id, agent_definition_hash, node_concurrency_limit,
+                    state, queued_at, node_run_id, manifest_json
+                )
+                values (?, 'ops-ws', ?, 'questions', 'generate', 'agent-1', 'hash', 1,
+                        'done', ?, ?, '{}')
+                """,
+                (f"exec-{run_id}", job_id, started_at, run_id),
+            )
 
 
 def test_query_summary_aggregates_recent_hour_independent_of_window() -> None:
@@ -530,3 +546,23 @@ def test_query_summary_scopes_tokens_and_gauges_by_worker() -> None:
     # node_runs 无 worker 归属，runs 统计始终全局。
     assert scoped["recent_hour_runs"]["completed"] == 1
     assert _service().query_summary(worker_id="w-unknown")["online_workers"] is None
+
+
+def test_query_summary_excludes_host_local_handler_runs() -> None:
+    _seed_workspace_job()
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    # Agent run（有 agent_execution_requests 引用）计入；
+    # Host 本地 handler 代码节点 run（无引用）不计入，也不影响耗时分位数。
+    _insert_node_run(1, "completed", now - timedelta(minutes=5), now - timedelta(minutes=4))
+    _insert_node_run(
+        2, "completed", now - timedelta(minutes=5), now - timedelta(minutes=4), agent_run=False
+    )
+    _insert_node_run(
+        3, "failed", now - timedelta(minutes=3), now - timedelta(minutes=2), agent_run=False
+    )
+
+    runs = _service().query_summary()["recent_hour_runs"]
+    assert runs["completed"] == 1
+    assert runs["failed"] == 0
+    assert runs["duration_p50_seconds"] == 60.0
+    assert runs["duration_p95_seconds"] == 60.0
