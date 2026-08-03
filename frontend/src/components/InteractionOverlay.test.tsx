@@ -260,7 +260,10 @@ describe('InteractionOverlay', () => {
       within(scrollableContent).queryByText('确认并继续')
     ).not.toBeInTheDocument()
     expect(within(actions).getByText('确认并继续')).toBeInTheDocument()
-  })
+    // FLAKY-002: 12 options x 12 state-updating clicks exceed the 5s default
+    // on contended CI runners (timed out in runs 30805689114 / 30814709192);
+    // root-cause fix (cheaper render) is tracked in tests/flaky_registry.yaml.
+  }, 20000)
 
   it('confirms summary interactions and continues playback', () => {
     const onContinue = vi.fn()
