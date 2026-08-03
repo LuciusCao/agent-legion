@@ -643,6 +643,14 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
+      # Browser binaries cache: a cold download stalled for 41 minutes once
+      # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
       - name: Install Chromium for Playwright
         run: npx playwright install --with-deps chromium
         working-directory: frontend
@@ -706,6 +714,14 @@ jobs:
 
       - run: npm ci
         working-directory: frontend
+
+      # Browser binaries cache: a cold download stalled for 41 minutes once
+      # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium firefox webkit
