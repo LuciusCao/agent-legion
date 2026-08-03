@@ -485,6 +485,7 @@
     "scripts/backfill_worker_output_validation.py": 330,
     "scripts/check-skills-shared.py": 184,
     "scripts/check_architecture.py": 30,
+    "scripts/check_coverage_partitions.py": 265,
     "scripts/check_exemption_age.py": 74,
     "scripts/check_invariants.py": 88,
     "scripts/compare_skill_cost.py": 175,
