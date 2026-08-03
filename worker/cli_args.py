@@ -48,7 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("--host-url")
     configure.add_argument("--worker-id")
     configure.add_argument("--name")
-    configure.add_argument("--runtime", action="append", choices=["pi", "openclaw"])
+    configure.add_argument("--runtime", action="append", choices=["pi", "openclaw", "velites"])
     configure.add_argument("--max-concurrency", type=int)
     configure.add_argument("--claim-enabled", action=argparse.BooleanOptionalAction, default=None)
     configure.add_argument("--capability", action="append")
