@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 3 complete (3A-3L, partition floors in report mode); Phase 4 E2E pending; performance targets open
+状态：Phase 4A browser smoke complete locally; CI wiring pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -581,6 +581,9 @@ Phase 3L 执行记录（2026-08-03，分区 coverage 门槛，报告模式）：
 - Phase 3 至此全部落地：coverage 分母显式（359/359）、后端六个低覆盖模块与前端
   auth/bootstrap、workflow upgrade、api transport、admin pages 全部达标、分区门槛
   以报告模式运行，待 CI 稳定后切 enforce。
+- GitHub Actions 验收（提交 `00cb5134`）：run
+  [30788173399](https://github.com/LuciusCao/agent-legion/actions/runs/30788173399)
+  backend、frontend、rust、ci-extended 全部通过。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
@@ -604,6 +607,25 @@ Phase 3L 执行记录（2026-08-03，分区 coverage 门槛，报告模式）：
 - nightly 可以查看 click latency、long task、内存、SSE throughput 和 trace artifact。
 
 回滚：PR E2E 可临时降为非阻塞 job，但 nightly stress 和 artifacts 保留用于诊断。
+
+Phase 4A 执行记录（2026-08-03，确定性浏览器 smoke + 本地 runner）：
+
+- 新增 `frontend/e2e/`（`smoke-auth.spec.ts`、`smoke-workspace-job.spec.ts`、`helpers.ts`）
+  与独立 `frontend/playwright.e2e.config.ts`（不改动既有 stress 配置）；两个流程：
+  bootstrap 首个管理员 → 登出 → 重新登录；建 workspace → 按题目 ID 批量建 job →
+  详情页断言节点渲染。`scripts/e2e/run_browser_smoke.py` 幂等 runner：独立 E2E 库
+  `agent_legion_e2e_<worktree>`（TRUNCATE reset，亚秒）、独立 data 目录与端口、
+  进程内 CMS stub（`batch_by_ids` intake 会真实调 CMS `/question/detail`，pytest 靠
+  monkeypatch，真实进程必须 stub——首轮实跑曾因此失败）、uvicorn factory 无 worker
+  （节点永不执行，job 稳定 pending，不碰 LLM）、vite preview 继承 server.proxy 经
+  `VITE_API_TARGET` 指向后端。workflows.enabled 在 tracked config 中已为 true，无需
+  额外配置。
+- 实跑验证：冷启动（含 build）33.4s、温启动连续两次 10.5s/9.6s、父代理复验
+  27.7s/12.4s，均远低于 3 分钟目标；跑完无残留进程，库 TRUNCATE 无状态泄漏。
+- 门禁两轮修正：ruff format 漏跑 + 架构预算 ceiling 随格式化收紧（338→322 重登记）。
+  最终 full gate 退出码 0：backend 2385 passed / 236.49s、frontend 154 files /
+  1147 tests、Rust 全部通过、full_gate 32 passed / 16.08s、combined coverage 93.46%，
+  0 rerun。E2E 暂未进 CI（Phase 4B 接线）， rerun/workflow upgrade spec 待补。
 
 ### Phase 5：CI 拆分、依赖去重与 flaky 治理
 
