@@ -88,7 +88,16 @@ async function measureScrollLatency(page: Page): Promise<number> {
 
 test('workspace page remains responsive under high job concurrency', async ({
   page,
+  context,
 }) => {
+  // Workspace APIs require an authenticated session; the stress runner logs in
+  // server-side and hands the session cookie over via STRESS_SESSION_COOKIE.
+  const sessionCookie = process.env.STRESS_SESSION_COOKIE
+  if (sessionCookie) {
+    await context.addCookies([
+      { name: 'agent_legion_session', value: sessionCookie, url: baseUrl },
+    ])
+  }
   const metrics: FrontendMetrics = {
     durationSeconds,
     clickLatenciesMs: [],

@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 4A browser smoke complete locally; CI wiring pending; performance targets open
+状态：Phase 4C complete locally (rerun smoke, nightly stress + multi-browser wired); CI acceptance pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -591,14 +591,14 @@ Phase 3L 执行记录（2026-08-03，分区 coverage 门槛，报告模式）：
 
 任务：
 
-- [ ] 新建独立 `frontend/e2e/`，与现有五分钟 `stress/` 分开。
-- [ ] 建立确定性 fixture/seed API，避免 E2E 依赖真实 CMS、LLM 或互联网。
-- [ ] PR/push Chromium smoke 覆盖：bootstrap/login、创建工作区、创建/查看 job、rerun 或
+- [x] 新建独立 `frontend/e2e/`，与现有五分钟 `stress/` 分开。
+- [x] 建立确定性 fixture/seed API，避免 E2E 依赖真实 CMS、LLM 或互联网。
+- [x] PR/push Chromium smoke 覆盖：bootstrap/login、创建工作区、创建/查看 job、rerun 或
       workflow upgrade 中的核心路径。
-- [ ] 失败时保留 trace、截图、前端 console 和后端日志。
-- [ ] nightly 执行现有 workspace stress，并上传 `frontend-metrics.json`。
-- [ ] nightly 或手动门禁增加 Firefox/WebKit 最小兼容性 smoke；PR 默认只跑 Chromium。
-- [ ] 为 E2E 设置独立数据库和端口，禁止与其他 worktree/CI job 共享运行时状态。
+- [x] 失败时保留 trace、截图、前端 console 和后端日志。
+- [x] nightly 执行现有 workspace stress，并上传 `frontend-metrics.json`。
+- [x] nightly 或手动门禁增加 Firefox/WebKit 最小兼容性 smoke；PR 默认只跑 Chromium。
+- [x] 为 E2E 设置独立数据库和端口，禁止与其他 worktree/CI job 共享运行时状态。
 
 验收：
 
@@ -647,6 +647,44 @@ Phase 4B 执行记录（2026-08-03，PR smoke CI 接线）：
   [30793710285](https://github.com/LuciusCao/agent-legion/actions/runs/30793710285)
   五个 job 全部通过；`e2e-smoke` 首跑总耗时 2m38s（Chromium 安装 34s、
   Browser smoke 步骤 32s 含前端 build 与后端启动），满足 PR E2E 3 分钟验收线。
+
+Phase 4C 执行记录（2026-08-03，rerun smoke + nightly stress/多浏览器）：
+
+- 新增 `frontend/e2e/smoke-job-rerun.spec.ts`：建 workspace → 按题目 ID 建 job →
+  详情页经 AppBar 注入的「重跑」按钮打开对话框 → 选 `review_key_info` 确认 →
+  断言对话框关闭且下游节点 badge 变为「已过期」（stale，对应后端
+  `test_rerun_node_marks_downstream_stale` 语义）。runner 连续两次 3 passed
+  （12.1s / 11.3s）。
+- 实跑发现 stress runner 自鉴权上线后整体失效（readiness 打 `/api/workspaces`
+  恒 401、SSE/事件上报/前端页面均无会话）。修复：新增
+  `scripts/stress/_stress_auth.py`（bootstrap-or-login 确定性 stress-admin，
+  会话带 CSRF header）；`_e2e_readiness.wait_for_server` 改打公开的
+  `/api/health`，snapshot readiness 接收 session；`simulate_agents` 自建会话用于
+  SSE 与 `StressHttpEventRecorder`；前端 stress spec 经 `STRESS_SESSION_COOKIE`
+  注入浏览器 cookie。runner 超 372 行预算，按纪律把 `_run_frontend_stress` 拆到
+  `scripts/stress/_e2e_frontend.py`（350+54+58 行，预算重登记 360/64/68）。
+  新增 `tests/scripts/test_stress_auth.py` 4 个纯单元用例。
+- 本地小画像实跑（`--agents 5 --jobs 50 --duration 60 --event-rate 20`）退出码
+  0：frontend stress 1 passed（60s），backend metrics 1195 事件 / 119 SSE 批次，
+  frontend-metrics.json 含 click p50 55ms、p95 61ms、longTask 0、SSE 1.9 msg/s、
+  内存采样；simulator 记录到 1 次 SSE read timeout（指标级，不影响退出码）。
+- `quality-gate.yml` 新增 `nightly-e2e` job（schedule/dispatch，同 ci-extended
+  条件）：三浏览器安装 → `E2E_BROWSERS=chromium,firefox,webkit` 跑 smoke →
+  stress 画像 `--agents 50 --jobs 2000 --duration 300 --event-rate 200`（5 分钟
+  实时 SSE 流量下采样，种子 2000 jobs 秒级完成，job 总量远低于 45 分钟
+  timeout）→ `stress-results/` 整体上传（report.md + frontend-metrics.json，
+  命名 `nightly-stress-<run_id>`，retention 14 天，`if: always()`）。
+- `playwright.e2e.config.ts` projects 按 `E2E_BROWSERS`（逗号分隔，默认
+  chromium）过滤；bootstrap 消耗一次性首管理员名额，firefox/webkit project 用
+  `grepInvert: /bootstrap 首个管理员/` 跳过 setup 流程。runner 经
+  `env={**os.environ, ...}` 透传 `E2E_BROWSERS`，无需改动。
+- 本地三浏览器验证：`npx playwright install firefox webkit` 后
+  `E2E_BROWSERS=chromium,firefox,webkit` runner 7 passed / 25.4s（首跑曾暴露
+  上述 bootstrap 冲突，修复后通过）；默认无 env 复跑 3 passed / 11.8s，
+  PR 路径不受多浏览器逻辑影响。
+- 契约验证：`yaml.safe_load` 通过；`test_quality_gate_scripts.py` +
+  `test_invariant_registry.py` + stress 相关测试共 51 passed / 6.02s；
+  `ruff check/format`、`tsc --noEmit`、prettier 全部通过。
 
 ### Phase 5：CI 拆分、依赖去重与 flaky 治理
 
