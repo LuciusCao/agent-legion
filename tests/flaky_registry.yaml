@@ -41,9 +41,13 @@ entries:
   scope: ci-infra:docker-hub
   owner: test-infra
   reason: CI infrastructure hiccups outside repository control. A Docker Hub
-    pull of postgres:17 timed out once, and the artifact API returned 503
-    once. Retrying the job is the correct response; no code fix applies.
-  observed: CI runs during 2026-07/2026-08 CI topology split (Phase 5A/5B).
+    pull of postgres:17 timed out once, the artifact API returned 503 once,
+    and a cold Playwright browser download stalled for 41 minutes (run
+    30816362118, ate the 45-minute nightly budget). Playwright binaries are
+    now cached via actions/cache keyed on frontend/package-lock.json;
+    retrying the job remains the correct response for the rest.
+  observed: CI runs during 2026-07/2026-08 CI topology split (Phase 5A/5B);
+    Playwright stall in run 30816362118.
   recurring: true
 - id: FLAKY-005
   scope: nightly:stress-probe-timeout
