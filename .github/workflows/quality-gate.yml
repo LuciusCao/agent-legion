@@ -171,6 +171,9 @@ jobs:
           COVERAGE_FILE: coverage-data/backend-postgres.coverage
           GATE_TIER: postgres
 
+      # Like the tier shards, the full gate writes its own COVERAGE_FILE, so
+      # it must not enforce the 85% floor on partial data
+      # (--cov-fail-under=0); the combined report below enforces it once.
       - name: Full gate evidence (tests/full)
         run: |
           mkdir -p coverage-data test-results
@@ -178,7 +181,8 @@ jobs:
             --durations=30 \
             --junitxml=test-results/backend-full-junit.xml \
             -p scripts.pytest_telemetry \
-            --cov=server --cov-report= --cov-append
+            --cov=server --cov-report= --cov-append \
+            --cov-fail-under=0
         env:
           AGENT_LEGION_RERUN_REPORT: test-results/backend-full-reruns.json
           COVERAGE_FILE: coverage-data/backend-full.coverage

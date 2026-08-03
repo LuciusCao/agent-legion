@@ -132,6 +132,12 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "COVERAGE_FILE: coverage-data/backend-postgres.coverage" in workflow
     assert "name: backend-unit-coverage" in workflow
     assert "coverage combine" in workflow
+    # Every pytest shard (tiers and the tests/full gate) runs on its own
+    # COVERAGE_FILE, so each must defer the 85% floor to the combined report;
+    # a shard enforcing it on partial data fails at ~59%.
+    full_gate_step = workflow.split("Full gate evidence (tests/full)", 1)[1]
+    full_gate_step = full_gate_step.split("- name:", 1)[0]
+    assert "--cov-fail-under=0" in full_gate_step
 
 
 def test_test_harness_skips_module_level_application_bootstrap() -> None:
