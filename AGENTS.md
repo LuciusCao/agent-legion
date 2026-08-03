@@ -46,6 +46,9 @@
   走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由
   CI 与 `./scripts/check.sh` 强制）。多 worktree 并行时用 `AGENT_LEGION_TEST_WORKERS`
   限制 pytest worker 数（默认 `-n auto` 吃满所有核）。
+- 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增
+  `tests/` 根目录文件；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过
+  TRUNCATE 隔离。
 
 ## 5. Architecture Governance
 

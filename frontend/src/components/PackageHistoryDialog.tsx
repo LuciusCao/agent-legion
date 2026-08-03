@@ -14,6 +14,7 @@ import {
   updateWorkspacePackage,
 } from '../api'
 import { triggerDownload } from '../lib/download'
+import { useUiStore } from '../stores/uiStore'
 import type { WorkspacePackageItem } from '../types/packageTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './PackageHistoryDialog.module.css'
@@ -47,6 +48,12 @@ function formatRelativeTime(iso: string): string {
 }
 
 export function PackageHistoryDialog({ open, onClose, workspaceId }: Props) {
+  const { showToast } = useUiStore()
+  const showError = (prefix: string, err: unknown) =>
+    showToast(
+      prefix + (err instanceof Error ? err.message : String(err)),
+      'error'
+    )
   const [packages, setPackages] = useState<WorkspacePackageItem[]>([])
   const [loading, setLoading] = useState(false)
 
@@ -79,7 +86,7 @@ export function PackageHistoryDialog({ open, onClose, workspaceId }: Props) {
       await deleteWorkspacePackage(workspaceId, id)
       setPackages((prev) => prev.filter((p) => p.id !== id))
     } catch (err) {
-      alert('删除失败: ' + (err instanceof Error ? err.message : String(err)))
+      showError('删除失败: ', err)
     }
   }
 
@@ -93,7 +100,7 @@ export function PackageHistoryDialog({ open, onClose, workspaceId }: Props) {
         )
       )
     } catch (err) {
-      alert('操作失败: ' + (err instanceof Error ? err.message : String(err)))
+      showError('操作失败: ', err)
     }
   }
 
@@ -115,7 +122,7 @@ export function PackageHistoryDialog({ open, onClose, workspaceId }: Props) {
         prev.map((p) => (p.id === id ? { ...p, name: editValue.trim() } : p))
       )
     } catch (err) {
-      alert('重命名失败: ' + (err instanceof Error ? err.message : String(err)))
+      showError('重命名失败: ', err)
     }
     setEditingId(null)
   }

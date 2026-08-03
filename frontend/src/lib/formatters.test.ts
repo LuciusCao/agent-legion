@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { formatRelativeTime } from './formatters'
+import { formatInteractionStats, formatRelativeTime } from './formatters'
 
 describe('formatRelativeTime', () => {
   beforeEach(() => {
@@ -32,5 +32,48 @@ describe('formatRelativeTime', () => {
     expect(formatRelativeTime('2024-04-01T12:00:00.000Z')).toBe(
       new Date('2024-04-01T12:00:00.000Z').toLocaleDateString('zh-CN')
     )
+  })
+})
+
+describe('formatInteractionStats', () => {
+  it('returns empty string for undefined stats', () => {
+    expect(formatInteractionStats(undefined)).toBe('')
+  })
+
+  it('returns empty string for empty stats', () => {
+    expect(formatInteractionStats({})).toBe('')
+  })
+
+  it('formats single type stats', () => {
+    expect(
+      formatInteractionStats({ example_practice: { passed: 2, total: 3 } })
+    ).toBe('例题试做 2/3')
+  })
+
+  it('formats multiple types in order', () => {
+    expect(
+      formatInteractionStats({
+        example_practice: { passed: 2, total: 3 },
+        interaction_summary: { passed: 1, total: 1 },
+      })
+    ).toBe('例题试做 2/3 ｜ 互动小结 1/1')
+  })
+
+  it('puts unknown types after known types', () => {
+    expect(
+      formatInteractionStats({
+        unknown_type: { passed: 1, total: 2 },
+        example_practice: { passed: 2, total: 3 },
+      })
+    ).toBe('例题试做 2/3 ｜ unknown_type 1/2')
+  })
+
+  it('treats video_summary same as interaction_summary in order', () => {
+    expect(
+      formatInteractionStats({
+        video_summary: { passed: 1, total: 1 },
+        example_practice: { passed: 2, total: 3 },
+      })
+    ).toBe('例题试做 2/3 ｜ 互动小结 1/1')
   })
 })

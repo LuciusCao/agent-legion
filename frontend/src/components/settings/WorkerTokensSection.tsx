@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   createRegisterToken,
   listAgentWorkers,
@@ -11,6 +11,7 @@ import type {
   AgentRegisterTokenSummary,
   AgentWorkerSummary,
 } from '../../api'
+import { useAsync } from '../../hooks/useAsync'
 import styles from './WorkerTokensSection.module.css'
 
 function formatTime(iso: string): string {
@@ -29,8 +30,6 @@ function errorMessage(error: unknown): string {
  * control arrives with the login/permission system.
  */
 export function WorkerTokensSection() {
-  const [tokens, setTokens] = useState<AgentRegisterTokenSummary[]>([])
-  const [workers, setWorkers] = useState<AgentWorkerSummary[]>([])
   const [label, setLabel] = useState('')
   const [workspaceId, setWorkspaceId] = useState('')
   const [createdToken, setCreatedToken] =
@@ -38,22 +37,18 @@ export function WorkerTokensSection() {
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([listRegisterTokens(), listAgentWorkers()])
-      .then(([tokenList, workerList]) => {
-        if (cancelled) return
-        setTokens(tokenList)
-        setWorkers(workerList)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(errorMessage(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [])
+  const { data: lists, error: listError } = useAsync(
+    () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
+    [refreshKey]
+  )
+  const tokens = lists?.[0] ?? []
+  const workers = lists?.[1] ?? []
+
+  function refresh() {
+    setRefreshKey((key) => key + 1)
+  }
 
   async function handleCreate() {
     const trimmedLabel = label.trim()
@@ -69,7 +64,7 @@ export function WorkerTokensSection() {
       setCopied(false)
       setLabel('')
       setWorkspaceId('')
-      setTokens(await listRegisterTokens())
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -92,7 +87,7 @@ export function WorkerTokensSection() {
     setError('')
     try {
       await revokeRegisterToken(token.token_id)
-      setTokens(await listRegisterTokens())
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -109,7 +104,7 @@ export function WorkerTokensSection() {
     setError('')
     try {
       await revokeAgentWorker(worker.worker_id)
-      setWorkers(await listAgentWorkers())
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -117,9 +112,9 @@ export function WorkerTokensSection() {
 
   return (
     <div>
-      {error && (
+      {(error || listError) && (
         <p className={styles.error} role="alert">
-          {error}
+          {error || listError}
         </p>
       )}
 

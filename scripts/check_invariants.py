@@ -10,8 +10,8 @@ from pathlib import Path
 
 import yaml
 
-from server.app.quality.exemptions import load_exemptions, validate_exemptions
-from server.app.quality.invariants import load_registry, validate_registry
+from scripts.quality.exemptions import load_exemptions, validate_exemptions
+from scripts.quality.invariants import load_registry, validate_registry
 
 project_root = Path(__file__).resolve().parents[1]
 

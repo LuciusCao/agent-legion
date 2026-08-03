@@ -7,6 +7,8 @@ import pytest
 
 check_skills_shared = importlib.import_module("scripts.check-skills-shared")
 
+pytestmark = pytest.mark.no_db
+
 
 def test_resolve_local_repo_file_url(tmp_path: Path) -> None:
     repo = tmp_path / "skill"

@@ -8,7 +8,7 @@ import pytest
 
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from tests.helpers.executor_worker import (
     allocate,
     bind,

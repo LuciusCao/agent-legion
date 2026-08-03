@@ -3,25 +3,25 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
-import { useJobFilterRefetch } from './useJobFilterRefetch'
-import { useWorkspacePackageActions } from './useWorkspacePackageActions'
-import { useWorkspaceRerunActions } from './useWorkspaceRerunActions'
-import { useWorkspaceSelection } from './useWorkspaceSelection'
-import { JobFilterBar } from '../components/JobFilterBar'
-import { JobList } from '../components/JobList'
+import { useJobFilterRefetch } from '../hooks/useJobFilterRefetch'
+import { useWorkspacePackageActions } from '../hooks/useWorkspacePackageActions'
+import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
+import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
+import { JobFilterBar } from '../components/job/JobFilterBar'
+import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
 import {
   JobActionBar,
   type JobActionBarFilter,
-} from '../components/JobActionBar'
+} from '../components/job/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
 import { fetchWorkflowDefinition } from '../api'
+import { useAsync } from '../hooks/useAsync'
 import {
   selectFilterCounts,
   selectFilteredJobIds,
 } from '../stores/job/selectors'
-import type { WorkflowDefinitionRecord } from '../types'
 import styles from './WorkspaceMainPage.module.css'
 
 export default function WorkspaceMainPage() {
@@ -52,9 +52,6 @@ export default function WorkspaceMainPage() {
   )
   const jobsLoading = useJobStore((state) => state.isLoading)
 
-  const [workflowDefinition, setWorkflowDefinition] =
-    useState<WorkflowDefinitionRecord | null>(null)
-  const [workflowError, setWorkflowError] = useState<string | null>(null)
   useWorkspaceEvents(workspaceId)
   useJobFilterRefetch(workspaceId)
 
@@ -64,25 +61,15 @@ export default function WorkspaceMainPage() {
     }
   }, [workspaceId, fetchWorkspaceStats])
 
-  useEffect(() => {
-    const workflowKey = workspaceId
-      ? workspaceStats[workspaceId]?.workflow_key
-      : undefined
-    if (!workflowKey) return
-    let stale = false
-    fetchWorkflowDefinition(workflowKey)
-      .then((data) => {
-        if (stale) return
-        setWorkflowDefinition(data.workflow)
-      })
-      .catch((err) => {
-        if (stale) return
-        setWorkflowError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      stale = true
-    }
-  }, [workspaceId, workspaceStats])
+  const workflowKey = workspaceId
+    ? workspaceStats[workspaceId]?.workflow_key
+    : undefined
+  const { data: workflowResult, error: workflowError } = useAsync(
+    () => fetchWorkflowDefinition(workflowKey ?? ''),
+    [workspaceId, workflowKey],
+    { enabled: !!workflowKey }
+  )
+  const workflowDefinition = workflowResult?.workflow ?? null
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 

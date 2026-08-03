@@ -1,6 +1,6 @@
 import json
 
-from server.app.job_dashboard_events import (
+from server.app.events.dashboard import (
     broadcast_workspace_stats_batch,
     build_workspace_stats_batch_payload,
 )

@@ -1,4 +1,4 @@
-import { DagGraph } from '../../components/DagGraph'
+import { DagGraph } from '../../components/dag/DagGraph'
 import { WorkflowDagFullscreenButton } from './components/WorkflowDagFullscreenButton'
 import { WorkflowStudioMobileNav } from './WorkflowStudioMobileNav'
 import { WorkflowStudioInspectorPanel } from './WorkflowStudioSidePanels'

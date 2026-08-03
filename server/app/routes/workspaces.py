@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from server.app.event_bus import workspace_channel
 from server.app.events import JobEventManager
+from server.app.events.bus import workspace_channel
 from server.app.routes.dashboard_events import create_dashboard_events_router
 from server.app.routes.job_contracts import (
     DeleteWorkspaceResponse,

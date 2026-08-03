@@ -1,11 +1,13 @@
 import { Suspense, useEffect } from 'react'
 import { useLocation } from 'react-router-dom'
+import { useAgentsStore } from './stores/agentsStore'
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
 import AppRoutes from './AppRoutes'
 
 export default function App() {
-  const { connectAgentsWs, closeAddDialog } = useUiStore()
+  const { connectAgentsWs } = useAgentsStore()
+  const { closeAddDialog } = useUiStore()
   const location = useLocation()
 
   useEffect(() => {

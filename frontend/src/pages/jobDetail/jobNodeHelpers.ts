@@ -1,4 +1,4 @@
-import type { DagEdge, DagGraphNode } from '../../components/DagGraph'
+import type { DagEdge, DagGraphNode } from '../../components/dag/DagGraph'
 import type { JobNode } from '../../types/jobTypes'
 
 const VALID_STATUSES = new Set<DagGraphNode['status']>([

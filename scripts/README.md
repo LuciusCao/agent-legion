@@ -47,8 +47,18 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `export_openapi.py` | 不启动 Worker 导出 OpenAPI 模式。 |
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
-| `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 |
-| `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为（共享逻辑在 `_skill_cost_core.py`）。 |
+
+## 一次性与运维脚本
+
+直接操作生产表的脚本必须先 `--dry-run` 验证影响面，再正式执行；退役后删除并在本节留档。
+
+| 脚本 | 用途 | 退役条件 |
+|------|------|----------|
+| `backfill_failure_classification.py` | 为历史 failed `node_runs` 回填 `failure_category`/`failure_detail`（幂等，支持 `--dry-run` / `--include-unknown`）。 | 生产库中无未分类的 failed 行，且分类规则稳定不再需要重评 `unknown`。 |
+| `backfill_worker_output_validation.py` | 补跑 EXEC-VALIDATION-001 之前 Worker 完成节点的输出校验，失败的标记节点/任务 failed（幂等，支持 `--dry-run`）。 | 所有存量 Worker-run 节点完成重校验（无候选行）。 |
+| `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为（共享逻辑在 `_skill_cost_core.py`）。 | skill 成本对账不再需要按版本切片对比。 |
+| `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
+| `velites_diff_events.py` | 结构对比 Node Pi 与 velites 的 `events.jsonl` 事件流（忽略时序字段与 delta 事件差异）。 | velites 完全替代 Node Pi 且回归基线归档后。 |
 
 一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；历史用法见 git 历史。
 
@@ -56,7 +66,8 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 
 | 目录 | 用途 |
 |------|------|
-| `architecture/` | `check_architecture.py` / `ratchet_architecture_budgets.py` 的检查实现（预算盘点、边界、路由契约、import 环等各 phase 模块）。 |
+| `architecture/` | `check_architecture.py` / `ratchet_architecture_budgets.py` 的检查实现（预算盘点、边界、路由契约、import 环等按检查域划分的模块）。 |
+| `quality/` | 架构不变量与豁免注册表的加载/校验实现（`invariants.py`、`exemptions.py`、`exemption_age.py`），供 `check_invariants.py` / `check_exemption_age.py` 与 `architecture/file_budgets.py` 使用。 |
 | `git-hooks/` | 版本化的 pre-commit / pre-push 钩子 dispatcher，由 `install-git-hooks.sh` 安装到 Git common directory，再转发到 worktree 根的 `.githooks/`。 |
 | `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
 | `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |

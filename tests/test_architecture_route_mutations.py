@@ -3,9 +3,11 @@ from pathlib import Path
 
 import pytest
 
-from scripts.architecture import phase6
+from scripts.architecture import workspace_boundaries
 from scripts.check_architecture import check_repository
 from tests.architecture_budget_helpers import write_neutral_budget_governance
+
+pytestmark = pytest.mark.no_db
 
 
 def write(path: Path, content: str) -> None:
@@ -133,7 +135,7 @@ def test_preserves_exact_route_mutation_diagnostics(tmp_path):
         "    downstream_nodes(None, 'a')\n",
     )
 
-    assert phase6.check_route_dag_and_deletion(tmp_path) == [
+    assert workspace_boundaries.check_route_dag_and_deletion(tmp_path) == [
         "server/app/routes/jobs.py:4: filesystem deletion 'rmtree' belongs in services; "
         "routes must call orchestration services",
         "server/app/routes/jobs.py:5: DAG traversal 'downstream_nodes' belongs in services; "
@@ -141,7 +143,10 @@ def test_preserves_exact_route_mutation_diagnostics(tmp_path):
     ]
 
 
-def test_phase6_reexports_route_mutation_checker():
+def test_workspace_boundaries_reexports_route_mutation_checker():
     route_mutations = importlib.import_module("scripts.architecture.route_mutations")
 
-    assert phase6.check_route_dag_and_deletion is route_mutations.check_route_dag_and_deletion
+    assert (
+        workspace_boundaries.check_route_dag_and_deletion
+        is route_mutations.check_route_dag_and_deletion
+    )

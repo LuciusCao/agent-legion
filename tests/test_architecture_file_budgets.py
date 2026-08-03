@@ -15,7 +15,9 @@ from scripts.architecture.file_budgets import (
     count_source_lines,
     load_budget_baseline,
 )
-from server.app.quality.exemptions import ArchitectureExemption
+from scripts.quality.exemptions import ArchitectureExemption
+
+pytestmark = pytest.mark.no_db
 
 
 def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, BudgetPolicy]:

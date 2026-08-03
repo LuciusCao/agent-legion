@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach } from 'vitest'
+import { act, renderHook, waitFor } from '@testing-library/react'
 import { useAsync } from './useAsync'
 
 describe('useAsync', () => {
@@ -185,5 +185,79 @@ describe('useAsync', () => {
     // Give the stale promise a chance to settle.
     await Promise.resolve()
     expect(result.current.data).toBe('second')
+  })
+
+  describe('refetchInterval', () => {
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('re-runs the task on the interval without touching loading', async () => {
+      vi.useFakeTimers()
+      let value = 0
+      const task = vi.fn(() => Promise.resolve(`v${++value}`))
+
+      const { result } = renderHook(() =>
+        useAsync(task, ['key'], { refetchInterval: 1000 })
+      )
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(result.current.data).toBe('v1')
+      expect(result.current.loading).toBe(false)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(3000)
+      })
+
+      expect(task).toHaveBeenCalledTimes(4)
+      expect(result.current.data).toBe('v4')
+      expect(result.current.loading).toBe(false)
+    })
+
+    it('stops polling after unmount', async () => {
+      vi.useFakeTimers()
+      const task = vi.fn(() => Promise.resolve('value'))
+
+      const { unmount } = renderHook(() =>
+        useAsync(task, ['key'], { refetchInterval: 1000 })
+      )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(task).toHaveBeenCalledTimes(1)
+
+      unmount()
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(5000)
+      })
+
+      expect(task).toHaveBeenCalledTimes(1)
+    })
+
+    it('restarts the interval when deps change', async () => {
+      vi.useFakeTimers()
+      const task = vi.fn(() => Promise.resolve('value'))
+
+      const { rerender } = renderHook(
+        ({ dep }) => useAsync(task, [dep], { refetchInterval: 1000 }),
+        { initialProps: { dep: 'a' } }
+      )
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+
+      rerender({ dep: 'b' })
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0)
+      })
+      expect(task).toHaveBeenCalledTimes(2)
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(1000)
+      })
+      expect(task).toHaveBeenCalledTimes(3)
+    })
   })
 })
