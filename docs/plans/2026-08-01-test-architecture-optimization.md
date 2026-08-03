@@ -542,6 +542,22 @@ Phase 3J 执行记录（2026-08-03，前端 API transport 簇）：
   观测）、frontend 154 files / 1133 tests（1095 + 38 新增）、Rust 全部通过、full_gate
   32 passed / 20.12s、backend combined coverage 93.46%、frontend lines 90.04%
   （3I 的 88.9% → 90.04%）、coverage inventory 359/359、production bundle 通过。
+- GitHub Actions 验收（提交 `03c85617`）：run
+  [30784771132](https://github.com/LuciusCao/agent-legion/actions/runs/30784771132)
+  backend、frontend、rust、ci-extended 全部通过。
+
+Phase 3K 执行记录（2026-08-03，前端管理页面簇）：
+
+- `UsersAdminPage.tsx`（61%）新增 11 个用例：列表加载失败、创建失败（Error 与非 Error
+  字符串化）、显示名/角色选择后创建、角色切换成功与失败、禁用/启用双向切换与失败、
+  `window.prompt` 重置密码（确认/取消/失败三分支）。`JobDetailPage.tsx`（65%）新增 3 个
+  用例：缺 jobId 提示、产物列表打开/关闭 + 产物预览内容渲染与关闭、产物获取失败时预览
+  内展示 `HTTP 500` 错误。两文件 lines 均 100%（剩余为 requestId 竞态守卫等分支，
+  statements 93.87%/98.55%）。
+- full gate 退出码 0（本机负载 47 下耗时偏高）：backend 2378 passed / 510.50s、frontend
+  154 files / 1147 tests（1133 + 14 新增）、Rust 全部通过、full_gate 32 passed / 96.75s、
+  backend combined coverage 93.41%、frontend lines 90.77%、coverage inventory 359/359、
+  production bundle 通过，0 rerun。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
