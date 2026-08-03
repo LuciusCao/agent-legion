@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 3D workflow upgrade cluster complete; remaining coverage clusters pending; performance targets open
+状态：Phase 3E transcription providers cluster complete; remaining coverage clusters pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -453,6 +453,22 @@ Phase 3D 执行记录（2026-08-03）：
   [30777220296](https://github.com/LuciusCao/agent-legion/actions/runs/30777220296)
   首次 frontend job 因 Docker Hub 拉取 `postgres:17` 连续超时失败（基础设施抖动，与改动无关），
   `--failed` 重跑后 backend、frontend、rust、ci-extended 全部通过。
+
+Phase 3E 执行记录（2026-08-03）：
+
+- `services/transcription_providers.py` 基线 28%；新增
+  `tests/services/test_transcription_providers.py` 4 个纯单元用例：默认配置（timeout 900、
+  sensevoice 路径锚定 root_dir）、自定义 timeout/binary/model/vad、`~` 展开与相对/绝对路径
+  解析、缺失 VAD 模型抛 `FileNotFoundError`。tracked config 自带 `vad_model` 默认路径，测试
+  显式覆写 `settings.config["asr"]` 避免机器差异。聚焦覆盖率 100%（18/18）；用例无 postgres
+  依赖，数据库不可达时 4/4 通过。
+- full gate 首轮在本机 load average 73+ 下出现 9 个超时类失败：backend 为 Phase 0 已记录的
+  已知时序 flaky `test_local_executor_cancel_during_run`，frontend 为 8 个 5000ms test
+  timeout（SetupPage/SettingsPage/AddDialog/InteractionOverlay）。隔离复跑 backend 1/1、
+  frontend 42/42 通过，确认为负载抖动而非断言回归；该现象并入 Phase 5 flaky 观测。
+- 负载回落后重跑退出码 0：backend 2364 passed（2360 + 4 新增）/ 169.54s、frontend
+  142 files / 1089 tests、Rust 全部通过、full_gate 32 passed / 10.37s、combined coverage
+  93.26%，0 rerun，目标模块在合并报告中 100%。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
