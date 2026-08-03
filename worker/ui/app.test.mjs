@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -192,4 +192,17 @@ test("hasChartData 任一 key 有非空值即为 true，全 null/空数组为 fa
   assert.equal(hasChartData([{ active_executions: null }, { active_executions: 2 }], ["active_executions"]), true);
   assert.equal(hasChartData([{ active_executions: null, input_tokens: null }], ["active_executions", "input_tokens"]), false);
   assert.equal(hasChartData([], ["active_executions"]), false);
+});
+
+test("runOccupancy 只统计占用运行槽位的阶段", () => {
+  const executions = [
+    { phase: "claimed" },
+    { phase: "downloading" },
+    { phase: "running" },
+    { phase: "queued_upload" },
+    { phase: "uploading" },
+  ];
+  assert.equal(runOccupancy(executions), 3);
+  assert.equal(runOccupancy([]), 0);
+  assert.equal(runOccupancy(undefined), 0);
 });

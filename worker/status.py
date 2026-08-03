@@ -44,14 +44,13 @@ class ExecutionStatusReporter:
         return cls(Path(raw) if raw else None)
 
     def start(self, execution_id: str, **fields: Any) -> None:
-        entry = {
-            "execution_id": execution_id,
-            **fields,
-            "phase": "claimed",
-            "started_at": datetime.now(UTC).isoformat(),
-        }
         with self._lock:
-            self._executions[execution_id] = entry
+            self._executions[execution_id] = {
+                "execution_id": execution_id,
+                **fields,
+                "phase": "claimed",
+                "started_at": datetime.now(UTC).isoformat(),
+            }
             self._flush()
 
     def set_phase(self, execution_id: str, phase: str) -> None:
@@ -59,6 +58,17 @@ class ExecutionStatusReporter:
             if execution_id in self._executions:
                 self._executions[execution_id]["phase"] = phase
                 self._flush()
+
+    def upsert_phase(self, execution_id: str, phase: str, **fields: Any) -> None:
+        with self._lock:
+            if execution_id not in self._executions:
+                self._executions[execution_id] = {
+                    "execution_id": execution_id,
+                    **fields,
+                    "started_at": datetime.now(UTC).isoformat(),
+                }
+            self._executions[execution_id]["phase"] = phase
+            self._flush()
 
     def finish(self, execution_id: str) -> None:
         with self._lock:
