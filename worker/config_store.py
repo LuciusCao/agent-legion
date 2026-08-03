@@ -14,7 +14,7 @@ import yaml
 from worker import worker_declarations
 from worker._atomic import atomic_write
 from worker.registration_token import normalized_registration_token
-from worker.runtime_controls import validate_claim_controls
+from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
@@ -25,6 +25,7 @@ _EDITABLE_FIELDS = {
     "name",
     "runtimes",
     "max_concurrency",
+    "upload_max_concurrency",
     "models",
     "labels",
     "poll_interval_seconds",
@@ -39,6 +40,7 @@ _DEFAULTS: dict[str, Any] = {
     "name": "",
     "runtimes": ["pi"],
     "max_concurrency": 1,
+    "upload_max_concurrency": 4,
     "models": [],
     "labels": {},
     "register_token_file": "/run/secrets/agent_worker_register_token",
@@ -82,6 +84,13 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
+    upload_concurrency = config.get("upload_max_concurrency")
+    if (
+        isinstance(upload_concurrency, bool)
+        or not isinstance(upload_concurrency, int)
+        or not 1 <= upload_concurrency <= MAX_DYNAMIC_CONCURRENCY
+    ):
+        raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
     capabilities = worker_declarations.normalize_capabilities(config.get("capabilities", []))
     models = worker_declarations.normalize_models(config.get("models", []))
@@ -107,6 +116,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "name": name,
         "runtimes": runtimes,
         "max_concurrency": concurrency,
+        "upload_max_concurrency": upload_concurrency,
         "claim_enabled": claim_enabled,
         "capabilities": capabilities,
         "labels": normalized_labels,
