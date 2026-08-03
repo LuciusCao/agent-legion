@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 4C complete locally (rerun smoke, nightly stress + multi-browser wired); CI acceptance pending; performance targets open
+状态：Phase 4 complete (CI accepted); Phase 5A-5C done (5C CI pending 30805689114); 5C-2/5D and final acceptance pending
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -696,6 +696,49 @@ Phase 4C 执行记录（2026-08-03，rerun smoke + nightly stress/多浏览器�
   CMS 用 env-only dummy token（G2 合规），不碰 $HOME。本机 scrubbed env
   （受限 PATH + SKIP_DOTENV）精确复现 CI 失败并验证 stub 后 1s 通过
   `/api/health`。full gate 退出码 0（2389 passed / 115.64s，combined 93.49%）。
+- CI 复验（run [30803694145](https://github.com/LuciusCao/agent-legion/actions/runs/30803694145)）：
+  `nightly-e2e` 通过（14.6 分钟，含三浏览器 smoke + 50/2000/300s stress）；同时该 run
+  首次验证了 5A/5B 拓扑（见下）与 stress probe 放宽（`697a106f`）。
+
+Phase 5A/5B 执行记录（2026-08-03，frontend CI 拓扑）：
+
+- 5A：api:check 移到 backend job（已有 Python+PG）；frontend 各 job 不再安装 uv 与
+  postgres service，test summary 改用系统 python3（stdlib-only 脚本）。
+- 5B：frontend 拆为 `frontend-logic`（node project + static + bundle）、
+  `frontend-component`（jsdom project）与 `frontend-coverage`（下载两 shard 的
+  blob 测试报告，`vitest --merge-reports` 合并后强制 vite.config thresholds +
+  359 文件 inventory）。`check-quick-frontend.sh` 新增 `FRONTEND_TEST_PROJECT` /
+  `FRONTEND_COVERAGE_BLOB_DIR`（shard 内 threshold 置 0，合并报告统一强制），
+  默认本地路径不变，含契约测试。blob artifact retention 1 天。
+- CI 验收（提交 `2aceae5f`，run 30803694145）：全部通过；实测 frontend-component
+  3.8 分钟、frontend-logic 1.5 分钟、frontend-coverage 0.4 分钟——frontend 关键路径
+  由 9m06s 降至 3.8 分钟，远优于 6 分钟预估。backend job 9.2 分钟成为新关键路径，
+  由 5C 处理。
+
+Phase 5C 执行记录（2026-08-03，backend CI 拆分）：
+
+- backend 拆为 `backend-unit`（无 PG service：static + 离线 unit tier）与
+  `backend-postgres`（api:check、bwrap、postgres tier、full gate、coverage 合并与
+  summary）。两层各写独立 `COVERAGE_FILE`，backend-postgres 下载 unit 的 1 天
+  artifact 后 `coverage combine`，单次 85% floor 语义不变；unit artifact 缺失时
+  download 直接失败变红，不用部分数据算 floor。合并放在 backend-postgres 尾部
+  而非独立 job（独立 job 会多 ~90s 串行 setup 尾巴）。契约测试同步更新。
+- full gate 退出码 0（backend 2390 passed / 139.01s、frontend 154 files /
+  1147 tests、full_gate 32 passed / 11.28s、combined 93.50%，0 rerun）。
+- CI 验收：提交 `8d9881d4`，run
+  [30805689114](https://github.com/LuciusCao/agent-legion/actions/runs/30805689114)（待确认）。
+- 已知余量：backend-postgres 预计 ~8.2 分钟（postgres tier 269s + 不可压缩 setup），
+  要进 6 分钟需 5C-2 把 postgres tier 再分片（机制与 frontend blob 分片类似，
+  改 tier 语义，需契约测试）。
+
+Phase 5D 观察清单（flaky registry 原始数据）：
+
+- `test_local_executor_cancel_during_run`：时序 flaky，Phase 0 起多次复现（负载相关）。
+- 负载 40+ 下 frontend 组件测试 5s timeout 批量抖动（3E/3K 多次，隔离复跑均过）。
+- xdist coverage combine 在高负载下丢失 postgres worker 数据一次（5B gate 首轮 59%，
+  复跑 93.5% 恢复；若复现需查 pytest-cov worker 数据回收）。
+- CI 基础设施：Docker Hub 拉取 postgres:17 超时（3D 一次）、artifact API 503（一次性）。
+- stress probe 单次超时（4C nightly 首跑，已通过 env 阈值放宽处理，p95 断言仍严格）。
 
 ### Phase 5：CI 拆分、依赖去重与 flaky 治理
 
