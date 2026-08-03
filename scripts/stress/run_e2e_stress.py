@@ -28,8 +28,10 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 
+from scripts.stress._e2e_frontend import run_frontend_stress  # noqa: E402
 from scripts.stress._e2e_readiness import wait_for_server, wait_for_snapshot_readiness  # noqa: E402
 from scripts.stress._e2e_report import E2EStressReport, write_report  # noqa: E402
+from scripts.stress._stress_auth import ensure_admin_session, session_cookie  # noqa: E402
 
 logger = logging.getLogger(__name__)
 STRESS_RESULTS = PROJECT_ROOT / "stress-results"
@@ -175,40 +177,6 @@ def _run_backend_stress(
     return proc, backend_results / "backend-metrics.json", cmd
 
 
-def _run_frontend_stress(
-    base_url: str,
-    workspace: str,
-    browser: str,
-    duration: int,
-    run_dir: Path,
-) -> tuple[Path | None, list[str], str | None]:
-    frontend_results = run_dir / "frontend"
-    frontend_results.mkdir(parents=True, exist_ok=True)
-
-    npm = shutil.which("npm")
-    if npm is None:
-        return None, [], "npm not found; frontend stress cannot run"
-
-    env = os.environ.copy()
-    env["STRESS_BASE_URL"] = base_url
-    env["STRESS_WORKSPACE"] = workspace
-    env["STRESS_DURATION"] = str(duration)
-    env["STRESS_BROWSER"] = browser
-    env["STRESS_RESULTS_DIR"] = str(frontend_results)
-
-    cmd = [npm, "run", "stress:workspace", "--", "--reporter=line"]
-    logger.info("Running frontend stress: %s", " ".join(cmd))
-    try:
-        subprocess.run(cmd, cwd=FRONTEND_DIR, env=env, check=True)
-    except subprocess.CalledProcessError as exc:
-        return None, cmd, str(exc)
-    except Exception as exc:  # noqa: BLE001
-        return None, cmd, str(exc)
-
-    metrics_path = frontend_results / "frontend-metrics.json"
-    return (metrics_path if metrics_path.exists() else None), cmd, None
-
-
 def _terminate_process(proc: subprocess.Popen) -> None:
     if proc.poll() is not None:
         return
@@ -276,14 +244,24 @@ def run(
             )
             report.backend_metrics_path = str(backend_metrics_path.relative_to(PROJECT_ROOT))
 
-            if not wait_for_snapshot_readiness(backend_base_url, workspace, min_jobs=jobs):
+            # Workspace APIs require an authenticated session; the same
+            # session drives snapshot readiness and the browser cookie.
+            session = ensure_admin_session(backend_base_url)
+            if not wait_for_snapshot_readiness(
+                backend_base_url, workspace, min_jobs=jobs, session=session
+            ):
                 report.errors.append(
                     "Workspace snapshot did not become ready before frontend stress"
                 )
 
             if not skip_frontend and not report.errors:
-                frontend_metrics_path, frontend_cmd, frontend_error = _run_frontend_stress(
-                    frontend_base_url, workspace, browser, duration, run_dir
+                frontend_metrics_path, frontend_cmd, frontend_error = run_frontend_stress(
+                    frontend_base_url,
+                    workspace,
+                    browser,
+                    duration,
+                    run_dir,
+                    session_cookie(session),
                 )
                 report.frontend_command = shlex.join(frontend_cmd)
                 if frontend_error is not None:

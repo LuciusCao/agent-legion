@@ -248,6 +248,76 @@ jobs:
           path: frontend/e2e-results/
           retention-days: 5
 
+  # Nightly workspace stress + multi-browser smoke (test architecture plan,
+  # Phase 4C). The stress step runs the existing five-minute scenario against
+  # a real backend and uploads report.md + frontend-metrics.json for
+  # diagnostics; the smoke step re-runs the deterministic browser suite on
+  # Firefox/WebKit as well (PR/push stays Chromium-only via E2E_BROWSERS).
+  # Stress profile rationale: 50 agents / 2000 jobs / 300s at 200 events/s
+  # keeps the page under live SSE traffic long enough for stable click
+  # latency / long task / memory samples while the whole job stays well
+  # under the 45-minute timeout (local 5-agent/60s validation: ~95s total).
+  nightly-e2e:
+    name: nightly-e2e
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_legion_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: uv sync
+
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: frontend
+
+      - name: Multi-browser smoke E2E
+        run: uv run python scripts/e2e/run_browser_smoke.py
+        env:
+          AGENT_LEGION_E2E_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          E2E_BROWSERS: chromium,firefox,webkit
+
+      - name: Workspace stress run
+        run: >-
+          uv run python scripts/stress/run_e2e_stress.py
+          --agents 50 --jobs 2000 --duration 300 --event-rate 200
+
+      - name: Upload stress report and metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-stress-${{ github.run_id }}
+          path: stress-results/
+          retention-days: 14
+
   rust:
     name: rust
     runs-on: ubuntu-latest
