@@ -16,6 +16,7 @@ from typing import Any
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.metrics_cache import METRICS_FILENAME
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
+from worker.status_aggregates import execution_counts
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
@@ -201,6 +202,7 @@ class WorkerSupervisor:
                 "failed": self._failed_reason,
             }
         runtime = read_runtime_status(self.store.state_dir / STATUS_FILENAME)
+        executions = runtime["executions"]
         remote = runtime["remote"] if configured else {}
         if configured and not remote:
             remote = {
@@ -219,9 +221,11 @@ class WorkerSupervisor:
             "configured": configured,
             "claim_enabled": config["claim_enabled"],
             "max_concurrency": config["max_concurrency"],
+            "upload_max_concurrency": config.get("upload_max_concurrency", 4),
+            **execution_counts(executions),
             "bootstrap_error": self.store.bootstrap_error,
             "mounted_config_diverged": self._mounted_config_diverged(),
             **snapshot,
-            "current_executions": runtime["executions"],
+            "current_executions": executions,
             **remote,
         }

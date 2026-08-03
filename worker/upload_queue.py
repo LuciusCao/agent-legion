@@ -133,7 +133,8 @@ class UploadQueue:
         """
         marker = task.execution_dir / PENDING_FILENAME
         marker.write_text(json.dumps(task.to_json(), ensure_ascii=False), encoding="utf-8")
-        self._status.set_phase(task.execution_id, "queued_upload")
+        # upsert: 重启恢复的任务在 reporter 里尚无条目，积压期间也要以 queued_upload 可见。
+        self._status.upsert_phase(task.execution_id, "queued_upload", **task.status_fields)
         with self._lock:
             self._depth += 1
         self._pool.submit(self._run, task)
@@ -168,6 +169,7 @@ class UploadQueue:
     def _run(self, task: UploadTask) -> None:
         if task.heartbeat_thread is None:
             # Restored from disk: resume heartbeating so the lease survives.
+            # The status entry already exists — submit() upserted it at restore.
             task.heartbeat_thread = upload_heartbeat.start_upload_heartbeat(
                 self._client,
                 task.execution_id,
@@ -175,7 +177,6 @@ class UploadQueue:
                 task.heartbeat_stop,
                 self._heartbeat_interval,
             )
-            self._status.start(task.execution_id, **task.status_fields)
         try:
             self._deliver(task)
         except Exception as exc:
