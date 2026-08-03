@@ -77,8 +77,8 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     if len(name) > 128:
         raise ValueError("Worker 名称不能超过 128 个字符")
     runtimes = sorted(set(str(value) for value in config.get("runtimes", [])))
-    if not runtimes or any(value not in {"pi", "openclaw"} for value in runtimes):
-        raise ValueError("运行时必须至少选择 pi 或 openclaw 之一")
+    if not runtimes or any(value not in {"pi", "openclaw", "velites"} for value in runtimes):
+        raise ValueError("运行时必须至少选择 pi、openclaw 或 velites 之一")
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
