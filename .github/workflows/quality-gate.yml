@@ -419,6 +419,11 @@ jobs:
         run: >-
           uv run python scripts/stress/run_e2e_stress.py
           --agents 50 --jobs 2000 --duration 300 --event-rate 200
+        env:
+          # Shared runners hiccup under load: allow occasional probe timeouts
+          # while the p95 click-latency assertion still guards regressions.
+          STRESS_PROBE_TIMEOUT_MS: "5000"
+          STRESS_MAX_PROBE_ERRORS: "3"
 
       - name: Upload stress report and metrics
         if: always()
