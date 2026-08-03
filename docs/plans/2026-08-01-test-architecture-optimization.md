@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 3E transcription providers cluster complete; remaining coverage clusters pending; performance targets open
+状态：Phase 3 backend coverage clusters complete (3D-3H, CI accepted); frontend blind spots pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -503,6 +503,9 @@ Phase 3H 执行记录（2026-08-03）：
   `tests/services/test_agent_artifacts.py`（已加入 `_POSTGRES_TEST_FILES`）2 个用例：输入文件
   上传为内容寻址 blob + `artifact_refs` 落库 + manifest 改写为 `refs` 模式，以及空 inputs 的
   空映射。聚焦覆盖率 100%（13/13），与 3G 共用同一次 full gate（指标见上）。
+- GitHub Actions 验收（提交 `85dec7c6`、`632129cb`、`36857eb0`）：run
+  [30780617385](https://github.com/LuciusCao/agent-legion/actions/runs/30780617385)
+  backend、frontend、rust、ci-extended 全部通过，Phase 3 后端六个低覆盖模块全部达标。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
