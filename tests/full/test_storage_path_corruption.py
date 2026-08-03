@@ -19,6 +19,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_deletion import JobDeletionService
+from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError
 from tests.helpers import ensure_legacy_workspace_tables
@@ -91,10 +92,11 @@ def test_job_delete_rejects_outside_sibling_storage(tmp_path: Path) -> None:
         str(outside / "escaped_job"),
     )
 
-    result = service.delete(job["workspace_id"], job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete(job["workspace_id"], job["id"])
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "delete_failed"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "delete_failed"
     assert sentinel.read_text(encoding="utf-8") == "outside"
     assert job_db.get_job(job["id"]) is not None
     assert not (outside / ".trash").exists()
@@ -121,10 +123,11 @@ def test_job_delete_rejects_symlink_escape_storage(tmp_path: Path) -> None:
         str(link / "escaped_job"),
     )
 
-    result = service.delete(job["workspace_id"], job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete(job["workspace_id"], job["id"])
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "delete_failed"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "delete_failed"
     assert sentinel.read_text(encoding="utf-8") == "outside"
     assert job_db.get_job(job["id"]) is not None
     assert not (outside / ".trash").exists()

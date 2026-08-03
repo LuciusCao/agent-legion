@@ -234,7 +234,9 @@ def test_velites_flavor_end_to_end(tmp_path: Path) -> None:
         for e in events
         if e["type"] == "message_end" and e["message"].get("usage")
     ]
-    assert [u["input"] for u in usages] == [11, 23]
+    # usage.input 口径 = prompt_tokens - cacheRead（pi 口径，缓存不双重计费）：
+    # 第一跳 11 - 3 = 8，第二跳无缓存 23。
+    assert [u["input"] for u in usages] == [8, 23]
 
     # 声明产物落盘 + run.json。
     assert (job_dir / OUTPUT_NAME).is_file()
@@ -246,9 +248,9 @@ def test_velites_flavor_end_to_end(tmp_path: Path) -> None:
     with job_db.connect() as conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
     assert row is not None
-    assert row["input_tokens"] == 34
+    assert row["input_tokens"] == 31
     assert row["output_tokens"] == 12
     assert row["cache_read_tokens"] == 3
-    assert row["total_tokens"] == 49
+    assert row["total_tokens"] == 46
     assert row["provider"] == "gateway"
     assert row["model"] == "stub-model"
