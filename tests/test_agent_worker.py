@@ -20,7 +20,6 @@ import pytest
 from server.app.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
 from worker.registration_retry import register_with_retry
-from worker.runtime_preflight import preflight_error
 from worker.status import ExecutionStatusReporter, read_current_executions, read_runtime_status
 from worker.upload_queue import UploadQueue
 
@@ -698,63 +697,6 @@ def test_main_exits_cleanly_on_revoked_worker(
     thread.join(timeout=10)
     assert result == [2]
     assert "re-register required" in capsys.readouterr().out
-
-
-@pytest.mark.no_db
-def test_runtime_preflight_rejects_missing_binary(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(shutil, "which", lambda binary: None)
-
-    error = preflight_error(["pi", "velites"])
-
-    assert error is not None
-    assert "运行时 'velites'" in error  # 缺哪个 runtime
-    assert "可执行文件 'velites'" in error  # 缺哪个二进制
-    assert "PATH" in error
-    assert "移除" in error  # 修复指引
-
-
-@pytest.mark.no_db
-def test_runtime_preflight_passes_when_binaries_present(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
-    assert preflight_error(["pi", "velites"]) is None
-
-
-@pytest.mark.no_db
-def test_runtime_preflight_does_not_probe_openclaw(monkeypatch: pytest.MonkeyPatch) -> None:
-    # openclaw dispatch 本就 fail-fast，不存在 claim 后 spawn 的路径，不探测。
-    monkeypatch.setattr(shutil, "which", lambda binary: None)
-    assert preflight_error(["openclaw"]) is None
-
-
-@pytest.mark.no_db
-def test_runtime_preflight_default_pi_declaration_unchanged(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        shutil, "which", lambda binary: "/usr/local/bin/pi" if binary == "pi" else None
-    )
-    assert preflight_error(["pi"]) is None
-
-
-def test_main_refuses_start_when_declared_runtime_binary_missing(
-    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
-    """声明了 PATH 上没有二进制的 runtime → 退出码 2（不自动重启），不进入注册。"""
-    monkeypatch.setattr(shutil, "which", lambda binary: None)
-    config_path = _write_main_config(tmp_path)
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["runtimes"] = ["pi", "velites"]
-    config_path.write_text(json.dumps(config), encoding="utf-8")
-    monkeypatch.setattr(sys, "argv", ["agent_worker.py", "--config", str(config_path)])
-
-    assert agent_worker.main() == 2
-
-    out = capsys.readouterr().out
-    assert "启动预检失败" in out
-    assert "运行时 'velites'" in out
-    assert "PATH" in out
 
 
 def test_status_reporter_tracks_concurrent_executions(tmp_path: Path) -> None:

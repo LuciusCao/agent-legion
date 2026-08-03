@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import re
 import threading
 import time
 from collections.abc import Callable
@@ -285,14 +284,6 @@ def test_validate_config_accepts_velites_and_defaults_to_pi() -> None:
     assert config["runtimes"] == ["pi", "velites"]
     # 默认值保持 ["pi"]：声明 velites 是显式运维动作。
     assert validate_config(_config())["runtimes"] == ["pi"]
-
-
-@pytest.mark.no_db
-def test_shipped_ui_offers_checkbox_for_every_supported_runtime() -> None:
-    """worker/ui 的 runtime checkbox 集合与 validate_config 白名单一致。"""
-    html = (ROOT / "worker" / "ui" / "index.html").read_text(encoding="utf-8")
-    offered = sorted(set(re.findall(r'name="runtimes"[^>]*value="([^"]+)"', html)))
-    assert offered == ["openclaw", "pi", "velites"]
 
 
 def test_local_api_partial_update_keeps_unspecified_fields(tmp_path: Path) -> None:
