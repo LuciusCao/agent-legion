@@ -469,6 +469,19 @@ Phase 3E 执行记录（2026-08-03）：
 - 负载回落后重跑退出码 0：backend 2364 passed（2360 + 4 新增）/ 169.54s、frontend
   142 files / 1089 tests、Rust 全部通过、full_gate 32 passed / 10.37s、combined coverage
   93.26%，0 rerun，目标模块在合并报告中 100%。
+- GitHub Actions 验收（提交 `ff2adb62`）：run
+  [30779090551](https://github.com/LuciusCao/agent-legion/actions/runs/30779090551)
+  backend、frontend、rust、ci-extended 全部通过。
+
+Phase 3F 执行记录（2026-08-03）：
+
+- `workflows/skill_version_fallbacks.py` 基线 39%；新增
+  `tests/workflows/test_skill_version_fallbacks.py` 6 个纯单元用例：capability→skill 映射只覆盖
+  skill-backed 节点、无映射/空 skill/缺 snapshot/缺 settings 均返回空、job_db stub 下全部节点
+  标记 `unavailable`（空 node_key 跳过）、数据库异常返回空。聚焦覆盖率 100%（23/23）。
+- full gate 退出码 0：backend 2370 passed（2364 + 6 新增）/ 178.75s、frontend
+  142 files / 1089 tests、Rust 全部通过、full_gate 32 passed / 17.34s、combined coverage
+  93.35%，0 rerun。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
