@@ -8,7 +8,7 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, TypedDict
+from typing import Any, NoReturn, TypedDict
 
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -17,6 +17,7 @@ from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services._job_batch_ops import batch_delete as _batch_delete
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_artifact_gc import gc_deleted_job_artifacts, read_artifact_candidates
+from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
@@ -44,6 +45,10 @@ class JobDeleteResult(TypedDict):
     status: str
     reason_code: str | None
     message: str | None
+
+
+def _fail(job_id: str, reason_code: str | None, message: str) -> NoReturn:
+    raise JobOperationError(job_id, "delete", "failed", None, reason_code, message)
 
 
 class JobDeletionService:
@@ -88,21 +93,11 @@ class JobDeletionService:
     def delete(self, workspace_id: str, job_id: str) -> JobDeleteResult:
         job = self.job_db.get_job(job_id)
         if job is None:
-            return self._result(job_id, "failed", "not_found", "Job not found")
+            _fail(job_id, "not_found", "Job not found")
         if job["workspace_id"] != workspace_id:
-            return self._result(
-                job_id,
-                "failed",
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
-            )
+            _fail(job_id, "wrong_workspace", f"Job does not belong to workspace {workspace_id}")
         if self.lease_repo.has_active_for_job(job_id, self._now()):
-            return self._result(
-                job_id,
-                "failed",
-                "active_lease",
-                "Cannot delete a job with an active executor lease",
-            )
+            _fail(job_id, "active_lease", "Cannot delete a job with an active executor lease")
 
         log_paths = [
             Path(log_path)
@@ -112,7 +107,7 @@ class JobDeletionService:
         try:
             storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
         except ManagedPathError as exc:
-            return self._result(job_id, "failed", "delete_failed", str(exc))
+            _fail(job_id, "delete_failed", str(exc))
 
         artifact_candidates = read_artifact_candidates(self.artifact_store, job_id)
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
@@ -147,25 +142,15 @@ class JobDeletionService:
             try:
                 self._restore_paths(restore_paths)
             except DeletionRollbackConflict as rollback_exc:
-                return self._result(
-                    job_id,
-                    "failed",
-                    "rollback_conflict",
-                    str(rollback_exc),
-                )
-            return self._result(job_id, "failed", exc.reason_code, str(exc))
+                _fail(job_id, "rollback_conflict", str(rollback_exc))
+            _fail(job_id, exc.reason_code, str(exc))
         except Exception as exc:
             logger.exception("Unexpected error deleting job %s", job_id)
             try:
                 self._restore_paths(restore_paths)
             except DeletionRollbackConflict as rollback_exc:
-                return self._result(
-                    job_id,
-                    "failed",
-                    "rollback_conflict",
-                    str(rollback_exc),
-                )
-            return self._result(job_id, "failed", "delete_failed", str(exc))
+                _fail(job_id, "rollback_conflict", str(rollback_exc))
+            _fail(job_id, "delete_failed", str(exc))
 
         self._cleanup_staged_paths(job_id, staged_storage, staged_logs)
         self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)

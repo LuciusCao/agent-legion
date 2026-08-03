@@ -6,7 +6,7 @@ from pathlib import Path
 
 from server.app.db.connection import DatabaseConnection
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
-from server.app.executors._lease_control import _sync_job_status
+from server.app.executors._lease_control import sync_job_status
 from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ConfigurationFailureRequest
 from server.app.services import failure_classification
@@ -33,5 +33,5 @@ def fail_without_lease(
     )
     if node_run_id is None:
         return None
-    _sync_job_status(conn, request.job_id)
+    sync_job_status(conn, request.job_id)
     return node_run_id

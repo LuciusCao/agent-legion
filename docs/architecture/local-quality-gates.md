@@ -32,7 +32,7 @@ evidence from a trimmed run is never reused for a different lane set or tier.
 The smoke tier (`GATE_TIER=smoke`) replaces the backend pytest lane with a
 curated subset — every architecture governance test plus one core behavioral
 file per subsystem, assigned by path in `tests/conftest.py`
-(`_SMOKE_TEST_FILES`) and selected with `-m "smoke and not repository_gate"`.
+(`_SMOKE_TEST_FILES`) and selected with `-m "smoke"`.
 It runs without coverage because the 85% floor only applies to the full
 suite. Keep the tier under ~90 seconds: when adding tests for a new
 subsystem, add one core file to the smoke set rather than raising the budget.

@@ -24,8 +24,8 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflow_worker_execution import reap_futures
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.execution import reap_futures
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
 from tests.helpers.auth import authenticate_client
 

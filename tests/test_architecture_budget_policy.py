@@ -16,6 +16,8 @@ from scripts.architecture.budget_policy import (
     load_budget_policy,
 )
 
+pytestmark = pytest.mark.no_db
+
 VALID_POLICY = {
     "version": 1,
     "production": {

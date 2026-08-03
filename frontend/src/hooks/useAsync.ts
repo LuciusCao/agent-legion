@@ -17,6 +17,11 @@ export interface UseAsyncOptions {
    * (data=null, loading=true, error='') before invoking the task.
    */
   resetOnRun?: boolean
+  /**
+   * When set, the task re-runs every `refetchInterval` ms until cleanup.
+   * Poll runs apply only data (or error) and leave the loading flag untouched.
+   */
+  refetchInterval?: number
 }
 
 /**
@@ -43,26 +48,31 @@ export function useAsync<T>(
       setLoading(true)
       setError('')
     }
-    Promise.resolve()
-      .then(task)
-      .then((value) => {
-        if (cancelled) return
-        setData(value)
-        setError('')
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setData(null)
-        setError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+    const run = () =>
+      Promise.resolve()
+        .then(task)
+        .then((value) => {
+          if (cancelled) return
+          setData(value)
+          setError('')
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setData(null)
+          setError(err instanceof Error ? err.message : String(err))
+        })
+    void run().finally(() => {
+      if (!cancelled) setLoading(false)
+    })
+    const interval = options?.refetchInterval
+    const timer =
+      interval != null ? setInterval(() => void run(), interval) : null
     return () => {
       cancelled = true
+      if (timer !== null) clearInterval(timer)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [...deps, enabled])
+  }, [...deps, enabled, options?.refetchInterval])
 
   return { data, loading, error }
 }

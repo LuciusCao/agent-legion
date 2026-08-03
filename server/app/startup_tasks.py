@@ -7,7 +7,7 @@ if TYPE_CHECKING:
     from fastapi import FastAPI
 
     from server.app.agent_broadcast import AgentBroadcastController
-    from server.app.job_events import WorkspaceJobEventAggregator
+    from server.app.events.aggregator import WorkspaceJobEventAggregator
     from server.app.services.ops_metrics import OpsMetricsService
 
 from server.app.job_intake_background import consume_intake_batches

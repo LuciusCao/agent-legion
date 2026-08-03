@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import http.client
 import json
-import time
 import urllib.error
 from pathlib import Path
 from typing import Any
+
+from worker._retry import run_with_retry
 
 # Transient network errors (timeout/reset/refused) and Host 5xx get
 # exponential backoff (1s, 2s, 4s, …). Socket timeouts surface as
@@ -39,8 +40,8 @@ class HostRequestError(RuntimeError):
         self.status = status
 
 
-def _error_text(exc: BaseException) -> str:
-    return str(exc) or type(exc).__name__
+class _TransientTransferError(RuntimeError):
+    """Internal carrier for one retried attempt's failure message."""
 
 
 class TransferOperations:
@@ -79,21 +80,29 @@ class TransferOperations:
         transient condition). Exhaustion raises RuntimeError carrying the
         last error with the call-site label as context.
         """
-        error = ""
-        for attempt in range(_RETRY_MAX_ATTEMPTS):
+
+        def attempt() -> tuple[int, bytes]:
             try:
                 status, body = self.request(
                     method, path, data=data, headers=headers, timeout=timeout
                 )
             except _TRANSIENT_ERRORS as exc:
-                error = _error_text(exc)
-            else:
-                if status < 500:
-                    return status, body
-                error = f"HTTP {status}: {body[:200]!r}"
-            if attempt + 1 < _RETRY_MAX_ATTEMPTS:
-                time.sleep(_RETRY_BACKOFF_BASE_SECONDS * 2**attempt)
-        raise RuntimeError(f"{label}: {error}")
+                raise _TransientTransferError(str(exc) or type(exc).__name__) from exc
+            if status >= 500:
+                raise _TransientTransferError(f"HTTP {status}: {body[:200]!r}")
+            return status, body
+
+        try:
+            result = run_with_retry(
+                attempt,
+                retriable=(_TransientTransferError,),
+                base_seconds=_RETRY_BACKOFF_BASE_SECONDS,
+                max_attempts=_RETRY_MAX_ATTEMPTS,
+            )
+        except _TransientTransferError as exc:
+            raise RuntimeError(f"{label}: {exc}") from exc
+        assert result is not None  # no stop event: the loop exits via return/raise
+        return result
 
     def download(self, path: str, destination: Path) -> None:
         status, body = self._request_with_retry(

@@ -4,8 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from scripts.architecture.budget_inventory import BudgetInventory, build_budget_inventory
 from scripts.architecture.budget_policy import BudgetPolicy, ProductionRoot, TestRoot
+
+pytestmark = pytest.mark.no_db
 
 
 def write_files(root: Path, *paths: str) -> None:

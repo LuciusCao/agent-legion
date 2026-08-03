@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import {
   listMembers,
   listUsers,
   putMember,
   removeMember,
 } from '../../api/authApi'
-import type { MemberResponse, UserResponse } from '../../api/authApi'
+import type { MemberResponse } from '../../api/authApi'
+import { useAsync } from '../../hooks/useAsync'
 import settingsStyles from '../../pages/SettingsPage.module.css'
 import styles from './WorkspaceMembersSection.module.css'
 
@@ -18,28 +19,18 @@ function errorMessage(error: unknown): string {
 }
 
 export function WorkspaceMembersSection({ workspaceId }: Props) {
-  const [members, setMembers] = useState<MemberResponse[]>([])
-  const [users, setUsers] = useState<UserResponse[]>([])
   const [selectedUserId, setSelectedUserId] = useState('')
   const [role, setRole] = useState<'editor' | 'viewer'>('editor')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([listMembers(workspaceId), listUsers()])
-      .then(([memberList, userList]) => {
-        if (cancelled) return
-        setMembers(memberList)
-        setUsers(userList)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(errorMessage(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId])
+  const { data: lists, error: listError } = useAsync(
+    () => Promise.all([listMembers(workspaceId), listUsers()]),
+    [workspaceId, refreshKey]
+  )
+  const members = lists?.[0] ?? []
+  const users = lists?.[1] ?? []
 
   const memberIds = new Set(members.map((m) => m.id))
   const candidates = users.filter(
@@ -51,10 +42,9 @@ export function WorkspaceMembersSection({ workspaceId }: Props) {
     setError('')
     setLoading(true)
     try {
-      setMembers(
-        await putMember(workspaceId, { user_id: selectedUserId, role })
-      )
+      await putMember(workspaceId, { user_id: selectedUserId, role })
       setSelectedUserId('')
+      setRefreshKey((key) => key + 1)
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -66,7 +56,8 @@ export function WorkspaceMembersSection({ workspaceId }: Props) {
     if (!window.confirm(`确定要移除成员「${member.username}」吗？`)) return
     setError('')
     try {
-      setMembers(await removeMember(workspaceId, member.id))
+      await removeMember(workspaceId, member.id)
+      setRefreshKey((key) => key + 1)
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -77,9 +68,9 @@ export function WorkspaceMembersSection({ workspaceId }: Props) {
       <h2 className={settingsStyles.sectionTitle}>成员管理</h2>
       <hr className={settingsStyles.sectionDivider} />
       <div>
-        {error && (
+        {(error || listError) && (
           <p className={styles.error} role="alert">
-            {error}
+            {error || listError}
           </p>
         )}
 

@@ -2,7 +2,7 @@ import { Close } from '@mui/icons-material'
 import { Dialog, IconButton, Toolbar, Tooltip, Typography } from '@mui/material'
 import type { WorkflowDefinitionRecord } from '../../../types'
 import type { ExecutorDefinition } from '../../../types/executorTypes'
-import { DagGraph } from '../../../components/DagGraph'
+import { DagGraph } from '../../../components/dag/DagGraph'
 import { buildDagEdges, buildDagNodes } from '../workflowStudioDag'
 import styles from './WorkflowDagFullscreenDialog.module.css'
 

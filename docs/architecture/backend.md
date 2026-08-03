@@ -67,9 +67,8 @@ server/app/
 ├── video_capabilities/     # 视频能力合约与投影
 ├── executors/              # Executor 配置、Runtime、租赁调度
 ├── agents.py               # Agent 发现与状态跟踪
-├── workflow_worker_thread.py # DAG workflow worker 线程
-├── workflow_worker_ready.py  # 每 pass 一次的 ready 候选收集（批量状态查询）
-└── workflow_worker_schedule.py # ready 候选的 lease 认领与提交
+├── workflow_worker/      # DAG workflow worker：thread.py 线程、ready.py 每 pass
+│                         # 一次的 ready 候选收集、schedule.py lease 认领与提交
 ```
 
 ## Data Flow
@@ -235,7 +234,7 @@ server/app/
 | MemberResponse | BaseModel | id: str, username: str, display_name: str, user_role: Literal['admin', 'membe... | app/routes/auth_contracts.py |
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
-| HealthResponse | BaseModel | ok: bool | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None | app/routes/common.py |
 | ExecutorCapabilityResponse | BaseModel | name: str, handler: str | None, skill: str | None, tools: list[str], provider... | app/routes/executor_catalog_contracts.py |
 | ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['local', 'pi', 'openclaw'], global_capacity: int, capa... | app/routes/executor_catalog_contracts.py |
 | ExecutorCatalogResponse | BaseModel | executors: list[ExecutorDefinitionResponse], agents: list[AgentDefinitionResp... | app/routes/executor_catalog_contracts.py |
@@ -358,6 +357,7 @@ server/app/
 | WorkspaceSecretDeleteResponse | BaseModel | deleted: str | app/routes/workspace_secrets.py |
 | JobDeleteResult | TypedDict | job_id: str, operation: str, status: str, reason_code: str | None, message: s... | app/services/job_deletion.py |
 | LogEntry | TypedDict | type: str, title: str, detail: str, truncated: bool | app/services/job_log_renderer.py |
+| JobOperationResult | TypedDict | job_id: str, operation: str, status: str, node_key: str | None, reason_code: ... | app/services/job_operation_error.py |
 | CostBreakdown | BaseModel | currency: str, input: float, output: float, cache_read: float, total: float, ... | app/services/token_usage_contracts.py |
 | JobPackageItemResult | TypedDict | job_id: str, status: str, reason_code: str | None, message: str | None | app/services/workspace_package_contracts.py |
 | JobPackageResult | TypedDict | results: list[JobPackageItemResult], succeeded_count: int, failed_count: int,... | app/services/workspace_package_contracts.py |
@@ -439,6 +439,7 @@ Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py
 - `JobQueries.connect()` 与 `WorkspaceQueries.connect()` 是上下文管理器，确保 `conn.close()`。
 - `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
+- SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 
 ## New Subsystems
 
@@ -469,7 +470,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 ### Quality Subsystem
 
-`server/app/quality/` 在运行时检查架构不变量与豁免。
+`scripts/quality/` 提供架构不变量与豁免注册表的加载与校验（治理工具，不在 server 运行时路径上）。
 
 - `invariants.py`: 读取 `config/architecture/architecture-invariants.yaml` 并校验。
 - `exemptions.py`: 读取 `config/architecture/architecture-exemptions.yaml` 并校验。

@@ -13,8 +13,8 @@ import json
 import threading
 from datetime import UTC, datetime, timedelta
 
-from server.app._agent_broker_unclaimable import fail_unclaimable_model_requests
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
+from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
 from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
 from server.app.agent_workers import AgentWorkerRegistry
 from tests.postgres_support import TEST_DATABASE_URL

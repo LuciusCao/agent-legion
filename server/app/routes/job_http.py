@@ -10,6 +10,7 @@ from server.app.services.job_errors import (
     UnsupportedOperationError,
 )
 from server.app.services.job_log_raw import PayloadTooLargeError
+from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
 
 
@@ -28,3 +29,9 @@ def raise_job_http_error(error: JobServiceError) -> Never:
     if isinstance(error, (InvalidOperationError, ConflictError)):
         raise HTTPException(status_code=400, detail=str(error)) from error
     raise error
+
+
+def raise_job_operation_error(error: JobOperationError) -> Never:
+    """Map a failed/skipped single-job mutation to its HTTP error."""
+    status_code = 404 if error.reason_code in ("not_found", "node_not_found") else 400
+    raise HTTPException(status_code=status_code, detail=error.failure_detail) from error

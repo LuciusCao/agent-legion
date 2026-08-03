@@ -1843,6 +1843,10 @@ export interface components {
     HealthResponse: {
       /** Ok */
       ok: boolean
+      /** Workers */
+      workers?: {
+        [key: string]: string
+      } | null
     }
     /** JobBatchRequest */
     JobBatchRequest: {
