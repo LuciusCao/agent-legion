@@ -33,7 +33,7 @@ def metrics_cache_path(state_dir: Path) -> Path:
 
 def read_metrics_cache(path: Path) -> dict[str, Any]:
     """Return only a live writer's cache; stale or malformed files are ignored."""
-    empty = {"snapshots": {}, "error": None, "updated_at": None}
+    empty: dict[str, Any] = {"snapshots": {}, "error": None, "updated_at": None}
     try:
         payload = json.loads(path.read_text(encoding="utf-8"))
         os.kill(int(payload["pid"]), 0)
