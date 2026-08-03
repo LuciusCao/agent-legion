@@ -121,10 +121,17 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "GATE_TIER: unit" in workflow
     assert "Backend PostgreSQL tests" in workflow
     assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres" in workflow
-    assert 'AGENT_LEGION_COV_APPEND: "1"' in workflow
     assert "GATE_TIER: postgres" in workflow
     assert "backend-unit-junit.xml" in workflow
     assert "backend-postgres-junit.xml" in workflow
+    # Phase 5C: the tiers run as parallel jobs, each writing an independent
+    # coverage data file (no cross-tier AGENT_LEGION_COV_APPEND). The
+    # backend-postgres job downloads the unit shard's artifact and merges all
+    # shards via `coverage combine` before the single 85% floor check.
+    assert "COVERAGE_FILE: coverage-data/backend-unit.coverage" in workflow
+    assert "COVERAGE_FILE: coverage-data/backend-postgres.coverage" in workflow
+    assert "name: backend-unit-coverage" in workflow
+    assert "coverage combine" in workflow
 
 
 def test_test_harness_skips_module_level_application_bootstrap() -> None:
