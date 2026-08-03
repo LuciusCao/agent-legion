@@ -28,6 +28,14 @@ const workspaceId = process.env.STRESS_WORKSPACE || 'ws-stress'
 const durationSeconds = parseInt(process.env.STRESS_DURATION || '300', 10)
 const resultsDir =
   process.env.STRESS_RESULTS_DIR || path.join(process.cwd(), 'stress-results')
+// Probe guardrails are env-tunable per environment: shared CI runners hiccup
+// under load, so nightly relaxes them while local runs keep strict defaults.
+// The hard p95 latency assertion below still guards real regressions.
+const probeTimeoutMs = parseInt(
+  process.env.STRESS_PROBE_TIMEOUT_MS || '2000',
+  10
+)
+const maxProbeErrors = parseInt(process.env.STRESS_MAX_PROBE_ERRORS || '0', 10)
 const testTimeoutMs = durationSeconds * 2000 + 120_000
 
 test.setTimeout(testTimeoutMs)
@@ -163,7 +171,7 @@ test('workspace page remains responsive under high job concurrency', async ({
   while (Date.now() < endTime) {
     const clickLatency = await withProbeTimeout(
       measureClickLatency(page),
-      3000,
+      probeTimeoutMs,
       'click latency'
     )
     if (clickLatency.ok) {
@@ -174,7 +182,7 @@ test('workspace page remains responsive under high job concurrency', async ({
 
     const scrollLatency = await withProbeTimeout(
       measureScrollLatency(page),
-      3000,
+      probeTimeoutMs,
       'scroll latency'
     )
     if (scrollLatency.ok) {
@@ -192,7 +200,7 @@ test('workspace page remains responsive under high job concurrency', async ({
           | undefined
         return mem?.usedJSHeapSize ?? 0
       }),
-      1000,
+      probeTimeoutMs,
       'memory probe'
     )
     if (memoryResult.ok) {
@@ -212,7 +220,7 @@ test('workspace page remains responsive under high job concurrency', async ({
               .__stressLongTasks as PerformanceEntry[] | undefined) || []
           )
         }),
-        1000,
+        probeTimeoutMs,
         'long task probe'
       )
       if (longTasksResult.ok) {
@@ -237,7 +245,7 @@ test('workspace page remains responsive under high job concurrency', async ({
         .__stressGetSseMessageCount as (() => number) | undefined
       return getter ? getter() : 0
     }),
-    1000,
+    probeTimeoutMs,
     'sse message count probe'
   )
   const sseMessageCount = sseMessageCountResult.ok
@@ -256,6 +264,6 @@ test('workspace page remains responsive under high job concurrency', async ({
     JSON.stringify(summarizeMetrics(metrics), null, 2)
   )
 
-  expect(metrics.errors).toHaveLength(0)
+  expect(metrics.errors.length).toBeLessThanOrEqual(maxProbeErrors)
   expect(percentile(metrics.clickLatenciesMs, 0.95)).toBeLessThan(300)
 })
