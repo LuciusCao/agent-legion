@@ -496,6 +496,7 @@
     "scripts/generate_architecture.py": 345,
     "scripts/generate_architecture_frontend.py": 70,
     "scripts/generate_architecture_pipeline.py": 59,
+    "scripts/pytest_gate_shard.py": 79,
     "scripts/pytest_telemetry.py": 57,
     "scripts/ratchet_architecture_budgets.py": 155,
     "scripts/remote/llm_gateway.py": 100,

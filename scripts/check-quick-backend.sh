@@ -86,6 +86,13 @@ run_tests() {
       ;;
     postgres)
       echo "=== Python PostgreSQL Tests ==="
+      # GATE_SHARD=i/n (CI only) hash-shards the tier via a collection filter;
+      # unset locally, where the tier keeps running as one unsplit suite.
+      shard_args=()
+      if [[ -n "${GATE_SHARD:-}" ]]; then
+        echo "=== GATE_SHARD=${GATE_SHARD} (deterministic hash shard) ==="
+        shard_args=(-p scripts.pytest_gate_shard)
+      fi
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
@@ -93,6 +100,7 @@ run_tests() {
         -n "$workers" \
         --reruns 1 \
         --reruns-delay 2 \
+        "${shard_args[@]}" \
         "${telemetry_args[@]}" \
         "${cov_args[@]}" \
         "${split_cov_floor_args[@]}"
