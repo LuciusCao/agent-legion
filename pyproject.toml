@@ -39,6 +39,7 @@ markers = [
   "slow: tests involving real subprocesses or long sleeps",
   "repository_gate: whole-repository checks executed separately by the quality gate",
   "postgres: tests that require the isolated PostgreSQL test database",
+  "no_db: pure static tests that never touch the database; skips TRUNCATE-based DB isolation",
   "fresh_schema: rebuild the test schema from scratch instead of TRUNCATE-based reset (for tests that mutate DDL)",
 ]
 filterwarnings = [
