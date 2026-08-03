@@ -529,7 +529,7 @@
     "server/app/agent_broker/release.py": 43,
     "server/app/agent_broker/runtime_dispatch.py": 44,
     "server/app/agent_broker/sweepers.py": 174,
-    "server/app/agent_broker/unclaimable.py": 126,
+    "server/app/agent_broker/unclaimable.py": 121,
     "server/app/agent_broker/unclaimable_reasons.py": 60,
     "server/app/agent_bundle.py": 60,
     "server/app/agent_catalog.py": 163,

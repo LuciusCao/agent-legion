@@ -12,7 +12,7 @@ import json
 from typing import TYPE_CHECKING
 
 from server.app import agent_claim_compatibility
-from server.app.agent_broker.unclaimable_reasons import unmatched_reasons
+from server.app.agent_broker.unclaimable_reasons import WorkerDeclarations, unmatched_reasons
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
 from server.app.services import failure_classification
@@ -46,14 +46,11 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         ).fetchall()
         if not worker_rows:
             return failed
-        worker_capabilities: set[str] = set()
-        worker_models: set[tuple[str, str]] = set()
-        worker_runtimes: set[str] = set()
+        workers: list[WorkerDeclarations] = []
         for worker_row in worker_rows:
             capabilities, models = agent_claim_compatibility.worker_declarations(worker_row)
-            worker_capabilities |= capabilities
-            worker_models |= models
-            worker_runtimes |= set(json.loads(worker_row["runtimes_json"] or "[]"))
+            runtimes = set(json.loads(worker_row["runtimes_json"] or "[]"))
+            workers.append((runtimes, capabilities, models))
         # Requests whose pinned definition is disabled/changed are excluded
         # by the enabled-definition join: ``fail_stale_definition_requests``
         # owns them. The revision join mirrors the claim candidate query.
@@ -77,9 +74,7 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         ).fetchall()
         for row in rows:
             manifest = agent_claim_compatibility.live_claim_manifest(row)
-            reasons = unmatched_reasons(
-                row, manifest, worker_capabilities, worker_models, worker_runtimes
-            )
+            reasons = unmatched_reasons(row, manifest, workers)
             if not reasons:
                 continue
             error = (

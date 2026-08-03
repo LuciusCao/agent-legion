@@ -88,6 +88,12 @@ def test_configure_accepts_models_capabilities_and_token_file(tmp_path: Path) ->
     }
 
 
+def test_configure_accepts_velites_runtime() -> None:
+    args = build_parser().parse_args(["configure", "--runtime", "pi", "--runtime", "velites"])
+
+    assert configure_payload(args) == {"runtimes": ["pi", "velites"]}
+
+
 def test_container_style_standalone_workerctl_can_import_companion_modules(
     tmp_path: Path,
 ) -> None:
