@@ -533,12 +533,15 @@ invariants:
         gate: full
 
   - id: EXEC-CLAIM-RUNTIME-001
-    statement: "A queued Agent request whose definition runtime is declared by no non-revoked Worker is failed by the unclaimable sweeper with an explicit runtime reason; it never rots in queued. With zero non-revoked Workers the sweeper stays inactive (a deployment gap, not a definition problem)."
+    statement: "A queued Agent request no single non-revoked Worker can claim — judged per Worker on runtime, capability and model together, never on cross-Worker unions — is failed by the unclaimable sweeper with an explicit reason; it never rots in queued. With zero non-revoked Workers the sweeper stays inactive (a deployment gap, not a definition problem)."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
         target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_runtime_mismatch
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_cross_worker_combination
         gate: quick
       - kind: integration
         target: tests/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
