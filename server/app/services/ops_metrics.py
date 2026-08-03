@@ -35,16 +35,16 @@ _WINDOWS: dict[Granularity, tuple[timedelta, int]] = {
     "30d": (timedelta(days=30), 14_400),
 }
 
-# The shared row factory renders datetimes as UTC "%Y-%m-%d %H:%M:%S.%f"
-# strings (see server.app.db.rows); accept either shape and emit ISO-8601
-# with an explicit UTC offset for API consumers.
-_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+# The shared row factory renders datetimes as UTC ISO-8601 strings with an
+# explicit offset (see server.app.db.rows); legacy rows and TEXT columns may
+# still hold naive "%Y-%m-%d %H:%M:%S.%f" strings. Accept either shape and
+# emit ISO-8601 with an explicit UTC offset for API consumers.
 
 
 def _isoformat_utc(value: Any) -> str:
     if not isinstance(value, datetime):
-        value = datetime.strptime(str(value), _TIMESTAMP_FORMAT).replace(tzinfo=UTC)
-    elif value.tzinfo is None:
+        value = datetime.fromisoformat(str(value))
+    if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return str(value.isoformat())
 
