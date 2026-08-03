@@ -33,4 +33,6 @@ def load_claim_controls(path: Path) -> tuple[int, bool]:
     capacity = config.get("max_concurrency")
     enabled = config.get("claim_enabled", False)
     validate_claim_controls(capacity, enabled)
+    assert isinstance(capacity, int)
+    assert isinstance(enabled, bool)
     return capacity, enabled

@@ -52,6 +52,7 @@ def _config() -> dict[str, Any]:
         "name": "Test Worker",
         "runtimes": ["pi"],
         "max_concurrency": 3,
+        "upload_max_concurrency": 4,
         "labels": {"arch": "arm64"},
         "register_token_file": "/run/secrets/register-token",
         "work_root": "/tmp/worker-executions",
@@ -97,6 +98,11 @@ class FakeSupervisor:
             "host_reachable": True,
             "registered": True,
             "connected": True,
+            "max_concurrency": 3,
+            "upload_max_concurrency": 4,
+            "running_executions_count": 0,
+            "upload_queued_count": 0,
+            "upload_active_count": 0,
             "current_executions": [],
         }
 
@@ -654,3 +660,43 @@ def test_status_endpoint_exposes_current_executions(tmp_path: Path) -> None:
         response = client.get("/api/status", headers=_auth(store))
     assert response.status_code == 200
     assert response.json()["current_executions"] == []
+
+
+def test_status_endpoint_breaks_out_running_and_upload_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "fake_worker.py"
+    script.write_text(
+        """
+import json, os, time
+path = os.environ["AGENT_WORKER_STATUS_FILE"]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump({
+        "pid": os.getpid(),
+        "remote": {"host_reachable": True, "registered": True, "connected": True, "host_worker": {"worker_id": "worker-1"}, "connection_error": None},
+        "executions": {
+            "exec-1": {"execution_id": "exec-1", "node_key": "node_a", "phase": "running", "started_at": "2026-07-23T00:00:00+00:00"},
+            "exec-2": {"execution_id": "exec-2", "node_key": "node_b", "phase": "downloading", "started_at": "2026-07-23T00:00:00+00:00"},
+            "exec-3": {"execution_id": "exec-3", "node_key": "node_c", "phase": "queued_upload", "started_at": "2026-07-23T00:00:00+00:00"},
+            "exec-4": {"execution_id": "exec-4", "node_key": "node_d", "phase": "uploading", "started_at": "2026-07-23T00:00:00+00:00"},
+        },
+    }, handle)
+time.sleep(30)
+""",
+        encoding="utf-8",
+    )
+    token_file = tmp_path / "register-token"
+    token_file.write_text("secret", encoding="utf-8")
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
+    supervisor = WorkerSupervisor(store, script)
+    supervisor.start()
+    try:
+        _wait_for(lambda: supervisor.status()["current_executions"] != [])
+        status = supervisor.status()
+        assert status["running_executions_count"] == 2
+        assert status["upload_queued_count"] == 1
+        assert status["upload_active_count"] == 1
+        assert status["upload_max_concurrency"] == 4
+    finally:
+        supervisor.stop()
