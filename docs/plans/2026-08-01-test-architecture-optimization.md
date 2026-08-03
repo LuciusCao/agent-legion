@@ -507,6 +507,19 @@ Phase 3H 执行记录（2026-08-03）：
   [30780617385](https://github.com/LuciusCao/agent-legion/actions/runs/30780617385)
   backend、frontend、rust、ci-extended 全部通过，Phase 3 后端六个低覆盖模块全部达标。
 
+Phase 3I 执行记录（2026-08-03，前端 workflow upgrade 簇）：
+
+- `api/jobWorkflowUpgradeApi.ts` 为 0%、`pages/jobDetail/useUpgradeWorkflowAction.ts` 为 11%。
+  新增 6 个用例：api 层验证 POST URL 编码与错误透传（node project，沿用 fetch mock 约定）；
+  hook 层验证成功后刷新、loading 时序、Error/非 Error 失败映射与无 jobId 空操作（jsdom，
+  已登记进 `vite.config.ts` 的 `browserTestFiles`）。两文件聚焦覆盖率均 100%。
+- 首跑 static round 因两个新文件未过 prettier 失败，`prettier --write` 后重跑；hook 测试的
+  参数默认值陷阱（`setup(undefined)` 触发默认 `'job-1'`）一并修正。
+- full gate 退出码 0：backend 2378 passed、frontend 144 files / 1095 tests（1089 + 6 新增）、
+  Rust 全部通过、full_gate 32 passed / 10.41s、backend combined coverage 93.49%、frontend
+  lines 88.9%（3B 的 88.74% 之上）、coverage inventory 359/359、production bundle 通过，
+  0 rerun。
+
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
 目的：覆盖 jsdom 无法验证的路由、浏览器 API、SSE 和前后端集成。
