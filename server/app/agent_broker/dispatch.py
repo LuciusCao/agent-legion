@@ -8,6 +8,7 @@ from typing import Any
 from server.app.agent_artifacts import stage_agent_inputs
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
+from server.app.agent_broker.runtime_dispatch import pi_config_for_runtime
 from server.app.agent_bundle import build_agent_bundle
 from server.app.agent_catalog import AgentDefinition
 from server.app.config_schema import manifest_safe_config
@@ -51,12 +52,13 @@ class AgentDispatchService:
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
-        if definition.runtime != "pi":
-            raise ValueError(f"Agent runtime {definition.runtime!r} is not implemented yet")
+        pi = pi_config_for_runtime(
+            PiConfig.from_runtime(self.settings.executor_runtime.workflows.pi),
+            definition.runtime,
+        )
         execution_id = str(uuid.uuid4())
         skill_dir = resolve_skill_dir(self.skill_manager, definition.skill, execution_id)
         try:
-            pi = PiConfig.from_runtime(self.settings.executor_runtime.workflows.pi)
             manifest: dict[str, Any] = {
                 "execution_id": execution_id,
                 "workspace_id": workspace["id"],

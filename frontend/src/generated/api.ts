@@ -1480,7 +1480,7 @@ export interface components {
        * Runtime
        * @enum {string}
        */
-      runtime: 'pi' | 'openclaw'
+      runtime: 'pi' | 'openclaw' | 'velites'
       /** Skill */
       skill: string
       /** Skill Commit */
