@@ -102,7 +102,8 @@ function renderStatus(status) {
   const uploadQueued = status.upload_queued_count ?? 0;
   const uploadCapacity = status.upload_max_concurrency ?? 4;
   setText("upload-state", `${uploadActive} / ${uploadCapacity || "—"}`);
-  setText("upload-queued", uploadQueued > 0 ? `${uploadQueued} 个排队` : "无排队");
+  // 排队数仅在 >0 时内联显示在数字后（琥珀色），为 0 时隐藏（:empty 规则）
+  setText("upload-queued", uploadQueued > 0 ? `${uploadQueued} 个排队` : "");
   document.querySelector("#upload-meter").style.width = `${uploadCapacity ? Math.min(100, (uploadActive / uploadCapacity) * 100) : 0}%`;
   const toggle = document.querySelector("#toggle-claiming");
   toggle.dataset.enabled = String(Boolean(status.claim_enabled));
@@ -575,23 +576,6 @@ async function loadMetrics() {
 }
 
 if (hasDom) {
-  // 侧边栏收起/展开（状态持久化）；收起后重建图表以适配新宽度
-  const appShell = document.querySelector(".app-shell");
-  const sidebarToggle = document.querySelector("#sidebar-toggle");
-  const setSidebarCollapsed = (collapsed) => {
-    appShell.classList.toggle("sidebar-collapsed", collapsed);
-    sidebarToggle.setAttribute("aria-expanded", String(!collapsed));
-    sidebarToggle.setAttribute("aria-label", collapsed ? "展开侧边栏" : "收起侧边栏");
-    window.localStorage.setItem("worker-ui-sidebar-collapsed", collapsed ? "1" : "0");
-  };
-  sidebarToggle.addEventListener("click", () => {
-    setSidebarCollapsed(!appShell.classList.contains("sidebar-collapsed"));
-    for (const chart of metricsCharts.values()) chart.destroy();
-    metricsCharts.clear();
-    loadMetrics();
-  });
-  if (window.localStorage.getItem("worker-ui-sidebar-collapsed") === "1") setSidebarCollapsed(true);
-
   document.querySelectorAll(".nav-button").forEach((button) => {
     button.addEventListener("click", () => {
       const page = button.dataset.page;
