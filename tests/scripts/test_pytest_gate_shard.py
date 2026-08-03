@@ -67,6 +67,19 @@ def test_filter_keeps_only_own_shard_and_reports_deselected() -> None:
     assert {i.nodeid for i in config._deselected} == {n for n in _NODEIDS if shard_index(n, 2) == 1}
 
 
+def test_filter_partitions_into_three_shards() -> None:
+    kept: list[set[str]] = []
+    for index in (1, 2, 3):
+        items = [SimpleNamespace(nodeid=n) for n in _NODEIDS]
+        GateShardFilter(index, 3).pytest_collection_modifyitems(None, _fake_config(), items)
+        kept.append({i.nodeid for i in items})
+
+    assert kept[0] | kept[1] | kept[2] == set(_NODEIDS)
+    assert not (kept[0] & kept[1])
+    assert not (kept[0] & kept[2])
+    assert not (kept[1] & kept[2])
+
+
 def test_pytest_configure_registers_filter_only_when_env_set(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

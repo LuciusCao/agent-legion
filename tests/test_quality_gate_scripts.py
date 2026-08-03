@@ -328,10 +328,10 @@ def _run_backend_gate_with_fake_uv(tmp_path: Path, env: dict[str, str]) -> str:
 
 
 def test_backend_postgres_tier_loads_shard_plugin_when_gate_shard_set(tmp_path: Path) -> None:
-    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_SHARD": "1/2"})
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_SHARD": "1/3"})
 
     assert "-p scripts.pytest_gate_shard" in calls
-    assert "shard:1/2" in calls
+    assert "shard:1/3" in calls
     assert "postgres and not repository_gate" in calls
 
 

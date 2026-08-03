@@ -120,20 +120,32 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "AGENT_LEGION_TEST_RESULT_NAME: backend-unit" in workflow
     assert "GATE_TIER: unit" in workflow
     assert "backend-unit-junit.xml" in workflow
-    # Phase 5C-2: the postgres tier is hash-sharded into two parallel jobs
-    # (aggregator A hosts api:check + the combined floor; B also runs the
-    # tests/full gate), each on its own COVERAGE_FILE and result name.
+    # Phase 5C-2/5C-3: the postgres tier is hash-sharded into three parallel
+    # jobs (aggregator A hosts api:check + the combined floor; B also runs the
+    # tests/full gate; C runs only its shard), each on its own COVERAGE_FILE
+    # and result name.
     assert "backend-postgres-a:" in workflow
     assert "backend-postgres-b:" in workflow
-    assert "Backend PostgreSQL tests (shard 1/2)" in workflow
-    assert "Backend PostgreSQL tests (shard 2/2)" in workflow
+    assert "backend-postgres-c:" in workflow
+    assert "Backend PostgreSQL tests (shard 1/3)" in workflow
+    assert "Backend PostgreSQL tests (shard 2/3)" in workflow
+    assert "Backend PostgreSQL tests (shard 3/3)" in workflow
     assert "GATE_TIER: postgres" in workflow
-    assert "GATE_SHARD: 1/2" in workflow
-    assert "GATE_SHARD: 2/2" in workflow
+    assert "GATE_SHARD: 1/3" in workflow
+    assert "GATE_SHARD: 2/3" in workflow
+    assert "GATE_SHARD: 3/3" in workflow
     assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-a" in workflow
     assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-b" in workflow
+    assert "AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-c" in workflow
     assert "backend-postgres-a-junit.xml" in workflow
     assert "backend-postgres-b-junit.xml" in workflow
+    assert "backend-postgres-c-junit.xml" in workflow
+    # 5C-3: the aggregator can reach the merge before its peers upload under
+    # load (run 30811145691), so it polls `gh api` for the peer coverage
+    # artifacts first (actions: read) and only then downloads them; a missing
+    # shard still fails the explicit download step.
+    assert "Wait for peer shard coverage artifacts" in workflow
+    assert "actions: read" in workflow
     # Phase 5C: the tiers run as parallel jobs, each writing an independent
     # coverage data file (no cross-tier AGENT_LEGION_COV_APPEND). The
     # backend-postgres-a job downloads every shard's artifact and merges all
@@ -141,9 +153,11 @@ def test_quality_gate_runs_unit_and_postgres_layers_with_combined_coverage() -> 
     assert "COVERAGE_FILE: coverage-data/backend-unit.coverage" in workflow
     assert "COVERAGE_FILE: coverage-data/backend-postgres-a.coverage" in workflow
     assert "COVERAGE_FILE: coverage-data/backend-postgres-b.coverage" in workflow
+    assert "COVERAGE_FILE: coverage-data/backend-postgres-c.coverage" in workflow
     assert "COVERAGE_FILE: coverage-data/backend-full.coverage" in workflow
     assert "name: backend-unit-coverage" in workflow
     assert "name: backend-postgres-b-coverage" in workflow
+    assert "name: backend-postgres-c-coverage" in workflow
     assert "coverage combine" in workflow
     # Every pytest shard (tiers and the tests/full gate) runs on its own
     # COVERAGE_FILE, so each must defer the 85% floor to the combined report;
