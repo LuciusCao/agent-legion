@@ -75,9 +75,12 @@
   声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
   workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
   （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
-- velites（`velites/` crate，pi 的自研 Rust 替代）：Workspace Executor 扩展链不变
-  （capability → executor → allocation → binding → local limit），harness flavor
-  切换只经 `workflows.pi.flavor` 配置，workflow 节点不感知 harness 实现。
+- velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
+  runtime，由 `AgentDefinition.runtime` 声明（`config/workflow.yaml` `agents:` 段，
+  per-agent 灰度/回退都是单字段改动）。`workflows.pi.flavor` 只作用于
+  `runtime: pi` 的 agent 做实现选择；`runtime: velites` 钉死 velites 实现、忽略
+  flavor。Workflow 节点不感知 runtime/harness 实现。Worker 声明 velites 前必须
+  先在 PATH 提供 velites 二进制（启动预检缺失即拒启动）。
   事件 schema 改动必须同步 `velites/schema/events.schema.json`
   （`cargo run --bin velites-schema -- schema/events.schema.json`）并保证契约测试
   （`velites/tests/schema_current.rs`、`golden_events.rs`）通过；事件流只保留 Host

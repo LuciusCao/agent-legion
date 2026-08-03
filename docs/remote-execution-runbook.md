@@ -130,7 +130,7 @@ curl -X POST http://<laptop-tailnet-ip>:8788/v1/chat/completions \
 ```
 
 Expect a normal OpenAI-compatible chat completion response. A `502` means the
-laptop could not reach the LLM provider (see §6).
+laptop could not reach the LLM provider (see §7).
 
 ## 5. Workers
 
@@ -160,12 +160,50 @@ peak RSS is still unmeasured — calibrate with full-duration jobs before
 raising `max_concurrency`, and keep OS headroom:
 `max_concurrency = floor((RAM - OS reserve) / measured peak)`.
 
-## 6. Troubleshooting
+## 6. Migrating an Agent between runtimes (pi ↔ velites)
+
+`pi`, `openclaw` and `velites` are peer runtimes declared per Agent definition
+(the `agents:` section of `config/workflow.yaml`, field `runtime`). Migrating
+one agent to velites — or rolling it back — is a single-field YAML change plus
+a Host restart (`sync_agent_definitions` republishes the catalog at startup).
+`workflows.pi.flavor` selects the implementation only for `runtime: pi`
+agents; a `runtime: velites` definition pins the velites builder and ignores
+the flavor switch. Facts to know before flipping the field:
+
+- **Worker declarations first, definition migration second.** A queued request
+  whose runtime no non-revoked Worker declares is failed by the unclaimable
+  sweeper with an explicit runtime reason. Declare `velites` in the Worker
+  fleet (`runtimes` in the Worker console/config) first; the Worker startup
+  preflight refuses to start (exit code 2) when a declared runtime's binary is
+  missing from PATH, so a fleet that claims velites without the binary fails
+  loudly at boot instead of stranding claimed executions.
+- **Changing `runtime` changes `definition_hash`.** Queued requests pinned to
+  the old hash are failed as stale by the stale-definition sweeper. Migrate
+  off-peak with the queue drained; re-submit staled jobs under the normal
+  stale semantics.
+- **In-flight executions are unaffected.** Manifests are frozen at enqueue;
+  claimed/running executions finish on the frozen command spec.
+- **Rollback** is the same single-field operation: set the definition back to
+  `runtime: pi` and restart. Note the flavor interplay — while
+  `workflows.pi.flavor: velites` is in effect, an agent rolled back to
+  `runtime: pi` still runs the velites binary; returning to the pi binary
+  requires `flavor: pi` as well. A fleet-wide velites incident mirrors the
+  canary-era playbook: `flavor: pi` plus migrating every definition back to
+  `runtime: pi` in one config change.
+- **Sandbox escape hatch:** `workflows.pi.velites_no_sandbox: true` applies to
+  `runtime: velites` manifests too (adds `--no-sandbox`), no redeploy needed.
+- **Suggested canary order:** migrate a low-risk, low-traffic agent first
+  (e.g. `video-subtitle-review-v1`), observe ≥ 3 days, then the question-chain
+  mains (`question-key-info-v1` etc.), then the rest. Each step is an
+  independent single-field change with its own rollback.
+
+## 7. Troubleshooting
 
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
 | Worker becomes unhealthy with registration rejected | Registration token mismatch or Worker revoked | `make stack-logs STACK=worker`; verify the token file and registration status |
+| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary is not on PATH (e.g. `velites` declared but not installed) | Install the binary (`cargo build --release` in `velites/`, on PATH) or drop the runtime from the Worker's `runtimes`, then restart |
 | Registration returns 401 | `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` on the Host does not match the worker's token file | Re-copy `deploy/secrets/agent_worker_register_token` to the worker machine (deployment doc §4) |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's declared `runtimes` / `labels` |
@@ -176,7 +214,7 @@ raising `max_concurrency`, and keep OS headroom:
 | Gateway 401/403 | `LLM_GATEWAY_TOKEN` missing or mismatched | Gateway and every worker must share the same token (§4); never run a tailnet-bound gateway without it |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers recover on their own; enforce §2 item 5 |
 
-## 7. Security notes
+## 8. Security notes
 
 - **Tailnet ACLs:** restrict device-to-device traffic so workers can reach only
   port 8000 (Host API) and port 8788 (gateway) on the laptop. Nothing else on
