@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 4 complete (CI accepted); 5A/5B/5C done (CI accepted, run 30807258518); 5D registry landed; 5C-2 postgres sharding + final acceptance pending
+状态：Phase 4 complete (CI accepted); 5A-5D done (5C-2 CI accepted, run 30809939232, PR critical path 5.1min); Phase 5 final acceptance (3 consecutive runs) in progress: 1/3
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -740,6 +740,31 @@ Phase 5C 执行记录（2026-08-03，backend CI 拆分）：
   frontend-coverage 0.4 / rust 0.8 / e2e-smoke 2.2 / ci-extended 1.3 /
   nightly-e2e 14.3 分钟。backend-postgres 超 6 分钟目标，5C-2 启动。
 
+Phase 5C-2 执行记录（2026-08-03，postgres tier 分片）：
+
+- 分片机制：新增 `scripts/pytest_gate_shard.py`，`GATE_SHARD=i/n` 时
+  check-quick-backend.sh 追加 `-p scripts.pytest_gate_shard`，按
+  `md5(nodeid) % n` 在 collection 阶段过滤（xdist controller 侧生效，
+  非法值 `pytest.UsageError` 非零退出）；不设置 env 时命令行与之前逐字节
+  一致，本地 quick gate 零变化。
+- collect-only 验证：shard 1/2 = 436、shard 2/2 = 491，并集 = 全集 927、
+  交集 0（47%/53% 负载）。
+- workflow：`backend-postgres` 拆为 `backend-postgres-a`（api:check +
+  shard 1/2 + 下载全部 coverage artifact + combine + 85% floor + summary）
+  与 `backend-postgres-b`（shard 2/2 + full gate evidence + 上传 1 天
+  coverage/telemetry artifact；tests/full 不碰 frontend 产物故去
+  node/npm；bwrap 两边都装——postgres tier 自身的 velites sandbox 测试
+  也需要，原注释仅提 tests/full 不准确）。shard 缺失即红语义保持
+  （下载步无 `if: always()`）。
+- 契约测试 47 passed（新增插件 13 例 + gate 脚本 2 例 + workflow 拓扑断言），
+  quick gate exit 0（123s）。
+- CI 验收（提交 `3dcabc8b`，run [30809939232](https://github.com/LuciusCao/agent-legion/actions/runs/30809939232)）：
+  全绿。backend-postgres-a 5.1 分钟、backend-postgres-b 5.1 分钟、
+  backend-unit 2.6 / frontend-logic 1.5 / frontend-component 4.3 /
+  frontend-coverage 0.4 / rust 0.8 / e2e-smoke 2.3 / nightly-e2e 15.2 分钟。
+  PR 关键路径由 9.2 分钟（拆分前 backend 单 job）降至 **5.1 分钟**，达标。
+  本次计为 Phase 5 三次连续验收第 1 次。
+
 Phase 5D 观察清单（flaky registry 原始数据）：
 
 - `test_local_executor_cancel_during_run`：时序 flaky，Phase 0 起多次复现（负载相关）。
@@ -786,8 +811,9 @@ Phase 5D 执行记录（2026-08-03，flaky registry 落地）：
 - 任一 rerun 在 CI 页面可见并能定位到 test id。
 - frontend job 不再为非前端工作重复启动重型依赖，或有数据证明保留更快。
 - required checks 和 branch protection 在 job 改名/拆分后同步更新。
-  （Phase 5 最终注记：required checks 需在合并时同步为 backend-unit / backend-postgres /
-  frontend-logic / frontend-component / frontend-coverage / rust / e2e-smoke。）
+  （Phase 5 最终注记：required checks 需在合并时同步为 backend-unit /
+  backend-postgres-a / backend-postgres-b / frontend-logic /
+  frontend-component / frontend-coverage / rust / e2e-smoke。）
 
 回滚：保留旧聚合 job 一段迁移期；新并行 job 稳定后再调整 required checks。
 
