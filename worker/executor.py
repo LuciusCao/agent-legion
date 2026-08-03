@@ -34,6 +34,7 @@ from worker.host_status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
 from worker.process_lifecycle import terminate, wait_for_exit
 from worker.registration_retry import register_from_config
+from worker.runtime_preflight import preflight_error
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import load_transfer_controls
@@ -204,6 +205,11 @@ def main() -> int:
     except (OSError, ValueError) as exc:
         print(f"worker fd limit raise failed; continuing with defaults: {exc}", flush=True)
     config = runtime_controls.load_config(args.config)
+    if error := preflight_error(config.get("runtimes") or []):
+        # 退出码 2（supervisor 不自动重启）：声明了 PATH 上没有二进制的
+        # runtime 是部署缺口，重试无意义，必须人工修复后重启。
+        print(error, flush=True)
+        return 2
     transfer = load_transfer_controls(args.config)
     client = Client(str(config["host_url"]), transfer_timeout=transfer.transfer_timeout_seconds)
     stop = threading.Event()
