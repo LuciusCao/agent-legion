@@ -22,7 +22,7 @@ if (!CONTROL_TOKEN && hasDom) {
 const TOKEN_MISSING = !CONTROL_TOKEN;
 let latestMaxConcurrency = 0;
 // 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
-export const NUMBER_DEFAULTS = { max_concurrency: 1, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
+export const NUMBER_DEFAULTS = { max_concurrency: 1, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
 async function api(path, options = {}) {
   const headers = { Authorization: `Bearer ${CONTROL_TOKEN}`, ...(options.headers || {}) };
@@ -97,11 +97,17 @@ function renderStatus(status) {
   setText("process-state", processState);
   setText("claim-state", status.claim_enabled ? "正在领取" : "已暂停");
   document.querySelector("#claim-state").className = status.claim_enabled ? "mint-text" : "amber-text";
-  const activeCount = status.current_executions?.length || 0;
+  const runningCount = status.running_executions_count ?? 0;
   const capacity = status.max_concurrency ?? 0;
   latestMaxConcurrency = capacity;
-  setText("capacity-state", `${activeCount} / ${capacity || "—"}`);
-  document.querySelector("#capacity-meter").style.width = `${capacity ? Math.min(100, (activeCount / capacity) * 100) : 0}%`;
+  setText("capacity-state", `${runningCount} / ${capacity || "—"}`);
+  document.querySelector("#capacity-meter").style.width = `${capacity ? Math.min(100, (runningCount / capacity) * 100) : 0}%`;
+  const uploadActive = status.upload_active_count ?? 0;
+  const uploadQueued = status.upload_queued_count ?? 0;
+  const uploadCapacity = status.upload_max_concurrency ?? 4;
+  setText("upload-state", `${uploadActive} / ${uploadCapacity || "—"}`);
+  setText("upload-queued", uploadQueued > 0 ? `${uploadQueued} 个排队` : "无排队");
+  document.querySelector("#upload-meter").style.width = `${uploadCapacity ? Math.min(100, (uploadActive / uploadCapacity) * 100) : 0}%`;
   const toggle = document.querySelector("#toggle-claiming");
   toggle.dataset.enabled = String(Boolean(status.claim_enabled));
   toggle.querySelector("span").textContent = status.claim_enabled ? "暂停领取" : "开始领取";
@@ -184,7 +190,14 @@ export function phaseProgress(phase) {
 }
 
 function phaseLabel(phase) {
-  return { claimed: "已领取", downloading: "下载中", running: "运行中", queued_upload: "等待上传", uploading: "上传中" }[phase] || phase || "未知";
+  return { claimed: "已领取", downloading: "下载中", running: "运行中", queued_upload: "排队上传", uploading: "上传中" }[phase] || phase || "未知";
+}
+
+function phaseBadgeClass(phase) {
+  if (phase === "uploading" || phase === "queued_upload") return "status-badge uploading";
+  if (phase === "running") return "status-badge";
+  if (phase === "downloading") return "status-badge info";
+  return "status-badge warn";
 }
 
 function shortenId(value) {
@@ -238,7 +251,7 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
     name.append(mark, title, count);
 
     const phase = document.createElement("span");
-    phase.className = `status-badge ${group.phase === "uploading" ? "uploading" : group.phase === "running" ? "" : "warn"}`.trim();
+    phase.className = phaseBadgeClass(group.phase);
     phase.textContent = phaseLabel(group.phase);
 
     const elapsed = document.createElement("span");
@@ -268,7 +281,7 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
       id.className = "execution-id";
       id.textContent = shortenId(execution.execution_id || execution.job_id || executionLabel(execution));
       const rowPhase = document.createElement("span");
-      rowPhase.className = `status-badge ${execution.phase === "uploading" ? "uploading" : execution.phase === "running" ? "" : "warn"}`.trim();
+      rowPhase.className = phaseBadgeClass(execution.phase);
       rowPhase.textContent = phaseLabel(execution.phase);
       const rowElapsed = document.createElement("span");
       rowElapsed.textContent = formatElapsed(execution.started_at);
@@ -595,9 +608,10 @@ if (hasDom) {
       const data = new FormData(form);
       const payload = {
         host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
-        max_concurrency: numberField(data, "max_concurrency"), runtimes: data.getAll("runtimes"),
-        capabilities: linesFromText(data.get("capabilities")), models: modelsFromText(data.get("models")),
-        labels: labelsFromText(data.get("labels")), poll_interval_seconds: numberField(data, "poll_interval_seconds"),
+        max_concurrency: numberField(data, "max_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"),
+        runtimes: data.getAll("runtimes"), capabilities: linesFromText(data.get("capabilities")),
+        models: modelsFromText(data.get("models")), labels: labelsFromText(data.get("labels")),
+        poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
         shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
       };

@@ -916,6 +916,7 @@
     "worker/service_models.py": 31,
     "worker/stale_sweep.py": 80,
     "worker/status.py": 96,
+    "worker/status_aggregates.py": 33,
     "worker/status_reader.py": 43,
     "worker/supervisor.py": 231,
     "worker/transfer_controls.py": 53,

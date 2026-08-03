@@ -1,7 +1,5 @@
 """Argument parsing and configuration payloads for workerctl."""
 
-from __future__ import annotations
-
 import argparse
 from pathlib import Path
 from typing import Any
@@ -50,6 +48,7 @@ def build_parser() -> argparse.ArgumentParser:
     configure.add_argument("--name")
     configure.add_argument("--runtime", action="append", choices=["pi", "openclaw"])
     configure.add_argument("--max-concurrency", type=int)
+    configure.add_argument("--upload-concurrency", type=int)
     configure.add_argument("--claim-enabled", action=argparse.BooleanOptionalAction, default=None)
     configure.add_argument("--capability", action="append")
     configure.add_argument("--model", action="append", default=[])
@@ -70,6 +69,7 @@ def configure_payload(args: argparse.Namespace) -> dict[str, Any]:
         ("name", "name"),
         ("runtime", "runtimes"),
         ("max_concurrency", "max_concurrency"),
+        ("upload_concurrency", "upload_max_concurrency"),
         ("claim_enabled", "claim_enabled"),
         ("capability", "capabilities"),
     ):
