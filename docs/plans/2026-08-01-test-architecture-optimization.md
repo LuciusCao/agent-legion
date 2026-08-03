@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 4 complete (CI accepted); Phase 5A-5C done (5C CI pending 30805689114); 5C-2/5D and final acceptance pending
+状态：Phase 4 complete (CI accepted); 5A/5B/5C done (CI accepted, run 30807258518); 5D registry landed; 5C-2 postgres sharding + final acceptance pending
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -725,11 +725,20 @@ Phase 5C 执行记录（2026-08-03，backend CI 拆分）：
   而非独立 job（独立 job 会多 ~90s 串行 setup 尾巴）。契约测试同步更新。
 - full gate 退出码 0（backend 2390 passed / 139.01s、frontend 154 files /
   1147 tests、full_gate 32 passed / 11.28s、combined 93.50%，0 rerun）。
-- CI 验收：提交 `8d9881d4`，run
-  [30805689114](https://github.com/LuciusCao/agent-legion/actions/runs/30805689114)（待确认）。
-- 已知余量：backend-postgres 预计 ~8.2 分钟（postgres tier 269s + 不可压缩 setup），
-  要进 6 分钟需 5C-2 把 postgres tier 再分片（机制与 frontend blob 分片类似，
-  改 tier 语义，需契约测试）。
+- CI 复验（提交 `8d9881d4`，run
+  [30805689114](https://github.com/LuciusCao/agent-legion/actions/runs/30805689114)）
+  暴露两处问题：(1) `backend-postgres` 的 full gate 步直接调 pytest 落在独立
+  `COVERAGE_FILE` 上，漏 `--cov-fail-under=0`，在分片自身的 58.71% 数据上
+  强执 85% floor 判红（编排遗漏，非 xdist 丢数据）；(2) `frontend-component`
+  一个 jsdom 5s timeout（`InteractionOverlay.test.tsx:236`，103/104 文件通过，
+  即 FLAKY-002 模式）。
+- 修复（提交 `d44fe476`）：full gate 步补 `--cov-fail-under=0` 并在
+  `tests/test_pytest_postgres_boundaries.py` 钉住"分片不得自执 floor"不变量。
+- CI 验收（run [30807258518](https://github.com/LuciusCao/agent-legion/actions/runs/30807258518)）：
+  全绿。实测 backend-unit 2.6 分钟、backend-postgres **8.3 分钟**（与预估一致）、
+  frontend-logic 1.5 / frontend-component 6.1（负载波动，5B 验收时 3.8）/
+  frontend-coverage 0.4 / rust 0.8 / e2e-smoke 2.2 / ci-extended 1.3 /
+  nightly-e2e 14.3 分钟。backend-postgres 超 6 分钟目标，5C-2 启动。
 
 Phase 5D 观察清单（flaky registry 原始数据）：
 
@@ -739,6 +748,22 @@ Phase 5D 观察清单（flaky registry 原始数据）：
   复跑 93.5% 恢复；若复现需查 pytest-cov worker 数据回收）。
 - CI 基础设施：Docker Hub 拉取 postgres:17 超时（3D 一次）、artifact API 503（一次性）。
 - stress probe 单次超时（4C nightly 首跑，已通过 env 阈值放宽处理，p95 断言仍严格）。
+
+Phase 5D 执行记录（2026-08-03，flaky registry 落地）：
+
+- 新增 `tests/flaky_registry.yaml`：5 条 entry（FLAKY-001~005，nodeid/scope +
+  owner + reason + deadline 或 `recurring: true`），字段风格对齐
+  `config/architecture/architecture-exemptions.yaml`。
+- 新增 `scripts/check_reruns.py`：消费 pytest_telemetry rerun report，出现
+  registry 之外的 rerun nodeid 或非 recurring entry 过期即 exit 1；
+  缺失 report 只 note 不 fail（与 summarize_test_results.py 一致）。
+- nightly fail-on-rerun 接在 `ci-extended` job 尾部（`if: always()`，消费
+  `test-results/ci-extended-reruns.json`）；nightly-e2e 不经 pytest、无 rerun
+  report，无可接点。PR/push 路径行为不变。
+- 契约测试：`tests/ci/test_flaky_registry.py`（registry schema/deadline/nodeid
+  存在性，`no_db`）+ `tests/scripts/test_check_reruns.py`（13 用例）；pyproject
+  注册 `no_db` marker（与 develop 同文案，前向兼容）。契约测试 16 passed，
+  quick gate exit 0（119s）。
 
 ### Phase 5：CI 拆分、依赖去重与 flaky 治理
 

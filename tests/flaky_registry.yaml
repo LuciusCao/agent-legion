@@ -1,0 +1,54 @@
+# Flaky test governance registry (test architecture plan, Phase 5D).
+#
+# Every known flaky test or flake scope gets an owner, a reason, and either a
+# fix deadline or `recurring: true` for irreducible infrastructure noise.
+# Global `--reruns 1` stays, but reruns are no longer silently absorbed:
+# scripts/check_reruns.py fails nightly CI when a rerun hits a nodeid outside
+# this registry or when a non-recurring entry outlives its deadline.
+# Field style follows config/architecture/architecture-exemptions.yaml.
+entries:
+- id: FLAKY-001
+  nodeid: tests/executors/test_local_executor.py::test_local_executor_cancel_during_run
+  owner: workspace-executor
+  reason: Timing-sensitive cancel-during-run assertion; reproduces under host
+    load since Phase 0 of the test architecture plan. Needs a deterministic
+    synchronization point instead of wall-clock waits.
+  observed: Multiple local reproductions under load since 2026-07 (Phase 0
+    evidence, docs/plans/2026-08-01-test-architecture-optimization.md).
+  deadline: 2026-09-01
+- id: FLAKY-002
+  scope: frontend:component-jsdom-timeout
+  owner: test-infra
+  reason: Frontend component tests hit the 5s jsdom timeout in batches when
+    runner load exceeds ~40 parallel workers; isolated reruns pass. Most
+    recent instance was src/components/InteractionOverlay.test.tsx "keeps
+    summary actions outside the scrollable content area" (103/104 files
+    passed).
+  observed: https://github.com/LuciusCao/agent-legion/actions/runs/30805689114
+  deadline: 2026-09-01
+- id: FLAKY-003
+  scope: backend:xdist-coverage-combine
+  owner: test-infra
+  reason: xdist coverage combine dropped one postgres worker's data under high
+    load once (first 5B gate round reported 59% lines; rerun recovered to
+    93.5%). The 59% in CI run 30805689114 was a separate orchestration bug
+    (already fixed) and is NOT this entry.
+  observed: Local 5B gate run, 2026-08 (Phase 5B acceptance evidence).
+  deadline: 2026-09-01
+- id: FLAKY-004
+  scope: ci-infra:docker-hub
+  owner: test-infra
+  reason: CI infrastructure hiccups outside repository control. A Docker Hub
+    pull of postgres:17 timed out once, and the artifact API returned 503
+    once. Retrying the job is the correct response; no code fix applies.
+  observed: CI runs during 2026-07/2026-08 CI topology split (Phase 5A/5B).
+  recurring: true
+- id: FLAKY-005
+  scope: nightly:stress-probe-timeout
+  owner: test-infra
+  reason: Single stress probe timeout on the first 4C nightly run; shared
+    runners hiccup under load. Mitigated via STRESS_PROBE_TIMEOUT_MS /
+    STRESS_MAX_PROBE_ERRORS thresholds in scripts/stress/_validation_stub.py;
+    the p95 click-latency assertion stays strict.
+  observed: First nightly-e2e stress run after Phase 4C, 2026-08.
+  recurring: true

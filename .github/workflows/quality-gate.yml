@@ -617,3 +617,12 @@ jobs:
             --rerun-report test-results/ci-extended-reruns.json \
             --output test-results/ci-extended-summary.md
           cat test-results/ci-extended-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Flaky governance (test architecture plan, Phase 5D): reruns are fine
+      # only for nodeids registered in tests/flaky_registry.yaml with a live
+      # deadline. Nightly-only; PR/push lanes never run this job.
+      - name: Fail on unregistered reruns
+        if: always()
+        run: >-
+          uv run python scripts/check_reruns.py
+          --rerun-report test-results/ci-extended-reruns.json

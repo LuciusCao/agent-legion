@@ -488,6 +488,7 @@
     "scripts/check_coverage_partitions.py": 265,
     "scripts/check_exemption_age.py": 74,
     "scripts/check_invariants.py": 88,
+    "scripts/check_reruns.py": 211,
     "scripts/compare_skill_cost.py": 175,
     "scripts/e2e/_database.py": 79,
     "scripts/e2e/run_browser_smoke.py": 295,
