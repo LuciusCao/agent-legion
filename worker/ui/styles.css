@@ -94,12 +94,10 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   border-top: 1px solid #172c26;
   color: var(--muted);
   display: grid;
-  grid-template-columns: auto 1fr;
-  align-items: center;
   gap: 7px;
   font-size: 11px;
 }
-.sidebar-meta small { grid-column: 2; color: var(--dim); }
+.sidebar-meta small { color: var(--dim); }
 .online-dot {
   width: 8px;
   height: 8px;
@@ -242,7 +240,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   min-height: 80px;
   padding: 13px 15px;
   display: grid;
-  grid-template-columns: auto 1fr auto;
+  grid-template-columns: auto 1fr;
   align-items: center;
   gap: 10px;
   border: 1px solid rgba(240, 173, 67, .28);
@@ -250,22 +248,12 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
   color: var(--amber);
   background: rgba(78, 53, 16, .18);
 }
-.source-warning.ok-source { color: var(--mint); border-color: rgba(102, 232, 173, .22); background: rgba(40, 91, 70, .13); }
+/* display:grid 会覆盖 [hidden] 的 UA 样式，显式补上 */
+.source-warning[hidden] { display: none; }
 .source-warning > .icon { font-size: 25px; }
 .source-warning strong, .source-warning span { display: block; }
 .source-warning strong { margin-bottom: 5px; font-size: 14px; }
 .source-warning span { color: #9eaa9e; font-size: 12px; }
-.local-live {
-  padding-left: 14px;
-  border-left: 1px solid rgba(240, 173, 67, .22);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #c5d3ce;
-  white-space: nowrap;
-  font-size: 12px;
-}
-.local-live span { display: block; }
 .status-grid {
   grid-column: 1 / -1;
   display: grid;
@@ -366,7 +354,7 @@ i#upload-meter { background: var(--amber); }
 .execution-table { overflow: hidden; border: 1px solid var(--line); border-radius: 11px; }
 .table-head, .group-row, .execution-row {
   display: grid;
-  grid-template-columns: minmax(260px, 1.7fr) minmax(105px, .75fr) minmax(90px, .6fr) minmax(160px, 1fr) minmax(100px, .65fr);
+  grid-template-columns: minmax(260px, 1.7fr) minmax(105px, .75fr) minmax(90px, .6fr) minmax(160px, 1fr);
   align-items: center;
 }
 .table-head {
@@ -418,7 +406,6 @@ i#upload-meter { background: var(--amber); }
 .group-row > span, .execution-row > span { min-width: 0; }
 .group-progress { display: flex; align-items: center; gap: 8px; color: #a6b8b1; font-size: 12px; }
 .group-progress .progress-bar { width: 68px; }
-.group-capacity { font-size: 12px; font-weight: 700; }
 .execution-children[hidden] { display: none; }
 .execution-row {
   min-height: 43px;
@@ -453,11 +440,7 @@ i#upload-meter { background: var(--amber); }
 .empty-state strong { margin-bottom: 5px; color: #dceae5; font-size: 13px; }
 .empty-state small { color: var(--dim); font-size: 11px; }
 .chart-panel { min-height: 206px; margin-top: 16px; }
-.chart-legend { display: flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; }
-.chart-legend i { width: 7px; height: 7px; border-radius: 50%; background: var(--mint); }
 .chart { min-height: 260px; border-radius: 10px; background: #07130f; }
-.overview-chart { min-height: 180px; background: transparent; }
-#overview-metrics-error:not(:empty) + .overview-chart { min-height: 150px; }
 /* uPlot 图例配色贴合深色面板 */
 .chart .u-legend { color: #668078; font-size: 11px; }
 .chart-empty { margin: 110px 0; color: var(--muted); text-align: center; font-size: 13px; }
@@ -528,7 +511,7 @@ fieldset { margin: 0; padding: 0; border: 0; }
 .diagnostic-status-grid strong, .diagnostic-status-grid small { display: block; }
 .diagnostic-status-grid strong { margin-bottom: 5px; font-size: 12px; }
 .diagnostic-status-grid small { overflow-wrap: anywhere; color: var(--muted); font-size: 10px; }
-.diagnostics-chart-panel, .log-panel { margin-top: 14px; }
+.log-panel { margin-top: 14px; }
 .granularity-switch { display: flex; gap: 7px; }
 .chip, .secondary-button {
   border: 1px solid var(--line);
@@ -567,7 +550,7 @@ code { color: var(--mint); }
   .status-panel { grid-template-columns: 1fr 360px; }
   .status-grid { grid-template-columns: 1.3fr 1.3fr 1fr 1fr; }
   .status-item:last-child { grid-column: 1 / -1; }
-  .table-head, .group-row, .execution-row { grid-template-columns: minmax(230px, 1.5fr) 100px 80px minmax(130px, .9fr) 90px; }
+  .table-head, .group-row, .execution-row { grid-template-columns: minmax(230px, 1.5fr) 100px 80px minmax(130px, .9fr); }
 }
 @media (max-width: 820px) {
   .status-panel { grid-template-columns: 1fr; }
@@ -575,7 +558,7 @@ code { color: var(--mint); }
   .status-item, .status-item.status-item-emphasis { grid-column: auto; }
   .source-warning { grid-row: 2; }
   .table-head span:nth-child(3), .group-row > span:nth-child(3), .execution-row > span:nth-child(3) { display: none; }
-  .table-head, .group-row, .execution-row { grid-template-columns: minmax(210px, 1.4fr) 100px minmax(120px, .8fr) 80px; }
+  .table-head, .group-row, .execution-row { grid-template-columns: minmax(210px, 1.4fr) 100px minmax(120px, .8fr); }
   .diagnostic-status-grid { grid-template-columns: 1fr 1fr; }
   .charts { grid-template-columns: 1fr; }
 }
@@ -611,7 +594,6 @@ code { color: var(--mint); }
   .health-icon { width: 43px; height: 43px; }
   .status-lead h2 { font-size: 20px; }
   .source-warning { grid-template-columns: auto 1fr; }
-  .local-live { display: none; }
   .status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .status-item, .status-item.status-item-emphasis { min-width: 0; min-height: 88px; padding: 13px 12px 28px 42px; grid-column: auto; }
   .status-item > .icon { top: 13px; left: 13px; font-size: 22px; }
@@ -632,4 +614,44 @@ code { color: var(--mint); }
   .form-grid, .advanced-grid { grid-template-columns: 1fr; }
   .form-grid .wide { grid-column: auto; }
   .diagnostic-status-grid { grid-template-columns: 1fr; }
+}
+
+/* ---- 概览负载卡片只有两张：两列即可（置于媒体查询之后保证优先生效） ---- */
+.status-grid.slim { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.status-grid.slim .status-item:last-child { grid-column: auto; }
+/* 容量与吞吐：每张图独占一行 */
+.charts.stacked { grid-template-columns: 1fr; }
+
+/* ---- 侧边栏收起为图标栏 ---- */
+.sidebar-toggle {
+  margin-left: auto;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  display: grid;
+  place-items: center;
+  color: #668078;
+  background: transparent;
+  cursor: pointer;
+}
+.sidebar-toggle:hover { color: var(--text); background: rgba(25, 62, 51, .46); }
+.sidebar-toggle .icon { font-size: 15px; transition: transform .18s ease; transform: rotate(180deg); }
+.app-shell.sidebar-collapsed .sidebar-toggle .icon { transform: rotate(0deg); }
+@media (min-width: 1051px) {
+  .app-shell.sidebar-collapsed { grid-template-columns: 74px minmax(0, 1fr); }
+  .app-shell.sidebar-collapsed .brand span,
+  .app-shell.sidebar-collapsed .nav-button span,
+  .app-shell.sidebar-collapsed .sidebar-meta { display: none; }
+  .app-shell.sidebar-collapsed .brand { justify-content: center; padding-inline: 0; position: relative; }
+  .app-shell.sidebar-collapsed .nav-button { justify-content: center; padding: 0; }
+  .app-shell.sidebar-collapsed .sidebar-toggle {
+    position: absolute;
+    right: -13px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 1px solid var(--line);
+    background: #0b1b17;
+  }
 }
