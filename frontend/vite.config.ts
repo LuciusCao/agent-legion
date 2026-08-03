@@ -1,5 +1,24 @@
-import { defineConfig, loadEnv } from 'vite'
+import { createLogger, defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+
+// Dev-server proxy noise filter: when the browser reloads / HMR restarts, the
+// proxy may still have frames in flight for a WebSocket the client already
+// closed, and vite dumps a full "ws proxy error" stack trace for what is a
+// benign disconnect (the client reconnects automatically). Collapse those to
+// a one-line warning and keep every other error untouched.
+const logger = createLogger()
+const loggerError = logger.error
+logger.error = (msg, options) => {
+  const code = (options?.error as NodeJS.ErrnoException | undefined)?.code
+  if (
+    msg.includes('ws proxy error') &&
+    (code === 'ERR_STREAM_WRITE_AFTER_END' || code === 'ECONNRESET')
+  ) {
+    logger.warn(`ws proxy: client disconnected (${code})`, { timestamp: true })
+    return
+  }
+  loggerError(msg, options)
+}
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '')
@@ -7,6 +26,7 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
+    customLogger: logger,
     css: {
       modules: {
         localsConvention: 'dashes',
