@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -16,6 +17,7 @@ import worker.supervisor as state_module
 from worker.metrics_cache import WorkerMetricsCache, metrics_cache_key, metrics_cache_path
 from worker.registration_token import registration_token_configured
 from worker.service import create_app
+from worker.service_bind import embed_control_token
 from worker.supervisor import (
     WorkerConfigStore,
     WorkerSupervisor,
@@ -474,6 +476,33 @@ def test_index_injects_control_token(tmp_path: Path) -> None:
 
     assert f'= "{store.control_token()}"' in body
     assert '= "__WORKER_CONTROL_TOKEN__"' not in body
+
+
+def test_index_skips_control_token_when_embedding_disabled(tmp_path: Path) -> None:
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text(
+        '<script>window.__WORKER_CONTROL_TOKEN__ = "__WORKER_CONTROL_TOKEN__";</script>',
+        encoding="utf-8",
+    )
+    store = WorkerConfigStore(tmp_path / "state")
+    app = create_app(FakeSupervisor(store), ui, embed_token=False)
+
+    with TestClient(app) as client:
+        body = client.get("/").text
+
+    assert store.control_token() not in body
+    assert '= "__WORKER_CONTROL_TOKEN__"' in body
+
+
+def test_embed_control_token_only_on_loopback(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert embed_control_token("127.0.0.1") is True
+        assert embed_control_token("::1") is True
+        assert embed_control_token("localhost") is True
+        assert embed_control_token("0.0.0.0") is False
+
+    assert any("非回环地址 0.0.0.0" in record.message for record in caplog.records)
 
 
 def test_worker_ui_serves_icon_sprite(tmp_path: Path) -> None:

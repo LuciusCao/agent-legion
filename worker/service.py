@@ -17,6 +17,7 @@ from fastapi.responses import FileResponse, HTMLResponse
 from worker.host_client import Client
 from worker.metrics_proxy import create_metrics_proxy_router
 from worker.registration_token import registration_token_configured
+from worker.service_bind import embed_control_token
 from worker.service_models import WorkerConfigPayload
 from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 
@@ -48,7 +49,7 @@ def _revoke_previous_worker(config: dict[str, Any]) -> None:
         logger.warning("吊销旧 Worker %s 失败，继续保存新配置：%s", worker_id, exc)
 
 
-def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
+def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool = True) -> FastAPI:
     token = supervisor.store.control_token()
 
     async def require_token(request: Request) -> None:
@@ -71,7 +72,9 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
     @app.get("/", include_in_schema=False)
     def index() -> HTMLResponse:
         html = (ui_dir / "index.html").read_text(encoding="utf-8")
-        return HTMLResponse(html.replace('= "__WORKER_CONTROL_TOKEN__"', f'= "{token}"'))
+        if embed_token:
+            html = html.replace('= "__WORKER_CONTROL_TOKEN__"', f'= "{token}"')
+        return HTMLResponse(html)
 
     @app.get("/assets/{name:path}", include_in_schema=False)
     def asset(name: str) -> FileResponse:
@@ -149,7 +152,7 @@ def main() -> int:
     worker_dir = Path(__file__).resolve().parent
     store = WorkerConfigStore(args.state_dir.resolve(), args.config.resolve())
     supervisor = WorkerSupervisor(store, worker_dir / "executor.py")
-    app = create_app(supervisor, worker_dir / "ui")
+    app = create_app(supervisor, worker_dir / "ui", embed_token=embed_control_token(args.host))
     uvicorn.run(app, host=args.host, port=args.port)
     return 0
 

@@ -4,13 +4,23 @@ from pathlib import Path
 
 from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
 from scripts.architecture.configuration import check_configuration_ownership
+from scripts.architecture.executor_contracts import (
+    check_executor_contract_models,
+    check_frontend_executor_types,
+    check_settings_store_legacy_agents,
+    check_workspace_save_outside_transaction,
+)
+from scripts.architecture.executor_decoupling import (
+    check_forbidden_patterns,
+    check_legacy_modules_absent,
+    check_workflow_worker_capability_branching,
+)
 from scripts.architecture.exemptions import categorize_exemptions, load_exemptions
 from scripts.architecture.file_budgets import check_file_budgets
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
     SCHEDULER_FORBIDDEN,
     _assignment_target,
-    accesses_runner_or_agent,
     annotation_contains_any,
     forbidden_imports,
     has_named_response_model,
@@ -22,28 +32,20 @@ from scripts.architecture.helpers import (
     threadpool_dict_by_workspace,
 )
 from scripts.architecture.import_cycles import check_import_cycles
-from scripts.architecture.phase4 import (
-    check_executor_contract_models,
-    check_frontend_executor_types,
-    check_settings_store_legacy_agents,
-    check_workspace_save_outside_transaction,
-)
-from scripts.architecture.phase5 import (
-    check_forbidden_patterns,
-    check_legacy_modules_absent,
-)
-from scripts.architecture.phase6 import (
+from scripts.architecture.route_contracts import has_protocol_response_annotation
+from scripts.architecture.service_boundaries import check_service_import_boundaries
+from scripts.architecture.sql_placeholders import check_sql_placeholders
+from scripts.architecture.video_legacy import check_video_legacy
+from scripts.architecture.workflow import check_workflow_definitions
+from scripts.architecture.workspace_boundaries import (
     check_frontend_handwritten_job_transports,
     check_job_deletion_service_is_singular,
     check_job_execution_direct_executor_calls,
+    check_jobs_route_include_router,
     check_route_dag_and_deletion,
     check_schema_mutation_locations,
     check_workspace_legacy_video_imports,
 )
-from scripts.architecture.route_contracts import has_protocol_response_annotation
-from scripts.architecture.service_boundaries import check_service_import_boundaries
-from scripts.architecture.video_legacy import check_video_legacy
-from scripts.architecture.workflow import check_workflow_definitions
 
 
 def check_repository(root: Path) -> list[str]:
@@ -101,12 +103,6 @@ def check_repository(root: Path) -> list[str]:
                         f"{relative_path}:{lineno}: scheduler must not use "
                         "_futures length for capacity decisions"
                     )
-                if relative_path == "server/app/workflow_worker_thread.py":
-                    for lineno in accesses_runner_or_agent(tree):
-                        errors.append(
-                            f"{relative_path}:{lineno}: "
-                            "WorkflowWorkerThread must branch on capability, not .runner or .agent"
-                        )
             if (
                 relative_path.startswith("server/app/executors/")
                 and not relative_path.endswith("/__init__.py")
@@ -119,14 +115,6 @@ def check_repository(root: Path) -> list[str]:
                     )
 
             errors.extend(check_service_import_boundaries(relative_path, tree))
-            if relative_path == "server/app/routes/jobs.py":
-                for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
-                    name = ast.unparse(call.func)
-                    if name.endswith("include_router"):
-                        errors.append(
-                            f"{relative_path}: include_router forbidden; "
-                            "compose focused routers in routes/__init__.py"
-                        )
 
             if not relative_path.startswith("server/app/routes/"):
                 continue
@@ -162,15 +150,18 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_frontend_executor_types(root))
     errors.extend(check_legacy_modules_absent(root))
     errors.extend(check_forbidden_patterns(root))
+    errors.extend(check_workflow_worker_capability_branching(root))
     errors.extend(check_workspace_legacy_video_imports(root))
     errors.extend(check_job_execution_direct_executor_calls(root))
     errors.extend(check_video_legacy(root))
     errors.extend(check_route_dag_and_deletion(root))
     errors.extend(check_frontend_handwritten_job_transports(root))
     errors.extend(check_job_deletion_service_is_singular(root))
+    errors.extend(check_jobs_route_include_router(root))
     errors.extend(check_schema_mutation_locations(root))
     errors.extend(check_import_cycles(root))
     errors.extend(check_configuration_ownership(root))
+    errors.extend(check_sql_placeholders(root))
 
     try:
         policy = load_budget_policy(root / "config/architecture/architecture-budget-policy.yaml")

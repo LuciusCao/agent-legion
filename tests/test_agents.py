@@ -25,7 +25,7 @@ def _agent_dict(**kwargs):
 
 
 def test_broadcast_publishes_to_agents_channel():
-    from server.app.event_bus import InProcessEventBus
+    from server.app.events.bus import InProcessEventBus
 
     bus = InProcessEventBus()
     manager = AgentStatusManager(event_bus=bus)
@@ -36,7 +36,7 @@ def test_broadcast_publishes_to_agents_channel():
 
 
 def test_broadcast_sends_incremental_agent_events():
-    from server.app.event_bus import InProcessEventBus
+    from server.app.events.bus import InProcessEventBus
 
     bus = InProcessEventBus()
     manager = AgentStatusManager(event_bus=bus)
@@ -61,7 +61,7 @@ def test_broadcast_sends_incremental_agent_events():
 
 
 def test_add_pi_agent_broadcasts_snapshot_envelope():
-    from server.app.event_bus import InProcessEventBus
+    from server.app.events.bus import InProcessEventBus
 
     bus = InProcessEventBus()
     manager = AgentStatusManager(event_bus=bus)

@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
-import { TokenUsagePanel } from '../components/TokenUsagePanel'
+import { TokenUsagePanel } from '../components/tokenUsage/TokenUsagePanel'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 
 export function TokenUsagePage() {

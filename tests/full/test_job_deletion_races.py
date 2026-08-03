@@ -15,6 +15,7 @@ import pytest
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
+from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 
@@ -87,6 +88,8 @@ def test_delete_rollback_survives_concurrent_recreation(
     def _deleter() -> None:
         try:
             result_holder.append(service.delete(workspace_id, job["id"]))
+        except JobOperationError as exc:
+            result_holder.append(exc.to_result())
         except BaseException as exc:  # pragma: no cover - defensive
             exception_holder.append(exc)
 

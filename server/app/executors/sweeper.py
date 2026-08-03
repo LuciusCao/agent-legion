@@ -6,8 +6,8 @@ import logging
 import threading
 from datetime import UTC, datetime
 
-from server.app._agent_broker_unclaimable import fail_unclaimable_model_requests
 from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
 from server.app.executors.leases import ExecutorLeaseRepository
 
 logger = logging.getLogger(__name__)

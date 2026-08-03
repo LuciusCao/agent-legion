@@ -14,6 +14,7 @@
 
 - **想了解系统当前怎么工作的** → 看 `docs/architecture/`
 - **部署与运维** → 看 `docs/` 下的部署文档与 runbook
+- **想了解 `data/` 运行时目录布局** → 看 [data-layout.md](data-layout.md)
 
 ## 维护规则
 

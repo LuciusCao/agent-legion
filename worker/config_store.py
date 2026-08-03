@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
-import tempfile
 import threading
 import urllib.parse
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from worker import worker_declarations
+from worker._atomic import atomic_write
 from worker.registration_token import normalized_registration_token
 from worker.runtime_controls import validate_claim_controls
 
@@ -153,14 +151,16 @@ class WorkerConfigStore:
             if registration_token is not None:
                 token = normalized_registration_token(registration_token)
                 token_path = self.state_dir / "register_token"
-                self._atomic_write(token_path, token + "\n")
+                atomic_write(token_path, token + "\n", mode=0o600)
                 updated["register_token_file"] = str(token_path)
             self.write(updated)
             return updated
 
     def write(self, config: dict[str, Any]) -> None:
         # 同目录临时文件 + fsync + os.replace，保证并发/掉电时状态文件不被写坏。
-        self._atomic_write(self.path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
+        atomic_write(
+            self.path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False), mode=0o600
+        )
 
     def control_token(self) -> str:
         """Read or create the local control-plane bearer token (0600 in state_dir)."""
@@ -171,19 +171,5 @@ class WorkerConfigStore:
         except OSError:
             pass
         token = secrets.token_urlsafe(32)
-        self._atomic_write(path, token + "\n")
+        atomic_write(path, token + "\n", mode=0o600)
         return token
-
-    def _atomic_write(self, path: Path, content: str) -> None:
-        descriptor, temporary = tempfile.mkstemp(dir=self.state_dir, prefix=f"{path.stem}.")
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
-        except BaseException:
-            with suppress(OSError):
-                os.unlink(temporary)
-            raise

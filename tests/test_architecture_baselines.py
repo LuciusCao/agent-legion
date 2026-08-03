@@ -1,7 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.check_architecture import check_repository
 from tests.architecture_budget_helpers import write_neutral_budget_governance
+
+pytestmark = pytest.mark.no_db
 
 
 def write(path: Path, content: str) -> None:
@@ -153,7 +157,7 @@ def test_jobs_router_is_not_a_router_aggregator(tmp_path):
 
 def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
     write(
-        tmp_path / "server/app/workflow_worker_thread.py",
+        tmp_path / "server/app/workflow_worker/thread.py",
         "from concurrent.futures import ThreadPoolExecutor\n"
         "class Worker:\n"
         "    def build(self, executor_id):\n"
@@ -165,7 +169,7 @@ def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
         [
             {
                 "check": "architecture.scheduler_threadpool",
-                "path": "server/app/workflow_worker_thread.py:self._pools[executor_id]",
+                "path": "server/app/workflow_worker/thread.py:self._pools[executor_id]",
                 "reason": "Executor-id keyed shared pool bounded by capacity.",
                 "owner": "test",
                 "remove_when": "issues/open/032-P2-event-driven-worker.md",

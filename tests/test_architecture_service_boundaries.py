@@ -2,8 +2,12 @@ import ast
 import importlib
 from pathlib import Path
 
+import pytest
+
 from scripts.check_architecture import check_repository
 from tests.architecture_budget_helpers import write_neutral_budget_governance
+
+pytestmark = pytest.mark.no_db
 
 
 def write(path: Path, content: str) -> None:

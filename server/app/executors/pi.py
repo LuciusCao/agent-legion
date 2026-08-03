@@ -4,6 +4,7 @@ import logging
 from collections.abc import Mapping
 
 from server.app.executors._pi_result import to_execution_result
+from server.app.executors._pi_skill import build_skill_manager as build_skill_manager
 from server.app.executors._pi_skill import get_skill_version, prepare_execution, resolve_skill_dir
 from server.app.executors._shard_contract import shard_prompt_section
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker

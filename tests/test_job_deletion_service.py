@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
@@ -16,6 +16,7 @@ from server.app.services.job_deletion import (
     JobDeleteResult,
     JobDeletionService,
 )
+from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 
@@ -78,7 +79,7 @@ def _insert_active_lease(
             values (?, ?, 'running', ?, ?, '', '', ?)
             returning id
             """,
-            (job_id, node_key, "[]", "", _database_timestamp(now)),
+            (job_id, node_key, "[]", "", database_timestamp(now)),
         )
         node_run_id = cursor.fetchone()["id"]
         conn.execute(
@@ -98,9 +99,9 @@ def _insert_active_lease(
                 "question_comprehension_info",
                 node_key,
                 node_run_id,
-                _database_timestamp(now),
-                _database_timestamp(now),
-                _database_timestamp(expires),
+                database_timestamp(now),
+                database_timestamp(now),
+                database_timestamp(expires),
             ),
         )
 
@@ -114,12 +115,14 @@ def test_delete_rejects_active_lease_despite_stale_ui(job_db: JobQueries, tmp_pa
     # Stale UI still shows queued, but an active non-expired lease exists.
     _insert_active_lease(job_db, job["id"])
 
-    result: JobDeleteResult = service.delete(job["workspace_id"], job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete(job["workspace_id"], job["id"])
 
-    assert result["job_id"] == job["id"]
-    assert result["operation"] == "delete"
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "active_lease"
+    error = exc_info.value
+    assert error.job_id == job["id"]
+    assert error.operation == "delete"
+    assert error.status == "failed"
+    assert error.reason_code == "active_lease"
     # Database row and storage directory must remain intact.
     assert job_db.get_job(job["id"]) is not None
     assert resolve_job_dir(job, settings.jobs_dir).exists()
@@ -150,10 +153,11 @@ def test_delete_atomic_guard_catches_lease_created_after_precheck(
 
     monkeypatch.setattr(job_db, "lease_guarded_mutation", race)
 
-    result = service.delete(job["workspace_id"], job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete(job["workspace_id"], job["id"])
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "busy"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "busy"
     assert job_db.get_job(job["id"]) is not None
     assert (storage_dir / "artifact.json").exists()
 
@@ -254,12 +258,14 @@ def test_delete_rejects_wrong_workspace(job_db: JobQueries, tmp_path: Path) -> N
 
     job = _create_job(job_db, "ws3", "Q003", status="completed")
 
-    result: JobDeleteResult = service.delete("other-workspace", job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete("other-workspace", job["id"])
 
-    assert result["job_id"] == job["id"]
-    assert result["operation"] == "delete"
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "wrong_workspace"
+    error = exc_info.value
+    assert error.job_id == job["id"]
+    assert error.operation == "delete"
+    assert error.status == "failed"
+    assert error.reason_code == "wrong_workspace"
 
 
 def test_delete_rejects_missing_job(job_db: JobQueries, tmp_path: Path) -> None:
@@ -267,12 +273,14 @@ def test_delete_rejects_missing_job(job_db: JobQueries, tmp_path: Path) -> None:
     lease_repo = ExecutorLeaseRepository(job_db.path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
-    result: JobDeleteResult = service.delete("ws-missing", "missing-job-id")
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete("ws-missing", "missing-job-id")
 
-    assert result["job_id"] == "missing-job-id"
-    assert result["operation"] == "delete"
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "not_found"
+    error = exc_info.value
+    assert error.job_id == "missing-job-id"
+    assert error.operation == "delete"
+    assert error.status == "failed"
+    assert error.reason_code == "not_found"
 
 
 def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path) -> None:
@@ -324,9 +332,10 @@ def test_delete_rollback_preserves_recreated_destination(
 
     monkeypatch.setattr(job_db, "delete_job_in_transaction", _fail_once)
 
-    result = service.delete(job["workspace_id"], job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete(job["workspace_id"], job["id"])
 
-    assert result["status"] == "failed"
+    assert exc_info.value.status == "failed"
     assert captured_paths
     staged_storage, original_storage = captured_paths[0]
     assert staged_storage.exists()
@@ -364,10 +373,11 @@ def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Pa
             ("../escape", job["id"]),
         )
 
-    result = service.delete(job["workspace_id"], job["id"])
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete(job["workspace_id"], job["id"])
 
-    assert result["status"] == "failed"
-    assert result["reason_code"] == "delete_failed"
+    assert exc_info.value.status == "failed"
+    assert exc_info.value.reason_code == "delete_failed"
     assert legitimate_storage.exists()
     assert (legitimate_storage / "artifact.json").exists()
     assert not (settings.jobs_dir / ".trash").exists()

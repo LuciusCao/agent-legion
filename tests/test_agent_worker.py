@@ -337,12 +337,53 @@ def test_sweep_stale_executions_removes_only_old_dirs(tmp_path: Path) -> None:
     fresh = work_root / "fresh-exec"
     old.mkdir(parents=True)
     fresh.mkdir(parents=True)
-    (old / "events.jsonl").write_text("{}", encoding="utf-8")
+    events = old / "events.jsonl"
+    events.write_text("{}", encoding="utf-8")
     past = time.time() - 25 * 3600
+    # Staleness is judged by the newest mtime in the subtree, so the whole
+    # tree must be backdated for the dir to count as stale.
+    os.utime(events, (past, past))
     os.utime(old, (past, past))
     agent_worker.sweep_stale_executions(work_root)
     assert not old.exists()
     assert fresh.exists()
+
+
+def test_sweep_stale_executions_keeps_dir_with_fresh_nested_file(tmp_path: Path) -> None:
+    # A long-running execution's top-level dir mtime freezes at extraction
+    # time while runtime writes keep landing in nested dirs (job/runs/...);
+    # the sweep must not rmtree it just for outliving max_age_seconds.
+    work_root = tmp_path / "work"
+    running = work_root / "long-exec"
+    run_dir = running / "job" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    events = run_dir / "events.jsonl"
+    events.write_text("{}", encoding="utf-8")
+    past = time.time() - 25 * 3600
+    os.utime(running, (past, past))
+    os.utime(running / "job", (past, past))
+    os.utime(run_dir.parent, (past, past))
+    os.utime(run_dir, (past, past))
+    agent_worker.sweep_stale_executions(work_root)
+    assert running.exists()
+    assert events.is_file()
+
+
+def test_sweep_stale_executions_removes_fully_stale_subtree(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    stale = work_root / "stale-exec"
+    run_dir = stale / "job" / "runs" / "run-1"
+    run_dir.mkdir(parents=True)
+    events = run_dir / "events.jsonl"
+    events.write_text("{}", encoding="utf-8")
+    past = time.time() - 25 * 3600
+    os.utime(events, (past, past))
+    os.utime(run_dir, (past, past))
+    os.utime(run_dir.parent, (past, past))
+    os.utime(stale / "job", (past, past))
+    os.utime(stale, (past, past))
+    agent_worker.sweep_stale_executions(work_root)
+    assert not stale.exists()
 
 
 def test_sweep_stale_executions_tolerates_missing_work_root(tmp_path: Path) -> None:

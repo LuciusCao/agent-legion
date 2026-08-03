@@ -1,7 +1,7 @@
 import type { components } from '../generated/api'
 import { formatDuration, STATUS_ICON, STATUS_LABEL } from './dagNodeStatus'
 import { MaterialIcon } from './MaterialIcon'
-import type { DagNodeData } from './DagNode'
+import type { DagNodeData } from './dag/DagNode'
 import styles from './NodeDetailsPanel.module.css'
 
 type LatestRun = Pick<

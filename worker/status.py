@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import threading
-from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker._atomic import atomic_write
 from worker.status_reader import read_current_executions, read_runtime_status
 
 ENV_VAR = "AGENT_WORKER_STATUS_FILE"
@@ -82,18 +81,6 @@ class ExecutionStatusReporter:
             "remote": self._remote,
         }
         try:
-            descriptor, temporary = tempfile.mkstemp(
-                dir=self._path.parent, prefix=f"{self._path.stem}."
-            )
-            try:
-                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle, ensure_ascii=False)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, self._path)
-            except BaseException:
-                with suppress(OSError):
-                    os.unlink(temporary)
-                raise
+            atomic_write(self._path, json.dumps(payload, ensure_ascii=False))
         except OSError as exc:  # 状态展示降级为"无当前执行"，不影响任务本身
             print(f"status file write failed: {exc}", flush=True)

@@ -1,5 +1,5 @@
 import { RichText } from './RichText'
-import styles from './QuestionContentPanel.module.css'
+import styles from './question/QuestionContentPanel.module.css'
 
 export interface ErrorAnswerBadgesProps {
   answers: string[]

@@ -3,6 +3,7 @@ import { useParams, useNavigate, Outlet, useLocation } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
+import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { usePageHeaderStore } from '../stores/pageHeaderStore'
 import { AppShell } from './AppShell'
@@ -22,8 +23,8 @@ export default function WorkspaceLayout() {
     fetchWorkspaceStats,
   } = useWorkspaceStore()
 
+  const { fetchWorkerStatus } = useAgentsStore()
   const {
-    fetchWorkerStatus,
     openAddDialog,
     addDialogOpen,
     closeAddDialog,

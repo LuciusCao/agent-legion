@@ -5,6 +5,7 @@ import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceMainPage from './WorkspaceMainPage'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
 import {
@@ -257,7 +258,7 @@ describe('WorkspaceMainPage', () => {
       loading: false,
       error: null,
     })
-    useUiStore.setState({
+    useAgentsStore.setState({
       agents: [
         makeAgentStatus({
           id: 'agent-a',
@@ -265,11 +266,13 @@ describe('WorkspaceMainPage', () => {
           workspace_id: 'ws1',
         }),
       ],
+      workerPausedByWorkspace: {},
+    })
+    useUiStore.setState({
       addDialogOpen: false,
       addContentType: 'knowledge',
       workspacePackageDialogOpen: false,
       tokenUsageDialogOpen: false,
-      workerPausedByWorkspace: {},
       toast: null,
     })
     useSettingStore.setState({
