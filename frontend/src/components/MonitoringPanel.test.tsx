@@ -86,7 +86,7 @@ describe('MonitoringPanel', () => {
     expect(screen.getByText(/输入 400/)).toBeInTheDocument()
     expect(screen.getByText(/输出 200/)).toBeInTheDocument()
     expect(screen.getByText(/缓存读 40/)).toBeInTheDocument()
-    // 近 1 小时 Runs：完成数、失败数与 p50/p95 耗时
+    // 近 1 小时 Agent Runs：完成数、失败数与 p50/p95 耗时
     expect(screen.getByTestId('hourly-runs-summary')).toHaveTextContent(
       '完成 5'
     )
