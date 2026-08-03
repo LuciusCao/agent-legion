@@ -19,11 +19,16 @@ export function useWorkspaceRerunActions(workspaceId: string | undefined) {
     nodeKey: string | null,
     fromFailedNode?: boolean,
     jobIds?: string[],
-    failureCategory?: FailureCategory
+    failureCategory?: FailureCategory,
+    fromNodeKey?: string
   ) => {
     if (!workspaceId) return
     if (failureCategory) {
-      await rerunByFailure(workspaceId, { category: failureCategory, jobIds })
+      await rerunByFailure(workspaceId, {
+        category: failureCategory,
+        jobIds,
+        fromNodeKey,
+      })
       return
     }
     await batchRerun(workspaceId, nodeKey, fromFailedNode, jobIds)

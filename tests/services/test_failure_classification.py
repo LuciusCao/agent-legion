@@ -359,6 +359,48 @@ def test_pool_timeout_is_transient_technical():
     assert is_transient_retryable(detail)
 
 
+def test_bare_pool_connection_timeout_is_transient_technical():
+    category, detail = classify_failure(1, "couldn't get a connection after 10.00 sec")
+    assert category == "technical"
+    assert detail == "db_pool_timeout"
+    assert is_transient_retryable(detail)
+
+
+def test_velites_transient_http_502_is_provider_request():
+    assert classify_failure(0, "provider call failed (transient): HTTP 502: ") == (
+        "technical",
+        "provider_request",
+    )
+
+
+def test_velites_deterministic_call_failure_is_provider_request():
+    assert classify_failure(0, "provider call failed: HTTP 400: invalid request") == (
+        "technical",
+        "provider_request",
+    )
+
+
+def test_velites_transport_interruptions_are_provider_stream():
+    assert classify_failure(
+        0,
+        "provider call failed (transient): transport error: error decoding response body "
+        "(error reading a body from connection <== unexpected EOF during chunk size line)",
+    ) == ("technical", "provider_stream")
+    assert classify_failure(0, "provider call failed: stream error: 操作失败") == (
+        "technical",
+        "provider_stream",
+    )
+
+
+def test_velites_sensitive_finish_reason_is_business():
+    # The provider's content filter stopped generation — retrying unchanged
+    # infrastructure will not help, so this is business like review_rejected.
+    assert classify_failure(0, "provider call failed: unexpected finish_reason `sensitive`") == (
+        "business",
+        "provider_content_filter",
+    )
+
+
 def test_non_transient_details_are_not_retryable():
     assert not is_transient_retryable("provider_stream")
     assert not is_transient_retryable("database")

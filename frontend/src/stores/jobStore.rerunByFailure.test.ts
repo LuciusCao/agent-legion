@@ -136,6 +136,33 @@ describe('jobStore rerunByFailureCategory', () => {
     expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
+  it('includes from_node_key in the request when a start node is given', async () => {
+    mockRerunJobsByFailure.mockResolvedValue({
+      results: [
+        {
+          job_id: 'j1',
+          operation: 'rerun',
+          status: 'succeeded',
+          node_key: 'extract',
+          rerun_nodes: ['extract'],
+        },
+      ],
+    })
+
+    await useJobStore.getState().rerunByFailureCategory('ws1', {
+      category: 'technical',
+      jobIds: ['j1'],
+      fromNodeKey: 'extract',
+    })
+
+    expect(mockRerunJobsByFailure).toHaveBeenCalledWith('ws1', {
+      category: 'technical',
+      strategy: 'auto',
+      job_ids: ['j1'],
+      from_node_key: 'extract',
+    })
+  })
+
   it('does nothing when there are no job ids', async () => {
     useJobStore.setState({ selectedIds: new Set() })
 
