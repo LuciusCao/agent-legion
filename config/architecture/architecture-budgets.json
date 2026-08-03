@@ -913,6 +913,7 @@
     "worker/registration_retry.py": 55,
     "worker/registration_token.py": 27,
     "worker/runtime_controls.py": 46,
+    "worker/runtime_preflight.py": 50,
     "worker/service.py": 162,
     "worker/service_bind.py": 32,
     "worker/service_models.py": 31,
