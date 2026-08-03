@@ -4,9 +4,12 @@ Split out of ``ops_metrics.py`` to respect that module's size budget. The
 summary feeds the monitoring cards, which must stay stable while the chart
 window switches: token and gauge values always come from minute-resolution
 samples (``bucket_start >= now - 1h`` for tokens, latest minute row for
-gauges), and run stats are aggregated on demand from ``node_runs``. The run
-table has no worker attribution, so run stats are always global; duration
-percentiles cover ``completed`` runs only.
+gauges), and run stats are aggregated on demand from ``node_runs``. Run stats
+cover Agent runs only — a run counts when an ``agent_execution_requests``
+row references it (same attribution the sampler uses); Host-local handler
+(code) nodes never have one and are excluded. The run table has no worker
+attribution, so run stats are always global; duration percentiles cover
+``completed`` runs only.
 """
 
 from __future__ import annotations
@@ -54,6 +57,9 @@ def query_summary(service: OpsMetricsService, worker_id: str | None = None) -> d
                    ) filter (where status = 'completed') as p95
             from node_runs
             where status in ('completed', 'failed') and finished_at >= ?
+              and exists (
+                select 1 from agent_execution_requests r where r.node_run_id = node_runs.id
+              )
             """,
             (cutoff,),
         ).fetchone()
