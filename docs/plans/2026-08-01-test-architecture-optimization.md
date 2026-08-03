@@ -643,6 +643,10 @@ Phase 4B 执行记录（2026-08-03，PR smoke CI 接线）：
   新 job 不破坏既有契约；required checks 同步更新留待 Phase 5 统一处理。
 - full gate 退出码 0：backend 2385 passed / 128.80s、frontend 154 files / 1147 tests、
   Rust 全部通过、full_gate 32 passed / 11.55s、combined coverage 93.50%，0 rerun。
+- GitHub Actions 验收（提交 `0fa0bbb1`）：run
+  [30793710285](https://github.com/LuciusCao/agent-legion/actions/runs/30793710285)
+  五个 job 全部通过；`e2e-smoke` 首跑总耗时 2m38s（Chromium 安装 34s、
+  Browser smoke 步骤 32s 含前端 build 与后端启动），满足 PR E2E 3 分钟验收线。
 
 ### Phase 5：CI 拆分、依赖去重与 flaky 治理
 
