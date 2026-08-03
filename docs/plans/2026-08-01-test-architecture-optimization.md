@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 3 backend coverage clusters complete (3D-3H, CI accepted); frontend blind spots pending; performance targets open
+状态：Phase 3 complete (3A-3L, partition floors in report mode); Phase 4 E2E pending; performance targets open
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -558,6 +558,29 @@ Phase 3K 执行记录（2026-08-03，前端管理页面簇）：
   154 files / 1147 tests（1133 + 14 新增）、Rust 全部通过、full_gate 32 passed / 96.75s、
   backend combined coverage 93.41%、frontend lines 90.77%、coverage inventory 359/359、
   production bundle 通过，0 rerun。
+- GitHub Actions 验收（提交 `753d55f5`）：run
+  [30785947933](https://github.com/LuciusCao/agent-legion/actions/runs/30785947933)
+  backend、frontend、rust、ci-extended 全部通过。
+
+Phase 3L 执行记录（2026-08-03，分区 coverage 门槛，报告模式）：
+
+- 新增 `scripts/check_coverage_partitions.py`：backend 经 `coverage json`、frontend 经
+  V8 statementMap 推导行覆盖，按命名分区核对行覆盖下限（backend dispatch、workflow
+  upgrade ≥80%，transcription/artifacts/skill fallback/raw log ≥70%；frontend
+  auth/bootstrap、api transport、workflow upgrade、admin pages ≥80%）。默认报告模式
+  非阻断，`AGENT_LEGION_COV_PARTITIONS=enforce` 或 `--enforce` 转阻断；未提供数据源
+  的分区记 SKIP，提供后无匹配文件才算违规。
+- 接入 `check.sh` 的 non-blocking 段（combined coverage 之后）；新生产文件经
+  `ratchet_architecture_budgets` 登记 265 行预算。新增 `tests/scripts/` 目录与 7 个
+  纯单元用例（istanbul 合成报告、evaluate 违规/SKIP/达标、main 报告/enforce 双模式）。
+- full gate 首轮因新文件缺架构预算基线失败（登记后过）；第二轮 1 个既有组件测试在
+  load 43 下 5s 超时（隔离复跑通过，同 3E 负载模式）；第三轮退出码 0：backend
+  2385 passed（2378 + 7 新增）/ 344.73s、frontend 154 files / 1147 tests、Rust 全部
+  通过、full_gate 32 passed / 20.58s、combined coverage 93.49%，0 rerun。报告段端到端
+  输出 10 个分区全部 OK（9 个 100%，frontend api transport 93.8%）。
+- Phase 3 至此全部落地：coverage 分母显式（359/359）、后端六个低覆盖模块与前端
+  auth/bootstrap、workflow upgrade、api transport、admin pages 全部达标、分区门槛
+  以报告模式运行，待 CI 稳定后切 enforce。
 
 ### Phase 4：加入短 E2E 与 nightly 浏览器压力测试
 
