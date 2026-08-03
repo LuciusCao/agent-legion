@@ -533,6 +533,40 @@ def test_unclaimable_sweeper_runtime_match_stays_queued(job_db) -> None:
     assert _request_state(job_db, execution_id) == "queued"
 
 
+def test_unclaimable_sweeper_fails_on_cross_worker_combination(job_db) -> None:
+    """EXEC-CLAIM-RUNTIME-001: runtime, capability and model are each declared
+    by some Worker but never together on one machine — claim.py judges per
+    Worker, so the request would rot in queued; the sweeper fails it with an
+    explicit combination reason instead of trusting the cross-Worker union."""
+    execution_id = _seed_request(job_db, job_id="combination-job", runtime="velites")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-velites-only",
+        capabilities=["review"],
+        models=[{"provider": "gateway", "model": "other-model"}],
+        runtimes=["velites"],
+    )
+    _register_with_declarations(
+        registry,
+        "worker-pi-generate",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+        runtimes=["pi"],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == [execution_id]
+
+    node = job_db.get_job_node("combination-job", "generate")
+    assert node["status"] == "failed"
+    assert (
+        "no single Worker declares runtime, capability and model together" in node["error_message"]
+    )
+    assert "not declared by any Worker" not in node["error_message"]
+    assert _request_state(job_db, execution_id) == "done"
+
+
 def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> None:
     """The pinned revision's node execution overrides win over manifest pi."""
     execution_id = _seed_request(job_db, job_id="revision-job")
