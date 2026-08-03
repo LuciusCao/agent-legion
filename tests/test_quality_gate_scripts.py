@@ -20,8 +20,10 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
     for key in (
         "BACKEND_GATE_PHASE",
         "FRONTEND_API_CHECK",
+        "FRONTEND_COVERAGE_BLOB_DIR",
         "FRONTEND_GATE_PHASE",
         "FRONTEND_TEST_MODE",
+        "FRONTEND_TEST_PROJECT",
         "GATE_LANES",
         "GATE_TIER",
     ):
@@ -246,3 +248,48 @@ def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
     assert f"--outputFile.junit={results / 'vitest-junit.xml'}" in calls
     assert "--reporter=json" in calls
     assert f"--outputFile.json={results / 'vitest-results.json'}" in calls
+
+
+def test_frontend_gate_shards_project_and_defers_coverage_enforcement(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    frontend = tmp_path / "frontend"
+    fake_bin = tmp_path / "bin"
+    results = tmp_path / "results"
+    blobs = tmp_path / "blobs"
+    scripts.mkdir()
+    frontend.mkdir()
+    fake_bin.mkdir()
+    frontend_gate = scripts / "check-quick-frontend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-frontend.sh", frontend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "npm",
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        frontend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "FRONTEND_COVERAGE_BLOB_DIR": str(blobs),
+            "FRONTEND_GATE_PHASE": "test",
+            "FRONTEND_TEST_MODE": "coverage",
+            "FRONTEND_TEST_PROJECT": "logic",
+            "GATE_LOG": str(gate_log),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "run test:coverage -- --project logic" in calls
+    assert "--reporter=blob" in calls
+    assert f"--outputFile.blob={blobs / 'vitest-blob-logic.json'}" in calls
+    # A shard's partial coverage cannot meet the global thresholds; the merge
+    # job enforces them once against the combined data instead.
+    assert "--coverage.thresholds.lines=0" in calls
+    assert "--coverage.thresholds.functions=0" in calls
+    assert "--coverage.thresholds.branches=0" in calls
+    assert "--coverage.thresholds.statements=0" in calls
+    assert "run test:coverage-inventory" not in calls

@@ -19,8 +19,8 @@ env:
   # at the default location so astral-sh/setup-uv caching covers it.
   UV_CACHE_DIR: /home/runner/.cache/uv
   # Fresh per-run databases on the service container below. export_openapi's
-  # create_app writes worker_control_state at startup, so the frontend job needs
-  # a live database too.
+  # create_app writes worker_control_state at startup, so the backend job
+  # (which hosts the api:check contract step) needs a live database.
   AGENT_LEGION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_ci
   AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_test_ci
   # check-skills-shared.py compares skill repos at machine-local paths
@@ -62,6 +62,17 @@ jobs:
 
       - run: uv sync
 
+      # The api:check contract step regenerates frontend API types via
+      # openapi-typescript/prettier from frontend/node_modules.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
       # fail-closed: the tests/full e2e and bwrap-gated cargo tests need a
       # real bubblewrap binary on the runner. Ubuntu 24.04 restricts
@@ -74,6 +85,11 @@ jobs:
 
       - name: Backend static checks
         run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
+
+      # api:check boots create_app to export the OpenAPI schema, so it lives
+      # in this job (Python env + Postgres) instead of the frontend jobs.
+      - name: API contract check
+        run: FRONTEND_GATE_PHASE=api-contract ./scripts/check-quick-frontend.sh
 
       - name: Backend unit tests (PostgreSQL offline)
         run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
@@ -125,35 +141,19 @@ jobs:
             --output test-results/backend-summary.md
           cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
 
-  frontend:
-    name: frontend
+  # Frontend is sharded into the two Vitest projects (test architecture plan,
+  # Phase 5B): pure logic tests (node) and component tests (jsdom) run as
+  # parallel jobs, each emitting a blob report that embeds raw V8 coverage.
+  # frontend-coverage then merges the blobs and enforces the global coverage
+  # thresholds + inventory once, against the combined data. The OpenAPI
+  # contract check lives in the backend job (Phase 5A), so these jobs need
+  # neither Python nor Postgres.
+  frontend-logic:
+    name: frontend-logic
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    services:
-      postgres:
-        image: postgres:17
-        env:
-          POSTGRES_USER: postgres
-          POSTGRES_PASSWORD: postgres
-          # api:check's create_app connects to AGENT_LEGION_DATABASE_URL; the
-          # service only auto-creates POSTGRES_DB (tests create their own).
-          POSTGRES_DB: agent_legion_ci
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
     steps:
       - uses: actions/checkout@v4
-
-      # api:check regenerates the OpenAPI schema via uv run + create_app,
-      # so this job needs the Python environment and the database as well.
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
-          python-version: "3.13"
 
       - uses: actions/setup-node@v4
         with:
@@ -161,33 +161,143 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
 
-      - run: uv sync
-
       - run: npm ci
         working-directory: frontend
 
+      # FRONTEND_API_CHECK=0: the contract check runs in the backend job.
       - name: Frontend static checks
-        run: FRONTEND_GATE_PHASE=static FRONTEND_TEST_MODE=coverage ./scripts/check-quick-frontend.sh
+        run: FRONTEND_GATE_PHASE=static FRONTEND_TEST_MODE=coverage FRONTEND_API_CHECK=0 ./scripts/check-quick-frontend.sh
 
-      - name: Frontend tests
-        run: FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage ./scripts/check-quick-frontend.sh
+      - name: Frontend logic tests
+        run: >-
+          FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage
+          FRONTEND_TEST_PROJECT=logic
+          FRONTEND_COVERAGE_BLOB_DIR="${{ github.workspace }}/coverage-blobs/logic"
+          ./scripts/check-quick-frontend.sh
         env:
-          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend
+          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend-logic
+
+      - name: Upload logic coverage blob
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-blob-logic
+          path: coverage-blobs/logic/
+          retention-days: 1
 
       - name: Production bundle
         run: npm run build:bundle
         working-directory: frontend
 
-      - name: Frontend test summary
+      # summarize_test_results.py is stdlib-only; the runner's system
+      # python3 avoids a full uv sync in this job.
+      - name: Frontend logic test summary
         if: always()
         env:
-          AGENT_LEGION_COV: frontend-v8
+          AGENT_LEGION_COV: frontend-v8-blob
         run: |
-          uv run python scripts/summarize_test_results.py \
-            --title "Frontend test evidence" \
-            --junit test-results/frontend/vitest-junit.xml \
-            --output test-results/frontend-summary.md
-          cat test-results/frontend-summary.md >> "$GITHUB_STEP_SUMMARY"
+          python3 scripts/summarize_test_results.py \
+            --title "Frontend logic test evidence" \
+            --junit test-results/frontend-logic/vitest-junit.xml \
+            --output test-results/frontend-logic-summary.md
+          cat test-results/frontend-logic-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-component:
+    name: frontend-component
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Frontend component tests
+        run: >-
+          FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage
+          FRONTEND_TEST_PROJECT=component
+          FRONTEND_COVERAGE_BLOB_DIR="${{ github.workspace }}/coverage-blobs/component"
+          ./scripts/check-quick-frontend.sh
+        env:
+          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend-component
+
+      - name: Upload component coverage blob
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-blob-component
+          path: coverage-blobs/component/
+          retention-days: 1
+
+      - name: Frontend component test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: frontend-v8-blob
+        run: |
+          python3 scripts/summarize_test_results.py \
+            --title "Frontend component test evidence" \
+            --junit test-results/frontend-component/vitest-junit.xml \
+            --output test-results/frontend-component-summary.md
+          cat test-results/frontend-component-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-coverage:
+    name: frontend-coverage
+    needs: [frontend-logic, frontend-component]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Download coverage blobs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: frontend-coverage-blob-*
+          path: coverage-blobs
+          merge-multiple: true
+
+      # --merge-reports replays the shard blob reports (tests + embedded V8
+      # coverage) and applies vite.config.ts coverage thresholds to the
+      # merged data; json-summary feeds the job summary below.
+      - name: Merge coverage and enforce thresholds
+        run: >-
+          npx vitest run
+          --merge-reports "${{ github.workspace }}/coverage-blobs"
+          --coverage.enabled=true
+          --coverage.reporter=text
+          --coverage.reporter=json
+          --coverage.reporter=json-summary
+        working-directory: frontend
+
+      - name: Coverage inventory
+        run: npm run test:coverage-inventory
+        working-directory: frontend
+
+      - name: Frontend coverage summary
+        if: always()
+        run: |
+          node -e '
+            const summary = require("./coverage/coverage-summary.json").total;
+            const rows = ["lines", "functions", "branches", "statements"]
+              .map((key) => `| ${key} | ${summary[key].pct}% |`)
+              .join("\n");
+            console.log(`## Frontend coverage (merged shards)\n\n| Metric | Total |\n| --- | ---: |\n${rows}\n`);
+          ' >> "$GITHUB_STEP_SUMMARY"
+        working-directory: frontend
 
   # Deterministic Chromium smoke (test architecture plan, Phase 4): real
   # backend + vite preview + Playwright, offline via the in-process CMS stub
