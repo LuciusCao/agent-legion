@@ -20,11 +20,13 @@ entries:
   scope: frontend:component-jsdom-timeout
   owner: test-infra
   reason: Frontend component tests hit the 5s jsdom timeout in batches when
-    runner load exceeds ~40 parallel workers; isolated reruns pass. Most
-    recent instance was src/components/InteractionOverlay.test.tsx "keeps
-    summary actions outside the scrollable content area" (103/104 files
-    passed).
-  observed: https://github.com/LuciusCao/agent-legion/actions/runs/30805689114
+    runner load exceeds ~40 parallel workers; isolated reruns pass. The
+    recurring single offender (InteractionOverlay.test.tsx "keeps summary
+    actions outside the scrollable content area", 12 options x 12 clicks,
+    failed in CI runs 30805689114 and 30814709192) is mitigated with a
+    per-test 20s timeout; the root-cause fix (cheaper render path or
+    project-level timeout policy for heavy jsdom cases) is still owed.
+  observed: https://github.com/LuciusCao/agent-legion/actions/runs/30814709192
   deadline: 2026-09-01
 - id: FLAKY-003
   scope: backend:xdist-coverage-combine
