@@ -32,6 +32,7 @@ from scripts.stress._e2e_frontend import run_frontend_stress  # noqa: E402
 from scripts.stress._e2e_readiness import wait_for_server, wait_for_snapshot_readiness  # noqa: E402
 from scripts.stress._e2e_report import E2EStressReport, write_report  # noqa: E402
 from scripts.stress._stress_auth import ensure_admin_session, session_cookie  # noqa: E402
+from scripts.stress._validation_stub import ensure_asr_validation_stub  # noqa: E402
 
 logger = logging.getLogger(__name__)
 STRESS_RESULTS = PROJECT_ROOT / "stress-results"
@@ -79,10 +80,15 @@ def _frontend_command(port: int) -> list[str]:
 
 
 def _start_backend(cmd: list[str], run_dir: Path) -> subprocess.Popen:
+    stress_data_dir = PROJECT_ROOT / "data" / "stress"
     env = {
         **os.environ,
-        "AGENT_LEGION_DATA_DIR": str(PROJECT_ROOT / "data" / "stress"),
+        "AGENT_LEGION_DATA_DIR": str(stress_data_dir),
         "AGENT_LEGION_ENABLE_STRESS_EVENTS": "1",
+        # Module-level app validates settings at startup; stress never
+        # transcribes or calls the real CMS, so satisfy the validators with
+        # local stubs (no whisper install / no credentials on CI runners).
+        **ensure_asr_validation_stub(stress_data_dir),
     }
     logs_dir = run_dir / "backend"
     logs_dir.mkdir(parents=True, exist_ok=True)
