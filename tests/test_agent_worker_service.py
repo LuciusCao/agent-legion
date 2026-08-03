@@ -278,6 +278,14 @@ def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:
     assert response.status_code == 422
 
 
+@pytest.mark.no_db
+def test_validate_config_accepts_velites_and_defaults_to_pi() -> None:
+    config = validate_config({**_config(), "runtimes": ["pi", "velites"]})
+    assert config["runtimes"] == ["pi", "velites"]
+    # 默认值保持 ["pi"]：声明 velites 是显式运维动作。
+    assert validate_config(_config())["runtimes"] == ["pi"]
+
+
 def test_local_api_partial_update_keeps_unspecified_fields(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))

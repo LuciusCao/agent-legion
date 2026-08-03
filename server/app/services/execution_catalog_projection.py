@@ -43,7 +43,7 @@ def _agent_entry(
         **definition.model_dump(mode="json"),
         **skills.metadata(definition.skill),
     }
-    if definition.runtime == "pi":
+    if definition.runtime in ("pi", "velites"):
         runtime = settings.executor_runtime.workflows.pi
         entry.update(
             provider=runtime.provider,
