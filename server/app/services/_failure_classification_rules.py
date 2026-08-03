@@ -1,9 +1,7 @@
 """Rule table mapping a failed run's exit code and message to (category, detail).
 
-The same technical failure reaches ``node_runs.error_message`` in two textual
-shapes: Agent Workers report the raw message (e.g. ``terminated``) while the
-local Pi runner wraps model errors as ``Pi model call failed: ...``.
-Unrecognized failures classify as ``unknown`` — never default to ``technical``.
+Message markers live in ``_failure_classification_markers``. Unrecognized
+failures classify as ``unknown`` — never default to ``technical``.
 
 Category semantics agreed with operators:
 
@@ -18,41 +16,30 @@ Category semantics agreed with operators:
 
 from __future__ import annotations
 
-import re
+from server.app.services._failure_classification_markers import (
+    _DB_POOL_MARKERS,
+    _EXECUTION_ERROR_MARKERS,
+    _EXECUTOR_NOT_REGISTERED_RE,
+    _INTERACTION_CONTRACT_RE,
+    _MISSING_OUTPUTS_PREFIXES,
+    _NETWORK_MARKERS,
+    _NO_OUTPUT_ARTIFACTS_PREFIX,
+    _PI_MODEL_CALL_PREFIX,
+    _PROCESS_EXITED_RE,
+    _PROVIDER_CALL_PREFIX,
+    _PROVIDER_CALL_STREAM_MARKERS,
+    _PROVIDER_CONTENT_FILTER_MARKER,
+    _RESOURCE_LIMIT_MARKERS,
+    _REVIEW_REJECTED_MARKERS,
+    _SQLITE_MARKERS,
+    _TERMINATED_WORD_RE,
+    _UNPACK_FAILURE,
+)
 
 CATEGORY_TECHNICAL = "technical"
 CATEGORY_BUSINESS = "business"
 CATEGORY_UNKNOWN = "unknown"
 FAILURE_CATEGORIES = (CATEGORY_TECHNICAL, CATEGORY_BUSINESS, CATEGORY_UNKNOWN)
-
-_REVIEW_REJECTED_MARKERS = (
-    "review_rejected:",
-    "content review rejected by skill",
-    "Output validation failed: Review rejected",
-)
-_PI_MODEL_CALL_PREFIX = "Pi model call failed:"
-_MISSING_OUTPUTS_PREFIXES = ("missing outputs", "missing required file")
-_NO_OUTPUT_ARTIFACTS_PREFIX = "Agent Worker did not report output artifacts"
-_UNPACK_FAILURE = "failed to unpack Agent result"
-_RESOURCE_LIMIT_MARKERS = ("Too many open files", "No space left on device")
-_SQLITE_MARKERS = (
-    "database is locked",
-    "cannot rollback",
-    "unable to open database file",
-    "database or disk is full",
-)
-_EXECUTION_ERROR_MARKERS = (
-    "openclaw command failed",
-    "SQLite objects created in a thread",
-    "isolated handler did not return a result",
-    "object has no attribute",
-    "[Errno 2] No such file or directory",
-)
-_NETWORK_MARKERS = ("IncompleteRead", "ChunkedEncodingError", "Connection broken")
-_PROCESS_EXITED_RE = re.compile(r"^Agent process exited (\d+)$")
-_TERMINATED_WORD_RE = re.compile(r"\bterminated\b")
-_EXECUTOR_NOT_REGISTERED_RE = re.compile(r"^Executor '.+' is not registered$")
-_INTERACTION_CONTRACT_RE = re.compile(r"^Interaction \d+.*(is missing|has unknown type)")
 
 TIMEOUT_EXIT_CODE = 124
 
@@ -100,6 +87,15 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     if message.startswith(_PI_MODEL_CALL_PREFIX) or "HTTPError: 502" in message:
         return CATEGORY_TECHNICAL, "provider_request"
 
+    # velites provider errors: content-filter stops are business, stream or
+    # transport interruptions are provider_stream, the rest provider_request.
+    if message.startswith(_PROVIDER_CALL_PREFIX):
+        if _PROVIDER_CONTENT_FILTER_MARKER in message:
+            return CATEGORY_BUSINESS, "provider_content_filter"
+        if any(marker in message for marker in _PROVIDER_CALL_STREAM_MARKERS):
+            return CATEGORY_TECHNICAL, "provider_stream"
+        return CATEGORY_TECHNICAL, "provider_request"
+
     if "CmsClientError" in message or "CMS token" in message:
         return CATEGORY_TECHNICAL, "cms_auth"
 
@@ -132,7 +128,7 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     if any(marker in message for marker in _SQLITE_MARKERS):
         return CATEGORY_TECHNICAL, "database"
 
-    if "PoolTimeout" in message or "connection pool exhausted" in message:
+    if any(marker in message for marker in _DB_POOL_MARKERS):
         return CATEGORY_TECHNICAL, DETAIL_DB_POOL_TIMEOUT
 
     if any(marker in message for marker in _NETWORK_MARKERS):
