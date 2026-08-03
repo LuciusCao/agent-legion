@@ -19,7 +19,7 @@ from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
 
 __all__ = ["WorkerConfigStore", "WorkerSupervisor", "public_config", "validate_config"]
 
-_EXIT_REFUSED = 2  # Host 拒绝注册 / Worker 被吊销：不自动重启，进入 failed
+_EXIT_REFUSED = 2  # Host 拒绝注册 / Worker 被吊销 / 启动预检失败：不自动重启，进入 failed
 _RESTART_BACKOFF_INITIAL = 5.0
 _RESTART_BACKOFF_MAX = 300.0
 _STABLE_AFTER = 60.0  # 稳定运行超过该时长后重置退避
@@ -148,7 +148,8 @@ class WorkerSupervisor:
             self._exit_code = exit_code
             if exit_code == _EXIT_REFUSED:
                 self._failed_reason = (
-                    "Host 拒绝注册或 Worker 已被吊销（退出码 2），请修正配置后手动重启"
+                    "Host 拒绝注册、Worker 已被吊销或启动预检失败（退出码 2），"
+                    "详见上方 Worker 日志，请修正配置后手动重启"
                 )
                 self._log(self._failed_reason)
                 return
