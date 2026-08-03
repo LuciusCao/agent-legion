@@ -1,10 +1,4 @@
-import {
-  Button,
-  Chip,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-} from '@mui/material'
+import { Chip, DialogContent, DialogTitle } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
 import {
   computeOrderedNodes,
@@ -13,6 +7,8 @@ import {
 import { JobRerunExcludedLists } from './JobRerunExcludedLists'
 import { JobRerunSelectionSummary } from './JobRerunSelectionSummary'
 import { JobRerunFailureCategoryRow } from './JobRerunFailureCategoryRow'
+import { JobRerunFromNodeRow } from './JobRerunFromNodeRow'
+import { JobRerunDialogActions } from './JobRerunDialogActions'
 import { failedModeSummaryText } from './failureCategoryCounts'
 import type { FailureCategoryState } from './useFailureCategories'
 import styles from './JobRerunDialog.module.css'
@@ -107,6 +103,9 @@ export function JobRerunDialogContent({
           )}
 
           {failedMode && <JobRerunFailureCategoryRow failure={failure} />}
+          {failedMode && orderedNodes.length > 0 && (
+            <JobRerunFromNodeRow nodes={orderedNodes} failure={failure} />
+          )}
           <JobRerunExcludedLists
             failedMode={failedMode}
             effectiveNodeKey={effectiveNodeKey}
@@ -131,27 +130,17 @@ export function JobRerunDialogContent({
           )}
         </div>
       </DialogContent>
-      <DialogActions>
-        <Button
-          variant="text"
-          type="button"
-          onClick={onClose}
-          disabled={loading}
-        >
-          取消
-        </Button>
-        <Button
-          variant="contained"
-          onClick={onConfirm}
-          disabled={!canConfirm || loading}
-        >
-          {failedMode
-            ? failure.confirmLabel
-            : allowFailedNodeMode
-              ? `重跑 ${runnableJobs.length} 个${itemLabel}`
-              : '确认重跑'}
-        </Button>
-      </DialogActions>
+      <JobRerunDialogActions
+        failedMode={failedMode}
+        failure={failure}
+        allowFailedNodeMode={allowFailedNodeMode}
+        runnableCount={runnableJobs.length}
+        itemLabel={itemLabel}
+        canConfirm={canConfirm}
+        loading={loading}
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />
     </>
   )
 }

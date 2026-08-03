@@ -20,11 +20,14 @@ export type JobRerunConfirmArgs = [
   fromFailedNode: boolean,
   jobIds?: string[],
   failureCategory?: FailureCategory,
+  fromNodeKey?: string,
 ]
 
 export type FailureCategoryState = {
   selection: FailureCategorySelection
   setSelection: (value: FailureCategorySelection) => void
+  fromNodeKey: string | null
+  setFromNodeKey: (value: string | null) => void
   counts: FailureCategoryCounts | null
   failedCount: number
   canConfirm: boolean
@@ -42,6 +45,7 @@ export function useFailureCategories(
   failedJobs: JobSummary[]
 ): FailureCategoryState {
   const [selection, setSelection] = useState<FailureCategorySelection>('all')
+  const [fromNodeKey, setFromNodeKey] = useState<string | null>(null)
 
   const workspaceId = failureContext?.workspaceId
   const workflowKey = failureContext?.workflowKey
@@ -79,13 +83,18 @@ export function useFailureCategories(
   return {
     selection,
     setSelection,
+    fromNodeKey,
+    setFromNodeKey,
     counts,
     failedCount,
     canConfirm,
     confirmLabel: failedModeConfirmLabel(selection, counts, failedCount),
-    confirmArgs: () =>
-      selection === 'all'
-        ? [null, true]
-        : [null, true, failedJobIds, selection],
+    confirmArgs: () => {
+      if (selection === 'all') return [null, true]
+      const args: JobRerunConfirmArgs = [null, true, failedJobIds, selection]
+      // 指定起始节点时追加（仅具体失败类型支持；'all' 维持原语义）。
+      if (fromNodeKey) args.push(fromNodeKey)
+      return args
+    },
   }
 }
