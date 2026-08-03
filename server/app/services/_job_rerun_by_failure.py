@@ -6,10 +6,13 @@ from collections.abc import Collection
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services._job_rerun_single import execute_rerun_result
+from server.app.services._job_rerun_by_failure_results import (
+    execute_rerun_targets,
+    job_failure_result,
+)
 from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
-from server.app.workflows.workflow_branching import upstream_nodes
+from server.app.workflows.workflow_branching import downstream_nodes, upstream_nodes
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -33,6 +36,7 @@ def rerun_by_failure_category(
     workflow_key: str | None = None,
     job_filter: JobListFilter | None = None,
     exclude_ids: Collection[str] = (),
+    from_node_key: str | None = None,
 ) -> list[dict[str, Any]]:
     """Rerun the latest failed node runs of one category, one result per job."""
     resolved = _AUTO_STRATEGIES.get(category, "rerun_self") if strategy == "auto" else strategy
@@ -53,13 +57,13 @@ def rerun_by_failure_category(
             nodes.append(node_key)
 
     results = [
-        _rerun_job_failures(service, workspace_id, job_id, nodes, resolved)
+        _rerun_job_failures(service, workspace_id, job_id, nodes, resolved, from_node_key)
         for job_id, nodes in failed_nodes_by_job.items()
     ]
     for job_id in requested:
         if job_id not in failed_nodes_by_job:
             results.append(
-                _job_result(
+                job_failure_result(
                     job_id,
                     "skipped",
                     "no_matching_failure",
@@ -75,18 +79,32 @@ def _rerun_job_failures(
     job_id: str,
     failed_nodes: list[str],
     strategy: str,
+    from_node_key: str | None = None,
 ) -> dict[str, Any]:
     job = service.job_db.get_job(job_id)
     if job is None:
-        return _job_result(job_id, "failed", "not_found", "Job not found")
+        return job_failure_result(job_id, "failed", "not_found", "Job not found")
     if job["workspace_id"] != workspace_id:
-        return _job_result(
+        return job_failure_result(
             job_id, "failed", "wrong_workspace", f"Job does not belong to workspace {workspace_id}"
         )
 
     definition = definition_from_job_snapshot(job) or service.workflows.definition(
         str(job["workflow_key"])
     )
+    if from_node_key is not None:
+        # Explicit start node: only jobs whose matching failure is the node
+        # itself or downstream of it rerun, starting from from_node_key.
+        downstream = set(downstream_nodes(definition, from_node_key))
+        if not any(node == from_node_key or node in downstream for node in failed_nodes):
+            return job_failure_result(
+                job_id,
+                "skipped",
+                "no_matching_failure",
+                f"No latest failed run at or downstream of node {from_node_key!r}",
+            )
+        return execute_rerun_targets(service, job, job_id, [from_node_key])
+
     targets: list[str] = []
     for node_key in failed_nodes:
         resolved = upstream_nodes(definition, node_key) if strategy == "rerun_upstream" else []
@@ -94,36 +112,4 @@ def _rerun_job_failures(
         for target in resolved or [node_key]:
             if target not in targets:
                 targets.append(target)
-
-    node_results = [execute_rerun_result(service, job, job_id, target) for target in targets]
-    rerun_nodes = [str(r["node_key"]) for r in node_results if r["status"] == "succeeded"]
-    failures = [r for r in node_results if r["status"] == "failed"]
-    skips = [r for r in node_results if r["status"] == "skipped"]
-    result = _job_result(job_id, "succeeded", None, None)
-    if failures:
-        result["status"] = "failed"
-        result["reason_code"] = failures[0]["reason_code"]
-        result["message"] = failures[0]["message"]
-    elif skips and not rerun_nodes:
-        result["status"] = "skipped"
-        result["reason_code"] = skips[0]["reason_code"]
-        result["message"] = skips[0]["message"]
-    result["rerun_nodes"] = rerun_nodes
-    return result
-
-
-def _job_result(
-    job_id: str,
-    status: str,
-    reason_code: str | None,
-    message: str | None,
-) -> dict[str, Any]:
-    return {
-        "job_id": job_id,
-        "operation": "rerun",
-        "status": status,
-        "node_key": None,
-        "reason_code": reason_code,
-        "message": message,
-        "rerun_nodes": [],
-    }
+    return execute_rerun_targets(service, job, job_id, targets)

@@ -117,3 +117,80 @@ def test_rerun_by_failure_route_validates_category(tmp_path):
             json={"category": "bogus"},
         )
     assert response.status_code == 422
+
+
+def test_rerun_by_failure_from_node_key_overrides_strategy_target(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id, "Q910")
+        _fail_node(app, job_id, "review_key_info", "business", "review_rejected")
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
+            json={"category": "business", "from_node_key": "review_key_info"},
+        )
+        detail = c.get(f"/api/jobs/{job_id}").json()
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["status"] == "succeeded"
+    assert results[0]["rerun_nodes"] == ["review_key_info"]
+    nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
+    assert nodes["review_key_info"] == "pending"
+
+
+def test_rerun_by_failure_from_node_key_upstream_of_failure(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id, "Q911")
+        _fail_node(app, job_id, "review_key_info", "business", "review_rejected")
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
+            json={"category": "business", "from_node_key": "clean_and_parse"},
+        )
+        detail = c.get(f"/api/jobs/{job_id}").json()
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["status"] == "succeeded"
+    assert results[0]["rerun_nodes"] == ["clean_and_parse"]
+    nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
+    assert nodes["clean_and_parse"] == "pending"
+    assert nodes["review_key_info"] == "stale"
+
+
+def test_rerun_by_failure_from_node_key_not_upstream_skips_job(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id, "Q912")
+        _fail_node(app, job_id, "clean_and_parse", "technical", "provider_stream")
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/rerun-by-failure",
+            json={
+                "category": "technical",
+                "job_ids": [job_id],
+                "from_node_key": "review_key_info",
+            },
+        )
+        detail = c.get(f"/api/jobs/{job_id}").json()
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["status"] == "skipped"
+    assert results[0]["reason_code"] == "no_matching_failure"
+    nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
+    assert nodes["clean_and_parse"] == "failed"
