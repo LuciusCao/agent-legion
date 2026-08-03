@@ -277,7 +277,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, summary:focus
     rgba(10, 26, 21, .62);
   border-color: #264a3e;
 }
-.status-item > .icon { position: absolute; top: 20px; left: 20px; color: #c7d7d1; font-size: 31px; }
+.status-item > .icon { position: absolute; top: 50%; left: 20px; transform: translateY(-50%); color: #c7d7d1; font-size: 31px; }
 .status-item > span:not(.meter) { display: block; margin-bottom: 6px; color: #96aaa2; font-size: 13px; font-weight: 500; line-height: 1.25; }
 .status-item > small {
   display: block;
@@ -619,39 +619,10 @@ code { color: var(--mint); }
 /* ---- 概览负载卡片只有两张：两列即可（置于媒体查询之后保证优先生效） ---- */
 .status-grid.slim { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .status-grid.slim .status-item:last-child { grid-column: auto; }
+/* 异常横幅隐藏时，状态标题行填满第一行 */
+.status-panel:has(#source-warning[hidden]) { grid-template-columns: 1fr; }
 /* 容量与吞吐：每张图独占一行 */
 .charts.stacked { grid-template-columns: 1fr; }
-
-/* ---- 侧边栏收起为图标栏 ---- */
-.sidebar-toggle {
-  margin-left: auto;
-  width: 24px;
-  height: 24px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  display: grid;
-  place-items: center;
-  color: #668078;
-  background: transparent;
-  cursor: pointer;
-}
-.sidebar-toggle:hover { color: var(--text); background: rgba(25, 62, 51, .46); }
-.sidebar-toggle .icon { font-size: 15px; transition: transform .18s ease; transform: rotate(180deg); }
-.app-shell.sidebar-collapsed .sidebar-toggle .icon { transform: rotate(0deg); }
-@media (min-width: 1051px) {
-  .app-shell.sidebar-collapsed { grid-template-columns: 74px minmax(0, 1fr); }
-  .app-shell.sidebar-collapsed .brand span,
-  .app-shell.sidebar-collapsed .nav-button span,
-  .app-shell.sidebar-collapsed .sidebar-meta { display: none; }
-  .app-shell.sidebar-collapsed .brand { justify-content: center; padding-inline: 0; position: relative; }
-  .app-shell.sidebar-collapsed .nav-button { justify-content: center; padding: 0; }
-  .app-shell.sidebar-collapsed .sidebar-toggle {
-    position: absolute;
-    right: -13px;
-    top: 50%;
-    transform: translateY(-50%);
-    border: 1px solid var(--line);
-    background: #0b1b17;
-  }
-}
+/* 上传卡片：排队数内联在数字后面（>0 时才有内容，:empty 自动隐藏） */
+.status-item-upload strong { display: inline-block; }
+.status-item-upload > small { display: inline; margin: 0 0 0 8px; }
