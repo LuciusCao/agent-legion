@@ -189,6 +189,11 @@ export function phaseProgress(phase) {
   return { claimed: 16, downloading: 34, running: 68, queued_upload: 80, uploading: 88 }[phase] ?? 12;
 }
 
+// 与 worker/status_aggregates.py 的运行中口径一致：上传阶段已释放运行槽位。
+export function runOccupancy(executions = []) {
+  return (executions || []).filter((execution) => ["claimed", "downloading", "running"].includes(execution.phase)).length;
+}
+
 function phaseLabel(phase) {
   return { claimed: "已领取", downloading: "下载中", running: "运行中", queued_upload: "排队上传", uploading: "上传中" }[phase] || phase || "未知";
 }
@@ -266,8 +271,8 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
     progress.append(progressBar, `${group.executions.length} 个执行`);
     const capacity = document.createElement("span");
     capacity.className = "group-capacity";
-    capacity.title = "当前分组占用 / 本机最大并发";
-    capacity.textContent = `${group.executions.length} / ${maxConcurrency || "—"}`;
+    capacity.title = "当前分组运行中占用 / 本机最大并发";
+    capacity.textContent = `${runOccupancy(group.executions)} / ${maxConcurrency || "—"}`;
     button.append(name, phase, elapsed, progress, capacity);
 
     const children = document.createElement("div");
@@ -294,8 +299,8 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
       rowBar.append(rowFill);
       rowProgress.append(rowBar, phaseLabel(execution.phase));
       const rowCapacity = document.createElement("span");
-      rowCapacity.title = "当前执行占用 / 本机最大并发";
-      rowCapacity.textContent = `1 / ${maxConcurrency || "—"}`;
+      rowCapacity.title = "当前执行运行中占用 / 本机最大并发（上传阶段不占运行槽位）";
+      rowCapacity.textContent = `${runOccupancy([execution])} / ${maxConcurrency || "—"}`;
       row.append(id, rowPhase, rowElapsed, rowProgress, rowCapacity);
       children.appendChild(row);
     });
