@@ -508,6 +508,7 @@
     "scripts/stress/_stress_auth.py": 68,
     "scripts/stress/_stress_http_events.py": 51,
     "scripts/stress/_stress_metrics.py": 56,
+    "scripts/stress/_validation_stub.py": 48,
     "scripts/stress/run_e2e_stress.py": 360,
     "scripts/stress/simulate_agents.py": 411,
     "scripts/summarize_test_results.py": 179,

@@ -685,6 +685,17 @@ Phase 4C 执行记录（2026-08-03，rerun smoke + nightly stress/多浏览器�
 - 契约验证：`yaml.safe_load` 通过；`test_quality_gate_scripts.py` +
   `test_invariant_registry.py` + stress 相关测试共 51 passed / 6.02s；
   `ruff check/format`、`tsc --noEmit`、prettier 全部通过。
+- CI 首跑（提交 `2bcbcb49`，run
+  [30798014587](https://github.com/LuciusCao/agent-legion/actions/runs/30798014587)）：
+  五 job 通过但 `nightly-e2e` 失败——stress 后端走 `server.app.main:app`
+  （start_worker=True）触发 lifespan `validate_settings`，CI 无 whisper 安装
+  （`asr.provider` auto）且无 CMS 凭据（`cms.token`）；smoke 后端用 factory
+  （start_worker=False）跳过校验所以未暴露。修复：新增
+  `scripts/stress/_validation_stub.py`，runner 在 `data/stress/asr-stub/` 生成
+  no-op `whisper-cli` 与空模型文件，经 `AGENT_LEGION_ASR_*` env override 注入，
+  CMS 用 env-only dummy token（G2 合规），不碰 $HOME。本机 scrubbed env
+  （受限 PATH + SKIP_DOTENV）精确复现 CI 失败并验证 stub 后 1s 通过
+  `/api/health`。full gate 退出码 0（2389 passed / 115.64s，combined 93.49%）。
 
 ### Phase 5：CI 拆分、依赖去重与 flaky 治理
 
