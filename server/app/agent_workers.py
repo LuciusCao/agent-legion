@@ -56,9 +56,9 @@ class AgentWorkerRegistry:
             raise ValueError(f"max_concurrency must be between 1 and {_MAX_CONCURRENCY}")
         normalized_runtimes = sorted(set(runtimes))
         if not normalized_runtimes or any(
-            runtime not in {"pi", "openclaw"} for runtime in normalized_runtimes
+            runtime not in {"pi", "openclaw", "velites"} for runtime in normalized_runtimes
         ):
-            raise ValueError("runtimes must contain pi and/or openclaw")
+            raise ValueError("runtimes must contain pi, openclaw and/or velites")
         normalized_labels = normalize_labels(labels or {})
         # None is kept as an internal compatibility mode for older direct
         # registry callers; the HTTP contract always supplies explicit lists.

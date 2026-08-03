@@ -516,3 +516,30 @@ invariants:
       - kind: integration
         target: tests/executors/test_velites_sandbox.py::test_bash_sandbox_blocks_escape_macos
         gate: quick
+
+  - id: EXEC-RUNTIME-DISPATCH-001
+    statement: "Agent command construction is selected by AgentDefinition.runtime: velites pins the velites builder regardless of workflows.pi.flavor (binary default normalization follows the same rule as PiRuntimeConfig._flavor_binary); pi delegates implementation choice to flavor, bit-for-bit unchanged; unknown runtimes fail fast at dispatch before any manifest is frozen."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/workflows/test_velites_command.py
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
+        gate: quick
+      - kind: integration
+        target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
+        gate: full
+
+  - id: EXEC-CLAIM-RUNTIME-001
+    statement: "A queued Agent request whose definition runtime is declared by no non-revoked Worker is failed by the unclaimable sweeper with an explicit runtime reason; it never rots in queued. With zero non-revoked Workers the sweeper stays inactive (a deployment gap, not a definition problem)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_runtime_mismatch
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
+        gate: quick

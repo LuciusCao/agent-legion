@@ -38,8 +38,9 @@ def _seed_request(
     workspace_id: str = "test-workspace",
     node_key: str = "generate",
     workspace_cap: int | None = 20,
+    runtime: str = "pi",
 ) -> str:
-    definition = _definition()
+    definition = _definition(runtime=runtime)
     sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
@@ -102,11 +103,12 @@ def _register_with_declarations(
     *,
     capabilities: list[str],
     models: list[dict[str, str]],
+    runtimes: list[str] | None = None,
 ) -> None:
     registry.issue_token(
         worker_id=worker_id,
         name=worker_id,
-        runtimes=["pi"],
+        runtimes=runtimes or ["pi"],
         capabilities=capabilities,
         models=models,
         max_concurrency=10,
@@ -483,6 +485,51 @@ def test_unclaimable_sweeper_wildcard_worker_passes(job_db) -> None:
     assert fail_unclaimable_model_requests(broker) == []
 
     assert job_db.get_job_node("wildcard-job", "generate")["status"] == "pending"
+    assert _request_state(job_db, execution_id) == "queued"
+
+
+def test_unclaimable_sweeper_fails_on_runtime_mismatch(job_db) -> None:
+    """EXEC-CLAIM-RUNTIME-001: capability and model match, but no non-revoked
+    Worker declares the definition's runtime — the request fails with an
+    explicit runtime reason instead of rotting in queued."""
+    execution_id = _seed_request(job_db, job_id="runtime-mismatch-job", runtime="velites")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+        runtimes=["pi"],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == [execution_id]
+
+    node = job_db.get_job_node("runtime-mismatch-job", "generate")
+    assert node["status"] == "failed"
+    assert "runtime 'velites' not declared by any Worker" in node["error_message"]
+    assert "capability 'generate' not declared" not in node["error_message"]
+    assert "model gateway/test-model not declared" not in node["error_message"]
+    assert node["failure_category"] == "technical"
+    assert node["failure_detail"] == "unclaimable_model"
+    assert _request_state(job_db, execution_id) == "done"
+
+
+def test_unclaimable_sweeper_runtime_match_stays_queued(job_db) -> None:
+    execution_id = _seed_request(job_db, job_id="runtime-match-job", runtime="velites")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+        runtimes=["pi", "velites"],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == []
+
+    assert job_db.get_job_node("runtime-match-job", "generate")["status"] == "pending"
     assert _request_state(job_db, execution_id) == "queued"
 
 
