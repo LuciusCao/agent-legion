@@ -735,8 +735,7 @@ export interface paths {
     }
     /** Read Workflow Node File */
     get: operations['read_workflow_node_file_api_workflow_nodes_files__file_path__get']
-    /** Update Workflow Node File */
-    put: operations['update_workflow_node_file_api_workflow_nodes_files__file_path__put']
+    put?: never
     post?: never
     delete?: never
     options?: never
@@ -3121,18 +3120,6 @@ export interface components {
       /** Path */
       path: string
     }
-    /** WorkflowNodeFileUpdateRequest */
-    WorkflowNodeFileUpdateRequest: {
-      /** Content */
-      content: string
-    }
-    /** WorkflowNodeFileUpdateResponse */
-    WorkflowNodeFileUpdateResponse: {
-      /** Capabilities */
-      capabilities?: components['schemas']['WorkflowNodeCapabilityReference'][]
-      /** Path */
-      path: string
-    }
     /** WorkflowNodeResponse */
     WorkflowNodeResponse: {
       /** After */
@@ -4959,41 +4946,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowNodeFileResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  update_workflow_node_file_api_workflow_nodes_files__file_path__put: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        file_path: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WorkflowNodeFileUpdateRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeFileUpdateResponse']
         }
       }
       /** @description Validation Error */

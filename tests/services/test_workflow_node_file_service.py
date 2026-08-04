@@ -9,7 +9,6 @@ from server.app.services.workflow_node_files import (
     referencing_capabilities,
     resolve_node_path,
     workflow_nodes_dir,
-    write_node_file,
 )
 
 VALID_CONTENT = "def run(job, job_dir, runtime):\n    return None\n"
@@ -67,28 +66,6 @@ def test_read_node_file_returns_display_path_and_content(tmp_path) -> None:
 
     assert path == "workflow_nodes/demo_node.py"
     assert content == VALID_CONTENT
-
-
-def test_write_node_file_validates_content(tmp_path) -> None:
-    nodes_dir = _nodes_dir(tmp_path)
-
-    with pytest.raises(NodeFileError, match="not valid Python"):
-        write_node_file(nodes_dir, "demo_node.py", "def run(:\n")
-    with pytest.raises(NodeFileError, match="module-level 'run'"):
-        write_node_file(nodes_dir, "demo_node.py", "X = 1\n")
-
-    assert (nodes_dir / "demo_node.py").read_text(encoding="utf-8") == VALID_CONTENT
-
-
-def test_write_node_file_accepts_async_run(tmp_path) -> None:
-    nodes_dir = _nodes_dir(tmp_path)
-    updated = "async def run(job, job_dir, runtime):\n    return None\n"
-
-    path = write_node_file(nodes_dir, "demo_node.py", updated)
-
-    assert path == "workflow_nodes/demo_node.py"
-    assert (nodes_dir / "demo_node.py").read_text(encoding="utf-8") == updated
-    assert [p.name for p in nodes_dir.iterdir()] == ["demo_node.py"]
 
 
 def test_referencing_capabilities_matches_code_paths() -> None:
