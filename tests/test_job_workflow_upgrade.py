@@ -10,6 +10,22 @@ from server.app.workflows.definition import load_workflow_definition
 from tests.postgres_support import TEST_DATABASE_URL
 
 
+class _RecordingEventBuffer:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def record_job_updated(self, workspace_id: str, job_id: str) -> None:
+        self.calls.append((workspace_id, job_id))
+
+
+class _RecordingEventManager:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str, dict]] = []
+
+    def broadcast_job_updated(self, workspace_id: str, job_id: str, stats: dict) -> None:
+        self.calls.append((workspace_id, job_id, stats))
+
+
 def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
@@ -241,3 +257,72 @@ def test_upgrade_job_workflow_fails_for_missing_or_wrong_workspace(tmp_path: Pat
     assert missing["reason_code"] == "not_found"
     assert wrong_workspace["status"] == "failed"
     assert wrong_workspace["reason_code"] == "wrong_workspace"
+
+
+def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    revisions = WorkflowRevisionService(queries)
+    original = revisions.publish_workspace_revision(workspace["id"], definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    job = queries.create_job(
+        workflow_key=definition.key,
+        source_type="question",
+        source_id="Q1",
+        batch_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_questions"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+    buffer = _RecordingEventBuffer()
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries.path, job_db=queries),
+        job_event_buffer=buffer,
+    )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert buffer.calls == [(workspace["id"], job["id"])]
+
+
+def test_upgrade_job_workflow_broadcasts_via_event_manager(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    revisions = WorkflowRevisionService(queries)
+    original = revisions.publish_workspace_revision(workspace["id"], definition)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    job = queries.create_job(
+        workflow_key=definition.key,
+        source_type="question",
+        source_id="Q1",
+        batch_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_questions"],
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+    manager = _RecordingEventManager()
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries.path, job_db=queries),
+        job_event_manager=manager,
+    )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert len(manager.calls) == 1
+    workspace_id, job_id, stats = manager.calls[0]
+    assert (workspace_id, job_id) == (workspace["id"], job["id"])
+    assert stats == queries.count_jobs_by_status(workspace["id"])

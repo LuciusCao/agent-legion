@@ -33,6 +33,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import requests  # noqa: E402
 
+from scripts.stress._stress_auth import ensure_admin_session  # noqa: E402
 from scripts.stress._stress_http_events import StressHttpEventRecorder  # noqa: E402
 from scripts.stress._stress_metrics import StressMetrics  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
@@ -97,6 +98,7 @@ class StressSimulator:
         self._stop_event = asyncio.Event()
         self._job_ids: list[str] = []
         self._pending_flush_times: queue.Queue[float] = queue.Queue()
+        self._session: requests.Session | None = None
 
     def _setup_db(self) -> JobQueries:
         settings = load_settings()
@@ -181,7 +183,8 @@ class StressSimulator:
             return
         url = f"{self.base_url}/api/workspaces/{self.workspace_id}/events"
         try:
-            session = requests.Session()
+            # Workspace APIs require an authenticated session (auth guard).
+            session = self._session or requests.Session()
             # requests does not support async streaming; use a thread for SSE.
             loop = asyncio.get_running_loop()
             await loop.run_in_executor(None, self._consume_sse_blocking, session, url)
@@ -225,7 +228,7 @@ class StressSimulator:
         if not job_ids or self.base_url is None:
             return
 
-        recorder = StressHttpEventRecorder(self.base_url, self.workspace_id)
+        recorder = StressHttpEventRecorder(self.base_url, self.workspace_id, self._session)
         interval = self.agents / max(1, self.event_rate)
         end_time = time.monotonic() + self.duration
         events_issued = 0
@@ -308,6 +311,8 @@ class StressSimulator:
         job_db = self._setup_db()
         self._ensure_workspace_and_revision(job_db)
         self._seed_jobs(job_db)
+        if self.base_url:
+            self._session = ensure_admin_session(self.base_url)
 
         tasks = [
             asyncio.create_task(self._generate_events()),

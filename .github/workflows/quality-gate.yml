@@ -19,8 +19,8 @@ env:
   # at the default location so astral-sh/setup-uv caching covers it.
   UV_CACHE_DIR: /home/runner/.cache/uv
   # Fresh per-run databases on the service container below. export_openapi's
-  # create_app writes worker_control_state at startup, so the frontend job needs
-  # a live database too.
+  # create_app writes worker_control_state at startup, so the backend-postgres
+  # job (which hosts the api:check contract step) needs a live database.
   AGENT_LEGION_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_ci
   AGENT_LEGION_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/agent_legion_test_ci
   # check-skills-shared.py compares skill repos at machine-local paths
@@ -32,10 +32,93 @@ env:
   AGENT_LEGION_WORKER_REGISTER_TOKEN: ci-only-dummy-register-token
 
 jobs:
-  backend:
-    name: backend
+  # Backend is sharded by database dependency (test architecture plan, Phase
+  # 5C): backend-unit runs the static checks and the PostgreSQL-offline unit
+  # tier with no service container, while the postgres side (Phase 5C-2/5C-3)
+  # is split into three parallel jobs. backend-postgres-a hosts the api:check
+  # contract step (Python env + Postgres + node_modules) and postgres tier
+  # shard 1/3, then waits for the peer shards' coverage artifacts, downloads
+  # every shard's coverage artifact, merges them via `coverage combine`, and
+  # enforces the 85% floor once — the same combined-coverage semantics the
+  # single job previously got from AGENT_LEGION_COV_APPEND. backend-postgres-b
+  # runs shard 2/3 plus the full-gate layer; backend-postgres-c runs shard
+  # 3/3. Both upload coverage + telemetry as 1-day artifacts. Sharding is a
+  # deterministic md5(nodeid) % 3 collection filter
+  # (scripts/pytest_gate_shard.py, GATE_SHARD=i/n), so the three shards
+  # partition the tier with no overlap.
+  backend-unit:
+    name: backend-unit
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Backend static checks
+        run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
+
+      - name: Backend unit tests (PostgreSQL offline)
+        run: |
+          mkdir -p coverage-data
+          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        env:
+          AGENT_LEGION_COV: "1"
+          AGENT_LEGION_TEST_RESULTS_DIR: test-results
+          AGENT_LEGION_TEST_RESULT_NAME: backend-unit
+          COVERAGE_FILE: coverage-data/backend-unit.coverage
+          GATE_TIER: unit
+
+      # Artifacts carry only data files (coverage data = paths + line counts,
+      # no source; JUnit/rerun telemetry), retention 1 day per the repository
+      # artifact policy. backend-postgres-a downloads them for the combined
+      # coverage floor and the aggregate summary.
+      - name: Upload unit shard coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-unit-coverage
+          path: coverage-data/backend-unit.coverage
+          retention-days: 1
+
+      - name: Upload unit shard test telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-unit-telemetry
+          path: |
+            test-results/backend-unit-junit.xml
+            test-results/backend-unit-reruns.json
+          retention-days: 1
+
+      - name: Backend unit test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: "1"
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "Backend unit test evidence" \
+            --junit test-results/backend-unit-junit.xml \
+            --rerun-report test-results/backend-unit-reruns.json \
+            --output test-results/backend-unit-summary.md
+          cat test-results/backend-unit-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  # Aggregator shard: hosts api:check (needs node_modules) and postgres tier
+  # shard 1/3, then merges all coverage shards and enforces the 85% floor.
+  backend-postgres-a:
+    name: backend-postgres-a
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    # actions: read lets the pre-merge step poll this run's artifact list via
+    # `gh api`; contents: read is the checkout baseline.
+    permissions:
+      actions: read
+      contents: read
     services:
       postgres:
         image: postgres:17
@@ -62,43 +145,161 @@ jobs:
 
       - run: uv sync
 
+      # The api:check contract step regenerates frontend API types via
+      # openapi-typescript/prettier from frontend/node_modules.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
       # velites' Linux filesystem sandbox (EXEC-HARNESS-SANDBOX-001) is
-      # fail-closed: the tests/full e2e and bwrap-gated cargo tests need a
-      # real bubblewrap binary on the runner. Ubuntu 24.04 restricts
-      # unprivileged userns via AppArmor ("bwrap: setting up uid map:
-      # Permission denied"); setuid bwrap sidesteps that on the CI VM.
+      # fail-closed: the postgres tier's velites sandbox tests need a real
+      # bubblewrap binary on the runner. Ubuntu 24.04 restricts unprivileged
+      # userns via AppArmor ("bwrap: setting up uid map: Permission denied");
+      # setuid bwrap sidesteps that on the CI VM.
       - name: Install bubblewrap (velites sandbox backend)
         run: |
           sudo apt-get update && sudo apt-get install -y bubblewrap
           sudo chmod u+s "$(command -v bwrap)"
 
-      - name: Backend static checks
-        run: BACKEND_GATE_PHASE=static ./scripts/check-quick-backend.sh
+      # api:check boots create_app to export the OpenAPI schema, so it lives
+      # in this job (Python env + Postgres) instead of backend-unit or the
+      # frontend jobs.
+      - name: API contract check
+        run: FRONTEND_GATE_PHASE=api-contract ./scripts/check-quick-frontend.sh
 
-      - name: Backend tests
-        run: BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+      - name: Backend PostgreSQL tests (shard 1/3)
+        run: |
+          mkdir -p coverage-data
+          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
         env:
-          # Local quick gate skips coverage; CI feeds the combined 85% floor.
           AGENT_LEGION_COV: "1"
+          AGENT_LEGION_TEST_RESULTS_DIR: test-results
+          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-a
+          COVERAGE_FILE: coverage-data/backend-postgres-a.coverage
+          GATE_TIER: postgres
+          GATE_SHARD: 1/3
 
-      - name: Full gate evidence (tests/full)
-        run: uv run pytest -q tests/full -m full_gate --cov=server --cov-report= --cov-append
+      # Peer shards upload coverage only after their pytest run; under load
+      # the aggregator can reach the merge first (5C-2 race, run
+      # 30811145691). Poll until all shard coverage artifacts exist (40 x 15s
+      # = 10 min cap, then fail); the explicit download steps below stay the
+      # fail-fast guard. backend-unit (~2.6 min) almost always lands first,
+      # but runner queuing is not a guarantee, so it is polled too (codex
+      # review on PR #25).
+      - name: Wait for peer shard coverage artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          for attempt in $(seq 1 40); do
+            missing=0
+            for name in backend-unit-coverage backend-postgres-b-coverage backend-postgres-c-coverage; do
+              count=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=${name}" --jq '.total_count')
+              [[ "$count" -ge 1 ]] || missing=1
+            done
+            [[ "$missing" -eq 0 ]] && exit 0
+            sleep 15
+          done
+          echo "peer coverage artifacts did not appear within 10 minutes" >&2
+          exit 1
 
+      # backend-unit (~3 min) and the postgres peer shards finish long before
+      # this job reaches the merge, so their artifacts are always available
+      # here (the wait step above guarantees it). If a shard failed before
+      # uploading, failing this step keeps the gate red instead of computing
+      # the floor on partial coverage data.
+      - name: Download unit shard coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-unit-coverage
+          path: coverage-data
+
+      - name: Download postgres shard B coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-postgres-b-coverage
+          path: coverage-data
+
+      - name: Download postgres shard C coverage data
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-postgres-c-coverage
+          path: coverage-data
+
+      - name: Download unit shard test telemetry
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-unit-telemetry
+          path: test-results
+
+      - name: Download postgres shard B test telemetry
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-postgres-b-telemetry
+          path: test-results
+
+      - name: Download postgres shard C test telemetry
+        if: always()
+        uses: actions/download-artifact@v4
+        with:
+          name: backend-postgres-c-telemetry
+          path: test-results
+
+      # Merging the shard data files replaces the old single-job
+      # AGENT_LEGION_COV_APPEND flow; `coverage report` enforces the 85% floor
+      # (pyproject [tool.coverage.report] fail_under) once, against the
+      # combined data, exactly as before.
       - name: Combined coverage report
-        run: uv run coverage report
+        run: |
+          for shard in coverage-data/*.coverage; do
+            cp "$shard" ".coverage.$(basename "$shard" .coverage)"
+          done
+          uv run coverage combine
+          uv run coverage report
 
-  frontend:
-    name: frontend
+      # Only aggregate counts go to the persistent job summary. Raw JUnit and
+      # coverage files stay off the persistent record: the unit and shard-B
+      # copies are 1-day artifacts, everything else remains ephemeral on the
+      # runner.
+      - name: Backend test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: "1"
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "Backend test evidence" \
+            --junit test-results/backend-unit-junit.xml \
+            --junit test-results/backend-postgres-a-junit.xml \
+            --junit test-results/backend-postgres-b-junit.xml \
+            --junit test-results/backend-postgres-c-junit.xml \
+            --junit test-results/backend-full-junit.xml \
+            --rerun-report test-results/backend-unit-reruns.json \
+            --rerun-report test-results/backend-postgres-a-reruns.json \
+            --rerun-report test-results/backend-postgres-b-reruns.json \
+            --rerun-report test-results/backend-postgres-c-reruns.json \
+            --rerun-report test-results/backend-full-reruns.json \
+            --output test-results/backend-summary.md
+          cat test-results/backend-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  # Second postgres shard plus the full-gate layer. No node/npm: tests/full
+  # does not touch frontend build artifacts. bwrap stays because the
+  # tests/full velites e2e needs the fail-closed sandbox backend.
+  backend-postgres-b:
+    name: backend-postgres-b
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          # api:check's create_app connects to AGENT_LEGION_DATABASE_URL; the
-          # service only auto-creates POSTGRES_DB (tests create their own).
           POSTGRES_DB: agent_legion_ci
         ports:
           - 5432:5432
@@ -110,8 +311,324 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # api:check regenerates the OpenAPI schema via uv run + create_app,
-      # so this job needs the Python environment and the database as well.
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s "$(command -v bwrap)"
+
+      - name: Backend PostgreSQL tests (shard 2/3)
+        run: |
+          mkdir -p coverage-data
+          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        env:
+          AGENT_LEGION_COV: "1"
+          AGENT_LEGION_TEST_RESULTS_DIR: test-results
+          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-b
+          COVERAGE_FILE: coverage-data/backend-postgres-b.coverage
+          GATE_TIER: postgres
+          GATE_SHARD: 2/3
+
+      # Like the tier shards, the full gate writes its own COVERAGE_FILE, so
+      # it must not enforce the 85% floor on partial data
+      # (--cov-fail-under=0); the combined report in backend-postgres-a
+      # enforces it once.
+      - name: Full gate evidence (tests/full)
+        run: |
+          mkdir -p coverage-data test-results
+          uv run pytest -q tests/full -m full_gate \
+            --durations=30 \
+            --junitxml=test-results/backend-full-junit.xml \
+            -p scripts.pytest_telemetry \
+            --cov=server --cov-report= --cov-append \
+            --cov-fail-under=0
+        env:
+          AGENT_LEGION_RERUN_REPORT: test-results/backend-full-reruns.json
+          COVERAGE_FILE: coverage-data/backend-full.coverage
+
+      # Artifacts carry only data files (coverage data = paths + line counts,
+      # no source; JUnit/rerun telemetry), retention 1 day per the repository
+      # artifact policy. backend-postgres-a downloads them for the combined
+      # coverage floor and the aggregate summary; a missing upload fails the
+      # corresponding download step there, keeping the gate red.
+      - name: Upload postgres shard B coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-postgres-b-coverage
+          path: |
+            coverage-data/backend-postgres-b.coverage
+            coverage-data/backend-full.coverage
+          retention-days: 1
+
+      - name: Upload postgres shard B test telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-postgres-b-telemetry
+          path: |
+            test-results/backend-postgres-b-junit.xml
+            test-results/backend-postgres-b-reruns.json
+            test-results/backend-full-junit.xml
+            test-results/backend-full-reruns.json
+          retention-days: 1
+
+  # Third postgres shard, nothing else. No node/npm; bwrap is installed for
+  # uniformity with the other shards even though the tier's only
+  # bwrap-dependent tests live in the unit tier / tests/full.
+  backend-postgres-c:
+    name: backend-postgres-c
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_legion_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - run: uv sync
+
+      - name: Install bubblewrap (velites sandbox backend)
+        run: |
+          sudo apt-get update && sudo apt-get install -y bubblewrap
+          sudo chmod u+s "$(command -v bwrap)"
+
+      - name: Backend PostgreSQL tests (shard 3/3)
+        run: |
+          mkdir -p coverage-data
+          BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
+        env:
+          AGENT_LEGION_COV: "1"
+          AGENT_LEGION_TEST_RESULTS_DIR: test-results
+          AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-c
+          COVERAGE_FILE: coverage-data/backend-postgres-c.coverage
+          GATE_TIER: postgres
+          GATE_SHARD: 3/3
+
+      - name: Upload postgres shard C coverage data
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-postgres-c-coverage
+          path: coverage-data/backend-postgres-c.coverage
+          retention-days: 1
+
+      - name: Upload postgres shard C test telemetry
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-postgres-c-telemetry
+          path: |
+            test-results/backend-postgres-c-junit.xml
+            test-results/backend-postgres-c-reruns.json
+          retention-days: 1
+
+  # Frontend is sharded into the two Vitest projects (test architecture plan,
+  # Phase 5B): pure logic tests (node) and component tests (jsdom) run as
+  # parallel jobs, each emitting a blob report that embeds raw V8 coverage.
+  # frontend-coverage then merges the blobs and enforces the global coverage
+  # thresholds + inventory once, against the combined data. The OpenAPI
+  # contract check lives in the backend-postgres-a job (Phase 5A/5C), so these
+  # jobs need neither Python nor Postgres.
+  frontend-logic:
+    name: frontend-logic
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      # FRONTEND_API_CHECK=0: the contract check runs in the backend-postgres-a job.
+      - name: Frontend static checks
+        run: FRONTEND_GATE_PHASE=static FRONTEND_TEST_MODE=coverage FRONTEND_API_CHECK=0 ./scripts/check-quick-frontend.sh
+
+      - name: Frontend logic tests
+        run: >-
+          FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage
+          FRONTEND_TEST_PROJECT=logic
+          FRONTEND_COVERAGE_BLOB_DIR="${{ github.workspace }}/coverage-blobs/logic"
+          ./scripts/check-quick-frontend.sh
+        env:
+          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend-logic
+
+      - name: Upload logic coverage blob
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-blob-logic
+          path: coverage-blobs/logic/
+          retention-days: 1
+
+      - name: Production bundle
+        run: npm run build:bundle
+        working-directory: frontend
+
+      # summarize_test_results.py is stdlib-only; the runner's system
+      # python3 avoids a full uv sync in this job.
+      - name: Frontend logic test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: frontend-v8-blob
+        run: |
+          python3 scripts/summarize_test_results.py \
+            --title "Frontend logic test evidence" \
+            --junit test-results/frontend-logic/vitest-junit.xml \
+            --output test-results/frontend-logic-summary.md
+          cat test-results/frontend-logic-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-component:
+    name: frontend-component
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Frontend component tests
+        run: >-
+          FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage
+          FRONTEND_TEST_PROJECT=component
+          FRONTEND_COVERAGE_BLOB_DIR="${{ github.workspace }}/coverage-blobs/component"
+          ./scripts/check-quick-frontend.sh
+        env:
+          AGENT_LEGION_TEST_RESULTS_DIR: ${{ github.workspace }}/test-results/frontend-component
+
+      - name: Upload component coverage blob
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-coverage-blob-component
+          path: coverage-blobs/component/
+          retention-days: 1
+
+      - name: Frontend component test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: frontend-v8-blob
+        run: |
+          python3 scripts/summarize_test_results.py \
+            --title "Frontend component test evidence" \
+            --junit test-results/frontend-component/vitest-junit.xml \
+            --output test-results/frontend-component-summary.md
+          cat test-results/frontend-component-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+  frontend-coverage:
+    name: frontend-coverage
+    needs: [frontend-logic, frontend-component]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: npm ci
+        working-directory: frontend
+
+      - name: Download coverage blobs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: frontend-coverage-blob-*
+          path: coverage-blobs
+          merge-multiple: true
+
+      # --merge-reports replays the shard blob reports (tests + embedded V8
+      # coverage) and applies vite.config.ts coverage thresholds to the
+      # merged data; json-summary feeds the job summary below.
+      - name: Merge coverage and enforce thresholds
+        run: >-
+          npx vitest run
+          --merge-reports "${{ github.workspace }}/coverage-blobs"
+          --coverage.enabled=true
+          --coverage.reporter=text
+          --coverage.reporter=json
+          --coverage.reporter=json-summary
+        working-directory: frontend
+
+      - name: Coverage inventory
+        run: npm run test:coverage-inventory
+        working-directory: frontend
+
+      - name: Frontend coverage summary
+        if: always()
+        run: |
+          node -e '
+            const summary = require("./coverage/coverage-summary.json").total;
+            const rows = ["lines", "functions", "branches", "statements"]
+              .map((key) => `| ${key} | ${summary[key].pct}% |`)
+              .join("\n");
+            console.log(`## Frontend coverage (merged shards)\n\n| Metric | Total |\n| --- | ---: |\n${rows}\n`);
+          ' >> "$GITHUB_STEP_SUMMARY"
+        working-directory: frontend
+
+  # Deterministic Chromium smoke (test architecture plan, Phase 4): real
+  # backend + vite preview + Playwright, offline via the in-process CMS stub
+  # and a dedicated E2E database. Cold start stays well under the 3-minute
+  # budget; failure evidence (trace/screenshot/backend log) uploads only on
+  # failure with a short retention.
+  e2e-smoke:
+    name: e2e-smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_legion_e2e_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
@@ -128,15 +645,113 @@ jobs:
       - run: npm ci
         working-directory: frontend
 
-      - name: Frontend static checks
-        run: FRONTEND_GATE_PHASE=static FRONTEND_TEST_MODE=coverage ./scripts/check-quick-frontend.sh
+      # Browser binaries cache: a cold download stalled for 41 minutes once
+      # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
 
-      - name: Frontend tests
-        run: FRONTEND_GATE_PHASE=test FRONTEND_TEST_MODE=coverage ./scripts/check-quick-frontend.sh
-
-      - name: Production bundle
-        run: npm run build:bundle
+      - name: Install Chromium for Playwright
+        run: npx playwright install --with-deps chromium
         working-directory: frontend
+
+      - name: Browser smoke E2E
+        run: uv run python scripts/e2e/run_browser_smoke.py
+        env:
+          AGENT_LEGION_E2E_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+
+      - name: Upload E2E failure evidence
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-smoke-results
+          path: frontend/e2e-results/
+          retention-days: 5
+
+  # Nightly workspace stress + multi-browser smoke (test architecture plan,
+  # Phase 4C). The stress step runs the existing five-minute scenario against
+  # a real backend and uploads report.md + frontend-metrics.json for
+  # diagnostics; the smoke step re-runs the deterministic browser suite on
+  # Firefox/WebKit as well (PR/push stays Chromium-only via E2E_BROWSERS).
+  # Stress profile rationale: 50 agents / 2000 jobs / 300s at 200 events/s
+  # keeps the page under live SSE traffic long enough for stable click
+  # latency / long task / memory samples while the whole job stays well
+  # under the 45-minute timeout (local 5-agent/60s validation: ~95s total).
+  nightly-e2e:
+    name: nightly-e2e
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: agent_legion_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.13"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - run: uv sync
+
+      - run: npm ci
+        working-directory: frontend
+
+      # Browser binaries cache: a cold download stalled for 41 minutes once
+      # (run 30816362118, FLAKY-004) and ate the whole nightly budget.
+      - name: Cache Playwright browsers
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('frontend/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox webkit
+        working-directory: frontend
+
+      - name: Multi-browser smoke E2E
+        run: uv run python scripts/e2e/run_browser_smoke.py
+        env:
+          AGENT_LEGION_E2E_ADMIN_DSN: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+          E2E_BROWSERS: chromium,firefox,webkit
+
+      - name: Workspace stress run
+        run: >-
+          uv run python scripts/stress/run_e2e_stress.py
+          --agents 50 --jobs 2000 --duration 300 --event-rate 200
+        env:
+          # Shared runners hiccup under load: allow occasional probe timeouts
+          # while the p95 click-latency assertion still guards regressions.
+          STRESS_PROBE_TIMEOUT_MS: "5000"
+          STRESS_MAX_PROBE_ERRORS: "3"
+
+      - name: Upload stress report and metrics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: nightly-stress-${{ github.run_id }}
+          path: stress-results/
+          retention-days: 14
 
   rust:
     name: rust
@@ -207,5 +822,39 @@ jobs:
 
       - run: uv sync
 
+      # --reruns 1 matches the tier gates and is what makes the flaky
+      # governance below meaningful: registered flakes get one retry and
+      # land in the rerun report; without it a flake fails outright and the
+      # report is always empty (codex review on PR #25).
       - name: CI extended architecture evidence
-        run: uv run pytest -q tests/ci -m ci_extended
+        run: |
+          mkdir -p test-results
+          uv run pytest -q tests/ci -m ci_extended \
+            --durations=30 \
+            --junitxml=test-results/ci-extended-junit.xml \
+            --reruns 1 \
+            --reruns-delay 2 \
+            -p scripts.pytest_telemetry
+        env:
+          AGENT_LEGION_RERUN_REPORT: test-results/ci-extended-reruns.json
+
+      - name: CI extended test summary
+        if: always()
+        env:
+          AGENT_LEGION_COV: "0"
+        run: |
+          uv run python scripts/summarize_test_results.py \
+            --title "CI extended test evidence" \
+            --junit test-results/ci-extended-junit.xml \
+            --rerun-report test-results/ci-extended-reruns.json \
+            --output test-results/ci-extended-summary.md
+          cat test-results/ci-extended-summary.md >> "$GITHUB_STEP_SUMMARY"
+
+      # Flaky governance (test architecture plan, Phase 5D): reruns are fine
+      # only for nodeids registered in tests/flaky_registry.yaml with a live
+      # deadline. Nightly-only; PR/push lanes never run this job.
+      - name: Fail on unregistered reruns
+        if: always()
+        run: >-
+          uv run python scripts/check_reruns.py
+          --rerun-report test-results/ci-extended-reruns.json

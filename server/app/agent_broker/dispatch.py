@@ -9,7 +9,7 @@ from server.app.agent_artifacts import stage_agent_inputs
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_broker.runtime_dispatch import pi_config_for_runtime
-from server.app.agent_bundle import build_agent_bundle
+from server.app.agent_bundle import build_agent_bundle, cleanup_bundle_on_error
 from server.app.agent_catalog import AgentDefinition
 from server.app.config_schema import manifest_safe_config
 from server.app.executors._pi_skill import build_skill_manager, get_skill_version, resolve_skill_dir
@@ -116,22 +116,23 @@ class AgentDispatchService:
             if self.broker.bundle_dir is None:
                 raise RuntimeError("Agent bundle directory is not configured")
             bundle_path = self.broker.bundle_dir / f"{execution_id}.tar.gz"
-            build_agent_bundle(bundle_path, skill_dir=skill_dir, manifest=manifest)
-            manifest["bundle_name"] = bundle_path.name
-            queued = self.broker.enqueue(
-                AgentExecutionRequest(
-                    workspace_id=str(workspace["id"]),
-                    job_id=str(job["id"]),
-                    workflow_key=workflow_key,
-                    node_key=node.key,
-                    agent_id=agent_id,
-                    agent_definition_hash=definition.definition_hash(),
-                    manifest=manifest,
-                    execution_id=execution_id,
+            with cleanup_bundle_on_error(bundle_path):
+                build_agent_bundle(bundle_path, skill_dir=skill_dir, manifest=manifest)
+                manifest["bundle_name"] = bundle_path.name
+                queued = self.broker.enqueue(
+                    AgentExecutionRequest(
+                        workspace_id=str(workspace["id"]),
+                        job_id=str(job["id"]),
+                        workflow_key=workflow_key,
+                        node_key=node.key,
+                        agent_id=agent_id,
+                        agent_definition_hash=definition.definition_hash(),
+                        manifest=manifest,
+                        execution_id=execution_id,
+                    )
                 )
-            )
-            if queued is None:
-                bundle_path.unlink(missing_ok=True)
-            return queued is not None
+                if queued is None:
+                    bundle_path.unlink(missing_ok=True)
+                return queued is not None
         finally:
             self.skill_manager.cleanup_execution(execution_id)

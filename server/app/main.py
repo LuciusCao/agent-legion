@@ -1,7 +1,7 @@
 import asyncio
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
 
 from fastapi import FastAPI
 
@@ -15,13 +15,12 @@ from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
 from server.app.events.aggregator import build_workspace_event_aggregator
 from server.app.events.bus import InProcessEventBus
+from server.app.executor_registry_factory import build_executor_registry
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.pi import build_skill_manager
-from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
-from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
@@ -37,36 +36,12 @@ from server.app.services.workspace_configuration import WorkspaceConfigurationSe
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
-from server.app.settings import Settings, load_settings, validate_settings
-from server.app.skills.manager import SkillManager
+from server.app.settings import load_settings, validate_settings
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
-
-
-def build_executor_registry(
-    settings: Settings,
-    job_db: Any | None = None,
-    artifact_store: ArtifactStore | None = None,
-    skill_manager: SkillManager | None = None,
-) -> ExecutorRegistry:
-    """Build the application-wide executor registry from settings (once per app)."""
-    if skill_manager is None:
-        skill_manager = build_skill_manager(settings.root_dir)
-    runtime = RuntimeDependencies(
-        local_handlers=build_local_handlers(settings),
-        pi_runtime=settings.executor_runtime.workflows.pi,
-        skill_manager=skill_manager,
-        openclaw_runtime=settings.executor_runtime.openclaw,
-        settings_config=settings.config,
-        resource_providers=settings.resource_providers,
-        job_db=job_db,
-        cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
-        artifact_store=artifact_store,
-    )
-    return ExecutorRegistry.build(settings.executor_definitions, runtime)
 
 
 def create_app(
@@ -213,4 +188,7 @@ def create_app(
     return app
 
 
-app = create_app(start_worker=True)
+if os.environ.get("AGENT_LEGION_SKIP_MODULE_APP") == "1":
+    app = FastAPI()
+else:
+    app = create_app(start_worker=True)

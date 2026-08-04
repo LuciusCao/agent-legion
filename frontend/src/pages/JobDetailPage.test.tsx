@@ -766,4 +766,104 @@ describe('JobDetailPage', () => {
 
     expect(await screen.findByText('Job Token 使用分析')).toBeInTheDocument()
   })
+
+  it('shows an error hint when the job id is missing', async () => {
+    vi.stubGlobal('fetch', createFetchMock())
+
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1/jobs']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/jobs"
+            element={<JobDetailPage />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByText('缺少任务 ID')).toBeInTheDocument()
+  })
+
+  it('previews an artifact from the list and closes both dialogs', async () => {
+    const base = createFetchMock({ detailStatus: 'completed' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/jobs/j1/artifacts/question.json') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              name: 'question.json',
+              content: 'artifact-body',
+            }),
+          })
+        }
+        return base(url, init)
+      })
+    )
+
+    renderPage()
+    await screen.findByText('提取')
+
+    // Open the artifact list, then close it without selecting.
+    await act(async () => {
+      screen.getByLabelText('产物文件').click()
+    })
+    expect(
+      await screen.findByRole('heading', { name: '产物文件' })
+    ).toBeInTheDocument()
+    await act(async () => {
+      screen.getByRole('button', { name: '关闭' }).click()
+    })
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', { name: '产物文件' })
+      ).not.toBeInTheDocument()
+    })
+
+    // Reopen, select the artifact, and the preview shows its content.
+    await act(async () => {
+      screen.getByLabelText('产物文件').click()
+    })
+    await act(async () => {
+      screen.getByText('question.json').click()
+    })
+    expect(await screen.findByText('artifact-body')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByRole('button', { name: '关闭' }).click()
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('artifact-body')).not.toBeInTheDocument()
+    })
+  })
+
+  it('shows the fetch error inside the artifact preview', async () => {
+    const base = createFetchMock({ detailStatus: 'completed' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/jobs/j1/artifacts/question.json') {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            text: async () => 'server boom',
+            json: async () => ({}),
+          })
+        }
+        return base(url, init)
+      })
+    )
+
+    renderPage()
+    await screen.findByText('提取')
+    await act(async () => {
+      screen.getByLabelText('产物文件').click()
+    })
+    await act(async () => {
+      screen.getByText('question.json').click()
+    })
+
+    expect(await screen.findByText(/HTTP 500: server boom/)).toBeInTheDocument()
+  })
 })
