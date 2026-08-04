@@ -3,7 +3,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, tokensLastHour } from "./app.js";
+import { NUMBER_DEFAULTS, bucketLabel, chartSeriesData, executionLabel, fillWindowBuckets, foldLogLines, formatElapsed, formatTokens, groupExecutions, hasChartData, labelsFromText, latestMetric, linesFromText, metricsParams, modelsFromText, numberField, phaseProgress, runOccupancy, tokensLastHour } from "./app.js";
 
 test("labelsFromText 解析多行 key=value", () => {
   assert.deepEqual(labelsFromText("host=home\nos=mac"), { host: "home", os: "mac" });
@@ -205,4 +205,21 @@ test("runOccupancy 只统计占用运行槽位的阶段", () => {
   assert.equal(runOccupancy(executions), 3);
   assert.equal(runOccupancy([]), 0);
   assert.equal(runOccupancy(undefined), 0);
+});
+
+test("foldLogLines 忽略时间戳折叠连续重复行，展示最新一行并标注重复次数", () => {
+  const lines = [
+    "[15:55:08] worker slots 0/96, upload queue depth 0",
+    "[15:55:25] worker slots 0/96, upload queue depth 0",
+    "[15:55:41] worker slots 0/96, upload queue depth 0",
+    "[15:55:57] 警告：挂载的配置文件与本地状态副本不一致",
+    "[15:56:13] worker slots 0/96, upload queue depth 0",
+  ];
+  assert.deepEqual(foldLogLines(lines), [
+    "[15:55:41] worker slots 0/96, upload queue depth 0  × 3",
+    "[15:55:57] 警告：挂载的配置文件与本地状态副本不一致",
+    "[15:56:13] worker slots 0/96, upload queue depth 0",
+  ]);
+  assert.deepEqual(foldLogLines([]), []);
+  assert.deepEqual(foldLogLines(undefined), []);
 });

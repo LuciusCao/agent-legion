@@ -2,8 +2,8 @@
 
 Split out of ``metrics_contracts.py`` to respect that module's size budget.
 The summary is window-independent: tokens and gauges come from minute
-samples, run stats are aggregated on demand from ``node_runs`` (always
-global — the table has no worker attribution).
+samples, run stats are aggregated on demand from ``node_runs`` (Agent runs
+only — Host-local handler nodes excluded; always global).
 """
 
 from __future__ import annotations
