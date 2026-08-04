@@ -23,11 +23,16 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
 }
 
+function workerScope(worker: AgentWorkerSummary): string {
+  return worker.allowed_workspaces.length === 0
+    ? '全部 workspace'
+    : worker.allowed_workspaces.join(', ')
+}
+
 /**
  * Worker register token management (issue / list / revoke) plus revocation of
- * already-registered workers. Management endpoints are currently open
- * (trusted-network deployment, same as the rest of the Host API); access
- * control arrives with the login/permission system.
+ * already-registered workers. Endpoints require login like the rest of the
+ * authenticated Host API.
  */
 export function WorkerTokensSection() {
   const [label, setLabel] = useState('')
@@ -239,6 +244,11 @@ export function WorkerTokensSection() {
               >
                 {worker.online ? '在线' : '离线'}
               </span>
+              <span className={styles.chip}>{worker.runtimes.join(', ')}</span>
+              <span className={styles.chip}>
+                并发上限 {worker.max_concurrency}
+              </span>
+              <span className={styles.chip}>{workerScope(worker)}</span>
               {worker.revoked && (
                 <span className={`${styles.chip} ${styles.chipRevoked}`}>
                   已吊销

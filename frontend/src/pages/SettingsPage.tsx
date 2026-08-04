@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 import { useAuthStore } from '../stores/authStore'
+import { useSettingsScrollSpy } from '../hooks/useSettingsScrollSpy'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
@@ -42,7 +43,6 @@ export function SettingsPage() {
     testConnection,
     resetTestStatus,
     fetchSettings,
-    fetchGlobalServices,
     fetchResourceProviders,
     fetchWorkflowDefinition,
   } = useSettingStore()
@@ -80,18 +80,16 @@ export function SettingsPage() {
       { id: 'intake-config', label: '接入与资源' },
       ...(hasNodeConfig ? [{ id: 'node-config', label: '节点配置' }] : []),
       { id: 'workflow', label: '工作流' },
-      { id: 'executor-allocation', label: '执行器分配' },
-      { id: 'executor-binding', label: '节点绑定' },
-      { id: 'worker-tokens', label: 'Worker Token' },
+      { id: 'executors', label: '执行器' },
+      { id: 'agent-workers', label: 'Agent 与 Worker' },
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
-      ...(hasLocalNodes
-        ? [{ id: 'local-node-concurrency', label: '本地节点并发' }]
-        : []),
+      { id: 'danger-zone', label: '危险操作' },
     ],
-    [hasLocalNodes, hasNodeConfig, isAdmin]
+    [hasNodeConfig, isAdmin]
   )
 
-  const [activeSection, setActiveSection] = useState('basic-info')
+  const { activeSection, contentRef, scrollToSection } =
+    useSettingsScrollSpy(navItems)
 
   useEffect(() => {
     if (!workspaceId) return
@@ -102,22 +100,13 @@ export function SettingsPage() {
 
   useEffect(() => {
     if (!workspaceId) return
-    void fetchGlobalServices()
     void fetchResourceProviders()
-  }, [workspaceId, fetchGlobalServices, fetchResourceProviders])
+  }, [workspaceId, fetchResourceProviders])
 
   useEffect(() => {
     if (!settings.workflowKey) return
     void fetchWorkflowDefinition()
   }, [settings.workflowKey, fetchWorkflowDefinition])
-
-  const scrollToSection = useCallback((id: string) => {
-    setActiveSection(id)
-    const el = document.getElementById(id)
-    if (el) {
-      el.scrollIntoView({ behavior: 'smooth' })
-    }
-  }, [])
 
   if (!workspaceId) return null
 
@@ -152,22 +141,25 @@ export function SettingsPage() {
         <nav className={styles.navSidebar}>
           <ul className={styles.navList}>
             {navItems.map((item) => (
-              <li
-                key={item.id}
-                className={
-                  activeSection === item.id
-                    ? styles.navItemActive
-                    : styles.navItem
-                }
-                onClick={() => scrollToSection(item.id)}
-              >
-                {item.label}
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={
+                    activeSection === item.id
+                      ? styles.navItemActive
+                      : styles.navItem
+                  }
+                  aria-current={activeSection === item.id ? 'true' : undefined}
+                  onClick={() => scrollToSection(item.id)}
+                >
+                  {item.label}
+                </button>
               </li>
             ))}
           </ul>
         </nav>
 
-        <div className={styles.contentArea}>
+        <div className={styles.contentArea} ref={contentRef}>
           <BasicInfoSection
             workspaceName={workspaceName}
             workspaceDescription={workspaceDescription}
@@ -198,36 +190,29 @@ export function SettingsPage() {
             onChange={(key) => setSettings({ workflowKey: key })}
           />
 
-          <section id="executor-allocation" className={styles.section}>
-            <h2 className={styles.sectionTitle}>执行器分配</h2>
+          <section id="executors" className={styles.section}>
+            <h2 className={styles.sectionTitle}>执行器</h2>
             <hr className={styles.sectionDivider} />
             <ExecutorAllocationSection />
-          </section>
-          <section id="executor-binding" className={styles.section}>
-            <h2 className={styles.sectionTitle}>节点绑定</h2>
-            <hr className={styles.sectionDivider} />
             <ExecutorBindingSection />
+            {hasLocalNodes && <LocalNodeLimitSection />}
           </section>
-          <section id="agent-routing" className={styles.section}>
-            <h2 className={styles.sectionTitle}>Agent 执行</h2>
+          <section id="agent-workers" className={styles.section}>
+            <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>
             <hr className={styles.sectionDivider} />
             <AgentRoutingSection />
-          </section>
-          <section id="worker-tokens" className={styles.section}>
-            <h2 className={styles.sectionTitle}>Worker Token</h2>
-            <hr className={styles.sectionDivider} />
             <WorkerTokensSection />
           </section>
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
-          {hasLocalNodes && (
-            <section id="local-node-concurrency" className={styles.section}>
-              <h2 className={styles.sectionTitle}>本地节点并发</h2>
-              <hr className={styles.sectionDivider} />
-              <LocalNodeLimitSection />
-            </section>
-          )}
 
-          <DangerZone workspaceId={workspaceId} workspaceName={workspaceName} />
+          <section id="danger-zone" className={styles.section}>
+            <h2 className={styles.sectionTitle}>危险操作</h2>
+            <hr className={styles.sectionDivider} />
+            <DangerZone
+              workspaceId={workspaceId}
+              workspaceName={workspaceName}
+            />
+          </section>
         </div>
       </div>
     </AppShell>

@@ -113,7 +113,6 @@ export const WORKSPACE_LABELS = {
   confirmDeleteJob: '确认删除任务',
   refresh: '刷新',
   nodes: '节点',
-  globalServices: '全局服务',
   resourceProviders: '资源接口',
   providerEnabled: '启用',
   providerParams: '参数配置',

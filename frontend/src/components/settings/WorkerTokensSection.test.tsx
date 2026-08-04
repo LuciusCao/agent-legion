@@ -67,6 +67,35 @@ describe('WorkerTokensSection', () => {
     expect(screen.getByText('video_knowledge')).toBeTruthy()
   })
 
+  it('shows runtime, concurrency and workspace scope chips for workers', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      sampleWorker,
+      {
+        ...sampleWorker,
+        worker_id: 'w2',
+        name: 'scoped-mac',
+        online: false,
+        allowed_workspaces: ['video_knowledge', 'question_comprehension'],
+      },
+    ])
+    render(<WorkerTokensSection />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('worker-w1')).toBeTruthy()
+    })
+    const globalItem = screen.getByTestId('worker-w1')
+    expect(globalItem.textContent).toContain('在线')
+    expect(globalItem.textContent).toContain('local')
+    expect(globalItem.textContent).toContain('并发上限 2')
+    expect(globalItem.textContent).toContain('全部 workspace')
+
+    const scopedItem = screen.getByTestId('worker-w2')
+    expect(scopedItem.textContent).toContain('离线')
+    expect(scopedItem.textContent).toContain(
+      'video_knowledge, question_comprehension'
+    )
+  })
+
   it('shows an error when loading fails', async () => {
     mockListRegisterTokens.mockRejectedValue(new Error('HTTP 500'))
     render(<WorkerTokensSection />)

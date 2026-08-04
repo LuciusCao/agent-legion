@@ -83,7 +83,6 @@ const defaultState: Partial<SettingState> = {
   originalWorkspaceDescription: '',
   originalSettings: null,
   isDirty: false,
-  globalServices: null,
   resourceProviders: [],
   workflowDefinition: null,
   testStatus: { state: 'idle' as const },
@@ -479,28 +478,6 @@ describe('settingStore', () => {
     mockApi.mockResolvedValue({})
     await useSettingStore.getState().fetchSettings('ws1')
     expect(useSettingStore.getState().settings).toEqual(defaultState.settings)
-  })
-
-  it('fetchGlobalServices hydrates global services from API', async () => {
-    mockApi.mockResolvedValueOnce({
-      cms: {
-        url: 'http://cms.example.com',
-        tokenConfigured: true,
-        env: 'prod',
-        healthy: null,
-        lastCheckedAt: null,
-      },
-    })
-    await useSettingStore.getState().fetchGlobalServices()
-    expect(useSettingStore.getState().globalServices).toEqual({
-      cms: {
-        url: 'http://cms.example.com',
-        tokenConfigured: true,
-        env: 'prod',
-        healthy: null,
-        lastCheckedAt: null,
-      },
-    })
   })
 
   it('fetchResourceProviders hydrates providers from API', async () => {

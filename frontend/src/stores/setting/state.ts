@@ -1,6 +1,5 @@
 import type {
   WorkspaceSettings,
-  GlobalServiceStatus,
   ResourceProviderDefinition,
   WorkflowDefinitionRecord,
 } from '../../types'
@@ -29,7 +28,6 @@ export type SettingState = {
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
-  globalServices: GlobalServiceStatus | null
   resourceProviders: ResourceProviderDefinition[]
   workflowDefinition: WorkflowDefinitionRecord | null
   testStatus: TestStatus
@@ -58,7 +56,6 @@ export type SettingState = {
     limit: number | null
   ) => void
   fetchSettings: (workspaceId: string) => Promise<void>
-  fetchGlobalServices: () => Promise<void>
   fetchResourceProviders: () => Promise<void>
   fetchWorkflowDefinition: () => Promise<void>
   saveAll: () => Promise<void>

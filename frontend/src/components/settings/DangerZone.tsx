@@ -23,28 +23,24 @@ export function DangerZone({ workspaceId, workspaceName }: Props) {
 
   return (
     <>
-      <section className={styles.dangerZone}>
-        <h2 className={styles.sectionTitle}>危险操作</h2>
-        <hr className={styles.sectionDivider} />
-        <div className={styles.dangerRow}>
-          <div>
-            <div className={styles.dangerTitle}>删除 Workspace</div>
-            <div className={styles.dangerDescription}>
-              删除后不可恢复，相关任务记录将被移除，但磁盘产物文件不会自动清理。
-            </div>
+      <div className={styles.dangerRow}>
+        <div>
+          <div className={styles.dangerTitle}>删除 Workspace</div>
+          <div className={styles.dangerDescription}>
+            删除后不可恢复，相关任务记录将被移除，但磁盘产物文件不会自动清理。
           </div>
-          {workspaceId !== 'default' && (
-            <Button
-              variant="outlined"
-              color="error"
-              onClick={() => setDeleteDialogOpen(true)}
-              disabled={workspaceName.trim() === ''}
-            >
-              删除 Workspace
-            </Button>
-          )}
         </div>
-      </section>
+        {workspaceId !== 'default' && (
+          <Button
+            variant="outlined"
+            color="error"
+            onClick={() => setDeleteDialogOpen(true)}
+            disabled={workspaceName.trim() === ''}
+          >
+            删除 Workspace
+          </Button>
+        )}
+      </div>
       <DeleteWorkspaceDialog
         open={deleteDialogOpen}
         workspaceName={workspaceName}
