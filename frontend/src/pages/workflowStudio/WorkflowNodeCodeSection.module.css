@@ -29,3 +29,58 @@
   font-size: 12px;
   color: #d32f2f;
 }
+.editor {
+  width: 100%;
+  min-height: 220px;
+  padding: 8px;
+  border: 1px solid #c7c7c7;
+  border-radius: 8px;
+  font-size: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  resize: vertical;
+  box-sizing: border-box;
+}
+.noteInput {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid #c7c7c7;
+  border-radius: 8px;
+  font-size: 12px;
+  box-sizing: border-box;
+}
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.badge {
+  margin-left: 8px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: #fff3e0;
+  color: #b26a00;
+  font-size: 11px;
+}
+.versions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 8px;
+}
+.versionRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.versionTitle {
+  font-size: 12px;
+  font-weight: 600;
+}
+.versionMeta {
+  font-size: 12px;
+  color: #43474e;
+  flex: 1;
+  word-break: break-all;
+}
