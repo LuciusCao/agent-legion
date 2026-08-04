@@ -1,6 +1,6 @@
 # velites 升格为一级 Runtime 实施计划
 
-状态：方向已拍板，待实施
+状态：**已落地**（Phase 1：PR #20；Phase 2：PR #21 + 审题链路迁移 2026-08-03；金丝雀关闭 `14ec130f` 2026-08-04；Phase 3 阶段 B 文档收口随本状态更新提交）。阶段 C（pi 退役）另立项未排期。
 范围：`server/app/agent_broker/`、`server/app/agent_catalog.py`、`server/app/routes/`、`worker/`、`config/`、`frontend/src/generated/`
 关联文档：[velites-harness.md](velites-harness.md)（harness 设计）、[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)（证据矩阵）、`config/architecture/architecture-invariants.yaml`（invariant registry）
 
@@ -132,7 +132,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 ### 4.5 flavor 退役三阶段
 
 - **阶段 A（过渡，本计划 Phase 1–2）**：flavor 仍是 runtime=pi agent 的全局实现开关；runtime=velites agent 的 manifest flavor 被 dispatch 钉死。两者并存。
-- **阶段 B（全量迁移完成后）**：flavor 正式收窄为"runtime=pi agent 的实现选择"遗留兼容层。生产 agent 全部 `runtime: velites` 后 flavor 无实际消费者，保留配置与校验仅为不破坏既有配置文件启动。此阶段改写 AGENTS.md §6 与 velites-harness.md §9 的相关表述。
+- **阶段 B（已落地，2026-08-04）**：flavor 正式收窄为"runtime=pi agent 的实现选择"遗留兼容层，AGENTS.md §6 与 velites-harness.md §9 已改写。注意与原文假设的偏差：video_knowledge 4 个 agent 保持 `runtime: pi`（该链路暂无新内容产出，用户决策不迁），故 flavor 的实际消费者**仅剩这 4 个 video agent**而非"无消费者"；新增 agent 一律直接声明 runtime。
 - **阶段 C（pi 退役，另立项）**：删除 `PiRuntimeConfig.flavor`（runtime_config.py:19）、`PiConfig.flavor`（pi_config.py:14）、`build_command_for_flavor` 分发层（velites_command.py:38-64）、pi argv 构建 `build_command`（pi_protocol.py:73-105），manifest `"pi"` 块重命名为 runtime 中性名（command_spec `version` 升 2，Worker 占位符替换兼容处理）。触发条件：pi 二进制生产零调用 ≥ 一个季度。
 
 ### 4.6 Worker 侧

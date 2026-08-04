@@ -114,8 +114,10 @@ heartbeat_failure_threshold: 3
 workflows:
   enabled: true
   pi:
-    # Headless harness 选择：pi（Node Pi CLI）| velites（自研 Rust harness，见
-    # docs/architecture/velites-harness.md）。缺省 pi；非法值启动即报错（fail-fast）。
+    # `runtime: pi` agent 的遗留实现选择层：pi（Node Pi CLI）| velites（自研 Rust
+    # harness，见 docs/architecture/velites-harness.md §9）。仅作用于 runtime: pi
+    # 的 agent；runtime: velites 由定义钉死、忽略本项。生产默认 velites；非法值
+    # 启动即报错（fail-fast）。新增 agent 应直接声明 runtime，勿依赖本开关。
     # 切到 velites 时 binary 未显式覆盖则自动用 velites 二进制；`flavor: pi` 单字段即回退。
     flavor: velites
     # velites 逃生门：true 时 velites 命令追加 --no-sandbox（生产沙箱异常时
