@@ -85,11 +85,11 @@ describe('WorkflowStudioRightPanel', () => {
     useAuthStore.setState({ user: null, status: 'unknown' })
     useSettingStore.setState({ workspaceId: null, settings: baseSettings })
     mockApi.mockResolvedValue({
+      origin: 'builtin',
+      code: 'def run(inputs):\n    return {}\n',
       path: 'workflow_nodes/fetch_questions.py',
-      content: 'def run(inputs):\n    return {}\n',
-      capabilities: [
-        { executor_id: 'code-default', capability: 'fetch_questions' },
-      ],
+      version: null,
+      has_draft: false,
     })
   })
 
@@ -122,6 +122,7 @@ describe('WorkflowStudioRightPanel', () => {
       workspaceId: 'ws1',
       settings: {
         ...baseSettings,
+        workflowKey: 'video_knowledge',
         nodeConfig: { fetch_questions: { bank_version: 'v2' } },
         nodeConfigSchemas: {
           fetch_questions: {
