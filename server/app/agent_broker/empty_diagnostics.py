@@ -1,25 +1,26 @@
 """Empty-claim diagnostics: why a claim came back empty with stock present.
 
-Split out of ``empty.py`` for the file-size budget. The claim pass counts
-why each candidate lost (see ``claim_scan.py``); when the queue still holds
-queued rows yet no Worker could claim anything, that is a blocked queue —
-the load-drop-with-no-cause failure mode from the 2026-08-01 incident — and
-worth a debounced WARNING carrying the reason histogram and the queue head.
+Split out of ``empty.py`` for the file-size budget: debounced WARNING plus
+the persisted blocked-queue signal for the monitoring panel (issue #13).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import Mapping
 from typing import Any
+
+from server.app.db.connection import DatabaseDsn
+from server.app.db.transaction import write_transaction
 
 logger = logging.getLogger(__name__)
 
 _QUEUE_HEAD_LIMIT = 5
 
 
-def log_blocked_queue(conn: Any, skip_reasons: Mapping[str, int]) -> None:
-    """Log the blocked-queue signal: skip histogram plus the queue head."""
+def log_blocked_queue(dsn: DatabaseDsn, conn: Any, skip_reasons: Mapping[str, int]) -> None:
+    """Log the blocked-queue signal and persist it for the ops summary."""
     head = conn.execute(
         "select execution_id, workspace_id, job_id, node_key, queued_at"
         " from agent_execution_requests where state='queued'"
@@ -41,3 +42,12 @@ def log_blocked_queue(conn: Any, skip_reasons: Mapping[str, int]) -> None:
             for row in head
         ],
     )
+    with write_transaction(dsn) as write_conn:
+        write_conn.execute(
+            "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
+            " values (1, 'blocked', %s, current_timestamp)"
+            " on conflict(id) do update set"
+            " kind='blocked', reasons_json=excluded.reasons_json,"
+            " updated_at=current_timestamp",
+            (json.dumps(dict(skip_reasons), sort_keys=True),),
+        )
