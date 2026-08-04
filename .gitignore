@@ -32,4 +32,5 @@ htmlcov_backend/
 
 # Internal design docs, not published
 /docs/superpowers/
+/docs/plans/
 /issues/
