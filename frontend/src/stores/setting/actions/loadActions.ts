@@ -6,7 +6,6 @@ import {
 import type { components } from '../../../generated/api'
 import type {
   WorkspaceSettings,
-  GlobalServiceStatus,
   ResourceProvidersResponse,
   WorkflowResponse,
   WorkspaceResponse,
@@ -85,17 +84,6 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
         }
         const message = err instanceof Error ? err.message : '加载设置失败'
         set({ saveError: message })
-      }
-    },
-
-    async fetchGlobalServices() {
-      try {
-        const result = await api<GlobalServiceStatus>('/api/global-services')
-        if (result && typeof result === 'object' && 'cms' in result) {
-          set({ globalServices: result })
-        }
-      } catch {
-        // Silently fail; global services are informational
       }
     },
 

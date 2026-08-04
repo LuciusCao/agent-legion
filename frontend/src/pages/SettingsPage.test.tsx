@@ -52,15 +52,6 @@ const defaultState: SettingState = {
   originalWorkspaceDescription: '测试描述',
   originalSettings: null,
   isDirty: false,
-  globalServices: {
-    cms: {
-      baseUrl: 'http://cms.example.com',
-      tokenConfigured: true,
-      env: 'prod',
-      healthy: null,
-      lastCheckedAt: null,
-    },
-  },
   resourceProviders: [],
   workflowDefinition: null,
   testStatus: { state: 'idle' },
@@ -97,7 +88,6 @@ const defaultState: SettingState = {
   setNodeLimit: vi.fn(),
   setAgentCapacity: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue(undefined),
-  fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
   fetchResourceProviders: vi.fn().mockResolvedValue(undefined),
   fetchWorkflowDefinition: vi.fn().mockResolvedValue(undefined),
   saveAll: vi.fn().mockResolvedValue(undefined),
@@ -219,13 +209,28 @@ describe('SettingsPage', () => {
       '基本信息',
       '接入与资源',
       '工作流',
-      '执行器分配',
-      '节点绑定',
-      'Agent 执行',
-      'Worker Token',
-      '本地节点并发',
+      '执行器',
+      'Agent 与 Worker',
       '危险操作',
     ])
+  })
+
+  it('renders nav items matching the sections and marks the active one', async () => {
+    renderPage()
+    await act(async () => {})
+
+    const nav = screen.getByRole('navigation')
+    const navButtons = within(nav).getAllByRole('button')
+    expect(navButtons.map((b) => b.textContent)).toEqual([
+      '基础信息',
+      '接入与资源',
+      '工作流',
+      '执行器',
+      'Agent 与 Worker',
+      '危险操作',
+    ])
+    expect(navButtons[0]).toHaveAttribute('aria-current', 'true')
+    expect(navButtons[1]).not.toHaveAttribute('aria-current')
   })
 
   it('renders workspace name in header', async () => {
@@ -275,14 +280,10 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('calls fetchGlobalServices and fetchResourceProviders on mount', async () => {
-    const fetchGlobalServices = vi.fn().mockResolvedValue(undefined)
+  it('calls fetchResourceProviders on mount', async () => {
     const fetchResourceProviders = vi.fn().mockResolvedValue(undefined)
-    useSettingStore.setState({ fetchGlobalServices, fetchResourceProviders })
+    useSettingStore.setState({ fetchResourceProviders })
     renderPage()
-    await waitFor(() => {
-      expect(fetchGlobalServices).toHaveBeenCalled()
-    })
     await waitFor(() => {
       expect(fetchResourceProviders).toHaveBeenCalled()
     })
@@ -513,7 +514,7 @@ describe('SettingsPage', () => {
     renderPage()
     await act(async () => {})
 
-    const headings = screen.getAllByRole('heading', { level: 2 })
+    const headings = screen.getAllByRole('heading')
     const labels = headings.map((h) => h.textContent)
     expect(labels.indexOf('节点绑定')).toBeGreaterThan(
       labels.indexOf('执行器分配')

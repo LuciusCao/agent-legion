@@ -87,6 +87,7 @@ describe('ExecutorBindingSection', () => {
       workspaceId: 'ws1',
       executorCatalog: catalog,
       workflowDefinition,
+      agentRoutes: [],
       executorConfiguration: {
         allocations: [
           {
@@ -166,5 +167,28 @@ describe('ExecutorBindingSection', () => {
     expect(
       screen.getByText('没有已分配的执行器支持能力 unsupported_capability')
     ).toBeInTheDocument()
+  })
+
+  it('excludes agent nodes, which are routed by Agent ID', () => {
+    useSettingStore.setState({
+      agentRoutes: [
+        {
+          workflow_key: 'sample_workflow',
+          node_key: 'review_keywords',
+          node_label: '审核关键词',
+          capability: 'review_keywords',
+          agent_id: 'keyword-reviewer',
+          agent_skill: 'review_key_info',
+        },
+      ],
+    })
+
+    render(<ExecutorBindingSection />)
+
+    expect(
+      screen.queryByTestId('binding-select-review_keywords')
+    ).not.toBeInTheDocument()
+    expect(getSelectInput('fetch_questions')).toBeInTheDocument()
+    expect(getSelectInput('generate_distractors')).toBeInTheDocument()
   })
 })
