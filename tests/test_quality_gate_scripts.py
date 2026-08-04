@@ -18,6 +18,11 @@ def _write_executable(path: Path, content: str) -> None:
 def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
     process_env = os.environ.copy()
     for key in (
+        # AGENT_LEGION_TEST_DATABASE_URL: the unit tier pins an unreachable
+        # offline URL for its whole pytest process; without scrubbing, a
+        # simulated GATE_TIER=smoke run inherits it and the curated tier's
+        # contract (never offline-pinned) cannot be verified on CI.
+        "AGENT_LEGION_TEST_DATABASE_URL",
         "BACKEND_GATE_PHASE",
         "FRONTEND_API_CHECK",
         "FRONTEND_COVERAGE_BLOB_DIR",
