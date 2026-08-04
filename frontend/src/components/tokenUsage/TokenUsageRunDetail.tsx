@@ -151,6 +151,11 @@ function TokenUsageBreakdown({ usage }: { usage: RunUsage | null }) {
           </div>
         </>
       )}
+      {usage.pricing_missing && (
+        <p className={styles.empty}>
+          {provider || '未知'} / {model || '未知'} 缺少定价配置
+        </p>
+      )}
     </div>
   )
 }

@@ -49,7 +49,11 @@ export function TokenUsageJobPanel({ jobId }: Props) {
           <div className={styles.metricValue}>
             {money(data.currency, total.cost?.total)}
           </div>
-          <div className={styles.metricMeta}>按配置单价计算</div>
+          <div className={styles.metricMeta}>
+            {total.pricing_missing_models?.length
+              ? `缺少定价：${total.pricing_missing_models.join('、')}`
+              : '按配置单价计算'}
+          </div>
         </div>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>覆盖率</div>
