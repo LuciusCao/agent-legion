@@ -2,55 +2,41 @@ import { afterEach, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { EventSourceMock } from './testing/eventSourceMock'
 import './test-setup-matchmedia'
+import './test-setup-console'
 
-let unexpectedConsoleErrors: unknown[][] = []
-let expectedConsoleErrors: RegExp[] = []
-let unexpectedConsoleWarnings: unknown[][] = []
-let expectedConsoleWarnings: RegExp[] = []
+export { expectConsoleError, expectConsoleWarning } from './test-setup-console'
 
-export function expectConsoleError(pattern: RegExp) {
-  expectedConsoleErrors.push(pattern)
-}
-
-export function expectConsoleWarning(pattern: RegExp) {
-  expectedConsoleWarnings.push(pattern)
+const preventNavigation = (event: MouseEvent) => {
+  if (
+    event.target instanceof Element &&
+    event.target.closest('a[href]') !== null
+  ) {
+    event.preventDefault()
+  }
 }
 
 beforeEach(() => {
-  unexpectedConsoleErrors = []
-  expectedConsoleErrors = []
-  unexpectedConsoleWarnings = []
-  expectedConsoleWarnings = []
-  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
-    unexpectedConsoleErrors.push(args)
-  })
-  vi.spyOn(console, 'warn').mockImplementation((...args: unknown[]) => {
-    unexpectedConsoleWarnings.push(args)
-  })
+  // React Router handles the click on its root before it bubbles here. This
+  // preserves application navigation while suppressing jsdom's default page
+  // navigation, which it intentionally does not implement.
+  document.addEventListener('click', preventNavigation)
 })
 
 afterEach(() => {
-  vi.restoreAllMocks()
-  const unmatchedErrors = unexpectedConsoleErrors
-    .map((args) => args.map(String).join(' '))
-    .filter(
-      (message) =>
-        !expectedConsoleErrors.some((pattern) => pattern.test(message))
-    )
-  const unmatchedWarnings = unexpectedConsoleWarnings
-    .map((args) => args.map(String).join(' '))
-    .filter(
-      (message) =>
-        !expectedConsoleWarnings.some((pattern) => pattern.test(message))
-    )
-  const unexpectedMessages = [
-    ...unmatchedErrors.map((message) => `console.error: ${message}`),
-    ...unmatchedWarnings.map((message) => `console.warn: ${message}`),
-  ]
-  if (unexpectedMessages.length === 0) return
-  throw new Error(
-    `Unexpected console output during test:\n${unexpectedMessages.join('\n')}`
-  )
+  document.removeEventListener('click', preventNavigation)
+})
+
+Object.defineProperties(HTMLMediaElement.prototype, {
+  play: {
+    configurable: true,
+    writable: true,
+    value: () => Promise.resolve(),
+  },
+  pause: {
+    configurable: true,
+    writable: true,
+    value: () => {},
+  },
 })
 
 class ResizeObserverMock {

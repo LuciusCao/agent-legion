@@ -11,13 +11,15 @@
     "build:bundle": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run --pool=threads",
-    "test:coverage": "vitest run --coverage --pool=threads",
+    "test": "vitest run --pool=threads --maxWorkers=6",
+    "test:coverage": "vitest run --coverage --pool=threads --maxWorkers=6",
+    "test:coverage-inventory": "node --test scripts/coverage-inventory.test.mjs && node scripts/coverage-inventory.mjs",
     "stress:workspace": "playwright test stress/",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write src",
-    "format:check": "prettier --check src"
+    "e2e:smoke": "playwright test -c playwright.e2e.config.ts",
+    "lint": "eslint src/ scripts/",
+    "lint:fix": "eslint src/ scripts/ --fix",
+    "format": "prettier --write src scripts",
+    "format:check": "prettier --check src scripts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
