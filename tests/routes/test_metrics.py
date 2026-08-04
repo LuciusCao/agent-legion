@@ -87,16 +87,28 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
             " values ('job-1', 'ops-ws', 'questions', 'question', 'job-1')"
             " on conflict(id) do nothing",
         )
-        conn.execute(
-            "insert into node_runs(job_id, node_key, status, started_at, finished_at)"
-            " values ('job-1', 'generate', 'completed', ?, ?)",
-            (now - timedelta(seconds=20), now - timedelta(seconds=10)),
-        )
-        conn.execute(
-            "insert into node_runs(job_id, node_key, status, started_at, finished_at)"
-            " values ('job-1', 'review', 'failed', ?, ?)",
-            (now - timedelta(seconds=50), now - timedelta(seconds=40)),
-        )
+        for node_key, status, started, finished in (
+            ("generate", "completed", now - timedelta(seconds=20), now - timedelta(seconds=10)),
+            ("review", "failed", now - timedelta(seconds=50), now - timedelta(seconds=40)),
+        ):
+            run = conn.execute(
+                "insert into node_runs(job_id, node_key, status, started_at, finished_at)"
+                " values ('job-1', ?, ?, ?, ?) returning id",
+                (node_key, status, started, finished),
+            ).fetchone()
+            # Agent runs 口径：只有被 agent_execution_requests 引用的 run 才计入摘要。
+            conn.execute(
+                """
+                insert into agent_execution_requests(
+                    execution_id, workspace_id, job_id, workflow_key, node_key,
+                    agent_id, agent_definition_hash, node_concurrency_limit,
+                    state, queued_at, node_run_id, manifest_json
+                )
+                values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 1,
+                        'done', ?, ?, '{}')
+                """,
+                (f"exec-{node_key}", node_key, started, run["id"]),
+            )
 
     summaries = []
     for granularity in ("6h", "24h", "30d"):

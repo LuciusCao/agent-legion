@@ -69,29 +69,30 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path, *, embed_token: bool 
 
     app = FastAPI(title="Agent Legion Worker Service", version="1.0", lifespan=lifespan)
 
+    # 本地控制面不需要浏览器长缓存：no-cache 强制每次校验，ETag 未变则 304。
+    ui_assets = (
+        "app.js",
+        "styles.css",
+        "icons.svg",
+        "vendor/uPlot.iife.min.js",
+        "vendor/uPlot.min.css",
+    )
+    media_types = {".js": "text/javascript", ".css": "text/css", ".svg": "image/svg+xml"}
+    no_cache = {"Cache-Control": "no-cache"}
+
     @app.get("/", include_in_schema=False)
     def index() -> HTMLResponse:
         html = (ui_dir / "index.html").read_text(encoding="utf-8")
         if embed_token:
             html = html.replace('= "__WORKER_CONTROL_TOKEN__"', f'= "{token}"')
-        return HTMLResponse(html)
+        return HTMLResponse(html, headers=no_cache)
 
     @app.get("/assets/{name:path}", include_in_schema=False)
     def asset(name: str) -> FileResponse:
-        if name not in {
-            "app.js",
-            "styles.css",
-            "icons.svg",
-            "vendor/uPlot.iife.min.js",
-            "vendor/uPlot.min.css",
-        }:
+        if name not in ui_assets:
             raise HTTPException(status_code=404, detail="asset not found")
-        media_type = {
-            ".js": "text/javascript",
-            ".css": "text/css",
-            ".svg": "image/svg+xml",
-        }[Path(name).suffix]
-        return FileResponse(ui_dir / name, media_type=media_type)
+        media_type = media_types[Path(name).suffix]
+        return FileResponse(ui_dir / name, media_type=media_type, headers=no_cache)
 
     @app.get("/api/health")
     def health() -> dict[str, str]:
