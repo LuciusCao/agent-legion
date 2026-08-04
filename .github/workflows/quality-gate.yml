@@ -186,16 +186,18 @@ jobs:
 
       # Peer shards upload coverage only after their pytest run; under load
       # the aggregator can reach the merge first (5C-2 race, run
-      # 30811145691). Poll until both peer coverage artifacts exist (40 x 15s
+      # 30811145691). Poll until all shard coverage artifacts exist (40 x 15s
       # = 10 min cap, then fail); the explicit download steps below stay the
-      # fail-fast guard, and the unit shard (~2.6 min) never needs waiting.
+      # fail-fast guard. backend-unit (~2.6 min) almost always lands first,
+      # but runner queuing is not a guarantee, so it is polled too (codex
+      # review on PR #25).
       - name: Wait for peer shard coverage artifacts
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           for attempt in $(seq 1 40); do
             missing=0
-            for name in backend-postgres-b-coverage backend-postgres-c-coverage; do
+            for name in backend-unit-coverage backend-postgres-b-coverage backend-postgres-c-coverage; do
               count=$(gh api "repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts?name=${name}" --jq '.total_count')
               [[ "$count" -ge 1 ]] || missing=1
             done
@@ -820,12 +822,18 @@ jobs:
 
       - run: uv sync
 
+      # --reruns 1 matches the tier gates and is what makes the flaky
+      # governance below meaningful: registered flakes get one retry and
+      # land in the rerun report; without it a flake fails outright and the
+      # report is always empty (codex review on PR #25).
       - name: CI extended architecture evidence
         run: |
           mkdir -p test-results
           uv run pytest -q tests/ci -m ci_extended \
             --durations=30 \
             --junitxml=test-results/ci-extended-junit.xml \
+            --reruns 1 \
+            --reruns-delay 2 \
             -p scripts.pytest_telemetry
         env:
           AGENT_LEGION_RERUN_REPORT: test-results/ci-extended-reruns.json
