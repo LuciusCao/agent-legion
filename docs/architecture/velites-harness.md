@@ -1,6 +1,6 @@
 # velites：Agent Legion 自研轻量 Agent Harness 设计
 
-日期：2026-07-31 ｜ 状态：Draft（待评审）｜ 前置：[PoC 报告](./velites-poc-report.md)（worktree `poc-rust-pi`）
+日期：2026-07-31 ｜ 状态：已落地（现行设计文档；2026-08-03 升格落地、2026-08-04 金丝雀关闭，见 §9）｜ 前置：[PoC 报告](./velites-poc-report.md)（worktree `poc-rust-pi`）
 
 > velites（罗马军团轻步兵）是 Agent Legion 的专用 agent 执行内核：Rust 实现、单静态二进制、
 > 极简上下文、可控性（controllability）作为第一特性。它替代 Node 版 Pi CLI 承担
@@ -55,12 +55,15 @@ velites/                 # Cargo crate（本仓库根下新目录）
     cli.rs               # 参数定义
     agent.rs             # agent loop
     events.rs            # 事件 schema 定义（serde）+ emitter
-    tools/{read,write,bash}.rs
-    provider/{client,openai_compat}.rs
+    config.rs            # gateway 凭据（文件 + env 覆盖，§7）
+    session.rs           # session.jsonl 镜像落盘（--session-dir）
+    tools/{mod,read,write,bash,truncate}.rs
+    provider/{mod,openai_compat,retry,stub}.rs
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
     cancel.rs            # 取消/信号
     sandbox.rs           # 沙箱抽象（seatbelt / bubblewrap，§5）
+    bin/velites_schema.rs # 事件流 JSON Schema 导出（schemars）
   tests/                 # Rust 集成测试（含 golden event fixtures）
 ```
 
@@ -75,8 +78,10 @@ agent 框架；依赖清单评审纳入 PR。
 
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
-二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；`config/workflow.yaml`
-的 `workflows.pi.binary` 指向切换（保留回退 Node Pi 的能力一个版本周期）。
+二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；实现选择经
+`AgentDefinition.runtime` + `workflows.pi.flavor` 分派
+（`server/app/agent_broker/runtime_dispatch.py`）——pi 不退役、长期保留，
+灰度/回退均为单 agent 定义的单字段配置改动（详见 §9）。
 
 ## 4. 事件 Schema v1：pi 兼容子集（velites/json1）
 
@@ -264,8 +269,11 @@ velites --mode json \
 
 - 初期：velites 自有配置文件（`~/.velites/config.json`，含 gateway `base_url` +
   `api_key`），文件权限 0600。**明文文件是权宜之计，不作为长期方案**；
-- 后续扩展：env 注入（`--api-key-env`）→ 与 Agent Legion vault 打通，按优先级
-  env > 文件覆盖；
+- env 注入（已实现）：固定环境变量 `VELITES_BASE_URL` / `VELITES_API_KEY`
+  （`velites/src/config.rs`）按字段覆盖文件值，env 全量提供时可完全免去配置
+  文件；无 `--api-key-env` flag；
+- 后续扩展：与 Agent Legion vault 打通（env 覆盖即预留的接入缝），优先级
+  env > 文件；
 - 保留的底线仅一条：secret 不上命令行（`ps` 可见）。不做启动强校验等其他治理。
 
 ## 8. 工具实现
@@ -360,12 +368,13 @@ velites 二进制；要回 pi 二进制需同时落 `flavor: pi`）；系统性�
     沙箱不可用时 fail-closed（exit≠0），不降级；
 - **测试债偿还**：`tests/executors/` 目前对 pi 全部 fake-binary mock；本期为 velites
   建立真二进制 + stub provider 的集成测试（full lane），pi flavor 维持 mock 至移除；
-- **压力门禁**：并发 RSS/启动延迟基准纳入 stress lane（对照 PoC 基线：单发 RSS
-  <30 MB、冷启动 <50 ms）；
+- **压力门禁（未实施）**：并发 RSS/启动延迟基准纳入 stress lane（对照 PoC 基线：单发 RSS
+  <30 MB、冷启动 <50 ms）——截至 2026-08-04，`scripts/stress/` 与 CI stress lane
+  均无 velites 基准，仍为待落地项；
 - **体积预算**：velites 为 Rust crate，不进 Python 体积预算；CI 新增 rust lane
   （`cargo fmt --check`、`clippy -D warnings`、`cargo test`），按路径裁剪；
-- **安全**：secret 不上命令行（`ps` 可见）这一条保留；凭据初期走 0600 配置文件，
-  env/vault 为后续扩展（§7）；VAULT-SECRET-001 边界不变化——harness 不接触 vault；
+- **安全**：secret 不上命令行（`ps` 可见）这一条保留；凭据走 0600 配置文件 +
+  env 覆盖（已实现，§7），vault 打通为后续扩展；VAULT-SECRET-001 边界不变化——harness 不接触 vault；
   文件系统沙箱默认开启（§5 沙箱小节，EXEC-HARNESS-SANDBOX-001），回应 2026-07-31
   pi 扫全仓库事故；
 - **文档**：README 增 velites 章节；本文件进 `docs/architecture/`；

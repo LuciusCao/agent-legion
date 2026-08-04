@@ -78,9 +78,9 @@ Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope
 
   该 Worker 注册后只能看到并 claim 对应 workspace 的任务。
 
-  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）当前**不做鉴权**，与 Host 现有无鉴权模型一致，依赖可信内网/Tailscale 部署保护；待登录/权限体系落地后会恢复校验。Worker 注册本身仍必须凭 register token（全局或 scoped），不受影响。
+  注意：这些管理端点（UI 与下列 curl 共用的 `/api/agent-register-tokens*`、`/api/agent-workers/*/revoke`）要求 **admin 会话**调用，必须携带登录 cookie 与 CSRF header（见 Host Web UI 登录后的会话）。Worker 注册本身仍必须凭 register token（全局或 scoped），不受影响。
 
-  也可以用 curl 在部署机上签发（备选方式，无需任何鉴权 header）：
+  也可以用 curl 在部署机上签发（备选方式）。这些请求需要 admin 会话：先在 Host Web UI 登录（或调用 `/api/auth/login`）取得登录 cookie，并在请求中带上 CSRF header，否则返回 401/403。
 
 ```bash
 curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
@@ -125,7 +125,7 @@ make stack-logs STACK=worker
 
 页面保存配置后会原子写入控制卷。身份、能力、可用模型或注册 Token 变化时会重启执行进程并重新注册；领取开关和最大并发会热更新。每次 Worker 执行进程启动（包括服务启动、手动重启和崩溃后的自动重启）都会先把 claim 置为关闭，即使上次退出前处于开启状态也不会自动恢复；用户必须在控制台点击「开始领取」，或执行 `workerctl claim enable`，之后 Worker 才会按本机 `max_concurrency` 拉取任务。
 
-Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capability 与 workflow 节点已有的 `capability` 是同一个值，不存在额外的 `required_worker_capabilities` 字段；只有 capability、provider 和 model 都匹配时，Host 才会把该节点任务交给 Worker。没有兼容 Worker 时任务保持排队，不会被不兼容的机器领取。
+Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capability 与 workflow 节点已有的 `capability` 是同一个值，不存在额外的 `required_worker_capabilities` 字段；只有 runtime、capability、provider 和 model 都匹配时，Host 才会把该节点任务交给 Worker。没有兼容 Worker 时任务保持排队，不会被不兼容的机器领取。
 
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 
@@ -178,7 +178,7 @@ docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
 
 ### 崩溃重启与失败状态
 
-Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册或 Worker 已被吊销）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
+Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程内指数退避重试注册，不会打印 traceback，也不会触发 supervisor 重启。执行进程因其他原因崩溃后按指数退避自动重启：5 秒起步、每次 ×2、封顶 300 秒；稳定运行满 60 秒后重置退避。退出码 2（Host 明确拒绝注册、Worker 已被吊销，或启动预检失败——例如声明了某个 runtime 但其二进制不在 PATH 上）不自动重启，进入 failed 状态，需修正配置后手动 `workerctl restart`。`status` 中的 `restart_count`、`next_restart_delay`、`failed` 字段反映这些状态；容器 healthcheck 会把 failed 或已配置但进程未运行视为 unhealthy。
 
 ### 挂载配置与状态副本不一致
 
@@ -191,10 +191,10 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 
 ## 6. 验证两个 Worker
 
-可以直接查看 Worker 控制台，也可以在部署机执行：
+可以直接查看 Worker 控制台，也可以在部署机执行（`GET /api/agent-workers` 要求登录用户会话，需携带登录 cookie 与 CSRF header，否则会返回 401；也可以直接在 Host Web UI 中查看）：
 
 ```bash
-curl http://192.0.2.1:8000/api/agent-workers
+curl -b <登录 cookie> -H 'X-CSRF-Token: <csrf-token>' http://192.0.2.1:8000/api/agent-workers
 ```
 
 响应中应同时看到 `company-local-1` 和 `home-mac-mini-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示用全局 token 注册、可承接所有 workspace 的任务；否则列出 scoped token 授权的唯一 workspace。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。

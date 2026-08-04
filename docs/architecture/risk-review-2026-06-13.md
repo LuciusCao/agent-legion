@@ -1,5 +1,12 @@
 # Agent Legion 架构风险 Review 报告
 
+> **时点快照声明（2026-08-04 补注）**：本文是 2026-06-13 时点的历史记录，结论与
+> `path:line` 证据均反映当时代码，未随后续演进更新。多数 P0/P1 项此后已修复或随
+> 架构演进失效，包括但不限于：认证层已上线（`server/app/auth/`）；密钥纪律已改为
+> vault + env-only（不再写 YAML）；`/api/health` 端点已存在；存储已从 SQLite 迁至
+> PostgreSQL；`config/pipeline.yaml` 已退役；`routes/videos.py` 等被引用文件已删除。
+> 当前架构风险状态请以现行代码与 `docs/architecture/` 现行文档为准。
+
 **日期**：2026-06-13  
 **分支**：`codex/workspace-executor-governance`  
 **Review 方式**：通过 4 个并行的只读 explore agent 分别审查后端、前端、质量门禁与测试、配置/数据流/部署；并在本地运行 `scripts/check-quick.sh` 相关命令验证当前基线。  

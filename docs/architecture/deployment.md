@@ -42,8 +42,8 @@ scripts/
 ## Key Decisions
 
 - 使用 `uv` 而非 `pip`/`poetry`，依赖锁定在 `uv.lock`。
-- PostgreSQL 是唯一运行时数据库；SQLite 只由一次性离线导入器读取。
-- 质量门分为 `check-quick.sh`（日常/本地 pre-push）和 `check.sh`（完整门禁，由 GitHub Actions CI 执行，见 `.github/workflows/quality-gate.yml`）。
+- PostgreSQL 是唯一运行时数据库；`server/` 与 `scripts/` 已无任何 SQLite 使用，仅 `tools/content-uploader` 用 SQLite 记录自身上传状态。
+- 质量门分三层：本地 pre-push 默认 smoke 级（`scripts/run-local-gate.sh`，由 `.githooks/pre-push` 调用）；本地完整门 `check.sh`（`AGENT_LEGION_GATE_LEVEL=full` 触发）；CI（`.github/workflows/quality-gate.yml`）分阶段调用 `scripts/check-quick-backend.sh` / `check-quick-frontend.sh`，不调用 `check.sh`。
 - 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录。
 
 ## API Surface / Interface

@@ -6,7 +6,7 @@
 ## 1. Worktree & Isolation
 
 - 每次独立开发任务优先在新的 git worktree 中进行。
-- 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免 SQLite、视频、日志、package 互相覆盖。
+- 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
 - 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`（缺这两个文件会导致 pytest/服务启动即失败）。手工初始化时必须自行补上这两个 secrets 文件。
 - 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（不要用 tracked 的 `config/app.yaml` 里的共享库）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
@@ -31,7 +31,8 @@
 
 - 任何代码修改后先跑 `./scripts/check-quick.sh`。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
-  的 `backend` + `frontend` job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
+  的 backend-unit、backend-postgres-a/b/c、frontend-logic、frontend-component、
+  frontend-coverage、e2e-smoke、rust 等 job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
   默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
   裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
@@ -120,7 +121,7 @@ LocalExecutor(...).execute(context)
 - Skill 只在外部仓库（如 `~/.agents/skills/agent-legion/...`）修改，不要复制或 symlink 到项目根。
 - 修改后同步 shared assets，更新 `config/skills.yaml` 与 `config/skills.lock`。
 - 跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py` 验证共享引用文件一致。
-- 完整流程见 [README.md](README.md) 的 Pi Agent Runner 章节。
+- 完整流程见 [README.md](README.md) 的 Agent Runtimes 章节。
 
 ## 8. Security & Data
 

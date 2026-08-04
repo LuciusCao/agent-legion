@@ -143,6 +143,9 @@
 
 ## 附：产物清单（均在本 worktree）
 
+> **状态标注（2026-08-04 补注）**：以下产物所指 worktree `.worktrees/poc-rust-pi`
+> 已删除，上述产物均不可得，本清单仅作历史记录。
+
 - `bin/pi-rust`、`poc/pi-rust-help.txt`、`poc/dl/`（安装包+校验）
 - `poc/diff_events.py`、`poc/skillrun/{node,rust}/events.jsonl`、`poc/skillrun/diff_result.txt`
 - `poc/errtest/{node,rust}/`、`poc/ctxtest/`（context 注入证据）

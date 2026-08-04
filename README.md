@@ -29,7 +29,9 @@ It ships with two production workflows:
 - **Pluggable agent runtimes.** Agent nodes run headlessly through the Pi CLI
   or **velites** — Agent Legion's own Rust harness (&lt;50 ms cold start vs
   Pi's ~1.6 s, a fraction of the memory, same pi-compatible event stream).
-  Switch per deployment with `workflows.pi.flavor`.
+  Switch per agent with the `runtime` field (`pi` / `openclaw` / `velites`) in
+  the agent definitions of `config/workflow.yaml`; `workflows.pi.flavor` is a
+  legacy selector that only applies to `runtime: pi` agents.
 - **Versioned external skills.** Each capability maps to a skill in a
   standalone git repository, declared in `config/skills.yaml` and pinned by
   `config/skills.lock`. Every run restores the locked ref, so workflow output
@@ -154,13 +156,15 @@ by `config/skills.lock`.
 
 Two harness flavors run them:
 
-- **Pi CLI** (default): `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`,
+- **Pi CLI**: `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`,
   then `pi` to authenticate and `./scripts/check-pi.sh` to verify. Configure
-  provider/model/timeout under `workflows.pi` in `config/workflow.yaml`.
-- **velites** (rolling out): a single static Rust binary built from `velites/`
-  (`cargo build --release`), emitting the same event stream the host consumes.
-  Enable with `workflows.pi.flavor: velites`; rolling back to `pi` needs no
-  data migration. See
+  provider/model/timeout under `workflows.pi` in `config/workflow.yaml`. Pi is
+  an optional runtime; the production default is velites.
+- **velites** (production default): a single static Rust binary built from
+  `velites/` (`cargo build --release`), emitting the same event stream the host
+  consumes. Enable per agent by declaring `runtime: velites` in the agent
+  definition in `config/workflow.yaml`; `workflows.pi.flavor` remains only as a
+  rollback lever for `runtime: pi` agents (the video pipeline). See
   [docs/architecture/velites-harness.md](docs/architecture/velites-harness.md).
 
 Every node execution leaves a full trace under
