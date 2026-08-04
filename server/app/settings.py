@@ -73,6 +73,15 @@ def _path_parser(value: str) -> str:
     return os.path.expanduser(value)
 
 
+def _bool_parser(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"invalid boolean env value: {value!r}")
+
+
 # Reviewed mapping from environment variable to config path and parser.
 # Do not add arbitrary double-underscore mutation; every override is listed here.
 # ``database.url`` is deliberately absent: it is handled by
@@ -85,6 +94,10 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
     "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
     "AGENT_LEGION_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
+    "AGENT_LEGION_CUSTOM_NODES_ENABLED": (
+        ("workflows", "custom_nodes_enabled"),
+        _bool_parser,
+    ),
     "AGENT_LEGION_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
     "AGENT_LEGION_WORKER_REGISTER_TOKEN": (("agent_workers", "register_token"), _str_parser),
     "AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE": (

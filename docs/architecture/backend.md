@@ -203,7 +203,7 @@ server/app/
 | OpenClawSkillSafetyRepo | BaseModel | path: str | app/executors/runtime_config.py |
 | OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[OpenClawSkillSafetyRepo] | app/executors/runtime_config.py |
 | OpenClawRuntimeConfig | BaseModel | command_template: tuple[str, ...], cwd: str, timeout_seconds: int, cancellati... | app/executors/runtime_config.py |
-| WorkflowsRuntimeConfig | BaseModel | enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
+| WorkflowsRuntimeConfig | BaseModel | enabled: bool, custom_nodes_enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
 | AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw', 'velites'], capability: str, skil... | app/routes/agent_catalog_contracts.py |

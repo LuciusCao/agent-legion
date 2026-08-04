@@ -37,7 +37,7 @@ def test_schema_v25_recorded() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "node_cms_config"
+    assert row["name"] == "custom_node_codes"
 
 
 def test_migration_rebinds_first_nodes_and_copies_concurrency() -> None:
