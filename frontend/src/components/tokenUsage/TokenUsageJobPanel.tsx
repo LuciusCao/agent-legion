@@ -11,7 +11,7 @@ function fmt(value: number | null | undefined) {
 }
 
 function money(currency: string, value: number | null | undefined) {
-  if (typeof value !== 'number') return '未配置价格'
+  if (typeof value !== 'number') return '-'
   const symbol = currency === 'CNY' ? '¥' : currency
   return `${symbol} ${value.toFixed(4)}`
 }
@@ -49,9 +49,7 @@ export function TokenUsageJobPanel({ jobId }: Props) {
           <div className={styles.metricValue}>
             {money(data.currency, total.cost?.total)}
           </div>
-          <div className={styles.metricMeta}>
-            {total.pricing_missing ? '缺少定价配置' : '按配置单价计算'}
-          </div>
+          <div className={styles.metricMeta}>按配置单价计算</div>
         </div>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>覆盖率</div>
