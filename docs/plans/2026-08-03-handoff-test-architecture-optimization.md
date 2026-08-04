@@ -1,5 +1,12 @@
 # 测试架构优化——交接文档（2026-08-03 第三版，终态）
 
+> 2026-08-04 补充：develop 27 个提交已合入（merge `ef61d81d`，9 个冲突文件解决，
+> 语义见合并提交 message）；codex review 两条 P2 已修（`0bcaf9c1`：ci-extended 补
+> `--reruns 1`、轮询名单加 `backend-unit-coverage`）；契约测试 harness 环境泄漏修复
+> （`931edc94`）。合并后 CI 复验全绿（run
+> [30872022287](https://github.com/LuciusCao/agent-legion/actions/runs/30872022287)，
+> PR 关键路径 5.7 分钟）。PR #25 处于可合并状态。
+
 > 第一、二版见同文件 git 历史。本文档是自包含的交接入口；权威执行记录以
 > `docs/plans/2026-08-01-test-architecture-optimization.md` 为准（含 Phase 0–5 全部
 > 执行记录、CI run 链接、flaky registry）。
