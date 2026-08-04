@@ -75,7 +75,9 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(self.job_db).ensure_active_revision(workspace["id"], definition)
+        WorkflowRevisionService(
+            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+        ).ensure_active_revision(workspace["id"], definition)
         return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:
@@ -171,7 +173,9 @@ class WorkspaceConfigurationService:
                 self.job_db.set_workspace_agent_capacity(workspace_id, agent_capacity)
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(self.job_db).ensure_active_revision(workspace_id, workflow)
+        WorkflowRevisionService(
+            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+        ).ensure_active_revision(workspace_id, workflow)
         executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,
@@ -204,9 +208,9 @@ class WorkspaceConfigurationService:
                 default_workflow_key=patch.get("workflowKey"),
             )
             if patch.get("workflowKey") is not None:
-                WorkflowRevisionService(self.job_db).ensure_active_revision(
-                    workspace_id, definition
-                )
+                WorkflowRevisionService(
+                    self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+                ).ensure_active_revision(workspace_id, definition)
         elif section == "nodes":
             workspace = update_workspace_node_config(
                 self.job_db,

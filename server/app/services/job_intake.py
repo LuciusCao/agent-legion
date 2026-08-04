@@ -18,6 +18,7 @@ from server.app.services.job_intake_workspace import (
     get_workspace,
     singular_field_name,
 )
+from server.app.services.node_codes import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
@@ -88,6 +89,17 @@ class JobIntakeService:
         except ValueError as exc:
             raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc
 
+        # Freeze the published custom code versions into the batch snapshot so
+        # running jobs are immune to later edits (EXEC-CODE-002); empty when
+        # every node is builtin or the feature gate is off.
+        node_code_versions = freeze_node_code_versions(
+            self.job_db.path,
+            self.settings.executor_runtime.workflows.custom_nodes_enabled,
+            workspace_id,
+            workflow_key,
+            [node.key for node in definition.nodes.values()],
+        )
+
         if payload.get("async_processing"):
             return enqueue_intake_batch(
                 self.job_db,
@@ -98,6 +110,7 @@ class JobIntakeService:
                 mode,
                 active_revision,
                 node_config,
+                node_code_versions,
             )
 
         # Filter candidates that already exist in the workspace so duplicates are
@@ -143,6 +156,7 @@ class JobIntakeService:
         source_payload["question_ids"] = resolved_ids
         source_payload["knowledge_codes"] = knowledge_codes
         source_payload["node_config"] = node_config
+        source_payload["node_code_versions"] = node_code_versions
         source_payload["intake_mode"] = {
             "key": mode.key,
             "label": mode.label,

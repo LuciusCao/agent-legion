@@ -14,7 +14,9 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from server.app.executors.config import CodeExecutorConfig
 from server.app.executors.scheduling.capacity import CapacitySnapshot
+from server.app.services.node_codes import resolve_dispatch_node_code
 from server.app.services.node_config import (
     dispatch_effective_config,
     executor_definition_capability_schema,
@@ -151,6 +153,7 @@ def try_claim_and_submit(
         return False
 
     try:
+        batch_payload = cached_batch_payload(worker, job)
         node_config = dispatch_effective_config(
             executor_definition_capability_schema(
                 worker.settings.executor_definitions, executor_id, node.capability
@@ -158,13 +161,28 @@ def try_claim_and_submit(
             node,
             workflow_key,
             workspace,
-            cached_batch_payload(worker, job),
+            batch_payload,
         )
         # Resolve vault secret_refs in memory only; frozen payloads keep refs (VAULT-SECRET-001).
         vault = VaultService(worker.job_db.path, worker.settings.config)
         node_config = vault.resolve_secret_refs(node_config, workspace_id)
     except (ValueError, VaultError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+
+    # Custom node code (EXEC-CODE-002): only code-kind executors can carry
+    # custom code, so other kinds skip the DB read entirely. Frozen job
+    # version wins over the current published version; None keeps builtin.
+    node_code = None
+    if isinstance(worker.settings.executor_definitions.get(executor_id), CodeExecutorConfig):
+        frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
+        node_code = resolve_dispatch_node_code(
+            worker.job_db.path,
+            worker.settings.executor_runtime.workflows.custom_nodes_enabled,
+            workspace_id,
+            workflow_key,
+            node_key,
+            frozen_pins.get(node_key),
+        )
 
     claimed = claim_executor_node(
         worker,
@@ -181,6 +199,7 @@ def try_claim_and_submit(
         allowed_node_keys,
         snapshot,
         node_config,
+        node_code,
     )
     if claimed:
         worker._pass_claim_counts[executor_id] = worker._pass_claim_counts.get(executor_id, 0) + 1

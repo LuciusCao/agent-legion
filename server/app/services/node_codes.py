@@ -79,6 +79,18 @@ class NodeCodeService:
             ).fetchone()
         return dict(row) if row else None
 
+    def get_code_by_version(
+        self, workspace_id: str, workflow_key: str, node_key: str, version: int
+    ) -> dict[str, Any] | None:
+        """Return any version row (including archived) — frozen jobs read these."""
+        self._require_enabled()
+        with read_connection(self._dsn) as conn:
+            row = conn.execute(
+                f"select {_COLUMNS} from workflow_node_codes where {_NODE_FILTER} and version=%s",
+                (workspace_id, workflow_key, node_key, version),
+            ).fetchone()
+        return dict(row) if row else None
+
     def list_versions(
         self, workspace_id: str, workflow_key: str, node_key: str
     ) -> list[dict[str, Any]]:
@@ -237,3 +249,55 @@ def _get_by_id(conn: Any, row_id: str) -> dict[str, Any]:
     if row is None:  # pragma: no cover - defensive; the row was just written
         raise NotFoundError(f"node code row vanished: {row_id}")
     return dict(row)
+
+
+def freeze_node_code_versions(
+    database_dsn: DatabaseDsn,
+    custom_nodes_enabled: bool,
+    workspace_id: str,
+    workflow_key: str,
+    node_keys: list[str],
+) -> dict[str, dict[str, Any]]:
+    """Intake freeze: published ``{node_key: {version, code_hash}}`` pins.
+
+    Only nodes with a published custom version appear; the gate short-circuits
+    to an empty mapping so intake never touches the table when the feature is
+    off.
+    """
+    if not custom_nodes_enabled:
+        return {}
+    service = NodeCodeService(database_dsn)
+    pins: dict[str, dict[str, Any]] = {}
+    for node_key in node_keys:
+        row = service.get_effective_code(workspace_id, workflow_key, node_key)
+        if row is not None:
+            pins[node_key] = {"version": row["version"], "code_hash": row["code_hash"]}
+    return pins
+
+
+def resolve_dispatch_node_code(
+    database_dsn: DatabaseDsn,
+    custom_nodes_enabled: bool,
+    workspace_id: str,
+    workflow_key: str,
+    node_key: str,
+    frozen: dict[str, Any] | None,
+) -> str | None:
+    """Dispatch-time code text: frozen job version → published → None (builtin).
+
+    One DB read per dispatch, same cadence as the vault secret resolution it
+    runs next to; the 30s route cache in ``routing.py`` only covers executor
+    bindings and is deliberately not consulted here. The gate short-circuits
+    to builtin instead of raising so a disabled feature never breaks dispatch.
+    """
+    if not custom_nodes_enabled:
+        return None
+    service = NodeCodeService(database_dsn)
+    if frozen is not None:
+        row = service.get_code_by_version(
+            workspace_id, workflow_key, node_key, int(frozen["version"])
+        )
+        if row is not None:
+            return str(row["code"])
+    row = service.get_effective_code(workspace_id, workflow_key, node_key)
+    return str(row["code"]) if row is not None else None

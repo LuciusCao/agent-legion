@@ -36,6 +36,7 @@ def claim_executor_node(
     allowed_node_keys: frozenset[str] | None,
     snapshot: CapacitySnapshot,
     node_config: dict[str, Any],
+    node_code: str | None = None,
 ) -> bool:
     """Buffer an executor claim for the pass-end batch lease; False on capacity loss."""
     workspace_id = workspace["id"]
@@ -74,6 +75,7 @@ def claim_executor_node(
             log_path=log_path,
             inputs=inputs,
             node_config=node_config,
+            node_code=node_code,
         )
     )
     snapshot.record_claim(executor_id, workspace_id)

@@ -197,6 +197,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_workspace_executor_queries.py",
         "tests/workers/test_scheduler_wakeup.py",
         "tests/workers/test_workflow_worker_capacity.py",
+        "tests/workers/test_workflow_worker_node_code.py",
         "tests/workers/test_workflow_worker_node_config.py",
         "tests/workers/test_workflow_worker_ready_queue.py",
         "tests/workers/test_workflow_worker_thread_local.py",

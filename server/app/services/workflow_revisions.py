@@ -4,6 +4,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from server.app.services.node_codes import freeze_node_code_versions
 from server.app.services.workflow_revision_format import (
     definition_hash,
     serialize_definition,
@@ -18,11 +19,31 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowRevisionService:
-    def __init__(self, job_db: JobQueries) -> None:
+    def __init__(self, job_db: JobQueries, custom_nodes_enabled: bool = True) -> None:
         self.job_db = job_db
+        self.custom_nodes_enabled = custom_nodes_enabled
 
     def publish_workspace_revision(self, workspace_id: str, definition: WorkflowDefinition) -> dict:
         definition_json = serialize_definition(definition)
+        # node_code_pins snapshot the published custom code versions at publish
+        # time (EXEC-CODE-002, design §4): they are publish-moment state, not
+        # part of the workflow definition, so they ride alongside the
+        # definition inside the stored definition_json but stay out of
+        # definition_hash (computed from the pure definition above).
+        pins = freeze_node_code_versions(
+            self.job_db.path,
+            self.custom_nodes_enabled,
+            workspace_id,
+            definition.key,
+            [node.key for node in definition.nodes.values()],
+        )
+        stored_json = definition_json
+        if pins:
+            payload = json.loads(definition_json)
+            payload["node_code_pins"] = pins
+            stored_json = json.dumps(
+                payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+            )
         version = self.job_db.next_workflow_revision_version(workspace_id, definition.key)
         revision_id = f"{workspace_id}:{definition.key}:v{version}"
         agent_routes = self._agent_routes(definition)
@@ -32,7 +53,7 @@ class WorkflowRevisionService:
             workflow_key=definition.key,
             version=version,
             status="active",
-            definition_json=definition_json,
+            definition_json=stored_json,
             definition_hash=definition_hash(definition_json),
             agent_routes=agent_routes,
         )
