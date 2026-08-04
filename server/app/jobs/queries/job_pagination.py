@@ -33,5 +33,9 @@ def list_jobs_paginated(
     if len(jobs) <= limit:
         return jobs, None
     last = jobs[limit - 1]
-    next_cursor = f"{last.get('created_at', '')}|{last['id']}"
+    # Strip the UTC offset: the cursor travels in URL query strings where
+    # "+" decodes to a space, and the naive value parses back under the
+    # connection's UTC session timezone.
+    created_at = str(last.get("created_at", "")).removesuffix("+00:00")
+    next_cursor = f"{created_at}|{last['id']}"
     return jobs[:limit], next_cursor

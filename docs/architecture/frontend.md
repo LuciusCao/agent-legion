@@ -21,11 +21,11 @@ frontend/src/
 ├── App.tsx                 # 应用壳（ThemeProvider、Query 层）
 ├── AppRoutes.tsx           # React Router v6 路由定义
 ├── api/                    # 按领域拆分的 API 层
-│   ├── index.ts            # barrel：统一 re-export 各领域模块
+│   ├── index.ts            # barrel：纯 re-export 各领域模块
 │   ├── core.ts             # 通用请求封装
-│   ├── jobApi.ts / jobBatchApi.ts / jobSnapshot.ts
-│   ├── videoApi.ts         # Job Detail 视频面板 API
-│   ├── workflows.ts / workflow_revisions.ts / workflow_draft_compare.ts
+│   ├── workspaceApi.ts / jobsApi.ts / jobApi.ts / jobBatchApi.ts / jobSnapshot.ts
+│   ├── jobVideoApi.ts      # Job Detail 视频面板 API
+│   ├── workflows.ts / workflowRevisions.ts / workflowDraftCompare.ts
 │   └── ...                 # executorApi、packages、tokenUsage 等
 ├── generated/
 │   └── api.ts              # OpenAPI 生成的传输类型
@@ -40,15 +40,15 @@ frontend/src/
 ├── layouts/                # 布局组件
 │   ├── AppShell.tsx
 │   └── WorkspaceLayout.tsx
-├── components/             # 可复用 UI 组件
+├── components/             # 可复用 UI 组件（按领域子目录组织）
+│   ├── job/                # Job 列表/操作组件（JobList、JobActionBar、JobProgressPanel 等）
+│   ├── dag/                # DAG 图组件（DagGraph、DagNode、DagStepper 等）
+│   ├── artifact/           # 产物组件（ArtifactListDialog、ArtifactPopover、ArtifactPreviewDialog）
+│   ├── tokenUsage/         # Token 用量组件（TokenUsagePanel、TokenUsageDialog 等）
+│   ├── question/           # 审题内容组件（QuestionContentPanel、QuestionAnnotations 等）
+│   ├── JobRerunDialog/     # Job 重跑对话框（已有子目录）
+│   ├── settings/           # Settings 区块组件（已有子目录）
 │   ├── AddDialog.tsx
-│   ├── JobList.tsx
-│   ├── JobListItem.tsx
-│   ├── DagGraph.tsx
-│   ├── DagStepper.tsx
-│   ├── ArtifactListDialog.tsx    # 产物列表对话框
-│   ├── ArtifactPopover.tsx       # 产物快捷预览
-│   ├── ArtifactPreviewDialog.tsx # 产物预览对话框
 │   ├── VideoPlayer.tsx
 │   ├── VideoContentPanel.tsx     # Job Detail 视频内容面板
 │   ├── TimelineStrip.tsx         # 视频章节时间轴

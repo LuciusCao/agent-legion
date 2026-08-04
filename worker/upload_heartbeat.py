@@ -11,10 +11,10 @@ from __future__ import annotations
 import threading
 from typing import Any
 
-from worker.execution_lifecycle import heartbeat_loop
+from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
 
 
-def start_heartbeat(
+def start_upload_heartbeat(
     client: Any,
     execution_id: str,
     lease_id: str,
@@ -22,12 +22,12 @@ def start_heartbeat(
     interval: float,
 ) -> threading.Thread:
     """Start a daemon heartbeat thread for one execution's lease."""
-    thread = threading.Thread(
-        target=heartbeat_loop,
-        args=(client, execution_id, lease_id, stop, interval, threading.Event()),
-        kwargs={"proc_ref": {"proc": None}, "adopted": threading.Event()},
-        daemon=True,
+    # Upload-side beats outlive the agent process; the process-tracking
+    # HeartbeatConfig fields stay inert defaults here.
+    config = HeartbeatConfig(
+        client=client, execution_id=execution_id, lease_id=lease_id, stop=stop, interval=interval
     )
+    thread = threading.Thread(target=heartbeat_loop, args=(config,), daemon=True)
     thread.start()
     return thread
 

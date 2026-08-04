@@ -7,6 +7,7 @@ import threading
 from datetime import UTC, datetime
 
 from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
 from server.app.executors.leases import ExecutorLeaseRepository
 
 logger = logging.getLogger(__name__)
@@ -55,8 +56,11 @@ class SweeperThread:
                 logger.warning(
                     "failed Agent requests pinned to stale definitions: %s", ", ".join(stale)
                 )
+            unclaimable = fail_unclaimable_model_requests(self._broker)
+            if unclaimable:
+                logger.warning("failed unclaimable Agent requests: %s", ", ".join(unclaimable))
         except Exception:
-            logger.exception("Agent stale-definition sweep failed")
+            logger.exception("Agent stale-request sweep failed")
         try:
             reaped = self._broker.reap_terminal_bundles()
             if reaped:

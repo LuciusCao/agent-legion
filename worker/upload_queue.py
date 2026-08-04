@@ -31,15 +31,16 @@ from server.app.services.pi_event_compression import (
     compress_pi_events,
     scan_and_compress_pi_events,
 )
+from worker import upload_heartbeat
+from worker._retry import run_with_retry
 from worker.host_transfer import HostRequestError
-from worker.upload_heartbeat import quiesce_heartbeat, quiesce_task_heartbeat, start_heartbeat
 
 PENDING_FILENAME = "upload_pending.json"
 _PENDING_VERSION = 1
 
 _RETRY_BASE_SECONDS = 2.0
 _RETRY_CAP_SECONDS = 60.0
-_MAX_ERROR_MESSAGE_CHARS = 4000
+MAX_ERROR_MESSAGE_CHARS = 4000
 _HEARTBEAT_JOIN_SECONDS = 5.0
 
 
@@ -132,7 +133,8 @@ class UploadQueue:
         """
         marker = task.execution_dir / PENDING_FILENAME
         marker.write_text(json.dumps(task.to_json(), ensure_ascii=False), encoding="utf-8")
-        self._status.set_phase(task.execution_id, "queued_upload")
+        # upsert: 重启恢复的任务在 reporter 里尚无条目，积压期间也要以 queued_upload 可见。
+        self._status.upsert_phase(task.execution_id, "queued_upload", **task.status_fields)
         with self._lock:
             self._depth += 1
         self._pool.submit(self._run, task)
@@ -167,20 +169,20 @@ class UploadQueue:
     def _run(self, task: UploadTask) -> None:
         if task.heartbeat_thread is None:
             # Restored from disk: resume heartbeating so the lease survives.
-            task.heartbeat_thread = start_heartbeat(
+            # The status entry already exists — submit() upserted it at restore.
+            task.heartbeat_thread = upload_heartbeat.start_upload_heartbeat(
                 self._client,
                 task.execution_id,
                 task.lease_id,
                 task.heartbeat_stop,
                 self._heartbeat_interval,
             )
-            self._status.start(task.execution_id, **task.status_fields)
         try:
             self._deliver(task)
         except Exception as exc:
             print(f"upload task crashed for {task.execution_id}: {exc}", flush=True)
         finally:
-            quiesce_heartbeat(task.heartbeat_stop, task.heartbeat_thread, 2)
+            upload_heartbeat.quiesce_heartbeat(task.heartbeat_stop, task.heartbeat_thread, 2)
             self._status.finish(task.execution_id)
             with self._lock:
                 self._depth -= 1
@@ -241,7 +243,7 @@ class UploadQueue:
             metadata = {
                 "status": "failed",
                 "exit_code": 1,
-                "error_message": f"result preparation failed: {exc}"[:_MAX_ERROR_MESSAGE_CHARS],
+                "error_message": f"result preparation failed: {exc}"[:MAX_ERROR_MESSAGE_CHARS],
                 "command": list(task.command),
                 "output_artifacts": {},
             }
@@ -258,7 +260,7 @@ class UploadQueue:
                 metadata = {
                     "status": "failed",
                     "exit_code": 1,
-                    "error_message": str(exc)[:_MAX_ERROR_MESSAGE_CHARS],
+                    "error_message": str(exc)[:MAX_ERROR_MESSAGE_CHARS],
                     "command": list(task.command),
                     "output_artifacts": {},
                 }
@@ -271,7 +273,9 @@ class UploadQueue:
         # Quiesce the heartbeat before the final report: a beat racing the
         # commit loses the row lock and logs a spurious "lost ownership" 409.
         # Resume only while a transient report failure backs off.
-        quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
+        # Deliberately NOT run_with_retry: each backoff window must re-arm the
+        # lease heartbeat, which the shared plain-sleep loop cannot express.
+        upload_heartbeat.quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
         backoff = _RETRY_BASE_SECONDS
         while not self._stop.is_set():
             try:
@@ -285,7 +289,7 @@ class UploadQueue:
                 )
                 # An unbounded backoff chain can outlive the lease TTL.
                 task.heartbeat_stop = threading.Event()
-                task.heartbeat_thread = start_heartbeat(
+                task.heartbeat_thread = upload_heartbeat.start_upload_heartbeat(
                     self._client,
                     task.execution_id,
                     task.lease_id,
@@ -294,7 +298,7 @@ class UploadQueue:
                 )
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, _RETRY_CAP_SECONDS)
-                quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
+                upload_heartbeat.quiesce_task_heartbeat(task, _HEARTBEAT_JOIN_SECONDS)
                 continue
             if status_code == 204:
                 break
@@ -314,17 +318,15 @@ class UploadQueue:
         shutil.rmtree(task.execution_dir, ignore_errors=True)
 
     def _upload_with_retry(self, path: Path) -> str | None:
-        """Upload one artifact; None means "stopped, try again next startup".
-
-        HostRequestError (terminal 4xx) propagates to the caller."""
-        backoff = _RETRY_BASE_SECONDS
-        while not self._stop.is_set():
-            try:
-                return self._client.upload_artifact(path)
-            except HostRequestError:
-                raise
-            except RuntimeError as exc:
-                print(f"artifact upload retry for {path.name}: {exc}", flush=True)
-                self._stop.wait(backoff)
-                backoff = min(backoff * 2, _RETRY_CAP_SECONDS)
-        return None
+        """Upload one artifact; None = stopped (retry next startup); 4xx propagates."""
+        return run_with_retry(
+            lambda: self._client.upload_artifact(path),
+            retriable=(RuntimeError,),
+            terminal=(HostRequestError,),
+            base_seconds=_RETRY_BASE_SECONDS,
+            cap_seconds=_RETRY_CAP_SECONDS,
+            stop=self._stop,
+            on_retry=lambda exc, _backoff: print(
+                f"artifact upload retry for {path.name}: {exc}", flush=True
+            ),
+        )

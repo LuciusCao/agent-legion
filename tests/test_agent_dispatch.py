@@ -6,9 +6,9 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from server.app import agent_dispatch
+from server.app.agent_broker import dispatch as agent_dispatch
+from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.agent_catalog import AgentDefinition
-from server.app.agent_dispatch import AgentDispatchService
 from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
 

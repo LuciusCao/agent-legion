@@ -35,7 +35,7 @@ def retry_on_database_conflict(
     raise RuntimeError("database retry loop exhausted")
 
 
-def retried_on_database_conflict(fn: Callable[..., T]) -> Callable[..., T]:
+def with_database_conflict_retry(fn: Callable[..., T]) -> Callable[..., T]:
     @functools.wraps(fn)
     def wrapper(*args: object, **kwargs: object) -> T:
         return retry_on_database_conflict(lambda: fn(*args, **kwargs))

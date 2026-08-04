@@ -16,8 +16,12 @@ const { closeAddDialog, connectAgentsWs, disconnectAgentsWs } = vi.hoisted(
   })
 )
 
+vi.mock('./stores/agentsStore', () => ({
+  useAgentsStore: () => ({ connectAgentsWs }),
+}))
+
 vi.mock('./stores/uiStore', () => ({
-  useUiStore: () => ({ closeAddDialog, connectAgentsWs }),
+  useUiStore: () => ({ closeAddDialog }),
 }))
 
 vi.mock('./AppRoutes', () => ({

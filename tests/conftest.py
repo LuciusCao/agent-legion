@@ -54,6 +54,26 @@ def pytest_configure() -> None:
             os.environ[key] = ""
 
 
+# Smoke tier (GATE_TIER=smoke, used by pre-push): a small set of fast,
+# high-value tests that keeps the local push feedback loop around a minute
+# while the full quick suite stays the CI boundary. Membership is path-based:
+# every architecture governance test is smoke by default, plus one core
+# behavioral file per subsystem. Add new entries here when a new subsystem
+# gains tests; keep the tier under ~90s.
+_SMOKE_TEST_FILES = frozenset(
+    {
+        "tests/routes/test_auth_routes.py",
+        "tests/routes/jobs/test_job_lifecycle.py",
+        "tests/services/test_vault.py",
+        "tests/executors/test_shard_contract.py",
+        "tests/executors/test_executor_kinds.py",
+        "tests/executors/leases/test_claim_basics.py",
+        "tests/workflows/test_sharding.py",
+        "tests/db/test_retry.py",
+    }
+)
+
+
 # Files that connect to PostgreSQL directly instead of through a root fixture.
 # Keep this inventory explicit so new direct consumers are visible in review;
 # fixture-based consumers are classified by _POSTGRES_FIXTURES below.
@@ -168,6 +188,8 @@ def pytest_collection_modifyitems(config, items):
             rel = item.path.relative_to(root).as_posix()
         except ValueError:
             continue
+        if rel in _SMOKE_TEST_FILES or item.path.name.startswith("test_architecture_"):
+            item.add_marker(pytest.mark.smoke)
         if (
             rel in _POSTGRES_TEST_FILES
             or _POSTGRES_FIXTURES.intersection(item.fixturenames)
@@ -246,6 +268,11 @@ def _session_test_schema():
 
 @pytest.fixture(autouse=True)
 def _isolate_postgres_database(request):
+    if request.node.get_closest_marker("no_db") is not None:
+        # Tests marked no_db never touch the database (pure static governance
+        # checks, fully mocked script tests); skip TRUNCATE-based isolation.
+        yield
+        return
     if request.node.get_closest_marker("postgres") is None:
         yield
         return

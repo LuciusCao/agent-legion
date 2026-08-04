@@ -17,9 +17,9 @@ from typing import Any
 from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
-    _sync_job_status,
+    sync_job_status,
 )
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import ExecutionResult
 from server.app.workflows.sharding import (
     ShardStatus,
@@ -65,7 +65,7 @@ def finish_shard_execution(
             """,
             (aggregate, error_message, now_str, lease["job_id"], lease["node_key"]),
         )
-        _sync_job_status(conn, lease["job_id"])
+        sync_job_status(conn, lease["job_id"])
         if aggregate == "completed":
             _pause_job_on_target_completion(conn, lease["job_id"], lease["node_key"], now_str)
     return True
@@ -84,7 +84,7 @@ def complete_empty_shard_node(
     semantics. The status guard makes a concurrent completion/claim a no-op
     for the loser. Returns True when this call advanced the node.
     """
-    now_str = now_str or _database_timestamp(datetime.now(UTC))
+    now_str = now_str or database_timestamp(datetime.now(UTC))
     cursor = conn.execute(
         """
         update job_nodes
@@ -95,6 +95,6 @@ def complete_empty_shard_node(
     )
     if cursor.rowcount == 0:
         return False
-    _sync_job_status(conn, job_id)
+    sync_job_status(conn, job_id)
     _pause_job_on_target_completion(conn, job_id, node_key, now_str)
     return True

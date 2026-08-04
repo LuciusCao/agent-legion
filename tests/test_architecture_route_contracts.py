@@ -7,6 +7,8 @@ from scripts.architecture import route_contracts
 from scripts.check_architecture import check_repository
 from tests.architecture_budget_helpers import write_neutral_budget_governance
 
+pytestmark = pytest.mark.no_db
+
 
 def write_route(root: Path, annotation: str | None, *, response_model_none: bool = False) -> None:
     return_annotation = f" -> {annotation}" if annotation else ""

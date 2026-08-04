@@ -13,13 +13,13 @@ from typing import TYPE_CHECKING
 from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_claims import claim_lease
-from server.app.executors._lease_control import _sync_job_status
+from server.app.executors._lease_control import sync_job_status
 from server.app.executors._lease_lifecycle import (
     expire_stale_leases,
     finish_lease,
     heartbeat_lease,
 )
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
     ExecutionResult,
@@ -90,7 +90,7 @@ def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
             "select job_id from executor_leases where status='active' and expires_at<=?",
-            (_database_timestamp(now),),
+            (database_timestamp(now),),
         ).fetchall()
         affected_job_ids = list({str(row["job_id"]) for row in rows})
         expired = expire_stale_leases(conn, now)
@@ -102,7 +102,7 @@ def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
 
 def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
     """Reset jobs stuck in 'running' with no active lease back to 'queued'."""
-    now_str = _database_timestamp(now)
+    now_str = database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
             """
@@ -162,7 +162,7 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
         ).fetchone()
         if lease is not None:
             return False
-        _sync_job_status(conn, job_id)
+        sync_job_status(conn, job_id)
         return True
     # The reset above holds row locks on this job's running nodes until
     # commit, so no claim for those nodes can interleave with these follow-up
@@ -185,5 +185,5 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
         """,
         (now_str, job_id),
     )
-    _sync_job_status(conn, job_id)
+    sync_job_status(conn, job_id)
     return True

@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { NodeDetailsPanel } from './NodeDetailsPanel'
-import type { DagNodeData } from './DagNode'
+import type { DagNodeData } from './dag/DagNode'
 import type { components } from '../generated/api'
 
 const baseData: DagNodeData = {

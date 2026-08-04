@@ -1,4 +1,4 @@
-"""Tests for exemption age warnings in server.app.quality.exemption_age."""
+"""Tests for exemption age warnings in scripts.quality.exemption_age."""
 
 from __future__ import annotations
 
@@ -8,8 +8,10 @@ from pathlib import Path
 import pytest
 import yaml
 
-from server.app.quality.exemption_age import exemption_age_warnings
-from server.app.quality.exemptions import ArchitectureExemption, load_exemptions
+from scripts.quality.exemption_age import exemption_age_warnings
+from scripts.quality.exemptions import ArchitectureExemption, load_exemptions
+
+pytestmark = pytest.mark.no_db
 
 TODAY = date(2026, 7, 22)
 

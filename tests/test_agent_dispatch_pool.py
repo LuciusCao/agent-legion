@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from server.app.agent_dispatch_pool import AgentEnqueuePool
+from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 
 
 def test_submit_returns_false_when_the_pending_queue_is_full() -> None:
@@ -34,7 +34,7 @@ def test_run_logs_a_failure_and_continues_to_the_next_item(caplog) -> None:
     pool._queue.put_nowait(lambda: calls.append("recovered"))
     pool._queue.put_nowait(None)
 
-    with caplog.at_level(logging.ERROR, logger="server.app.agent_dispatch_pool"):
+    with caplog.at_level(logging.ERROR, logger="server.app.agent_broker.dispatch_pool"):
         pool._run()
 
     assert calls == ["recovered"]

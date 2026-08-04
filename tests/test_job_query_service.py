@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -663,9 +663,9 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
                 job["workflow_key"],
                 node_key,
                 run["id"],
-                _database_timestamp(now),
-                _database_timestamp(now),
-                _database_timestamp(now + timedelta(seconds=300)),
+                database_timestamp(now),
+                database_timestamp(now),
+                database_timestamp(now + timedelta(seconds=300)),
             ),
         )
 

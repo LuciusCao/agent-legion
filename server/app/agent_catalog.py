@@ -19,7 +19,7 @@ class AgentDefinition(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     capability: str = Field(min_length=1)
-    runtime: Literal["pi", "openclaw"]
+    runtime: Literal["pi", "openclaw", "velites"]
     skill: str = Field(min_length=1)
     tools: tuple[str, ...] = ("read", "write", "bash")
     requires_labels: dict[str, str] = Field(default_factory=dict)

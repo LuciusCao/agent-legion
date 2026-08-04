@@ -14,7 +14,7 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowIntake,

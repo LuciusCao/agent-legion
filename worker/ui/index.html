@@ -85,16 +85,23 @@
                 <div class="local-live">本机实时<span class="online-dot"></span></div>
               </div>
               <div class="status-grid">
+                <article class="status-item status-item-emphasis">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#share"></use></svg>
+                  <span>运行中容量</span>
+                  <strong id="capacity-state">—</strong>
+                  <span class="meter"><i id="capacity-meter"></i></span>
+                </article>
+                <article class="status-item status-item-emphasis">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#upload"></use></svg>
+                  <span>上传队列</span>
+                  <strong id="upload-state">—</strong>
+                  <small id="upload-queued">—</small>
+                  <span class="meter"><i id="upload-meter"></i></span>
+                </article>
                 <article class="status-item">
                   <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#download"></use></svg>
                   <span>任务领取</span>
                   <strong id="claim-state">已暂停</strong>
-                </article>
-                <article class="status-item">
-                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#share"></use></svg>
-                  <span>动态容量</span>
-                  <strong id="capacity-state">—</strong>
-                  <span class="meter"><i id="capacity-meter"></i></span>
                 </article>
                 <article class="status-item">
                   <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#language"></use></svg>
@@ -122,7 +129,7 @@
               </div>
               <div class="execution-table" role="table" aria-label="当前执行">
                 <div class="table-head" role="row">
-                  <span>执行</span><span>状态</span><span>已运行</span><span>阶段进度</span><span title="当前分组占用 / 本机最大并发">动态容量</span>
+                  <span>执行</span><span>状态</span><span>已运行</span><span>阶段进度</span><span title="本机运行中 / 最大并发">容量</span>
                 </div>
                 <div id="executions" class="execution-groups">
                   <div class="empty-state">空闲中，等待新的任务</div>
@@ -159,10 +166,12 @@
                     <label>Worker ID<input name="worker_id" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" title="以字母或数字开头，只能包含字母、数字、_、-，最长 64 字符" required /></label>
                     <label>显示名称<input name="name" /></label>
                     <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
+                    <label>上传并发<input name="upload_max_concurrency" type="number" min="1" max="1024" required /></label>
                     <fieldset>
                       <legend>运行时</legend>
                       <label class="check"><input name="runtimes" type="checkbox" value="pi" /> Pi</label>
                       <label class="check"><input name="runtimes" type="checkbox" value="openclaw" /> OpenClaw</label>
+                      <label class="check"><input name="runtimes" type="checkbox" value="velites" /> Velites</label>
                     </fieldset>
                   </div>
                 </div>

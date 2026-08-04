@@ -43,10 +43,11 @@ agent-legion/
 │       ├── video_capabilities/ # 视频能力合约与投影
 │       ├── skills/             # 外部 Pi skill 管理
 │       ├── agents.py           # Agent 发现与状态跟踪
-│       ├── events.py           # SSE 事件广播
-│       ├── workflow_worker_thread.py # DAG workflow worker 线程与 poll 循环
-│       ├── workflow_worker_ready.py  # 每 pass 一次的 ready 候选收集（批量状态查询）
-│       ├── workflow_worker_schedule.py # ready 候选的 lease 认领与提交
+│       ├── events/             # 事件子系统：sse.py SSE 广播、bus.py 进程内总线、
+│       │                       # buffer.py DB 持久化缓冲、aggregator.py 聚合器
+│       ├── workflow_worker/    # DAG workflow worker：thread.py 线程与 poll 循环、
+│       │                       # ready.py 每 pass 一次的 ready 候选收集、
+│       │                       # schedule.py ready 候选的 lease 认领与提交
 │       └── worker*.py          # Worker 控制与遗留 worker 文件
 ├── frontend/
 │   ├── package.json

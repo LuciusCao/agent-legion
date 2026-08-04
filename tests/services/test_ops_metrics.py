@@ -438,3 +438,95 @@ def test_sample_catch_up_caps_backfill_horizon() -> None:
     assert written == 10
     # Buckets older than the horizon stay empty: no fabricated history.
     assert _fetch_sample(_bucket_start(_NOW) + timedelta(minutes=1)) is None
+
+
+def _insert_node_run(
+    run_id: int,
+    status: str,
+    started_at: datetime,
+    finished_at: datetime | None,
+    *,
+    job_id: str = "job-1",
+) -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into node_runs(id, job_id, node_key, status, started_at, finished_at)"
+            " values (?, ?, 'generate', ?, ?, ?)",
+            (run_id, job_id, status, started_at, finished_at),
+        )
+
+
+def test_query_summary_aggregates_recent_hour_independent_of_window() -> None:
+    _seed_workspace_job()
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    # 近 1 小时内的两个分钟样本 + 一个超出窗口的旧样本（不计入 token 求和）。
+    _insert_sample(now - timedelta(minutes=3), online_workers=1, input_tokens=10, total_tokens=20)
+    _insert_sample(
+        now - timedelta(minutes=1),
+        online_workers=2,
+        active_executions=1,
+        input_tokens=30,
+        output_tokens=5,
+        cache_read_tokens=2,
+        total_tokens=60,
+    )
+    _insert_sample(now - timedelta(minutes=90), total_tokens=999)
+    # 完成的 runs：10s / 20s / 30s -> p50=20, p95=29；failed 不计入分位数。
+    for run_id, seconds in ((1, 10), (2, 20), (3, 30)):
+        _insert_node_run(
+            run_id,
+            "completed",
+            now - timedelta(minutes=30, seconds=seconds),
+            now - timedelta(minutes=30),
+        )
+    _insert_node_run(4, "failed", now - timedelta(seconds=700), now - timedelta(seconds=600))
+    # 超出 1 小时窗口的终态 run 与仍在运行的 run 都不计入。
+    _insert_node_run(5, "completed", now - timedelta(hours=3), now - timedelta(hours=2))
+    _insert_node_run(6, "running", now - timedelta(minutes=5), None)
+
+    summary = _service().query_summary()
+    assert summary["online_workers"] == 2
+    assert summary["active_executions"] == 1
+    tokens = summary["recent_hour_tokens"]
+    assert tokens["input_tokens"] == 40
+    assert tokens["output_tokens"] == 5
+    assert tokens["cache_read_tokens"] == 2
+    assert tokens["total_tokens"] == 80
+    runs = summary["recent_hour_runs"]
+    assert runs["completed"] == 3
+    assert runs["failed"] == 1
+    assert runs["duration_p50_seconds"] == 20.0
+    assert runs["duration_p95_seconds"] == 29.0
+
+
+def test_query_summary_empty_tables_return_zeroes_and_nulls() -> None:
+    summary = _service().query_summary()
+    assert summary["online_workers"] is None
+    assert summary["active_executions"] is None
+    assert summary["recent_hour_tokens"] == {
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "total_tokens": 0,
+    }
+    assert summary["recent_hour_runs"] == {
+        "completed": 0,
+        "failed": 0,
+        "duration_p50_seconds": None,
+        "duration_p95_seconds": None,
+    }
+
+
+def test_query_summary_scopes_tokens_and_gauges_by_worker() -> None:
+    _seed_workspace_job()
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    _insert_sample(now - timedelta(minutes=1), online_workers=2, total_tokens=100)
+    _insert_sample(now - timedelta(minutes=1), worker_id="w-1", online_workers=1, total_tokens=40)
+    _insert_node_run(1, "completed", now - timedelta(seconds=20), now - timedelta(seconds=10))
+
+    scoped = _service().query_summary(worker_id="w-1")
+    assert scoped["online_workers"] == 1
+    assert scoped["recent_hour_tokens"]["total_tokens"] == 40
+    # node_runs 无 worker 归属，runs 统计始终全局。
+    assert scoped["recent_hour_runs"]["completed"] == 1
+    assert _service().query_summary(worker_id="w-unknown")["online_workers"] is None

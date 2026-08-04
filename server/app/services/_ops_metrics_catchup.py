@@ -20,13 +20,13 @@ if TYPE_CHECKING:
     from server.app.services.ops_metrics import OpsMetricsService
 
 _MAX_BACKFILL_MINUTES = 10
-_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
 
 
 def _parse_bucket_start(value: Any) -> datetime:
-    if isinstance(value, datetime):
-        return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    return datetime.strptime(str(value), _TIMESTAMP_FORMAT).replace(tzinfo=UTC)
+    # Accept both the row factory's ISO-8601 UTC strings and legacy naive
+    # "%Y-%m-%d %H:%M:%S.%f" strings from TEXT columns.
+    parsed = value if isinstance(value, datetime) else datetime.fromisoformat(str(value))
+    return parsed if parsed.tzinfo is not None else parsed.replace(tzinfo=UTC)
 
 
 def sample_catch_up(service: OpsMetricsService, now: datetime | None = None) -> int:

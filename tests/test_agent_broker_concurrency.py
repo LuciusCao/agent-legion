@@ -9,10 +9,12 @@ re-checks, and stale-definition reaping.
 
 from __future__ import annotations
 
+import json
 import threading
 from datetime import UTC, datetime, timedelta
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
+from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
 from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
 from server.app.agent_workers import AgentWorkerRegistry
 from tests.postgres_support import TEST_DATABASE_URL
@@ -36,8 +38,9 @@ def _seed_request(
     workspace_id: str = "test-workspace",
     node_key: str = "generate",
     workspace_cap: int | None = 20,
+    runtime: str = "pi",
 ) -> str:
-    definition = _definition()
+    definition = _definition(runtime=runtime)
     sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
@@ -90,6 +93,25 @@ def _register(registry: AgentWorkerRegistry, worker_id: str, *, max_concurrency:
         name=worker_id,
         runtimes=["pi"],
         max_concurrency=max_concurrency,
+        labels={"arch": "arm64"},
+    )
+
+
+def _register_with_declarations(
+    registry: AgentWorkerRegistry,
+    worker_id: str,
+    *,
+    capabilities: list[str],
+    models: list[dict[str, str]],
+    runtimes: list[str] | None = None,
+) -> None:
+    registry.issue_token(
+        worker_id=worker_id,
+        name=worker_id,
+        runtimes=runtimes or ["pi"],
+        capabilities=capabilities,
+        models=models,
+        max_concurrency=10,
         labels={"arch": "arm64"},
     )
 
@@ -338,3 +360,258 @@ def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
     assert [
         (str(run["job_id"]), str(run["node_key"]), str(run["failure_detail"])) for run in runs
     ] == [("stale-def-job", "generate", "stale_definition")]
+
+
+def _request_state(job_db, execution_id: str) -> str:
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where execution_id=?",
+            (execution_id,),
+        ).fetchone()
+    return str(row["state"])
+
+
+def test_unclaimable_model_requests_are_failed_by_sweeper(job_db) -> None:
+    execution_id = _seed_request(job_db, job_id="unclaimable-job")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "other-model"}],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == [execution_id]
+
+    node = job_db.get_job_node("unclaimable-job", "generate")
+    assert node["status"] == "failed"
+    assert node["error_message"].startswith("No registered Agent Worker can claim")
+    assert "model gateway/test-model not declared by any Worker" in node["error_message"]
+    assert "node execution overrides" in node["error_message"]
+    assert node["failure_category"] == "technical"
+    assert node["failure_detail"] == "unclaimable_model"
+    assert job_db.get_job("unclaimable-job")["status"] == "failed"
+    assert _request_state(job_db, execution_id) == "done"
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select outcome_json from agent_execution_requests where execution_id=?",
+            (execution_id,),
+        ).fetchone()
+    outcome = json.loads(row["outcome_json"])
+    assert outcome["status"] == "failed"
+    assert outcome["exit_code"] == 1
+    assert outcome["error_message"] == node["error_message"]
+    runs = job_db.list_failed_node_runs("test-workspace", category="technical")
+    assert [
+        (str(run["job_id"]), str(run["node_key"]), str(run["failure_detail"])) for run in runs
+    ] == [("unclaimable-job", "generate", "unclaimable_model")]
+
+
+def test_unclaimable_sweeper_leaves_matching_worker_requests_queued(job_db) -> None:
+    execution_id = _seed_request(job_db, job_id="claimable-job")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == []
+
+    assert job_db.get_job_node("claimable-job", "generate")["status"] == "pending"
+    assert job_db.get_job("claimable-job")["status"] != "failed"
+    assert _request_state(job_db, execution_id) == "queued"
+
+
+def test_unclaimable_sweeper_fails_on_capability_mismatch(job_db) -> None:
+    execution_id = _seed_request(job_db, job_id="cap-mismatch-job")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["other-capability"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == [execution_id]
+
+    node = job_db.get_job_node("cap-mismatch-job", "generate")
+    assert node["status"] == "failed"
+    assert "capability 'generate' not declared by any Worker" in node["error_message"]
+    assert "model gateway/test-model not declared" not in node["error_message"]
+    assert node["failure_detail"] == "unclaimable_model"
+
+
+def test_unclaimable_sweeper_without_workers_is_a_noop(job_db) -> None:
+    """Zero registered Workers is a deployment gap, not a definition problem."""
+    execution_id = _seed_request(job_db, job_id="no-worker-job")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == []
+
+    assert job_db.get_job_node("no-worker-job", "generate")["status"] == "pending"
+    assert _request_state(job_db, execution_id) == "queued"
+
+
+def test_unclaimable_sweeper_revoked_worker_does_not_count(job_db) -> None:
+    execution_id = _seed_request(job_db, job_id="revoked-worker-job")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+    )
+    registry.revoke("worker-1")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    # Revoked Workers carry no declarations; with none left the deployment-gap
+    # guard applies just like the zero-Worker case.
+    assert fail_unclaimable_model_requests(broker) == []
+
+    assert _request_state(job_db, execution_id) == "queued"
+
+
+def test_unclaimable_sweeper_wildcard_worker_passes(job_db) -> None:
+    execution_id = _seed_request(job_db, job_id="wildcard-job")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register(registry, "worker-1")  # legacy ("*", "*") model / "*" capability
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == []
+
+    assert job_db.get_job_node("wildcard-job", "generate")["status"] == "pending"
+    assert _request_state(job_db, execution_id) == "queued"
+
+
+def test_unclaimable_sweeper_fails_on_runtime_mismatch(job_db) -> None:
+    """EXEC-CLAIM-RUNTIME-001: capability and model match, but no non-revoked
+    Worker declares the definition's runtime — the request fails with an
+    explicit runtime reason instead of rotting in queued."""
+    execution_id = _seed_request(job_db, job_id="runtime-mismatch-job", runtime="velites")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+        runtimes=["pi"],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == [execution_id]
+
+    node = job_db.get_job_node("runtime-mismatch-job", "generate")
+    assert node["status"] == "failed"
+    assert "runtime 'velites' not declared by any Worker" in node["error_message"]
+    assert "capability 'generate' not declared" not in node["error_message"]
+    assert "model gateway/test-model not declared" not in node["error_message"]
+    assert node["failure_category"] == "technical"
+    assert node["failure_detail"] == "unclaimable_model"
+    assert _request_state(job_db, execution_id) == "done"
+
+
+def test_unclaimable_sweeper_runtime_match_stays_queued(job_db) -> None:
+    execution_id = _seed_request(job_db, job_id="runtime-match-job", runtime="velites")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+        runtimes=["pi", "velites"],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == []
+
+    assert job_db.get_job_node("runtime-match-job", "generate")["status"] == "pending"
+    assert _request_state(job_db, execution_id) == "queued"
+
+
+def test_unclaimable_sweeper_fails_on_cross_worker_combination(job_db) -> None:
+    """EXEC-CLAIM-RUNTIME-001: runtime, capability and model are each declared
+    by some Worker but never together on one machine — claim.py judges per
+    Worker, so the request would rot in queued; the sweeper fails it with an
+    explicit combination reason instead of trusting the cross-Worker union."""
+    execution_id = _seed_request(job_db, job_id="combination-job", runtime="velites")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-velites-only",
+        capabilities=["review"],
+        models=[{"provider": "gateway", "model": "other-model"}],
+        runtimes=["velites"],
+    )
+    _register_with_declarations(
+        registry,
+        "worker-pi-generate",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+        runtimes=["pi"],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == [execution_id]
+
+    node = job_db.get_job_node("combination-job", "generate")
+    assert node["status"] == "failed"
+    assert (
+        "no single Worker declares runtime, capability and model together" in node["error_message"]
+    )
+    assert "not declared by any Worker" not in node["error_message"]
+    assert _request_state(job_db, execution_id) == "done"
+
+
+def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> None:
+    """The pinned revision's node execution overrides win over manifest pi."""
+    execution_id = _seed_request(job_db, job_id="revision-job")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workflow_revisions("
+            " id, workspace_id, workflow_key, version, status, definition_json, definition_hash)"
+            " values ('rev-1', 'test-workspace', 'questions', 1, 'active', ?, 'hash-1')",
+            (
+                json.dumps(
+                    {
+                        "nodes": {
+                            "generate": {
+                                "execution": {"provider": "gateway", "model": "test-model"}
+                            }
+                        }
+                    }
+                ),
+            ),
+        )
+        conn.execute("update jobs set workflow_revision_id='rev-1' where id='revision-job'")
+        # The manifest only carries an unclaimable placeholder model.
+        conn.execute(
+            "update agent_execution_requests set manifest_json=? where execution_id=?",
+            (
+                json.dumps(
+                    {
+                        "job_id": "revision-job",
+                        "log_path": "logs/revision-job.log",
+                        "pi": {"provider": "gateway", "model": "your-model"},
+                    }
+                ),
+                execution_id,
+            ),
+        )
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_with_declarations(
+        registry,
+        "worker-1",
+        capabilities=["generate"],
+        models=[{"provider": "gateway", "model": "test-model"}],
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert fail_unclaimable_model_requests(broker) == []
+
+    assert job_db.get_job_node("revision-job", "generate")["status"] == "pending"
+    assert _request_state(job_db, execution_id) == "queued"

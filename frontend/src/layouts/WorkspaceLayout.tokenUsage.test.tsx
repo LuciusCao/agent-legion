@@ -3,7 +3,7 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceLayout from './WorkspaceLayout'
-import { useUiStore } from '../stores/uiStore'
+import { useAgentsStore } from '../stores/agentsStore'
 
 vi.mock('../stores/workspaceStore', () => ({
   useWorkspaceStore: () => ({
@@ -44,7 +44,7 @@ vi.mock('../components/AgentStatusIndicator', () => ({
 
 describe('WorkspaceLayout token usage navigation', () => {
   beforeEach(() => {
-    useUiStore.setState({
+    useAgentsStore.setState({
       fetchWorkerStatus: vi.fn().mockResolvedValue(undefined),
     })
   })

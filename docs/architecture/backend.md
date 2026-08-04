@@ -67,9 +67,8 @@ server/app/
 ├── video_capabilities/     # 视频能力合约与投影
 ├── executors/              # Executor 配置、Runtime、租赁调度
 ├── agents.py               # Agent 发现与状态跟踪
-├── workflow_worker_thread.py # DAG workflow worker 线程
-├── workflow_worker_ready.py  # 每 pass 一次的 ready 候选收集（批量状态查询）
-└── workflow_worker_schedule.py # ready 候选的 lease 认领与提交
+├── workflow_worker/      # DAG workflow worker：thread.py 线程、ready.py 每 pass
+│                         # 一次的 ready 候选收集、schedule.py lease 认领与提交
 ```
 
 ## Data Flow
@@ -192,7 +191,7 @@ server/app/
 
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
-| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw'], skill: str, tools: tuple... | app/agent_catalog.py |
+| AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/agent_stock.py |
 | LocalCapabilityConfig | BaseModel | handler: str, timeout_seconds: float | None, isolation: Literal['process', 't... | app/executors/config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
@@ -207,7 +206,7 @@ server/app/
 | WorkflowsRuntimeConfig | BaseModel | enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
 | AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
-| AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw'], capability: str, skill: str, too... | app/routes/agent_catalog_contracts.py |
+| AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw', 'velites'], capability: str, skil... | app/routes/agent_catalog_contracts.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, allowed_workspaces: list[str] | app/routes/agent_workers_contracts.py |
 | CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
@@ -235,7 +234,7 @@ server/app/
 | MemberResponse | BaseModel | id: str, username: str, display_name: str, user_role: Literal['admin', 'membe... | app/routes/auth_contracts.py |
 | MembersResponse | BaseModel | members: list[MemberResponse] | app/routes/auth_contracts.py |
 | MemberPutRequest | BaseModel | user_id: str, role: Literal['editor', 'viewer'] | app/routes/auth_contracts.py |
-| HealthResponse | BaseModel | ok: bool | app/routes/common.py |
+| HealthResponse | BaseModel | ok: bool, workers: dict[str, str] | None | app/routes/common.py |
 | ExecutorCapabilityResponse | BaseModel | name: str, handler: str | None, skill: str | None, tools: list[str], provider... | app/routes/executor_catalog_contracts.py |
 | ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['local', 'pi', 'openclaw'], global_capacity: int, capa... | app/routes/executor_catalog_contracts.py |
 | ExecutorCatalogResponse | BaseModel | executors: list[ExecutorDefinitionResponse], agents: list[AgentDefinitionResp... | app/routes/executor_catalog_contracts.py |
@@ -251,8 +250,6 @@ server/app/
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
-| JobRerunByFailureRequest | BaseModel | category: Literal['technical', 'business', 'unknown'], strategy: Literal['aut... | app/routes/failed_node_run_contracts.py |
-| JobRerunByFailureResponse | BaseModel | results: list[JobRerunByFailureResultResponse] | app/routes/failed_node_run_contracts.py |
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
@@ -281,6 +278,8 @@ server/app/
 | BatchJobMutationResponse | BaseModel | results: list[JobMutationResultResponse] | app/routes/job_operation_contracts.py |
 | RunToRequest | BaseModel | target_node_key: str, start_node_key: str | None | app/routes/job_operation_contracts.py |
 | ContinueJobRequest | BaseModel | — | app/routes/job_operation_contracts.py |
+| JobRerunByFailureRequest | BaseModel | category: Literal['technical', 'business', 'unknown'], strategy: Literal['aut... | app/routes/job_rerun_by_failure_contracts.py |
+| JobRerunByFailureResponse | BaseModel | results: list[JobRerunByFailureResultResponse] | app/routes/job_rerun_by_failure_contracts.py |
 | StressEventRecord | BaseModel | job_id: str, kind: str | app/routes/job_stress_events.py |
 | StressEventBatchRequest | BaseModel | events: list[StressEventRecord] | app/routes/job_stress_events.py |
 | StressEventBatchResponse | BaseModel | recorded: int, recorded_at: float | app/routes/job_stress_events.py |
@@ -294,7 +293,10 @@ server/app/
 | JobLogResponse | BaseModel | run_id: int, log: str, truncated: bool, structured: list[LogEventResponse] | ... | app/routes/job_view_contracts.py |
 | JobDetailResponse | BaseModel | job: JobSummaryResponse, nodes: list[JobNodeResponse], runs: list[NodeRunResp... | app/routes/job_view_contracts.py |
 | MetricBucket | BaseModel | bucket_start: str, online_workers: int, online_workers_max: int, active_execu... | app/routes/metrics_contracts.py |
-| OpsMetricsResponse | BaseModel | granularity: Literal['6h', '24h', '30d'], buckets: list[MetricBucket] | app/routes/metrics_contracts.py |
+| OpsMetricsResponse | BaseModel | granularity: Literal['6h', '24h', '30d'], buckets: list[MetricBucket], summar... | app/routes/metrics_contracts.py |
+| RecentHourTokenSummary | BaseModel | input_tokens: int, output_tokens: int, cache_read_tokens: int, total_tokens: ... | app/routes/metrics_summary_contracts.py |
+| RecentHourRunSummary | BaseModel | completed: int, failed: int, duration_p50_seconds: float | None, duration_p95... | app/routes/metrics_summary_contracts.py |
+| OpsMetricsSummary | BaseModel | online_workers: int | None, active_executions: int | None, recent_hour_tokens... | app/routes/metrics_summary_contracts.py |
 | WorkspacePackageResultResponse | BaseModel | job_id: str, status: Literal['succeeded', 'failed'], reason_code: str | None,... | app/routes/package_contracts.py |
 | WorkspacePackageResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |
 | WorkspacePackageStatusResetResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/package_contracts.py |
@@ -355,6 +357,7 @@ server/app/
 | WorkspaceSecretDeleteResponse | BaseModel | deleted: str | app/routes/workspace_secrets.py |
 | JobDeleteResult | TypedDict | job_id: str, operation: str, status: str, reason_code: str | None, message: s... | app/services/job_deletion.py |
 | LogEntry | TypedDict | type: str, title: str, detail: str, truncated: bool | app/services/job_log_renderer.py |
+| JobOperationResult | TypedDict | job_id: str, operation: str, status: str, node_key: str | None, reason_code: ... | app/services/job_operation_error.py |
 | CostBreakdown | BaseModel | currency: str, input: float, output: float, cache_read: float, total: float, ... | app/services/token_usage_contracts.py |
 | JobPackageItemResult | TypedDict | job_id: str, status: str, reason_code: str | None, message: str | None | app/services/workspace_package_contracts.py |
 | JobPackageResult | TypedDict | results: list[JobPackageItemResult], succeeded_count: int, failed_count: int,... | app/services/workspace_package_contracts.py |
@@ -436,6 +439,7 @@ Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py
 - `JobQueries.connect()` 与 `WorkspaceQueries.connect()` 是上下文管理器，确保 `conn.close()`。
 - `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
+- SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。
 
 ## New Subsystems
 
@@ -466,7 +470,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 ### Quality Subsystem
 
-`server/app/quality/` 在运行时检查架构不变量与豁免。
+`scripts/quality/` 提供架构不变量与豁免注册表的加载与校验（治理工具，不在 server 运行时路径上）。
 
 - `invariants.py`: 读取 `config/architecture/architecture-invariants.yaml` 并校验。
 - `exemptions.py`: 读取 `config/architecture/architecture-exemptions.yaml` 并校验。
