@@ -27,19 +27,19 @@ def migrate_code_executor_bindings(conn: Any) -> None:
         workspace_id = row["id"]
         local = conn.execute(
             "select concurrency_limit from workspace_executor_allocations"
-            " where workspace_id=? and executor_id='local-default'",
+            " where workspace_id=%s and executor_id='local-default'",
             (workspace_id,),
         ).fetchone()
         concurrency = int(local["concurrency_limit"]) if local else 1
         conn.execute(
             "insert into workspace_executor_allocations"
-            "(workspace_id, executor_id, concurrency_limit) values (?, ?, ?)"
+            "(workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)"
             " on conflict(workspace_id, executor_id) do nothing",
             (workspace_id, _CODE_EXECUTOR_ID, concurrency),
         )
         for workflow_key, node_key in _CODE_NODE_BINDINGS:
             conn.execute(
-                "update workspace_node_bindings set executor_id=?"
-                " where workspace_id=? and workflow_key=? and node_key=?",
+                "update workspace_node_bindings set executor_id=%s"
+                " where workspace_id=%s and workflow_key=%s and node_key=%s",
                 (_CODE_EXECUTOR_ID, workspace_id, workflow_key, node_key),
             )

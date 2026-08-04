@@ -20,10 +20,10 @@ def migrate_local_executor_removal(conn: Any) -> None:
     update and delete converge on replay.
     """
     conn.execute(
-        "update workspace_node_bindings set executor_id=? where executor_id=?",
+        "update workspace_node_bindings set executor_id=%s where executor_id=%s",
         (_CODE_EXECUTOR_ID, _LOCAL_EXECUTOR_ID),
     )
     conn.execute(
-        "delete from workspace_executor_allocations where executor_id=?",
+        "delete from workspace_executor_allocations where executor_id=%s",
         (_LOCAL_EXECUTOR_ID,),
     )
