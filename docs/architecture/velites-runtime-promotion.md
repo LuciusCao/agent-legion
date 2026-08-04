@@ -1,6 +1,6 @@
 # velites 升格为一级 Runtime 实施计划
 
-状态：**已落地**（Phase 1：PR #20；Phase 2：PR #21 + 审题链路迁移 2026-08-03；金丝雀关闭 `14ec130f` 2026-08-04；Phase 3 阶段 B 文档收口随本状态更新提交）。阶段 C（pi 退役）另立项未排期。
+状态：**已落地**（Phase 1：PR #20；Phase 2：PR #21 + 审题链路迁移 2026-08-03；金丝雀关闭 `14ec130f` 2026-08-04；Phase 3 阶段 B 文档收口随本状态更新提交）。**阶段 C 已取消**：2026-08-04 用户决策 pi 作为可选 runtime 长期保留（不退役），flavor 相应长期保留。
 范围：`server/app/agent_broker/`、`server/app/agent_catalog.py`、`server/app/routes/`、`worker/`、`config/`、`frontend/src/generated/`
 关联文档：[velites-harness.md](velites-harness.md)（harness 设计）、[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)（证据矩阵）、`config/architecture/architecture-invariants.yaml`（invariant registry）
 
@@ -131,11 +131,11 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 - Worker 舰队需先于定义迁移完成 velites 声明（§4.6），否则 sweeper 会把新请求判 unclaimable 失败——**顺序：Worker 声明先行，定义迁移随后。**
 - 灰度顺序建议：先迁低风险小流量 agent（如 `video-subtitle-review-v1`），观察 ≥ 3 天；再迁 question 链路主力（`question-key-info-v1` 等）；最后全量。每步是一次单字段 yaml 改动 + 重启，独立可回退。
 
-### 4.5 flavor 退役三阶段
+### 4.5 flavor 收窄与 pi 定位
 
 - **阶段 A（过渡，本计划 Phase 1–2）**：flavor 仍是 runtime=pi agent 的全局实现开关；runtime=velites agent 的 manifest flavor 被 dispatch 钉死。两者并存。
 - **阶段 B（已落地，2026-08-04）**：flavor 正式收窄为"runtime=pi agent 的实现选择层"，AGENTS.md §6 与 velites-harness.md §9 已改写。注意与原文假设的偏差：video_knowledge 4 个 agent 保持 `runtime: pi`（该链路暂无新内容产出，用户决策不迁），故 flavor 的实际消费者**仅剩这 4 个 video agent**而非"无消费者"——在它们迁出或下线前，flavor 仍是活跃实现路径，不能删除；新增 agent 一律直接声明 runtime。
-- **阶段 C（pi 退役，另立项）**：删除 `PiRuntimeConfig.flavor`（runtime_config.py:19）、`PiConfig.flavor`（pi_config.py:14）、`build_command_for_flavor` 分发层（velites_command.py:38-64）、pi argv 构建 `build_command`（pi_protocol.py:73-105），manifest `"pi"` 块重命名为 runtime 中性名（command_spec `version` 升 2，Worker 占位符替换兼容处理）。触发条件：pi 二进制生产零调用 ≥ 一个季度。
+- **~~阶段 C（pi 退役）~~ 已取消（2026-08-04 用户决策）**：pi 作为可选 runtime **长期保留**（velites 为生产主力，pi 为备选实现与对照基线），flavor 相应长期保留，不做删除规划。原文的阶段 C 删除清单（`PiRuntimeConfig.flavor`、`build_command_for_flavor` 分发层、pi argv 构建、manifest `"pi"` 块改名）仅作存档；若未来出于卫生目的重做其中个别项（如 manifest 块改名 + command_spec version 升级），另行立项评估，与退役无关。
 
 ### 4.6 Worker 侧
 

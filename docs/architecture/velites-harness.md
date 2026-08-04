@@ -313,12 +313,12 @@ runtime，由 `AgentDefinition.runtime` 声明（`config/workflow.yaml` `agents:
 不能删除或忽略**；配置与校验同时为既有配置文件保留启动兼容。新增 agent
 应直接声明 `runtime: velites`，不要再依赖 flavor 路径。
 
-**pi 退役（阶段 C，另立项，未排期）**：删除 `PiRuntimeConfig.flavor` /
-`PiConfig.flavor`、`build_command_for_flavor` 分发层、pi argv 构建
-（`pi_protocol.py build_command`），manifest `"pi"` 块重命名为 runtime 中性名
-（command_spec `version` 升 2，Worker 占位符替换兼容处理）。触发条件：pi
-二进制生产零调用 ≥ 一个季度（含 video agent 迁出 `runtime: pi` 或该链路
-下线）。
+**pi 的定位（2026-08-04 用户决策）**：pi **不退役**，作为可选 runtime 长期
+保留——velites 是生产主力，pi 作为备选实现与对照基线继续可用
+（`runtime: pi` + `flavor: pi` 即完整 pi 路径）。flavor 相应长期保留为
+`runtime: pi` agent 的实现选择层，不做删除规划。若未来仅出于卫生目的清理
+（如 manifest `"pi"` 块改为 runtime 中性名、command_spec version 升级），
+另行立项评估，与退役无关。
 
 **回退**：单 agent 异常把该定义迁回 `runtime: pi`（flavor 为 velites 时仍跑
 velites 二进制；要回 pi 二进制需同时落 `flavor: pi`）；系统性异常
