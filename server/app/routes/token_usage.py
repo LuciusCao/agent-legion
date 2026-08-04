@@ -14,11 +14,16 @@ from server.app.services.token_usage import (
     build_run_usage_response,
     build_workspace_usage_response,
 )
+from server.app.services.token_usage_pricing_store import TokenUsagePricingStore
 from server.app.settings import Settings
 
 
 def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
     router = APIRouter()
+    pricing_store = TokenUsagePricingStore(job_queries.job_db.path)
+
+    def effective_config() -> dict:
+        return pricing_store.effective_config(settings.config)
 
     @router.get("/jobs/{job_id}/runs/{run_id}/token-usage", response_model=TokenUsageRunResponse)
     def get_run_token_usage(job_id: str, run_id: int) -> TokenUsageRunResponse:
@@ -29,7 +34,7 @@ def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
         if run is None:
             raise HTTPException(status_code=404, detail="Run not found")
         return TokenUsageRunResponse(
-            **build_run_usage_response(job_queries.job_db, run, settings.config)
+            **build_run_usage_response(job_queries.job_db, run, effective_config())
         )
 
     @router.get("/jobs/{job_id}/token-usage", response_model=TokenUsageJobResponse)
@@ -38,7 +43,7 @@ def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
         return TokenUsageJobResponse(
-            **build_job_usage_response(job_queries.job_db, job_id, settings.config)
+            **build_job_usage_response(job_queries.job_db, job_id, effective_config())
         )
 
     @router.get(
@@ -63,7 +68,7 @@ def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
             **build_workspace_usage_response(
                 job_queries.job_db,
                 workspace_id,
-                settings.config,
+                effective_config(),
                 node_key=node_key,
                 job_id=job_id,
                 provider=provider,

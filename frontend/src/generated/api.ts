@@ -4,6 +4,24 @@
  */
 
 export interface paths {
+  '/api/admin/token-usage-pricing': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Token Usage Pricing */
+    get: operations['get_token_usage_pricing_api_admin_token_usage_pricing_get']
+    /** Put Token Usage Pricing */
+    put: operations['put_token_usage_pricing_api_admin_token_usage_pricing_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-executions/claim': {
     parameters: {
       query?: never
@@ -2603,6 +2621,33 @@ export interface components {
       runs_without_usage: number
       total: components['schemas']['TokenUsageTotal']
     }
+    /** TokenUsagePricingConfigResponse */
+    TokenUsagePricingConfigResponse: {
+      /** Currency */
+      currency: string
+      /** Pricing */
+      pricing: components['schemas']['TokenUsagePricingRate'][]
+    }
+    /** TokenUsagePricingConfigUpdate */
+    TokenUsagePricingConfigUpdate: {
+      /** Currency */
+      currency: string
+      /** Pricing */
+      pricing: components['schemas']['TokenUsagePricingRate'][]
+    }
+    /** TokenUsagePricingRate */
+    TokenUsagePricingRate: {
+      /** Cache Read Per 1M */
+      cache_read_per_1m: number
+      /** Input Per 1M */
+      input_per_1m: number
+      /** Model */
+      model: string
+      /** Output Per 1M */
+      output_per_1m: number
+      /** Provider */
+      provider: string
+    }
     /** TokenUsageRunItem */
     TokenUsageRunItem: {
       /** Node Key */
@@ -3560,6 +3605,59 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
+  get_token_usage_pricing_api_admin_token_usage_pricing_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TokenUsagePricingConfigResponse']
+        }
+      }
+    }
+  }
+  put_token_usage_pricing_api_admin_token_usage_pricing_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['TokenUsagePricingConfigUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TokenUsagePricingConfigResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   claim_api_agent_executions_claim_post: {
     parameters: {
       query?: never
