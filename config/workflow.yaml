@@ -125,7 +125,11 @@ workflows:
     velites_no_sandbox: false
     binary: pi
     provider: gateway
-    model: your-model
+    # 默认 model 必须为空：占位符（如历史上的 your-model）会在 intake 冻结进
+    # manifest，导致请求永远无法被任何 worker claim 并堵死队首（issue #13）。
+    # broker 在 enqueue 时拒绝空/占位符 model，节点必须经节点或 Agent revision
+    # 的 execution.model 显式声明。
+    model: ""
     thinking: low
     timeout_seconds: 1800
     environment:
