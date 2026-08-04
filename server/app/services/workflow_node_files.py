@@ -1,19 +1,14 @@
-"""Read and edit repo-tracked workflow node code files.
+"""Read repo-tracked workflow node code files.
 
-Backend for the DAG node code editor: exposes the tracked Python files under
+Backend for the DAG node code viewer: exposes the tracked Python files under
 ``workflow_nodes/`` (each exposing a module-level ``run``) plus the executor
-capabilities that reference them. Writes are validated (syntax plus a
-module-level ``run`` function) and applied atomically; the code executor
-reloads the file from disk on every execution, so edits take effect without a
-restart.
+capabilities that reference them. Reads are whitelist-validated; node code
+changes land through git review + CI (EXEC-CODE-001), so this module has no
+write path.
 """
 
 from __future__ import annotations
 
-import ast
-import contextlib
-import os
-import tempfile
 from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
@@ -70,26 +65,6 @@ def read_node_file(nodes_dir: Path, name: str) -> tuple[str, str]:
     return _display_path(path), path.read_text(encoding="utf-8")
 
 
-def write_node_file(nodes_dir: Path, name: str, content: str) -> str:
-    """Validate ``content`` and atomically replace the node file.
-
-    Returns the repo-relative path. Only existing files may be overwritten;
-    the path whitelist is identical to reads.
-    """
-    path = resolve_node_path(nodes_dir, name)
-    _validate_content(content)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            handle.write(content)
-        os.replace(tmp_name, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp_name)
-        raise
-    return _display_path(path)
-
-
 def referencing_capabilities(
     executor_definitions: Mapping[str, ExecutorConfig], path: str
 ) -> list[dict[str, str]]:
@@ -107,14 +82,3 @@ def referencing_capabilities(
 
 def _display_path(path: Path) -> str:
     return f"{WORKFLOW_NODES_DIR}/{path.name}"
-
-
-def _validate_content(content: str) -> None:
-    try:
-        tree = ast.parse(content)
-    except SyntaxError as exc:
-        raise NodeFileError(f"node file is not valid Python: {exc}") from exc
-    for node in tree.body:
-        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "run":
-            return
-    raise NodeFileError("node file must define a module-level 'run' function")

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, waitFor } from '@testing-library/react'
 import { WorkflowNodeCodeSection } from './WorkflowNodeCodeSection'
 import { api } from '../../api'
 import type { UserResponse } from '../../api/authApi'
@@ -96,7 +96,7 @@ describe('WorkflowNodeCodeSection', () => {
     expect(mockApi).not.toHaveBeenCalled()
   })
 
-  it('loads and shows the code file with path and capability references', async () => {
+  it('loads and shows the code file read-only with path and capability references', async () => {
     renderSection()
 
     expect(
@@ -111,7 +111,10 @@ describe('WorkflowNodeCodeSection', () => {
     expect(
       screen.getByText(/code-default: fetch_questions/)
     ).toBeInTheDocument()
-    expect(screen.getByText(/代码保存后立即生效/)).toBeInTheDocument()
+    expect(screen.getByText(/内置节点代码只读/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '编辑' })
+    ).not.toBeInTheDocument()
   })
 
   it('shows an error when the load fails', async () => {
@@ -123,75 +126,13 @@ describe('WorkflowNodeCodeSection', () => {
     )
   })
 
-  it('saves edits and returns to the read-only view', async () => {
-    renderSection()
-    await screen.findByText('def run(inputs):', { exact: false })
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    const editor = screen.getByLabelText('节点代码内容')
-    fireEvent.change(editor, { target: { value: 'def run():\n    pass\n' } })
-    mockApi.mockResolvedValue({
-      path: 'workflow_nodes/fetch_questions.py',
-      capabilities: fileResponse.capabilities,
-    })
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-
-    await waitFor(() =>
-      expect(useUiStore.getState().toast?.message).toBe(
-        '节点代码已保存，下次执行生效'
-      )
-    )
-    const [path, init] = mockApi.mock.calls[1]
-    expect(path).toBe(
-      '/api/workflow-nodes/files/workflow_nodes/fetch_questions.py'
-    )
-    expect(init?.method).toBe('PUT')
-    expect(JSON.parse(String(init?.body))).toEqual({
-      content: 'def run():\n    pass\n',
-    })
-    expect(screen.queryByLabelText('节点代码内容')).not.toBeInTheDocument()
-    expect(screen.getByText('def run():', { exact: false })).toBeInTheDocument()
-  })
-
-  it('shows the 422 error and stays in edit mode when the save fails', async () => {
-    renderSection()
-    await screen.findByText('def run(inputs):', { exact: false })
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.change(screen.getByLabelText('节点代码内容'), {
-      target: { value: 'not python' },
-    })
-    mockApi.mockRejectedValue(new Error('缺少模块级 run 函数'))
-    fireEvent.click(screen.getByRole('button', { name: '保存' }))
-
-    await waitFor(() =>
-      expect(screen.getByRole('alert')).toHaveTextContent('缺少模块级 run 函数')
-    )
-    expect(screen.getByLabelText('节点代码内容')).toBeInTheDocument()
-  })
-
-  it('discards edits on cancel', async () => {
-    renderSection()
-    await screen.findByText('def run(inputs):', { exact: false })
-
-    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
-    fireEvent.change(screen.getByLabelText('节点代码内容'), {
-      target: { value: 'changed' },
-    })
-    fireEvent.click(screen.getByRole('button', { name: '取消' }))
-
-    expect(screen.queryByLabelText('节点代码内容')).not.toBeInTheDocument()
-    expect(
-      screen.getByText('def run(inputs):', { exact: false })
-    ).toBeInTheDocument()
-    expect(mockApi).toHaveBeenCalledTimes(1)
-  })
-
-  it('keeps the immediate-effect hint in read-only revision mode', async () => {
+  it('keeps the read-only hint in read-only revision mode', async () => {
     renderSection({ readOnly: true })
     await screen.findByText('def run(inputs):', { exact: false })
 
     expect(screen.getByText(/历史版本查看模式/)).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '编辑' })).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '编辑' })
+    ).not.toBeInTheDocument()
   })
 })

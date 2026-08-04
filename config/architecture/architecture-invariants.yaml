@@ -359,7 +359,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-001
-    statement: "Code executor capabilities must reference repo-tracked Python files via repo-relative paths: absolute paths and '..' segments are rejected at config load, paths must resolve to files inside the repository root at startup and executor construction, and node code runs only through the isolated child-process contract run(job, job_dir, runtime)."
+    statement: "Built-in code executor capabilities must reference repo-tracked Python files via repo-relative paths: absolute paths and '..' segments are rejected at config load, paths must resolve to files inside the repository root at startup and executor construction, and node code runs only through the isolated child-process contract run(job, job_dir, runtime). Scope is built-in nodes only: built-in node code changes land exclusively through git review + CI; no runtime API may create, modify, or delete repo workflow_nodes/ files (the former Studio online-edit write endpoint was removed in M1)."
     owner: workspace-executor
     risk: high
     evidence:
