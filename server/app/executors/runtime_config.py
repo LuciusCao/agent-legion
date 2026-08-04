@@ -16,7 +16,7 @@ from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 class PiRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    flavor: Literal["pi", "velites"] = "pi"  # Headless harness 选择（设计 §9）；非法值 fail-fast
+    flavor: Literal["pi", "velites"] = "pi"  # runtime: pi 的遗留实现选择层（§9）；非法值 fail-fast
     binary: str = Field(default="pi", validate_default=True)
     provider: str = ""
     model: str = ""
