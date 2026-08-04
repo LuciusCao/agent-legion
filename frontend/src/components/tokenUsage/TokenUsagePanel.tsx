@@ -185,7 +185,11 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
           <div className={styles.metricValue} data-testid="total-cost-summary">
             {money(data?.currency ?? 'CNY', summary?.cost?.total ?? undefined)}
           </div>
-          <div className={styles.metricMeta}>按配置单价计算</div>
+          <div className={styles.metricMeta}>
+            {summary?.pricing_missing_models?.length
+              ? `缺少定价：${summary.pricing_missing_models.join('、')}`
+              : '按配置单价计算'}
+          </div>
         </div>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>平均每 run</div>
@@ -447,6 +451,12 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                                   )}
                                 </span>
                               </div>
+                              {group.pricing_missing_models.length > 0 && (
+                                <div className={styles.pricingMissing}>
+                                  缺少定价：
+                                  {group.pricing_missing_models.join('、')}
+                                </div>
+                              )}
                             </div>
                           </div>
                         </div>

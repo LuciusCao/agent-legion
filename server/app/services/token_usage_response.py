@@ -37,7 +37,7 @@ def build_aggregate_cost(
     cache_read_tokens: int,
     total_tokens: int,
     total_cost_value: float | None,
-    pricing_missing: bool,
+    pricing_missing_models: list[str],
     usage_rows: Sequence[Mapping[str, Any]],
     config: dict[str, Any],
 ) -> dict[str, Any]:
@@ -45,13 +45,28 @@ def build_aggregate_cost(
 
     When every row shares a single provider/model with a configured price, the
     full input/output/cache/total breakdown is returned. Otherwise only the
-    total is exposed. If pricing is missing, ``cost`` is ``None``.
+    total is exposed. Rows without configured pricing are excluded from the
+    total but reported in ``pricing_missing_models``; ``cost`` is ``None``
+    only when nothing could be priced at all.
     """
     if not usage_rows:
-        return {"cost": None, "pricing_missing": False}
+        return {"cost": None, "pricing_missing": False, "pricing_missing_models": []}
 
-    if pricing_missing:
-        return {"cost": None, "pricing_missing": True}
+    if pricing_missing_models:
+        cost_obj: dict[str, Any] | None = None
+        if total_cost_value is not None:
+            cost_obj = {
+                "currency": currency_from_config(config),
+                "input": None,
+                "output": None,
+                "cache_read": None,
+                "total": total_cost_value,
+            }
+        return {
+            "cost": cost_obj,
+            "pricing_missing": True,
+            "pricing_missing_models": pricing_missing_models,
+        }
 
     distinct = {
         (str(row.get("provider", "")), str(row.get("model", "")))
@@ -79,6 +94,7 @@ def build_aggregate_cost(
                     "total": cost["total"],
                 },
                 "pricing_missing": False,
+                "pricing_missing_models": [],
             }
 
     return {
@@ -90,6 +106,7 @@ def build_aggregate_cost(
             "total": total_cost_value,
         },
         "pricing_missing": False,
+        "pricing_missing_models": [],
     }
 
 

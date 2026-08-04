@@ -272,8 +272,8 @@ def build_job_usage_response(
     total_output = 0
     total_cache_read = 0
     total_tokens = 0
-    total_cost_value = 0.0
-    total_pricing_missing = False
+    total_cost_value: float | None = None
+    total_pricing_missing_models: set[str] = set()
     runs_with_usage = 0
     runs_without_usage = 0
 
@@ -312,9 +312,9 @@ def build_job_usage_response(
         total_tokens += int(usage_row.get("total_tokens", 0))
         cost = usage["cost"]
         if cost is not None:
-            total_cost_value += float(cost["total"])
+            total_cost_value = (total_cost_value or 0.0) + float(cost["total"])
         if usage["pricing_missing"]:
-            total_pricing_missing = True
+            total_pricing_missing_models.add(f"{usage['provider']}/{usage['model']}")
 
     total_cost_obj = build_aggregate_cost(
         total_input,
@@ -322,7 +322,7 @@ def build_job_usage_response(
         total_cache_read,
         total_tokens,
         total_cost_value,
-        total_pricing_missing,
+        sorted(total_pricing_missing_models),
         list(usage_by_run.values()) if runs_with_usage > 0 else [],
         config,
     )
@@ -338,6 +338,7 @@ def build_job_usage_response(
             "total_tokens": total_tokens,
             "cost": total_cost_obj["cost"],
             "pricing_missing": total_cost_obj["pricing_missing"],
+            "pricing_missing_models": total_cost_obj["pricing_missing_models"],
         },
         "runs_with_usage": runs_with_usage,
         "runs_without_usage": runs_without_usage,
