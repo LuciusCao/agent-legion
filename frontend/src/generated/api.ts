@@ -2295,6 +2295,10 @@ export interface components {
       online_workers_max: number
       /** Output Tokens */
       output_tokens: number
+      /** Queued */
+      queued: number
+      /** Queued Max */
+      queued_max: number
       /** Total Tokens */
       total_tokens: number
     }
@@ -2365,6 +2369,8 @@ export interface components {
       active_executions: number | null
       /** Online Workers */
       online_workers: number | null
+      queue: components['schemas']['QueueSummary']
+      queue_alert: components['schemas']['QueueAlert'] | null
       recent_hour_runs: components['schemas']['RecentHourRunSummary']
       recent_hour_tokens: components['schemas']['RecentHourTokenSummary']
     }
@@ -2410,6 +2416,29 @@ export interface components {
         | null
       /** Stem */
       stem?: string | null
+    }
+    /** QueueAlert */
+    QueueAlert: {
+      /** At */
+      at: string | null
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'blocked' | 'stalled'
+      /** Reasons */
+      reasons: {
+        [key: string]: number
+      }
+    }
+    /** QueueSummary */
+    QueueSummary: {
+      /** Oldest Queued At */
+      oldest_queued_at: string | null
+      /** Queued */
+      queued: number
+      /** Recent Hour Unclaimable Failed */
+      recent_hour_unclaimable_failed: number
     }
     /** RecentHourRunSummary */
     RecentHourRunSummary: {

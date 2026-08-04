@@ -13,6 +13,8 @@ class MetricBucket(BaseModel):
     online_workers_max: int
     active_executions: int
     active_executions_max: int
+    queued: int
+    queued_max: int
     input_tokens: int
     output_tokens: int
     cache_read_tokens: int

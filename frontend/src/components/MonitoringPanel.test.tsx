@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MonitoringPanel } from './MonitoringPanel'
 
 // bucket_start 必须对齐到整分钟，否则在固定时间窗网格里匹配不上会被填零。
@@ -13,6 +13,8 @@ function bucket(offsetMinutes: number, overrides = {}) {
     online_workers_max: 5,
     active_executions: 2,
     active_executions_max: 4,
+    queued: 12,
+    queued_max: 20,
     input_tokens: 100,
     output_tokens: 50,
     cache_read_tokens: 10,
@@ -38,17 +40,31 @@ function summary(overrides = {}) {
       duration_p50_seconds: 42,
       duration_p95_seconds: 185,
     },
+    queue: {
+      queued: 12,
+      oldest_queued_at: null,
+      recent_hour_unclaimable_failed: 0,
+    },
+    queue_alert: null,
     ...overrides,
   }
 }
 
-const mockFetchOpsMetrics = vi.fn((params: { granularity: string }) =>
-  Promise.resolve({
+// 面板每次渲染发起两个 fetch（主数据 + 队列深度图的全局数据，子组件 effect 先
+// 执行），自定义响应必须用持久实现并在 afterEach 复原，不能用 Once 系列。
+function defaultMetricsResponse(params: { granularity: string }) {
+  return Promise.resolve({
     granularity: params.granularity,
     buckets: [bucket(4), bucket(3), bucket(2), bucket(1)],
     summary: summary(),
   })
-)
+}
+
+const mockFetchOpsMetrics = vi.fn(defaultMetricsResponse)
+
+afterEach(() => {
+  mockFetchOpsMetrics.mockImplementation(defaultMetricsResponse)
+})
 
 vi.mock('../api/metrics', () => ({
   fetchOpsMetrics: (...args: [{ granularity: string }]) =>
@@ -99,9 +115,61 @@ describe('MonitoringPanel', () => {
     expect(
       screen.getByRole('img', { name: 'Token 吞吐量趋势' })
     ).toBeInTheDocument()
+    // 队列摘要卡与队列深度图（全局指标）
+    expect(screen.getByTestId('queue-depth-summary')).toHaveTextContent('12')
+    expect(screen.getByTestId('queue-sweeper-summary')).toHaveTextContent('0')
+    expect(
+      screen.getByRole('img', { name: 'Agent 执行队列深度趋势' })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
       granularity: '6h',
     })
+  })
+
+  it('renders the blocked queue alert with the skip-reason histogram', async () => {
+    mockFetchOpsMetrics.mockResolvedValue({
+      granularity: '6h',
+      buckets: [bucket(1)],
+      summary: summary({
+        queue: {
+          queued: 33412,
+          oldest_queued_at: new Date(Date.now() - 18 * 3600_000).toISOString(),
+          recent_hour_unclaimable_failed: 136,
+        },
+        queue_alert: {
+          kind: 'blocked',
+          at: new Date().toISOString(),
+          reasons: { capability_or_model_mismatch: 8 },
+        },
+      }),
+    })
+
+    render(<MonitoringPanel />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('队列堵塞')
+    expect(alert).toHaveTextContent('33,412 条请求排队中')
+    expect(alert).toHaveTextContent('model/capability 不匹配 ×8')
+    // 队首最老超过 1 小时标红（18h）
+    expect(screen.getByText('18.0h')).toBeInTheDocument()
+    expect(screen.getByTestId('queue-sweeper-summary')).toHaveTextContent('136')
+  })
+
+  it('renders the stalled queue alert without claim skip reasons', async () => {
+    mockFetchOpsMetrics.mockResolvedValue({
+      granularity: '6h',
+      buckets: [bucket(1)],
+      summary: summary({
+        queue_alert: { kind: 'stalled', at: null, reasons: {} },
+      }),
+    })
+
+    render(<MonitoringPanel />)
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('队列停滞')
+    expect(alert).toHaveTextContent('领取开关关闭')
   })
 
   it('refetches with the new window when granularity changes', async () => {
@@ -156,7 +224,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('renders error message on fetch failure', async () => {
-    mockFetchOpsMetrics.mockRejectedValueOnce(new Error('network error'))
+    mockFetchOpsMetrics.mockRejectedValue(new Error('network error'))
 
     render(<MonitoringPanel />)
 
@@ -193,7 +261,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('renders placeholder when no runs completed in the recent hour', async () => {
-    mockFetchOpsMetrics.mockResolvedValueOnce({
+    mockFetchOpsMetrics.mockResolvedValue({
       granularity: '6h',
       buckets: [],
       summary: summary({
@@ -217,7 +285,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('renders a zero-filled fixed window when no buckets', async () => {
-    mockFetchOpsMetrics.mockResolvedValueOnce({
+    mockFetchOpsMetrics.mockResolvedValue({
       granularity: '6h',
       buckets: [],
       summary: summary({
