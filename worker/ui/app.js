@@ -1,6 +1,6 @@
 // labelsFromText / numberField / NUMBER_DEFAULTS / formatElapsed / executionLabel /
 // formatTokens / latestMetric / tokensLastHour / bucketLabel / fillWindowBuckets /
-// chartSeriesData / hasChartData 是纯函数，
+// chartSeriesData / hasChartData / foldLogLines 是纯函数，
 // 由 app.test.mjs（node:test）直接 import；
 // 因此本文件以 ES module 加载（见 index.html 的 script type="module"），DOM 访问做存在性守卫。
 const hasDom = typeof document !== "undefined";
@@ -20,7 +20,6 @@ if (!CONTROL_TOKEN && hasDom) {
   }
 }
 const TOKEN_MISSING = !CONTROL_TOKEN;
-let latestMaxConcurrency = 0;
 // 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
 export const NUMBER_DEFAULTS = { max_concurrency: 1, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
@@ -88,32 +87,28 @@ function renderStatus(status) {
         : status.configured ? "本地配置已加载，等待连接恢复" : "请先完成配置"),
   );
   const processState = status.worker_running
-    ? `运行中 · PID ${status.pid}`
+    ? `运行中 · PID ${status.pid}${status.mounted_config_diverged ? " · 配置分歧" : ""}`
     : status.failed
       ? "已失败"
       : status.next_restart_delay
         ? `等待自动重启（第 ${status.restart_count} 次）`
         : "未运行";
   setText("process-state", processState);
-  setText("claim-state", status.claim_enabled ? "正在领取" : "已暂停");
-  document.querySelector("#claim-state").className = status.claim_enabled ? "mint-text" : "amber-text";
   const runningCount = status.running_executions_count ?? 0;
   const capacity = status.max_concurrency ?? 0;
-  latestMaxConcurrency = capacity;
   setText("capacity-state", `${runningCount} / ${capacity || "—"}`);
   document.querySelector("#capacity-meter").style.width = `${capacity ? Math.min(100, (runningCount / capacity) * 100) : 0}%`;
   const uploadActive = status.upload_active_count ?? 0;
   const uploadQueued = status.upload_queued_count ?? 0;
   const uploadCapacity = status.upload_max_concurrency ?? 4;
   setText("upload-state", `${uploadActive} / ${uploadCapacity || "—"}`);
-  setText("upload-queued", uploadQueued > 0 ? `${uploadQueued} 个排队` : "无排队");
+  // 排队数仅在 >0 时内联显示在数字后（琥珀色），为 0 时隐藏（:empty 规则）
+  setText("upload-queued", uploadQueued > 0 ? `${uploadQueued} 个排队` : "");
   document.querySelector("#upload-meter").style.width = `${uploadCapacity ? Math.min(100, (uploadActive / uploadCapacity) * 100) : 0}%`;
   const toggle = document.querySelector("#toggle-claiming");
   toggle.dataset.enabled = String(Boolean(status.claim_enabled));
   toggle.querySelector("span").textContent = status.claim_enabled ? "暂停领取" : "开始领取";
   toggle.classList.toggle("paused", !status.claim_enabled);
-  setText("host-state", status.host_reachable ? "可达" : "不可达");
-  document.querySelector("#host-state").className = status.host_reachable ? "mint-text" : "red-text";
   setText(
     "registered-state",
     status.registered
@@ -122,26 +117,38 @@ function renderStatus(status) {
   );
   const scope = status.host_worker?.allowed_workspaces;
   setText("workspace-scope", scope ? (scope.length ? scope.join(", ") : "全部") : "—");
-  setText("last-seen", formatClock(status.host_worker?.last_seen_at));
   setText("worker-name", status.host_worker?.name || status.host_worker?.worker_id || "本机 Worker");
   setText("diagnostic-host", status.host_reachable ? "连接正常" : friendlyConnectionError(status.connection_error));
+  // 顶栏圆点是唯一的全局连接指示：title 携带 Host 可达性与最后同步时间
+  const hostText = status.host_reachable
+    ? `Host 可达 · 同步于 ${formatClock(status.host_worker?.last_seen_at)}`
+    : "Host 不可达";
   const topDot = document.querySelector("#worker-online-dot");
   topDot.className = `online-dot ${healthy ? "" : warning ? "warning" : "offline"}`.trim();
-  topDot.title = healthy ? "在线" : warning ? "等待 Host" : "离线";
+  topDot.title = healthy ? `在线 · ${hostText}` : warning ? `等待 Host · ${hostText}` : "离线";
+  const dotClasses = [
+    status.worker_running ? (status.mounted_config_diverged ? "warning" : "") : "offline",
+    status.host_reachable ? "" : "offline",
+    status.registered ? "" : "offline",
+    scope ? "" : "warning",
+  ];
   document.querySelectorAll(".diagnostic-status-grid .diagnostic-dot").forEach((dot, index) => {
-    const ok = index === 0 ? status.worker_running : index === 1 ? status.host_reachable : index === 2 ? status.registered : Boolean(scope);
-    dot.className = `diagnostic-dot ${ok ? "" : index === 3 && !scope ? "warning" : "offline"}`.trim();
+    dot.className = `diagnostic-dot ${dotClasses[index]}`.trim();
   });
+  // 异常横幅：仅在配置分歧或 Host 不可达时出现，正常时隐藏
   const source = document.querySelector("#source-warning");
-  source.classList.toggle("ok-source", status.host_reachable);
-  setText("source-warning-title", status.host_reachable ? "Host 连接正常" : "Host 状态不可用");
-  setText(
-    "source-warning-detail",
-    status.host_reachable
-      ? `Host 最后同步 ${formatClock(status.host_worker?.last_seen_at)}`
-      : friendlyConnectionError(status.connection_error),
-  );
-  renderExecutions(status.current_executions, capacity);
+  if (status.mounted_config_diverged) {
+    source.hidden = false;
+    setText("source-warning-title", "挂载配置与本地状态不一致");
+    setText("source-warning-detail", "挂载修改不会自动生效；可用 workerctl configure 覆盖，或删除状态文件后重启以重新导入");
+  } else if (!status.host_reachable) {
+    source.hidden = false;
+    setText("source-warning-title", "Host 状态不可用");
+    setText("source-warning-detail", friendlyConnectionError(status.connection_error));
+  } else {
+    source.hidden = true;
+  }
+  renderExecutions(status.current_executions);
 }
 
 function fillForm(config) {
@@ -217,7 +224,7 @@ function filterExecutions(query) {
   });
 }
 
-function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
+function renderExecutions(executions) {
   const list = document.querySelector("#executions");
   const groups = groupExecutions(executions);
   list.textContent = "";
@@ -269,11 +276,7 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
     progressFill.style.width = `${phaseProgress(group.phase)}%`;
     progressBar.append(progressFill);
     progress.append(progressBar, `${group.executions.length} 个执行`);
-    const capacity = document.createElement("span");
-    capacity.className = "group-capacity";
-    capacity.title = "当前分组运行中占用 / 本机最大并发";
-    capacity.textContent = `${runOccupancy(group.executions)} / ${maxConcurrency || "—"}`;
-    button.append(name, phase, elapsed, progress, capacity);
+    button.append(name, phase, elapsed, progress);
 
     const children = document.createElement("div");
     children.className = "execution-children";
@@ -298,10 +301,7 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
       rowFill.style.width = `${phaseProgress(execution.phase)}%`;
       rowBar.append(rowFill);
       rowProgress.append(rowBar, phaseLabel(execution.phase));
-      const rowCapacity = document.createElement("span");
-      rowCapacity.title = "当前执行运行中占用 / 本机最大并发（上传阶段不占运行槽位）";
-      rowCapacity.textContent = `${runOccupancy([execution])} / ${maxConcurrency || "—"}`;
-      row.append(id, rowPhase, rowElapsed, rowProgress, rowCapacity);
+      row.append(id, rowPhase, rowElapsed, rowProgress);
       children.appendChild(row);
     });
     button.addEventListener("click", () => {
@@ -503,8 +503,24 @@ async function loadStatus() {
 async function loadLogs() {
   try {
     const payload = await api("/api/logs?limit=200");
-    document.querySelector("#logs").textContent = payload.lines.join("\n") || "暂无日志";
+    document.querySelector("#logs").textContent = foldLogLines(payload.lines).join("\n") || "暂无日志";
   } catch (error) { document.querySelector("#logs").textContent = error.message; }
+}
+
+// 折叠连续重复行：比较时去掉行首时间戳（心跳行内容相同但时间戳各异），展示最新一行并标注重复次数。
+export function foldLogLines(lines) {
+  const folded = [];
+  for (const line of lines ?? []) {
+    const body = String(line).replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, "");
+    const last = folded[folded.length - 1];
+    if (last && last.body === body) {
+      last.count += 1;
+      last.text = line;
+    } else {
+      folded.push({ body, text: line, count: 1 });
+    }
+  }
+  return folded.map((item) => (item.count > 1 ? `${item.text}  × ${item.count}` : item.text));
 }
 
 async function loadConfig() {
@@ -534,38 +550,28 @@ function renderMetrics(payload) {
   const granularity = payload.granularity ?? metricsGranularity;
   const buckets = fillWindowBuckets(payload.buckets ?? [], granularity);
   const formatCount = (v) => String(Math.round(v));
-  renderUplotChart(document.querySelector("#chart-fleet"), buckets, CAPACITY_SERIES, {
-    height: 260,
+  // 两张图同在概览「容量与吞吐」面板，跟随同一个粒度切换
+  renderUplotChart(document.querySelector("#chart-capacity"), buckets, CAPACITY_SERIES, {
+    height: 240,
     formatValue: formatCount,
     granularity,
   });
   renderUplotChart(document.querySelector("#chart-tokens"), buckets, TOKEN_SERIES, {
-    height: 260,
+    height: 240,
     formatValue: formatTokens,
     granularity,
   });
-  if (granularity === "6h") {
-    renderUplotChart(document.querySelector("#chart-capacity"), buckets, CAPACITY_SERIES, {
-      height: 180,
-      formatValue: formatCount,
-      granularity,
-    });
-  }
 }
 
 async function loadMetrics() {
-  const metricsError = document.querySelector("#metrics-error");
   const overviewError = document.querySelector("#overview-metrics-error");
   try {
     const params = new URLSearchParams(metricsParams(metricsGranularity));
     const payload = await api(`/api/metrics/overview?${params}`);
-    metricsError.textContent = "";
     overviewError.textContent = "";
     renderMetrics(payload);
   } catch (error) {
-    const message = friendlyConnectionError(error.message);
-    metricsError.textContent = `监控数据不可用：${message}`;
-    overviewError.textContent = `监控数据不可用：${message}`;
+    overviewError.textContent = `监控数据不可用：${friendlyConnectionError(error.message)}`;
   }
 }
 

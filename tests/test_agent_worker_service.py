@@ -532,6 +532,20 @@ def test_worker_ui_serves_icon_sprite(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("image/svg+xml")
+    assert response.headers["Cache-Control"] == "no-cache"
+
+
+def test_index_disables_browser_caching(tmp_path: Path) -> None:
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text("<div>worker</div>", encoding="utf-8")
+    store = WorkerConfigStore(tmp_path / "state")
+    app = create_app(FakeSupervisor(store), ui)
+
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    assert response.headers["Cache-Control"] == "no-cache"
 
 
 def test_supervisor_starts_and_stops_worker_process(

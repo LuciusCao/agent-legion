@@ -175,7 +175,7 @@ export function MonitoringPanel() {
           </div>
         </div>
         <div className={styles.metric}>
-          <div className={styles.metricLabel}>近 1 小时 Runs</div>
+          <div className={styles.metricLabel}>近 1 小时 Agent Runs</div>
           <div className={styles.metricValue} data-testid="hourly-runs-summary">
             完成 {fmt(hourlyRuns?.completed)}
           </div>
