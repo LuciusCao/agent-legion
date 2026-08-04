@@ -10,7 +10,11 @@ code is always git-reviewed and CI-gated.
 Custom node code (EXEC-CODE-002) arrives as text on ``ExecutionContext.
 node_code`` — resolved at dispatch from the frozen job version or the
 published DB version — and is loaded from the string instead of the file; the
-``run`` contract is identical.
+``run`` contract is identical. Because custom code is user-supplied, it runs
+inside the velites OS sandbox (EXEC-CODE-003, ``velites sandbox wrap``):
+read-only filesystem except ``job_dir``/tmp, network denied unless the
+capability opts in (``sandbox_network``), and fail-closed — without a
+sandbox backend the executor refuses to run custom code at all.
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ import importlib.util
 import logging
 import multiprocessing
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -27,6 +32,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from server.app.executors._code_sandbox import execute_custom_sandboxed
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
@@ -165,6 +171,8 @@ class CodeExecutor:
         self._cancelled: set[str] = set()
         self._tokens: dict[str, CancellationToken] = {}
         self._watchers: dict[str, threading.Thread] = {}
+        self._velites_probed = False
+        self._velites_path: str | None = None
 
     def supports(self, capability: str) -> bool:
         return capability in self._paths
@@ -189,6 +197,8 @@ class CodeExecutor:
             )
 
         timeout = self._capabilities[context.capability].timeout_seconds
+        if context.node_code is not None:
+            return execute_custom_sandboxed(self, context, timeout)
         return self._execute_isolated(context, path, timeout)
 
     def cancel(self, execution_id: str) -> None:
@@ -329,8 +339,18 @@ class CodeExecutor:
             self._tokens.pop(context.execution_id, None)
             self._watchers.pop(context.execution_id, None)
 
-    def _terminate_child(self, process: multiprocessing.process.BaseProcess) -> None:
+    def _terminate_child(
+        self, process: multiprocessing.process.BaseProcess | subprocess.Popen[bytes]
+    ) -> None:
         process.terminate()
+        if isinstance(process, subprocess.Popen):
+            with contextlib.suppress(subprocess.TimeoutExpired):
+                process.wait(timeout=self.cancellation_grace_seconds)
+            if process.poll() is None:
+                process.kill()
+                with contextlib.suppress(subprocess.TimeoutExpired):
+                    process.wait(timeout=2)
+            return
         process.join(timeout=self.cancellation_grace_seconds)
         if process.is_alive():
             process.kill()

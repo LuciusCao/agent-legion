@@ -21,6 +21,10 @@ class CodeCapabilityConfig(BaseModel):
     # Repo-relative path to a tracked Python file exposing ``run(job, job_dir, runtime)``.
     path: str = Field(min_length=1)
     timeout_seconds: int = Field(default=600, ge=1)
+    # Custom (DB-backed) code for this capability runs inside the velites OS
+    # sandbox (EXEC-CODE-003), which denies network by default; flip this on
+    # for capabilities whose node must reach a service (e.g. the CMS).
+    sandbox_network: bool = False
     # Non-secret tunable parameters for the node_config chain (spec D15);
     # secrets stay in resource bindings / the vault (spec D16).
     config_schema: dict[str, Any] = Field(default_factory=dict)
