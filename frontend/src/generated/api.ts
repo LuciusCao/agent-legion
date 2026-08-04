@@ -2683,6 +2683,11 @@ export interface components {
       output_tokens: number
       /** Pricing Missing */
       pricing_missing: boolean
+      /**
+       * Pricing Missing Models
+       * @default []
+       */
+      pricing_missing_models: string[]
       /** Total Tokens */
       total_tokens: number
     }
@@ -2699,6 +2704,11 @@ export interface components {
       output_tokens: number
       /** Pricing Missing */
       pricing_missing: boolean
+      /**
+       * Pricing Missing Models
+       * @default []
+       */
+      pricing_missing_models: string[]
       /** Total Tokens */
       total_tokens: number
     }
@@ -2724,6 +2734,11 @@ export interface components {
       node_key: string
       /** Pricing Missing */
       pricing_missing: boolean
+      /**
+       * Pricing Missing Models
+       * @default []
+       */
+      pricing_missing_models: string[]
       /** Provider */
       provider: string
       /** Runs */

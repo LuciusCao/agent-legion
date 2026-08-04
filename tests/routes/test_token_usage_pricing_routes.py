@@ -136,3 +136,51 @@ def test_database_pricing_drives_workspace_cost(client, workspace_usage) -> None
     assert client.put(PRICING_URL, json=_payload()).status_code == 200
     # updated rates: input 10.0 / output 20.0 per 1M → 30.0
     assert _workspace_total_cost(client, workspace_usage) == pytest.approx(30.0)
+
+
+def test_unpriced_models_keep_known_cost_and_are_listed(client, workspace_usage) -> None:
+    """Rows without configured pricing are excluded from the total (not zeroing
+    it) and reported in pricing_missing_models."""
+    job_db = client.app.state.job_db
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)",
+            (2, "pricing_job_1", "node-b", "completed"),
+        )
+        conn.execute(
+            """
+            insert into node_run_token_usage(
+              node_run_id, job_id, workspace_id, node_key, provider, model, skill_version,
+              message_count, input_tokens, output_tokens, cache_read_tokens, total_tokens
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                2,
+                "pricing_job_1",
+                workspace_usage,
+                "node-b",
+                "gateway",
+                "unpriced-model",
+                "v1",
+                1,
+                500_000,
+                500_000,
+                0,
+                1_000_000,
+            ),
+        )
+
+    response = client.get(f"/api/workspaces/{workspace_usage}/token-usage")
+    assert response.status_code == 200
+    summary = response.json()["summary"]
+    assert summary["pricing_missing"] is True
+    assert summary["pricing_missing_models"] == ["gateway/unpriced-model"]
+    # Known cost is still computed from the priced rows only.
+    assert summary["cost"]["total"] == pytest.approx(18.0)
+
+    response = client.get("/api/jobs/pricing_job_1/token-usage")
+    assert response.status_code == 200
+    total = response.json()["total"]
+    assert total["pricing_missing"] is True
+    assert total["pricing_missing_models"] == ["gateway/unpriced-model"]
+    assert total["cost"]["total"] == pytest.approx(18.0)
