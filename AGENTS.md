@@ -38,7 +38,10 @@
   裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
   改动只跑静态、共享文件/新分支一律全量）。用 `AGENT_LEGION_GATE_LEVEL=quick`
   （完整 quick 套件）或 `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次
-  推送。full gate 由 GitHub CI 在 PR/push 执行；ci-extended 压力门改为
+  推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
+  （与本地 pre-push 一致：纯前端改动跳过 backend pytest shards 但保留
+  api:check、纯 `velites/` 改动只跑 rust、docs-only 全跳过、共享文件
+  全量，检测逻辑见 workflow 的 `changes` job）；ci-extended 压力门改为
   nightly + 手动 dispatch。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
