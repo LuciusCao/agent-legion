@@ -286,15 +286,17 @@ def _count_runs_per_node_group(
 def _sum_cost_rows(
     rows: Sequence[Mapping[str, Any]],
     config: dict[str, Any],
-) -> tuple[float | None, bool]:
-    """Return (total_cost, pricing_missing) by pricing each row's provider/model.
+) -> tuple[float | None, list[str]]:
+    """Return (total_cost, missing_models) by pricing each row's provider/model.
 
     Rows are expected to carry aggregate columns ``total_input_tokens``,
     ``total_output_tokens``, ``total_cache_read_tokens`` and ``total_tokens``.
-    ``total_cost`` is ``None`` when every row lacks configured pricing.
+    ``total_cost`` sums only rows with configured pricing (``None`` when no
+    row matches); ``missing_models`` lists the unmatched ``provider/model``
+    combinations so the API can say exactly what is not priced.
     """
     total_cost: float | None = None
-    pricing_missing = False
+    missing: set[str] = set()
     for r in rows:
         cost = calculate_cost(
             int(r.get("total_tokens", 0)),
@@ -306,10 +308,10 @@ def _sum_cost_rows(
             config,
         )
         if cost is None:
-            pricing_missing = True
+            missing.add(f"{r.get('provider', '')}/{r.get('model', '')}")
             continue
         total_cost = (total_cost or 0.0) + cost.total
-    return total_cost, pricing_missing
+    return total_cost, sorted(missing)
 
 
 def build_workspace_usage_response(
@@ -365,7 +367,7 @@ def build_workspace_usage_response(
         total_output = int(row["total_output_tokens"])
         total_cache_read = int(row["total_cache_read_tokens"])
         total_tokens = int(row["total_tokens"])
-        group_cost, group_pricing_missing = _sum_cost_rows(
+        group_cost, group_missing_models = _sum_cost_rows(
             group_cost_by_key.get(group_key, []), config
         )
 
@@ -393,7 +395,8 @@ def build_workspace_usage_response(
                 "total_tokens": total_tokens,
                 "total_cost": group_cost,
                 "avg_cost": group_cost / runs if group_cost is not None and runs else None,
-                "pricing_missing": group_pricing_missing,
+                "pricing_missing": bool(group_missing_models),
+                "pricing_missing_models": group_missing_models,
                 "coverage": coverage,
             }
         )
@@ -401,14 +404,14 @@ def build_workspace_usage_response(
     runs_with_usage = int(aggregates["runs_with_usage"])
     runs_without_usage = max(0, total_runs - runs_with_usage)
 
-    summary_cost, summary_pricing_missing = _sum_cost_rows(summary_cost_rows, config)
+    summary_cost, summary_missing_models = _sum_cost_rows(summary_cost_rows, config)
     summary_cost_obj = build_aggregate_cost(
         int(aggregates["input_tokens"]),
         int(aggregates["output_tokens"]),
         int(aggregates["cache_read_tokens"]),
         int(aggregates["total_tokens"]),
         summary_cost,
-        summary_pricing_missing,
+        summary_missing_models,
         summary_cost_rows,
         config,
     )
@@ -424,6 +427,7 @@ def build_workspace_usage_response(
             "total_tokens": int(aggregates["total_tokens"]),
             "cost": summary_cost_obj["cost"],
             "pricing_missing": summary_cost_obj["pricing_missing"],
+            "pricing_missing_models": summary_cost_obj["pricing_missing_models"],
         },
         "groups": groups,
         "runs_with_usage": runs_with_usage,

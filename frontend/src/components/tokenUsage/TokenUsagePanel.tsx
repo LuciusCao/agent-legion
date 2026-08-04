@@ -32,7 +32,7 @@ function fmt(value: number | null | undefined) {
 }
 
 function money(currency: string, value: number | null | undefined) {
-  if (typeof value !== 'number') return '未配置价格'
+  if (typeof value !== 'number') return '-'
   const symbol = currency === 'CNY' ? '¥' : currency
   return `${symbol} ${value.toFixed(4)}`
 }
@@ -186,7 +186,9 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
             {money(data?.currency ?? 'CNY', summary?.cost?.total ?? undefined)}
           </div>
           <div className={styles.metricMeta}>
-            {summary?.pricing_missing ? '缺少定价配置' : '按配置单价计算'}
+            {summary?.pricing_missing_models?.length
+              ? `缺少定价：${summary.pricing_missing_models.join('、')}`
+              : '按配置单价计算'}
           </div>
         </div>
         <div className={styles.metric}>
@@ -449,9 +451,10 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                                   )}
                                 </span>
                               </div>
-                              {group.pricing_missing && (
+                              {group.pricing_missing_models.length > 0 && (
                                 <div className={styles.pricingMissing}>
-                                  缺少定价配置
+                                  缺少定价：
+                                  {group.pricing_missing_models.join('、')}
                                 </div>
                               )}
                             </div>

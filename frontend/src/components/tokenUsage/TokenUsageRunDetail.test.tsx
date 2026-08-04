@@ -142,6 +142,31 @@ describe('TokenUsageRunDetail', () => {
     expect(screen.getByText('无 token 数据')).toBeInTheDocument()
   })
 
+  it('shows which provider/model is missing pricing', async () => {
+    mockFetchRunTokenUsage.mockResolvedValue({
+      ...mockUsageResponse,
+      usage: {
+        ...mockUsageResponse.usage,
+        provider: 'gateway',
+        model: 'unpriced-model',
+        cost: null,
+        pricing_missing: true,
+      },
+    })
+
+    render(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
+    await waitFor(() => {
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+    })
+
+    fireEvent.click(screen.getByLabelText('Token 用量'))
+
+    expect(
+      screen.getByText('gateway / unpriced-model 缺少定价配置')
+    ).toBeInTheDocument()
+    expect(screen.queryByText('费用明细')).not.toBeInTheDocument()
+  })
+
   it('renders nothing but the compact button while loading', () => {
     mockFetchRunTokenUsage.mockImplementation(() => new Promise(() => {}))
 
