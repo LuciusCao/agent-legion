@@ -28,6 +28,43 @@ from server.app.jobs import JobQueries
 from server.app.main import create_app
 from server.app.settings import PROJECT_ROOT, load_settings
 
+# Deterministic pricing seeded into global_settings after every TRUNCATE (see
+# _reset_schema_data); rates mirror the retired yaml defaults so historical
+# cost assertions stay valid.
+_TEST_PRICING_DOCUMENT = {
+    "currency": "CNY",
+    "pricing": [
+        {
+            "provider": "gateway",
+            "model": "your-model-a",
+            "input_per_1m": 3.0,
+            "output_per_1m": 15.0,
+            "cache_read_per_1m": 0.6,
+        },
+        {
+            "provider": "doubao",
+            "model": "Doubao-Seed-2.1-turbo",
+            "input_per_1m": 3.0,
+            "output_per_1m": 15.0,
+            "cache_read_per_1m": 0.6,
+        },
+        {
+            "provider": "gateway",
+            "model": "your-model-b",
+            "input_per_1m": 1.0,
+            "output_per_1m": 2.0,
+            "cache_read_per_1m": 0.2,
+        },
+        {
+            "provider": "deepseek",
+            "model": "your-model-b",
+            "input_per_1m": 1.0,
+            "output_per_1m": 2.0,
+            "cache_read_per_1m": 0.2,
+        },
+    ],
+}
+
 _CMS_ENV_KEYS = (
     "CMS_BASE_URL",
     "CMS_TOKEN",
@@ -109,6 +146,8 @@ def _reset_schema_data() -> None:
     that re-run init_db rely on it for idempotency. DDL-seeded rows must be
     restored after the truncate: job_event_seq carries a singleton counter
     row (postgres_schema.sql) that job intake bumps on every batch.
+    global_settings is re-seeded with a fixed token_usage pricing document so
+    cost-calculation tests have deterministic rates to assert against.
     """
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
@@ -129,6 +168,13 @@ def _reset_schema_data() -> None:
                 sql.SQL(
                     "insert into {}(id, value) values (1, 0) on conflict(id) do nothing"
                 ).format(sql.Identifier(TEST_SCHEMA, "job_event_seq"))
+            )
+            conn.execute(
+                sql.SQL(
+                    "insert into {}(key, value) values ('token_usage', %s)"
+                    " on conflict(key) do update set value=excluded.value"
+                ).format(sql.Identifier(TEST_SCHEMA, "global_settings")),
+                (json.dumps(_TEST_PRICING_DOCUMENT),),
             )
     except psycopg.Error as exc:
         pytest.fail(

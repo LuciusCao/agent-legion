@@ -1,5 +1,6 @@
 import { Routes, Route, Navigate } from 'react-router-dom'
 import { AuthGate } from './components/AuthGate'
+import AdminRoutes from './routes/AdminRoutes'
 import {
   DashboardPage,
   JobDetailPage,
@@ -8,7 +9,6 @@ import {
   SettingsPage,
   SetupPage,
   TokenUsagePage,
-  UsersAdminPage,
   WorkflowStudioPage,
   WorkspaceLayout,
   WorkspaceMainPage,
@@ -20,7 +20,7 @@ export default function AppRoutes() {
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/setup" element={<SetupPage />} />
-        <Route path="/admin/users" element={<UsersAdminPage />} />
+        <Route path="/admin/*" element={<AdminRoutes />} />
         <Route path="/" element={<DashboardPage />} />
         <Route path="/monitoring" element={<MonitoringPage />} />
         <Route path="/workspaces" element={<Navigate to="/" replace />} />

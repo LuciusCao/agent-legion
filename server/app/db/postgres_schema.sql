@@ -308,6 +308,14 @@ create table if not exists worker_control_state (
   updated_at timestamptz not null
 );
 
+-- Global (non-workspace) product settings, e.g. token_usage pricing (schema v21).
+-- value holds a JSON document whose shape mirrors the yaml fallback section.
+create table if not exists global_settings (
+  key text primary key,
+  value text not null,
+  updated_at timestamptz not null default current_timestamp
+);
+
 create table if not exists artifacts (
   hash text primary key,
   size bigint not null,
