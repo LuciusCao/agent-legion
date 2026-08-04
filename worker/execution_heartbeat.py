@@ -13,7 +13,7 @@ import threading
 from dataclasses import dataclass
 from typing import Any
 
-from worker.execution_lifecycle import heartbeat_loop
+from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
 
 
 @dataclass
@@ -30,7 +30,7 @@ class ExecutionHeartbeat:
         self.adopted.set()
 
 
-def start_heartbeat(
+def start_lease_heartbeat(
     client: Any,
     execution_id: str,
     lease_id: str,
@@ -41,10 +41,16 @@ def start_heartbeat(
     stop = threading.Event()
     adopted = threading.Event()
     proc_ref: dict[str, subprocess.Popen[bytes] | None] = {"proc": None}
-    thread = threading.Thread(
-        target=heartbeat_loop,
-        args=(client, execution_id, lease_id, stop, interval, ownership_lost, proc_ref, adopted),
-        daemon=True,
+    config = HeartbeatConfig(
+        client=client,
+        execution_id=execution_id,
+        lease_id=lease_id,
+        stop=stop,
+        interval=interval,
+        ownership_lost=ownership_lost,
+        proc_ref=proc_ref,
+        adopted=adopted,
     )
+    thread = threading.Thread(target=heartbeat_loop, args=(config,), daemon=True)
     thread.start()
     return ExecutionHeartbeat(thread=thread, stop=stop, adopted=adopted, proc_ref=proc_ref)

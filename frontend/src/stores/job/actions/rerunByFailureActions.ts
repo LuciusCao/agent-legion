@@ -27,6 +27,7 @@ export function rerunByFailureActions(set: JobStoreSet, get: () => JobState) {
           strategy: 'auto',
           ...targetBody(target),
         }
+        if (input.fromNodeKey) body.from_node_key = input.fromNodeKey
         const data = await rerunJobsByFailure(workspaceId, body)
         const results = data.results ?? []
         const hasUpstreamRerun = results.some(

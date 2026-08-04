@@ -69,7 +69,8 @@ async fn streaming_chunks_aggregate_into_one_message() {
     assert_eq!(message.provider.as_deref(), Some("gateway"));
     assert_eq!(message.model.as_deref(), Some("kimi-k2.6"));
     let usage = message.usage.unwrap();
-    assert_eq!((usage.input, usage.output, usage.cache_read), (100, 12, 64));
+    // pi 口径: input excludes cache-read tokens (100 − 64).
+    assert_eq!((usage.input, usage.output, usage.cache_read), (36, 12, 64));
     assert_eq!(
         message.content,
         vec![
@@ -194,7 +195,8 @@ async fn non_streaming_json_fallback() {
         }]
     );
     let usage = message.usage.unwrap();
-    assert_eq!((usage.input, usage.output, usage.cache_read), (7, 2, 4));
+    // pi 口径: input excludes cache-read tokens (7 − 4).
+    assert_eq!((usage.input, usage.output, usage.cache_read), (3, 2, 4));
 }
 
 #[tokio::test]
@@ -359,6 +361,7 @@ async fn unrecovered_error_ends_run_with_exit_0() {
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        read_roots: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
@@ -435,6 +438,7 @@ async fn full_tool_round_over_gateway() {
         require_output: Vec::new(),
         session: None,
         cwd,
+        read_roots: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     };
@@ -524,6 +528,83 @@ async fn stream_ending_without_finish_reason_is_transient() {
     assert_eq!(server.recorded().len(), 2, "initial attempt + one retry");
 }
 
+#[tokio::test]
+async fn timing_present_and_monotonic_on_paced_stream() {
+    // A paced fixture stream gives the timing fields a stable lower bound:
+    // several 20ms pauses between body pieces, so the first→last chunk span
+    // cannot collapse to zero even on a fast loopback.
+    let body = sse_body(&[
+        json!({"choices": [{"delta": {"content": "Hel"}, "finish_reason": null}]}),
+        json!({"choices": [{"delta": {"content": "lo"}, "finish_reason": null}]}),
+        json!({"choices": [{"delta": {}, "finish_reason": "stop"}]}),
+        json!({"choices": [], "usage": {"prompt_tokens": 5, "completion_tokens": 2}}),
+    ]);
+    let server = MockServer::start(vec![MockResponse::paced_sse(
+        body,
+        48,
+        Duration::from_millis(20),
+    )])
+    .await;
+
+    let messages = vec![Message::user("hi".into())];
+    let message = provider(&server)
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap();
+
+    let timing = message.timing.expect("successful stream must carry timing");
+    assert!(
+        timing.ttfb_ms <= timing.total_ms,
+        "ttfb {} <= total {}",
+        timing.ttfb_ms,
+        timing.total_ms
+    );
+    assert!(
+        timing.stream_ms <= timing.total_ms,
+        "stream {} <= total {}",
+        timing.stream_ms,
+        timing.total_ms
+    );
+    assert!(
+        timing.ttfb_ms + timing.stream_ms <= timing.total_ms,
+        "ttfb {} + stream {} <= total {}",
+        timing.ttfb_ms,
+        timing.stream_ms,
+        timing.total_ms
+    );
+    // Several 20ms pauses fall strictly between the first and last chunk.
+    assert!(
+        timing.stream_ms >= 30,
+        "paced stream must show a measurable span, got {}ms",
+        timing.stream_ms
+    );
+}
+
+#[tokio::test]
+async fn timing_present_on_non_streaming_json_fallback() {
+    // The application/json dialect (PoC P2) measures headers as the
+    // first-byte mark; all three fields are still populated.
+    let body = json!({
+        "choices": [{
+            "message": {"role": "assistant", "content": "plain answer"},
+            "finish_reason": "stop"
+        }],
+        "usage": {"prompt_tokens": 7, "completion_tokens": 2}
+    })
+    .to_string();
+    let server = MockServer::start(vec![MockResponse::json(200, body)]).await;
+
+    let messages = vec![Message::user("hi".into())];
+    let message = provider(&server)
+        .complete(&request(&messages, &[]))
+        .await
+        .unwrap();
+
+    let timing = message.timing.expect("json fallback must carry timing");
+    assert!(timing.ttfb_ms <= timing.total_ms);
+    assert!(timing.stream_ms <= timing.total_ms);
+}
+
 // --- Retry observability (pi-compatible auto_retry_start events) -----------
 
 /// Retry provider whose failed transient attempts emit the pi-compatible
@@ -564,6 +645,7 @@ fn agent_config(dir: &tempfile::TempDir) -> velites::agent::AgentConfig {
         require_output: Vec::new(),
         session: None,
         cwd: dir.path().to_path_buf(),
+        read_roots: Vec::new(),
         sandbox: None,
         cancel: velites::cancel::CancelToken::default(),
     }
@@ -644,6 +726,8 @@ async fn retry_events_emitted_and_run_recovers() {
         assert!(failed.error_message.is_some(), "errorMessage required");
         assert_eq!(failed.provider.as_deref(), Some("gateway"));
         assert_eq!(failed.model.as_deref(), Some("kimi-k2.6"));
+        // Failed attempts carry no request-level timing.
+        assert!(failed.timing.is_none(), "error events omit timing");
     }
     assert!(message_ends[0]
         .error_message
@@ -651,6 +735,12 @@ async fn retry_events_emitted_and_run_recovers() {
         .unwrap_or_default()
         .contains("500"));
     assert_eq!(message_ends[2].stop_reason, Some(StopReason::Stop));
+    // Only the successful attempt is timed.
+    let timing = message_ends[2]
+        .timing
+        .expect("recovered attempt carries timing");
+    assert!(timing.ttfb_ms <= timing.total_ms);
+    assert!(timing.stream_ms <= timing.total_ms);
 
     let attempts: Vec<u32> = events
         .iter()

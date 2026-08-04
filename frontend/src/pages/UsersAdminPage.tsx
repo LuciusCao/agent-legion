@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useState } from 'react'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { useAuthStore } from '../stores/authStore'
 import { createUser, listUsers, updateUser } from '../api/authApi'
 import type { UserResponse } from '../api/authApi'
+import { useAsync } from '../hooks/useAsync'
 import styles from './UsersAdminPage.module.css'
 
 function errorMessage(error: unknown): string {
@@ -12,34 +13,26 @@ function errorMessage(error: unknown): string {
 
 export default function UsersAdminPage() {
   const currentUser = useAuthStore((s) => s.user)
-  const [users, setUsers] = useState<UserResponse[]>([])
   const [username, setUsername] = useState('')
   const [displayName, setDisplayName] = useState('')
   const [password, setPassword] = useState('')
   const [role, setRole] = useState<'admin' | 'member'>('member')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [refreshKey, setRefreshKey] = useState(0)
 
   const isAdmin = currentUser?.role === 'admin'
 
-  const refresh = useCallback(async () => {
-    setUsers(await listUsers())
-  }, [])
+  const { data: userList, error: listError } = useAsync(
+    () => listUsers(),
+    [isAdmin, refreshKey],
+    { enabled: isAdmin }
+  )
+  const users = userList ?? []
 
-  useEffect(() => {
-    if (!isAdmin) return
-    let cancelled = false
-    listUsers()
-      .then((list) => {
-        if (!cancelled) setUsers(list)
-      })
-      .catch((err: unknown) => {
-        if (!cancelled) setError(errorMessage(err))
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [isAdmin])
+  function refresh() {
+    setRefreshKey((key) => key + 1)
+  }
 
   async function handleCreate() {
     const trimmed = username.trim()
@@ -57,7 +50,7 @@ export default function UsersAdminPage() {
       setDisplayName('')
       setPassword('')
       setRole('member')
-      await refresh()
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -69,7 +62,7 @@ export default function UsersAdminPage() {
     setError('')
     try {
       await updateUser(user.id, { disabled: user.disabled_at === null })
-      await refresh()
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -81,7 +74,7 @@ export default function UsersAdminPage() {
       await updateUser(user.id, {
         role: user.role === 'admin' ? 'member' : 'admin',
       })
-      await refresh()
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     }
@@ -119,9 +112,9 @@ export default function UsersAdminPage() {
       )}
     >
       <div className={styles.main}>
-        {error && (
+        {(error || listError) && (
           <p className={styles.error} role="alert">
-            {error}
+            {error || listError}
           </p>
         )}
 

@@ -6,7 +6,8 @@ global row (``worker_id=''``) plus one row per active Worker per minute into
 ``ops_metric_samples``; the ``/api/metrics/overview`` route serves raw minute
 rows or epoch-floor rollups from the same table. The ``granularity`` query
 value names the window (``6h``/``24h``/``30d``) and implies the bin size
-(60s/300s/14400s); there are no separate window params.
+(60s/300s/14400s); there are no separate window params. The response also
+carries a window-independent ``summary`` (see ``_ops_metrics_summary``).
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services._ops_metrics_catchup import sample_catch_up as _sample_catch_up
 from server.app.services._ops_metrics_sampling import _EMPTY_TOKENS, _upsert_sample
+from server.app.services._ops_metrics_summary import query_summary as _query_summary
 
 Granularity = Literal["6h", "24h", "30d"]
 
@@ -33,16 +35,16 @@ _WINDOWS: dict[Granularity, tuple[timedelta, int]] = {
     "30d": (timedelta(days=30), 14_400),
 }
 
-# The shared row factory renders datetimes as UTC "%Y-%m-%d %H:%M:%S.%f"
-# strings (see server.app.db.rows); accept either shape and emit ISO-8601
-# with an explicit UTC offset for API consumers.
-_TIMESTAMP_FORMAT = "%Y-%m-%d %H:%M:%S.%f"
+# The shared row factory renders datetimes as UTC ISO-8601 strings with an
+# explicit offset (see server.app.db.rows); legacy rows and TEXT columns may
+# still hold naive "%Y-%m-%d %H:%M:%S.%f" strings. Accept either shape and
+# emit ISO-8601 with an explicit UTC offset for API consumers.
 
 
 def _isoformat_utc(value: Any) -> str:
     if not isinstance(value, datetime):
-        value = datetime.strptime(str(value), _TIMESTAMP_FORMAT).replace(tzinfo=UTC)
-    elif value.tzinfo is None:
+        value = datetime.fromisoformat(str(value))
+    if value.tzinfo is None:
         value = value.replace(tzinfo=UTC)
     return str(value.isoformat())
 
@@ -172,6 +174,9 @@ class OpsMetricsService:
                 "delete from ops_metric_samples where bucket_start < ?", (cutoff,)
             )
             return result.rowcount
+
+    def query_summary(self, worker_id: str | None = None) -> dict[str, Any]:
+        return _query_summary(self, worker_id)
 
     def query_series(
         self,

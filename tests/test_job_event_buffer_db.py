@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from server.app.db.schema import init_db
-from server.app.job_events import JobEventBuffer
+from server.app.events.buffer import JobEventBuffer
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -71,7 +71,7 @@ def test_overflow_resync_semantics_unchanged(db_path):
 def test_db_revision_retries_on_transaction_conflict(db_path, monkeypatch):
     from psycopg.errors import SerializationFailure
 
-    import server.app.job_event_buffer as buffer_module
+    import server.app.events.buffer as buffer_module
     from server.app.db.transaction import write_transaction as real_write_transaction
 
     calls = 0

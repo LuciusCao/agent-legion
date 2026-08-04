@@ -3,9 +3,10 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from server.app.job_events import broadcast_job_update, record_job_update
+from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.workflow_branching import downstream_nodes
@@ -22,39 +23,24 @@ def resolve_rerun_node(
     job: dict[str, Any],
     node_key: str | None,
     from_failed_node: bool,
-) -> tuple[str | None, dict[str, Any] | None]:
-    """Resolve the actual node key for a rerun and return any early error."""
+) -> str:
+    """Resolve the actual node key for a rerun, raising on an invalid selection."""
     if from_failed_node:
         if job.get("status") != "failed":
-            return None, {
-                "job_id": job_id,
-                "operation": "rerun",
-                "status": "skipped",
-                "node_key": None,
-                "reason_code": "not_failed",
-                "message": "Job is not failed",
-            }
+            raise JobOperationError(
+                job_id, "rerun", "skipped", None, "not_failed", "Job is not failed"
+            )
         for node in job_db.list_job_nodes(job_id):
             if node["status"] == "failed":
-                return str(node["node_key"]), None
-        return None, {
-            "job_id": job_id,
-            "operation": "rerun",
-            "status": "skipped",
-            "node_key": None,
-            "reason_code": "no_failed_node",
-            "message": "No failed node found",
-        }
+                return str(node["node_key"])
+        raise JobOperationError(
+            job_id, "rerun", "skipped", None, "no_failed_node", "No failed node found"
+        )
     if node_key is None:
-        return None, {
-            "job_id": job_id,
-            "operation": "rerun",
-            "status": "failed",
-            "node_key": None,
-            "reason_code": "node_key_required",
-            "message": "node_key is required",
-        }
-    return node_key, None
+        raise JobOperationError(
+            job_id, "rerun", "failed", None, "node_key_required", "node_key is required"
+        )
+    return node_key
 
 
 def execute_rerun(
@@ -62,14 +48,15 @@ def execute_rerun(
     job: dict[str, Any],
     job_id: str,
     actual_node_key: str,
-) -> dict[str, Any]:
+) -> JobOperationResult:
     """Validate and mark a single node for rerun."""
     definition = definition_from_job_snapshot(job) or service.workflows.definition(
         str(job["workflow_key"])
     )
     if actual_node_key not in definition.nodes:
-        return _result(
+        raise JobOperationError(
             job_id,
+            "rerun",
             "failed",
             actual_node_key,
             "node_not_found",
@@ -77,8 +64,9 @@ def execute_rerun(
         )
 
     if service.job_db.get_job_node(job_id, actual_node_key) is None:
-        return _result(
+        raise JobOperationError(
             job_id,
+            "rerun",
             "failed",
             actual_node_key,
             "node_not_found",
@@ -86,8 +74,9 @@ def execute_rerun(
         )
 
     if service.lease_repo.has_active_for_node(job_id, actual_node_key, service._now()):
-        return _result(
+        raise JobOperationError(
             job_id,
+            "rerun",
             "skipped",
             actual_node_key,
             "busy",
@@ -95,8 +84,9 @@ def execute_rerun(
         )
 
     if service._job_has_running_nodes(job_id):
-        return _result(
+        raise JobOperationError(
             job_id,
+            "rerun",
             "skipped",
             actual_node_key,
             "busy",
@@ -118,22 +108,27 @@ def execute_rerun(
     except JobMutationConflict as exc:
         if staged is not None:
             staged.rollback()
-        return _result(job_id, "skipped", actual_node_key, exc.reason_code, str(exc))
+        raise JobOperationError(
+            job_id, "rerun", "skipped", actual_node_key, exc.reason_code, str(exc)
+        ) from exc
     except ValueError as exc:
         if staged is not None:
             staged.rollback()
-        return _result(job_id, "failed", actual_node_key, "cleanup_failed", str(exc))
+        raise JobOperationError(
+            job_id, "rerun", "failed", actual_node_key, "cleanup_failed", str(exc)
+        ) from exc
     except Exception as exc:
         logger.exception("Failed to mark nodes for rerun for job %s", job_id)
         if staged is not None:
             staged.rollback()
-        return _result(
+        raise JobOperationError(
             job_id,
+            "rerun",
             "failed",
             actual_node_key,
             "rerun_failed",
             str(exc),
-        )
+        ) from exc
 
     commit_staged_outputs(staged, job_id, "rerun")
     notify_schedulable_work()
@@ -144,18 +139,25 @@ def execute_rerun(
     return _result(job_id, "succeeded", actual_node_key)
 
 
-def _result(
+def execute_rerun_result(
+    service: JobRerunService,
+    job: dict[str, Any],
     job_id: str,
-    status: str,
-    node_key: str | None = None,
-    reason_code: str | None = None,
-    message: str | None = None,
-) -> dict[str, Any]:
+    actual_node_key: str,
+) -> JobOperationResult:
+    """Rerun one node, capturing a non-succeeded outcome as a result dict (batch use)."""
+    try:
+        return execute_rerun(service, job, job_id, actual_node_key)
+    except JobOperationError as exc:
+        return exc.to_result()
+
+
+def _result(job_id: str, status: str, node_key: str | None = None) -> JobOperationResult:
     return {
         "job_id": job_id,
         "operation": "rerun",
         "status": status,
         "node_key": node_key,
-        "reason_code": reason_code,
-        "message": message,
+        "reason_code": None,
+        "message": None,
     }

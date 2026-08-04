@@ -124,6 +124,8 @@ fn golden_event_sequence_with_tool_round() {
     assert_eq!(msg1["usage"]["output"], 5);
     assert_eq!(msg1["usage"]["cacheRead"], 3);
     assert!(msg1.get("errorMessage").is_none());
+    // Stub provider never fills request-level timing.
+    assert!(msg1.get("timing").is_none());
     assert_eq!(msg1["content"][0]["type"], "thinking");
     assert_eq!(msg1["content"][0]["thinking"], "I should read the file.");
     assert_eq!(msg1["content"][1]["type"], "text");
@@ -163,6 +165,7 @@ fn golden_event_sequence_with_tool_round() {
     assert_eq!(msg2["usage"]["output"], 8);
     assert_eq!(msg2["usage"]["cacheRead"], 0);
     assert_eq!(msg2["content"][0]["text"], "The file says: hello velites");
+    assert!(msg2.get("timing").is_none());
 
     // agent_end: full history, no error.
     let agent_end = &events[12];

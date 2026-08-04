@@ -8,27 +8,25 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
+from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.agents import AgentStatusManager
+from server.app.services.artifact_store import ArtifactStore
+from server.app.settings import Settings
+from server.app.workflows.schema import WorkflowNode
 from tests.postgres_support import TEST_DATABASE_URL
 
 
-def _seed_request(
+def _insert_job_rows(
     job_db,
     *,
     job_id: str,
-    node_key: str = "generate",
-    limit: int = 20,
-    workspace_id: str = "test-workspace",
+    node_key: str,
+    limit: int,
+    workspace_id: str,
+    agent_id: str,
 ) -> None:
-    definition = AgentDefinition(
-        capability="generate",
-        runtime="pi",
-        skill="question/generate",
-        requires_labels={"arch": "arm64"},
-    )
-    sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspaces(id, name) values (?, 'Test') on conflict(id) do nothing",
@@ -42,9 +40,9 @@ def _seed_request(
         conn.execute("insert into job_nodes(job_id, node_key) values (?, ?)", (job_id, node_key))
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (?, 'questions', ?, 'agent', 'generator-v1')"
+            " values (?, 'questions', ?, 'agent', ?)"
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
-            (workspace_id, node_key),
+            (workspace_id, node_key, agent_id),
         )
         # Capacity is workspace-level now: one row per workspace.
         conn.execute(
@@ -54,6 +52,34 @@ def _seed_request(
             " set max_concurrency=excluded.max_concurrency",
             (workspace_id, limit),
         )
+
+
+def _seed_request(
+    job_db,
+    *,
+    job_id: str,
+    node_key: str = "generate",
+    limit: int = 20,
+    workspace_id: str = "test-workspace",
+    runtime: str = "pi",
+    agent_id: str = "generator-v1",
+    definitions: dict[str, AgentDefinition] | None = None,
+) -> None:
+    definition = AgentDefinition(
+        capability="generate",
+        runtime=runtime,
+        skill="question/generate",
+        requires_labels={"arch": "arm64"},
+    )
+    sync_agent_definitions(TEST_DATABASE_URL, definitions or {agent_id: definition})
+    _insert_job_rows(
+        job_db,
+        job_id=job_id,
+        node_key=node_key,
+        limit=limit,
+        workspace_id=workspace_id,
+        agent_id=agent_id,
+    )
     broker = AgentExecutionBroker(TEST_DATABASE_URL)
     assert broker.enqueue(
         AgentExecutionRequest(
@@ -61,7 +87,7 @@ def _seed_request(
             job_id=job_id,
             workflow_key="questions",
             node_key=node_key,
-            agent_id="generator-v1",
+            agent_id=agent_id,
             agent_definition_hash=definition.definition_hash(),
             manifest={
                 "job_id": job_id,
@@ -737,3 +763,170 @@ def test_sweep_requeues_reporting_with_expired_heartbeat(job_db) -> None:
     assert row["state"] == "queued"
     assert row["worker_id"] is None
     assert job_db.get_job_node("job-1", "generate")["status"] == "pending"
+
+
+def _register_runtime_worker(
+    registry: AgentWorkerRegistry, worker_id: str, runtimes: list[str]
+) -> None:
+    registry.issue_token(
+        worker_id=worker_id,
+        name=worker_id,
+        runtimes=runtimes,
+        max_concurrency=10,
+        labels={"arch": "arm64"},
+    )
+
+
+def test_pi_only_worker_cannot_claim_velites_request(job_db) -> None:
+    """Runtime matching lives in claim.py: a Worker that never declared
+    velites skips velites requests; a velites Worker picks them up."""
+    _seed_request(job_db, job_id="job-1", runtime="velites")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_runtime_worker(registry, "worker-pi", ["pi"])
+    _register_runtime_worker(registry, "worker-velites", ["velites"])
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    assert broker.claim("worker-pi") is None
+    assert job_db.get_job_node("job-1", "generate")["status"] == "pending"
+
+    claimed = broker.claim("worker-velites")
+    assert claimed is not None
+    assert claimed.job_id == "job-1"
+    assert job_db.get_job_node("job-1", "generate")["status"] == "running"
+
+
+def test_mixed_runtime_fleet_claims_matching_requests(job_db) -> None:
+    """Dual-runtime coexistence: pi and velites definitions side by side, each
+    Worker claims exactly the requests of its declared runtime."""
+    pi_definition = AgentDefinition(
+        capability="generate",
+        runtime="pi",
+        skill="question/generate",
+        requires_labels={"arch": "arm64"},
+    )
+    velites_definition = AgentDefinition(
+        capability="generate",
+        runtime="velites",
+        skill="question/generate",
+        requires_labels={"arch": "arm64"},
+    )
+    catalog = {"gen-pi": pi_definition, "gen-velites": velites_definition}
+    _seed_request(
+        job_db,
+        job_id="job-pi",
+        node_key="generate-a",
+        runtime="pi",
+        agent_id="gen-pi",
+        definitions=catalog,
+    )
+    _seed_request(
+        job_db,
+        job_id="job-velites",
+        node_key="generate-b",
+        runtime="velites",
+        agent_id="gen-velites",
+        definitions=catalog,
+    )
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_runtime_worker(registry, "worker-pi", ["pi"])
+    _register_runtime_worker(registry, "worker-velites", ["pi", "velites"])
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    claimed_pi = broker.claim("worker-pi")
+    assert claimed_pi is not None
+    assert claimed_pi.job_id == "job-pi"
+    # The pi-only Worker never touches the velites request.
+    assert broker.claim("worker-pi") is None
+
+    claimed_velites = broker.claim("worker-velites")
+    assert claimed_velites is not None
+    assert claimed_velites.job_id == "job-velites"
+    assert job_db.get_job_node("job-velites", "generate-b")["status"] == "running"
+
+
+def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) -> None:
+    """Definition migration (runtime pi -> velites) changes definition_hash:
+    the queued request pinned to the old hash is failed by the stale sweeper
+    while the freshly pinned velites request claims normally."""
+    _seed_request(job_db, job_id="job-old", runtime="pi")
+    # Migrate the definition in place: same agent_id, new runtime => new hash.
+    velites_definition = AgentDefinition(
+        capability="generate",
+        runtime="velites",
+        skill="question/generate",
+        requires_labels={"arch": "arm64"},
+    )
+    sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": velites_definition})
+    _insert_job_rows(
+        job_db,
+        job_id="job-new",
+        node_key="generate",
+        limit=20,
+        workspace_id="test-workspace",
+        agent_id="generator-v1",
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    fresh_execution_id = broker.enqueue(
+        AgentExecutionRequest(
+            workspace_id="test-workspace",
+            job_id="job-new",
+            workflow_key="questions",
+            node_key="generate",
+            agent_id="generator-v1",
+            agent_definition_hash=velites_definition.definition_hash(),
+            manifest={
+                "job_id": "job-new",
+                "log_path": "logs/job-new.log",
+                "pi": {"provider": "gateway", "model": "test-model"},
+            },
+        )
+    )
+    assert fresh_execution_id is not None
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_runtime_worker(registry, "worker-velites", ["velites"])
+
+    stale = broker.fail_stale_definition_requests()
+    assert len(stale) == 1
+    assert stale != [fresh_execution_id]
+    assert job_db.get_job_node("job-old", "generate")["status"] == "failed"
+
+    claimed = broker.claim("worker-velites")
+    assert claimed is not None
+    assert claimed.execution_id == fresh_execution_id
+    assert claimed.job_id == "job-new"
+
+
+def test_dispatch_fails_fast_on_unsupported_runtime(job_db, tmp_path) -> None:
+    """EXEC-RUNTIME-DISPATCH-001: openclaw stays fail-fast at dispatch; the
+    error names the supported runtime set."""
+    settings = Settings(
+        root_dir=tmp_path,
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={},
+    )
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=tmp_path / "bundles")
+    store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
+    service = AgentDispatchService(settings, broker, store)
+    definition = AgentDefinition(
+        capability="generate",
+        runtime="openclaw",
+        skill="question/generate",
+    )
+    node = WorkflowNode(key="generate", label="generate", capability="generate", outputs=["o.json"])
+
+    with pytest.raises(ValueError, match=r"supported runtimes: pi, velites"):
+        service.enqueue(
+            agent_id="generator-v1",
+            definition=definition,
+            workspace={"id": "test-workspace"},
+            job={"id": "job-openclaw"},
+            workflow_key="questions",
+            node=node,
+            job_dir=tmp_path / "job",
+            log_path=tmp_path / "job.log",
+            inputs=(),
+        )

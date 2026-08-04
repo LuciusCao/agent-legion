@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_selection_resolver import resolve_batch_selection
 
 if TYPE_CHECKING:
@@ -31,7 +32,10 @@ def batch_delete(
         if not normalized or normalized in seen:
             continue
         seen.add(normalized)
-        results.append(service.delete(workspace_id, normalized))
+        try:
+            results.append(service.delete(workspace_id, normalized))
+        except JobOperationError as exc:
+            results.append(exc.to_result())
     return results
 
 
@@ -44,7 +48,13 @@ def batch_run_to(
     *,
     job_filter: JobListFilter | None = None,
     exclude_ids: Collection[str] = (),
-) -> list[dict[str, Any]]:
+) -> list[JobOperationResult]:
     """Run each selected job to ``target_node_key`` (ids are not normalized)."""
     ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
-    return [service.run_to(workspace_id, job_id, target_node_key, start_node_key) for job_id in ids]
+    results: list[JobOperationResult] = []
+    for job_id in ids:
+        try:
+            results.append(service.run_to(workspace_id, job_id, target_node_key, start_node_key))
+        except JobOperationError as exc:
+            results.append(exc.to_result())
+    return results

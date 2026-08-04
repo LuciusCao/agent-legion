@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from server.app.executors._lease_claims import claim_lease
-from server.app.executors.leases import ExecutorLeaseRepository, _database_timestamp
+from server.app.executors.leases import ExecutorLeaseRepository, database_timestamp
 from server.app.executors.models import (
     ConfigurationFailureRequest,
     ExecutionResult,
@@ -209,4 +209,4 @@ def test_finish_lease_rejects_session_dir_outside_jobs(
 
 def test_database_timestamp_is_utc_without_t_separator() -> None:
     now = datetime(2025, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
-    assert _database_timestamp(now) == "2025-01-02 03:04:05.123456"
+    assert database_timestamp(now) == "2025-01-02 03:04:05.123456"

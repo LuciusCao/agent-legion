@@ -3,7 +3,7 @@ import type { VideoArtifacts } from '../types'
 import { useArtifactStore } from '../stores/artifactStore'
 import { useInteractionStore } from '../stores/interactionStore'
 import { INTERACTION_TYPE_LABELS } from '../labels'
-import { parseTimeSeconds } from '../helpers'
+import { parseTimeSeconds } from '../lib/formatters'
 import { RichText } from './RichText'
 import {
   formatIssue,

@@ -6,7 +6,7 @@ import subprocess
 import sys
 import threading
 
-from worker.execution_lifecycle import heartbeat_loop
+from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
 
 
 class FakeClient:
@@ -30,11 +30,17 @@ def _start_loop(
     proc_ref: dict[str, subprocess.Popen[bytes] | None],
     adopted: threading.Event,
 ) -> threading.Thread:
-    thread = threading.Thread(
-        target=heartbeat_loop,
-        args=(client, "exec-1", "lease-1", stop, 0.02, threading.Event(), proc_ref, adopted),
-        daemon=True,
+    config = HeartbeatConfig(
+        client=client,
+        execution_id="exec-1",
+        lease_id="lease-1",
+        stop=stop,
+        interval=0.02,
+        ownership_lost=threading.Event(),
+        proc_ref=proc_ref,
+        adopted=adopted,
     )
+    thread = threading.Thread(target=heartbeat_loop, args=(config,), daemon=True)
     thread.start()
     return thread
 

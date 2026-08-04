@@ -1,34 +1,30 @@
 import asyncio
-import logging
 import os
 from contextlib import asynccontextmanager
-from functools import partial
 from pathlib import Path
 
 from fastapi import FastAPI
 
-from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
 from server.app.agent_catalog import sync_agent_definitions
 from server.app.agent_completion import AgentCompletionHandler
-from server.app.agent_dispatch import AgentDispatchService
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.agents import AgentStatusManager
 from server.app.auth.service import build_auth_service
 from server.app.db.connection import close_database_pools
-from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
+from server.app.events.aggregator import build_workspace_event_aggregator
+from server.app.events.bus import InProcessEventBus
 from server.app.executor_registry_factory import build_executor_registry
-from server.app.executors._pi_skill import build_skill_manager
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.pi import build_skill_manager
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
-from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
-from server.app.scheduler_wakeup import register_wakeup, unregister_wakeup
+from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
@@ -44,8 +40,8 @@ from server.app.settings import load_settings, validate_settings
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
-from server.app.workflow_worker_agent_gate import request_restock
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.worker_startup import start_worker_threads
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
 def create_app(
@@ -80,7 +76,10 @@ def create_app(
         job_event_buffer=job_event_buffer,
     )
     agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
-    executor_registry = build_executor_registry(settings, job_db, artifact_store=artifact_store)
+    skill_manager = build_skill_manager(settings.root_dir)
+    executor_registry = build_executor_registry(
+        settings, job_db, artifact_store=artifact_store, skill_manager=skill_manager
+    )
 
     executor_leases = ExecutorLeaseRepository(
         job_db.path,
@@ -96,7 +95,7 @@ def create_app(
         artifact_store,
         settings.jobs_dir,
         settings.data_dir / "agent_bundles",
-        skill_manager=build_skill_manager(settings.root_dir),
+        skill_manager=skill_manager,
     )
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
@@ -114,49 +113,17 @@ def create_app(
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
-            if WorkflowWorkerThread.is_enabled(settings):
-                execution_runtime = ExecutionRuntime(
-                    executor_leases,
-                    executor_registry,
-                    heartbeat_interval_seconds=settings.executor_runtime.heartbeat_interval_seconds,
-                    lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
-                    heartbeat_failure_threshold=settings.executor_runtime.heartbeat_failure_threshold,
-                    cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
-                )
-                # The sweeper owns all lease hygiene; sweeper_enabled=False means
-                # an external sweeper process (multi-replica deployments).
-                if settings.executor_runtime.sweeper_enabled:
-                    sweeper_thread = SweeperThread(
-                        executor_leases,
-                        agent_broker,
-                        interval_seconds=settings.executor_runtime.sweeper_interval_seconds,
-                        lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
-                    )
-                    try:
-                        sweeper_thread.start()
-                    except Exception:
-                        logging.getLogger(__name__).exception("sweeper failed to start")
-                        sweeper_thread = None
-                workflow_worker_thread = WorkflowWorkerThread(
-                    job_db=job_db,
-                    leases=executor_leases,
-                    registry=executor_registry,
-                    runtime=execution_runtime,
-                    settings=settings,
-                    workspace_worker_control=workspace_worker_control,
-                    agent_manager=agent_manager,
-                    agent_dispatch=agent_dispatch,
-                )
-                try:
-                    workflow_worker_thread.start()
-                except Exception:
-                    logging.getLogger(__name__).exception("workflow worker failed to start")
-                else:
-                    register_wakeup(workflow_worker_thread.wake)
-                    # Empty Worker claims demand immediate restocking (debounced).
-                    agent_broker.empty_claim.on_empty_queue = partial(
-                        request_restock, workflow_worker_thread
-                    )
+            sweeper_thread, workflow_worker_thread, worker_status = start_worker_threads(
+                settings,
+                job_db=job_db,
+                executor_leases=executor_leases,
+                executor_registry=executor_registry,
+                agent_broker=agent_broker,
+                workspace_worker_control=workspace_worker_control,
+                agent_manager=agent_manager,
+                agent_dispatch=agent_dispatch,
+            )
+            app.state.worker_startup = worker_status
         background_tasks.start(app)
         try:
             yield

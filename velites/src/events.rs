@@ -43,12 +43,41 @@ pub enum Role {
 }
 
 /// Token usage of one assistant message. `cacheRead` is camelCase on the wire.
+///
+/// Pi-aligned semantics: `input` EXCLUDES cache-read tokens (the provider's
+/// `prompt_tokens` includes them; subtracting avoids double-billing the
+/// cached part), so `input + cacheRead` reconstructs `prompt_tokens`.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Usage {
+    /// Non-cached input tokens (pi-aligned; excludes `cacheRead`).
     pub input: u64,
     pub output: u64,
     pub cache_read: u64,
+}
+
+/// Request-level timing of one LLM completion (velites extension; Pi has no
+/// equivalent). Attached to the assistant message of the SUCCESSFUL attempt —
+/// failed transient attempts surface as pi-compatible error `message_end`
+/// events without timing. All durations are wall-clock milliseconds measured
+/// by the provider:
+///
+/// - `ttfbMs`: POST sent → first SSE `data:` chunk (for the non-streaming
+///   JSON fallback dialect: → response headers);
+/// - `streamMs`: first → last SSE `data:` chunk (`[DONE]` or connection end);
+/// - `totalMs`: POST sent → stream end.
+///
+/// Tokens-per-second is NOT stored: consumers derive it as
+/// `usage.output / (streamMs / 1000)`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct RequestTiming {
+    /// POST sent → first response chunk, in milliseconds.
+    pub ttfb_ms: u64,
+    /// First → last stream chunk, in milliseconds.
+    pub stream_ms: u64,
+    /// POST sent → stream end, in milliseconds.
+    pub total_ms: u64,
 }
 
 /// Content block of a message (pi-compatible shapes).
@@ -70,7 +99,7 @@ pub enum ContentBlock {
 }
 
 /// One conversation message. Assistant metadata (`usage`, `provider`, `model`,
-/// `stopReason`, `errorMessage`) and tool-result metadata (`toolCallId`,
+/// `stopReason`, `errorMessage`, `timing`) and tool-result metadata (`toolCallId`,
 /// `toolName`, `isError`) are only present on the roles they apply to; `None`
 /// fields are skipped on the wire.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -94,6 +123,10 @@ pub struct Message {
     pub tool_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub is_error: Option<bool>,
+    /// Request-level timing (velites extension); only set by real providers
+    /// on successful completions — the stub provider and error events omit it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timing: Option<RequestTiming>,
 }
 
 impl Message {
@@ -110,6 +143,7 @@ impl Message {
             tool_call_id: None,
             tool_name: None,
             is_error: None,
+            timing: None,
         }
     }
 
@@ -449,6 +483,30 @@ mod tests {
         assert_eq!(retry_start["maxAttempts"], 4);
         assert_eq!(retry_start["delayMs"], 2000);
         assert_eq!(retry_start["error"], "terminated");
+    }
+
+    #[test]
+    fn timing_wire_shape_and_skip_when_absent() {
+        let mut msg = Message::bare(
+            Role::Assistant,
+            vec![ContentBlock::Text { text: "hi".into() }],
+        );
+        // Absent timing (stub provider, error events) is skipped, not null.
+        let value = serde_json::to_value(&msg).unwrap();
+        assert!(value.get("timing").is_none());
+
+        msg.timing = Some(RequestTiming {
+            ttfb_ms: 120,
+            stream_ms: 480,
+            total_ms: 600,
+        });
+        let value = serde_json::to_value(&msg).unwrap();
+        assert_eq!(value["timing"]["ttfbMs"], 120);
+        assert_eq!(value["timing"]["streamMs"], 480);
+        assert_eq!(value["timing"]["totalMs"], 600);
+        // Round-trip through the schema types.
+        let decoded: Message = serde_json::from_value(value).unwrap();
+        assert_eq!(decoded.timing, msg.timing);
     }
 
     #[test]

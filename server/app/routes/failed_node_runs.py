@@ -8,11 +8,13 @@ from server.app.jobs import JobQueries
 from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunItem,
     FailedNodeRunsResponse,
+)
+from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.job_rerun_by_failure_contracts import (
     JobRerunByFailureRequest,
     JobRerunByFailureResponse,
     JobRerunByFailureResultResponse,
 )
-from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.services.failed_node_runs import FailedNodeRunQueryService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_rerun import JobRerunService
@@ -68,6 +70,7 @@ def create_failed_node_runs_router(
             workflow_key=payload.workflow_key,
             job_filter=payload.filter.to_filter() if payload.filter is not None else None,
             exclude_ids=payload.exclude_ids,
+            from_node_key=payload.from_node_key,
         )
         return JobRerunByFailureResponse(
             results=[JobRerunByFailureResultResponse.model_validate(result) for result in results]

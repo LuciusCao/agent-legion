@@ -14,6 +14,7 @@ fn ctx(cwd: &std::path::Path) -> ToolContext {
         // own integration tests (tests/os_sandbox.rs) and CI's Linux lane
         // has no bwrap.
         sandbox: None,
+        read_roots: Vec::new(),
     }
 }
 

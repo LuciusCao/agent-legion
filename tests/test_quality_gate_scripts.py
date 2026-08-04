@@ -169,7 +169,7 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
             "AGENT_LEGION_TEST_RESULT_NAME": "quick",
             "BACKEND_GATE_PHASE": "test",
             "GATE_LOG": str(gate_log),
-            "GATE_TIER": "smoke",
+            "GATE_TIER": "unit",
             "PATH": f"{fake_bin}:{os.environ['PATH']}",
         },
     )
@@ -178,11 +178,46 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     assert "PostgreSQL offline" in result.stdout
     calls = gate_log.read_text(encoding="utf-8")
     assert "not postgres and not repository_gate" in calls
-    assert "smoke and not repository_gate" not in calls
     assert "--durations=30" in calls
     assert f"--junitxml={results / 'quick-junit.xml'}" in calls
     assert "-p scripts.pytest_telemetry" in calls
     assert f"rerun:{results / 'quick-reruns.json'}" in calls
+
+
+def test_backend_smoke_tier_runs_the_curated_subset(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "smoke",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Python Smoke Tests" in result.stdout
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "-m smoke" in calls
+    assert "not postgres" not in calls
+    # The curated tier includes PostgreSQL-backed tests, so it must not be
+    # pinned to the unit tier's unreachable database URL.
+    assert "agent_legion_unit_offline" not in calls
 
 
 def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -> None:

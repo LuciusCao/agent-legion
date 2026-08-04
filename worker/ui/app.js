@@ -6,11 +6,23 @@
 const hasDom = typeof document !== "undefined";
 const form = hasDom ? document.querySelector("#config-form") : null;
 const errorBox = hasDom ? document.querySelector("#form-error") : null;
-const CONTROL_TOKEN = typeof window !== "undefined" ? window.__WORKER_CONTROL_TOKEN__ : undefined;
-const TOKEN_MISSING = !CONTROL_TOKEN || CONTROL_TOKEN === "__WORKER_CONTROL_TOKEN__";
+const injectedToken = typeof window !== "undefined" ? window.__WORKER_CONTROL_TOKEN__ : undefined;
+let CONTROL_TOKEN = !injectedToken || injectedToken === "__WORKER_CONTROL_TOKEN__" ? undefined : injectedToken;
+// 非回环绑定时服务端不再内嵌 token：先读 sessionStorage，否则提示手动输入并记住本次会话。
+if (!CONTROL_TOKEN && hasDom) {
+  CONTROL_TOKEN = window.sessionStorage.getItem("worker-control-token") || undefined;
+  if (!CONTROL_TOKEN) {
+    const entered = window.prompt("请输入 Worker 控制令牌（见 state dir 下的 control_token 文件）");
+    if (entered) {
+      CONTROL_TOKEN = entered;
+      window.sessionStorage.setItem("worker-control-token", entered);
+    }
+  }
+}
+const TOKEN_MISSING = !CONTROL_TOKEN;
 let latestMaxConcurrency = 0;
 // 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
-export const NUMBER_DEFAULTS = { max_concurrency: 1, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
+export const NUMBER_DEFAULTS = { max_concurrency: 1, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
 async function api(path, options = {}) {
   const headers = { Authorization: `Bearer ${CONTROL_TOKEN}`, ...(options.headers || {}) };
@@ -85,11 +97,17 @@ function renderStatus(status) {
   setText("process-state", processState);
   setText("claim-state", status.claim_enabled ? "正在领取" : "已暂停");
   document.querySelector("#claim-state").className = status.claim_enabled ? "mint-text" : "amber-text";
-  const activeCount = status.current_executions?.length || 0;
+  const runningCount = status.running_executions_count ?? 0;
   const capacity = status.max_concurrency ?? 0;
   latestMaxConcurrency = capacity;
-  setText("capacity-state", `${activeCount} / ${capacity || "—"}`);
-  document.querySelector("#capacity-meter").style.width = `${capacity ? Math.min(100, (activeCount / capacity) * 100) : 0}%`;
+  setText("capacity-state", `${runningCount} / ${capacity || "—"}`);
+  document.querySelector("#capacity-meter").style.width = `${capacity ? Math.min(100, (runningCount / capacity) * 100) : 0}%`;
+  const uploadActive = status.upload_active_count ?? 0;
+  const uploadQueued = status.upload_queued_count ?? 0;
+  const uploadCapacity = status.upload_max_concurrency ?? 4;
+  setText("upload-state", `${uploadActive} / ${uploadCapacity || "—"}`);
+  setText("upload-queued", uploadQueued > 0 ? `${uploadQueued} 个排队` : "无排队");
+  document.querySelector("#upload-meter").style.width = `${uploadCapacity ? Math.min(100, (uploadActive / uploadCapacity) * 100) : 0}%`;
   const toggle = document.querySelector("#toggle-claiming");
   toggle.dataset.enabled = String(Boolean(status.claim_enabled));
   toggle.querySelector("span").textContent = status.claim_enabled ? "暂停领取" : "开始领取";
@@ -171,8 +189,20 @@ export function phaseProgress(phase) {
   return { claimed: 16, downloading: 34, running: 68, queued_upload: 80, uploading: 88 }[phase] ?? 12;
 }
 
+// 与 worker/status_aggregates.py 的运行中口径一致：上传阶段已释放运行槽位。
+export function runOccupancy(executions = []) {
+  return (executions || []).filter((execution) => ["claimed", "downloading", "running"].includes(execution.phase)).length;
+}
+
 function phaseLabel(phase) {
-  return { claimed: "已领取", downloading: "下载中", running: "运行中", queued_upload: "等待上传", uploading: "上传中" }[phase] || phase || "未知";
+  return { claimed: "已领取", downloading: "下载中", running: "运行中", queued_upload: "排队上传", uploading: "上传中" }[phase] || phase || "未知";
+}
+
+function phaseBadgeClass(phase) {
+  if (phase === "uploading" || phase === "queued_upload") return "status-badge uploading";
+  if (phase === "running") return "status-badge";
+  if (phase === "downloading") return "status-badge info";
+  return "status-badge warn";
 }
 
 function shortenId(value) {
@@ -226,7 +256,7 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
     name.append(mark, title, count);
 
     const phase = document.createElement("span");
-    phase.className = `status-badge ${group.phase === "uploading" ? "uploading" : group.phase === "running" ? "" : "warn"}`.trim();
+    phase.className = phaseBadgeClass(group.phase);
     phase.textContent = phaseLabel(group.phase);
 
     const elapsed = document.createElement("span");
@@ -241,8 +271,8 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
     progress.append(progressBar, `${group.executions.length} 个执行`);
     const capacity = document.createElement("span");
     capacity.className = "group-capacity";
-    capacity.title = "当前分组占用 / 本机最大并发";
-    capacity.textContent = `${group.executions.length} / ${maxConcurrency || "—"}`;
+    capacity.title = "当前分组运行中占用 / 本机最大并发";
+    capacity.textContent = `${runOccupancy(group.executions)} / ${maxConcurrency || "—"}`;
     button.append(name, phase, elapsed, progress, capacity);
 
     const children = document.createElement("div");
@@ -256,7 +286,7 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
       id.className = "execution-id";
       id.textContent = shortenId(execution.execution_id || execution.job_id || executionLabel(execution));
       const rowPhase = document.createElement("span");
-      rowPhase.className = `status-badge ${execution.phase === "uploading" ? "uploading" : execution.phase === "running" ? "" : "warn"}`.trim();
+      rowPhase.className = phaseBadgeClass(execution.phase);
       rowPhase.textContent = phaseLabel(execution.phase);
       const rowElapsed = document.createElement("span");
       rowElapsed.textContent = formatElapsed(execution.started_at);
@@ -269,8 +299,8 @@ function renderExecutions(executions, maxConcurrency = latestMaxConcurrency) {
       rowBar.append(rowFill);
       rowProgress.append(rowBar, phaseLabel(execution.phase));
       const rowCapacity = document.createElement("span");
-      rowCapacity.title = "当前执行占用 / 本机最大并发";
-      rowCapacity.textContent = `1 / ${maxConcurrency || "—"}`;
+      rowCapacity.title = "当前执行运行中占用 / 本机最大并发（上传阶段不占运行槽位）";
+      rowCapacity.textContent = `${runOccupancy([execution])} / ${maxConcurrency || "—"}`;
       row.append(id, rowPhase, rowElapsed, rowProgress, rowCapacity);
       children.appendChild(row);
     });
@@ -583,9 +613,10 @@ if (hasDom) {
       const data = new FormData(form);
       const payload = {
         host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
-        max_concurrency: numberField(data, "max_concurrency"), runtimes: data.getAll("runtimes"),
-        capabilities: linesFromText(data.get("capabilities")), models: modelsFromText(data.get("models")),
-        labels: labelsFromText(data.get("labels")), poll_interval_seconds: numberField(data, "poll_interval_seconds"),
+        max_concurrency: numberField(data, "max_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"),
+        runtimes: data.getAll("runtimes"), capabilities: linesFromText(data.get("capabilities")),
+        models: modelsFromText(data.get("models")), labels: labelsFromText(data.get("labels")),
+        poll_interval_seconds: numberField(data, "poll_interval_seconds"),
         heartbeat_interval_seconds: numberField(data, "heartbeat_interval_seconds"),
         shutdown_grace_seconds: numberField(data, "shutdown_grace_seconds"),
       };
@@ -637,7 +668,7 @@ if (hasDom) {
 
   if (TOKEN_MISSING) {
     setText("status-title", "控制令牌未注入");
-    setText("status-detail", "请通过 Worker Service（默认 http://127.0.0.1:8787/）访问本页面，静态打开 index.html 无法鉴权");
+    setText("status-detail", "请刷新页面并按提示输入控制令牌；本机默认走 http://127.0.0.1:8787/ 访问时自动注入");
     errorBox.textContent = "控制令牌未注入，页面不可用";
   } else {
     Promise.all([loadConfig(), loadStatus(), loadLogs(), loadMetrics()]);

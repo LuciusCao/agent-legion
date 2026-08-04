@@ -1,4 +1,4 @@
-import type { DagGraphEdge, DagGraphNode } from '../../components/DagGraph'
+import type { DagGraphEdge, DagGraphNode } from '../../components/dag/DagGraph'
 import type { WorkflowDefinitionRecord } from '../../types'
 import type { ExecutorDefinition } from '../../types/executorTypes'
 import { conditionLabel } from './workflowStudioModel'

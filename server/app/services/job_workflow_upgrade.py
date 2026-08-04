@@ -5,8 +5,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from server.app.events import JobEventManager
+from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.job_events import broadcast_job_update, record_job_update
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.jobs.workflow_upgrade_mutation import upgrade_job_workflow

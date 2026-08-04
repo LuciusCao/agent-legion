@@ -4,12 +4,17 @@
 use velites::tools::{resolve_in_cwd, ToolContext, ToolKind};
 
 fn ctx(cwd: &std::path::Path) -> ToolContext {
+    ctx_with_read_roots(cwd, &[])
+}
+
+fn ctx_with_read_roots(cwd: &std::path::Path, read_roots: &[std::path::PathBuf]) -> ToolContext {
     ToolContext {
         cwd: cwd.canonicalize().unwrap(),
         cancel: velites::cancel::CancelToken::default(),
         // These tests cover the in-process canonicalize sandbox of the
         // read/write tools, which is independent of the OS-level bash sandbox.
         sandbox: None,
+        read_roots: read_roots.to_vec(),
     }
 }
 
@@ -134,4 +139,122 @@ async fn resolve_in_cwd_accepts_dot_segments_inside() {
     let canonical = dir.path().canonicalize().unwrap();
     let resolved = resolve_in_cwd(&canonical, "sub/../ok.txt").unwrap();
     assert_eq!(resolved, canonical.join("ok.txt"));
+}
+
+// --- Read-only roots (--skill dirs, session dir; design §5): the read tool
+// may resolve into them, escapes out of them are rejected, and the write
+// tool never honors them. ---
+
+/// A job dir, a sibling skill dir, and a sibling session dir, with
+/// `read_roots` covering the latter two (canonicalized, like lib.rs does).
+fn job_skill_session() -> (
+    tempfile::TempDir,
+    std::path::PathBuf,
+    std::path::PathBuf,
+    std::path::PathBuf,
+) {
+    let dir = tempfile::tempdir().unwrap();
+    let job = dir.path().join("job");
+    let skill = dir.path().join("skill");
+    let session = dir.path().join("session");
+    std::fs::create_dir(&job).unwrap();
+    std::fs::create_dir(&skill).unwrap();
+    std::fs::create_dir(&session).unwrap();
+    (dir, job, skill, session)
+}
+
+#[tokio::test]
+async fn read_allows_absolute_paths_inside_skill_and_session_dirs() {
+    let (_dir, job, skill, session) = job_skill_session();
+    std::fs::write(skill.join("SKILL.md"), "skill doc").unwrap();
+    std::fs::create_dir(skill.join("references")).unwrap();
+    std::fs::write(skill.join("references/data.json"), "{\"k\": 1}").unwrap();
+    std::fs::write(session.join("notes.txt"), "session notes").unwrap();
+
+    let roots = vec![
+        skill.canonicalize().unwrap(),
+        session.canonicalize().unwrap(),
+    ];
+    let ctx = ctx_with_read_roots(&job, &roots);
+
+    for (path, expected) in [
+        (skill.join("SKILL.md"), "skill doc"),
+        (skill.join("references/data.json"), "{\"k\": 1}"),
+        (session.join("notes.txt"), "session notes"),
+    ] {
+        let output = ToolKind::Read
+            .execute(&serde_json::json!({"path": path.to_string_lossy()}), &ctx)
+            .await;
+        assert!(
+            !output.is_error,
+            "read of {} failed: {}",
+            path.display(),
+            result_text(&output)
+        );
+        assert_eq!(result_text(&output), expected);
+    }
+}
+
+#[tokio::test]
+async fn read_rejects_parent_escape_out_of_skill_dir() {
+    let (dir, job, skill, _session) = job_skill_session();
+    std::fs::write(dir.path().join("secret.txt"), "secret").unwrap();
+
+    let ctx = ctx_with_read_roots(&job, &[skill.canonicalize().unwrap()]);
+    let escaping = format!("{}/../secret.txt", skill.display());
+    let output = ToolKind::Read
+        .execute(&serde_json::json!({"path": escaping}), &ctx)
+        .await;
+    assert!(output.is_error, "`..` out of a skill dir must be rejected");
+    assert!(result_text(&output).contains("sandbox"));
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn read_rejects_symlink_escape_out_of_skill_dir() {
+    let (dir, job, skill, _session) = job_skill_session();
+    let outside = dir.path().join("outside");
+    std::fs::create_dir(&outside).unwrap();
+    std::fs::write(outside.join("secret.txt"), "secret").unwrap();
+    std::os::unix::fs::symlink(&outside, skill.join("link")).unwrap();
+
+    let ctx = ctx_with_read_roots(&job, &[skill.canonicalize().unwrap()]);
+    let via_symlink = format!("{}/link/secret.txt", skill.display());
+    let output = ToolKind::Read
+        .execute(&serde_json::json!({"path": via_symlink}), &ctx)
+        .await;
+    assert!(output.is_error, "symlink escape must be rejected");
+    assert!(result_text(&output).contains("sandbox"));
+}
+
+#[tokio::test]
+async fn read_still_rejects_paths_outside_every_root() {
+    let (_dir, job, skill, _session) = job_skill_session();
+    let ctx = ctx_with_read_roots(&job, &[skill.canonicalize().unwrap()]);
+
+    let output = ToolKind::Read
+        .execute(&serde_json::json!({"path": "/etc/hosts"}), &ctx)
+        .await;
+    assert!(output.is_error);
+    assert!(result_text(&output).contains("sandbox"));
+}
+
+#[tokio::test]
+async fn write_rejects_skill_dir_even_when_it_is_a_read_root() {
+    let (_dir, job, skill, _session) = job_skill_session();
+    let ctx = ctx_with_read_roots(&job, &[skill.canonicalize().unwrap()]);
+    let target = skill.join("evil.txt");
+
+    let output = ToolKind::Write
+        .execute(
+            &serde_json::json!({"path": target.to_string_lossy(), "content": "pwned"}),
+            &ctx,
+        )
+        .await;
+    assert!(
+        output.is_error,
+        "write to a read-only root must be rejected"
+    );
+    assert!(result_text(&output).contains("sandbox"));
+    assert!(!target.exists());
 }

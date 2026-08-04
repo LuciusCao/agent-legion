@@ -2,21 +2,19 @@
 
 from __future__ import annotations
 
-import os
 import re
 import secrets
-import tempfile
 import threading
 import urllib.parse
-from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
 import yaml
 
 from worker import worker_declarations
+from worker._atomic import atomic_write
 from worker.registration_token import normalized_registration_token
-from worker.runtime_controls import validate_claim_controls
+from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY, validate_claim_controls
 
 _WORKER_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
 _EDITABLE_FIELDS = {
@@ -27,6 +25,7 @@ _EDITABLE_FIELDS = {
     "name",
     "runtimes",
     "max_concurrency",
+    "upload_max_concurrency",
     "models",
     "labels",
     "poll_interval_seconds",
@@ -41,6 +40,7 @@ _DEFAULTS: dict[str, Any] = {
     "name": "",
     "runtimes": ["pi"],
     "max_concurrency": 1,
+    "upload_max_concurrency": 4,
     "models": [],
     "labels": {},
     "register_token_file": "/run/secrets/agent_worker_register_token",
@@ -79,11 +79,18 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     if len(name) > 128:
         raise ValueError("Worker 名称不能超过 128 个字符")
     runtimes = sorted(set(str(value) for value in config.get("runtimes", [])))
-    if not runtimes or any(value not in {"pi", "openclaw"} for value in runtimes):
-        raise ValueError("运行时必须至少选择 pi 或 openclaw 之一")
+    if not runtimes or any(value not in {"pi", "openclaw", "velites"} for value in runtimes):
+        raise ValueError("运行时必须至少选择 pi、openclaw 或 velites 之一")
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
+    upload_concurrency = config.get("upload_max_concurrency")
+    if (
+        isinstance(upload_concurrency, bool)
+        or not isinstance(upload_concurrency, int)
+        or not 1 <= upload_concurrency <= MAX_DYNAMIC_CONCURRENCY
+    ):
+        raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
     capabilities = worker_declarations.normalize_capabilities(config.get("capabilities", []))
     models = worker_declarations.normalize_models(config.get("models", []))
@@ -109,6 +116,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "name": name,
         "runtimes": runtimes,
         "max_concurrency": concurrency,
+        "upload_max_concurrency": upload_concurrency,
         "claim_enabled": claim_enabled,
         "capabilities": capabilities,
         "labels": normalized_labels,
@@ -153,14 +161,16 @@ class WorkerConfigStore:
             if registration_token is not None:
                 token = normalized_registration_token(registration_token)
                 token_path = self.state_dir / "register_token"
-                self._atomic_write(token_path, token + "\n")
+                atomic_write(token_path, token + "\n", mode=0o600)
                 updated["register_token_file"] = str(token_path)
             self.write(updated)
             return updated
 
     def write(self, config: dict[str, Any]) -> None:
         # 同目录临时文件 + fsync + os.replace，保证并发/掉电时状态文件不被写坏。
-        self._atomic_write(self.path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False))
+        atomic_write(
+            self.path, yaml.safe_dump(config, allow_unicode=True, sort_keys=False), mode=0o600
+        )
 
     def control_token(self) -> str:
         """Read or create the local control-plane bearer token (0600 in state_dir)."""
@@ -171,19 +181,5 @@ class WorkerConfigStore:
         except OSError:
             pass
         token = secrets.token_urlsafe(32)
-        self._atomic_write(path, token + "\n")
+        atomic_write(path, token + "\n", mode=0o600)
         return token
-
-    def _atomic_write(self, path: Path, content: str) -> None:
-        descriptor, temporary = tempfile.mkstemp(dir=self.state_dir, prefix=f"{path.stem}.")
-        try:
-            with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.chmod(temporary, 0o600)
-            os.replace(temporary, path)
-        except BaseException:
-            with suppress(OSError):
-                os.unlink(temporary)
-            raise

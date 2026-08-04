@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 from server.app.db.connection import DatabaseConnection
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 
 
 def record_failed_node_without_execution(
@@ -28,7 +28,7 @@ def record_failed_node_without_execution(
     Returns the new node_runs id, or None when the node already left the
     queueable states (a concurrent claim/finish owns it now).
     """
-    now_str = _database_timestamp(datetime.now(UTC))
+    now_str = database_timestamp(datetime.now(UTC))
     cursor = conn.execute(
         """
         update job_nodes

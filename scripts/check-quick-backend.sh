@@ -22,7 +22,7 @@ run_static_checks() {
   fi
 
   echo "=== MyPy Type Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app scripts/architecture scripts/quality
 
   echo "=== Architecture Contracts ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_architecture
@@ -35,10 +35,12 @@ run_static_checks() {
 }
 
 run_tests() {
-  # GATE_TIER=smoke/unit runs every non-PostgreSQL test against an intentionally
-  # unreachable database URL. This is marker-based membership rather than a
-  # file allowlist, and proves the pure layer remains independently runnable.
-  # The 85% coverage floor remains a full-suite CI boundary.
+  # GATE_TIER=smoke runs the curated fast subset (membership lives in
+  # tests/conftest.py) without coverage — the 85% coverage floor only makes
+  # sense for the full suite, which remains the CI boundary. GATE_TIER=unit
+  # runs every non-PostgreSQL test against an intentionally unreachable
+  # database URL; this is marker-based membership rather than a file
+  # allowlist, and proves the pure layer remains independently runnable.
   #
   # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism (default: auto =
   # all cores). Machines running several worktrees at once should set it
@@ -70,7 +72,17 @@ run_tests() {
     split_cov_floor_args=(--cov-fail-under=0)
   fi
   case "${GATE_TIER:-full}" in
-    smoke|unit)
+    smoke)
+      echo "=== Python Smoke Tests (curated, no coverage) ==="
+      UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
+        --ignore=tests/full \
+        --ignore=tests/ci \
+        -m "smoke" \
+        -n "$workers" \
+        --reruns 1 \
+        --reruns-delay 2
+      ;;
+    unit)
       echo "=== Python Unit Tests (PostgreSQL offline) ==="
       AGENT_LEGION_TEST_DATABASE_URL="postgresql://127.0.0.1:1/agent_legion_unit_offline" \
         UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
@@ -117,7 +129,6 @@ run_tests() {
       UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q \
         --ignore=tests/full \
         --ignore=tests/ci \
-        -m "not repository_gate" \
         -n "$workers" \
         --reruns 1 \
         --reruns-delay 2 \

@@ -8,11 +8,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from server.app.quality.exemptions import (
+from scripts.quality.exemptions import (
     ArchitectureExemption,
     load_exemptions,
     validate_exemptions,
 )
+
+pytestmark = pytest.mark.no_db
 
 
 @pytest.fixture

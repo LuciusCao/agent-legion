@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -16,6 +17,7 @@ import worker.supervisor as state_module
 from worker.metrics_cache import WorkerMetricsCache, metrics_cache_key, metrics_cache_path
 from worker.registration_token import registration_token_configured
 from worker.service import create_app
+from worker.service_bind import embed_control_token
 from worker.supervisor import (
     WorkerConfigStore,
     WorkerSupervisor,
@@ -50,6 +52,7 @@ def _config() -> dict[str, Any]:
         "name": "Test Worker",
         "runtimes": ["pi"],
         "max_concurrency": 3,
+        "upload_max_concurrency": 4,
         "labels": {"arch": "arm64"},
         "register_token_file": "/run/secrets/register-token",
         "work_root": "/tmp/worker-executions",
@@ -95,6 +98,11 @@ class FakeSupervisor:
             "host_reachable": True,
             "registered": True,
             "connected": True,
+            "max_concurrency": 3,
+            "upload_max_concurrency": 4,
+            "running_executions_count": 0,
+            "upload_queued_count": 0,
+            "upload_active_count": 0,
             "current_executions": [],
         }
 
@@ -274,6 +282,14 @@ def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:
         )
 
     assert response.status_code == 422
+
+
+@pytest.mark.no_db
+def test_validate_config_accepts_velites_and_defaults_to_pi() -> None:
+    config = validate_config({**_config(), "runtimes": ["pi", "velites"]})
+    assert config["runtimes"] == ["pi", "velites"]
+    # 默认值保持 ["pi"]：声明 velites 是显式运维动作。
+    assert validate_config(_config())["runtimes"] == ["pi"]
 
 
 def test_local_api_partial_update_keeps_unspecified_fields(tmp_path: Path) -> None:
@@ -476,6 +492,33 @@ def test_index_injects_control_token(tmp_path: Path) -> None:
     assert '= "__WORKER_CONTROL_TOKEN__"' not in body
 
 
+def test_index_skips_control_token_when_embedding_disabled(tmp_path: Path) -> None:
+    ui = tmp_path / "ui"
+    ui.mkdir()
+    (ui / "index.html").write_text(
+        '<script>window.__WORKER_CONTROL_TOKEN__ = "__WORKER_CONTROL_TOKEN__";</script>',
+        encoding="utf-8",
+    )
+    store = WorkerConfigStore(tmp_path / "state")
+    app = create_app(FakeSupervisor(store), ui, embed_token=False)
+
+    with TestClient(app) as client:
+        body = client.get("/").text
+
+    assert store.control_token() not in body
+    assert '= "__WORKER_CONTROL_TOKEN__"' in body
+
+
+def test_embed_control_token_only_on_loopback(caplog: pytest.LogCaptureFixture) -> None:
+    with caplog.at_level(logging.WARNING):
+        assert embed_control_token("127.0.0.1") is True
+        assert embed_control_token("::1") is True
+        assert embed_control_token("localhost") is True
+        assert embed_control_token("0.0.0.0") is False
+
+    assert any("非回环地址 0.0.0.0" in record.message for record in caplog.records)
+
+
 def test_worker_ui_serves_icon_sprite(tmp_path: Path) -> None:
     ui = tmp_path / "ui"
     ui.mkdir()
@@ -625,3 +668,43 @@ def test_status_endpoint_exposes_current_executions(tmp_path: Path) -> None:
         response = client.get("/api/status", headers=_auth(store))
     assert response.status_code == 200
     assert response.json()["current_executions"] == []
+
+
+def test_status_endpoint_breaks_out_running_and_upload_counts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    script = tmp_path / "fake_worker.py"
+    script.write_text(
+        """
+import json, os, time
+path = os.environ["AGENT_WORKER_STATUS_FILE"]
+with open(path, "w", encoding="utf-8") as handle:
+    json.dump({
+        "pid": os.getpid(),
+        "remote": {"host_reachable": True, "registered": True, "connected": True, "host_worker": {"worker_id": "worker-1"}, "connection_error": None},
+        "executions": {
+            "exec-1": {"execution_id": "exec-1", "node_key": "node_a", "phase": "running", "started_at": "2026-07-23T00:00:00+00:00"},
+            "exec-2": {"execution_id": "exec-2", "node_key": "node_b", "phase": "downloading", "started_at": "2026-07-23T00:00:00+00:00"},
+            "exec-3": {"execution_id": "exec-3", "node_key": "node_c", "phase": "queued_upload", "started_at": "2026-07-23T00:00:00+00:00"},
+            "exec-4": {"execution_id": "exec-4", "node_key": "node_d", "phase": "uploading", "started_at": "2026-07-23T00:00:00+00:00"},
+        },
+    }, handle)
+time.sleep(30)
+""",
+        encoding="utf-8",
+    )
+    token_file = tmp_path / "register-token"
+    token_file.write_text("secret", encoding="utf-8")
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
+    supervisor = WorkerSupervisor(store, script)
+    supervisor.start()
+    try:
+        _wait_for(lambda: supervisor.status()["current_executions"] != [])
+        status = supervisor.status()
+        assert status["running_executions_count"] == 2
+        assert status["upload_queued_count"] == 1
+        assert status["upload_active_count"] == 1
+        assert status["upload_max_concurrency"] == 4
+    finally:
+        supervisor.stop()
