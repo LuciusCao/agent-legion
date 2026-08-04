@@ -78,6 +78,11 @@
 - `code` executor 节点：`config/workflow.yaml` 的 capability 用 `path`（仓库相对路径）绑定
   `workflow_nodes/` 下的 Python 文件，文件暴露模块级 `run(job, job_dir, runtime)`；
   path 禁止绝对路径与 `..`（EXEC-CODE-001），代码变更必须入库经 git review 与 CI。
+- 节点代码变更只有两条通道：内置节点走 git（EXEC-CODE-001）；自定义节点代码只存
+  `workflow_node_codes` 表、经发布流生效、版本不可变、job intake 冻结代码版本
+  （EXEC-CODE-002），禁止任何运行时 API 增删改 repo `workflow_nodes/` 文件。
+  自定义节点执行必须经 `velites sandbox wrap` OS 沙箱，沙箱不可用即拒绝执行
+  （fail-closed，EXEC-CODE-003）；开关 `workflows.custom_nodes_enabled`。
 - 节点可调参数经 `AgentDefinition.config_schema` 声明（`server/app/config_schema.py`
   子集）；executor 节点经 capability 的 `config_schema`
   声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →

@@ -391,6 +391,21 @@ invariants:
         target: tests/executors/test_code_executor.py::test_execute_custom_node_code_from_source
         gate: quick
 
+  - id: EXEC-CODE-003
+    statement: "Custom (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend custom code never runs unsandboxed. Builtin repo-tracked nodes keep the bare multiprocessing child (EXEC-CODE-001)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_custom_node_code_fails_closed_without_sandbox
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_custom_sandbox_denies_network_by_default
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_custom_sandbox_denies_writes_outside_job_dir
+        gate: quick
+
   - id: SECURITY-WORKER-001
     statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
     owner: security

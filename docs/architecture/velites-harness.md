@@ -243,6 +243,24 @@ velites --mode json \
 - 未知 flag 直接报错退出（与 Pi/pi_agent_rust 的静默吞掉相反，防止配置漂移）；
 - `--name` 保留（仅标识用途，写入 `session` 事件）。
 
+### `velites sandbox wrap`（EXEC-CODE-003）
+
+```
+velites sandbox wrap --cwd <dir> [--allow-read <dir> ...] [--allow-write <dir> ...] \
+                     [--allow-network] -- <cmd...>
+```
+
+把单个命令包进 OS 沙箱执行（供 Host 的自定义 code 节点使用，设计
+`custom-workflow-nodes-design.md` §7 二期）：与 bash 工具同一套策略生成
+（seatbelt profile / bwrap argv，单一事实源）——默认 `deny`，`--cwd` 与系统
+tmp 可写、`--allow-read` 只读、网络默认拒绝（macOS 无 network 规则、Linux
+`--unshare-net`），`--allow-network` 按 capability 放开。fail-closed：后端
+探测失败即非零退出，绝不裸跑。
+
+部署注意：启用自定义节点（`workflows.custom_nodes_enabled`）后，**Host 机器**的
+PATH 必须提供 velites 二进制（此前仅 Worker 侧要求）；缺失时自定义节点执行
+fail-closed 报错，内置节点不受影响。
+
 ## 7. Provider 层
 
 - 仅实现 OpenAI chat completions（SSE streaming）；请求/重试/usage 解析一处收敛；

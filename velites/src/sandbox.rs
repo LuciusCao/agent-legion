@@ -31,9 +31,27 @@ enum Backend {
     #[cfg(target_os = "macos")]
     Seatbelt(String),
     /// Linux bubblewrap: read-write bind mounts (everything else stays on the
-    /// read-only bind of `/`).
+    /// read-only bind of `/`); `unshare_net` isolates the network namespace.
     #[cfg(target_os = "linux")]
-    Bwrap { read_write: Vec<PathBuf> },
+    Bwrap {
+        read_write: Vec<PathBuf>,
+        unshare_net: bool,
+    },
+}
+
+/// Extra policy knobs for `velites sandbox wrap` (generic command wrapping,
+/// e.g. the custom node code child): the bash tool keeps its own fixed
+/// policy via [`Sandbox::new`].
+#[derive(Default)]
+pub struct WrapOptions {
+    /// Additional read-write roots (canonicalized at build time).
+    pub read_write: Vec<PathBuf>,
+    /// Additional read-only roots (Linux needs none: the read-only `/` bind
+    /// covers every read-only location).
+    pub read_only: Vec<PathBuf>,
+    /// Outbound+inbound network is denied by default (macOS: no network rule
+    /// in the seatbelt profile; Linux: `--unshare-net`); this flag allows it.
+    pub allow_network: bool,
 }
 
 impl Sandbox {
@@ -48,16 +66,37 @@ impl Sandbox {
         skill_dirs: &[PathBuf],
     ) -> anyhow::Result<Self> {
         let read_write = collect_read_write(cwd, session_dir)?;
-        Self::build(read_write, skill_dirs)
+        let options = WrapOptions {
+            read_only: skill_dirs.to_vec(),
+            ..WrapOptions::default()
+        };
+        Self::build(read_write, &options)
+    }
+
+    /// Wrap an arbitrary command (the `sandbox wrap` subcommand): `cwd` is
+    /// read-write, everything else comes from `options`. Fail-closed like
+    /// [`Sandbox::new`]: an unavailable backend is an error, never a
+    /// degrading to an unsandboxed run.
+    pub fn for_wrap(cwd: &Path, options: &WrapOptions) -> anyhow::Result<Self> {
+        let mut read_write = collect_read_write(cwd, None)?;
+        for dir in &options.read_write {
+            let canonical = dir.canonicalize().with_context(|| {
+                format!("failed to canonicalize write root `{}`", dir.display())
+            })?;
+            if !read_write.contains(&canonical) {
+                read_write.push(canonical);
+            }
+        }
+        Self::build(read_write, options)
     }
 
     #[cfg(target_os = "macos")]
-    fn build(read_write: Vec<PathBuf>, skill_dirs: &[PathBuf]) -> anyhow::Result<Self> {
+    fn build(read_write: Vec<PathBuf>, options: &WrapOptions) -> anyhow::Result<Self> {
         probe_macos()?;
         let mut read_only = macos_system_read_paths();
-        for dir in skill_dirs {
+        for dir in &options.read_only {
             read_only.push(dir.canonicalize().with_context(|| {
-                format!("failed to canonicalize skill dir `{}`", dir.display())
+                format!("failed to canonicalize read root `{}`", dir.display())
             })?);
         }
         // Design §8: python3 must run inside the sandbox (skill scripts).
@@ -72,24 +111,30 @@ impl Sandbox {
             }
         }
         Ok(Self {
-            backend: Backend::Seatbelt(seatbelt_profile(&read_only, &read_write)),
+            backend: Backend::Seatbelt(seatbelt_profile_ext(
+                &read_only,
+                &read_write,
+                options.allow_network,
+            )),
         })
     }
 
     #[cfg(target_os = "linux")]
-    fn build(read_write: Vec<PathBuf>, skill_dirs: &[PathBuf]) -> anyhow::Result<Self> {
-        // Skill dirs need no extra bind: the read-only `/` bind already
+    fn build(read_write: Vec<PathBuf>, options: &WrapOptions) -> anyhow::Result<Self> {
+        // Read-only extras need no extra bind: the read-only `/` bind already
         // covers every read-only location.
-        let _ = skill_dirs;
         probe_linux()?;
         Ok(Self {
-            backend: Backend::Bwrap { read_write },
+            backend: Backend::Bwrap {
+                read_write,
+                unshare_net: !options.allow_network,
+            },
         })
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    fn build(read_write: Vec<PathBuf>, skill_dirs: &[PathBuf]) -> anyhow::Result<Self> {
-        let _ = (read_write, skill_dirs);
+    fn build(read_write: Vec<PathBuf>, options: &WrapOptions) -> anyhow::Result<Self> {
+        let _ = (read_write, options);
         Err(anyhow!(
             "no filesystem sandbox backend on this platform (supported: macOS seatbelt, Linux bubblewrap)"
         ))
@@ -106,7 +151,13 @@ impl Sandbox {
                 ("sandbox-exec".to_string(), argv)
             }
             #[cfg(target_os = "linux")]
-            Backend::Bwrap { read_write } => ("bwrap".to_string(), bwrap_argv(read_write, inner)),
+            Backend::Bwrap {
+                read_write,
+                unshare_net,
+            } => (
+                "bwrap".to_string(),
+                bwrap_argv_opts(read_write, inner, *unshare_net),
+            ),
         }
     }
 }
@@ -266,6 +317,36 @@ fn seatbelt_escape(path: &Path) -> String {
         .replace('"', "\\\"")
 }
 
+/// Generate the seatbelt profile with an optional network allow rule.
+///
+/// Structure (validated empirically on macOS 15):
+///
+/// - `file-read-metadata` is allowed GLOBALLY: with it restricted, dyld /
+///   libsystem kill the process at exec (abort/bus error) before `main`.
+///   Metadata (stat) alone cannot read file contents or directory entries.
+/// - `file-read-data` is restricted to the allowlist below, which must also
+///   contain `(literal "/")` — the root directory is opened at process
+///   startup. Read-data denial is what blocks content scanning (`readdir`
+///   and `open(O_RDONLY)` outside the roots fail with EPERM).
+/// - Both `literal` (the directory itself) and `subpath` (its contents) are
+///   listed per root: seatbelt treats them as distinct filters.
+/// - Read-write roots are also readable.
+/// - Network is denied by default (`deny default` covers it); `allow_network`
+///   appends an explicit outbound+inbound allow for commands that must talk
+///   to a service (e.g. a custom node reaching the CMS).
+#[cfg(target_os = "macos")]
+fn seatbelt_profile_ext(
+    read_only: &[PathBuf],
+    read_write: &[PathBuf],
+    allow_network: bool,
+) -> String {
+    let mut profile = seatbelt_profile(read_only, read_write);
+    if allow_network {
+        profile.push_str("(allow network-outbound)\n(allow network-inbound)\n");
+    }
+    profile
+}
+
 /// Generate the seatbelt profile.
 ///
 /// Structure (validated empirically on macOS 15):
@@ -314,11 +395,16 @@ fn seatbelt_profile(read_only: &[PathBuf], read_write: &[PathBuf]) -> String {
 
 /// `bwrap` argv: everything read-only except the read-write roots. `/tmp`
 /// becomes an empty tmpfs (scratch writes stay off the host); read-write
-/// binds come after it because later mounts win.
+/// binds come after it because later mounts win. `unshare_net` additionally
+/// isolates the network namespace (the `sandbox wrap` default; the bash tool
+/// keeps the shared namespace it has always had).
 #[cfg(any(target_os = "linux", test))]
-fn bwrap_argv(read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
-    let mut argv: Vec<String> = vec![
-        "--die-with-parent".into(),
+fn bwrap_argv_opts(read_write: &[PathBuf], inner: &[String], unshare_net: bool) -> Vec<String> {
+    let mut argv: Vec<String> = vec!["--die-with-parent".into()];
+    if unshare_net {
+        argv.push("--unshare-net".into());
+    }
+    argv.extend([
         "--ro-bind".into(),
         "/".into(),
         "/".into(),
@@ -326,7 +412,7 @@ fn bwrap_argv(read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
         "/dev".into(),
         "--proc".into(),
         "/proc".into(),
-    ];
+    ]);
     if read_write.iter().any(|path| path == Path::new("/tmp")) {
         argv.extend(["--tmpfs".into(), "/tmp".into()]);
     }
@@ -340,6 +426,12 @@ fn bwrap_argv(read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
     argv.push("--".into());
     argv.extend(inner.iter().cloned());
     argv
+}
+
+/// `bwrap` argv with the bash tool's shared-network policy.
+#[cfg(any(target_os = "linux", test))]
+fn bwrap_argv(read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
+    bwrap_argv_opts(read_write, inner, false)
 }
 
 #[cfg(target_os = "macos")]
@@ -418,6 +510,31 @@ mod tests {
     fn bwrap_argv_without_tmp_dir_has_no_tmpfs() {
         let argv = bwrap_argv(&[PathBuf::from("/job")], &inner());
         assert!(!argv.iter().any(|a| a == "--tmpfs"));
+    }
+
+    #[test]
+    fn bwrap_argv_opts_unshares_network_only_when_requested() {
+        let shared = bwrap_argv_opts(&[PathBuf::from("/job")], &inner(), false);
+        assert!(!shared.iter().any(|a| a == "--unshare-net"));
+        let isolated = bwrap_argv_opts(&[PathBuf::from("/job")], &inner(), true);
+        assert!(isolated.iter().any(|a| a == "--unshare-net"));
+        // Network isolation lands before the read-only root bind.
+        let unshare = isolated.iter().position(|a| a == "--unshare-net").unwrap();
+        let ro_bind = isolated.iter().position(|a| a == "--ro-bind").unwrap();
+        assert!(unshare < ro_bind);
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seatbelt_profile_ext_network_opt_in() {
+        let denied = seatbelt_profile_ext(&[], &[PathBuf::from("/job")], false);
+        assert!(!denied.contains("network-outbound"));
+        let allowed = seatbelt_profile_ext(&[], &[PathBuf::from("/job")], true);
+        assert!(allowed.contains("(allow network-outbound)"));
+        assert!(allowed.contains("(allow network-inbound)"));
+        // The base policy stays identical: deny default with the write root.
+        assert!(allowed.starts_with("(version 1)\n(deny default)\n"));
+        assert!(allowed.contains("(subpath \"/job\")"));
     }
 
     #[cfg(target_os = "macos")]
