@@ -494,3 +494,25 @@ create table if not exists workspace_secrets (
   updated_at timestamptz not null default current_timestamp,
   primary key(workspace_id, name)
 );
+
+-- Custom node codes (schema v25): DB-backed custom workflow node code with
+-- immutable versions (EXEC-CODE-002). The partial unique index guarantees at
+-- most one published version per (workspace, workflow, node).
+create table if not exists workflow_node_codes (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  version integer not null,
+  status text not null check(status in ('draft', 'published', 'archived')),
+  code text not null,
+  code_hash text not null,
+  created_by text not null,
+  change_note text,
+  created_at timestamptz not null default current_timestamp,
+  published_at timestamptz,
+  unique(workspace_id, workflow_key, node_key, version)
+);
+create unique index if not exists workflow_node_codes_published
+  on workflow_node_codes(workspace_id, workflow_key, node_key)
+  where status = 'published';

@@ -16,3 +16,7 @@ class ConflictError(JobServiceError):
 
 class UnsupportedOperationError(JobServiceError):
     pass
+
+
+class CustomNodesDisabledError(JobServiceError):
+    """Custom workflow node codes are disabled by configuration (routes map to 403)."""
