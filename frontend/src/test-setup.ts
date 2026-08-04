@@ -1,6 +1,43 @@
-import { vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { EventSourceMock } from './testing/eventSourceMock'
+import './test-setup-matchmedia'
+import './test-setup-console'
+
+export { expectConsoleError, expectConsoleWarning } from './test-setup-console'
+
+const preventNavigation = (event: MouseEvent) => {
+  if (
+    event.target instanceof Element &&
+    event.target.closest('a[href]') !== null
+  ) {
+    event.preventDefault()
+  }
+}
+
+beforeEach(() => {
+  // React Router handles the click on its root before it bubbles here. This
+  // preserves application navigation while suppressing jsdom's default page
+  // navigation, which it intentionally does not implement.
+  document.addEventListener('click', preventNavigation)
+})
+
+afterEach(() => {
+  document.removeEventListener('click', preventNavigation)
+})
+
+Object.defineProperties(HTMLMediaElement.prototype, {
+  play: {
+    configurable: true,
+    writable: true,
+    value: () => Promise.resolve(),
+  },
+  pause: {
+    configurable: true,
+    writable: true,
+    value: () => {},
+  },
+})
 
 class ResizeObserverMock {
   callback: ResizeObserverCallback

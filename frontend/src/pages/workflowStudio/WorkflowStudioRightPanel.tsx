@@ -1,0 +1,37 @@
+import type {
+  AgentDefinition,
+  ExecutorDefinition,
+} from '../../types/executorTypes'
+import type { WorkflowDefinitionRecord } from '../../types'
+import { WorkflowNodeInspector } from './WorkflowNodeInspector'
+import styles from './WorkflowStudioRightPanel.module.css'
+
+type Props = {
+  workflow: WorkflowDefinitionRecord | null
+  executorCatalog: ExecutorDefinition[]
+  agentCatalog: AgentDefinition[]
+  selectedNodeKey: string | null
+  readOnly: boolean
+  definitionYaml: string
+  setDefinitionYaml: (value: string) => void
+  onClose: () => void
+}
+
+export function WorkflowStudioRightPanel(props: Props) {
+  return (
+    <section className={styles.panel} aria-label="节点配置">
+      <div className={styles.body}>
+        <WorkflowNodeInspector
+          workflow={props.workflow}
+          executorCatalog={props.executorCatalog}
+          agentCatalog={props.agentCatalog}
+          selectedNodeKey={props.selectedNodeKey}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+          onClose={props.onClose}
+        />
+      </div>
+    </section>
+  )
+}

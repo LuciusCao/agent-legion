@@ -1,4 +1,5 @@
 from fastapi import APIRouter
+from fastapi.responses import PlainTextResponse
 
 from server.app.routes.job_contracts import ArtifactResponse
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
@@ -25,18 +26,14 @@ def create_job_artifacts_router(
             raise_job_http_error(exc)
 
     @router.get("/jobs/{job_id}/runs/{run_id}/log", response_model=JobLogResponse)
-    def get_job_run_log(job_id: str, run_id: int) -> JobLogResponse:
+    def get_job_run_log(job_id: str, run_id: int, raw: bool = False):
         require_workflows_enabled(settings)
         try:
+            if raw:
+                return PlainTextResponse(
+                    log_service.read_raw(job_id, run_id), media_type="text/plain"
+                )
             return JobLogResponse(**log_service.read(job_id, run_id))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
-
-    @router.get("/jobs/{job_id}/{invalid_path:path}", response_model=ArtifactResponse)
-    def reject_invalid_job_subpath(job_id: str, invalid_path: str) -> None:
-        require_workflows_enabled(settings)
-        try:
-            service.reject_subpath(job_id)
         except JobServiceError as exc:
             raise_job_http_error(exc)
 

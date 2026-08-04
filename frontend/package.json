@@ -1,5 +1,5 @@
 {
-  "name": "video-hive-frontend",
+  "name": "agent-legion-frontend",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -8,19 +8,26 @@
     "api:check": "../scripts/generate-api-types.sh --check",
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
+    "build:bundle": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "lint": "eslint src/",
-    "lint:fix": "eslint src/ --fix",
-    "format": "prettier --write src",
-    "format:check": "prettier --check src"
+    "test": "vitest run --pool=threads --maxWorkers=6",
+    "test:coverage": "vitest run --coverage --pool=threads --maxWorkers=6",
+    "test:coverage-inventory": "node --test scripts/coverage-inventory.test.mjs && node scripts/coverage-inventory.mjs",
+    "stress:workspace": "playwright test stress/",
+    "e2e:smoke": "playwright test -c playwright.e2e.config.ts",
+    "lint": "eslint src/ scripts/",
+    "lint:fix": "eslint src/ scripts/ --fix",
+    "format": "prettier --write src scripts",
+    "format:check": "prettier --check src scripts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.45.0",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^14.3.1",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/js-yaml": "^4.0.9",
     "@types/katex": "^0.16.8",
     "@types/node": "^25.9.3",
     "@vitejs/plugin-react": "^4.7.0",
@@ -36,15 +43,20 @@
     "vitest": "^4.1.7"
   },
   "dependencies": {
-    "@material/web": "^2.4.1",
+    "@emotion/react": "^11.14.0",
+    "@emotion/styled": "^11.14.1",
+    "@mui/icons-material": "^6.5.0",
+    "@mui/material": "^6.5.0",
     "@tanstack/react-virtual": "^3.13.26",
     "@types/dagre": "^0.7.54",
     "@xyflow/react": "^12.11.0",
     "dagre": "^0.8.5",
+    "js-yaml": "^4.1.0",
     "katex": "^0.17.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-router-dom": "^6.30.3",
+    "uplot": "^1.6.32",
     "zustand": "^4.5.7"
   }
 }

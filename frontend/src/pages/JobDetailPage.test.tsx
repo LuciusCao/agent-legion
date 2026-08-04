@@ -7,8 +7,10 @@ import {
   cleanup,
   act,
 } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import JobDetailPage from './JobDetailPage'
+import { usePageHeaderStore } from '../stores/pageHeaderStore'
 import { useUiStore } from '../stores/uiStore'
 
 const mockDetail = {
@@ -47,7 +49,7 @@ const mockDetail = {
       label: '生成',
       status: 'running',
       capability: 'generate',
-      executor_id: 'pi-default',
+      executor_id: 'pi',
       executor_kind: 'pi',
       after: ['extract'],
       inputs: [],
@@ -87,11 +89,11 @@ const mockDetail = {
   artifacts: ['question.json'],
 }
 
-// JobDetailPage injects app-bar actions into useUiStore, but WorkspaceLayout/AppBar
+// JobDetailPage injects app-bar actions into usePageHeaderStore, but WorkspaceLayout/AppBar
 // is not rendered in this isolated test, so ActionRenderer renders the stored actions
 // so tests can interact with them.
 function ActionRenderer() {
-  const actions = useUiStore((state) => state.detailPageActions)
+  const actions = usePageHeaderStore((state) => state.detailPageActions)
   return <div data-testid="detail-actions-host">{actions}</div>
 }
 
@@ -196,6 +198,44 @@ function createFetchMock(
         }),
       })
     }
+    if (url === '/api/jobs/j1/runs/1/token-usage' && method === 'GET') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          job_id: 'j1',
+          run_id: 1,
+          usage: null,
+          reason: 'no token usage recorded for run',
+        }),
+      })
+    }
+    if (url === '/api/jobs/j1/token-usage' && method === 'GET') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          job_id: 'j1',
+          currency: 'CNY',
+          runs: [],
+          total: {
+            message_count: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            total_tokens: 0,
+            cost: {
+              input: 0,
+              output: 0,
+              cache_read: 0,
+              total: 0,
+              currency: 'CNY',
+            },
+            pricing_missing: false,
+          },
+          runs_with_usage: 0,
+          runs_without_usage: 0,
+        }),
+      })
+    }
     return Promise.resolve({ ok: true, json: async () => ({}) })
   })
 }
@@ -203,6 +243,7 @@ function createFetchMock(
 describe('JobDetailPage', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
+    useUiStore.setState({ tokenUsageDialogOpen: false })
   })
 
   afterEach(() => {
@@ -250,13 +291,42 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // +1 detail poll, +1 mount-time workers refresh (750ms debounce).
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
+
+  it.each([['running'], ['queued']] as const)(
+    'polls %s jobs every five seconds',
+    async (detailStatus) => {
+      const fetchMock = createFetchMock({ detailStatus })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { unmount } = renderPage()
+      await waitFor(() => {
+        expect(screen.getByText('提取')).toBeInTheDocument()
+      })
+
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000)
+      })
+      // +1 detail poll, +1 mount-time workers refresh (750ms debounce).
+      expect(fetchMock).toHaveBeenCalledTimes(4)
+
+      unmount()
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(4)
+    }
+  )
 
   it('reloads questions.json when its producer node completes', async () => {
     let detailRequests = 0
@@ -334,12 +404,14 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    // No detail poll for a completed job; the mount-time workers refresh
+    // (750ms debounce) fires once when timers advance.
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('disables rerun and package for a running job', async () => {
@@ -553,10 +625,10 @@ describe('JobDetailPage', () => {
 
     expect(screen.getByLabelText('重跑')).toBeInTheDocument()
     expect(screen.getByLabelText('打包')).toBeInTheDocument()
-    // The old body action bar used md-outlined-button with text labels;
-    // app bar actions are now md-icon-button with aria-label.
+    // The old body action bar used text buttons with labels;
+    // app bar actions are now icon buttons with aria-label.
     expect(
-      screen.queryByText('重跑', { selector: 'md-outlined-button' })
+      screen.queryByText('重跑', { selector: 'button' })
     ).not.toBeInTheDocument()
   })
 
@@ -589,8 +661,209 @@ describe('JobDetailPage', () => {
 
     // Artifact list dialog should open
     expect(
-      screen.getByText('产物文件', { selector: '[slot="headline"]' })
+      screen.getByRole('heading', { name: '产物文件' })
     ).toBeInTheDocument()
     expect(screen.getByText('question.json')).toBeInTheDocument()
+  })
+
+  it('renders QuestionContentPanel for question jobs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url === '/api/jobs/j1') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              ...mockDetail,
+              job: { ...mockDetail.job, source_type: 'question' },
+            }),
+          })
+        }
+        if (url === '/api/jobs/j1/artifacts/questions.json') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              content: JSON.stringify({
+                questions: [
+                  {
+                    question_id: 'Q1',
+                    normalized: { stem: '<p>Question stem</p>' },
+                  },
+                ],
+              }),
+            }),
+          })
+        }
+        if (url === '/api/jobs/j1/artifacts/comprehension_info.json') {
+          return Promise.reject(new Error('not found'))
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) })
+      })
+    )
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('Question stem')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('video-content-panel')).not.toBeInTheDocument()
+  })
+
+  it('renders VideoContentPanel for video jobs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url === '/api/jobs/j1') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              ...mockDetail,
+              job: { ...mockDetail.job, source_type: 'video' },
+            }),
+          })
+        }
+        if (url === '/api/jobs/j1/video') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              input: {
+                title: 'Sample Video',
+                external_id: 'VID-001',
+                source_url: 'https://example.com/video.mp4',
+                source_uuid: 'uuid-1',
+                content_type: 'knowledge',
+                entity_type: 'video',
+                legacy_video_id: 'lv1',
+                schema_version: 1,
+              },
+              artifacts: {
+                video_url: 'https://cdn.example.com/video.mp4',
+                subtitles: [],
+                chapters: [],
+                interactions: [],
+                metadata: null,
+                review: null,
+                checklist: null,
+              },
+            }),
+          })
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) })
+      })
+    )
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('video-content-panel')).toBeInTheDocument()
+    })
+    expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
+  })
+
+  it('renders job token usage dialog when open', async () => {
+    useUiStore.setState({ tokenUsageDialogOpen: true })
+    vi.stubGlobal('fetch', createFetchMock())
+
+    renderPage()
+
+    expect(await screen.findByText('Job Token 使用分析')).toBeInTheDocument()
+  })
+
+  it('shows an error hint when the job id is missing', async () => {
+    vi.stubGlobal('fetch', createFetchMock())
+
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1/jobs']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/jobs"
+            element={<JobDetailPage />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByText('缺少任务 ID')).toBeInTheDocument()
+  })
+
+  it('previews an artifact from the list and closes both dialogs', async () => {
+    const base = createFetchMock({ detailStatus: 'completed' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/jobs/j1/artifacts/question.json') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              name: 'question.json',
+              content: 'artifact-body',
+            }),
+          })
+        }
+        return base(url, init)
+      })
+    )
+
+    renderPage()
+    await screen.findByText('提取')
+
+    // Open the artifact list, then close it without selecting.
+    await act(async () => {
+      screen.getByLabelText('产物文件').click()
+    })
+    expect(
+      await screen.findByRole('heading', { name: '产物文件' })
+    ).toBeInTheDocument()
+    await act(async () => {
+      screen.getByRole('button', { name: '关闭' }).click()
+    })
+    await waitFor(() => {
+      expect(
+        screen.queryByRole('heading', { name: '产物文件' })
+      ).not.toBeInTheDocument()
+    })
+
+    // Reopen, select the artifact, and the preview shows its content.
+    await act(async () => {
+      screen.getByLabelText('产物文件').click()
+    })
+    await act(async () => {
+      screen.getByText('question.json').click()
+    })
+    expect(await screen.findByText('artifact-body')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByRole('button', { name: '关闭' }).click()
+    })
+    await waitFor(() => {
+      expect(screen.queryByText('artifact-body')).not.toBeInTheDocument()
+    })
+  })
+
+  it('shows the fetch error inside the artifact preview', async () => {
+    const base = createFetchMock({ detailStatus: 'completed' })
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string, init?: RequestInit) => {
+        if (url === '/api/jobs/j1/artifacts/question.json') {
+          return Promise.resolve({
+            ok: false,
+            status: 500,
+            text: async () => 'server boom',
+            json: async () => ({}),
+          })
+        }
+        return base(url, init)
+      })
+    )
+
+    renderPage()
+    await screen.findByText('提取')
+    await act(async () => {
+      screen.getByLabelText('产物文件').click()
+    })
+    await act(async () => {
+      screen.getByText('question.json').click()
+    })
+
+    expect(await screen.findByText(/HTTP 500: server boom/)).toBeInTheDocument()
   })
 })

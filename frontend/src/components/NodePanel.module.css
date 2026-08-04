@@ -15,5 +15,5 @@
 }
 
 .node-card.answered {
-  background: var(--md-sys-color-primary-container);
+  background: #e0e0e0;
 }

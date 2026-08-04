@@ -8,26 +8,26 @@
   bottom: 7px;
   width: 8px;
   height: 8px;
-  border: 2px solid var(--md-sys-color-surface);
+  border: 2px solid #ffffff;
   border-radius: 50%;
-  background: var(--md-sys-color-outline);
+  background: #c3c6cf;
 }
 
 .active {
-  background: var(--md-sys-color-primary);
+  background: #000000;
 }
 
 .popover {
   position: absolute;
-  z-index: 20;
+  z-index: 100;
   top: calc(100% + 4px);
   right: 0;
   display: none;
-  min-width: 240px;
+  min-width: 320px;
   padding: 12px;
   border-radius: 12px;
-  background: var(--md-sys-color-surface-container-high);
-  box-shadow: var(--md-sys-elevation-level3);
+  background-color: #ffffff;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
 }
 
 .root:focus-within .popover,
@@ -41,7 +41,7 @@
   justify-content: space-between;
   gap: 16px;
   padding: 4px 0;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
   white-space: nowrap;
 }
 
@@ -52,23 +52,13 @@
 .divider {
   height: 1px;
   margin: 8px 0;
-  background: var(--md-sys-color-outline-variant);
+  background: #e5e7eb;
 }
 
-.row {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 6px 0;
-  color: var(--md-sys-color-on-surface);
-  white-space: nowrap;
-}
-
-.status {
-  color: var(--md-sys-color-on-surface-variant);
-}
-
-.empty {
-  color: var(--md-sys-color-on-surface-variant);
-  white-space: nowrap;
+.monitorLink {
+  display: block;
+  padding: 4px 0;
+  color: #2563eb;
+  font-size: 13px;
+  text-decoration: none;
 }

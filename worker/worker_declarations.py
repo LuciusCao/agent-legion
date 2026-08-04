@@ -1,0 +1,49 @@
+"""Validation for Worker scheduling declarations."""
+
+from __future__ import annotations
+
+from typing import Any
+
+
+def normalize_labels(labels: Any) -> dict[str, str]:
+    if not isinstance(labels, dict) or len(labels) > 32:
+        raise ValueError("标签必须是对象且不能超过 32 项")
+    normalized: dict[str, str] = {}
+    for key, value in labels.items():
+        if not isinstance(key, str) or not key or len(key) > 64:
+            raise ValueError("标签名必须是 1 到 64 个字符")
+        if not isinstance(value, (str, int, float, bool)) or len(str(value)) > 256:
+            raise ValueError(f"标签 {key!r} 的值必须是短标量")
+        normalized[key] = str(value)
+    return normalized
+
+
+def normalize_capabilities(values: Any) -> list[str]:
+    if not isinstance(values, list) or len(values) > 128:
+        raise ValueError("Worker 能力必须是最多 128 项的列表")
+    capabilities = sorted({str(value).strip() for value in values})
+    if any(not value or value == "*" or len(value) > 128 for value in capabilities):
+        raise ValueError("Worker 能力必须是 1 到 128 个字符")
+    return capabilities
+
+
+def normalize_models(values: Any) -> list[dict[str, str]]:
+    if not isinstance(values, list) or len(values) > 256:
+        raise ValueError("模型声明必须是最多 256 项的列表")
+    models: set[tuple[str, str]] = set()
+    for item in values:
+        if not isinstance(item, dict):
+            raise ValueError("模型声明必须包含 provider 和 model")
+        provider = str(item.get("provider", "")).strip()
+        model = str(item.get("model", "")).strip()
+        if (
+            not provider
+            or not model
+            or provider == "*"
+            or model == "*"
+            or len(provider) > 128
+            or len(model) > 256
+        ):
+            raise ValueError("provider/model 必须是非空短字符串")
+        models.add((provider, model))
+    return [{"provider": provider, "model": model} for provider, model in sorted(models)]

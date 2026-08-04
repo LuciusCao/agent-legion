@@ -1,35 +1,75 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
-import { createMockUiState } from '../testing/fixtures'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
+import { useExecutorsStore, type WorkerSummary } from '../stores/executorsStore'
+import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
+import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
+
+function renderIndicator() {
+  return render(
+    <MemoryRouter>
+      <AgentStatusIndicator workspaceId="ws1" />
+    </MemoryRouter>
+  )
+}
 
 const fetchWorkerStatusMock = vi.fn()
 const setWorkerPausedMock = vi.fn()
 const showToastMock = vi.fn()
+const refreshWorkersMock = vi.fn()
 
-let mockWorkerPaused = true
+function makeWorker(overrides: Partial<WorkerSummary> = {}): WorkerSummary {
+  return {
+    worker_id: 'worker-1',
+    name: 'Company Mac',
+    runtimes: ['pi'],
+    capabilities: ['review_subtitles'],
+    models: [{ provider: 'openai', model: 'gpt-5.2' }],
+    max_concurrency: 10,
+    labels: {},
+    protocol_version: 1,
+    registered_at: '2026-07-22 02:13:04',
+    last_seen_at: '2026-07-22 02:15:31',
+    online: true,
+    revoked: false,
+    allowed_workspaces: [],
+    ...overrides,
+  }
+}
+
+let mockWorkerPausedByWorkspace: Record<string, boolean> = {}
 let mockAgents: AgentStatus[] = [
-  {
+  makeAgentStatus({
     id: 'main',
     name: 'Main',
-    workspace_id: '',
-    busy: false,
-    task_count: 0,
+    workspace_id: 'ws1',
     max_tasks: 8,
-    current_video_id: null,
-  },
+  }),
 ]
+
+vi.mock('../stores/agentsStore', () => ({
+  useAgentsStore: (
+    selector?: (state: ReturnType<typeof createMockAgentsState>) => unknown
+  ) => {
+    const state = createMockAgentsState({
+      workerPausedByWorkspace: mockWorkerPausedByWorkspace,
+      agents: mockAgents,
+      getWorkerPaused: (workspaceId: string) =>
+        mockWorkerPausedByWorkspace[workspaceId] ?? true,
+      fetchWorkerStatus: fetchWorkerStatusMock,
+      setWorkerPaused: setWorkerPausedMock,
+    })
+    return selector ? selector(state) : state
+  },
+}))
 
 vi.mock('../stores/uiStore', () => ({
   useUiStore: (
     selector?: (state: ReturnType<typeof createMockUiState>) => unknown
   ) => {
     const state = createMockUiState({
-      workerPaused: mockWorkerPaused,
-      agents: mockAgents,
-      fetchWorkerStatus: fetchWorkerStatusMock,
-      setWorkerPaused: setWorkerPausedMock,
       showToast: showToastMock,
     })
     return selector ? selector(state) : state
@@ -39,44 +79,56 @@ vi.mock('../stores/uiStore', () => ({
 describe('AgentStatusIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockWorkerPaused = true
+    mockWorkerPausedByWorkspace = {}
+    useExecutorsStore.setState({
+      workers: [],
+      connectionStatus: {},
+      refreshWorkers: refreshWorkersMock,
+    })
+    refreshWorkersMock.mockResolvedValue(undefined)
     mockAgents = [
-      {
+      makeAgentStatus({
         id: 'main',
         name: 'Main',
-        workspace_id: '',
-        busy: false,
-        task_count: 0,
+        workspace_id: 'ws1',
         max_tasks: 8,
-        current_video_id: null,
-      },
+      }),
     ]
     fetchWorkerStatusMock.mockResolvedValue(undefined)
     setWorkerPausedMock.mockResolvedValue(undefined)
   })
 
   it('renders agent status button', () => {
-    render(<AgentStatusIndicator />)
+    renderIndicator()
     expect(screen.getByLabelText('Agent 状态')).toBeInTheDocument()
   })
 
+  it('links to the monitoring page from the popover', () => {
+    renderIndicator()
+    expect(screen.getByRole('link', { name: '查看监控' })).toHaveAttribute(
+      'href',
+      '/monitoring'
+    )
+  })
+
   it('fetches worker status for the given workspace on mount', () => {
-    render(<AgentStatusIndicator workspaceId="ws1" />)
+    renderIndicator()
     expect(fetchWorkerStatusMock).toHaveBeenCalledWith('ws1')
   })
 
   it('shows auto-scheduling switch in the popover', () => {
-    render(<AgentStatusIndicator workspaceId="ws1" />)
+    renderIndicator()
     expect(screen.getByText('自动调度')).toBeInTheDocument()
   })
 
   it('resumes scheduling when switch is toggled on', async () => {
-    render(<AgentStatusIndicator workspaceId="ws1" />)
-    const switchEl = document.querySelector('md-switch')
-    expect(switchEl).toBeTruthy()
+    mockWorkerPausedByWorkspace = { ws1: true }
+    renderIndicator()
+    const switchEl = screen.getByRole('checkbox')
+    expect(switchEl).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(switchEl!)
+      fireEvent.click(switchEl)
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(false, 'ws1')
@@ -84,68 +136,193 @@ describe('AgentStatusIndicator', () => {
   })
 
   it('pauses scheduling when switch is toggled off', async () => {
-    mockWorkerPaused = false
-    render(<AgentStatusIndicator workspaceId="ws1" />)
-    const switchEl = document.querySelector('md-switch')
-    expect(switchEl).toBeTruthy()
+    mockWorkerPausedByWorkspace = { ws1: false }
+    renderIndicator()
+    const switchEl = screen.getByRole('checkbox')
+    expect(switchEl).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(switchEl!)
+      fireEvent.click(switchEl)
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(true, 'ws1')
     expect(showToastMock).toHaveBeenCalledWith('已暂停自动调度', 'success')
   })
 
-  it('shows global openclaw agents in video-hive workspace', () => {
+  it('shows workspace-specific agents', () => {
     mockAgents = [
-      {
+      makeAgentStatus({
         id: 'main',
         name: 'Main',
-        workspace_id: '',
-        busy: false,
-        task_count: 0,
+        workspace_id: 'ws1',
         max_tasks: 8,
-        current_video_id: null,
-      },
-      {
+      }),
+      makeAgentStatus({
         id: 'pi',
         name: 'Pi Agent',
-        workspace_id: 'ws1',
-        busy: false,
-        task_count: 0,
+        workspace_id: 'ws2',
         max_tasks: 2,
-        current_video_id: null,
-      },
+      }),
     ]
-    render(<AgentStatusIndicator workspaceId="video-hive" />)
+    renderIndicator()
     expect(screen.getByText('Main')).toBeInTheDocument()
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 
-  it('shows workspace-specific pi agents in non-video-hive workspace', () => {
+  it('shows worker busy count over capacity', () => {
     mockAgents = [
-      {
-        id: 'main',
-        name: 'Main',
-        workspace_id: '',
-        busy: false,
-        task_count: 0,
-        max_tasks: 8,
-        current_video_id: null,
-      },
-      {
-        id: 'pi',
-        name: 'Pi Agent',
+      makeAgentStatus({
+        id: 'mac-mini',
+        name: 'MacMini',
         workspace_id: 'ws1',
-        busy: false,
-        task_count: 0,
-        max_tasks: 2,
-        current_video_id: null,
-      },
+        busy: true,
+        task_count: 3,
+        max_tasks: 16,
+      }),
     ]
-    render(<AgentStatusIndicator workspaceId="ws1" />)
-    expect(screen.queryByText('Main')).not.toBeInTheDocument()
-    expect(screen.getByText('Pi Agent')).toBeInTheDocument()
+    renderIndicator()
+    expect(screen.getByText('MacMini')).toBeInTheDocument()
+    expect(screen.getByText('忙碌 3/16')).toBeInTheDocument()
+  })
+
+  it('shows empty state when no worker is available', () => {
+    mockAgents = []
+    renderIndicator()
+    expect(screen.getByText('暂无可用 Worker')).toBeInTheDocument()
+  })
+
+  it('shows a disconnected status dot when the agents channel is closed', () => {
+    useExecutorsStore.setState({ connectionStatus: { agents: 'closed' } })
+    renderIndicator()
+    const dot = screen.getByTestId('agents-connection-status')
+    expect(dot).toBeInTheDocument()
+    expect(dot).toHaveAttribute('title', 'Agent 连接已断开')
+  })
+
+  it('shows a connecting status dot when the agents channel is connecting', () => {
+    useExecutorsStore.setState({ connectionStatus: { agents: 'connecting' } })
+    renderIndicator()
+    const dot = screen.getByTestId('agents-connection-status')
+    expect(dot).toBeInTheDocument()
+    expect(dot).toHaveAttribute('title', 'Agent 连接中')
+  })
+
+  it('hides the status dot when the agents channel is open', () => {
+    useExecutorsStore.setState({ connectionStatus: { agents: 'open' } })
+    renderIndicator()
+    expect(
+      screen.queryByTestId('agents-connection-status')
+    ).not.toBeInTheDocument()
+  })
+
+  it('refreshes registered workers on mount', () => {
+    renderIndicator()
+    expect(refreshWorkersMock).toHaveBeenCalled()
+  })
+
+  it('shows online and offline chips with last-seen heartbeat', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({ worker_id: 'w-online', name: 'Online Mac', online: true }),
+        makeWorker({
+          worker_id: 'w-offline',
+          name: 'Offline Mac',
+          online: false,
+          last_seen_at: '2026-07-22 01:00:00',
+        }),
+      ],
+    })
+    renderIndicator()
+    expect(screen.getByText('已注册 Worker')).toBeInTheDocument()
+    expect(screen.getByText('Online Mac')).toBeInTheDocument()
+    expect(screen.getByText('Offline Mac')).toBeInTheDocument()
+    expect(screen.getByTitle('最近心跳 2026-07-22 02:15:31')).toHaveTextContent(
+      '在线'
+    )
+    expect(screen.getByTitle('最近心跳 2026-07-22 01:00:00')).toHaveTextContent(
+      '离线'
+    )
+  })
+
+  it('filters workers by allowed workspaces; empty list means all workspaces', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({ worker_id: 'w-global', name: 'Global Mac' }),
+        makeWorker({
+          worker_id: 'w-scoped',
+          name: 'Scoped Mac',
+          allowed_workspaces: ['ws1'],
+        }),
+        makeWorker({
+          worker_id: 'w-other',
+          name: 'Other Mac',
+          allowed_workspaces: ['ws2'],
+        }),
+      ],
+    })
+    renderIndicator()
+    expect(screen.getByText('Global Mac')).toBeInTheDocument()
+    expect(screen.getByText('Scoped Mac')).toBeInTheDocument()
+    expect(screen.queryByText('Other Mac')).not.toBeInTheDocument()
+  })
+
+  it('does not show revoked workers', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({
+          worker_id: 'w-revoked',
+          name: 'Revoked Mac',
+          revoked: true,
+        }),
+      ],
+    })
+    renderIndicator()
+    expect(screen.queryByText('Revoked Mac')).not.toBeInTheDocument()
+    // Local agent rows without a registered Worker still render.
+    expect(screen.getByText('Main')).toBeInTheDocument()
+  })
+
+  it('merges registered worker info and workspace workload into one row', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({
+          worker_id: 'mac-air',
+          name: 'MacbookAir',
+          online: true,
+          max_concurrency: 30,
+        }),
+      ],
+    })
+    mockAgents = [
+      makeAgentStatus({
+        id: 'mac-air',
+        name: 'MacbookAir',
+        workspace_id: 'ws1',
+        busy: true,
+        task_count: 3,
+        max_tasks: 30,
+      }),
+    ]
+    renderIndicator()
+    expect(screen.getAllByText('MacbookAir')).toHaveLength(1)
+    expect(screen.getByText('忙碌 3/30')).toBeInTheDocument()
+    expect(screen.getByText('在线')).toBeInTheDocument()
+  })
+
+  it('falls back to worker capacity when no workload row exists yet', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({
+          worker_id: 'w-idle',
+          name: 'Idle Mac',
+          online: true,
+          max_concurrency: 10,
+        }),
+      ],
+    })
+    mockAgents = []
+    renderIndicator()
+    expect(screen.getByText('Idle Mac')).toBeInTheDocument()
+    expect(screen.getByText('空闲 0/10')).toBeInTheDocument()
   })
 })

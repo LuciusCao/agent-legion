@@ -1,0 +1,44 @@
+.reviewIcon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin-left: 2px;
+}
+
+.reviewApproved {
+  color: #2e7d32;
+}
+
+.reviewRejected {
+  color: #c62828;
+}
+
+.reviewAttention {
+  color: #ef6c00;
+}
+
+.reviewUnknown {
+  color: #757575;
+}
+
+.reviewSection {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #e0e0e0;
+  font-size: 13px;
+}
+
+.reviewDecision {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  color: #1a1c1e;
+}
+
+.reviewReason {
+  margin-top: 4px;
+  color: #43474e;
+  line-height: 1.5;
+}

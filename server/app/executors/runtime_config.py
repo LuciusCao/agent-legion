@@ -2,29 +2,54 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+
+from server.app.agent_stock import AgentStockConfig
+from server.app.cms.auth import cms_token_available
+from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 
 
 class PiRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    binary: str = "pi"
+    flavor: Literal["pi", "velites"] = "pi"  # runtime: pi 的遗留实现选择层（§9）；非法值 fail-fast
+    binary: str = Field(default="pi", validate_default=True)
     provider: str = ""
     model: str = ""
     thinking: str = ""
     timeout_seconds: int = Field(default=600, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
     environment: dict[str, str] = Field(default_factory=dict)
+    velites_no_sandbox: bool = False  # 逃生门：velites 下传 --no-sandbox（沙箱降级免发版）
+
+    @field_validator("binary")
+    @classmethod
+    def _flavor_binary(cls, value: str, info: ValidationInfo) -> str:
+        return "velites" if info.data.get("flavor") == "velites" and value == "pi" else value
+
+
+class OpenClawSkillSafetyRepo(BaseModel):
+    """One skill checkout the OpenClaw runner may force-restore before a run.
+
+    Only the path is declared here; the restore ref is pinned by
+    ``config/skills.lock`` (config governance G3, single source of truth).
+    A ``ref`` key is rejected as an extra field.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    path: str = Field(min_length=1)
 
 
 class OpenClawSkillSafetyRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
-    repos: list[dict[str, str]] = Field(default_factory=list)
+    repos: list[OpenClawSkillSafetyRepo] = Field(default_factory=list)
 
 
 class OpenClawRuntimeConfig(BaseModel):
@@ -47,14 +72,30 @@ class WorkflowsRuntimeConfig(BaseModel):
     pi: PiRuntimeConfig = Field(default_factory=PiRuntimeConfig)
 
 
+class AgentWorkersRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    register_token: str = ""
+    register_token_file: str = ""
+    max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
+    min_protocol_version: int = Field(default=1, ge=1)
+
+
 class ExecutorRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    heartbeat_interval_seconds: float = Field(default=10, gt=0)
+    lease_ttl_seconds: int = Field(default=90, ge=1)
+    heartbeat_failure_threshold: int = Field(default=3, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
+    sweeper_enabled: bool = True
+    sweeper_interval_seconds: float = Field(default=5.0, gt=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
     openclaw: OpenClawRuntimeConfig = Field(
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
+    agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
+    agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
 
 
 class StartupValidationError(Exception):
@@ -107,36 +148,10 @@ def _cms_resource_enabled(config: dict[str, Any]) -> bool:
     )
 
 
-def _cms_token_available(config: dict[str, Any]) -> bool:
-    """Return True when CMS credentials are available from any supported source.
-
-    Credentials may come from the config file, ``VIDEO_HIVE_CMS_*`` environment
-    overrides, or the legacy ``BASECMS_*`` environment variables.
-    """
-    cms_config = config.get("cms") or {}
-    if not isinstance(cms_config, dict):
-        return False
-    if cms_config.get("token"):
-        return True
-    if os.environ.get("BASECMS_TOKEN"):
-        return True
-    token_gen = cms_config.get("token_gen") or {}
-    if all(str(token_gen.get(key) or "") for key in ("app_id", "nonce", "secret", "url")):
-        return True
-    return all(
-        os.environ.get(env_key)
-        for env_key in (
-            "BASECMS_APP_ID",
-            "BASECMS_NONCE",
-            "BASECMS_SECRET",
-            "BASECMS_TOKEN_URL",
-        )
-    )
-
-
 def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
+    executor_definitions: Mapping[str, ExecutorConfig] | None = None,
 ) -> None:
     """Validate enabled runtime dependencies at startup.
 
@@ -202,7 +217,10 @@ def validate_runtime(
     if provider == "auto" and not (_whisper_usable() or _sensevoice_usable()):
         errors.append(("asr.provider", "auto mode requires at least one usable ASR provider"))
 
-    if runtime.workflows.enabled:
+    if runtime.workflows.enabled and any(
+        isinstance(definition, PiExecutorConfig)
+        for definition in (executor_definitions or {}).values()
+    ):
         pi_binary = str(runtime.workflows.pi.binary or "")
         if not pi_binary:
             errors.append(("workflows.pi.binary", "missing pi binary"))
@@ -214,15 +232,17 @@ def validate_runtime(
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
 
-    if _cms_resource_enabled(config) and not _cms_token_available(config):
-        cms_config = config.get("cms") or {}
-        if not isinstance(cms_config, dict):
-            cms_config = {}
-        if not str(cms_config.get("token", "")):
-            errors.append(("cms.token", "missing CMS token"))
-        token_gen = cms_config.get("token_gen") or {}
-        if isinstance(token_gen, dict) and not str(token_gen.get("secret", "")):
-            errors.append(("cms.token_gen.secret", "missing CMS token_gen secret"))
+    if _cms_resource_enabled(config) and not cms_token_available(config.get("cms")):
+        errors.append(
+            (
+                "cms.token",
+                "missing CMS credentials: set env CMS_TOKEN (or "
+                "AGENT_LEGION_CMS_TOKEN; BASECMS_TOKEN is a deprecated alias), "
+                "set all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / "
+                "CMS_TOKEN_URL, or bind a token in the workspace resource "
+                "config (vault)",
+            )
+        )
 
     if errors:
         raise StartupValidationError(errors)

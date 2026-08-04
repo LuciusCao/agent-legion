@@ -1,149 +1,133 @@
-data_dir: data
-server:
-  host: 127.0.0.1
-  port: 8000
-worker:
-  # Local phases do not consume openclaw runners. Tune these based on disk,
-  # network, and ASR capacity.
-  phase_concurrency:
-    download: 10
-    transcribe: 1
-    assemble: 10
-    package: 10
-    waiting_for_url: 10
-asr:
-  provider: auto
-  timeout_seconds: 900
-  whisper:
-    binary: whisper-cli
-    model: ~/.cache/whisper.cpp/ggml-medium.bin
-    # VAD model path for voice activity detection (silero-v6.2.0)
-    vad_model: ~/.cache/whisper.cpp/ggml-silero-v6.2.0.bin
-  sensevoice:
-    script: server/app/pipeline/transcribe_sensevoice.py
-    model_dir: ~/.cache/SenseVoiceSmall
-cms:
-  # Set CMS token and token_gen secret via environment overrides; do not commit credentials.
-  base_url: "https://cms.example.com/v2"
-  env: prod
-  bank_version: "v5"
-  country_id: "1"
-  subject_id: "2"
-  page_size: "50"
-  token: ""
-  token_gen:
-    app_id: ""
-    nonce: ""
-    secret: ""
-    url: ""
-
-resource_providers:
-  cms.question.detail:
-    path: "/question/detail"
-  cms.question.list_by_knowledge:
-    path: "/question/list"
-
-# Optional: delete the local MP4 after the assemble phase completes to save disk space.
-# Playback will fall back to source_url via redirect. Default is false.
-cleanup_video_after_assemble: false
-
+agents:
+  question-key-info-v1:
+    capability: generate_key_info
+    runtime: velites
+    skill: question_comprehension_info/generate_key_info
+    tools: [read, write, bash]
+  question-key-info-review-v1:
+    capability: review_key_info
+    runtime: velites
+    skill: question_comprehension_info/review_key_info
+    tools: [read, write, bash]
+  question-possible-errors-v1:
+    capability: generate_possible_errors
+    runtime: velites
+    skill: question_comprehension_info/generate_possible_errors
+    tools: [read, write, bash]
+  question-possible-errors-review-v1:
+    capability: review_possible_errors
+    runtime: velites
+    skill: question_comprehension_info/review_possible_errors
+    tools: [read, write, bash]
+  question-difficulty-v1:
+    capability: assess_comprehension_difficulty
+    runtime: velites
+    skill: question_comprehension_info/assess_comprehension_difficulty
+    tools: [read, write, bash]
+  video-subtitle-review-v1:
+    capability: review_subtitles
+    runtime: pi
+    skill: video_knowledge/review_subtitles
+    tools: [read, write, bash]
+  video-chapter-generation-v1:
+    capability: generate_chapters
+    runtime: pi
+    skill: video_knowledge/generate_chapters
+    tools: [read, write, bash]
+  video-interaction-generation-v1:
+    capability: generate_interactions
+    runtime: pi
+    skill: video_knowledge/generate_interactions
+    tools: [read, write, bash]
+  video-content-review-v1:
+    capability: review_video_content
+    runtime: pi
+    skill: video_knowledge/review_video_content
+    tools: [read, write, bash]
+agent_workers:
+  register_token: ""
+  register_token_file: "deploy/secrets/agent_worker_register_token"
+  max_archive_bytes: 67108864
+  min_protocol_version: 1
 executors:
   local-default:
     kind: local
-    global_capacity: 16
+    global_capacity: 128
+    # 每个 capability 可设 timeout_seconds（单次隔离执行的墙钟上限，超时判
+    # failed/timeout 并强杀子进程）；缺省回退 executor 默认值 3600s。
     capabilities:
       fetch_questions:
         handler: question_comprehension_info.fetch_questions
+        # Runs in the executor pool thread (no child-process spawn): trusted,
+        # fast, pure-code handler; cooperative cancellation only.
+        isolation: thread
+        # Non-secret CMS query selectors the node may tune (spec D15). Values
+        # resolve along node config → workspace override → intake freeze and
+        # win over resource bindings / global cms defaults; the token stays in
+        # the resource binding + vault chain (spec D16).
+        config_schema:
+          type: object
+          properties:
+            bank_version:
+              type: string
+              description: CMS 题库版本（覆盖 resource binding 与全局 cms 默认值）
+            country_id:
+              type: string
+              description: CMS 国家/地区 ID（覆盖 resource binding 与全局 cms 默认值）
+            subject_id:
+              type: string
+              description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
       clean_and_parse:
         handler: question_comprehension_info.clean_and_parse
+      classify_comprehension_eligibility:
+        handler: question_comprehension_info.classify_comprehension_eligibility
+      finalize_non_uploadable:
+        handler: question_comprehension_info.finalize_non_uploadable
       assemble_comprehension_info:
         handler: question_comprehension_info.assemble_comprehension_info
-      fetch_question_context:
-        handler: question_content.fetch_question_context
-      assemble_package:
-        handler: question_content.assemble_package
-  pi-default:
-    kind: pi
-    global_capacity: 20
-    capabilities:
-      generate_key_info:
-        skill: question_comprehension_info/generate_key_info
-        tools: [read, write, bash]
-      review_key_info:
-        skill: question_comprehension_info/review_key_info
-        tools: [read, write, bash]
-      generate_possible_errors:
-        skill: question_comprehension_info/generate_possible_errors
-        tools: [read, write, bash]
-      review_possible_errors:
-        skill: question_comprehension_info/review_possible_errors
-        tools: [read, write, bash]
-      assess_comprehension_difficulty:
-        skill: question_comprehension_info/assess_comprehension_difficulty
-        tools: [read, write, bash]
-
+      download_video:
+        handler: video_knowledge.download_video
+        # Non-secret CMS query selectors the node may tune (spec D15), used
+        # when resolving knowledge codes against the CMS at execution time;
+        # the token stays in the resource binding + vault chain (spec D16).
+        config_schema:
+          type: object
+          properties:
+            bank_version:
+              type: string
+              description: CMS 题库版本（覆盖 resource binding 与全局 cms 默认值）
+            country_id:
+              type: string
+              description: CMS 国家/地区 ID（覆盖 resource binding 与全局 cms 默认值）
+            subject_id:
+              type: string
+              description: CMS 学科 ID（覆盖 resource binding 与全局 cms 默认值）
+      transcribe_video:
+        handler: video_knowledge.transcribe_video
+      assemble_video_metadata:
+        handler: video_knowledge.assemble_video_metadata
+      package_video_job:
+        handler: video_knowledge.package_video_job
+heartbeat_interval_seconds: 10
+lease_ttl_seconds: 90
+heartbeat_failure_threshold: 3
 workflows:
-  # Enables the new workspace/job DAG surface. This is independent from the
-  # existing Video Hive video queue and keeps the old pipeline behavior intact.
   enabled: true
   pi:
+    # `runtime: pi` agent 的遗留实现选择层：pi（Node Pi CLI）| velites（自研 Rust
+    # harness，见 docs/architecture/velites-harness.md §9）。仅作用于 runtime: pi
+    # 的 agent；runtime: velites 由定义钉死、忽略本项。生产默认 velites；非法值
+    # 启动即报错（fail-fast）。新增 agent 应直接声明 runtime，勿依赖本开关。
+    # 切到 velites 时 binary 未显式覆盖则自动用 velites 二进制；`flavor: pi` 单字段即回退。
+    flavor: velites
+    # velites 逃生门：true 时 velites 命令追加 --no-sandbox（生产沙箱异常时
+    # 免发版降级为无沙箱运行，仍保留事件契约/预算/取消等全部可控性）。
+    velites_no_sandbox: false
     binary: pi
-    provider: ""
-    model: ""
+    provider: gateway
+    model: your-model
     thinking: low
-    timeout_seconds: 600
+    timeout_seconds: 1800
     environment:
-      PI_SKIP_VERSION_CHECK: "1"
-      PI_TELEMETRY: "0"
-
-openclaw:
-  cwd: .
-  timeout_seconds: 600
-  isolated_workspace_root: ""
-  # 调用 openclaw agent 前，强制把指定技能目录 checkout 到干净的 ref/tag，
-  # 防止 agent 自我修改技能或在技能里写入脏数据。
-  skill_safety:
-    enabled: true
-    repos:
-      - path: ~/.openclaw/workspace/skills/generate-interactions
-        ref: v1.0.0
-      - path: ~/.openclaw/workspace/skills/review-interactions
-        ref: v1.0.0
-      - path: ~/.openclaw/workspace/skills/review-subtitles
-        ref: v1.0.0
-      - path: ~/.openclaw/workspace/skills/slice-chapters
-        ref: v1.0.0
-  # 基础命令模板（如果包含 --agent，程序启动时会自动调用
-  # "openclaw agents list --json" 动态发现可用 agent，并为每个 agent
-  # 生成一个独立的 runner。如果模板不含 --agent，则只创建单个 runner）
-  command_template:
-    - openclaw
-    - agent
-    - --local
-    - --agent
-    - main
-    - --session-id
-    - "{video_id}-{timestamp}"
-    - --thinking
-    - "on"
-    - --message
-    - "{prompt_text}"
-    - --json
-  # 显式 runner 配置（可选，优先级高于动态发现）
-  # count 字段支持复用同一个 command_template 创建多个 runner，
-  # 实现基于同一个 agent 的高并发处理。
-  runners:
-    - command_template:
-        - openclaw
-        - agent
-        - --local
-        - --agent
-        - main
-        - --session-id
-        - "{video_id}-{timestamp}"
-        - --thinking
-        - "on"
-        - --message
-        - "{prompt_text}"
-        - --json
-      count: 8
+      PI_SKIP_VERSION_CHECK: '1'
+      PI_TELEMETRY: '0'

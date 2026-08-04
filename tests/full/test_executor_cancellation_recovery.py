@@ -7,12 +7,12 @@ from typing import Any
 
 import pytest
 
-from server.app.executors.config import (
-    PiCapabilityConfig,
-)
+from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.local import LocalExecutor
 from server.app.executors.pi import PiExecutor
 from server.app.jobs import JobQueries
+from server.app.skills.manager import SkillManager
+from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.pi_runner import PiConfig
 from tests.helpers.executor_worker import (
     allocate,
@@ -23,8 +23,23 @@ from tests.helpers.executor_worker import (
     make_registry,
     make_worker,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 GRACE = 0.5
+
+
+class _StubSkillManager(SkillManager):
+    """SkillManager stub that returns an existing on-disk skill directory."""
+
+    def __init__(self, base_dir: Path) -> None:
+        super().__init__(
+            config_path=base_dir / "skills.yaml",
+            lock_path=base_dir / "skills.lock",
+            base_dir=base_dir,
+        )
+
+    def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
+        return self.base_dir / skill_key
 
 
 # Repository-owned style handlers, referenced by fully-qualified module path so
@@ -62,12 +77,12 @@ def _local_executor() -> LocalExecutor:
 
 
 def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
-    make_pi_skill(skill_root, "reading_analysis/blocked_pi")
+    make_pi_skill(skill_root, "question_comprehension_info/blocked_pi")
     return PiExecutor(
         "pi-default",
         PiConfig(binary=str(fake_pi), cancellation_grace_seconds=GRACE),
-        skill_root,
-        {"blocked_pi": PiCapabilityConfig(skill="reading_analysis/blocked_pi")},
+        _StubSkillManager(skill_root),
+        {"blocked_pi": PiCapabilityConfig(skill="question_comprehension_info/blocked_pi")},
     )
 
 
@@ -90,7 +105,7 @@ def _make_registry(local_executor: LocalExecutor, pi_executor: PiExecutor) -> An
             "pi-default": {
                 "kind": "pi",
                 "global_capacity": 1,
-                "capabilities": {"blocked_pi": {"skill": "reading_analysis/blocked_pi"}},
+                "capabilities": {"blocked_pi": {"skill": "question_comprehension_info/blocked_pi"}},
             },
         },
     )
@@ -107,9 +122,11 @@ def _make_nodes() -> list[Any]:
 @pytest.mark.slow
 @pytest.mark.full_gate
 def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Cancel Recovery")
+    ws = job_db.create_workspace(
+        "Cancel Recovery", default_workflow_key="question_comprehension_info"
+    )
 
     fake_pi = tmp_path / "fake_pi"
     fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
@@ -224,5 +241,5 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
         future.result(timeout=10)
     node2 = job_db.get_job_node(job2["id"], "cooperative")
     assert node2["status"] == "completed"
-    assert (Path(job2["storage_dir"]) / "output.json").is_file()
+    assert (resolve_job_dir(job2, tmp_path / "jobs") / "output.json").is_file()
     worker2.stop()

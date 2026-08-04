@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useWorkspaceStore } from './workspaceStore'
-import type { WorkspaceRecord } from '../types'
-import type { WorkspaceStats } from '../workspaceTypes'
+import { makeWorkspace } from '../testing/workspaceFixtures'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 
 vi.mock('../api', () => ({
   fetchWorkspaces: vi.fn(),
@@ -49,14 +49,7 @@ describe('workspaceStore', () => {
   })
 
   it('fetchWorkspaces sets workspaces on success', async () => {
-    const workspaces: WorkspaceRecord[] = [
-      {
-        id: 'ws1',
-        name: 'Test Workspace',
-        default_workflow_key: 'question_content',
-        default_entity: 'question',
-      },
-    ]
+    const workspaces = [makeWorkspace({ id: 'ws1', name: 'Test Workspace' })]
     mockFetchWorkspaces.mockResolvedValueOnce({ workspaces })
 
     await useWorkspaceStore.getState().fetchWorkspaces()
@@ -76,17 +69,12 @@ describe('workspaceStore', () => {
   })
 
   it('createWorkspace adds to list', async () => {
-    const ws: WorkspaceRecord = {
-      id: 'ws2',
-      name: 'New Workspace',
-      default_workflow_key: 'question_content',
-      default_entity: 'question',
-    }
+    const ws = makeWorkspace({ id: 'ws2', name: 'New Workspace' })
     mockCreateWorkspace.mockResolvedValueOnce(ws)
 
     const result = await useWorkspaceStore
       .getState()
-      .createWorkspace('New Workspace')
+      .createWorkspace('New Workspace', 'question_comprehension_info')
 
     expect(result).toEqual(ws)
     expect(useWorkspaceStore.getState().workspaces).toContainEqual(ws)
@@ -97,25 +85,20 @@ describe('workspaceStore', () => {
     mockCreateWorkspace.mockRejectedValueOnce(new Error('create failed'))
 
     await expect(
-      useWorkspaceStore.getState().createWorkspace('Bad Workspace')
+      useWorkspaceStore
+        .getState()
+        .createWorkspace('Bad Workspace', 'question_comprehension_info')
     ).rejects.toThrow('create failed')
     expect(useWorkspaceStore.getState().error).toBe('Error: create failed')
   })
 
   it('updateWorkspace replaces workspace in list and current selection', async () => {
-    const existing: WorkspaceRecord = {
+    const existing = makeWorkspace({ id: 'ws1', name: 'Old' })
+    const updated = makeWorkspace({
       id: 'ws1',
       name: 'Old',
-      default_workflow_key: 'question_content',
-      default_entity: 'question',
-    }
-    const updated: WorkspaceRecord = {
-      id: 'ws1',
-      name: 'Old',
-      default_workflow_key: 'question_content',
-      default_entity: 'question',
-      cms_config: { subject_id: '5' },
-    }
+      resource_config: { resources: {} },
+    })
     useWorkspaceStore.setState({
       workspaces: [existing],
       currentWorkspace: existing,
@@ -124,7 +107,7 @@ describe('workspaceStore', () => {
 
     const result = await useWorkspaceStore
       .getState()
-      .updateWorkspace('ws1', { cms_config: { subject_id: '5' } })
+      .updateWorkspace('ws1', { resource_config: { resources: {} } })
 
     expect(result).toEqual(updated)
     expect(useWorkspaceStore.getState().workspaces).toEqual([updated])
@@ -134,18 +117,8 @@ describe('workspaceStore', () => {
   it('deleteWorkspace removes from list', async () => {
     useWorkspaceStore.setState({
       workspaces: [
-        {
-          id: 'ws1',
-          name: 'A',
-          default_workflow_key: 'question_content',
-          default_entity: 'question',
-        },
-        {
-          id: 'ws2',
-          name: 'B',
-          default_workflow_key: 'question_content',
-          default_entity: 'question',
-        },
+        makeWorkspace({ id: 'ws1', name: 'A' }),
+        makeWorkspace({ id: 'ws2', name: 'B' }),
       ],
     })
     mockDeleteWorkspace.mockResolvedValueOnce(undefined)
@@ -167,12 +140,7 @@ describe('workspaceStore', () => {
   })
 
   it('setCurrentWorkspace sets current', () => {
-    const ws: WorkspaceRecord = {
-      id: 'ws1',
-      name: 'Current',
-      default_workflow_key: 'question_content',
-      default_entity: 'question',
-    }
+    const ws = makeWorkspace({ id: 'ws1', name: 'Current' })
     useWorkspaceStore.getState().setCurrentWorkspace(ws)
     expect(useWorkspaceStore.getState().currentWorkspace).toEqual(ws)
   })
@@ -181,7 +149,7 @@ describe('workspaceStore', () => {
     const stats: WorkspaceStats = {
       workspace_id: 'ws1',
       name: 'Test Workspace',
-      workflow_key: 'question_content',
+      workflow_key: 'question_comprehension_info',
       workflow_label: 'Question Content',
       job_stats: {
         total_jobs: 10,

@@ -1,15 +1,39 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
-from pydantic_core import InitErrorDetails
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+)
+
+from server.app.config_schema import validate_config_schema
 
 
 class LocalCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     handler: str = Field(min_length=1)
+    # Wall-clock limit for one isolated run of this capability; absent falls
+    # back to the executor default (local.DEFAULT_TIMEOUT_SECONDS).
+    timeout_seconds: float | None = Field(default=None, gt=0)
+    # "thread" runs the handler directly in the executor pool thread: no
+    # process isolation, no wall-clock kill (timeout_seconds does not apply),
+    # and stdout is not redirected into the node log file (use logging).
+    # Only for trusted, fast, pure-code handlers. Default keeps every run in
+    # an isolated child process.
+    isolation: Literal["process", "thread"] = "process"
+    # Non-secret tunable parameters for the node_config chain (spec D15);
+    # secrets stay in resource bindings / the vault (spec D16).
+    config_schema: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("config_schema", mode="after")
+    @classmethod
+    def _validate_config_schema(cls, value: dict[str, Any]) -> dict[str, Any]:
+        validate_config_schema(value)
+        return value
 
 
 class PiCapabilityConfig(BaseModel):
@@ -81,38 +105,5 @@ class OpenClawExecutorConfig(BaseModel):
         return value
 
 
-ExecutorConfig = Annotated[
-    LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig,
-    Field(discriminator="kind"),
-]
-
-_executor_config_adapter: TypeAdapter[
-    LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig
-] = TypeAdapter(ExecutorConfig)
-
-
-def _validation_error_with_executor_id(exc: ValidationError, executor_id: str) -> ValidationError:
-    line_errors = exc.errors(include_url=False)
-    for error in line_errors:
-        ctx = error.get("ctx") or {}
-        ctx["executor_id"] = executor_id
-        error["ctx"] = ctx
-        error["loc"] = (executor_id, *error.get("loc", ()))
-    return ValidationError.from_exception_data(exc.title, cast(list[InitErrorDetails], line_errors))
-
-
-def load_executor_definitions(
-    raw: dict[str, object],
-) -> dict[str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig]:
-    """Validate a mapping of executor ID to executor configuration."""
-    definitions: dict[str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig] = {}
-    for executor_id, value in raw.items():
-        if not isinstance(value, dict):
-            raise TypeError(
-                f"Executor {executor_id!r}: expected a mapping, got {type(value).__name__}"
-            )
-        try:
-            definitions[executor_id] = _executor_config_adapter.validate_python(value)
-        except ValidationError as exc:
-            raise _validation_error_with_executor_id(exc, executor_id) from exc
-    return definitions
+ExecutorConfig = LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig
+"""Union of the built-in executor config models, for type annotations only."""

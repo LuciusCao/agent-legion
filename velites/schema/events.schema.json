@@ -1,0 +1,620 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Event",
+  "description": "The velites/json1 event stream: exactly these eleven event types, NDJSON\non stdout, one JSON object per line.",
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "session"
+        }
+      },
+      "$ref": "#/$defs/SessionEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent_start"
+        }
+      },
+      "$ref": "#/$defs/AgentStartEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "agent_end"
+        }
+      },
+      "$ref": "#/$defs/AgentEndEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "turn_start"
+        }
+      },
+      "$ref": "#/$defs/TurnStartEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "turn_end"
+        }
+      },
+      "$ref": "#/$defs/TurnEndEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "message_start"
+        }
+      },
+      "$ref": "#/$defs/MessageStartEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "message_end"
+        }
+      },
+      "$ref": "#/$defs/MessageEndEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "auto_retry_start"
+        }
+      },
+      "$ref": "#/$defs/AutoRetryStartEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "tool_execution_start"
+        }
+      },
+      "$ref": "#/$defs/ToolExecutionStartEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "tool_execution_end"
+        }
+      },
+      "$ref": "#/$defs/ToolExecutionEndEvent",
+      "required": [
+        "type"
+      ]
+    },
+    {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "outputs_validation"
+        }
+      },
+      "$ref": "#/$defs/OutputsValidationEvent",
+      "required": [
+        "type"
+      ]
+    }
+  ],
+  "$defs": {
+    "AgentEndEvent": {
+      "description": "`agent_end` event: final line of the stream. `error` is present only when\nthe run ended with an unrecovered model error (exit code stays 0, matching\nPi; the Host judges failure from the event stream). `reason` is present\nonly on budget exhaustion or cancellation (exit code also stays 0 — see\n`cancel.rs`).",
+      "type": "object",
+      "properties": {
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "messages": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/EndReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "messages"
+      ]
+    },
+    "AgentStartEvent": {
+      "description": "`agent_start` event: emitted once before the first turn.",
+      "type": "object"
+    },
+    "AutoRetryStartEvent": {
+      "description": "`auto_retry_start` event (pi-compatible): emitted right after the error\n`message_end` of a failed transient attempt, before the backoff sleep.\nThere is intentionally no `auto_retry_end` — Pi doesn't have one either;\nthe Host's `fold_model_error` treats the next successful assistant\n`message_end` (`stopReason=stop|toolUse`) as \"recovered\".",
+      "type": "object",
+      "properties": {
+        "attempt": {
+          "description": "1-based retry counter (pi wire field).",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        },
+        "delayMs": {
+          "description": "Backoff delay before the retry fires, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "error": {
+          "description": "Short description of the transient error that triggered the retry.",
+          "type": "string"
+        },
+        "maxAttempts": {
+          "description": "Total attempts allowed, initial call included.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "attempt",
+        "maxAttempts",
+        "delayMs",
+        "error"
+      ]
+    },
+    "ContentBlock": {
+      "description": "Content block of a message (pi-compatible shapes).",
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "text"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "thinking": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "thinking"
+            }
+          },
+          "required": [
+            "type",
+            "thinking"
+          ]
+        },
+        {
+          "type": "object",
+          "properties": {
+            "arguments": true,
+            "id": {
+              "description": "Filled by the provider (stub auto-generates `call-<n>-<i>`).",
+              "type": "string",
+              "default": ""
+            },
+            "name": {
+              "type": "string"
+            },
+            "type": {
+              "type": "string",
+              "const": "toolCall"
+            }
+          },
+          "required": [
+            "type",
+            "name",
+            "arguments"
+          ]
+        }
+      ]
+    },
+    "EndReason": {
+      "description": "Why the run ended early. Absent on a normal completion or an unrecovered\nmodel error (the `error` field covers that path); present only when the\nharness itself cut the run short (design §5 controllability).",
+      "oneOf": [
+        {
+          "description": "A run budget (turns / tokens / wall-clock deadline) was exhausted;\nthe model got one wrap-up turn before the loop ended.",
+          "type": "string",
+          "const": "budget_exceeded"
+        },
+        {
+          "description": "SIGTERM requested cancellation; the loop stopped at the next\ncheckpoint (turn boundary or after the current tool execution).",
+          "type": "string",
+          "const": "cancelled"
+        }
+      ]
+    },
+    "Message": {
+      "description": "One conversation message. Assistant metadata (`usage`, `provider`, `model`,\n`stopReason`, `errorMessage`, `timing`) and tool-result metadata (`toolCallId`,\n`toolName`, `isError`) are only present on the roles they apply to; `None`\nfields are skipped on the wire.",
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContentBlock"
+          }
+        },
+        "errorMessage": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "isError": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "provider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "role": {
+          "$ref": "#/$defs/Role"
+        },
+        "stopReason": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timing": {
+          "description": "Request-level timing (velites extension); only set by real providers\non successful completions — the stub provider and error events omit it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestTiming"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "toolCallId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toolName": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Usage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "role",
+        "content"
+      ]
+    },
+    "MessageEndEvent": {
+      "description": "`message_end` event: the final assistant message. This is the token-metering\nand failure-detection record — `usage`, `provider`, `model`, `stopReason`,\n`content`, `errorMessage` all live here.",
+      "type": "object",
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/Message"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "MessageStartEvent": {
+      "description": "`message_start` event: assistant message skeleton (role/provider/model\nknown, content empty).",
+      "type": "object",
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/Message"
+        }
+      },
+      "required": [
+        "message"
+      ]
+    },
+    "OutputsValidationEvent": {
+      "description": "`outputs_validation` event (velites extension, design §5 输出自检):\nemitted right before `agent_end` whenever `--require-output` was given and\nthe run ended normally or by budget exhaustion — always emitted in that\ncase so the Host can decide explicitly, with `missing` listing the\ndeclared artifacts (relative paths as passed on the CLI) that still do not\nexist after the single remediation turn. Not emitted on cancellation or\nunrecovered model error.",
+      "type": "object",
+      "properties": {
+        "missing": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "missing"
+      ]
+    },
+    "RequestTiming": {
+      "description": "Request-level timing of one LLM completion (velites extension; Pi has no\nequivalent). Attached to the assistant message of the SUCCESSFUL attempt —\nfailed transient attempts surface as pi-compatible error `message_end`\nevents without timing. All durations are wall-clock milliseconds measured\nby the provider:\n\n- `ttfbMs`: POST sent → first SSE `data:` chunk (for the non-streaming\n  JSON fallback dialect: → response headers);\n- `streamMs`: first → last SSE `data:` chunk (`[DONE]` or connection end);\n- `totalMs`: POST sent → stream end.\n\nTokens-per-second is NOT stored: consumers derive it as\n`usage.output / (streamMs / 1000)`.",
+      "type": "object",
+      "properties": {
+        "streamMs": {
+          "description": "First → last stream chunk, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "totalMs": {
+          "description": "POST sent → stream end, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "ttfbMs": {
+          "description": "POST sent → first response chunk, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ttfbMs",
+        "streamMs",
+        "totalMs"
+      ]
+    },
+    "Role": {
+      "description": "Message role. `ToolResult` serializes as `toolResult` (pi-compatible).",
+      "type": "string",
+      "enum": [
+        "user",
+        "assistant",
+        "toolResult"
+      ]
+    },
+    "SessionEvent": {
+      "description": "`session` event: first line of the stream.",
+      "type": "object",
+      "properties": {
+        "sessionId": {
+          "description": "Session identifier (`--name`, or a generated fallback).",
+          "type": "string"
+        },
+        "timestamp": {
+          "description": "Unix seconds at session start.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "sessionId",
+        "timestamp"
+      ]
+    },
+    "StopReason": {
+      "description": "Stop reason of an assistant message. Wire names are camelCase to match Pi\n(`stop` / `length` / `toolUse` / `error` / `aborted`).",
+      "type": "string",
+      "enum": [
+        "stop",
+        "length",
+        "toolUse",
+        "error",
+        "aborted"
+      ]
+    },
+    "ToolExecutionEndEvent": {
+      "description": "`tool_execution_end` event. `output_bytes` measures the tool's output\nvolume (stdout+stderr for bash, written/returned bytes for write/read);\nit is a measurement field only — no truncation happens in M1.",
+      "type": "object",
+      "properties": {
+        "isError": {
+          "type": "boolean"
+        },
+        "output_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "result": {
+          "$ref": "#/$defs/ToolResultData"
+        },
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolCallId",
+        "toolName",
+        "result",
+        "isError",
+        "output_bytes"
+      ]
+    },
+    "ToolExecutionStartEvent": {
+      "description": "`tool_execution_start` event.",
+      "type": "object",
+      "properties": {
+        "args": true,
+        "toolCallId": {
+          "type": "string"
+        },
+        "toolName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "toolCallId",
+        "toolName",
+        "args"
+      ]
+    },
+    "ToolResultData": {
+      "description": "Result payload shared by `tool_execution_end` (`result.content`).",
+      "type": "object",
+      "properties": {
+        "content": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ContentBlock"
+          }
+        }
+      },
+      "required": [
+        "content"
+      ]
+    },
+    "TurnEndEvent": {
+      "description": "`turn_end` event: assistant message plus the tool results it triggered.",
+      "type": "object",
+      "properties": {
+        "message": {
+          "$ref": "#/$defs/Message"
+        },
+        "toolResults": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Message"
+          }
+        },
+        "turnIndex": {
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "turnIndex",
+        "message",
+        "toolResults"
+      ]
+    },
+    "TurnStartEvent": {
+      "description": "`turn_start` event.",
+      "type": "object",
+      "properties": {
+        "turnIndex": {
+          "description": "1-based turn counter.",
+          "type": "integer",
+          "format": "uint32",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "turnIndex"
+      ]
+    },
+    "Usage": {
+      "description": "Token usage of one assistant message. `cacheRead` is camelCase on the wire.\n\nPi-aligned semantics: `input` EXCLUDES cache-read tokens (the provider's\n`prompt_tokens` includes them; subtracting avoids double-billing the\ncached part), so `input + cacheRead` reconstructs `prompt_tokens`.",
+      "type": "object",
+      "properties": {
+        "cacheRead": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "input": {
+          "description": "Non-cached input tokens (pi-aligned; excludes `cacheRead`).",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "output": {
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "input",
+        "output",
+        "cacheRead"
+      ]
+    }
+  }
+}

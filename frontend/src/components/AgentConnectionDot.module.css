@@ -1,0 +1,14 @@
+.connDot {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid #ffffff;
+  border-radius: 50%;
+  background: #d97706;
+}
+
+.connClosed {
+  background: #b91c1c;
+}

@@ -15,7 +15,9 @@ import pytest
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
+from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.mark.full_gate
@@ -44,12 +46,15 @@ def test_delete_rollback_survives_concurrent_recreation(
     )
 
     workspace_id = "ws-race"
-    job_db.create_workspace(workspace_id)
+    job_db.create_workspace(workspace_id, default_workflow_key="question_comprehension_info")
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["R1"]}, workspace_id=workspace_id
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["R1"]},
+        workspace_id=workspace_id,
     )
     job = job_db.create_job(
-        "question_content",
+        "question_comprehension_info",
         "question",
         "R1",
         batch["id"],
@@ -59,7 +64,7 @@ def test_delete_rollback_survives_concurrent_recreation(
     )
     job_db.update_job_status(job["id"], "completed")
 
-    storage_dir = Path(str(job["storage_dir"]))
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     original_artifact = storage_dir / "artifact.bin"
     original_artifact.write_bytes(b"original-bytes")
@@ -83,6 +88,8 @@ def test_delete_rollback_survives_concurrent_recreation(
     def _deleter() -> None:
         try:
             result_holder.append(service.delete(workspace_id, job["id"]))
+        except JobOperationError as exc:
+            result_holder.append(exc.to_result())
         except BaseException as exc:  # pragma: no cover - defensive
             exception_holder.append(exc)
 

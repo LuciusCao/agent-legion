@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, act, renderHook } from '@testing-library/react'
 import { useEffect } from 'react'
 import { AppShell, useAppShellScroll } from './AppShell'
+import { expectConsoleError } from '../test-setup'
 
 describe('AppShell', () => {
   it('passes scrolled=false initially to appBar render prop', () => {
@@ -79,8 +80,18 @@ describe('AppShell', () => {
   })
 
   it('throws when useAppShellScroll is used outside AppShell', () => {
-    expect(() => renderHook(() => useAppShellScroll())).toThrow(
-      'useAppShellScroll must be used inside AppShell'
-    )
+    expectConsoleError(/useAppShellScroll must be used inside AppShell/)
+    expectConsoleError(/The above error occurred in the <TestComponent>/)
+    const preventExpectedWindowError = (event: ErrorEvent) => {
+      event.preventDefault()
+    }
+    window.addEventListener('error', preventExpectedWindowError)
+    try {
+      expect(() => renderHook(() => useAppShellScroll())).toThrow(
+        'useAppShellScroll must be used inside AppShell'
+      )
+    } finally {
+      window.removeEventListener('error', preventExpectedWindowError)
+    }
   })
 })

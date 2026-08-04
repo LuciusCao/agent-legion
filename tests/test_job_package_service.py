@@ -3,9 +3,16 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from server.app.jobs import JobQueries
-from server.app.services.job_packages import JobPackageResult, JobPackageService
+from server.app.services.job_packages import (
+    JobPackageResult,
+    JobPackageService,
+    WorkspacePackageLockedError,
+)
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 
 def _create_settings(tmp_path: Path) -> Settings:
@@ -31,12 +38,12 @@ def _create_settings(tmp_path: Path) -> Settings:
 def _create_job(
     job_db: JobQueries, workspace_id: str, source_id: str, status: str = "queued"
 ) -> dict[str, Any]:
-    job_db.create_workspace(workspace_id)
+    job_db.create_workspace(workspace_id, default_workflow_key="question_comprehension_info")
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": [source_id]}, workspace_id
+        "question_comprehension_info", "batch_by_ids", {"question_ids": [source_id]}, workspace_id
     )
     job = job_db.create_job(
-        "question_content",
+        "question_comprehension_info",
         "question",
         source_id,
         batch["id"],
@@ -49,8 +56,8 @@ def _create_job(
     return job
 
 
-def _write_artifact(job: dict[str, Any]) -> None:
-    storage_dir = Path(str(job["storage_dir"]))
+def _write_artifact(job: dict[str, Any], settings: Settings) -> None:
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "question_context.json").write_text(
         '{"question_id":"' + job["source_id"] + '"}', encoding="utf-8"
@@ -65,13 +72,13 @@ def test_package_returns_ordered_results_with_reason_codes(
 
     workspace_id = "pkg-ws"
     completed_a = _create_job(job_db, workspace_id, "Q100", status="completed")
-    _write_artifact(completed_a)
+    _write_artifact(completed_a, settings)
     completed_b = _create_job(job_db, workspace_id, "Q101", status="completed")
-    _write_artifact(completed_b)
+    _write_artifact(completed_b, settings)
     incomplete = _create_job(job_db, workspace_id, "Q102", status="queued")
-    _write_artifact(incomplete)
+    _write_artifact(incomplete, settings)
     other_workspace_job = _create_job(job_db, "other-ws", "Q103", status="completed")
-    _write_artifact(other_workspace_job)
+    _write_artifact(other_workspace_job, settings)
 
     job_ids = [
         completed_a["id"],
@@ -118,7 +125,7 @@ def test_package_requires_at_least_one_eligible_job(job_db: JobQueries, tmp_path
 
     workspace_id = "empty-pkg-ws"
     incomplete = _create_job(job_db, workspace_id, "Q200", status="queued")
-    _write_artifact(incomplete)
+    _write_artifact(incomplete, settings)
 
     response: JobPackageResult = service.package(workspace_id, [incomplete["id"]])
 
@@ -128,3 +135,111 @@ def test_package_requires_at_least_one_eligible_job(job_db: JobQueries, tmp_path
     assert response["failed_count"] == 1
     assert response.get("package_filename") is None
     assert response.get("download_url") is None
+
+
+def test_package_creates_workspace_package_record_and_marks_jobs_packed(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-record"
+    completed_a = _create_job(job_db, workspace_id, "Q300", status="completed")
+    _write_artifact(completed_a, settings)
+    completed_b = _create_job(job_db, workspace_id, "Q301", status="completed")
+    _write_artifact(completed_b, settings)
+
+    response = service.package(workspace_id, [completed_a["id"], completed_b["id"]])
+
+    assert response["succeeded_count"] == 2
+    assert response["package_filename"]
+
+    packages = job_db.list_workspace_packages(workspace_id)
+    assert len(packages) == 1
+    pkg = packages[0]
+    assert pkg["job_count"] == 2
+    assert pkg["size_bytes"] > 0
+    assert pkg["name"] == "批次 (2个任务)"
+    assert pkg["path"].startswith("packages/workspace-pkg-ws-record/")
+    assert pkg["locked"] == 0
+
+    assert job_db.get_job(completed_a["id"])["packed"] == 1
+    assert job_db.get_job(completed_b["id"])["packed"] == 1
+
+
+def test_clear_packed_status_keeps_package_history(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-clear-status"
+    completed = _create_job(job_db, workspace_id, "Q350", status="completed")
+    _write_artifact(completed, settings)
+    service.package(workspace_id, [completed["id"]])
+    packages_before = job_db.list_workspace_packages(workspace_id)
+
+    results = service.clear_packed_status(workspace_id, [completed["id"]])
+
+    assert results == [
+        {
+            "job_id": completed["id"],
+            "status": "succeeded",
+            "reason_code": None,
+            "message": None,
+        }
+    ]
+    assert job_db.get_job(completed["id"])["packed"] == 0
+    assert job_db.list_workspace_packages(workspace_id) == packages_before
+
+
+def test_clear_packed_status_rejects_jobs_outside_workspace(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+    job = _create_job(job_db, "other-workspace", "Q351", status="completed")
+    job_db.set_jobs_packed([job["id"]], packed=1)
+
+    results = service.clear_packed_status("target-workspace", [job["id"], "missing"])
+
+    assert [result["reason_code"] for result in results] == [
+        "wrong_workspace",
+        "not_found",
+    ]
+    assert job_db.get_job(job["id"])["packed"] == 1
+
+
+def test_workspace_package_lifecycle_respects_locked(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-lifecycle"
+    completed = _create_job(job_db, workspace_id, "Q400", status="completed")
+    _write_artifact(completed, settings)
+
+    service.package(workspace_id, [completed["id"]])
+    pkg = job_db.list_workspace_packages(workspace_id)[0]
+
+    service.lock_workspace_package(workspace_id, pkg["id"], True)
+    assert job_db.get_workspace_package(workspace_id, pkg["id"])["locked"] == 1
+
+    with pytest.raises(WorkspacePackageLockedError):
+        service.delete_workspace_package(workspace_id, pkg["id"])
+
+    service.lock_workspace_package(workspace_id, pkg["id"], False)
+    service.delete_workspace_package(workspace_id, pkg["id"])
+    assert job_db.list_workspace_packages(workspace_id) == []
+
+
+def test_rerun_resets_packed_flag(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-rerun"
+    completed = _create_job(job_db, workspace_id, "Q500", status="completed")
+    _write_artifact(completed, settings)
+
+    service.package(workspace_id, [completed["id"]])
+    assert job_db.get_job(completed["id"])["packed"] == 1
+
+    job_db.mark_node_for_rerun(completed["id"], "extract_question", [])
+    assert job_db.get_job(completed["id"])["packed"] == 0

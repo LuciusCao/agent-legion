@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react'
-import { fetchJobArtifact } from '../api'
-import type { QuestionNormalized } from '../types'
+import { useAsync } from './useAsync'
+import { fetchJobArtifactJson } from './jobArtifactJson'
+import type { QuestionArtifactNormalized } from '../types'
 
 export interface UseJobQuestionReturn {
-  question: QuestionNormalized | null
+  question: QuestionArtifactNormalized | null
   loading: boolean
   error: string
 }
@@ -18,7 +18,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function extractFirstQuestion(
   data: QuestionsArtifact
-): QuestionNormalized | null {
+): QuestionArtifactNormalized | null {
   if (!Array.isArray(data.questions) || data.questions.length === 0) {
     return null
   }
@@ -26,39 +26,23 @@ function extractFirstQuestion(
   if (!isRecord(first)) return null
   const normalized = first.normalized
   if (!isRecord(normalized)) return null
-  return normalized as QuestionNormalized
+  return normalized as QuestionArtifactNormalized
 }
 
 export function useJobQuestion(
   jobId: string,
   refreshKey = ''
 ): UseJobQuestionReturn {
-  const [question, setQuestion] = useState<QuestionNormalized | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-
-  useEffect(() => {
-    let cancelled = false
-
-    fetchJobArtifact(jobId, 'questions.json')
-      .then((artifact) => {
-        if (cancelled) return
-        const data = JSON.parse(artifact.content) as QuestionsArtifact
-        setQuestion(extractFirstQuestion(data))
-        setError('')
-      })
-      .catch((err) => {
-        if (cancelled) return
-        setQuestion(null)
-        setError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-
-    return () => {
-      cancelled = true
-    }
+  const {
+    data: question,
+    loading,
+    error,
+  } = useAsync(async () => {
+    const data = await fetchJobArtifactJson<QuestionsArtifact>(
+      jobId,
+      'questions.json'
+    )
+    return extractFirstQuestion(data)
   }, [jobId, refreshKey])
 
   return { question, loading, error }

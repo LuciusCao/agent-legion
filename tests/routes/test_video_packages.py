@@ -1,395 +1,250 @@
-from pathlib import Path
+import pytest
+from fastapi.testclient import TestClient
+
+from server.app.storage_paths import resolve_job_dir
 
 
-def test_package_selected_videos_and_download(tmp_path, client, monkeypatch):
-    client.post(
-        "/api/videos",
+@pytest.fixture
+def workspace_client(client):
+    """Ensure workflows are enabled and provide a helper to create workspaces/jobs."""
+    client.app.state.settings.config.setdefault("workflows", {})["enabled"] = True
+    return client
+
+
+def _create_completed_job(client: TestClient, workspace_id: str, question_id: str = "Q001"):
+    created = client.post(
+        f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-                {
-                    "url": "https://example.com/k2.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K002",
-                },
-            ]
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "question_ids": [question_id],
+            "knowledge_codes": [],
         },
     )
-    for video_id in ["knowledge_K001", "knowledge_K002"]:
-        video_dir = tmp_path / "videos" / video_id
-        video_dir.mkdir(parents=True, exist_ok=True)
-        (video_dir / "metadata.json").write_text(f'{{"id":"{video_id}"}}', encoding="utf-8")
-        client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+    assert created.status_code == 200
+    job = created.json()["jobs"][0]
+    job_id = job["id"]
 
-    # Execute package synchronously in test by mocking executor.submit to run immediately
-    def _sync_submit(fn):
-        fn()
+    # Write a minimal artifact so workspace packaging has something to archive.
+    job_db = client.app.state.job_db
+    record = job_db.get_job(job_id)
+    storage_dir = resolve_job_dir(record, client.app.state.settings.jobs_dir)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "questions.json").write_text('{"question_id":"' + question_id + '"}')
 
-    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+    # There is no public "force complete" endpoint, so mutate the job status
+    # directly through the internal DB handle.
+    job_db.update_job_status(job_id, "completed")
+    return job_id
 
-    response = client.post("/api/package", json={"video_ids": ["knowledge_K002"]})
 
+def test_list_workspace_packages_empty_for_new_workspace(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Empty Packages WS", "default_workflow_key": "question_comprehension_info"},
+    )
+    assert ws.status_code == 200
+    ws_id = ws.json()["workspace"]["id"]
+
+    response = workspace_client.get(f"/api/workspaces/{ws_id}/packages")
     assert response.status_code == 200
-    assert response.json()["accepted"] is True
-
-    # After synchronous execution, the package file should exist
-    packages = list(client.app.state.settings.packages_dir.glob("*.zip"))
-    assert len(packages) == 1
-    download = client.get(f"/api/packages/{packages[0].name}")
-    assert download.status_code == 200
-    assert download.headers["content-type"] in {"application/zip", "application/x-zip-compressed"}
+    assert response.json() == {"packages": []}
 
 
-def test_package_selected_unfinished_video_returns_400(client):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
+def test_create_workspace_package_job_accepted(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Package Job WS", "default_workflow_key": "question_comprehension_info"},
     )
+    ws_id = ws.json()["workspace"]["id"]
+    job_id = _create_completed_job(workspace_client, ws_id, "Q101")
 
-    response = client.post("/api/package", json={"video_ids": ["knowledge_K001"]})
+    response = workspace_client.post(
+        f"/api/workspaces/{ws_id}/jobs/package",
+        json={"job_ids": [job_id]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded_count"] == 1
+    assert body["failed_count"] == 0
+    assert body["results"][0]["status"] == "succeeded"
+    assert body["package_filename"]
+    assert body["download_url"]
 
+    settings = workspace_client.app.state.settings
+    workspace_packages_dir = settings.packages_dir / f"workspace-{ws_id}"
+    zip_files = [p for p in workspace_packages_dir.iterdir() if p.suffix == ".zip"]
+    assert len(zip_files) == 1
+    assert zip_files[0].stat().st_size > 0
+
+
+def test_create_workspace_package_job_rejects_no_job_ids(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "No Jobs WS", "default_workflow_key": "question_comprehension_info"},
+    )
+    ws_id = ws.json()["workspace"]["id"]
+
+    response = workspace_client.post(
+        f"/api/workspaces/{ws_id}/jobs/package",
+        json={"job_ids": []},
+    )
     assert response.status_code == 400
-    assert response.json()["detail"] == "No completed videos selected for packaging"
+    assert "job_ids" in response.json()["detail"].lower()
 
 
-def test_package_selected_missing_video_returns_404(client):
+def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Incomplete WS", "default_workflow_key": "question_comprehension_info"},
+    )
+    ws_id = ws.json()["workspace"]["id"]
 
-    response = client.post("/api/package", json={"video_ids": ["missing"]})
-
-    assert response.status_code == 404
-    assert response.json()["detail"] == "Videos not found: missing"
-
-
-def test_package_with_empty_selection_returns_400(client):
-    client.post(
-        "/api/videos",
+    created = workspace_client.post(
+        f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "question_ids": ["Q201"],
+            "knowledge_codes": [],
         },
     )
+    job_id = created.json()["jobs"][0]["id"]
+    # Leave job status as queued (not completed).
 
-    response = client.post("/api/package", json={"video_ids": []})
+    response = workspace_client.post(
+        f"/api/workspaces/{ws_id}/jobs/package",
+        json={"job_ids": [job_id]},
+    )
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded_count"] == 0
+    assert body["failed_count"] == 1
+    assert body["results"][0]["reason_code"] == "not_completed"
 
+
+def test_clear_workspace_jobs_packed_status_preserves_package(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={
+            "name": "Clear Package Status WS",
+            "default_workflow_key": "question_comprehension_info",
+        },
+    )
+    ws_id = ws.json()["workspace"]["id"]
+    job_id = _create_completed_job(workspace_client, ws_id, "Q301")
+    workspace_client.post(f"/api/workspaces/{ws_id}/jobs/package", json={"job_ids": [job_id]})
+
+    response = workspace_client.post(
+        f"/api/workspaces/{ws_id}/jobs/clear-packed",
+        json={"job_ids": [job_id]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["succeeded_count"] == 1
+    assert response.json()["failed_count"] == 0
+    assert workspace_client.app.state.job_db.get_job(job_id)["packed"] == 0
+    assert len(workspace_client.get(f"/api/workspaces/{ws_id}/packages").json()["packages"]) == 1
+
+
+def test_clear_workspace_jobs_packed_status_rejects_no_job_ids(workspace_client):
+    response = workspace_client.post(
+        "/api/workspaces/ws-empty/jobs/clear-packed", json={"job_ids": []}
+    )
     assert response.status_code == 400
-    assert response.json()["detail"] == "No videos selected for packaging"
+    assert "job_ids" in response.json()["detail"].lower()
 
 
-def test_package_without_completed_videos_returns_400(client):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
+def test_workspace_package_download_rejects_path_traversal(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Traverse WS", "default_workflow_key": "question_comprehension_info"},
     )
+    ws_id = ws.json()["workspace"]["id"]
 
-    response = client.post("/api/package")
+    response = workspace_client.get(f"/api/workspaces/{ws_id}/packages/%2e%2e/%2e%2e/etc/passwd")
+    assert response.status_code == 404
 
-    assert response.status_code == 400
-    assert response.json()["detail"] == "No completed videos available for packaging"
+    response = workspace_client.get(f"/api/workspaces/{ws_id}/packages/foo/bar/../baz")
+    assert response.status_code == 404
 
-
-def test_package_sets_packed_true(tmp_path, client, monkeypatch):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
-    )
-    video_id = "knowledge_K001"
-    video_dir = tmp_path / "videos" / video_id
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
-
-    # Execute package synchronously in test by mocking executor.submit to run immediately
-    def _sync_submit(fn):
-        fn()
-
-    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
-
-    response = client.post("/api/package", json={"video_ids": [video_id]})
-
-    assert response.status_code == 200
-    assert response.json()["accepted"] is True
-    video = client.app.state.db.get_video(video_id)
-    assert video["packed"] == 1
-
-    # Package record should also be persisted
-    packages = client.app.state.db.list_packages()
-    assert len(packages) == 1
-    assert packages[0]["path"].endswith(".zip")
-
-
-def test_list_packages_returns_recent_packages(tmp_path, client, monkeypatch):
-    video_id = "knowledge_K001"
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
-    )
-    video_dir = tmp_path / "videos" / video_id
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
-
-    def _sync_submit(fn):
-        fn()
-
-    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
-
-    client.post("/api/package", json={"video_ids": [video_id]})
-
-    response = client.get("/api/packages")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["packages"]) == 1
-    assert data["packages"][0]["path"].endswith(".zip")
-
-
-def test_rerun_clears_packed(tmp_path, client):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
-    )
-    video_id = "knowledge_K001"
-    video_dir = tmp_path / "videos" / video_id
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(
-        video_id, status="completed", current_phase="assemble", packed=1
-    )
-
-    response = client.post(f"/api/videos/{video_id}/rerun", json={"phase": "assemble"})
-
-    assert response.status_code == 200
-    video = client.app.state.db.get_video(video_id)
-    assert video["packed"] == 0
-
-
-def test_package_download_rejects_path_traversal(client):
-    response = client.get("/api/packages/%2e%2e/%2e%2e/%2e%2e/etc/passwd")
+    response = workspace_client.get(f"/api/workspaces/{ws_id}/packages/%2fetc%2fpasswd")
     assert response.status_code == 404
 
 
-def test_package_download_rejects_empty_and_directory(client):
-    # Empty filename should 404
-    response = client.get("/api/packages/")
-    assert response.status_code == 404
+def test_workspace_package_download_rejects_subdirectory(workspace_client, tmp_path):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Subdir WS", "default_workflow_key": "question_comprehension_info"},
+    )
+    ws_id = ws.json()["workspace"]["id"]
 
-    # Leading slash should 404
-    response = client.get("/api/packages/%2fetc%2fpasswd")
-    assert response.status_code == 404
-
-    # Directory traversal via dot-dot should 404
-    response = client.get("/api/packages/foo/bar/../baz")
-    assert response.status_code == 404
-
-
-def test_package_download_rejects_backslash_traversal(client):
-    response = client.get("/api/packages/foo\\..\\..\\etc\\passwd")
-    assert response.status_code == 404
-
-
-def test_package_download_rejects_subdirectory(client, settings):
-    nested = settings.packages_dir / "foo" / "bar.zip"
+    packages_dir = workspace_client.app.state.settings.packages_dir / f"workspace-{ws_id}"
+    nested = packages_dir / "sub" / "bad.zip"
     nested.parent.mkdir(parents=True, exist_ok=True)
     nested.write_text("fake", encoding="utf-8")
-    response = client.get("/api/packages/foo/bar.zip")
+
+    response = workspace_client.get(f"/api/workspaces/{ws_id}/packages/sub/bad.zip")
     assert response.status_code == 404
 
 
-# SSE tests
-
-
-def test_package_download_runtime_error(client, monkeypatch):
-    def boom(self):
-        raise RuntimeError("boom")
-
-    monkeypatch.setattr(Path, "resolve", boom)
-    response = client.get("/api/packages/test.zip")
-    assert response.status_code == 404
-
-
-def test_package_with_custom_name(tmp_path, client, monkeypatch):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
+def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Lifecycle WS", "default_workflow_key": "question_comprehension_info"},
     )
-    video_id = "knowledge_K001"
-    video_dir = tmp_path / "videos" / video_id
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+    ws_id = ws.json()["workspace"]["id"]
+    job_id = _create_completed_job(workspace_client, ws_id, "Q501")
 
-    def _sync_submit(fn):
-        fn()
+    create_resp = workspace_client.post(
+        f"/api/workspaces/{ws_id}/jobs/package", json={"job_ids": [job_id]}
+    )
+    assert create_resp.status_code == 200
 
-    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
-
-    response = client.post("/api/package", json={"video_ids": [video_id], "name": "我的批次"})
-    assert response.status_code == 200
-    assert response.json()["accepted"] is True
-
-    packages = client.app.state.db.list_packages()
+    list_resp = workspace_client.get(f"/api/workspaces/{ws_id}/packages")
+    assert list_resp.status_code == 200
+    packages = list_resp.json()["packages"]
     assert len(packages) == 1
-    assert packages[0]["name"] == "我的批次"
+    pkg_id = packages[0]["id"]
     assert packages[0]["video_count"] == 1
     assert packages[0]["size_bytes"] > 0
 
-
-def test_delete_package(tmp_path, client, monkeypatch):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
+    patch_resp = workspace_client.patch(
+        f"/api/workspaces/{ws_id}/packages/{pkg_id}", json={"name": "Renamed"}
     )
-    video_id = "knowledge_K001"
-    video_dir = tmp_path / "videos" / video_id
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["name"] == "Renamed"
 
-    def _sync_submit(fn):
-        fn()
+    lock_resp = workspace_client.patch(
+        f"/api/workspaces/{ws_id}/packages/{pkg_id}", json={"locked": True}
+    )
+    assert lock_resp.status_code == 200
+    assert lock_resp.json()["locked"] is True
 
-    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+    del_resp = workspace_client.delete(f"/api/workspaces/{ws_id}/packages/{pkg_id}")
+    assert del_resp.status_code == 400
+    assert "locked" in del_resp.json()["detail"].lower()
 
-    client.post("/api/package", json={"video_ids": [video_id]})
-    pkg = client.app.state.db.list_packages(limit=1)[0]
+    workspace_client.patch(f"/api/workspaces/{ws_id}/packages/{pkg_id}", json={"locked": False})
+    del_resp = workspace_client.delete(f"/api/workspaces/{ws_id}/packages/{pkg_id}")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["deleted"] is True
 
-    response = client.delete(f"/api/packages/{pkg['id']}")
-    assert response.status_code == 200
-    assert response.json()["deleted"] is True
-    assert client.app.state.db.list_packages(limit=10) == []
+    list_resp = workspace_client.get(f"/api/workspaces/{ws_id}/packages")
+    assert list_resp.json()["packages"] == []
 
 
-def test_delete_package_not_found(client):
-    response = client.delete("/api/packages/99999")
+def test_workspace_package_download_missing_file_returns_404(client):
+    response = client.get("/api/workspaces/ws-x/packages/nope.zip")
     assert response.status_code == 404
 
 
-def test_patch_package_name(tmp_path, client, monkeypatch):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
-    )
-    video_id = "knowledge_K001"
-    video_dir = tmp_path / "videos" / video_id
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+def test_workspace_package_download_rejects_symlink_escape(client, settings, tmp_path):
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    packages_dir = settings.packages_dir / "workspace-ws-x"
+    packages_dir.mkdir(parents=True)
+    (packages_dir / "evil.zip").symlink_to(outside)
 
-    def _sync_submit(fn):
-        fn()
-
-    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
-
-    client.post("/api/package", json={"video_ids": [video_id]})
-    pkg = client.app.state.db.list_packages(limit=1)[0]
-
-    response = client.patch(f"/api/packages/{pkg['id']}", json={"name": "新名称"})
-    assert response.status_code == 200
-    assert response.json()["name"] == "新名称"
-
-
-def test_list_packages_returns_new_fields(tmp_path, client, monkeypatch):
-    client.post(
-        "/api/videos",
-        json={
-            "items": [
-                {
-                    "url": "https://example.com/k1.mp4",
-                    "content_type": "knowledge",
-                    "external_id": "K001",
-                },
-            ]
-        },
-    )
-    video_id = "knowledge_K001"
-    video_dir = tmp_path / "videos" / video_id
-    video_dir.mkdir(parents=True, exist_ok=True)
-    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
-
-    def _sync_submit(fn):
-        fn()
-
-    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
-
-    client.post("/api/package", json={"video_ids": [video_id], "name": "测试批次"})
-
-    response = client.get("/api/packages")
-    assert response.status_code == 200
-    data = response.json()
-    assert len(data["packages"]) == 1
-    assert data["packages"][0]["name"] == "测试批次"
-    assert data["packages"][0]["video_count"] == 1
-    assert data["packages"][0]["size_bytes"] > 0
+    response = client.get("/api/workspaces/ws-x/packages/evil.zip")
+    assert response.status_code == 404

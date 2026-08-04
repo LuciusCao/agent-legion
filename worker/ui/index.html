@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Worker 控制台</title>
+    <link rel="stylesheet" href="/assets/vendor/uPlot.min.css" />
+    <link rel="stylesheet" href="/assets/styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#hub"></use></svg>
+          <span>AGENT LEGION</span>
+        </div>
+        <nav aria-label="Worker 控制台">
+          <button class="nav-button active" data-page="overview" aria-current="page">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#grid"></use></svg><span>概览</span>
+          </button>
+          <button class="nav-button" data-page="config">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#settings"></use></svg><span>配置</span>
+          </button>
+          <button class="nav-button" data-page="diagnostics">
+            <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#diagnostics"></use></svg><span>诊断</span>
+          </button>
+        </nav>
+        <div class="sidebar-meta">
+          <span>Worker Service</span>
+          <small>local control plane</small>
+        </div>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar">
+          <div class="topbar-title">
+            <h1>Worker 控制台</h1>
+            <span id="global-notice" class="global-notice" role="status"></span>
+          </div>
+          <div class="topbar-actions">
+            <div class="worker-identity">
+              <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#memory"></use></svg>
+              <span id="worker-name">本机 Worker</span>
+              <span id="worker-online-dot" class="online-dot warning" title="正在检查"></span>
+            </div>
+            <button id="toggle-claiming" class="primary-action paused" data-enabled="false">
+              <svg class="icon claim-pause-icon" aria-hidden="true"><use href="/assets/icons.svg#pause"></use></svg>
+              <svg class="icon claim-play-icon" aria-hidden="true"><use href="/assets/icons.svg#play"></use></svg>
+              <span>开始领取</span>
+            </button>
+            <div class="menu-wrap">
+              <button id="more-actions" class="icon-button" aria-label="更多操作" aria-expanded="false">
+                <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#more"></use></svg>
+              </button>
+              <div id="action-menu" class="action-menu" hidden>
+                <button id="restart" type="button">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#restart"></use></svg>
+                  重启 Worker
+                </button>
+                <span>会中断当前正在执行的任务</span>
+              </div>
+            </div>
+          </div>
+        </header>
+
+        <main class="content">
+          <section class="page-view active" data-view="overview">
+            <section class="status-panel" aria-live="polite">
+              <div class="status-lead">
+                <div id="health-icon" class="health-icon">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#check"></use></svg>
+                </div>
+                <div>
+                  <h2 id="status-title">正在检查…</h2>
+                  <p id="status-detail">读取本地服务与 Host 状态</p>
+                </div>
+              </div>
+              <!-- 异常横幅：正常时隐藏；Host 不可达 / 配置分歧 / 启动失败时才出现 -->
+              <div id="source-warning" class="source-warning" hidden>
+                <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#warning"></use></svg>
+                <div>
+                  <strong id="source-warning-title"></strong>
+                  <span id="source-warning-detail"></span>
+                </div>
+              </div>
+              <!-- 负载卡片：容量 + 上传；领取状态由顶栏开关表达，连接状态由顶栏圆点表达 -->
+              <div class="status-grid slim">
+                <article class="status-item status-item-emphasis">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#share"></use></svg>
+                  <span>运行中容量</span>
+                  <strong id="capacity-state">—</strong>
+                  <span class="meter"><i id="capacity-meter"></i></span>
+                </article>
+                <article class="status-item status-item-emphasis status-item-upload">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#upload"></use></svg>
+                  <span>上传队列</span>
+                  <strong id="upload-state">—</strong>
+                  <small id="upload-queued">—</small>
+                  <span class="meter"><i id="upload-meter"></i></span>
+                </article>
+              </div>
+            </section>
+
+            <section class="chart-panel">
+              <div class="section-heading">
+                <div><p class="eyebrow">MONITORING</p><h2>容量与吞吐</h2></div>
+                <div class="granularity-switch" role="group" aria-label="时间粒度">
+                  <button class="chip active" data-granularity="6h">6h</button>
+                  <button class="chip" data-granularity="24h">24h</button>
+                  <button class="chip" data-granularity="30d">30d</button>
+                </div>
+              </div>
+              <p id="overview-metrics-error" class="error" role="alert"></p>
+              <div class="charts stacked">
+                <div><p class="chart-title">活跃执行（本机）</p><div id="chart-capacity" class="chart"></div></div>
+                <div><p class="chart-title">Token 吞吐</p><div id="chart-tokens" class="chart"></div></div>
+              </div>
+            </section>
+
+            <section class="executions-panel">
+              <div class="section-heading">
+                <h2>当前执行</h2>
+                <div class="execution-tools">
+                  <label class="search-field">
+                    <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#search"></use></svg>
+                    <input id="execution-search" type="search" placeholder="搜索 Agent 或执行 ID" />
+                  </label>
+                  <span id="execution-count" class="text-link">0 个执行</span>
+                </div>
+              </div>
+              <div class="execution-table" role="table" aria-label="当前执行">
+                <div class="table-head" role="row">
+                  <span>执行</span><span>状态</span><span>已运行</span><span>阶段进度</span>
+                </div>
+                <div id="executions" class="execution-groups">
+                  <div class="empty-state">空闲中，等待新的任务</div>
+                </div>
+              </div>
+            </section>
+          </section>
+
+          <section class="page-view" data-view="config" hidden>
+            <section class="page-panel">
+              <div class="page-heading">
+                <div><p class="eyebrow">CONFIGURATION</p><h2>连接与能力</h2><p>配置本机执行节点，并控制它向 Host 声明的能力范围。</p></div>
+                <button id="save-config" class="save-button" type="submit" form="config-form">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#save"></use></svg>保存并应用
+                </button>
+              </div>
+              <form id="config-form">
+                <div class="form-section">
+                  <div class="form-section-heading"><h3>连接与身份</h3><span id="save-state" class="muted"></span></div>
+                  <div class="form-grid">
+                    <label class="wide">Host 地址<input name="host_url" type="url" placeholder="http://100.64.0.10:8000" required /></label>
+                    <label class="wide">Host 注册 Token <span id="register-token-state" class="hint">仅写入，不会回显</span><input name="register_token" type="password" autocomplete="new-password" placeholder="留空则保持现有 Token" /></label>
+                    <label>Worker ID<input name="worker_id" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" title="以字母或数字开头，只能包含字母、数字、_、-，最长 64 字符" required /></label>
+                    <label>显示名称<input name="name" /></label>
+                    <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
+                    <label>上传并发<input name="upload_max_concurrency" type="number" min="1" max="1024" required /></label>
+                    <fieldset>
+                      <legend>运行时</legend>
+                      <label class="check"><input name="runtimes" type="checkbox" value="pi" /> Pi</label>
+                      <label class="check"><input name="runtimes" type="checkbox" value="openclaw" /> OpenClaw</label>
+                      <label class="check"><input name="runtimes" type="checkbox" value="velites" /> Velites</label>
+                    </fieldset>
+                  </div>
+                </div>
+                <div class="form-section">
+                  <div class="form-section-heading"><div><h3>能力与模型</h3><p>每行一项，保存后由 Worker 重新向 Host 登记。</p></div></div>
+                  <div class="form-grid">
+                    <label class="wide">Worker 能力 <span class="hint">与节点 capability 完全匹配</span><textarea name="capabilities" rows="5" placeholder="generate_key_info&#10;review_key_info"></textarea></label>
+                    <label>可用模型 <span class="hint">provider/model</span><textarea name="models" rows="5" placeholder="openai/gpt-5"></textarea></label>
+                    <label>标签 <span class="hint">key=value</span><textarea name="labels" rows="5" placeholder="os=linux&#10;arch=arm64"></textarea></label>
+                  </div>
+                </div>
+                <details class="advanced-panel">
+                  <summary>高级参数 <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#chevron-down"></use></svg></summary>
+                  <div class="advanced-grid">
+                    <label>拉取间隔（秒）<input name="poll_interval_seconds" type="number" min="0.2" step="0.1" /></label>
+                    <label>心跳间隔（秒）<input name="heartbeat_interval_seconds" type="number" min="0.2" step="0.1" /></label>
+                    <label>停止宽限（秒）<input name="shutdown_grace_seconds" type="number" min="0.2" step="0.1" /></label>
+                  </div>
+                </details>
+                <div id="form-error" class="error" role="alert"></div>
+              </form>
+            </section>
+          </section>
+
+          <section class="page-view" data-view="diagnostics" hidden>
+            <section class="diagnostic-status-grid">
+              <article><span class="diagnostic-dot"></span><div><strong>本机服务</strong><small id="process-state">正在检查</small></div></article>
+              <article><span class="diagnostic-dot"></span><div><strong>Host API</strong><small id="diagnostic-host">正在检查</small></div></article>
+              <article><span class="diagnostic-dot"></span><div><strong>Host 登记</strong><small id="registered-state">正在检查</small></div></article>
+              <article><span class="diagnostic-dot"></span><div><strong>工作区范围</strong><small id="workspace-scope">—</small></div></article>
+            </section>
+            <!-- 诊断页只保留连接/健康状态与日志；监控图表已并入概览 -->
+            <section class="page-panel log-panel">
+              <div class="section-heading">
+                <div><p class="eyebrow">EVENTS</p><h2>最近日志 <small class="muted">连续重复行自动折叠</small></h2></div>
+                <button id="refresh-logs" class="secondary-button">
+                  <svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#refresh"></use></svg>刷新
+                </button>
+              </div>
+              <pre id="logs">暂无日志</pre>
+              <p class="cli-hint">本机命令：<code>workerctl status</code></p>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+    <script>
+      window.__WORKER_CONTROL_TOKEN__ = "__WORKER_CONTROL_TOKEN__";
+    </script>
+    <script src="/assets/vendor/uPlot.iife.min.js"></script>
+    <script type="module" src="/assets/app.js"></script>
+  </body>
+</html>

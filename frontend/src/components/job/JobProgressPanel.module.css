@@ -1,0 +1,261 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  height: 100%;
+  overflow-y: auto;
+  box-sizing: border-box;
+}
+
+.stepperWrap {
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.stepperHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.timelineItem {
+  display: flex;
+  gap: 10px;
+  padding: 4px 0;
+}
+
+.timelineLeft {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  width: 28px;
+}
+
+.timelineNode {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  background: #ffffff;
+  border: 2px solid #e5e7eb;
+  color: #6b7280;
+}
+
+.timelineNode > svg {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.statusCompleted {
+  background: var(--status-completed-bg);
+  border-color: var(--status-completed-border);
+  color: var(--status-completed-text);
+}
+
+.statusRunning {
+  background: var(--status-running-bg);
+  border-color: var(--status-running-border);
+  color: var(--status-running-text);
+}
+
+.statusFailed {
+  background: var(--status-failed-bg);
+  border-color: var(--status-failed-border);
+  color: var(--status-failed-text);
+}
+
+.statusStale {
+  background: var(--status-failed-bg);
+  border-color: var(--status-failed-border);
+  color: var(--status-failed-text);
+}
+
+.statusPending {
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #6b7280;
+}
+
+.spinning {
+  animation: spin 1.5s linear infinite;
+}
+
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.timelineLine {
+  width: 2px;
+  flex: 1;
+  min-height: 16px;
+  background: #e5e7eb;
+}
+
+.timelineContent {
+  flex: 1;
+  min-width: 0;
+  padding: 0 0 8px;
+  display: grid;
+  gap: 4px;
+}
+
+.nodeNameRunning {
+  color: #000000;
+  font-weight: 600;
+}
+
+.timelineHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.nodeName {
+  font-weight: 500;
+  font-size: 14px;
+  color: #111827;
+}
+
+.statusBadge {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  font-weight: 500;
+}
+
+.badgeCompleted {
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
+}
+
+.badgeRunning {
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
+}
+
+.badgeFailed {
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
+}
+
+.badgeStale {
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
+}
+
+.badgePending {
+  background: #e5e7eb;
+  color: #43474e;
+}
+
+.timelineTimes {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 12px;
+  color: #6b7280;
+  flex-wrap: wrap;
+}
+
+.timelineTimes span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 14px;
+}
+
+.executorBadge {
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: #f3f4f6;
+  color: #374151;
+  font-weight: 500;
+}
+
+.metaIcon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  color: inherit;
+}
+
+.detailToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #dc2626;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.toggleIcon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+}
+
+.errorDetail {
+  font-size: 12px;
+  color: #b91c1c;
+  background: #fee2e2;
+  padding: 8px 10px;
+  border-radius: 6px;
+  margin-top: 2px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.logBtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: #6b7280;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.logBtn:hover {
+  color: #4b5563;
+}
+
+.emptyState {
+  margin: 0;
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.tokenUsageRow {
+  margin-top: 2px;
+}

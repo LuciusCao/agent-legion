@@ -94,6 +94,20 @@ describe('DeleteWorkspaceDialog', () => {
     expect(props.onClose).not.toHaveBeenCalled()
   })
 
+  it('disables confirm button when workspace name is empty', async () => {
+    render(<DeleteWorkspaceDialog {...createProps({ workspaceName: '' })} />)
+    const confirmBtn = screen.getByText('确认删除')
+    const input = screen.getByLabelText('Workspace 名称')
+
+    expect(confirmBtn).toHaveAttribute('disabled')
+
+    await act(async () => {
+      ;(input as HTMLInputElement).value = ''
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+    expect(confirmBtn).toHaveAttribute('disabled')
+  })
+
   it('calls onClose when cancel is clicked', () => {
     const props = createProps()
     render(<DeleteWorkspaceDialog {...props} />)

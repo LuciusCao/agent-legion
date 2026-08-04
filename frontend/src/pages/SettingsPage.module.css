@@ -28,14 +28,14 @@
   border-radius: 8px;
   cursor: pointer;
   font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   transition:
     background-color 0.2s,
     color 0.2s;
 }
 
 .navItem:hover {
-  background-color: var(--md-sys-color-surface-variant);
+  background-color: #f0f0f0;
 }
 
 .navItemActive {
@@ -46,8 +46,8 @@
   transition:
     background-color 0.2s,
     color 0.2s;
-  background-color: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
+  background-color: #f0f0f0;
+  color: #1a1c1e;
   font-weight: 500;
 }
 
@@ -58,7 +58,7 @@
 
 .section {
   padding: 20px 24px;
-  background: var(--md-sys-color-surface-container-low);
+  background: #fafafa;
   border-radius: 16px;
   margin-bottom: 16px;
 }
@@ -67,7 +67,7 @@
   font-size: 18px;
   font-weight: 500;
   margin: 0 0 20px 0;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
 }
 
 .field {
@@ -79,7 +79,7 @@
 
 .field label {
   font-size: 12px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
 }
 
 .saveBadge {
@@ -89,7 +89,7 @@
   width: 8px;
   height: 8px;
   border-radius: 50%;
-  background-color: var(--md-sys-color-error);
+  background-color: #ba1a1a;
 }
 
 .saveButtonWrap {

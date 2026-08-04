@@ -3,20 +3,17 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.retry import retry_on_database_conflict
 from server.app.db.schema import init_db
+from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
-from server.app.executors._lease_claims import claim_lease
-from server.app.executors._lease_control import _sync_job_status
-from server.app.executors._lease_lifecycle import (
-    active_lease_counts,
-    expire_stale_leases,
-    fail_without_lease,
-    finish_lease,
-    heartbeat_lease,
-)
-from server.app.executors._lease_transactions import _rollback, _sqlite_timestamp
+from server.app.events.aggregator import record_job_update
+from server.app.executors import _lease_write_paths
+from server.app.executors._lease_config_failure import fail_without_lease
+from server.app.executors._lease_control import active_lease_counts
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
     ConfigurationFailureRequest,
@@ -27,29 +24,34 @@ from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ExecutorLeaseRepository", "_sqlite_timestamp"]
+__all__ = ["ExecutorLeaseRepository"]
 
 
 class ExecutorLeaseRepository:
     def __init__(
         self,
-        path: Path,
+        path: str,
         job_db: JobQueries | None = None,
         job_event_manager: JobEventManager | None = None,
+        data_dir: Path | None = None,
+        job_event_buffer: Any | None = None,
     ):
         self.path = path
         self.job_db = job_db
         self.job_event_manager = job_event_manager
+        self.data_dir = data_dir
+        self.job_event_buffer = job_event_buffer
         init_db(path)
 
     def _broadcast_job_update(self, job_id: str) -> None:
         try:
-            if self.job_event_manager is None or self.job_db is None:
+            if self.job_db is None or self.job_event_manager is None:
+                return
+            if self.job_event_buffer is not None:
+                record_job_update(self.job_db, self.job_event_buffer, job_id)
                 return
             job = self.job_db.get_job(job_id)
-            if job is None:
-                return
-            workspace_id = str(job.get("workspace_id", ""))
+            workspace_id = str(job.get("workspace_id", "")) if job else ""
             if not workspace_id:
                 return
             stats = self.job_db.count_jobs_by_status(workspace_id)
@@ -57,194 +59,66 @@ class ExecutorLeaseRepository:
         except Exception:
             logger.exception("Failed to broadcast job update for %s", job_id)
 
+    # Write paths delegate to _lease_write_paths (one connect-and-transact
+    # unit per call, retried on database conflicts).
+
     def try_claim(self, request: LeaseClaimRequest) -> ClaimedExecution | None:
-        conn = connect_sqlite(self.path)
-        conn.isolation_level = None
-        claimed: ClaimedExecution | None = None
-        try:
-            conn.execute("begin immediate")
-            result = claim_lease(conn, request)
-            if result is None:
-                conn.execute("rollback")
-            else:
-                conn.execute("commit")
-                claimed = result
-            return result
-        except Exception:
-            _rollback(conn)
-            raise
-        finally:
-            conn.close()
-            if claimed is not None:
-                self._broadcast_job_update(str(claimed.job_id))
+        return retry_on_database_conflict(lambda: _lease_write_paths.try_claim(self, request))
+
+    def try_claim_many(self, requests: list[LeaseClaimRequest]) -> list[ClaimedExecution | None]:
+        return retry_on_database_conflict(lambda: _lease_write_paths.try_claim_many(self, requests))
 
     def heartbeat(self, lease_id: str, ttl_seconds: int) -> bool:
-        conn = connect_sqlite(self.path)
-        conn.isolation_level = None
-        try:
-            conn.execute("begin immediate")
-            result = heartbeat_lease(conn, lease_id, ttl_seconds)
-            conn.execute("commit")
-            return result
-        except Exception:
-            _rollback(conn)
-            raise
-        finally:
-            conn.close()
+        return retry_on_database_conflict(
+            lambda: _lease_write_paths.heartbeat(self, lease_id, ttl_seconds)
+        )
+
+    def lease_status(self, lease_id: str) -> str | None:
+        """Return the lease's current status, or None when unknown."""
+        with read_connection(self.path) as conn:
+            row = conn.execute(
+                "select status from executor_leases where id=?", (lease_id,)
+            ).fetchone()
+        return str(row["status"]) if row is not None else None
 
     def finish(self, lease_id: str, result: ExecutionResult) -> bool:
-        conn = connect_sqlite(self.path)
-        conn.isolation_level = None
-        job_id: str | None = None
-        result_flag = False
-        try:
-            conn.execute("begin immediate")
-            lease = conn.execute(
-                "select job_id from executor_leases where id=?", (lease_id,)
-            ).fetchone()
-            job_id = str(lease["job_id"]) if lease else None
-            result_flag = finish_lease(conn, lease_id, result)
-            conn.execute("commit")
-            if job_id is not None and result_flag:
-                self._broadcast_job_update(job_id)
-            return result_flag
-        except Exception:
-            _rollback(conn)
-            raise
-        finally:
-            conn.close()
+        return retry_on_database_conflict(lambda: _lease_write_paths.finish(self, lease_id, result))
 
     def fail_without_lease(
         self, request: ConfigurationFailureRequest, error_message: str
     ) -> int | None:
-        conn = connect_sqlite(self.path)
-        conn.isolation_level = None
         job_id = request.job_id
-        run_id: int | None = None
-        try:
-            conn.execute("begin immediate")
-            run_id = fail_without_lease(conn, request, error_message)
-            conn.execute("commit")
-            self._broadcast_job_update(job_id)
-            return run_id
-        except Exception:
-            _rollback(conn)
-            raise
-        finally:
-            conn.close()
+        with write_transaction(self.path) as conn:
+            run_id = fail_without_lease(conn, request, error_message, self.data_dir)
+        # Broadcast only after the commit has succeeded, never inside the tx.
+        self._broadcast_job_update(job_id)
+        return run_id
 
     def expire_stale(self, now: datetime) -> list[str]:
-        conn = connect_sqlite(self.path)
-        conn.isolation_level = None
-        affected_job_ids: list[str] = []
-        try:
-            conn.execute("begin immediate")
-            rows = conn.execute(
-                "select job_id from executor_leases where status='active' and expires_at<=?",
-                (_sqlite_timestamp(now),),
-            ).fetchall()
-            affected_job_ids = list({str(row["job_id"]) for row in rows})
-            expired = expire_stale_leases(conn, now)
-            conn.execute("commit")
-            for job_id in affected_job_ids:
-                self._broadcast_job_update(job_id)
-            return expired
-        except Exception:
-            _rollback(conn)
-            raise
-        finally:
-            conn.close()
+        return retry_on_database_conflict(lambda: _lease_write_paths.expire_stale(self, now))
 
     def active_counts(self, executor_id: str) -> dict[str, int]:
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             return active_lease_counts(conn, executor_id)
-        finally:
-            conn.close()
 
     def has_active_for_job(self, job_id: str, now: datetime) -> bool:
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and status='active' and expires_at>? limit 1",
-                (job_id, _sqlite_timestamp(now)),
+                (job_id, database_timestamp(now)),
             ).fetchone()
             return row is not None
-        finally:
-            conn.close()
 
     def has_active_for_node(self, job_id: str, node_key: str, now: datetime) -> bool:
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and node_key=? and status='active' and expires_at>? limit 1",
-                (job_id, node_key, _sqlite_timestamp(now)),
+                (job_id, node_key, database_timestamp(now)),
             ).fetchone()
             return row is not None
-        finally:
-            conn.close()
 
     def recover_orphaned_running_jobs(self, now: datetime) -> list[str]:
-        """Return jobs stuck in 'running' with no active lease back to 'queued'.
-
-        A job is orphaned when jobs.status='running' but no executor_leases
-        row exists with the same job_id and status='active'. Any job_nodes
-        still marked 'running' for that job are reset to 'pending' so the
-        scheduler can re-evaluate which node to run next.
-        """
-        conn = connect_sqlite(self.path)
-        conn.isolation_level = None
-        recovered: list[str] = []
-        now_str = _sqlite_timestamp(now)
-        try:
-            conn.execute("begin immediate")
-            rows = conn.execute(
-                """
-                select j.id
-                from jobs j
-                where j.status='running'
-                  and not exists (
-                      select 1 from executor_leases l
-                      where l.job_id = j.id and l.status='active'
-                  )
-                """
-            ).fetchall()
-            recovered = [str(row["id"]) for row in rows]
-            if not recovered:
-                conn.execute("commit")
-                return recovered
-
-            placeholders = ",".join("?" * len(recovered))
-            conn.execute(
-                f"""
-                update job_nodes
-                set status='pending',
-                    stale_reason='',
-                    error_message='',
-                    started_at=null,
-                    finished_at=null
-                where job_id in ({placeholders}) and status='running'
-                """,
-                recovered,
-            )
-            conn.execute(
-                f"""
-                update node_runs
-                set status='failed',
-                    error_message='orphaned recovery',
-                    finished_at=?
-                where job_id in ({placeholders}) and status='running'
-                """,
-                (now_str, *recovered),
-            )
-            for job_id in recovered:
-                _sync_job_status(conn, job_id)
-            conn.execute("commit")
-            for job_id in recovered:
-                self._broadcast_job_update(job_id)
-            return recovered
-        except Exception:
-            _rollback(conn)
-            raise
-        finally:
-            conn.close()
+        """Reset jobs stuck in 'running' with no active lease back to 'queued'."""
+        return retry_on_database_conflict(
+            lambda: _lease_write_paths.recover_orphaned_running_jobs(self, now)
+        )

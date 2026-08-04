@@ -1,0 +1,79 @@
+import { create } from 'zustand'
+import {
+  computeDirty,
+  defaultExecutorConfiguration,
+  defaultSettings,
+  type SettingState,
+} from './state'
+import { loadActions } from './actions/loadActions'
+import { saveActions } from './actions/saveActions'
+import { executorActions } from './actions/executorActions'
+import { testActions } from './actions/testActions'
+
+export const useSettingStore = create<SettingState>((set, get) => ({
+  workspaceId: null,
+  workspaceName: '',
+  workspaceDescription: '',
+  settings: defaultSettings,
+  originalWorkspaceName: '',
+  originalWorkspaceDescription: '',
+  originalSettings: null,
+  isDirty: false,
+  globalServices: null,
+  resourceProviders: [],
+  workflowDefinition: null,
+  testStatus: { state: 'idle' },
+  isSaving: false,
+  saveError: null,
+  executorCatalog: [],
+  executorConfiguration: defaultExecutorConfiguration,
+  originalExecutorConfiguration: null,
+  pendingAllocationRemoval: null,
+  agentRoutes: [],
+
+  setWorkspaceId(id) {
+    set({ workspaceId: id })
+  },
+
+  setWorkspaceName(name) {
+    set((state) => {
+      const nextState = { ...state, workspaceName: name }
+      return { ...nextState, isDirty: computeDirty(nextState) }
+    })
+  },
+
+  setWorkspaceDescription(description) {
+    set((state) => {
+      const nextState = { ...state, workspaceDescription: description }
+      return { ...nextState, isDirty: computeDirty(nextState) }
+    })
+  },
+
+  setSettings(s) {
+    set((state) => {
+      const nextSettings = { ...state.settings, ...s }
+      const workflowChanged =
+        s.workflowKey !== undefined &&
+        s.workflowKey !== state.settings.workflowKey
+      const nextExecutorConfiguration = workflowChanged
+        ? {
+            ...state.executorConfiguration,
+            bindings: [],
+            node_limits: [],
+          }
+        : state.executorConfiguration
+      const nextState = {
+        ...state,
+        settings: nextSettings,
+        workflowDefinition: workflowChanged ? null : state.workflowDefinition,
+        executorConfiguration: nextExecutorConfiguration,
+      }
+      return { ...nextState, isDirty: computeDirty(nextState) }
+    })
+  },
+
+  ...loadActions(set, get),
+  ...saveActions(set, get),
+  ...executorActions(set),
+  ...testActions(set, get),
+}))

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from server.app.quality.invariants import (
+from scripts.quality.invariants import (
     GATE_PREFIXES,
     ArchitectureInvariant,
     InvariantEvidence,
@@ -65,7 +65,7 @@ def write_registry(registry_root: Path):
     """Write a registry YAML into the temporary root and return the loaded invariants."""
 
     def _write(data: dict) -> tuple[ArchitectureInvariant, ...]:
-        path = registry_root / "config" / "architecture-invariants.yaml"
+        path = registry_root / "config" / "architecture" / "architecture-invariants.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(data))
         return load_registry(path)
@@ -369,6 +369,68 @@ def test_evidence_target_outside_gate_directory(write_registry, registry_root):
     )
     errors = validate_registry(invariants, base_path=registry_root)
     assert any("outside gate" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "tests/full/test_full.py::test_full_runtime",
+        "tests/ci/test_ci.py::test_ci_runtime",
+    ],
+)
+def test_full_and_ci_targets_rejected_as_quick_evidence(write_registry, registry_root, target):
+    invariants = write_registry(
+        {
+            "invariants": [
+                {
+                    "id": "API-CONTRACT-001",
+                    "statement": "Statement.",
+                    "owner": "architecture",
+                    "risk": "high",
+                    "evidence": [
+                        {
+                            "kind": "integration",
+                            "target": target,
+                            "gate": "quick",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    errors = validate_registry(invariants, base_path=registry_root)
+    assert any("outside gate" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "tests/test_example.py::test_local_pass",
+        "scripts/check_architecture.py",
+    ],
+)
+def test_quick_gate_accepts_tests_root_and_scripts(write_registry, registry_root, target):
+    invariants = write_registry(
+        {
+            "invariants": [
+                {
+                    "id": "API-CONTRACT-001",
+                    "statement": "Statement.",
+                    "owner": "architecture",
+                    "risk": "high",
+                    "evidence": [
+                        {
+                            "kind": "integration",
+                            "target": target,
+                            "gate": "quick",
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+    errors = validate_registry(invariants, base_path=registry_root)
+    assert errors == []
 
 
 def test_unsupported_evidence_kind_rejected(write_registry, registry_root):

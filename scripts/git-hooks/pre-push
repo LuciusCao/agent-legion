@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+HOOK="$ROOT_DIR/.githooks/pre-push"
+
+if [[ ! -x "$HOOK" ]]; then
+  exit 0
+fi
+
+exec "$HOOK" "$@"

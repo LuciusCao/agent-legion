@@ -13,5 +13,23 @@ frontend/dist/
 .workspaces/
 .superpowers/
 .coverage
+.coverage.*
 coverage/
 .DS_Store
+config/workflow.yaml.bak-*
+tools/content-uploader/config.dev.yaml
+tools/content-uploader/config.prod.yaml
+tools/content-uploader/config.yaml
+stress-results/
+test-results/
+e2e-results/
+deploy/secrets/
+deploy/worker.home.yaml
+deploy/worker.company.yaml
+config/agent-worker.yaml
+htmlcov/
+htmlcov_backend/
+
+# Internal design docs, not published
+/docs/superpowers/
+/issues/

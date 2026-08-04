@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from server.app.routes.workflow_node_contracts import WorkflowNodeResponse
+
 
 class WorkflowSummaryResponse(BaseModel):
     key: str
@@ -12,25 +14,28 @@ class WorkflowIntakeModeResponse(BaseModel):
     key: str
     label: str
     input_field: str
-    resource: str
 
 
 class WorkflowIntakeResponse(BaseModel):
     modes: list[WorkflowIntakeModeResponse]
 
 
-class WorkflowNodeResponse(BaseModel):
-    key: str
-    label: str
-    capability: str
-    after: list[str]
-    inputs: list[str]
-    outputs: list[str]
+class WorkflowConditionResponse(BaseModel):
+    artifact: str
+    path: str
+    equals: Any
+
+
+class WorkflowEdgeResponse(BaseModel):
+    source: str
+    target: str
+    condition: WorkflowConditionResponse | None = None
 
 
 class WorkflowDefinitionResponse(WorkflowSummaryResponse):
     intake: WorkflowIntakeResponse
     nodes: list[WorkflowNodeResponse]
+    edges: list[WorkflowEdgeResponse]
 
 
 class WorkflowResponse(BaseModel):
@@ -39,13 +44,3 @@ class WorkflowResponse(BaseModel):
 
 class WorkflowsListResponse(BaseModel):
     workflows: list[WorkflowSummaryResponse]
-
-
-def workflow_response(value: dict[str, Any]) -> WorkflowResponse:
-    return WorkflowResponse(workflow=WorkflowDefinitionResponse.model_validate(value))
-
-
-def workflows_list_response(values: list[dict[str, Any]]) -> WorkflowsListResponse:
-    return WorkflowsListResponse(
-        workflows=[WorkflowSummaryResponse.model_validate(value) for value in values]
-    )

@@ -1,0 +1,53 @@
+.bindingList {
+  display: grid;
+  gap: 10px;
+}
+.binding {
+  display: grid;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #eeeeee;
+}
+.bindingHeader {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  color: #1a1c1e;
+  font-size: 12px;
+  font-weight: 600;
+}
+.kind {
+  color: #616161;
+  font-size: 10px;
+  font-weight: 500;
+  text-transform: uppercase;
+}
+.bindingFields {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+.bindingFields div {
+  display: grid;
+  grid-template-columns: 54px minmax(0, 1fr);
+  gap: 8px;
+}
+.bindingFields dt {
+  color: #616161;
+  font-size: 11px;
+}
+.bindingFields dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #1a1c1e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.version {
+  color: #616161;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+}

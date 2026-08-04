@@ -8,14 +8,18 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TypedDict
+from typing import Any, NoReturn, TypedDict
 
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.services._job_batch_ops import batch_delete as _batch_delete
+from server.app.services.artifact_store import ArtifactStore
+from server.app.services.job_artifact_gc import gc_deleted_job_artifacts, read_artifact_candidates
+from server.app.services.job_operation_error import JobOperationError
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_managed_path
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -43,6 +47,10 @@ class JobDeleteResult(TypedDict):
     message: str | None
 
 
+def _fail(job_id: str, reason_code: str | None, message: str) -> NoReturn:
+    raise JobOperationError(job_id, "delete", "failed", None, reason_code, message)
+
+
 class JobDeletionService:
     def __init__(
         self,
@@ -51,12 +59,16 @@ class JobDeletionService:
         settings: Settings,
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
+        job_event_buffer: Any | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
         self.settings = settings
         self.clock = clock
         self.job_event_manager = job_event_manager
+        self.job_event_buffer = job_event_buffer
+        self.artifact_store = artifact_store
 
     def _now(self) -> datetime:
         if self.clock is not None:
@@ -81,40 +93,29 @@ class JobDeletionService:
     def delete(self, workspace_id: str, job_id: str) -> JobDeleteResult:
         job = self.job_db.get_job(job_id)
         if job is None:
-            return self._result(job_id, "failed", "not_found", "Job not found")
+            _fail(job_id, "not_found", "Job not found")
         if job["workspace_id"] != workspace_id:
-            return self._result(
-                job_id,
-                "failed",
-                "wrong_workspace",
-                f"Job does not belong to workspace {workspace_id}",
-            )
+            _fail(job_id, "wrong_workspace", f"Job does not belong to workspace {workspace_id}")
         if self.lease_repo.has_active_for_job(job_id, self._now()):
-            return self._result(
-                job_id,
-                "failed",
-                "active_lease",
-                "Cannot delete a job with an active executor lease",
-            )
+            _fail(job_id, "active_lease", "Cannot delete a job with an active executor lease")
 
         log_paths = [
             Path(log_path)
             for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log"))
         ]
 
+        try:
+            storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
+        except ManagedPathError as exc:
+            _fail(job_id, "delete_failed", str(exc))
+
+        artifact_candidates = read_artifact_candidates(self.artifact_store, job_id)
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
         staged_storage: Path | None = None
         staged_logs: list[Path] = []
         restore_paths: list[tuple[Path, Path]] = []
 
         try:
-            storage_dir = resolve_managed_path(
-                self.settings.jobs_dir,
-                job["storage_dir"],
-                allow_missing=True,
-                record_id=job_id,
-                root_kind="job",
-            )
             with self.job_db.lease_guarded_mutation(
                 job_id,
                 self._now(),
@@ -141,44 +142,32 @@ class JobDeletionService:
             try:
                 self._restore_paths(restore_paths)
             except DeletionRollbackConflict as rollback_exc:
-                return self._result(
-                    job_id,
-                    "failed",
-                    "rollback_conflict",
-                    str(rollback_exc),
-                )
-            return self._result(job_id, "failed", exc.reason_code, str(exc))
+                _fail(job_id, "rollback_conflict", str(rollback_exc))
+            _fail(job_id, exc.reason_code, str(exc))
         except Exception as exc:
             logger.exception("Unexpected error deleting job %s", job_id)
             try:
                 self._restore_paths(restore_paths)
             except DeletionRollbackConflict as rollback_exc:
-                return self._result(
-                    job_id,
-                    "failed",
-                    "rollback_conflict",
-                    str(rollback_exc),
-                )
-            return self._result(job_id, "failed", "delete_failed", str(exc))
+                _fail(job_id, "rollback_conflict", str(rollback_exc))
+            _fail(job_id, "delete_failed", str(exc))
 
         self._cleanup_staged_paths(job_id, staged_storage, staged_logs)
         self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)
         self._prune_empty_trash(self.settings.logs_dir / "jobs" / ".trash" / operation_id)
-        if self.job_event_manager is not None:
+        gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
+        if self.job_event_buffer is not None:
+            self.job_event_buffer.record_job_deleted(workspace_id, job_id)
+        elif self.job_event_manager is not None:
             stats = self.job_db.count_jobs_by_status(workspace_id)
             self.job_event_manager.broadcast_job_deleted(workspace_id, job_id, stats)
         return self._result(job_id, "succeeded")
 
-    def batch_delete(self, workspace_id: str, job_ids: list[str]) -> list[JobDeleteResult]:
-        results: list[JobDeleteResult] = []
-        seen: set[str] = set()
-        for job_id in job_ids:
-            normalized = job_id.strip()
-            if not normalized or normalized in seen:
-                continue
-            seen.add(normalized)
-            results.append(self.delete(workspace_id, normalized))
-        return results
+    def batch_delete(
+        self, workspace_id: str, job_ids: list[str] | None = None, **kwargs: Any
+    ) -> list[JobDeleteResult]:
+        """Delete the selected jobs; kwargs take job_filter/exclude_ids."""
+        return _batch_delete(self, workspace_id, job_ids, **kwargs)
 
     @staticmethod
     def _prune_empty_trash(path: Path) -> None:

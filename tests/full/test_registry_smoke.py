@@ -9,14 +9,14 @@ from pathlib import Path
 
 import pytest
 
-from server.app.quality.invariants import load_registry, validate_registry
+from scripts.quality.invariants import load_registry, validate_registry
 
 
 @pytest.mark.full_gate
 def test_invariant_registry_loads() -> None:
     """Smoke test: the invariant registry loads and validates without errors."""
     root = Path(__file__).resolve().parents[2]
-    registry_path = root / "config" / "architecture-invariants.yaml"
+    registry_path = root / "config" / "architecture" / "architecture-invariants.yaml"
     invariants = load_registry(registry_path)
     errors = validate_registry(invariants, base_path=root)
     assert errors == []

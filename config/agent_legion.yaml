@@ -1,0 +1,108 @@
+asr:
+  provider: auto
+  timeout_seconds: 900
+  whisper:
+    binary: whisper-cli
+    model: ~/.cache/whisper.cpp/ggml-medium.bin
+    vad_model: ~/.cache/whisper.cpp/ggml-silero-v6.2.0.bin
+  sensevoice:
+    script: server/app/pipeline/transcribe_sensevoice.py
+    model_dir: ~/.cache/SenseVoiceSmall
+cms:
+  base_url: https://cms.example.com/v2
+  env: prod
+  bank_version: v5
+  country_id: '1'
+  subject_id: '2'
+  page_size: '50'
+resource_providers:
+  cms.question.detail:
+    path: /question/detail
+    resource_key: question_detail
+    url_key: question_detail_url
+    config_schema:
+      type: object
+      properties:
+        api_url:
+          type: string
+        bank_version:
+          type: string
+        country_id:
+          type: string
+        subject_id:
+          type: string
+        env:
+          type: string
+        token:
+          type: string
+          secret: true
+  cms.question.list_by_knowledge:
+    path: /question/list
+    resource_key: by_knowledge
+    url_key: question_list_url
+    config_schema:
+      type: object
+      properties:
+        api_url:
+          type: string
+        bank_version:
+          type: string
+        country_id:
+          type: string
+        subject_id:
+          type: string
+        env:
+          type: string
+        token:
+          type: string
+          secret: true
+        page_size:
+          type: integer
+          minimum: 1
+          maximum: 500
+  cms.knowledge.video:
+    path: /knowledge/detail
+    resource_key: knowledge_video
+    url_key: knowledge_url
+    config_schema:
+      type: object
+      properties:
+        api_url:
+          type: string
+        bank_version:
+          type: string
+        country_id:
+          type: string
+        subject_id:
+          type: string
+        env:
+          type: string
+        token:
+          type: string
+          secret: true
+openclaw:
+  cwd: .
+  timeout_seconds: 600
+  isolated_workspace_root: ''
+  skill_safety:
+    enabled: true
+    # Path whitelist only: refs are pinned by config/skills.lock (single source
+    # of truth, config governance G3). A ref key here is rejected at startup.
+    repos:
+    - path: ~/.agents/skills/agent-legion/video_knowledge/generate_interactions
+    - path: ~/.agents/skills/agent-legion/video_knowledge/review_video_content
+    - path: ~/.agents/skills/agent-legion/video_knowledge/review_subtitles
+    - path: ~/.agents/skills/agent-legion/video_knowledge/generate_chapters
+  command_template:
+  - openclaw
+  - agent
+  - --local
+  - --agent
+  - main
+  - --session-id
+  - '{video_id}-{timestamp}'
+  - --thinking
+  - 'on'
+  - --message
+  - '{prompt_text}'
+  - --json

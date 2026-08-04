@@ -2,5 +2,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(git rev-parse --show-toplevel)"
+HOOK="$ROOT_DIR/.githooks/pre-commit"
 
-"$ROOT_DIR/scripts/check-quick.sh"
+if [[ ! -x "$HOOK" ]]; then
+  exit 0
+fi
+
+exec "$HOOK" "$@"

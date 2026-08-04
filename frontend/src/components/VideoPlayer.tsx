@@ -1,14 +1,14 @@
 import { useRef, useCallback, useState } from 'react'
-import type { InteractionNode, VideoItem, VideoArtifacts } from '../types'
+import type { InteractionNode, VideoArtifacts } from '../types'
 import { InteractionOverlay } from './InteractionOverlay'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 import styles from './VideoPlayer.module.css'
 
 interface VideoPlayerProps {
-  video: VideoItem
   artifacts: VideoArtifacts
   onTimeUpdate: (time: number) => void
   videoRef?: React.RefObject<HTMLVideoElement | null>
+  src?: string
   interactionNode?: InteractionNode | null
   interactionSentence?: string[]
   onInteractionWordClick?: (word: string) => void
@@ -35,10 +35,10 @@ function findSubtitleIndex(
 }
 
 export function VideoPlayer({
-  video,
   artifacts,
   onTimeUpdate,
   videoRef,
+  src,
   interactionNode = null,
   interactionSentence = [],
   onInteractionWordClick = () => {},
@@ -73,7 +73,7 @@ export function VideoPlayer({
     setSubtitleText(artifacts.subtitles[idx]?.text ?? '')
   }, [onTimeUpdate, artifacts.subtitles])
 
-  const videoUrl = video.storage_dir ? `/api/videos/${video.id}/video` : ''
+  const videoUrl = src || ''
 
   return (
     <div className={styles.playerWrap} data-testid="video-player-wrap">
@@ -100,7 +100,7 @@ export function VideoPlayer({
       />
       <div className={styles.subtitleOverlay}>
         <span className={styles.subtitleText}>
-          <LaTeXText>{subtitleText}</LaTeXText>
+          <RichText mode="inline">{subtitleText}</RichText>
         </span>
       </div>
     </div>

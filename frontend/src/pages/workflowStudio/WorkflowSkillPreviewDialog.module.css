@@ -1,0 +1,53 @@
+.content {
+  display: grid;
+  grid-template-columns: 240px minmax(0, 1fr);
+  height: min(72vh, 760px);
+  padding: 0 !important;
+}
+.fileList {
+  overflow: auto;
+  padding: 8px;
+  border-right: 1px solid #e0e0e0;
+  background: #f7f8fa;
+}
+.fileButton {
+  width: 100%;
+  justify-content: flex-start !important;
+  margin-bottom: 2px !important;
+  overflow: hidden;
+  text-transform: none !important;
+}
+.fileButton span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.preview {
+  min-width: 0;
+  overflow: auto;
+}
+.code {
+  min-height: 100%;
+  margin: 0;
+  padding: 18px 20px;
+  color: #1a1c1e;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.state {
+  padding: 24px;
+  color: #616161;
+}
+@media (max-width: 700px) {
+  .content {
+    grid-template-columns: 1fr;
+    grid-template-rows: 180px minmax(0, 1fr);
+  }
+  .fileList {
+    border-right: 0;
+    border-bottom: 1px solid #e0e0e0;
+  }
+}

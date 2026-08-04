@@ -1,1 +1,1 @@
-"""Architecture contract checks for the Video Hive monorepo."""
+"""Architecture contract checks for the Agent Legion monorepo."""

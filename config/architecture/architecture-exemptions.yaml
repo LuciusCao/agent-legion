@@ -1,0 +1,157 @@
+exemptions:
+- check: architecture.route_response_model
+  path: server/app/routes/agent_workers.py:heartbeat
+  reason: Agent Worker heartbeat returns an empty 204 response by protocol.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+- check: architecture.route_response_model
+  path: server/app/routes/agent_workers.py:result
+  reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+- check: architecture.route_response_model
+  path: server/app/routes/agent_workers.py:release_slot
+  reason: Agent Worker release-slot acknowledgement returns an empty 204 response by protocol.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+- check: architecture.scheduler_threadpool
+  path: server/app/workflow_worker/thread.py:self._pools[executor_id]
+  reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor
+    definition to submit adapter executions; each pool is bounded by the executor's
+    global capacity and keyed by executor_id, not workspace.
+  owner: workspace-executor
+  remove_when: issues/open/032-P2-event-driven-worker.md
+- check: architecture.file_budget
+  path: server/app/worker_control.py
+  reason: Task 8 of the phase2 state-externalization plan persists pause state
+    in worker_control_state (upsert on pause/resume, uncached reads on is_paused);
+    reset_all_to_paused runs once at control-plane startup because resume state
+    must not survive a restart. The single cohesive class outgrows the
+    in-memory-era baseline and the budget will be re-ratcheted if the module
+    shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase2-state-externalization.md#task-8
+  ceiling: 83
+- check: architecture.file_budget
+  path: server/app/agents.py
+  reason: Task 9 of the phase1 event-bus plan (complete) routes agent WS broadcasts
+    through the EventBus (subscribe/forward in connect, bus publish in _broadcast,
+    public broadcast_controller); the WS forwarding block will be extracted into
+    its own module. Task 9 of the phase4 agent-collaboration plan envelopes WS
+    messages (snapshot/agent_busy/agent_idle) and buffers per-agent incremental
+    events between flushes. The dormant workspace assignment functions were
+    removed per issues/closed/050-P3-agents-py-assignment-functions-deferral.md
+    and the ceiling was tightened to actual + buffer.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
+  ceiling: 302
+- check: architecture.file_budget
+  path: server/app/jobs/queries/workflow_revisions.py
+  reason: Task 1 of the workflow-studio-ux-refinement plan adds the get_workflow_revision
+    query; Agent Legion atomically materializes Agent routes with revision publication
+    (per-node capacities were replaced by workspace-level workspace_agent_capacities),
+    pruning rows absent from the new projection. Extract the projection write helper
+    after rollout.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
+  ceiling: 216
+- check: architecture.file_budget
+  path: server/app/routes/workflow_revisions.py
+  reason: Task 1 of the workflow-studio-ux-refinement plan adds the revision detail
+    route; the file will be split once the plan is complete.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
+  ceiling: 125
+- check: architecture.file_budget
+  path: server/app/routes/workflow_revisions_contracts.py
+  reason: Task 1 of the workflow-studio-ux-refinement plan adds the WorkflowRevisionDetailResponse
+    contract; the file will be split once the plan is complete.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
+  ceiling: 40
+- check: architecture.file_budget
+  path: server/app/workflows/schema.py
+  reason: Task 6 of the phase4 agent-collaboration plan adds the frozen
+    WorkflowShardSpec/WorkflowReduceSpec dataclasses and the shard/reduce
+    fields on WorkflowNode; the node schema stays one declarative module and
+    the budget will be re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
+  ceiling: 112
+- check: architecture.file_budget
+  path: server/app/routes/job_view_contracts.py
+  reason: Task 9 of the phase4 agent-collaboration plan adds the JobNodeResponse
+    worker_id field; Agent Legion adds the separate logical agent_id field. The contract module
+    stays cohesive and the budget will be re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-9
+  ceiling: 114
+- check: architecture.file_budget
+  path: server/app/executors/_lease_claims.py
+  reason: Cross-replica capacity enforcement adds a transaction-scoped advisory
+    lock and PostgreSQL RETURNING handling. Extract capacity validation from the
+    claim transaction after rollout.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 214
+- check: architecture.file_budget
+  path: server/app/jobs/queries/job_nodes.py
+  reason: PostgreSQL RETURNING paths now validate missing rows explicitly.
+    Extract node-run persistence when the query module is next split.
+  owner: database
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 353
+- check: architecture.file_budget
+  path: server/app/settings.py
+  reason: PostgreSQL-only configuration adds a validated database URL and its
+    explicit environment override. Agent Worker secret-file configuration is
+    resolved at the same trusted boundary. Resource provider declarations are
+    parsed once here and injected through Settings. The retired yaml cms
+    credential keys are rejected at this boundary with migration guidance
+    (config governance G2). The AGENT_LEGION_DATABASE_URL
+    environment override lives here too (config
+    governance G4), as does the CMS_* / BASECMS_* alias validation hook
+    (de-identification D3). Extract database settings into the configuration
+    package after rollout.
+  owner: config
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 260
+- check: architecture.file_budget
+  path: server/app/routes/__init__.py
+  reason: Composition adds the Agent Worker control-plane router and artifact authentication dependency.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 110
+- check: architecture.file_budget
+  path: server/app/routes/artifacts.py
+  reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 61
+- check: architecture.file_budget
+  path: server/app/services/workflow_drafts.py
+  reason: Publish validation resolves Agent capabilities through the Agent Catalog
+    and validates node resource references against injected provider declarations.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 75
+- check: architecture.file_budget
+  path: server/app/services/workflow_revisions.py
+  reason: Active revisions reconcile Agent routes at Host startup (capacity is
+    workspace-level via workspace_agent_capacities), warning and skipping revisions
+    whose capability mapping is ambiguous, and skipping the reconcile entirely
+    when the catalog has zero enabled definitions so routes are never pruned by
+    an empty-catalog regression.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
+  ceiling: 132
+- check: architecture.file_budget
+  path: worker/supervisor.py
+  reason: The develop merge stacked two intentional, individually in-budget
+    changes on this module — the worker runtime status/metrics cleanup helper
+    and the control-plane upload queue statistics (execution-count aggregates
+    plus configurable upload concurrency). Extract the upload/status
+    aggregation block from the supervisor loop after the merge lands.
+  owner: agent-worker
+  remove_when: issues/open/033-P3-worker-supervisor-upload-aggregation-split.md
+  ceiling: 245

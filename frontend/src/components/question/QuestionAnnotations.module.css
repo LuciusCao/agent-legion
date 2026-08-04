@@ -1,0 +1,57 @@
+.annotationLayer {
+  position: relative;
+  width: 220px;
+  flex-shrink: 0;
+  min-height: 120px;
+  align-self: flex-start;
+}
+
+.annotationCard {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: #fffbf0;
+  border: 1px solid #e3d6b5;
+  border-radius: 4px 16px 4px 16px;
+  padding: 10px 12px;
+  box-shadow: 2px 3px 0 rgba(125, 82, 96, 0.12);
+  font-size: 13px;
+  line-height: 1.6;
+  color: #3e3225;
+  transform: rotate(-0.8deg);
+  transition: transform 0.2s ease;
+  pointer-events: auto;
+}
+
+.annotationCard:hover {
+  transform: rotate(0deg) scale(1.02);
+  z-index: 10;
+}
+
+.annotationCard::before {
+  content: '✍️';
+  display: block;
+  font-size: 12px;
+  margin-bottom: 4px;
+  opacity: 0.7;
+}
+
+.connectionSvg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 5;
+  overflow: visible;
+}
+
+.connectionLine {
+  fill: none;
+  stroke: #7d5260;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-dasharray: 4 3;
+  opacity: 0.75;
+}

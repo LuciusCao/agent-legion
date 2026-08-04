@@ -2,11 +2,16 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 24px;
-  gap: 16px;
+  padding: 8px 16px;
+  gap: 12px;
   border-bottom: 1px solid transparent;
   flex-shrink: 0;
-  z-index: 1;
+  background: #ffffff;
+  position: relative;
+  /* Must stack above sticky main-content controls (e.g. JobFilterBar z-index: 10)
+     so that AppBar popovers such as AgentStatusIndicator are not obscured. */
+  z-index: 100;
+  min-height: 56px;
 }
 
 .scrolled {
@@ -22,18 +27,11 @@
   min-width: 0;
 }
 
-.title {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 500;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .right {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
   gap: 12px;
   min-width: 0;
+  flex: 1 1 auto;
 }

@@ -11,6 +11,7 @@ export const STATUS_LABELS: Record<string, string> = {
   running: '运行中',
   failed: '失败',
   completed: '已完成',
+  paused: '已暂停',
   pending: '等待中',
   stale: '已过期',
 }
@@ -21,6 +22,7 @@ export const STATUS_ICONS: Record<string, string> = {
   failed: 'error',
   queued: 'schedule',
   pending: 'radio_button_unchecked',
+  paused: 'pause_circle',
 }
 
 export const STATUS_FILTER_CONFIG: Record<
@@ -33,6 +35,7 @@ export const STATUS_FILTER_CONFIG: Record<
   running: { label: STATUS_LABELS.running, icon: 'sync' },
   failed: { label: STATUS_LABELS.failed, icon: 'error' },
   completed: { label: STATUS_LABELS.completed, icon: 'check_circle' },
+  paused: { label: STATUS_LABELS.paused, icon: 'pause_circle' },
   packed: { label: '已打包', icon: 'archive' },
   unpacked: { label: '未打包', icon: 'inventory_2' },
 }
@@ -82,6 +85,11 @@ export const INTERACTION_REVIEW_STATUS_LABELS: Record<string, string> = {
 
 export const JOB_STATUS_LABELS = STATUS_LABELS
 export const JOB_STATUS_ICONS = STATUS_ICONS
+
+export const JOB_SOURCE_TYPE_LABELS: Record<string, string> = {
+  question: '题目',
+  knowledge: '知识点',
+}
 
 export const WORKSPACE_LABELS = {
   overview: '概览',

@@ -1,11 +1,15 @@
 [project]
-name = "video-hive"
+name = "agent-legion"
 version = "0.1.0"
-description = "Local educational video processing queue and preview tool"
+description = "Local processing console for educational videos and Agent Legion workflows"
 requires-python = ">=3.11"
 dependencies = [
+  "cryptography",
   "fastapi",
+  "filelock",
   "funasr>=1.3.1",
+  "psycopg[binary,pool]>=3.2",
+  "pydantic",
   "pyyaml",
   "requests",
   "torch>=2.12.0",
@@ -21,6 +25,7 @@ dev = [
   "mypy>=2.1.0",
   "pytest",
   "pytest-cov>=7.1.0",
+  "pytest-rerunfailures>=15.0",
   "pytest-xdist>=3.8.0",
   "ruff",
 ]
@@ -32,9 +37,19 @@ markers = [
   "full_gate: deterministic higher-fidelity architecture scenarios",
   "ci_extended: repeated stress scenarios for CI",
   "slow: tests involving real subprocesses or long sleeps",
+  "repository_gate: whole-repository checks executed separately by the quality gate",
+  "postgres: tests that require the isolated PostgreSQL test database",
+  "smoke: curated fast high-value tests for the pre-push smoke tier (assigned in tests/conftest.py)",
+  "no_db: pure static tests that never touch the database; skips TRUNCATE-based DB isolation",
+  "fresh_schema: rebuild the test schema from scratch instead of TRUNCATE-based reset (for tests that mutate DDL)",
 ]
 filterwarnings = [
   "error::ResourceWarning:sqlite3",
+  "error::DeprecationWarning",
+  "ignore:Legacy absolute path stored:DeprecationWarning",
+  # Uvicorn's WebSocket protocol imports these deprecated compatibility APIs.
+  "ignore:^websockets\\.legacy is deprecated; see .*:DeprecationWarning:websockets\\.legacy$",
+  "ignore:^websockets\\.server\\.WebSocketServerProtocol is deprecated$:DeprecationWarning:uvicorn\\.protocols\\.websockets\\.websockets_impl$",
 ]
 
 [tool.ruff]
@@ -53,7 +68,13 @@ ignore = ["E501"]
 
 [tool.coverage.run]
 source = ["server"]
-omit = ["*/__pycache__/*"]
+omit = [
+  "*/__pycache__/*",
+  # These paths are referenced only by tests/test_export_openapi.py via
+  # compile() filenames; the files do not exist and must not be measured.
+  "server/app/routes/legacy.py",
+  "server/app/routes/unrelated.py",
+]
 
 [tool.coverage.report]
 fail_under = 85
@@ -63,6 +84,7 @@ skip_covered = false
 [tool.mypy]
 python_version = "3.11"
 warn_return_any = true
+warn_unreachable = true
 warn_unused_configs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true

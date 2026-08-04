@@ -1,0 +1,42 @@
+.sectionLabel {
+  padding: 2px 0;
+  font-size: 12px;
+  color: #74777f;
+}
+.row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 6px 0;
+  color: #1a1c1e;
+  white-space: nowrap;
+}
+.name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.workload {
+  color: #43474e;
+}
+.chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+}
+.chipOnline {
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+.chipOffline {
+  background: #f0f0f0;
+  color: #74777f;
+}
+.chipHidden {
+  visibility: hidden;
+}
+.empty {
+  color: #43474e;
+}

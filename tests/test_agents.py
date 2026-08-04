@@ -4,7 +4,8 @@ import threading
 from pathlib import Path
 
 from server.app.agents import AgentStatus, AgentStatusManager
-from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.executors.openclaw_runner import OpenClawRunner
+from server.app.pipeline.runners import list_openclaw_agents
 
 
 def _agent_dict(**kwargs):
@@ -21,6 +22,81 @@ def _agent_dict(**kwargs):
     }
     defaults.update(kwargs)
     return defaults
+
+
+def test_broadcast_publishes_to_agents_channel():
+    from server.app.events.bus import InProcessEventBus
+
+    bus = InProcessEventBus()
+    manager = AgentStatusManager(event_bus=bus)
+    queue = bus.subscribe("agents")
+    manager._broadcast()
+
+    assert json.loads(queue.get_nowait()) == {"type": "snapshot", "agents": []}
+
+
+def test_broadcast_sends_incremental_agent_events():
+    from server.app.events.bus import InProcessEventBus
+
+    bus = InProcessEventBus()
+    manager = AgentStatusManager(event_bus=bus)
+    manager.agents = [AgentStatus(id="main", name="Main", busy=False)]
+    queue = bus.subscribe("agents")
+
+    manager.set_busy("main", "v1")
+    manager._broadcast()
+    assert json.loads(queue.get_nowait()) == {
+        "type": "agent_busy",
+        "agent": _agent_dict(
+            id="main", name="Main", busy=True, task_count=1, current_video_id="v1"
+        ),
+    }
+
+    manager.set_idle("main")
+    manager._broadcast()
+    assert json.loads(queue.get_nowait()) == {
+        "type": "agent_idle",
+        "agent": _agent_dict(id="main", name="Main"),
+    }
+
+
+def test_add_pi_agent_broadcasts_snapshot_envelope():
+    from server.app.events.bus import InProcessEventBus
+
+    bus = InProcessEventBus()
+    manager = AgentStatusManager(event_bus=bus)
+    queue = bus.subscribe("agents")
+
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+
+    assert json.loads(queue.get_nowait()) == {
+        "type": "snapshot",
+        "agents": [
+            _agent_dict(id="pi", name="Pi Agent", max_tasks=2, workspace_id="ws-1"),
+        ],
+    }
+
+
+def test_broadcast_controller_is_public():
+    assert AgentStatusManager().broadcast_controller is not None
+
+
+def test_discover_uses_injected_callable():
+    from server.app.agents import AgentStatusManager
+
+    manager = AgentStatusManager(
+        discover_agents=lambda: [{"id": "agent_1", "identityName": "Worker One"}]
+    )
+    agents = manager.discover()
+    assert [a.id for a in agents] == ["agent_1"]
+    assert agents[0].name == "Worker One"
+    assert agents[0].busy is False
+
+
+def test_discover_without_injection_returns_empty():
+    from server.app.agents import AgentStatusManager
+
+    assert AgentStatusManager().discover() == []
 
 
 def test_discover_parses_openclaw_agents(monkeypatch):
@@ -44,7 +120,7 @@ def test_discover_parses_openclaw_agents(monkeypatch):
         )
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager()
+    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
 
     agents = manager.discover()
 
@@ -63,7 +139,7 @@ def test_discover_clears_stale_agents_when_openclaw_fails(monkeypatch):
         return subprocess.CompletedProcess(command, 1, stdout="", stderr="openclaw unavailable")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager()
+    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
     manager.agents = [AgentStatus(id="stale", name="Stale", busy=False)]
 
     assert manager.discover() == []
@@ -75,24 +151,21 @@ def test_discover_clears_stale_agents_when_json_is_invalid(monkeypatch):
         return subprocess.CompletedProcess(command, 0, stdout="{bad json", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager()
+    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
     manager.agents = [AgentStatus(id="stale", name="Stale", busy=False)]
 
     assert manager.discover() == []
     assert manager.get_all() == []
 
 
-def test_set_runner_counts_updates_max_tasks():
+def test_agent_status_manager_marks_broadcast_pending_once():
     manager = AgentStatusManager()
-    manager.agents = [
-        AgentStatus(id="main", name="Main", busy=False),
-        AgentStatus(id="fallback", name="Fallback", busy=False),
-    ]
+    manager.add_pi_agent_for_workspace("ws1", max_tasks=10)
 
-    manager.set_runner_counts({"main": 3, "fallback": 1})
+    manager.set_busy("pi", {"id": "job1"}, workspace_id="ws1")
+    manager.set_busy("pi", {"id": "job2"}, workspace_id="ws1")
 
-    assert manager.agents[0].max_tasks == 3
-    assert manager.agents[1].max_tasks == 1
+    assert manager.has_pending_broadcast() is True
 
 
 def test_set_busy_and_idle_updates_current_video_details():

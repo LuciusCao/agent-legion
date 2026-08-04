@@ -74,10 +74,20 @@ def test_openclaw_skill_safety_defaults():
 def test_openclaw_skill_safety_valid_overrides():
     config = OpenClawSkillSafetyRuntimeConfig(
         enabled=True,
-        repos=[{"path": "~/.skills/s1", "ref": "v1.0.0"}],
+        repos=[{"path": "~/.skills/s1"}],
     )
     assert config.enabled is True
-    assert config.repos == [{"path": "~/.skills/s1", "ref": "v1.0.0"}]
+    assert [repo.path for repo in config.repos] == ["~/.skills/s1"]
+
+
+def test_openclaw_skill_safety_rejects_ref_override():
+    """Refs are pinned by skills.lock (config governance G3); yaml ref is retired."""
+    with pytest.raises(ValidationError) as exc_info:
+        OpenClawSkillSafetyRuntimeConfig(
+            enabled=True,
+            repos=[{"path": "~/.skills/s1", "ref": "v1.0.0"}],
+        )
+    assert "ref" in str(exc_info.value)
 
 
 def test_openclaw_skill_safety_rejects_invalid_repos_container():
@@ -103,7 +113,7 @@ def test_openclaw_runtime_config_valid_overrides():
         isolated_workspace_root="/tmp/isolated",
         skill_safety=OpenClawSkillSafetyRuntimeConfig(
             enabled=True,
-            repos=[{"path": "~/.skills/s1", "ref": "v1.0.0"}],
+            repos=[{"path": "~/.skills/s1"}],
         ),
     )
     assert config.command_template == ("openclaw", "agent", "--local")
@@ -170,7 +180,7 @@ def test_executor_runtime_config_from_full_config():
             "skill_safety": {
                 "enabled": True,
                 "repos": [
-                    {"path": "~/.openclaw/workspace/skills/s1", "ref": "v1.0.0"},
+                    {"path": "~/.openclaw/workspace/skills/s1"},
                 ],
             },
             "command_template": [
@@ -194,7 +204,50 @@ def test_executor_runtime_config_from_full_config():
         "main",
     )
     assert config.openclaw.skill_safety.enabled is True
-    assert config.openclaw.skill_safety.repos[0]["ref"] == "v1.0.0"
+    assert config.openclaw.skill_safety.repos[0].path == "~/.openclaw/workspace/skills/s1"
+
+
+def test_executor_runtime_config_parses_lease_heartbeat_settings():
+    config = ExecutorRuntimeConfig.model_validate(
+        {
+            "heartbeat_interval_seconds": 7,
+            "lease_ttl_seconds": 90,
+            "heartbeat_failure_threshold": 3,
+            "openclaw": {"command_template": ["openclaw"]},
+        }
+    )
+    assert config.heartbeat_interval_seconds == 7
+    assert config.lease_ttl_seconds == 90
+    assert config.heartbeat_failure_threshold == 3
+
+
+def test_executor_runtime_config_sweeper_defaults():
+    config = ExecutorRuntimeConfig.model_validate({"openclaw": {"command_template": ["openclaw"]}})
+    assert config.sweeper_enabled is True
+    assert config.sweeper_interval_seconds == 5.0
+
+
+def test_executor_runtime_config_sweeper_overrides():
+    config = ExecutorRuntimeConfig.model_validate(
+        {
+            "sweeper_enabled": False,
+            "sweeper_interval_seconds": 1.5,
+            "openclaw": {"command_template": ["openclaw"]},
+        }
+    )
+    assert config.sweeper_enabled is False
+    assert config.sweeper_interval_seconds == 1.5
+
+
+def test_executor_runtime_config_rejects_non_positive_sweeper_interval():
+    with pytest.raises(ValidationError) as exc_info:
+        ExecutorRuntimeConfig.model_validate(
+            {
+                "sweeper_interval_seconds": 0,
+                "openclaw": {"command_template": ["openclaw"]},
+            }
+        )
+    assert "sweeper_interval_seconds" in str(exc_info.value)
 
 
 def test_executor_runtime_config_rejects_missing_command_template():

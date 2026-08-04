@@ -1,21 +1,61 @@
-from typing import Any
+from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse
+from pydantic import BaseModel
+from starlette import concurrency
 
-from ..db import Database
-from ..pipeline.common import resolve_video_dir
-from ..pipeline.reader import read_artifacts
-from ..settings import Settings
+from server.app.agent_workers import AgentWorkerRegistry
+from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
+from server.app.settings import Settings
 
 
-def create_artifacts_router(db: Database, settings: Settings) -> APIRouter:
-    router = APIRouter(prefix="/videos", tags=["artifacts"])
+class ArtifactUploadResponse(BaseModel):
+    hash: str
 
-    @router.get("/{video_id}/artifacts")
-    def artifacts(video_id: str) -> dict[str, Any]:
-        video = db.get_video(video_id)
-        if not video:
-            raise HTTPException(status_code=404, detail="Video not found")
-        return read_artifacts(resolve_video_dir(video, settings.videos_dir))
+
+def create_artifacts_router(
+    store: ArtifactStore,
+    settings: Settings,
+    agent_worker_registry: AgentWorkerRegistry | None = None,
+) -> APIRouter:
+    """Worker-facing artifact upload/download; auth + forwarding only (no storage logic)."""
+    router = APIRouter(prefix="/artifacts", tags=["artifacts"])
+    agent_config = settings.executor_runtime.agent_workers
+
+    def authorize_artifact(request: Request) -> None:
+        agent_token = request.headers.get("x-agent-worker-token", "")
+        if agent_token and agent_worker_registry is not None:
+            if agent_worker_registry.authenticate(agent_token) is not None:
+                return
+            raise HTTPException(status_code=401, detail="invalid Agent Worker token")
+        if not agent_config.register_token:
+            raise HTTPException(status_code=503, detail="Agent Worker execution is disabled")
+        raise HTTPException(status_code=401, detail="missing Agent Worker token")
+
+    @router.post("", status_code=201, response_model=ArtifactUploadResponse)
+    async def upload_artifact(request: Request) -> ArtifactUploadResponse:
+        authorize_artifact(request)
+        declared = request.headers.get("content-length")
+        if (
+            declared is not None
+            and declared.isdigit()
+            and int(declared) > agent_config.max_archive_bytes
+        ):
+            raise HTTPException(status_code=413, detail="artifact too large")
+        body = await request.body()
+        if len(body) > agent_config.max_archive_bytes:
+            raise HTTPException(status_code=413, detail="artifact too large")
+        digest = await concurrency.run_in_threadpool(store.put, body)
+        return ArtifactUploadResponse(hash=digest)
+
+    @router.get("/{hash}")
+    def download_artifact(hash: str, request: Request) -> FileResponse:
+        authorize_artifact(request)
+        try:
+            path = store.open(hash)
+        except ArtifactNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="artifact not found") from exc
+        return FileResponse(path, media_type="application/octet-stream", filename=hash)
 
     return router

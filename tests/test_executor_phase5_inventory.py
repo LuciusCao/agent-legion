@@ -20,11 +20,11 @@ REPLACEMENTS: dict[str, str] = {
     "workflow concurrency": "Workspace-level Executor allocation limits + local Node limits",
 }
 
-PROTECTED_VIDEO_HIVE_PATHS: set[str] = {
+PROTECTED_LEGACY_VIDEO_PATHS: set[str] = {
     "server/app/routes/agents.py",
     "server/app/agents.py",
-    "server/app/pipeline/openclaw.py",
-    "server/app/worker.py",
+    # OpenClawRunner 自 pipeline/openclaw.py 迁入 executors（issues/closed/057）。
+    "server/app/executors/openclaw_runner.py",
 }
 
 
@@ -51,12 +51,12 @@ def test_inventory_includes_replacement_for_every_legacy_path() -> None:
 # Concrete replacement tokens that demonstrate the legacy concepts were replaced.
 REPLACEMENT_TOKENS: dict[str, list[tuple[str, str]]] = {
     "workflow runner": [
-        ("server/app/workflows/definition.py", "capability"),
-        ("server/app/workflow_worker_thread.py", "workspace_node_bindings"),
+        ("server/app/workflows/schema.py", "capability"),
+        ("server/app/workflow_worker/routing.py", "workspace_node_bindings"),
     ],
     "workflow concurrency": [
-        ("server/app/db/migrations/v001_executor_core.py", "workspace_executor_allocations"),
-        ("server/app/db/migrations/v001_executor_core.py", "workspace_node_limits"),
+        ("server/app/db/postgres_schema.sql", "workspace_executor_allocations"),
+        ("server/app/db/postgres_schema.sql", "workspace_node_limits"),
     ],
 }
 
@@ -75,7 +75,7 @@ def test_workspace_agent_assignment_modules_are_removed() -> None:
     assert not (ROOT / "server/app/services/workspace_agent_assignments.py").exists()
 
 
-@pytest.mark.parametrize("rel_path", sorted(PROTECTED_VIDEO_HIVE_PATHS))
-def test_protected_video_hive_path_exists(rel_path: str) -> None:
-    """These Video Hive files must still exist at Phase 5 completion."""
-    assert (ROOT / rel_path).exists(), f"Protected Video Hive path missing: {rel_path}"
+@pytest.mark.parametrize("rel_path", sorted(PROTECTED_LEGACY_VIDEO_PATHS))
+def test_protected_legacy_video_path_exists(rel_path: str) -> None:
+    """These legacy video files must still exist at Phase 5 completion."""
+    assert (ROOT / rel_path).exists(), f"Protected legacy video path missing: {rel_path}"

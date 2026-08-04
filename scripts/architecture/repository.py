@@ -1,8 +1,22 @@
 import ast
-import json
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
+from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
+from scripts.architecture.configuration import check_configuration_ownership
+from scripts.architecture.executor_contracts import (
+    check_executor_contract_models,
+    check_frontend_executor_types,
+    check_settings_store_legacy_agents,
+    check_workspace_save_outside_transaction,
+)
+from scripts.architecture.executor_decoupling import (
+    check_forbidden_patterns,
+    check_legacy_modules_absent,
+    check_workflow_worker_capability_branching,
+)
+from scripts.architecture.exemptions import categorize_exemptions, load_exemptions
+from scripts.architecture.file_budgets import check_file_budgets
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
     SCHEDULER_FORBIDDEN,
@@ -12,91 +26,31 @@ from scripts.architecture.helpers import (
     has_named_response_model,
     imported_modules,
     is_scheduler_path,
-    is_service_path,
     reads_futures_length,
     reads_raw_executors_config,
     route_operations,
     threadpool_dict_by_workspace,
 )
-from scripts.architecture.phase4 import (
-    check_executor_contract_models,
-    check_frontend_executor_types,
-    check_settings_store_legacy_agents,
-    check_workspace_save_outside_transaction,
-)
-from scripts.architecture.phase5 import (
-    check_forbidden_patterns,
-    check_legacy_modules_absent,
-)
-from scripts.architecture.phase6 import (
+from scripts.architecture.import_cycles import check_import_cycles
+from scripts.architecture.route_contracts import has_protocol_response_annotation
+from scripts.architecture.service_boundaries import check_service_import_boundaries
+from scripts.architecture.sql_placeholders import check_sql_placeholders
+from scripts.architecture.video_legacy import check_video_legacy
+from scripts.architecture.workflow import check_workflow_definitions
+from scripts.architecture.workspace_boundaries import (
     check_frontend_handwritten_job_transports,
     check_job_deletion_service_is_singular,
     check_job_execution_direct_executor_calls,
+    check_jobs_route_include_router,
     check_route_dag_and_deletion,
     check_schema_mutation_locations,
-    check_workspace_video_hive_imports,
+    check_workspace_legacy_video_imports,
 )
-from scripts.architecture.workflow import check_workflow_definitions
-
-
-def _load_exemptions(root: Path) -> tuple:
-    """Load governed architecture exemptions from the YAML registry."""
-    from server.app.quality.exemptions import load_exemptions
-
-    path = root / "config/architecture-exemptions.yaml"
-    if not path.exists():
-        return ()
-    return load_exemptions(path)
-
-
-def _categorize_exemptions(exemptions: tuple):
-    """Group exemptions by check name for efficient lookup."""
-    response_model_exemptions: set[str] = set()
-    annotation_exemptions: set[str] = set()
-    route_import_exempt_files: set[str] = set()
-    route_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
-    scheduler_import_exempt_files: set[str] = set()
-    scheduler_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
-    scheduler_threadpool_exempt_targets: dict[str, set[str]] = defaultdict(set)
-
-    for ex in exemptions:
-        if ex.check == "architecture.route_response_model":
-            response_model_exemptions.add(ex.path)
-        elif ex.check == "architecture.route_annotation_any":
-            annotation_exemptions.add(ex.path)
-        elif ex.check == "architecture.route_import_boundary":
-            file_part, _, module_part = ex.path.partition(":")
-            if module_part:
-                route_import_exempt_modules[file_part].add(module_part)
-            else:
-                route_import_exempt_files.add(file_part)
-        elif ex.check == "architecture.scheduler_import_boundary":
-            file_part, _, module_part = ex.path.partition(":")
-            if module_part:
-                scheduler_import_exempt_modules[file_part].add(module_part)
-            else:
-                scheduler_import_exempt_files.add(file_part)
-        elif ex.check == "architecture.scheduler_threadpool":
-            file_part, _, target = ex.path.partition(":")
-            if target:
-                scheduler_threadpool_exempt_targets[file_part].add(target)
-
-    return (
-        response_model_exemptions,
-        annotation_exemptions,
-        route_import_exempt_files,
-        route_import_exempt_modules,
-        scheduler_import_exempt_files,
-        scheduler_import_exempt_modules,
-        scheduler_threadpool_exempt_targets,
-    )
 
 
 def check_repository(root: Path) -> list[str]:
-    config = json.loads((root / "config/architecture-budgets.json").read_text(encoding="utf-8"))
     errors: list[str] = []
-
-    exemptions = _load_exemptions(root)
+    exemptions = load_exemptions(root)
     (
         response_model_exemptions,
         annotation_exemptions,
@@ -105,10 +59,8 @@ def check_repository(root: Path) -> list[str]:
         scheduler_import_exempt_files,
         scheduler_import_exempt_modules,
         scheduler_threadpool_exempt_targets,
-    ) = _categorize_exemptions(exemptions)
-
+    ) = categorize_exemptions(exemptions)
     server_root = root / "server/app"
-
     if server_root.exists():
         for path in sorted(server_root.rglob("*.py")):
             relative_path = path.relative_to(root).as_posix()
@@ -128,7 +80,6 @@ def check_repository(root: Path) -> list[str]:
                         errors.append(
                             f"{relative_path}:{lineno}: scheduler boundary forbids import {module}"
                         )
-
                 allowed_targets = scheduler_threadpool_exempt_targets.get(relative_path, set())
                 observed_targets: Counter[str] = Counter()
                 for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
@@ -152,15 +103,6 @@ def check_repository(root: Path) -> list[str]:
                         f"{relative_path}:{lineno}: scheduler must not use "
                         "_futures length for capacity decisions"
                     )
-                if relative_path == "server/app/workflow_worker_thread.py":
-                    from scripts.architecture.helpers import accesses_runner_or_agent
-
-                    for lineno in accesses_runner_or_agent(tree):
-                        errors.append(
-                            f"{relative_path}:{lineno}: "
-                            "WorkflowWorkerThread must branch on capability, not .runner or .agent"
-                        )
-
             if (
                 relative_path.startswith("server/app/executors/")
                 and not relative_path.endswith("/__init__.py")
@@ -172,21 +114,7 @@ def check_repository(root: Path) -> list[str]:
                         "ExecutorConfig instead of raw settings.config['executors']"
                     )
 
-            if is_service_path(relative_path):
-                for module, lineno in modules.items():
-                    if module == "fastapi" or module.startswith("fastapi."):
-                        errors.append(
-                            f"{relative_path}:{lineno}: service boundary forbids import {module}"
-                        )
-
-            if relative_path == "server/app/routes/jobs.py":
-                for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
-                    name = ast.unparse(call.func)
-                    if name.endswith("include_router"):
-                        errors.append(
-                            f"{relative_path}: include_router forbidden; "
-                            "compose focused routers in routes/__init__.py"
-                        )
+            errors.extend(check_service_import_boundaries(relative_path, tree))
 
             if not relative_path.startswith("server/app/routes/"):
                 continue
@@ -200,7 +128,11 @@ def check_repository(root: Path) -> list[str]:
 
             for function, decorator in route_operations(tree):
                 key = f"{relative_path}:{function.name}"
-                if key not in response_model_exemptions and not has_named_response_model(decorator):
+                if (
+                    key not in response_model_exemptions
+                    and not has_named_response_model(decorator)
+                    and not has_protocol_response_annotation(function, tree)
+                ):
                     errors.append(
                         f"{relative_path}:{decorator.lineno}: route {function.name} "
                         "requires named response_model"
@@ -218,43 +150,24 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_frontend_executor_types(root))
     errors.extend(check_legacy_modules_absent(root))
     errors.extend(check_forbidden_patterns(root))
-    errors.extend(check_workspace_video_hive_imports(root))
+    errors.extend(check_workflow_worker_capability_branching(root))
+    errors.extend(check_workspace_legacy_video_imports(root))
     errors.extend(check_job_execution_direct_executor_calls(root))
+    errors.extend(check_video_legacy(root))
     errors.extend(check_route_dag_and_deletion(root))
     errors.extend(check_frontend_handwritten_job_transports(root))
     errors.extend(check_job_deletion_service_is_singular(root))
+    errors.extend(check_jobs_route_include_router(root))
     errors.extend(check_schema_mutation_locations(root))
+    errors.extend(check_import_cycles(root))
+    errors.extend(check_configuration_ownership(root))
+    errors.extend(check_sql_placeholders(root))
 
-    file_budgets = config.get("files", {})
-    for relative_path, budget in file_budgets.items():
-        path = root / relative_path
-        if not path.exists():
-            errors.append(f"{relative_path}: budgeted file does not exist")
-            continue
-        line_count = len(path.read_text(encoding="utf-8").splitlines())
-        if line_count > int(budget):
-            errors.append(
-                f"{relative_path}: {line_count} lines exceeds budget {budget}; "
-                "split responsibilities before adding more code"
-            )
-
-    budgeted_paths = set(file_budgets)
-    defaults = config.get("defaults", {})
-    for dir_rel, budget in defaults.items():
-        dir_path = root / dir_rel
-        if not dir_path.is_dir():
-            continue
-        for path in sorted(dir_path.rglob("*.py")):
-            rel = path.relative_to(root).as_posix()
-            if rel in budgeted_paths:
-                continue
-            if path.name == "__init__.py" or path.name.startswith("test_"):
-                continue
-            line_count = len(path.read_text(encoding="utf-8").splitlines())
-            if line_count > int(budget):
-                errors.append(
-                    f"{rel}: {line_count} lines exceeds budget {budget}; "
-                    "split responsibilities before adding more code"
-                )
+    try:
+        policy = load_budget_policy(root / "config/architecture/architecture-budget-policy.yaml")
+    except BudgetConfigurationError as exc:
+        errors.append(f"budget configuration: {exc}")
+    else:
+        errors.extend(check_file_budgets(root, policy, exemptions))
 
     return errors

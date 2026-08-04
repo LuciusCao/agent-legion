@@ -8,7 +8,7 @@ import {
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 
 function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
-  return {
+  const job = {
     id: 'j1',
     workspace_id: 'ws1',
     workflow_key: 'p1',
@@ -24,7 +24,19 @@ function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
     error_summary: '',
     completed_nodes: 0,
     total_nodes: 0,
+    workflow_revision_id: '',
+    workflow_version: null,
+    workflow_definition_hash: '',
+    outcome: '',
+    current_workflow_revision_id: '',
+    current_workflow_revision_version: null,
+    is_workflow_outdated: false,
+    packed: 0,
     ...overrides,
+  }
+  return {
+    ...job,
+    is_workflow_outdated: job.is_workflow_outdated ?? false,
   }
 }
 
@@ -32,6 +44,7 @@ const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
+  edges: [],
   nodes: [
     {
       key: 'extract',
@@ -64,6 +77,7 @@ const otherWorkflow: WorkflowDefinitionRecord = {
   key: 'other_workflow',
   label: 'Other',
   intake: { modes: [] },
+  edges: [],
   nodes: [
     {
       key: 'extract',

@@ -1,34 +1,42 @@
-import { describe, it, expect, beforeEach } from 'vitest'
-import { applyTheme } from './theme'
+import { describe, it, expect } from 'vitest'
+import { theme } from './theme'
 
-describe('applyTheme', () => {
-  beforeEach(() => {
-    const root = document.documentElement
-    root.removeAttribute('style')
+describe('theme', () => {
+  it('uses a neutral primary color for the black/white/gray UI', () => {
+    expect(theme.palette.primary.main).toBe('#000000')
+    expect(theme.palette.primary.contrastText).toBe('#ffffff')
   })
 
-  it('sets elevation tokens for floating panels', () => {
-    applyTheme()
-    const style = getComputedStyle(document.documentElement)
-    expect(style.getPropertyValue('--md-sys-elevation-level3').trim()).not.toBe(
-      ''
-    )
+  it('sets a light surface background so panels are not transparent', () => {
+    expect(theme.palette.background.default).toBe('#fafafa')
+    expect(theme.palette.background.paper).toBe('#ffffff')
   })
 
-  it('sets surface container tokens so panels are not transparent', () => {
-    applyTheme()
-    const style = getComputedStyle(document.documentElement)
-    expect(
-      style.getPropertyValue('--md-sys-color-surface-container').trim()
-    ).not.toBe('')
-    expect(
-      style.getPropertyValue('--md-sys-color-surface-container-low').trim()
-    ).not.toBe('')
-    expect(
-      style.getPropertyValue('--md-sys-color-surface-container-high').trim()
-    ).not.toBe('')
-    expect(
-      style.getPropertyValue('--md-sys-color-surface-container-highest').trim()
-    ).not.toBe('')
+  it('keeps the Roboto font family', () => {
+    expect(theme.typography.fontFamily).toContain('Roboto')
+  })
+
+  it('uses an angular shape to match the original Material Design feel', () => {
+    expect(theme.shape.borderRadius).toBe(2)
+  })
+
+  it('uses uppercase buttons for a structured, mechanical look', () => {
+    const buttonStyle = theme.components?.MuiButton?.styleOverrides?.root as
+      | Record<string, unknown>
+      | undefined
+    expect(buttonStyle?.textTransform).toBe('uppercase')
+  })
+
+  it('keeps buttons fully rounded as capsules', () => {
+    const buttonStyle = theme.components?.MuiButton?.styleOverrides?.root as
+      | Record<string, unknown>
+      | undefined
+    expect(buttonStyle?.borderRadius).toBe(9999)
+  })
+
+  it('uses heavier headings so titles feel grounded', () => {
+    expect(theme.typography.h1?.fontWeight).toBe(500)
+    expect(theme.typography.h6?.fontWeight).toBe(500)
+    expect(theme.typography.button?.fontWeight).toBe(500)
   })
 })

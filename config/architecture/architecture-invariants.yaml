@@ -1,0 +1,548 @@
+invariants:
+  - id: API-CONTRACT-001
+    statement: Generated frontend API types remain in sync with the backend OpenAPI schema.
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/generate-api-types.sh
+        gate: quick
+
+  - id: BOUNDARY-LAYER-001
+    statement: Architecture contract checks enforce layer boundaries between routes, services, and pipeline phases, and configuration file ownership is enforced by the split-layout architecture check.
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_configuration.py
+        gate: quick
+
+  - id: SECURITY-PATH-001
+    statement: Video and job filesystem operations stay inside managed roots and reject symlink escapes.
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_storage_paths.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_storage_path_corruption.py
+        gate: full
+
+  - id: DB-MUTATION-001
+    statement: "Job deletion rollback is conflict-safe: it restores only when the destination is absent, uses atomic same-filesystem rename, and preserves the staged recovery path when a concurrent recreation exists."
+    owner: jobs
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_job_deletion_service.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_job_deletion_races.py
+        gate: full
+
+  - id: EXEC-STATE-001
+    statement: "Continue/resume operations for workspace jobs reject terminal states (completed, failed, cancelled) and only transition explicitly paused jobs, validating state inside the same transaction."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_workspace_job_control_flow.py
+        gate: quick
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick
+
+  - id: EXEC-STATS-001
+    statement: "Workspace runtime stats derive from executor allocations, bindings, active leases, and configured capacities without consulting AgentStatusManager."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_workspace_configuration_service.py::test_executor_stats_report_configured_capacity_and_leases
+        gate: quick
+      - kind: integration
+        target: tests/test_workspace_configuration_service.py::test_executor_stats_does_not_consult_agent_status_manager
+        gate: quick
+      - kind: integration
+        target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_executor_status_reflects_allocations_and_leases
+        gate: quick
+
+  - id: DB-LIFECYCLE-001
+    statement: "PostgreSQL connections are bounded by a shared pool and deterministically returned after each transaction."
+    owner: database
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_postgres_runtime.py
+        gate: quick
+
+  - id: EXEC-CAPACITY-001
+    statement: "Executor global capacity is shared across workspaces and never exceeded."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_workflow_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
+        gate: quick
+      - kind: integration
+        target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_bounded_fairness
+        gate: full
+
+  - id: EXEC-FAIRNESS-001
+    statement: "Runnable workspaces receive bounded scheduling opportunity under contention."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_workflow_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
+        gate: quick
+      - kind: integration
+        target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_bounded_fairness
+        gate: full
+      - kind: failure_injection
+        target: tests/ci/test_executor_worker_stress.py::test_fairness_under_randomized_insertion_order
+        gate: ci_extended
+
+  - id: EXEC-CANCEL-001
+    statement: "Adapter-specific cancellation terminates active Pi/OpenClaw subprocess groups and isolated local handlers within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_executor_cancellation.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_executor_cancellation_recovery.py
+        gate: full
+
+  - id: RECOVERY-MIGRATION-001
+    statement: "PostgreSQL schema initialization is transactional, advisory-locked, and idempotent."
+    owner: database
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/db/test_postgres_runtime.py::test_schema_initialization_is_idempotent
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_postgres_agent_schema_initialization_is_idempotent
+        gate: full
+
+  - id: CONFIG-STARTUP-001
+    statement: "Secrets use environment overrides, enabled runtime dependencies fail validation at startup, and the split configuration layout is detected, validated for owned keys, and composed before settings are built."
+    owner: config
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_settings.py
+        gate: quick
+      - kind: integration
+        target: tests/test_startup_validation.py
+        gate: quick
+      - kind: integration
+        target: tests/test_configuration_loader.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_split_config_startup.py
+        gate: full
+
+  - id: EXEC-EVENT-001
+    statement: |
+      Workspace job lifecycle SSE events are broadcast to JobEventManager only
+      after the underlying PostgreSQL transaction has been committed. Broadcasting
+      inside a transaction is forbidden because clients may react by querying
+      the database and seeing pre-transaction state.
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_job_events.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_workspace_sse.py
+        gate: full
+
+  - id: CONFIG-ARCH-001
+    statement: |
+      Source file line budgets are governed by a closed-world ceiling model.
+      Every governed production file has a ceiling no more than ten lines above
+      its current size. New, removed, or unclassified files, stale ceilings, test
+      files over 1000 lines, and growth above the ceiling fail the quick gate.
+      Production files also have an absolute limit of 800 lines that exemptions
+      cannot override. Budget exemptions freeze an explicit ceiling and must
+      include a tracked removal condition; affected modules must be split rather
+      than indefinitely exempted. Exemptions whose removal reference is older
+      than 30 days are reported by the full gate.
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_file_budgets.py
+        gate: quick
+      - kind: contract
+        target: tests/test_ratchet_architecture_budgets.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_exemption_age.py
+        gate: quick
+
+  - id: BOUNDARY-VIDEO-001
+    statement: "video_capabilities modules must not import orchestration or runtime modules such as server.app.db, server.app.jobs, server.app.routes, server.app.worker, or server.app.worker_thread."
+    owner: agent-legion
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_video_legacy.py
+        gate: quick
+
+  - id: BOUNDARY-VIDEO-002
+    statement: "Production app and router code must not reintroduce legacy video route modules (e.g., server.app.routes.videos) after migration; Workspace job routes must be used instead."
+    owner: agent-legion
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_video_legacy.py
+        gate: quick
+
+  - id: BOUNDARY-VIDEO-003
+    statement: "Legacy server.app.pipeline.phases and phase executor modules have been removed; new Workspace code must not reintroduce imports of these legacy modules and must use workflow capabilities instead."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_phase6.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_video_legacy.py
+        gate: quick
+
+  - id: DB-STATE-001
+    statement: "Runtime queues and job event sequence numbers are persisted in PostgreSQL; introducing new in-process authoritative runtime state is forbidden."
+    owner: database
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker.py
+        gate: quick
+
+      - kind: integration
+        target: tests/test_job_event_buffer_db.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/jobs/test_job_batches.py::test_async_batch_claim_is_atomic_across_consumers
+        gate: quick
+      - kind: contract
+        target: tests/ci/test_postgres_only_runtime.py
+        gate: ci_extended
+
+  - id: CONFIG-WORKER-001
+    statement: "Worker Service accepts registration secrets only as write-only input through its locally authenticated UI/API/CLI, never returns or logs their plaintext, stores managed copies with mode 0600 in the writable control volume, preserves non-public runtime settings on edits, disables new-task claiming before every Worker execution-process start or restart until an operator explicitly enables it, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network). A transiently unavailable Host keeps the execution process alive and retries registration in-process without traceback or supervisor restart churn."
+    owner: agent-worker
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_worker_service.py
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_worker.py::test_registration_retries_transient_host_errors_without_traceback
+        gate: quick
+      - kind: integration
+        target: tests/test_worker_cli.py
+        gate: quick
+
+  - id: EXEC-AGENTCLAIM-001
+    statement: "An Agent Node may enter running only when a Worker declaring the same node capability and provider/model pair atomically claims it under both the Workspace-level Agent capacity (workspace_agent_capacities; a workspace without a row is unlimited) and the Worker machine-wide capacity; queued requests consume neither capacity and resolve their revision's latest runtime configuration at claim time."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_agent_capacity_matrix_across_workers
+        gate: full
+
+  - id: EXEC-AGENTDEF-001
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the Agent Catalog; the Host exposes that catalog and runtime defaults so Workflow Studio resolves Agent nodes by capability and edits provider/model overrides without treating Agents as legacy executors. Workers separately declare the node capabilities and provider/model pairs they can execute, alongside runtimes, labels, protocol version, and machine-wide max_concurrency."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_agent_catalog.py
+        gate: quick
+      - kind: integration
+        target: tests/test_executor_catalog_service.py::test_catalog_exposes_agent_definitions_with_runtime_defaults
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
+        gate: full
+
+  - id: EXEC-WORKERACL-001
+    statement: "A Worker can only claim Agent executions for workspaces in its server-side registration scope (agent_workers.allowed_workspaces_json, resolved from the presented registration credential: global register token = all workspaces, scoped register token = its workspace); claim must use only this stored snapshot and never Worker-supplied workspace fields."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_scoped_register_token_lifecycle
+        gate: full
+
+  - id: EXEC-REPORTING-001
+    statement: "Agent execution capacity (Worker machine domain and Workspace domain) is accounted from agent_execution_requests state='claimed' only; a Worker whose Agent process exited flips the request to 'reporting' via release-slot, which frees capacity immediately while the lease stays owned (heartbeat/claimed_payload/mark_done accept 'reporting', the one-active-node unique index and has_active_request block re-enqueue, and the expiry sweep requeues stale 'reporting' claims exactly like 'claimed' ones)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py::test_release_slot_requires_and_validates_lease_id
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_worker.py
+        gate: quick
+      - kind: integration
+        target: tests/test_worker_upload_queue.py
+        gate: quick
+
+  - id: EXEC-VALIDATION-001
+    statement: "A node run may complete only after the node skill's deterministic scripts/validate_output.py passes against the job directory: the local Pi runner validates after process exit, and the Host re-validates Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted); validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_completion_validation.py
+        gate: quick
+      - kind: integration
+        target: tests/test_pi_runner.py
+        gate: quick
+
+  - id: EXEC-KIND-001
+    statement: "Executor kinds must resolve through the kinds registry (register_kind/build_executor); isinstance dispatch chains over executor config types are forbidden in registry.py."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_executor_kind_registration.py::test_unknown_kind_rejected_at_config_load
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_execution_decoupling.py
+        gate: quick
+
+  - id: SECURITY-WORKER-001
+    statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/routes/test_agent_workers.py
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_worker_token_is_hashed_and_revocable
+        gate: full
+
+  - id: DB-FAILURE-001
+    statement: "node_runs/job_nodes failure_category is restricted to {'', 'technical', 'business', 'unknown'} (empty for non-failures); unrecognized failures classify as unknown and never default to technical; orphan recovery assigns (technical, worker_orphaned) and the stale-definition sweep assigns (technical, stale_definition) directly at their write paths."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_failure_classification.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/leases/test_failure_classification_persistence.py
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker_concurrency.py::test_stale_definition_requests_are_failed_by_sweeper
+        gate: quick
+
+  - id: DB-FAILURE-002
+    statement: "Transient failures (failure_detail in TRANSIENT_RETRY_DETAILS, currently only db_pool_timeout) return the job_node to 'pending' at the lease finish path for up to 3 total attempts instead of failing the job; every attempt stays recorded as its own failed node_run, and the final attempt fails node and job permanently."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/services/test_failure_classification.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/leases/test_failure_classification_persistence.py
+        gate: quick
+
+  - id: EXEC-SHARD-001
+    statement: "Shard executions must go through ExecutorLeaseRepository.try_claim with one lease per shard; fan-out paths that bypass the capacity system are forbidden."
+    owner: architecture
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/workflows/test_sharding.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_shard_fanout_e2e.py
+        gate: full
+
+  - id: SECURITY-AUTH-001
+    statement: "User sessions are revocable bearer tokens persisted only as sha256 digests with sliding expiry; management endpoints require the admin role; business routes require an authenticated user (anonymous gets 401); workspace membership gates reads (viewer) and writes (editor); repeated login failures lock the account temporarily."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/routes/test_auth_routes.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_auth_matrix.py
+        gate: quick
+      - kind: integration
+        target: tests/test_auth_queries.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_auth_control_plane.py
+        gate: full
+
+  - id: CONFIG-MANIFEST-001
+    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_config_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_node_config.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_node_config_manifest.py
+        gate: full
+
+  - id: VAULT-SECRET-001
+    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in binding configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/services/test_vault.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_workspace_secrets.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_vault_secret_freeze.py
+        gate: full
+
+  - id: CONFIG-YAML-001
+    statement: "Tracked split config yaml files carry no secret values: the retired yaml keys `cms.token` / `cms.token_gen` (G2) and `openclaw.skill_safety` refs (G3, pinned by config/skills.lock) are rejected at startup, and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
+    owner: config
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/test_config_yaml_hygiene.py
+        gate: quick
+      - kind: integration
+        target: tests/test_settings.py
+        gate: quick
+      - kind: integration
+        target: tests/test_configuration_loader.py
+        gate: quick
+
+  - id: EXEC-EVENT-SCHEMA-001
+    statement: "The velites event stream schema (velites/schema/events.schema.json, exported from velites/src/events.rs) stays wire-compatible with the Host consumers: every pi_event_scan allowlisted type exists in the schema and the consumed fields (usage/provider/model/stopReason/errorMessage/tool metadata, retry and outputs_validation payloads) keep their names and types; delta events (message_update/tool_execution_update) never appear."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/executors/test_velites_event_contract.py
+        gate: quick
+
+  - id: EXEC-HARNESS-ISOLATION-001
+    statement: "velites has zero auto-discovery: agent context comes only from --system-prompt, explicit --skill directories, and the @prompt instruction — an AGENTS.md (or any other file) in the working directory is never read into provider requests or the event stream. The absence is structural (no discovery code exists), not a disabled feature."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_no_auto_discovery
+        gate: quick
+
+  - id: EXEC-HARNESS-BUDGET-001
+    statement: "velites run budgets (--max-turns, --max-tokens, wall-clock deadline) are enforced inside the agent loop: exhaustion injects exactly one wrap-up turn and the run always terminates with agent_end carrying reason=budget_exceeded, never by silent truncation or outer hard-kill alone."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_budget_exhaustion_marks_agent_end
+        gate: quick
+
+  - id: EXEC-HARNESS-SANDBOX-001
+    statement: "velites confines the bash tool in a default-on OS-level filesystem sandbox (macOS seatbelt via sandbox-exec, Linux bubblewrap): reads are limited to the working directory, the session dir, explicit --skill dirs and system paths; writes are limited to the working directory, the session dir and $TMPDIR//tmp — escapes surface as tool_execution_end{isError: true}. When the sandbox backend is unavailable the harness fails closed (non-zero exit before the agent loop) and never degrades to an unsandboxed run; --no-sandbox is the only escape hatch."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_sandbox_unavailable_fails_closed
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_no_sandbox_escape_hatch
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_velites_sandbox.py::test_bash_sandbox_blocks_escape_macos
+        gate: quick
+
+  - id: EXEC-RUNTIME-DISPATCH-001
+    statement: "Agent command construction is selected by AgentDefinition.runtime: velites pins the velites builder regardless of workflows.pi.flavor (binary default normalization follows the same rule as PiRuntimeConfig._flavor_binary); pi delegates implementation choice to flavor, bit-for-bit unchanged; unknown runtimes fail fast at dispatch before any manifest is frozen."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/workflows/test_velites_command.py
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker.py::test_dispatch_fails_fast_on_unsupported_runtime
+        gate: quick
+      - kind: integration
+        target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
+        gate: full
+
+  - id: EXEC-CLAIM-RUNTIME-001
+    statement: "A queued Agent request no single non-revoked Worker can claim — judged per Worker on runtime, capability and model together, never on cross-Worker unions — is failed by the unclaimable sweeper with an explicit reason; it never rots in queued. With zero non-revoked Workers the sweeper stays inactive (a deployment gap, not a definition problem)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_runtime_mismatch
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker_concurrency.py::test_unclaimable_sweeper_fails_on_cross_worker_combination
+        gate: quick
+      - kind: integration
+        target: tests/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
+        gate: quick

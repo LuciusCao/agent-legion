@@ -1,22 +1,32 @@
+import logging
 import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
-import yaml
-
-from server.app.executors.config import (
-    ExecutorConfig,
-    load_executor_definitions,
-)
+from server.app.agent_catalog import AgentDefinition, load_agent_definitions
+from server.app.cms.env import resolve_cms_env, validate_cms_env_aliases
+from server.app.configuration import load_application_config
+from server.app.configuration.cors import CorsSettings, load_cors_settings
+from server.app.executors import registration as _registration  # noqa: F401
+from server.app.executors.config import ExecutorConfig
+from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
+from server.app.workflows.resource_providers import (
+    ResourceProviderDeclarations,
+    load_resource_provider_declarations,
+)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -28,7 +38,13 @@ class Settings:
     packages_dir: Path
     jobs_dir: Path
     config: dict[str, Any]
+    database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
+    cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
+    agent_definitions: dict[str, AgentDefinition] = field(default_factory=dict)
+    resource_providers: ResourceProviderDeclarations = field(
+        default_factory=ResourceProviderDeclarations
+    )
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -66,15 +82,42 @@ def _path_parser(value: str) -> str:
 
 # Reviewed mapping from environment variable to config path and parser.
 # Do not add arbitrary double-underscore mutation; every override is listed here.
+# ``database.url`` is deliberately absent: it is handled by
+# ``_apply_database_url_env`` below, which applies the authoritative
+# AGENT_LEGION_DATABASE_URL override.
 _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
-    "VIDEO_HIVE_CMS_TOKEN": (("cms", "token"), _str_parser),
-    "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
-    "VIDEO_HIVE_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
-    "VIDEO_HIVE_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
-    "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
-    "VIDEO_HIVE_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
-    "VIDEO_HIVE_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
+    "AGENT_LEGION_CMS_TOKEN": (("cms", "token"), _str_parser),
+    "AGENT_LEGION_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
+    "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
+    "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
+    "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
+    "AGENT_LEGION_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
+    "AGENT_LEGION_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
+    "AGENT_LEGION_WORKER_REGISTER_TOKEN": (("agent_workers", "register_token"), _str_parser),
+    "AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE": (
+        ("agent_workers", "register_token_file"),
+        _path_parser,
+    ),
+    "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
+    "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
+    "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
 }
+
+_DATABASE_URL_ENV = "AGENT_LEGION_DATABASE_URL"
+
+
+def _apply_database_url_env(config: dict[str, Any]) -> None:
+    """Apply the database URL env override (config governance G4).
+
+    ``AGENT_LEGION_DATABASE_URL`` is the single authoritative variable.
+    """
+    value = os.environ.get(_DATABASE_URL_ENV)
+    if value is None:
+        return
+    database = config.setdefault("database", {})
+    if not isinstance(database, dict):
+        config["database"] = database = {}
+    database["url"] = value
 
 
 def _apply_env_overrides(config: dict[str, Any]) -> None:
@@ -91,78 +134,117 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
         node[path[-1]] = parser(raw)
 
 
-def _apply_basecms_env_overrides(config: dict[str, Any]) -> None:
-    """Apply BASECMS_* overrides that predate the VIDEO_HIVE_* overrides."""
+def _apply_cms_env_overrides(config: dict[str, Any]) -> None:
+    """Validate CMS_* alias conflicts, then apply the CMS_BASE_URL override (D3)."""
+    validate_cms_env_aliases()
+    base_url = resolve_cms_env("CMS_BASE_URL")
+    if not base_url:
+        return
     cms = config.setdefault("cms", {})
     if not isinstance(cms, dict):
         return
-    base_url = os.environ.get("BASECMS_BASE_URL")
-    if base_url:
-        cms["base_url"] = base_url
+    cms["base_url"] = base_url
 
 
 def _normalize_cms_config(config: dict[str, Any]) -> None:
-    """Derive legacy URL fields from base_url when present."""
+    """Derive the legacy knowledge URL from base_url when present.
+
+    Resource URLs resolve through ``resource_providers`` (see
+    ``workflows.resources.resolve_cms_resource``); ``knowledge_url`` stays as
+    the legacy fallback for ``cms.knowledge.video``'s ``url_key`` (D14).
+    """
     cms = config.get("cms")
     if not isinstance(cms, dict):
         return
     base_url = str(cms.get("base_url", "")).rstrip("/")
-    if not base_url:
+    if not base_url or cms.get("knowledge_url"):
         return
     params: dict[str, str] = {
         "bank_version": str(cms.get("bank_version", "v5")),
         "country_id": str(cms.get("country_id", "1")),
         "subject_id": str(cms.get("subject_id", "2")),
     }
-    if not cms.get("knowledge_url"):
-        cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
-    if not cms.get("question_url"):
-        cms["question_url"] = f"{base_url}/question/detail?" + urlencode(params)
-    if not cms.get("question_detail_url"):
-        cms["question_detail_url"] = cms["question_url"]
-    list_params = {**params}
-    if "page_size" in cms and cms["page_size"] not in (None, ""):
-        list_params["page_size"] = str(cms["page_size"])
-    else:
-        list_params["page_size"] = "50"
-    if not cms.get("question_list_url"):
-        cms["question_list_url"] = f"{base_url}/question/list?" + urlencode(list_params)
+    cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
+
+
+def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
+    """Fail fast when the yaml ``cms:`` section carries retired keys.
+
+    Config governance G2 (breaking): ``cms.token`` and ``cms.token_gen`` are no
+    longer read from yaml. This check runs before env overrides so env-injected
+    in-memory values (``AGENT_LEGION_CMS_TOKEN`` et al.) are not mistaken for
+    yaml keys.
+    """
+    cms = config.get("cms")
+    if not isinstance(cms, dict):
+        return
+    retired = [key for key in ("token", "token_gen") if key in cms]
+    if not retired:
+        return
+    keys = ", ".join(f"cms.{key}" for key in retired)
+    raise ValueError(
+        f"Unsupported yaml keys under cms: {keys}. The yaml cms.token and "
+        "cms.token_gen sections were retired (config governance G2). Migrate: "
+        "token -> env CMS_TOKEN (or AGENT_LEGION_CMS_TOKEN; BASECMS_TOKEN is a "
+        "deprecated alias) or a vault-backed workspace resource binding; "
+        "token_gen -> env CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL "
+        "(deprecated aliases BASECMS_*)."
+    )
 
 
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
-    root_dir = Path(__file__).resolve().parents[2]
-    load_env_file(root_dir / ".env")
-    config_file = config_path or root_dir / "config" / "workflow.yaml"
-    config: dict[str, Any] = {}
-    if config_file.exists():
-        loaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            config = loaded
+    root_dir = PROJECT_ROOT
+    if os.environ.get("AGENT_LEGION_SKIP_DOTENV") != "1":
+        load_env_file(root_dir / ".env")
+    loaded = load_application_config(root_dir, config_path=config_path)
+    config = loaded.config
+    _reject_retired_cms_yaml_keys(config)
+    _apply_database_url_env(config)
     _apply_env_overrides(config)
-    _apply_basecms_env_overrides(config)
+    _apply_cms_env_overrides(config)
     _normalize_cms_config(config)
+    if data_dir is None:
+        env_data_dir = os.environ.get("AGENT_LEGION_DATA_DIR")
+        if env_data_dir:
+            data_dir = Path(env_data_dir)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
+    database_config = config.get("database", {})
+    database_url = str(database_config.get("url", "")) if isinstance(database_config, dict) else ""
+    if not database_url.startswith(("postgresql://", "postgres://")):
+        raise ValueError("database.url must be a PostgreSQL URL")
     videos_dir = resolved_data_dir / "videos"
     logs_dir = resolved_data_dir / "logs"
     packages_dir = resolved_data_dir / "packages"
     jobs_dir = resolved_data_dir / "jobs"
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
-    executor_definitions = load_executor_definitions(config.get("executors", {}))
+    executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
+    agent_definitions = load_agent_definitions(config.get("agents", {}))
+    # Fail fast on invalid resource provider declarations (spec D11).
+    resource_providers = load_resource_provider_declarations(config.get("resource_providers"))
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
+    token_file = executor_runtime.agent_workers.register_token_file
+    if token_file and not executor_runtime.agent_workers.register_token:
+        executor_runtime.agent_workers.register_token = (
+            Path(token_file).read_text(encoding="utf-8").strip()
+        )
     return Settings(
         root_dir=root_dir,
+        database_url=database_url,
         data_dir=resolved_data_dir,
         videos_dir=videos_dir,
         logs_dir=logs_dir,
         packages_dir=packages_dir,
         jobs_dir=jobs_dir,
         config=config,
+        cors=load_cors_settings(config),
         executor_definitions=executor_definitions,
+        agent_definitions=agent_definitions,
+        resource_providers=resource_providers,
         executor_runtime=executor_runtime,
     )
 
 
 def validate_settings(settings: Settings) -> None:
     """Validate runtime dependencies after settings are constructed."""
-    validate_runtime(settings.executor_runtime, settings.config)
+    validate_runtime(settings.executor_runtime, settings.config, settings.executor_definitions)

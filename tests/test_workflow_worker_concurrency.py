@@ -14,12 +14,13 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowIntake,
     WorkflowNode,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 class FakeExecutor:
@@ -47,7 +48,7 @@ class FakeExecutor:
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         self.contexts.append(context)
-        self.block_event.wait(timeout=10)
+        assert self.block_event.wait(timeout=10), "executor was not released in time"
         for output in context.expected_outputs:
             (context.job_dir / output).write_text('{"done": true}', encoding="utf-8")
         return ExecutionResult(
@@ -210,9 +211,9 @@ def _make_worker(
 
 
 def test_same_node_submitted_once(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -249,9 +250,9 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
 
 
 def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -289,10 +290,14 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
 
 
 def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
+    ws_a = job_db.create_workspace(
+        "Workspace A", default_workflow_key="question_comprehension_info"
+    )
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="question_comprehension_info"
+    )
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -329,9 +334,9 @@ def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path)
 
 
 def test_two_agent_nodes_share_workspace_executor_limit(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("pi-default", kind="pi", block_event=block_event)
@@ -366,10 +371,14 @@ def test_two_agent_nodes_share_workspace_executor_limit(tmp_path: Path) -> None:
 
 
 def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
+    ws_a = job_db.create_workspace(
+        "Workspace A", default_workflow_key="question_comprehension_info"
+    )
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="question_comprehension_info"
+    )
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -408,10 +417,14 @@ def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
 
 
 def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
+    ws_a = job_db.create_workspace(
+        "Workspace A", default_workflow_key="question_comprehension_info"
+    )
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="question_comprehension_info"
+    )
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -458,9 +471,9 @@ def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
 
 
 def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     executor = FakeExecutor("local-default")
     registry = _make_registry(
@@ -491,9 +504,9 @@ def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
 
 
 def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -551,9 +564,9 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
 
 
 def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     job = job_db.create_job(
         workflow_key="test",
@@ -583,7 +596,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
             capability="root",
             local_node_limit=1,
             lease_ttl_seconds=60,
-            log_path="/tmp/run.log",
+            log_path="logs/run.log",
             execution_mode="until_node",
             target_node_key="root",
             allowed_node_keys=("root",),
@@ -601,9 +614,9 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
 
 
 def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     executor = FakeExecutor("local-default", supports={"other"})
     registry = _make_registry(
@@ -636,9 +649,9 @@ def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Pat
 
 def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
     """The lease repository itself rejects claims that would exceed global capacity."""
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     executor = FakeExecutor("local-default")
     registry = _make_registry(
@@ -679,7 +692,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
         capability="fetch",
         local_node_limit=None,
         lease_ttl_seconds=60,
-        log_path="/tmp/run.log",
+        log_path="logs/run.log",
     )
 
     claim1 = worker.leases.try_claim(base_request)
@@ -696,7 +709,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
             capability="fetch",
             local_node_limit=None,
             lease_ttl_seconds=60,
-            log_path="/tmp/run2.log",
+            log_path="logs/run2.log",
         )
     )
     assert claim2 is None

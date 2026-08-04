@@ -34,6 +34,7 @@ def create_workspace_configuration_router(
                 executor_allocations=[a.model_dump() for a in payload.executor_allocations],
                 node_bindings=[b.model_dump() for b in payload.node_bindings],
                 node_limits=[n.model_dump() for n in payload.node_limits],
+                agent_capacity=payload.agent_capacity,
             )
             return WorkspaceConfigurationResponse(**result)
         except JobServiceError as exc:

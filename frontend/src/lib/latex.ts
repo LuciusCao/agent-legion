@@ -1,3 +1,5 @@
+import { normalizeLatexForKatex } from './katexNormalize'
+
 export function decodeHtmlEntities(raw: string): string {
   const textarea = document.createElement('textarea')
   textarea.innerHTML = raw
@@ -9,6 +11,8 @@ export interface LatexPart {
   content: string
   display: boolean
 }
+
+export { normalizeLatexForKatex } from './katexNormalize'
 
 export function extractLatexParts(text: string): LatexPart[] {
   if (!text) return []
@@ -171,10 +175,13 @@ export function renderLatexInHtml(html: string): string {
     for (const part of parts) {
       if (part.type === 'latex') {
         try {
-          const latexHtml = katex.renderToString(part.content, {
-            throwOnError: false,
-            displayMode: false,
-          })
+          const latexHtml = katex.renderToString(
+            normalizeLatexForKatex(part.content),
+            {
+              throwOnError: false,
+              displayMode: false,
+            }
+          )
           const wrapper = doc.createElement('span')
           wrapper.innerHTML = latexHtml
           fragment.appendChild(wrapper)

@@ -19,10 +19,11 @@ const catalog = [
 ]
 
 const workflowDefinition = {
-  key: 'reading_analysis',
-  label: '阅读分析',
+  key: 'sample_workflow',
+  label: '示例工作流',
   concurrency: { local: 8, agent: 2, nodes: {} },
   intake: { modes: [] },
+  edges: [],
   nodes: [
     {
       key: 'fetch_questions',
@@ -84,19 +85,19 @@ describe('LocalNodeLimitSection', () => {
         ],
         bindings: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'review_keywords',
             executor_id: 'pi-review',
           },
         ],
         node_limits: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             concurrency_limit: 2,
           },
@@ -125,9 +126,7 @@ describe('LocalNodeLimitSection', () => {
   it('sets the input max to the bound executor workspace allocation', () => {
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="获取题目 并发上限"]'
-    ) as HTMLElement
+    const input = screen.getByLabelText('获取题目 并发上限') as HTMLInputElement
     expect(input).toBeTruthy()
     expect(input).toHaveAttribute('max', '4')
   })
@@ -135,18 +134,15 @@ describe('LocalNodeLimitSection', () => {
   it('updates the node limit through the store', async () => {
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="获取题目 并发上限"]'
-    ) as HTMLInputElement
-    input.value = '3'
-    fireEvent.input(input)
+    const input = screen.getByLabelText('获取题目 并发上限') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '3' } })
 
     await waitFor(() => {
       expect(
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'reading_analysis',
+          workflow_key: 'sample_workflow',
           node_key: 'fetch_questions',
           concurrency_limit: 3,
         },
@@ -157,11 +153,8 @@ describe('LocalNodeLimitSection', () => {
   it('removes the row from the request when the limit is cleared', async () => {
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="获取题目 并发上限"]'
-    ) as HTMLInputElement
-    input.value = ''
-    fireEvent.input(input)
+    const input = screen.getByLabelText('获取题目 并发上限') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
 
     await waitFor(() => {
       expect(
@@ -182,7 +175,7 @@ describe('LocalNodeLimitSection', () => {
         ],
         bindings: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'clean_and_parse',
             executor_id: 'local-default',
           },
@@ -194,18 +187,17 @@ describe('LocalNodeLimitSection', () => {
 
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="清洗与解析 并发上限"]'
+    const input = screen.getByLabelText(
+      '清洗与解析 并发上限'
     ) as HTMLInputElement
-    input.value = '2'
-    fireEvent.input(input)
+    fireEvent.change(input, { target: { value: '2' } })
 
     await waitFor(() => {
       expect(
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'reading_analysis',
+          workflow_key: 'sample_workflow',
           node_key: 'clean_and_parse',
           concurrency_limit: 2,
         },

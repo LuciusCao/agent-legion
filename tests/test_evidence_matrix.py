@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from server.app.quality.invariants import load_registry
+from scripts.quality.invariants import load_registry
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 MATRIX_PATH = PROJECT_ROOT / "docs" / "architecture" / "workspace-executor-evidence-matrix.md"
-REGISTRY_PATH = PROJECT_ROOT / "config" / "architecture-invariants.yaml"
+REGISTRY_PATH = PROJECT_ROOT / "config" / "architecture" / "architecture-invariants.yaml"
 
 REQUIRED_COLUMNS = [
     "Promise",

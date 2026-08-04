@@ -3,13 +3,27 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_executor_resolver import resolve_node_executors
+from server.app.services.job_node_ordering import ordered_job_nodes
+from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
+from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
+from server.app.services.job_path_projection import resolve_record_paths
+from server.app.services.job_query_presenters import (
+    artifact_names,
+    job_nodes_with_definition,
+    node_summary,
+)
+from server.app.services.job_workflow_versions import is_workflow_outdated
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revision_format import definition_from_job_snapshot
+from server.app.services.workspace_dag import build_workspace_dag
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
+
+_RUN_PATH_FIELDS = {"log_path", "run_dir", "session_dir"}
+_UNSET: Any = object()
 
 
 class JobQueryService:
@@ -31,58 +45,20 @@ class JobQueryService:
             raise NotFoundError("Job not found")
         return job
 
-    def _definition(self, workflow_key: str) -> WorkflowDefinition:
-        return self.workflows.definition(workflow_key)
-
-    def _job_nodes_with_definition(
-        self,
-        job: dict[str, Any],
-        nodes: list[dict[str, Any]],
-        definition: WorkflowDefinition,
-    ) -> list[dict[str, Any]]:
-        return [
-            {
-                **node,
-                "label": definition.nodes[node["node_key"]].label
-                if node["node_key"] in definition.nodes
-                else node["node_key"],
-                "capability": definition.nodes[node["node_key"]].capability
-                if node["node_key"] in definition.nodes
-                else node["node_key"],
-                "after": definition.nodes[node["node_key"]].after
-                if node["node_key"] in definition.nodes
-                else [],
-                "inputs": definition.nodes[node["node_key"]].inputs
-                if node["node_key"] in definition.nodes
-                else [],
-                "outputs": definition.nodes[node["node_key"]].outputs
-                if node["node_key"] in definition.nodes
-                else [],
-            }
-            for node in nodes
-        ]
-
-    def _node_summary(
-        self,
-        node: dict[str, Any],
-        definition: WorkflowDefinition,
-    ) -> dict[str, Any]:
-        node_key = str(node["node_key"])
-        label = definition.nodes[node_key].label if node_key in definition.nodes else node_key
-        return {
-            "node_key": node_key,
-            "label": label,
-            "status": str(node["status"]),
-            "error_message": str(node.get("error_message", "")),
-        }
+    def _definition_for_job(self, job: dict[str, Any]) -> WorkflowDefinition:
+        return definition_from_job_snapshot(job) or self.workflows.definition(
+            str(job["workflow_key"])
+        )
 
     def _job_summary(
         self,
         job: dict[str, Any],
         nodes: list[dict[str, Any]],
         definition: WorkflowDefinition,
+        active_revision: Any = _UNSET,
     ) -> dict[str, Any]:
-        summaries = [self._node_summary(node, definition) for node in nodes]
+        ordered_nodes = ordered_job_nodes(nodes, definition)
+        summaries = [node_summary(node, definition) for node in ordered_nodes]
         completed_nodes = sum(1 for summary in summaries if summary["status"] == "completed")
         total_nodes = len(summaries)
 
@@ -106,27 +82,37 @@ class JobQueryService:
             if active_summary is not None:
                 error_summary = active_summary["error_message"][:240]
 
-        control = self.job_db.get_job_execution_control(job["id"])
+        if active_revision is _UNSET:
+            active = self.job_db.get_active_workflow_revision(
+                str(job["workspace_id"]), str(job["workflow_key"])
+            )
+        else:
+            active = active_revision
+        job_workflow_version = job.get("workflow_version")
+        is_outdated = is_workflow_outdated(job, active)
+
+        job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
+            "workflow_revision_id": job.get("workflow_revision_id", ""),
+            "workflow_version": job_workflow_version,
+            "workflow_definition_hash": job.get("workflow_definition_hash", ""),
+            "outcome": job.get("outcome", ""),
+            "current_workflow_revision_id": str(active["id"]) if active else "",
+            "current_workflow_revision_version": active["version"] if active else None,
+            "is_workflow_outdated": is_outdated,
             "node_summaries": summaries,
             "completed_nodes": completed_nodes,
             "total_nodes": total_nodes,
             "active_node_key": active_node_key,
             "error_summary": error_summary,
             "execution_control": {
-                "mode": control["execution_mode"] if control else "full",
-                "target_node_key": control["target_node_key"] if control else None,
-                "paused": control["execution_paused"] if control else False,
-                "pause_reason": control["pause_reason"] if control else "",
+                "mode": job.get("execution_mode", "full"),
+                "target_node_key": job.get("target_node_key"),
+                "paused": bool(job.get("execution_paused", False)),
+                "pause_reason": job.get("pause_reason", ""),
             },
         }
-
-    def _artifact_names(self, job: dict[str, Any]) -> list[str]:
-        base = resolve_job_dir(job, self.settings.jobs_dir)
-        if not base.exists():
-            return []
-        return sorted(path.name for path in base.iterdir() if path.is_file())
 
     def list_jobs(
         self,
@@ -139,42 +125,37 @@ class JobQueryService:
             workflow_key=workflow_key,
             status=status,
         )
-        job_ids = [str(job["id"]) for job in jobs]
-        nodes_by_job = self.job_db.list_job_nodes_for_jobs(job_ids)
-
-        definitions: dict[str, WorkflowDefinition] = {}
-        for job in jobs:
-            key = str(job["workflow_key"])
-            if key not in definitions:
-                definitions[key] = self._definition(key)
-
-        return [
-            self._job_summary(
-                job, nodes_by_job.get(str(job["id"]), []), definitions[str(job["workflow_key"])]
-            )
-            for job in jobs
-        ]
+        return summarize_paginated_jobs(self, self.job_db, jobs)
 
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
-        definition = self._definition(str(job["workflow_key"]))
+        definition = self._definition_for_job(job)
         nodes = self.job_db.list_job_nodes(job_id)
-        nodes_with_definition = self._job_nodes_with_definition(job, nodes, definition)
+        nodes_with_definition = job_nodes_with_definition(nodes, definition)
         executor_map = resolve_node_executors(
             str(job["workspace_id"]),
             str(job["workflow_key"]),
             self.workspace_executor_config,
             self.settings,
         )
+        worker_map = claimed_worker_map(self.job_db.path, job_id)
+        agent_map = agent_route_map(
+            self.job_db.path, str(job["workspace_id"]), str(job["workflow_key"])
+        )
         for node in nodes_with_definition:
             executor_id, executor_kind = executor_map.get(node["node_key"], (None, None))
             node["executor_id"] = executor_id
             node["executor_kind"] = executor_kind
+            node["worker_id"] = worker_map.get(node["node_key"])
+            node["agent_id"] = agent_map.get(node["node_key"])
         return {
             "job": self._job_summary(job, nodes, definition),
             "nodes": nodes_with_definition,
-            "runs": self.job_db.list_node_runs(job_id),
-            "artifacts": self._artifact_names(job),
+            "runs": [
+                resolve_record_paths(run, self.settings.data_dir, _RUN_PATH_FIELDS)
+                for run in self.job_db.list_node_runs(job_id)
+            ],
+            "artifacts": artifact_names(job, self.settings),
         }
 
     def workspace_runs(
@@ -185,39 +166,14 @@ class JobQueryService:
         job_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        return self.job_db.list_workspace_node_runs(
+        runs = self.job_db.list_workspace_node_runs(
             workspace_id,
             status=status,
             node_key=node_key,
             job_id=job_id,
             limit=limit,
         )
+        return [resolve_record_paths(run, self.settings.data_dir, _RUN_PATH_FIELDS) for run in runs]
 
     def workspace_dag(self, workspace_id: str) -> dict[str, Any]:
-        workspace = self.job_db.get_workspace(workspace_id)
-        if workspace is None:
-            raise NotFoundError("Workspace not found")
-        workflow_key = str(workspace.get("default_workflow_key") or "question_content")
-        definition = self._definition(workflow_key)
-        counts = self.job_db.count_workspace_job_nodes_by_status(workspace_id, workflow_key)
-        statuses = ["pending", "running", "completed", "failed", "stale"]
-        return {
-            "workflow": {
-                "key": definition.key,
-                "label": definition.label,
-            },
-            "nodes": [
-                {
-                    "key": node.key,
-                    "label": node.label,
-                    "capability": node.capability,
-                    "after": node.after,
-                    "inputs": node.inputs,
-                    "outputs": node.outputs,
-                    "status_counts": {
-                        status: counts.get(node.key, {}).get(status, 0) for status in statuses
-                    },
-                }
-                for node in definition.nodes.values()
-            ],
-        }
+        return build_workspace_dag(self.job_db, workspace_id)

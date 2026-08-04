@@ -2,17 +2,23 @@
 
 ## Overview
 
-Video Hive 设计为**本地运行**的工具，不依赖云服务。开发者通过 `uv` 管理 Python 依赖，`npm` 管理前端依赖。
+Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生产环境使用同一数据库语义。
 
 ## Directory Structure
 
 ```
 config/
-└── pipeline.yaml           # ASR 配置、OpenClaw 命令模板、流水线开关
+├── app.yaml                  # PostgreSQL、应用路径、HTTP 设置、清理、监控、token 定价
+├── agent_legion.yaml         # ASR、CMS、资源提供方、OpenClaw 配置
+├── workflow.yaml             # Workspace 执行器与工作流运行时开关
+├── skills.yaml               # 外部 Pi skill 源声明
+├── skills.lock               # 解析后的 skill commit 锁定
+├── agent-worker.example.yaml # Agent Worker 配置模板
+└── workflows/                # Workflow DAG 定义（video_knowledge、question_comprehension_info）
 
-data/                       # 运行时数据（gitignored）
-├── video_hive.sqlite       # SQLite 数据库
+data/                       # 文件产物（gitignored）
 ├── videos/                 # 下载的视频与产物
+├── jobs/                   # Workspace Job 产物
 ├── packages/               # ZIP 输出
 └── logs/                   # 处理日志
 
@@ -27,7 +33,7 @@ scripts/
 ```
 开发者启动后端（uvicorn 8000）+ 前端（vite 5173）
     → 前端通过 Vite proxy 访问后端 API
-    → 后端读写 data/ 目录
+    → 后端通过 PostgreSQL 协调任务，并读写 data/ 目录产物
     → 流水线产物存入 data/videos/{video_id}/
 ```
 
@@ -36,7 +42,8 @@ scripts/
 ## Key Decisions
 
 - 使用 `uv` 而非 `pip`/`poetry`，依赖锁定在 `uv.lock`。
-- 质量门分为 `check-quick.sh`（日常）和 `check.sh`（提交前）。
+- PostgreSQL 是唯一运行时数据库；SQLite 只由一次性离线导入器读取。
+- 质量门分为 `check-quick.sh`（日常/本地 pre-push）和 `check.sh`（完整门禁，由 GitHub Actions CI 执行，见 `.github/workflows/quality-gate.yml`）。
 - 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录。
 
 ## API Surface / Interface
@@ -45,18 +52,22 @@ scripts/
 
 ### 顶层配置项
 
+- `agent_workers`
+- `agents`
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
-- `cleanup_video_after_assemble`
-- `cms`
-- `data_dir`
+- `cleanup`
+- `cms` — CMS 集成配置
+- `data_dir` — 数据目录
+- `database`
+- `executors` — Workspace 执行器定义
+- `heartbeat_failure_threshold`
+- `heartbeat_interval_seconds`
+- `lease_ttl_seconds`
+- `monitoring`
 - `openclaw` — OpenClaw 命令模板与工作目录
-- `pipelines` — Agent Legion DAG 流水线开关
-- `resource_providers`
-- `server`
-- `worker`
+- `resource_providers` — 资源提供方声明（path/url_key 及各自可调参数的 config_schema，含 secret 标记）
+- `server` — HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）
+- `token_usage`
+- `workflows` — Agent Legion DAG 工作流开关
 
 <!-- END AUTO-GENERATED -->
-
-## Related Specs
-
-- [质量门渐进建设](../superpowers/completed/2026-05-28-quality-gates-design.md)

@@ -1,0 +1,338 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  overflow-y: auto;
+}
+.card {
+  background: #fafafa;
+  border-radius: 12px;
+  padding: 16px;
+}
+.sectionTitle {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1c1e;
+  margin: 0 0 12px 0;
+}
+.loading {
+  padding: 24px;
+  color: #43474e;
+  text-align: center;
+}
+.error {
+  padding: 12px 16px;
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 8px;
+}
+.empty {
+  color: #43474e;
+  font-style: italic;
+}
+.richText {
+  line-height: 1.6;
+  color: #1a1c1e;
+}
+
+.richText :global(p) {
+  margin: 0 0 8px 0;
+}
+
+.richText :global(p):last-child {
+  margin-bottom: 0;
+}
+
+.richText :global(.highlight) {
+  background: linear-gradient(
+    180deg,
+    transparent 60%,
+    rgba(255, 235, 59, 0.85) 60%
+  );
+  color: #1a1c1e;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.richText :global(.highlight-corrected) {
+  background: linear-gradient(
+    180deg,
+    transparent 60%,
+    rgba(239, 68, 68, 0.45) 60%
+  );
+  color: #1a1c1e;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
+.richText :global(img) {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+.optionList {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.optionItem {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  transition: background 150ms ease;
+}
+
+.optionItem.correct {
+  background: #f0f0f0;
+  color: #1a1c1e;
+}
+
+.optionLabel {
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.optionContent {
+  flex: 1;
+}
+
+.answerCard {
+  background: #fafafa;
+}
+
+.answerBadges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.answerBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: #5d5f61;
+  color: #ffffff;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.checkIcon {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+  color: #1a1c1e;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.answerBlankList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.answerBlank {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.blankLabel {
+  font-weight: 600;
+  color: #1a1c1e;
+  flex-shrink: 0;
+}
+
+.blankAlternatives {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.stemWrapper {
+  position: relative;
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.stemMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.comprehensionChips {
+  margin-top: 16px;
+}
+
+.chipsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.chipsCount {
+  font-size: 12px;
+  font-weight: 400;
+  color: #43474e;
+  margin-left: 8px;
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid #e0e0e0;
+  background: #ffffff;
+  color: #1a1c1e;
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.chip:hover {
+  background: #f5f5f5;
+}
+
+.chipSelected {
+  background: #f0f0f0;
+  color: #1a1c1e;
+  border-color: #f0f0f0;
+}
+
+.chipIndex {
+  font-size: 11px;
+  color: #43474e;
+  background: #f5f5f5;
+  border-radius: 999px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chipSelected .chipIndex {
+  background: rgba(103, 80, 164, 0.15);
+  color: #1a1c1e;
+}
+
+.detailPanel {
+  margin-top: 16px;
+}
+
+.detailCard {
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.detailCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.typeBadge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.typeBadgeGiven {
+  background: #f0f0f0;
+  color: #1a1c1e;
+}
+
+.typeBadgeHidden {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.detailId {
+  font-size: 12px;
+  color: #43474e;
+}
+
+.detailText {
+  font-size: 15px;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.detailSection {
+  font-size: 13px;
+  color: #43474e;
+  margin-top: 8px;
+}
+
+.detailSection strong {
+  color: #1a1c1e;
+}
+
+.abilityList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.abilityTag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f5f5f5;
+  color: #43474e;
+}
+
+.errorAnswerBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.relatedKeyInfoList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.relatedKeyInfoTag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f5f5f5;
+  color: #43474e;
+}

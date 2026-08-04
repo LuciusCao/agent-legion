@@ -1,0 +1,14 @@
+.canvas {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: #f5f5f5;
+  display: flex;
+}
+.canvas > :global(.DagGraph),
+.canvas > div:not([data-canvas-toolbar]) {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}

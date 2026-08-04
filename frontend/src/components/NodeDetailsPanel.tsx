@@ -1,11 +1,12 @@
 import type { components } from '../generated/api'
 import { formatDuration, STATUS_ICON, STATUS_LABEL } from './dagNodeStatus'
-import type { DagNodeData } from './DagNode'
+import { MaterialIcon } from './MaterialIcon'
+import type { DagNodeData } from './dag/DagNode'
 import styles from './NodeDetailsPanel.module.css'
 
 type LatestRun = Pick<
   components['schemas']['NodeRunResponse'],
-  'id' | 'status' | 'started_at' | 'exit_code' | 'error_message'
+  'id' | 'status' | 'started_at' | 'exit_code' | 'error_message' | 'runner'
 >
 
 interface NodeDetailsPanelProps {
@@ -30,7 +31,11 @@ export function NodeDetailsPanel({
       <div className={styles.section}>
         <div className={styles.sectionTitle}>状态</div>
         <div className={styles.statusRow}>
-          <span className={styles.icon}>{STATUS_ICON[data.status]}</span>
+          <MaterialIcon
+            name={STATUS_ICON[data.status]}
+            className={styles.icon}
+            data-testid={`node-icon-${data.status}`}
+          />
           <span>{STATUS_LABEL[data.status]}</span>
           <span className={styles.muted}>{durationText}</span>
         </div>
@@ -80,6 +85,9 @@ export function NodeDetailsPanel({
             <div>
               Run #{latestRun.id} · {latestRun.status}
             </div>
+            {latestRun.runner && (
+              <div className={styles.muted}>Runner:{latestRun.runner}</div>
+            )}
             <div className={styles.muted}>开始：{latestRun.started_at}</div>
             {latestRun.exit_code !== null && (
               <div>退出码：{latestRun.exit_code}</div>

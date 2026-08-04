@@ -30,8 +30,8 @@ describe('EmptyStateGuide', () => {
   it('renders rocket icon and title', () => {
     render(<EmptyStateGuide steps={steps} />)
 
-    expect(screen.getByText('rocket_launch')).toBeInTheDocument()
     expect(screen.getByText('开始使用 Workspace')).toBeInTheDocument()
+    expect(document.querySelector('svg')).toBeInTheDocument()
   })
 
   it('renders each step title and description', () => {

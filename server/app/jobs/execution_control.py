@@ -1,16 +1,16 @@
 from __future__ import annotations
 
-import sqlite3
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
-from server.app.jobs import atomic_mutations
+from server.app.db.connection import DatabaseConnection
+from server.app.jobs.atomic_mutations import resume_job as resume_job_mutation
 
 
 class _JobQueries(Protocol):
     """Minimal shape of ``JobQueries`` required by this mixin."""
 
-    def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
+    def connect(self) -> AbstractContextManager[DatabaseConnection]: ...
     def get_job(self, job_id: str) -> dict[str, Any] | None: ...
     def set_job_execution_mode(
         self,
@@ -115,7 +115,7 @@ class JobExecutionControlMixin:
 
     def resume_job(self: _JobQueries, job_id: str) -> None:
         with self.connect() as conn:
-            atomic_mutations.resume_job(conn, job_id)
+            resume_job_mutation(conn, job_id)
 
     def get_job_execution_control(self: _JobQueries, job_id: str) -> dict[str, Any] | None:
         row = self.get_job(job_id)

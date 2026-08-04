@@ -1,0 +1,113 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+# The full gate for protected branches (develop/main/release/tags) runs in
+# GitHub Actions (.github/workflows/quality-gate.yml); local pre-push keeps
+# only the fast feedback loop on the maintainer machine.
+# AGENT_LEGION_GATE_LEVEL picks the local level:
+#   smoke (default) — static checks + the curated smoke test tier;
+#   quick           — static checks + the full quick test suite;
+#   full            — the whole local full gate (scripts/check.sh).
+# CI runs every lane of the full quick gate regardless, so the smoke default
+# never weakens the server-side boundary.
+level="${AGENT_LEGION_GATE_LEVEL:-smoke}"
+case "$level" in
+  smoke) gate="quick"; tier="smoke" ;;
+  quick) gate="quick"; tier="full" ;;
+  full)  gate="full";  tier="full" ;;
+  *)
+    echo "Unsupported AGENT_LEGION_GATE_LEVEL: $level (expected smoke|quick|full)" >&2
+    exit 2
+    ;;
+esac
+export GATE_TIER="$tier"
+has_update=0
+force_full=0
+changed_paths=""
+zero_sha="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  _="$local_ref"
+  if [[ -z "$local_sha" || "$local_sha" == "$zero_sha" ]]; then
+    continue
+  fi
+  has_update=1
+  if [[ "$remote_sha" == "$zero_sha" ]]; then
+    # New branch/tag: no remote base to diff against.
+    force_full=1
+    continue
+  fi
+  if ! paths="$(git diff --name-only "$remote_sha...$local_sha" 2>/dev/null)"; then
+    force_full=1
+    continue
+  fi
+  changed_paths+="$paths"$'\n'
+done
+
+if [[ "$has_update" -eq 0 ]]; then
+  exit 0
+fi
+
+# Pick the quick-gate lanes from the pushed paths. CI runs every lane for each
+# PR/push, so this only trims the local feedback loop; anything ambiguous
+# (new refs, failed diff, shared files) falls back to all lanes.
+compute_lanes() {
+  local saw_frontend=0
+  local saw_backend=0
+  local saw_rust=0
+  local saw_non_docs=0
+  local saw_any=0
+  local path
+  while IFS= read -r path; do
+    [[ -z "$path" ]] && continue
+    saw_any=1
+    case "$path" in
+      # Shared/global files: all lanes, no trimming.
+      pyproject.toml|uv.lock|Makefile|scripts/*|.githooks/*|.github/*|config/*|frontend/package.json|frontend/package-lock.json)
+        echo "backend frontend rust"
+        return
+        ;;
+      velites/*)
+        saw_rust=1
+        saw_non_docs=1
+        ;;
+      frontend/*)
+        saw_frontend=1
+        saw_non_docs=1
+        ;;
+      docs/*|*.md)
+        ;;
+      *)
+        saw_backend=1
+        saw_non_docs=1
+        ;;
+    esac
+  done <<<"$changed_paths"
+
+  if [[ "$saw_any" -eq 0 ]]; then
+    echo "backend frontend rust"
+  elif [[ "$saw_non_docs" -eq 0 ]]; then
+    echo "static"
+  else
+    local lanes=""
+    [[ "$saw_backend" -eq 1 ]] && lanes="backend"
+    [[ "$saw_frontend" -eq 1 ]] && lanes="${lanes:+$lanes }frontend"
+    [[ "$saw_rust" -eq 1 ]] && lanes="${lanes:+$lanes }rust"
+    echo "$lanes"
+  fi
+}
+
+if [[ "$force_full" -eq 1 ]]; then
+  lanes="backend frontend rust"
+else
+  lanes="$(compute_lanes)"
+fi
+
+while IFS= read -r name; do
+  if [[ -n "$name" ]]; then
+    unset "$name"
+  fi
+done < <(git rev-parse --local-env-vars)
+
+exec "$ROOT_DIR/scripts/run-local-gate.sh" "$gate" "$lanes"
