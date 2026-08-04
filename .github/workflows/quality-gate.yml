@@ -32,6 +32,57 @@ env:
   AGENT_LEGION_WORKER_REGISTER_TOKEN: ci-only-dummy-register-token
 
 jobs:
+  # Lane detection (Actions minutes cost control): push/PR runs narrow the
+  # gate by changed paths, mirroring the local pre-push lane policy —
+  # frontend-only changes skip the backend pytest shards (postgres-a still
+  # runs api:check), velites-only changes run just the rust job, docs-only
+  # changes skip the gate entirely. Shared files (config, scripts, tests,
+  # workflows, anything outside frontend//velites//docs/) run the full
+  # backend+frontend gate; schedule/dispatch runs always get every lane.
+  changes:
+    name: changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      backend: ${{ steps.filter.outputs.backend }}
+      frontend: ${{ steps.filter.outputs.frontend }}
+      rust: ${{ steps.filter.outputs.rust }}
+    steps:
+      - uses: actions/checkout@v4
+        if: github.event_name == 'push' || github.event_name == 'pull_request'
+        with:
+          fetch-depth: 0
+
+      - id: filter
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          backend=true; frontend=true; rust=true
+          base=""
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base="$PR_BASE"
+          elif [ "$EVENT_NAME" = "push" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
+            base="$PUSH_BEFORE"
+          fi
+          # No usable base (schedule, dispatch, brand-new branch): full gate.
+          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+            backend=false; frontend=false; rust=false
+            while IFS= read -r f; do
+              case "$f" in
+                docs/*|*.md|LICENSE) ;;
+                frontend/*) frontend=true ;;
+                velites/*) rust=true ;;
+                *) backend=true; frontend=true ;;
+              esac
+            done < <(git diff --name-only "$base" HEAD)
+          fi
+          echo "backend=$backend" >> "$GITHUB_OUTPUT"
+          echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
+          echo "rust=$rust" >> "$GITHUB_OUTPUT"
+
   # Backend is sharded by database dependency (test architecture plan, Phase
   # 5C): backend-unit runs the static checks and the PostgreSQL-offline unit
   # tier with no service container, while the postgres side (Phase 5C-2/5C-3)
@@ -48,6 +99,8 @@ jobs:
   # partition the tier with no overlap.
   backend-unit:
     name: backend-unit
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -112,6 +165,10 @@ jobs:
   # shard 1/3, then merges all coverage shards and enforces the 85% floor.
   backend-postgres-a:
     name: backend-postgres-a
+    needs: changes
+    # Runs on the frontend lane too: it hosts api:check. The backend-test
+    # steps inside are gated individually on the backend lane.
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     # actions: read lets the pre-merge step poll this run's artifact list via
@@ -173,6 +230,7 @@ jobs:
         run: FRONTEND_GATE_PHASE=api-contract ./scripts/check-quick-frontend.sh
 
       - name: Backend PostgreSQL tests (shard 1/3)
+        if: needs.changes.outputs.backend == 'true'
         run: |
           mkdir -p coverage-data
           BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
@@ -192,6 +250,7 @@ jobs:
       # but runner queuing is not a guarantee, so it is polled too (codex
       # review on PR #25).
       - name: Wait for peer shard coverage artifacts
+        if: needs.changes.outputs.backend == 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -213,39 +272,42 @@ jobs:
       # uploading, failing this step keeps the gate red instead of computing
       # the floor on partial coverage data.
       - name: Download unit shard coverage data
+        if: needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-unit-coverage
           path: coverage-data
 
       - name: Download postgres shard B coverage data
+        if: needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-b-coverage
           path: coverage-data
 
       - name: Download postgres shard C coverage data
+        if: needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-c-coverage
           path: coverage-data
 
       - name: Download unit shard test telemetry
-        if: always()
+        if: always() && needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-unit-telemetry
           path: test-results
 
       - name: Download postgres shard B test telemetry
-        if: always()
+        if: always() && needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-b-telemetry
           path: test-results
 
       - name: Download postgres shard C test telemetry
-        if: always()
+        if: always() && needs.changes.outputs.backend == 'true'
         uses: actions/download-artifact@v4
         with:
           name: backend-postgres-c-telemetry
@@ -256,6 +318,7 @@ jobs:
       # (pyproject [tool.coverage.report] fail_under) once, against the
       # combined data, exactly as before.
       - name: Combined coverage report
+        if: needs.changes.outputs.backend == 'true'
         run: |
           for shard in coverage-data/*.coverage; do
             cp "$shard" ".coverage.$(basename "$shard" .coverage)"
@@ -268,7 +331,7 @@ jobs:
       # copies are 1-day artifacts, everything else remains ephemeral on the
       # runner.
       - name: Backend test summary
-        if: always()
+        if: always() && needs.changes.outputs.backend == 'true'
         env:
           AGENT_LEGION_COV: "1"
         run: |
@@ -292,6 +355,8 @@ jobs:
   # tests/full velites e2e needs the fail-closed sandbox backend.
   backend-postgres-b:
     name: backend-postgres-b
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -384,6 +449,8 @@ jobs:
   # bwrap-dependent tests live in the unit tier / tests/full.
   backend-postgres-c:
     name: backend-postgres-c
+    needs: changes
+    if: needs.changes.outputs.backend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -454,6 +521,8 @@ jobs:
   # jobs need neither Python nor Postgres.
   frontend-logic:
     name: frontend-logic
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -508,6 +577,8 @@ jobs:
 
   frontend-component:
     name: frontend-component
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -552,7 +623,8 @@ jobs:
 
   frontend-coverage:
     name: frontend-coverage
-    needs: [frontend-logic, frontend-component]
+    needs: [changes, frontend-logic, frontend-component]
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -610,6 +682,8 @@ jobs:
   # failure with a short retention.
   e2e-smoke:
     name: e2e-smoke
+    needs: changes
+    if: needs.changes.outputs.backend == 'true' || needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     services:
@@ -755,6 +829,8 @@ jobs:
 
   rust:
     name: rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
