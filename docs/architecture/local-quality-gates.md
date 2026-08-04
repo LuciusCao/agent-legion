@@ -16,7 +16,7 @@ provide.
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: full quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
-| PR / push to `develop`, `main`, `master` | Full | CI jobs `backend` + `frontend` |
+| PR / push to `develop`, `main`, `master` | Full | CI jobs `backend-unit` + `backend-postgres-a/b/c` + `frontend-*` + `rust` + `e2e-smoke` |
 | Nightly schedule, manual dispatch | Extended | CI job `ci-extended` |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
@@ -37,6 +37,13 @@ It runs without coverage because the 85% floor only applies to the full
 suite. Keep the tier under ~90 seconds: when adding tests for a new
 subsystem, add one core file to the smoke set rather than raising the budget.
 
+The unit tier (`GATE_TIER=unit`) runs the complete PostgreSQL-offline unit
+layer, selected with `-m "not postgres and not repository_gate"` against an
+unreachable loopback database URL, so an accidental database dependency fails
+the gate instead of silently using a developer database. CI runs it as the
+`backend-unit` job; the PostgreSQL integration layer (`GATE_TIER=postgres`)
+runs in the `backend-postgres-a/b/c` jobs described below.
+
 Install the repository-managed hooks once from a worktree that contains `.githooks/`:
 
 ```bash
@@ -53,27 +60,67 @@ unaffected. Passing evidence is shared through the same Git common directory.
 `.github/workflows/quality-gate.yml` runs on pull requests and pushes to
 `develop` / `main` / `master`, nightly (schedule), plus manual dispatch:
 
-- **backend** — static checks (ruff, format, mypy, architecture contracts,
-  invariant registry, spec health), the full pytest suite with coverage, and
-  the `tests/full -m full_gate` evidence with a combined coverage report. This
-  is the backend lane of `scripts/check.sh`.
-- **frontend** — generated API contract, prettier, ESLint, `tsc`, Vitest with
-  coverage, and the production bundle (`npm run build:bundle`).
+- **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
+  invariant registry, spec health) plus the PostgreSQL-offline unit tier
+  (`GATE_TIER=unit`), uploading its coverage data file as a 1-day artifact.
+- **backend-postgres-a** — the api:check OpenAPI contract step (Python +
+  Postgres + node_modules) and postgres tier shard 1/3, then downloads every
+  shard's coverage artifact, merges them with `coverage combine`, and
+  enforces the 85% floor once on the combined report.
+- **backend-postgres-b** — postgres tier shard 2/3 plus the
+  `tests/full -m full_gate` evidence, uploading its coverage data file.
+- **backend-postgres-c** — postgres tier shard 3/3, uploading its coverage
+  data file.
+- **frontend-logic / frontend-component / frontend-coverage** — frontend
+  static checks and the two Vitest projects (node / jsdom) as parallel jobs;
+  the coverage job merges the shard blob reports and enforces the frontend
+  coverage thresholds plus the production bundle (`npm run build:bundle`).
+- **rust** — `cargo fmt --check`, `cargo clippy --all-targets -- -D warnings`,
+  and `cargo test` in `velites/`.
+- **e2e-smoke** — the deterministic browser smoke suite.
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Runs only on
   the nightly schedule and manual dispatch; PR and push runs skip it.
+
+The postgres tier shards are a deterministic `md5(nodeid) % 3` collection
+filter (`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`). Every pytest shard
+writes its own `COVERAGE_FILE` with `--cov-fail-under=0`, so only the
+combined report in backend-postgres-a enforces the 85% floor.
 
 CI environment notes:
 
 - Each job gets a fresh `postgres:17` service container; `AGENT_LEGION_DATABASE_URL`
-  and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database is created
-  automatically by `tests/postgres_support.py`.
-- The frontend job also needs Python + Postgres because `npm run api:check`
-  regenerates the OpenAPI schema through `create_app`.
+  and `AGENT_LEGION_TEST_DATABASE_URL` point at it. The test database and worker
+  schemas are created lazily when the PostgreSQL layer starts; importing the
+  test support module and running the unit layer never connects to PostgreSQL.
+- The api:check contract step regenerates frontend API types through
+  `create_app` + node_modules, so it lives in the backend-postgres-a job; the
+  frontend jobs need neither Python nor Postgres.
 - `AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK=1` skips `check-skills-shared.py` in CI:
   `config/skills.yaml` points at machine-local skill repos (`~/.agents/skills/...`)
   that do not exist on runners. Local gates still run the check.
 - uv and npm caches are enabled; the first cold run is dominated by downloading
   torch/funasr and takes substantially longer than cached runs.
+
+## Test Telemetry
+
+CI test lanes emit lightweight, aggregate telemetry without retaining raw
+failure or source context as downloadable artifacts:
+
+- each backend unit, PostgreSQL, and full pytest layer prints its 30 slowest
+  tests, writes ephemeral JUnit XML, and records pytest-rerunfailures attempts
+  through `scripts.pytest_telemetry`;
+- frontend Vitest writes ephemeral JUnit and JSON reports alongside its normal
+  console and coverage reporters;
+- `scripts/summarize_test_results.py` adds aggregate counts, case time, rerun
+  counts, commit, platform, CPU, and tool versions to the GitHub job summary;
+- raw JUnit, Vitest JSON, and HTML coverage remain on the temporary runner and
+  are not uploaded, because they can contain private test names, failure data,
+  or source context.
+
+The gate scripts only enable file reporters when
+`AGENT_LEGION_TEST_RESULTS_DIR` is set, so ordinary local runs keep their
+existing output and overhead. `AGENT_LEGION_TEST_DURATIONS` controls the pytest
+slow-test count and defaults to 30 in telemetry mode.
 
 ## Exact-Commit Evidence (Local)
 
@@ -96,8 +143,10 @@ verification comes from the CI workflow, not from these files.
 Configure the repository on GitHub as follows:
 
 1. Protect `develop` and any release branches (Settings → Branches, or Rules → Rulesets).
-2. Require the `backend` and `frontend` status checks to pass before merging;
-   require branches to be up to date.
+2. Require the `backend-unit`, `backend-postgres-a`, `backend-postgres-b`,
+   `backend-postgres-c`, `frontend-logic`, `frontend-component`,
+   `frontend-coverage`, `rust`, and `e2e-smoke` status checks to pass before
+   merging; require branches to be up to date.
 3. Disable force-push and branch deletion for protected branches.
 4. Merge changes through a pull request; do not edit protected branches in the web UI.
 
@@ -123,10 +172,11 @@ available. Do not record passing evidence for a partial gate.
 
 ## Quality Impact
 
-- Fast feedback remains cheap enough to run on every commit; pushes only wait
-  for the smoke tier locally (~1-2 min instead of the full quick suite).
-- The full quick suite remains the CI boundary on every PR/push, so regressions
-  missed by the smoke tier are still caught server-side before merge.
+- Fast feedback remains cheap enough to run on every commit; pushes default
+  to the curated smoke tier, while the complete unit and PostgreSQL layers
+  run as parallel CI jobs on every PR/push.
+- CI adds the PostgreSQL and full layers on every PR/push, so database and
+  cross-control-plane regressions are still caught server-side before merge.
 - Stress evidence runs nightly instead of on every push, trading same-day
   detection for a much cheaper push loop; risky changes can trigger it on
   demand via `workflow_dispatch`.

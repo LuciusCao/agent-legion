@@ -65,6 +65,16 @@ echo "=== Combined Coverage Report ==="
 cd "$ROOT_DIR"
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run coverage report
 
+echo "=== Coverage Partition Report (non-blocking) ==="
+# Per-partition floors keep key modules from hiding behind the global average.
+# Report mode only; flip to blocking with AGENT_LEGION_COV_PARTITIONS=enforce
+# once the floors have been stable on CI.
+if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_coverage_partitions.py \
+  --backend "$COVERAGE_FILE" \
+  --frontend "$ROOT_DIR/frontend/coverage/coverage-final.json"; then
+  echo "WARNING: coverage partition check reported violations (non-blocking)." >&2
+fi
+
 echo "=== Exemption Age Check (non-blocking) ==="
 if ! UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_exemption_age; then
   echo "WARNING: exemption age check reported overdue exemptions (non-blocking)." >&2

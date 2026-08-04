@@ -35,7 +35,47 @@ run_static_checks() {
 
 run_tests() {
   echo "=== Frontend Tests (${test_command}) ==="
-  npm run "$test_command"
+  vitest_args=()
+  # FRONTEND_TEST_PROJECT selects a single Vitest project (logic/component)
+  # so CI can shard the two environments into parallel jobs.
+  if [[ -n "${FRONTEND_TEST_PROJECT:-}" ]]; then
+    vitest_args+=(--project "$FRONTEND_TEST_PROJECT")
+  fi
+  # FRONTEND_COVERAGE_BLOB_DIR marks a coverage shard: emit a blob report
+  # (which embeds the raw V8 coverage) for a downstream merge job, keep the
+  # local coverage report cheap (text only), and defer threshold + inventory
+  # enforcement to the merged run (a shard's partial coverage cannot meet
+  # the global thresholds on its own).
+  if [[ -n "${FRONTEND_COVERAGE_BLOB_DIR:-}" ]]; then
+    mkdir -p "$FRONTEND_COVERAGE_BLOB_DIR"
+    vitest_args+=(
+      --reporter=blob
+      --outputFile.blob="$FRONTEND_COVERAGE_BLOB_DIR/vitest-blob-${FRONTEND_TEST_PROJECT:-all}.json"
+      --coverage.reporter=text
+      --coverage.thresholds.lines=0
+      --coverage.thresholds.functions=0
+      --coverage.thresholds.branches=0
+      --coverage.thresholds.statements=0
+    )
+  fi
+  if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
+    mkdir -p "$AGENT_LEGION_TEST_RESULTS_DIR"
+    vitest_args+=(
+      --reporter=default
+      --reporter=junit
+      --outputFile.junit="$AGENT_LEGION_TEST_RESULTS_DIR/vitest-junit.xml"
+      --reporter=json
+      --outputFile.json="$AGENT_LEGION_TEST_RESULTS_DIR/vitest-results.json"
+    )
+  fi
+  if (( ${#vitest_args[@]} > 0 )); then
+    npm run "$test_command" -- "${vitest_args[@]}"
+  else
+    npm run "$test_command"
+  fi
+  if [[ "$test_command" == "test:coverage" && -z "${FRONTEND_COVERAGE_BLOB_DIR:-}" ]]; then
+    npm run test:coverage-inventory
+  fi
 }
 
 case "${FRONTEND_GATE_PHASE:-all}" in

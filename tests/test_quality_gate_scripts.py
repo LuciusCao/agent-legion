@@ -16,10 +16,29 @@ def _write_executable(path: Path, content: str) -> None:
 
 
 def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    process_env = os.environ.copy()
+    for key in (
+        # AGENT_LEGION_TEST_DATABASE_URL: the unit tier pins an unreachable
+        # offline URL for its whole pytest process; without scrubbing, a
+        # simulated GATE_TIER=smoke run inherits it and the curated tier's
+        # contract (never offline-pinned) cannot be verified on CI.
+        "AGENT_LEGION_TEST_DATABASE_URL",
+        "BACKEND_GATE_PHASE",
+        "FRONTEND_API_CHECK",
+        "FRONTEND_COVERAGE_BLOB_DIR",
+        "FRONTEND_GATE_PHASE",
+        "FRONTEND_TEST_MODE",
+        "FRONTEND_TEST_PROJECT",
+        "GATE_LANES",
+        "GATE_SHARD",
+        "GATE_TIER",
+    ):
+        process_env.pop(key, None)
+    process_env.update(env)
     return subprocess.run(
         [str(path)],
         cwd=cwd,
-        env={**os.environ, **env},
+        env=process_env,
         text=True,
         capture_output=True,
         check=False,
@@ -129,3 +148,236 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
     assert not any("test:coverage" in call for call in calls)
     assert any("pytest -q tests/full" in call for call in calls)
     assert any("coverage report" in call for call in calls)
+
+
+def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    results = tmp_path / "results"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'printf "rerun:%s\\n" "${AGENT_LEGION_RERUN_REPORT:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "AGENT_LEGION_TEST_RESULT_NAME": "quick",
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "unit",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PostgreSQL offline" in result.stdout
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "not postgres and not repository_gate" in calls
+    assert "--durations=30" in calls
+    assert f"--junitxml={results / 'quick-junit.xml'}" in calls
+    assert "-p scripts.pytest_telemetry" in calls
+    assert f"rerun:{results / 'quick-reruns.json'}" in calls
+
+
+def test_backend_smoke_tier_runs_the_curated_subset(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'printf "db:%s\\n" "${AGENT_LEGION_TEST_DATABASE_URL:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "smoke",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Python Smoke Tests" in result.stdout
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "-m smoke" in calls
+    assert "not postgres" not in calls
+    # The curated tier includes PostgreSQL-backed tests, so it must not be
+    # pinned to the unit tier's unreachable database URL.
+    assert "agent_legion_unit_offline" not in calls
+
+
+def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_COV": "1",
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "full",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "--cov=server" in calls
+    assert "--cov-fail-under=0" in calls
+
+
+def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    frontend = tmp_path / "frontend"
+    fake_bin = tmp_path / "bin"
+    results = tmp_path / "results"
+    scripts.mkdir()
+    frontend.mkdir()
+    fake_bin.mkdir()
+    frontend_gate = scripts / "check-quick-frontend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-frontend.sh", frontend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "npm",
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        frontend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "FRONTEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "run test -- --reporter=default --reporter=junit" in calls
+    assert f"--outputFile.junit={results / 'vitest-junit.xml'}" in calls
+    assert "--reporter=json" in calls
+    assert f"--outputFile.json={results / 'vitest-results.json'}" in calls
+
+
+def test_frontend_gate_shards_project_and_defers_coverage_enforcement(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    frontend = tmp_path / "frontend"
+    fake_bin = tmp_path / "bin"
+    results = tmp_path / "results"
+    blobs = tmp_path / "blobs"
+    scripts.mkdir()
+    frontend.mkdir()
+    fake_bin.mkdir()
+    frontend_gate = scripts / "check-quick-frontend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-frontend.sh", frontend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "npm",
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        frontend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_TEST_RESULTS_DIR": str(results),
+            "FRONTEND_COVERAGE_BLOB_DIR": str(blobs),
+            "FRONTEND_GATE_PHASE": "test",
+            "FRONTEND_TEST_MODE": "coverage",
+            "FRONTEND_TEST_PROJECT": "logic",
+            "GATE_LOG": str(gate_log),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8")
+    assert "run test:coverage -- --project logic" in calls
+    assert "--reporter=blob" in calls
+    assert f"--outputFile.blob={blobs / 'vitest-blob-logic.json'}" in calls
+    # A shard's partial coverage cannot meet the global thresholds; the merge
+    # job enforces them once against the combined data instead.
+    assert "--coverage.thresholds.lines=0" in calls
+    assert "--coverage.thresholds.functions=0" in calls
+    assert "--coverage.thresholds.branches=0" in calls
+    assert "--coverage.thresholds.statements=0" in calls
+    assert "run test:coverage-inventory" not in calls
+
+
+def _run_backend_gate_with_fake_uv(tmp_path: Path, env: dict[str, str]) -> str:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    backend_gate = scripts / "check-quick-backend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "uv",
+        "#!/usr/bin/env bash\n"
+        'printf "%s\\n" "$*" >>"$GATE_LOG"\n'
+        'printf "shard:%s\\n" "${GATE_SHARD:-unset}" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        backend_gate,
+        cwd=tmp_path,
+        env={
+            "BACKEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "GATE_TIER": "postgres",
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            **env,
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    return gate_log.read_text(encoding="utf-8")
+
+
+def test_backend_postgres_tier_loads_shard_plugin_when_gate_shard_set(tmp_path: Path) -> None:
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"GATE_SHARD": "1/3"})
+
+    assert "-p scripts.pytest_gate_shard" in calls
+    assert "shard:1/3" in calls
+    assert "postgres and not repository_gate" in calls
+
+
+def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(tmp_path: Path) -> None:
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {})
+
+    assert "scripts.pytest_gate_shard" not in calls
+    assert "shard:unset" in calls
+    assert "postgres and not repository_gate" in calls
