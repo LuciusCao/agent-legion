@@ -297,25 +297,50 @@ velites --mode json \
 
 ## 9. 与 Agent Legion 的集成与切换
 
-1. `server/app/workflows/pi_protocol.py`：PoC 已验证的 flavor 开关
-   （`AGENT_LEGION_PI_FLAVOR`）转正为配置项 `workflows.pi.flavor: pi|velites`；
-2. worker bundle：二进制不打进 bundle（bundle 只带 skill + prompt），由 worker 镜像
-   或 worker 侧配置提供路径；
-3. 灰度路径（2026-08-01 评审定稿，替代原 Phase 1/2 设想）：
-   - Phase 0：契约测试 + 真二进制集成测试入库（不启用）——M4 已完成；
-   - Phase 1 shadow = **抽样回放**（不建在线双跑基础设施）：从生产取最近
-     节点运行的 prompt/skill 快照，离线双跑 pi 与 velites，diff 事件流与
-     产出（方法论即 M2 联合验证的固化，工具见 `scripts/velites_replay.py`）；
-   - Phase 2 金丝雀 = **全局 `flavor: velites` + worker agent capacity 压低**
-     （如 4）控制爆炸半径，观察 1–2 天后逐步恢复容量；不按 capability
-     分批（flavor 是全局单开关，评审决定不加 per-capability override）；
-   - Phase 3：容量全量恢复后进入默认，Node Pi 保留一个版本周期后移除 flavor；
-4. 回退：`workflows.pi.flavor: pi` 即回退，无数据迁移；若生产沙箱异常，
-   `workflows.pi.velites_no_sandbox: true` 可免发版降级为无沙箱运行（保留
-   事件契约/预算/取消等全部可控性），为第二级回退；
-5. 部署前置（金丝雀前必须完成）：worker 镜像重建（velites 二进制 +
-   bwrap setuid）；真 worker 容器内跑一个带 bash 工具的最小执行验证
-   bwrap（容器 seccomp 需放行 `unshare`，见 §5 沙箱小节的运行时要求）。
+**当前模型（2026-08-03 起，升格 plan 落地）**：pi、openclaw、velites 是平级
+runtime，由 `AgentDefinition.runtime` 声明（`config/workflow.yaml` `agents:`
+段）。命令构建按 runtime 分派（EXEC-RUNTIME-DISPATCH-001）：`runtime: velites`
+钉死 velites 实现并忽略 flavor；`runtime: pi` 的实现由
+`workflows.pi.flavor: pi|velites` 选择；openclaw 未实现，dispatch fail-fast。
+灰度/回退粒度是单个 agent 定义的单字段 yaml 改动，操作手册见
+`docs/remote-execution-runbook.md` §6。
+
+**flavor 的现状定位（阶段 B，2026-08-04 金丝雀关闭后）**：flavor 已收窄为
+`runtime: pi` agent 的遗留实现选择层——生产 tracked 默认 `flavor: velites`，
+其实际消费者仅剩保持 `runtime: pi` 的 4 个 video_knowledge agent（审题链路
+5 个 agent 已迁 `runtime: velites`）。保留配置与校验仅为不破坏既有配置文件
+启动；新增 agent 应直接声明 `runtime: velites`，不要再依赖 flavor 路径。
+
+**pi 退役（阶段 C，另立项，未排期）**：删除 `PiRuntimeConfig.flavor` /
+`PiConfig.flavor`、`build_command_for_flavor` 分发层、pi argv 构建
+（`pi_protocol.py build_command`），manifest `"pi"` 块重命名为 runtime 中性名
+（command_spec `version` 升 2，Worker 占位符替换兼容处理）。触发条件：pi
+二进制生产零调用 ≥ 一个季度（含 video agent 迁出 `runtime: pi` 或该链路
+下线）。
+
+**回退**：单 agent 异常把该定义迁回 `runtime: pi`（flavor 为 velites 时仍跑
+velites 二进制；要回 pi 二进制需同时落 `flavor: pi`）；系统性异常
+`flavor: pi` + 定义全部迁回 `runtime: pi` 一次配置完成；沙箱异常
+`workflows.pi.velites_no_sandbox: true` 免发版降级为无沙箱运行（保留事件
+契约/预算/取消等全部可控性），对 `runtime: velites` 同样有效。
+
+**历史灰度路径（已完成，存档）**：
+
+- Phase 0：契约测试 + 真二进制集成测试入库（M4）；
+- Phase 1 shadow = 抽样回放（`scripts/velites_replay.py` 离线双跑 pi 与
+  velites，diff 事件流与产出）；
+- Phase 2 金丝雀 = 全局 `flavor: velites` + worker capacity 压低起步，逐步
+  恢复至 96 并发（一夜 4.3 万节点、99.6%）；
+- 升格落地（2026-08-03，PR #20/#21）：runtime 枚举/dispatch/sweeper/runtime
+  维度 + Worker UI/预检；审题链路迁 `runtime: velites` 并验证一夜
+  （8.4 万节点、97.7%）；
+- 金丝雀关闭（2026-08-04，`14ec130f`）：`flavor: velites` 与审题链路
+  `runtime: velites` 落为 tracked 默认值。
+
+**worker bundle 与部署**：二进制不打进 bundle（bundle 只带 skill + prompt），
+由 worker 镜像或 worker 侧 PATH 提供；Worker 声明某 runtime 前启动预检会
+探测对应二进制（缺失即拒启动）。容器部署前置：worker 镜像含 velites 二进制
++ bwrap setuid；容器 seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。
 
 ## 10. Quality Impact
 
