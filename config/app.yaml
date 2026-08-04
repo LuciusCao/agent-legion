@@ -16,27 +16,3 @@ cleanup:
 monitoring:
   sample_interval_seconds: 60
   retention_days: 30
-
-token_usage:
-  currency: CNY
-  pricing:
-    - provider: gateway
-      model: your-model-a
-      input_per_1m: 3.0
-      output_per_1m: 15.0
-      cache_read_per_1m: 0.6
-    - provider: doubao
-      model: Doubao-Seed-2.1-turbo
-      input_per_1m: 3.0
-      output_per_1m: 15.0
-      cache_read_per_1m: 0.6
-    - provider: gateway
-      model: your-model-b
-      input_per_1m: 1.0
-      output_per_1m: 2.0
-      cache_read_per_1m: 0.2
-    - provider: deepseek
-      model: your-model-b
-      input_per_1m: 1.0
-      output_per_1m: 2.0
-      cache_read_per_1m: 0.2

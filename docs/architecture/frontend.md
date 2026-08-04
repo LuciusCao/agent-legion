@@ -105,7 +105,7 @@ frontend/src/
 |------|----------|
 | `/login` | LoginPage |
 | `/setup` | SetupPage |
-| `/admin/users` | UsersAdminPage |
+| `/admin/*` | AdminRoutes |
 | `/` | DashboardPage |
 | `/monitoring` | MonitoringPage |
 | `/workspaces/:workspaceId` | WorkspaceLayout |
