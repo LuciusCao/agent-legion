@@ -306,10 +306,12 @@ runtime，由 `AgentDefinition.runtime` 声明（`config/workflow.yaml` `agents:
 `docs/remote-execution-runbook.md` §6。
 
 **flavor 的现状定位（阶段 B，2026-08-04 金丝雀关闭后）**：flavor 已收窄为
-`runtime: pi` agent 的遗留实现选择层——生产 tracked 默认 `flavor: velites`，
+`runtime: pi` agent 的实现选择层——生产 tracked 默认 `flavor: velites`，
 其实际消费者仅剩保持 `runtime: pi` 的 4 个 video_knowledge agent（审题链路
-5 个 agent 已迁 `runtime: velites`）。保留配置与校验仅为不破坏既有配置文件
-启动；新增 agent 应直接声明 `runtime: velites`，不要再依赖 flavor 路径。
+5 个 agent 已迁 `runtime: velites`）。**在 video agent 迁出 `runtime: pi` 或
+该链路下线之前，flavor 仍是决定它们跑 pi 还是 velites 二进制的活跃路径，
+不能删除或忽略**；配置与校验同时为既有配置文件保留启动兼容。新增 agent
+应直接声明 `runtime: velites`，不要再依赖 flavor 路径。
 
 **pi 退役（阶段 C，另立项，未排期）**：删除 `PiRuntimeConfig.flavor` /
 `PiConfig.flavor`、`build_command_for_flavor` 分发层、pi argv 构建
