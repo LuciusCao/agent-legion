@@ -11,7 +11,7 @@ function fmt(value: number | null | undefined) {
 }
 
 function money(currency: string, value: number | null | undefined) {
-  if (typeof value !== 'number') return '未配置价格'
+  if (typeof value !== 'number') return '-'
   const symbol = currency === 'CNY' ? '¥' : currency
   return `${symbol} ${value.toFixed(4)}`
 }
@@ -50,7 +50,9 @@ export function TokenUsageJobPanel({ jobId }: Props) {
             {money(data.currency, total.cost?.total)}
           </div>
           <div className={styles.metricMeta}>
-            {total.pricing_missing ? '缺少定价配置' : '按配置单价计算'}
+            {total.pricing_missing_models?.length
+              ? `缺少定价：${total.pricing_missing_models.join('、')}`
+              : '按配置单价计算'}
           </div>
         </div>
         <div className={styles.metric}>
