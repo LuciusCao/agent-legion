@@ -32,7 +32,7 @@ function fmt(value: number | null | undefined) {
 }
 
 function money(currency: string, value: number | null | undefined) {
-  if (typeof value !== 'number') return '未配置价格'
+  if (typeof value !== 'number') return '-'
   const symbol = currency === 'CNY' ? '¥' : currency
   return `${symbol} ${value.toFixed(4)}`
 }
@@ -185,9 +185,7 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
           <div className={styles.metricValue} data-testid="total-cost-summary">
             {money(data?.currency ?? 'CNY', summary?.cost?.total ?? undefined)}
           </div>
-          <div className={styles.metricMeta}>
-            {summary?.pricing_missing ? '缺少定价配置' : '按配置单价计算'}
-          </div>
+          <div className={styles.metricMeta}>按配置单价计算</div>
         </div>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>平均每 run</div>
@@ -449,11 +447,6 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                                   )}
                                 </span>
                               </div>
-                              {group.pricing_missing && (
-                                <div className={styles.pricingMissing}>
-                                  缺少定价配置
-                                </div>
-                              )}
                             </div>
                           </div>
                         </div>

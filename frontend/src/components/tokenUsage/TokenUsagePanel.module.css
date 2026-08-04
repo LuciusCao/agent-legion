@@ -274,15 +274,6 @@
   font-size: 13px;
 }
 
-.pricingMissing {
-  border: 1px dashed #d6d3d1;
-  background: #fffbeb;
-  border-radius: 8px;
-  padding: 10px;
-  color: #713f12;
-  font-size: 13px;
-}
-
 .emptyCell {
   text-align: center;
   color: #5f6368;
