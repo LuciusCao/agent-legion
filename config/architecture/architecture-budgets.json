@@ -33,7 +33,7 @@
     "frontend/src/components/AgentCapacityInput.tsx": 73,
     "frontend/src/components/AgentConnectionDot.module.css": 24,
     "frontend/src/components/AgentConnectionDot.tsx": 29,
-    "frontend/src/components/AgentRoutingSection.tsx": 115,
+    "frontend/src/components/AgentRoutingSection.tsx": 34,
     "frontend/src/components/AgentStatusIndicator.module.css": 66,
     "frontend/src/components/AgentStatusIndicator.tsx": 72,
     "frontend/src/components/AgentWorkerStatusList.module.css": 47,
