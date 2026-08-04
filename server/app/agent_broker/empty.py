@@ -16,8 +16,9 @@ from __future__ import annotations
 import logging
 import threading
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
+from server.app.agent_broker.empty_diagnostics import log_blocked_queue
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection
 
@@ -34,17 +35,20 @@ class EmptyClaimTrigger:
         self._lock = threading.Lock()
         self._last_fired = 0.0
 
-    def note_empty_claim(self, dsn: DatabaseDsn) -> None:
-        """Invoke the restock callback when the queue is truly empty.
+    def note_empty_claim(
+        self, dsn: DatabaseDsn, *, skip_reasons: Mapping[str, int] | None = None
+    ) -> None:
+        """Act on an empty claim: restock on true demand, warn on blockage.
 
         Debounced by wall clock: a burst of empty claims collapses into one
-        probe + callback per interval. The probe only confirms no queued
-        rows remain — claims can also come back empty with stock present
-        (capacity reached, capability mismatch), which must not trigger
-        restocking.
+        probe + callback per interval. The probe separates the two cases —
+        no queued rows remain means true demand (fire the restock callback);
+        queued rows with skip reasons means a blocked queue (log the reason
+        histogram, see ``empty_diagnostics.py``) and must not restock.
         """
         callback = self.on_empty_queue
-        if callback is None:
+        reasons = {key: count for key, count in (skip_reasons or {}).items() if count}
+        if callback is None and not reasons:
             return
         with self._lock:
             now = time.monotonic()
@@ -55,7 +59,11 @@ class EmptyClaimTrigger:
             row = conn.execute(
                 "select 1 from agent_execution_requests where state='queued' limit 1"
             ).fetchone()
-        if row is not None:
+            if row is not None:
+                if reasons:
+                    log_blocked_queue(conn, reasons)
+                return
+        if callback is None:
             return
         try:
             callback()

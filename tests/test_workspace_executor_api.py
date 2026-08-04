@@ -5,7 +5,8 @@ def test_list_executors_endpoint(client):
     agent = next(item for item in data["agents"] if item["id"] == "video-content-review-v1")
     assert agent["capability"] == "review_video_content"
     assert agent["provider"] == "gateway"
-    assert agent["model"] == "your-model"
+    # yaml 默认 model 已清空（issue #13）：占位符 model 在 enqueue 被拒。
+    assert agent["model"] == ""
     executor = data["executors"][0]
     assert executor["id"] == "local-default"
     assert executor["kind"] == "local"

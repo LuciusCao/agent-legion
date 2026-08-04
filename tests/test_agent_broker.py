@@ -720,7 +720,10 @@ def test_reporting_blocks_duplicate_enqueue(job_db) -> None:
                 node_key="generate",
                 agent_id="generator-v1",
                 agent_definition_hash=_seeded_definition_hash(),
-                manifest={"job_id": "job-1"},
+                manifest={
+                    "job_id": "job-1",
+                    "pi": {"provider": "gateway", "model": "test-model"},
+                },
             )
         )
         is None
