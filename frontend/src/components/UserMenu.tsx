@@ -2,8 +2,8 @@ import { Button } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 
-// Dashboard header actions tied to the session: admin user management entry
-// plus logout.
+// Dashboard header actions tied to the session: admin entries (user
+// management, global settings) plus logout.
 export function UserMenu() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -12,9 +12,17 @@ export function UserMenu() {
   return (
     <>
       {user?.role === 'admin' && (
-        <Button variant="outlined" onClick={() => navigate('/admin/users')}>
-          用户管理
-        </Button>
+        <>
+          <Button variant="outlined" onClick={() => navigate('/admin/users')}>
+            用户管理
+          </Button>
+          <Button
+            variant="outlined"
+            onClick={() => navigate('/admin/settings')}
+          >
+            设置
+          </Button>
+        </>
       )}
       <Button variant="text" onClick={() => void logout()}>
         退出登录

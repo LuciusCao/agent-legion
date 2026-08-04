@@ -132,7 +132,7 @@ top-level keys and anything else fails startup:
 
 | File | Owns |
 |------|------|
-| `config/app.yaml` | database URL, paths, HTTP, cleanup, monitoring, token pricing |
+| `config/app.yaml` | database URL, paths, HTTP, cleanup, monitoring |
 | `config/agent_legion.yaml` | ASR, CMS, resource providers, OpenClaw |
 | `config/workflow.yaml` | agent catalog, agent workers, executors, Pi/velites runtime |
 | `config/workflows/*.yaml` | workflow DAG definitions |
