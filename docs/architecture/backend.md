@@ -152,6 +152,8 @@ server/app/
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
 | GET | `/jobs/{job_id}/token-usage` | `get_job_token_usage` | routes/token_usage.py |
 | GET | `/workspaces/{workspace_id}/token-usage` | `get_workspace_token_usage` | routes/token_usage.py |
+| GET | `/admin/token-usage-pricing` | `get_token_usage_pricing` | routes/token_usage_pricing.py |
+| PUT | `/admin/token-usage-pricing` | `put_token_usage_pricing` | routes/token_usage_pricing.py |
 | GET | `/jobs/{job_id}/video` | `get_video_job_detail` | routes/video_jobs_detail.py |
 | GET | `/jobs/{job_id}/video/source` | `get_video_job_source` | routes/video_jobs_source.py |
 | GET | `/worker/status` | `worker_status` | routes/worker.py |
@@ -313,6 +315,9 @@ server/app/
 | TokenUsageTotal | BaseModel | message_count: int, input_tokens: int, output_tokens: int, cache_read_tokens:... | app/routes/token_usage_contracts.py |
 | TokenUsageJobResponse | BaseModel | job_id: str, runs: list[TokenUsageRunItem], total: TokenUsageTotal, runs_with... | app/routes/token_usage_contracts.py |
 | TokenUsageWorkspaceResponse | BaseModel | workspace_id: str, currency: str, summary: TokenUsageSummary, groups: list[To... | app/routes/token_usage_contracts.py |
+| TokenUsagePricingRate | BaseModel | provider: str, model: str, input_per_1m: float, output_per_1m: float, cache_r... | app/routes/token_usage_pricing_contracts.py |
+| TokenUsagePricingConfigResponse | BaseModel | currency: str, pricing: list[TokenUsagePricingRate] | app/routes/token_usage_pricing_contracts.py |
+| TokenUsagePricingConfigUpdate | BaseModel | currency: str, pricing: list[TokenUsagePricingRate] | app/routes/token_usage_pricing_contracts.py |
 | RunUsageCost | BaseModel | currency: str, input: float | None, output: float | None, cache_read: float |... | app/routes/token_usage_run_contracts.py |
 | RunUsage | BaseModel | node_run_id: int, node_key: str, provider: str, model: str, skill_version: st... | app/routes/token_usage_run_contracts.py |
 | TokenUsageCostBreakdown | BaseModel | currency: str, input: float | None, output: float | None, cache_read: float |... | app/routes/token_usage_run_contracts.py |
@@ -458,7 +463,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 - **Routes**: `routes/token_usage.py` (`/jobs/{job_id}/token-usage`, `/jobs/{job_id}/runs/{run_id}/token-usage`, `/workspaces/{workspace_id}/token-usage`)
 - **Services**: `services/token_usage*.py`
-- **Config**: `config/app.yaml` 中的 `token_usage.currency` 与 `token_usage.pricing`
+- **Config**: 全局设置 `global_settings` 表（`token_usage` 文档：currency + pricing），经 `GET/PUT /api/admin/token-usage-pricing` 维护；不再走 yaml
 - **Frontend**: `pages/TokenUsagePage.tsx`, `components/TokenUsage*.tsx`
 
 ### Configuration Package
@@ -497,7 +502,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
 
-- `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）、token 用量计价（`token_usage`）。
+- `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）。
 - `config/agent_legion.yaml`：ASR、CMS、资源提供者（`resource_providers`）、OpenClaw 设置。
 - `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，local executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
 
@@ -523,7 +528,8 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 - `server.cors`: 浏览器跨域来源和 credentials 策略
 - `cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`: 日志与运行目录清理策略
 - `monitoring.sample_interval_seconds` / `retention_days`: 资源监控采样间隔与保留天数
-- `token_usage.currency` / `token_usage.pricing`: Token 用量货币与模型单价
+
+token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 
 `config/workflow.yaml` 核心配置项：
 

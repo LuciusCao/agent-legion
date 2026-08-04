@@ -25,6 +25,7 @@ from .common import create_common_router
 from .job_route_group import include_job_routes
 from .metrics import create_metrics_router
 from .packages import create_packages_router
+from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
 from .workflow_resource_providers import create_workflow_resource_providers_router
@@ -62,6 +63,7 @@ def create_router(
 
     router.include_router(create_common_router())
     router.include_router(create_agents_router(agent_manager))
+    router.include_router(create_token_usage_pricing_router(job_db, settings))
     secured(create_packages_router(job_db, settings, job_packages))
     secured(create_worker_router(workspace_worker_control))
     if (

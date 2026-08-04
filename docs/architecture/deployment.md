@@ -8,7 +8,7 @@ Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生�
 
 ```
 config/
-├── app.yaml                  # PostgreSQL、应用路径、HTTP 设置、清理、监控、token 定价
+├── app.yaml                  # PostgreSQL、应用路径、HTTP 设置、清理、监控
 ├── agent_legion.yaml         # ASR、CMS、资源提供方、OpenClaw 配置
 ├── workflow.yaml             # Workspace 执行器与工作流运行时开关
 ├── skills.yaml               # 外部 Pi skill 源声明
@@ -67,7 +67,6 @@ scripts/
 - `openclaw` — OpenClaw 命令模板与工作目录
 - `resource_providers` — 资源提供方声明（path/url_key 及各自可调参数的 config_schema，含 secret 标记）
 - `server` — HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）
-- `token_usage`
 - `workflows` — Agent Legion DAG 工作流开关
 
 <!-- END AUTO-GENERATED -->
