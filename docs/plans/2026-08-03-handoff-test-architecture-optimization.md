@@ -1,83 +1,96 @@
-# 测试架构优化——交接文档（2026-08-03 第二版）
+# 测试架构优化——交接文档（2026-08-03 第三版，终态）
 
-> 第一版见同文件 git 历史。本文档是自包含的交接入口；权威执行记录以
+> 第一、二版见同文件 git 历史。本文档是自包含的交接入口；权威执行记录以
 > `docs/plans/2026-08-01-test-architecture-optimization.md` 为准（含 Phase 0–5 全部
-> 执行记录、CI run 链接、flaky 观察清单）。
+> 执行记录、CI run 链接、flaky registry）。
 
 - Worktree：`/Users/lucius/GitHub/agent-legion/.worktrees/test-architecture-optimization`
-- 分支：`test/test-architecture-optimization`（已推送 origin，工作区干净）
+- 分支：`test/test-architecture-optimization`（最新提交见 git log；工作区状态
+  以 `git status` 为准——终版文档提交时如遇到本地门禁约束，push 可能留待确认）
 - 基线：`develop@836235b9`
 
-## 1. 当前进度快照
+## 1. 最终状态：全部 Phase 完成，验收通过
 
-- **Phase 0–4 全部完成并 CI 验收**。Phase 3：后端 6 个低覆盖模块 + 前端 4 个盲区簇
-  全部补到目标线，coverage 分母显式（359/359），分区门槛报告模式运行
-  （`scripts/check_coverage_partitions.py`，10 分区全 OK）。Phase 4：`frontend/e2e/`
-  3 个确定性 smoke spec + `e2e-smoke` PR job（2.5 分钟）+ `nightly-e2e`（三浏览器
-  smoke + stress + `frontend-metrics.json` 上传，14.6 分钟，schedule/dispatch）。
-- **Phase 5 进行中**（CI 拓扑，目标 develop CI 连续三次中位数 ≤6 分钟）：
-  - 5A/5B ✅（`2aceae5f`）：api:check 移到 backend；frontend 拆
-    logic/component/coverage 三 job（blob 合并 coverage）。CI 实测 frontend 关键路径
-    9m06s → **3.8 分钟**。
-  - 5C ✅ 本地完成（`8d9881d4`）：backend 拆 backend-unit（无 PG，~3 分钟）/
-    backend-postgres（合并 coverage，预计 ~8 分钟）。**CI 复验 run
-    [30805689114](https://github.com/LuciusCao/agent-legion/actions/runs/30805689114)
-    已 dispatch，恢复后第一件事：`gh run watch 30805689114 --exit-status` 确认。**
-  - stress probe 阈值 env 化（`697a106f`，`STRESS_PROBE_TIMEOUT_MS` /
-    `STRESS_MAX_PROBE_ERRORS`）已修复 nightly 首跑的偶发探针超时。
+- **Phase 0–4 全部完成并 CI 验收**（Phase 3 覆盖率补点、Phase 4 E2E smoke +
+  nightly stress，详见计划文档执行记录）。
+- **Phase 5 完成（CI 拓扑 + flaky 治理）**，三次连续 CI 验收通过：
 
-## 2. 剩余任务（按序）
+| run | 结论 | PR 关键路径 | backend a/b/c | frontend-component |
+| --- | --- | --- | --- | --- |
+| [30820753433](https://github.com/LuciusCao/agent-legion/actions/runs/30820753433) | 全绿 | 5.0 min | 4.6/4.6/3.8 | 5.0 |
+| [30822164844](https://github.com/LuciusCao/agent-legion/actions/runs/30822164844) | 全绿 | 5.7 min | 5.4/5.0/3.8 | 5.7 |
+| [30823425046](https://github.com/LuciusCao/agent-legion/actions/runs/30823425046) | 全绿 | 5.8 min | 5.0/4.6/3.6 | 5.8 |
 
-1. **确认 5C CI run 30805689114 结果**，把验收行补进计划文档 Phase 5C 记录
-   （"待确认"处）。若失败先看是否 artifact 时序/合并机制问题（子代理风险项见
-   Phase 5C 记录），不要轻易重跑了事。
-2. **5C-2（很可能需要）**：backend-postgres 预计 ~8.2 分钟，达不到 ≤6 分钟。把
-   postgres tier 再分片（2 个 shard，机制参照 frontend blob：独立 COVERAGE_FILE +
-   artifact + coverage combine；会动 `scripts/check-quick-backend.sh` tier 语义，
-   必须同步 `tests/test_quality_gate_scripts.py` 契约测试）。如果 5C 实测
-   backend-postgres ≤6 分钟可跳过。
-3. **5D flaky registry**：把计划文档「Phase 5D 观察清单」落成正式 registry
-   （owner/原因/截止日期）；nightly 可选 fail-on-rerun。
-4. **Phase 5 验收**：连续 3 次 CI（workflow_dispatch 即可）中位数 ≤6 分钟
-   （PR 路径，不含 nightly-e2e）；required checks 在合并 PR 时同步为
-   `backend-unit / backend-postgres / frontend-logic / frontend-component /
-   frontend-coverage / rust / e2e-smoke`（repo settings 手工操作，合并前做）。
-5. 全部完成后：整理本分支 PR 合入 develop。
+  PR 关键路径中位数 **5.7 分钟 ≤ 6 分钟目标**（基线 9.2 分钟，降 38%）。
+- 最终 CI 拓扑（PR/push 必跑）：`backend-unit`（无 PG，~2.6min）/
+  `backend-postgres-a`（api:check + shard 1/3 + coverage 合并 + 85% floor +
+  summary）/ `backend-postgres-b`（shard 2/3 + full gate）/
+  `backend-postgres-c`（shard 3/3）/ `frontend-logic` / `frontend-component` /
+  `frontend-coverage` / `rust` / `e2e-smoke`；nightly/dispatch 限定：
+  `ci-extended`（含 fail-on-rerun）与 `nightly-e2e`（三浏览器 smoke + stress）。
+- 分片机制：`GATE_SHARD=i/n` + `scripts/pytest_gate_shard.py`
+  （`md5(nodeid) % n` collection 过滤）；本地不设 env 时行为与拆分前逐字节一致。
+- flaky 治理：`tests/flaky_registry.yaml`（FLAKY-001~005，owner/原因/deadline
+  或 recurring）+ `scripts/check_reruns.py`（nightly ci-extended 对 registry 外
+  rerun 判红）。
 
-## 3. 标准流程与门禁（每簇/每阶段）
+## 2. 剩余事项（仅此两件）
 
-- 本地门禁：`export AGENT_LEGION_TEST_WORKERS=4 && ./scripts/check.sh`（含 quick
-  gate + full gate + combined coverage；**gate 运行期间不要改动工作区文件**）。
-- 提交：Conventional Commits，message 带前后耗时/测试数/coverage/rerun 指标。
-- 推送：pre-push 要求工作区干净（有杂文件先 `git stash -u`，推完 pop）；禁止
+1. **合并 PR 到 develop**（合并前问用户）。
+2. **合并时同步 required checks**（repo settings 手工操作）：设为
+   `backend-unit / backend-postgres-a / backend-postgres-b / backend-postgres-c /
+   frontend-logic / frontend-component / frontend-coverage / rust / e2e-smoke`。
+   旧 job 名（`backend`、`frontend`）与新拓扑完全不同名，必须更新 branch
+   protection，否则 PR 永远等不到检查。
+
+遗留跟进（不阻塞合并）：flaky registry 三条非 recurring 条目 deadline
+2026-09-01（FLAKY-001 cancel-during-run 时序根治、FLAKY-002 jsdom 重负载渲染、
+FLAKY-003 xdist coverage combine 丢数据）；Phase 5 任务里"耗时预算监控"未做，
+已标注转入后续。
+
+## 3. 过程中修掉的结构性问题（供评审参考）
+
+- **full gate 分片自执 floor**（`d44fe476`）：5C 拆分后 tests/full 步落在独立
+  COVERAGE_FILE 上漏 `--cov-fail-under=0`，在 58.71% 部分数据上误判红。
+  契约测试已钉住"分片不得自执 floor"。
+- **聚合竞态**（`88d815e8`）：2 分片时聚合方 A 自带工作量小于上传方 B，
+  必然先撞合并点（run 30811145691 `Artifact not found`）。改 3 分片 +
+  A 下载前 `gh api` 轮询等 B/C artifact（10 分钟超时即红）。
+- **FLAKY-002 高频单点**（`f874381b`）：`InteractionOverlay.test.tsx` 12 选项
+  用例 5 次 CI 挂 2 次（5s timeout），加 20s per-test timeout 缓解，根治仍在
+  registry 跟踪。
+- **Playwright 冷下载卡 41 分钟**（`60897556`）：吃掉 nightly 45 分钟预算致
+  cancel。e2e job 加 `actions/cache` 缓存 `~/.cache/ms-playwright`。
+
+## 4. 标准流程与门禁
+
+- 本地门禁：`export AGENT_LEGION_TEST_WORKERS=4 && ./scripts/check.sh`；
+  **gate 运行期间不要改动工作区文件**。
+- 提交：Conventional Commits，message 带指标；推送前工作区干净；禁止
   `--no-verify`。
-- CI：本分支不会自动触发，必须 `gh workflow run "Quality Gate" --ref
-  test/test-architecture-optimization`，然后 `gh run watch <id> --exit-status
-  --interval 90`。dispatch 会同时触发 nightly-e2e（多 ~15 分钟，属正常）。
-- 计划文档每个阶段补执行记录（指标 + CI run 链接），格式照抄已有记录。
+- CI：本分支不自动触发，`gh workflow run "Quality Gate" --ref
+  test/test-architecture-optimization` + `gh run watch <id> --exit-status`。
+  dispatch 会连带 nightly-e2e（~15 分钟）。
+- 新前端文件先 `npx prettier --write`；新 Python 文件先 `ruff format` +
+  `uv run python -m scripts.ratchet_architecture_budgets` 登记预算。
 
-## 4. 环境坑（都踩过）
+## 5. 环境坑（都踩过）
 
-- worktree 运行时 PG 库被外部 drop → export_openapi 阶段 PoolTimeout；重建
-  `CREATE DATABASE agent_legion_test_architecture_optimization`（或
-  `scripts/init-worktree.sh`）。
+- worktree 运行时 PG 库被外部 drop → 重建
+  `CREATE DATABASE agent_legion_test_architecture_optimization`。
 - 本机多 worktree 并行负载 40+ 时：frontend 组件测试 5s timeout 批量抖动、
-  backend `test_local_executor_cancel_during_run` flaky、xdist coverage combine
-  丢数据一次——隔离复跑确认后等负载回落重跑 gate。
-- 新前端文件先 `npx prettier --write`；新 Python 文件先 `ruff format`；
-  新生产文件必须 `uv run python -m scripts.ratchet_architecture_budgets` 登记预算，
-  超预算拆分而非抬 ceiling。
-- stress 后端（`server.app.main:app`，start_worker=True）启动即跑
-  `validate_settings`：CI 无 whisper/CMS 凭据会挂——smoke 用 factory app 跳过
-  校验，stress 用 `scripts/stress/_validation_stub.py` 的 stub 绕过（已修好，
-  勿回退）。
-- `batch_by_ids` intake 真实调 CMS `/question/detail`：真实进程 E2E 必须有
-  CMS stub（`scripts/e2e/run_browser_smoke.py` 内置），pytest 里是 monkeypatch。
-- CI 偶发：Docker Hub 拉 postgres:17 超时（`gh run rerun <id> --failed`）、
-  artifact API 503（重试即可）。
+  backend `test_local_executor_cancel_during_run` flaky、xdist coverage
+  combine 丢数据一次——隔离复跑确认后等负载回落重跑 gate。
+- stress 后端启动即跑 `validate_settings`：CI 无 whisper/CMS 凭据会挂——
+  stress 用 `scripts/stress/_validation_stub.py`（勿回退）；E2E 必须有 CMS
+  stub（`scripts/e2e/run_browser_smoke.py` 内置）。
+- CI 偶发：Docker Hub 拉 postgres:17 超时、artifact API 503、Playwright 冷
+  下载慢（已加 cache）——`gh run rerun <id> --failed` 即可。
+- 本地合盖/断网只会让 `gh run watch` 进程失败，CI run 本身不受影响；
+  重新 `gh run view <id>` 查状态再继续。
 
-## 5. 纪律红线
+## 6. 纪律红线
 
-- 任何提速不得以删断言/跳测试/降门槛为代价；rerun 不得掩盖可复现失败。
+- 任何提速不得以删断言/跳测试/降门槛为代价；rerun 不得掩盖可复现失败
+  （registry + nightly fail-on-rerun 已制度化）。
 - 质量门未过不声明完成；提交前 `git status --short` 只含当前任务文件。
-- 计划文档停止条件见 §8。

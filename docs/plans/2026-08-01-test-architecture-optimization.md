@@ -1,6 +1,6 @@
 # Agent Legion 测试架构优化计划
 
-状态：Phase 4 complete (CI accepted); 5A-5D done (5C-2 CI accepted, run 30809939232, PR critical path 5.1min); Phase 5 final acceptance (3 consecutive runs) in progress: 1/3
+状态：ALL PHASES COMPLETE — Phase 5 三次连续 CI 验收通过（中位数 5.7 min ≤ 6 min，runs 30820753433 / 30822164844 / 30823425046）；待合并 develop + 同步 required checks
 分支：`test/test-architecture-optimization`
 基线：`develop@836235b9`
 日期：2026-08-01
@@ -765,6 +765,49 @@ Phase 5C-2 执行记录（2026-08-03，postgres tier 分片）：
   PR 关键路径由 9.2 分钟（拆分前 backend 单 job）降至 **5.1 分钟**，达标。
   本次计为 Phase 5 三次连续验收第 1 次。
 
+Phase 5C-3 执行记录（2026-08-03，聚合竞态修复 + 3 分片）：
+
+- 验收 run 2/3（[30811145691](https://github.com/LuciusCao/agent-legion/actions/runs/30811145691)）
+  暴露结构性竞态：2 分片下聚合方 A（api:check + shard 1/2）4.6 分钟即达
+  合并点，上传方 B（shard 2/2 + full gate）6.1 分钟才发布 artifact，
+  `Artifact not found: backend-postgres-b-coverage`。聚合方是 peer 中较快的
+  那个必然先撞合并点，run 30809939232 只是负载恰好让 A 慢于 B 才通过。
+- 修复（提交 `88d815e8`）：(1) postgres tier 改 3 分片（collect-only 实测
+  294/328/305，并集 927、两两交集 0）——a = api:check + shard 1/3 + 合并，
+  b = shard 2/3 + full gate，c = shard 3/3（新增 job）；(2) a 下载前用
+  `gh api` 轮询等待 b/c 的 coverage artifact（15s×40，10 分钟超时即红，
+  保持"shard 缺失即红"），job 加最小权限 `actions: read + contents: read`
+  （workflow 此前无 permissions 块）。契约测试 32 passed。
+- 同一 run 还暴露 FLAKY-002 高频单点（`InteractionOverlay.test.tsx:236`
+  5s timeout，5 次 CI 第 2 次）：提交 `f874381b` 给该用例加 20s per-test
+  timeout（根治仍由 registry 跟踪，deadline 2026-09-01）。
+- 验收 run（[30816362118](https://github.com/LuciusCao/agent-legion/actions/runs/30816362118)）：
+  PR 路径 10 job 全绿（a/b/c = 4.6/4.6/3.1 分钟、frontend-component 5.9），
+  但 nightly-e2e 在 45 分钟 job 超时被 cancel——根因是
+  `npx playwright install` 冷下载浏览器卡 41 分钟（13:07→13:48），stress 步
+  刚启动 44 秒即被杀。修复（提交 `60897556`）：e2e-smoke 与 nightly-e2e 加
+  `actions/cache` 缓存 `~/.cache/ms-playwright`（key =
+  `frontend/package-lock.json` hash），FLAKY-004 更新。
+- 拓扑变更后三次连续验收重新计数，见下方 Phase 5 最终验收记录。
+
+Phase 5 最终验收记录（2026-08-03，三次连续 CI，最终 tree `60897556`）：
+
+| run | 结论 | PR 关键路径 | backend a/b/c | frontend-component | nightly-e2e |
+| --- | --- | --- | --- | --- | --- |
+| [30820753433](https://github.com/LuciusCao/agent-legion/actions/runs/30820753433) | 全绿 | 5.0 min | 4.6 / 4.6 / 3.8 | 5.0 | 15.1 |
+| [30822164844](https://github.com/LuciusCao/agent-legion/actions/runs/30822164844) | 全绿 | 5.7 min | 5.4 / 5.0 / 3.8 | 5.7 | 14.1 |
+| [30823425046](https://github.com/LuciusCao/agent-legion/actions/runs/30823425046) | 全绿 | 5.8 min | 5.0 / 4.6 / 3.6 | 5.8 | 14.3 |
+
+- **验收通过**：三次连续全绿，PR 关键路径中位数 **5.7 分钟 ≤ 6 分钟**
+  （基线 9.2 分钟，降 38%）。其余 job 稳定在 backend-unit ~2.6 /
+  frontend-logic ~1.5 / frontend-coverage ~0.4 / rust ~0.8 /
+  e2e-smoke ~2.5 分钟。
+- rerun 可观测：各 pytest 分片写 rerun report 进 job summary；ci-extended
+  （nightly）对 registry 外 rerun fail（5D）。
+- required checks 合并时同步为：backend-unit / backend-postgres-a /
+  backend-postgres-b / backend-postgres-c / frontend-logic /
+  frontend-component / frontend-coverage / rust / e2e-smoke。
+
 Phase 5D 观察清单（flaky registry 原始数据）：
 
 - `test_local_executor_cancel_during_run`：时序 flaky，Phase 0 起多次复现（负载相关）。
@@ -796,14 +839,21 @@ Phase 5D 执行记录（2026-08-03，flaky registry 落地）：
 
 任务：
 
-- [ ] 根据 Phase 0 数据决定 backend unit/integration 是否拆成并行 jobs。
-- [ ] 将 OpenAPI contract 生成放到 backend/独立 contract job，评估是否可以让 frontend job
-      不再安装完整 Python 环境和 PostgreSQL service。
-- [ ] 保留 uv/npm/cargo cache，并记录 cache miss 对冷启动的影响。
-- [ ] 将全局 `--reruns 1` 改为可观测策略：发生 rerun 时 job summary 报告；nightly 可选择
-      fail-on-rerun。
-- [ ] 对已知 flaky 用例建立 owner、原因、截止日期，禁止永久静默重试。
+- [x] 根据 Phase 0 数据决定 backend unit/integration 是否拆成并行 jobs。
+      （5C/5C-2/5C-3：backend-unit + postgres a/b/c 三 shard）
+- [x] 将 OpenAPI contract 生成放到 backend/独立 contract job，评估是否可以让 frontend job
+      不再安装完整 Python 环境和 PostgreSQL service。（5A：api:check 移到 backend，
+      frontend job 不再装 uv/PG；backend-postgres-b/c 也不再装 node/npm）
+- [x] 保留 uv/npm/cargo cache，并记录 cache miss 对冷启动的影响。
+      （uv/npm/cargo cache 保留；新增 Playwright 浏览器 cache——冷下载曾卡 41
+      分钟致 nightly 超时取消，run 30816362118）
+- [x] 将全局 `--reruns 1` 改为可观测策略：发生 rerun 时 job summary 报告；nightly 可选择
+      fail-on-rerun。（rerun report 进各 job summary；ci-extended fail-on-rerun）
+- [x] 对已知 flaky 用例建立 owner、原因、截止日期，禁止永久静默重试。
+      （5D：`tests/flaky_registry.yaml` + `scripts/check_reruns.py`）
 - [ ] 建立耗时预算：单元测试文件、集成测试文件、E2E 场景分别监控。
+      （未完成，转入后续：CI 已有 --durations=30 与 job 级计时证据，缺正式预算
+      机制与告警）
 
 验收：
 
@@ -812,8 +862,9 @@ Phase 5D 执行记录（2026-08-03，flaky registry 落地）：
 - frontend job 不再为非前端工作重复启动重型依赖，或有数据证明保留更快。
 - required checks 和 branch protection 在 job 改名/拆分后同步更新。
   （Phase 5 最终注记：required checks 需在合并时同步为 backend-unit /
-  backend-postgres-a / backend-postgres-b / frontend-logic /
-  frontend-component / frontend-coverage / rust / e2e-smoke。）
+  backend-postgres-a / backend-postgres-b / backend-postgres-c /
+  frontend-logic / frontend-component / frontend-coverage / rust /
+  e2e-smoke。）
 
 回滚：保留旧聚合 job 一段迁移期；新并行 job 稳定后再调整 required checks。
 
