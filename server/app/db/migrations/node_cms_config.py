@@ -45,18 +45,18 @@ def _rename_vault_secret(conn: Any, workspace_id: str, old_name: str, new_name: 
     if old_name == new_name:
         return
     row = conn.execute(
-        "select 1 from workspace_secrets where workspace_id=? and name=?",
+        "select 1 from workspace_secrets where workspace_id=%s and name=%s",
         (workspace_id, old_name),
     ).fetchone()
     if row is None:
         return
     conn.execute(
-        "delete from workspace_secrets where workspace_id=? and name=?",
+        "delete from workspace_secrets where workspace_id=%s and name=%s",
         (workspace_id, new_name),
     )
     conn.execute(
-        "update workspace_secrets set name=?, updated_at=current_timestamp"
-        " where workspace_id=? and name=?",
+        "update workspace_secrets set name=%s, updated_at=current_timestamp"
+        " where workspace_id=%s and name=%s",
         (new_name, workspace_id, old_name),
     )
 
@@ -75,7 +75,7 @@ def _store_plaintext_token(
         return plaintext
     ciphertext = fernet.encrypt(plaintext.encode("utf-8")).decode("utf-8")
     conn.execute(
-        "insert into workspace_secrets(workspace_id, name, ciphertext) values (?, ?, ?)"
+        "insert into workspace_secrets(workspace_id, name, ciphertext) values (%s, %s, %s)"
         " on conflict(workspace_id, name)"
         " do update set ciphertext=excluded.ciphertext, updated_at=current_timestamp",
         (workspace_id, name, ciphertext),
@@ -136,6 +136,6 @@ def migrate_node_cms_config(conn: Any) -> None:
                     conn, fernet, workspace_id, token_name, token
                 )
         conn.execute(
-            "update workspaces set node_config_json=?, resource_config_json='{}' where id=?",
+            "update workspaces set node_config_json=%s, resource_config_json='{}' where id=%s",
             (json.dumps(node_config, ensure_ascii=False), workspace_id),
         )

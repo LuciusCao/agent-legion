@@ -117,13 +117,15 @@ _SMOKE_TEST_FILES = frozenset(
 _POSTGRES_TEST_FILES = frozenset(
     {
         "tests/ci/test_executor_worker_stress.py",
+        "tests/db/test_code_executor_migration.py",
+        "tests/db/test_local_executor_removal_migration.py",
+        "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",
         "tests/db/test_workspace_cms_migration.py",
         "tests/db/test_workspace_secrets_migration.py",
         "tests/executors/leases/test_expire_race.py",
         "tests/executors/leases/test_shard_expiry.py",
         "tests/executors/test_leases.py",
-        "tests/executors/test_local_executor.py",
         "tests/full/test_agent_worker_control_plane.py",
         "tests/full/test_executor_cancellation_recovery.py",
         "tests/full/test_executor_worker_fairness.py",
