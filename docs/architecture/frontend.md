@@ -18,7 +18,7 @@ Agent Legion 前端是 React 18 + TypeScript SPA，使用 Vite 构建。UI 基�
 ```
 frontend/src/
 ├── main.tsx                # React 入口
-├── App.tsx                 # 应用壳（ThemeProvider、Query 层）
+├── App.tsx                 # 应用壳（渲染 AppRoutes + 全局 Toast，建立 agents WebSocket；ThemeProvider 在 main.tsx）
 ├── AppRoutes.tsx           # React Router v6 路由定义
 ├── api/                    # 按领域拆分的 API 层
 │   ├── index.ts            # barrel：纯 re-export 各领域模块
@@ -92,7 +92,7 @@ frontend/src/
 - 使用 Zustand 而非 Redux，降低样板代码。
 - 状态按领域拆分（`workspaceStore`、`jobStore`、`job/*`、`setting/*` 等），避免单文件过大。
 - 使用 MUI v6 组件库 + CSS Modules 管理局部样式。
-- 路由定义集中在 `AppRoutes.tsx`；`App.tsx` 只负责应用级 Provider。
+- 路由定义集中在 `AppRoutes.tsx`；`App.tsx` 只负责渲染 `AppRoutes`、全局 Toast 与 agents WebSocket 连接，应用级 Provider（如 ThemeProvider）在 `main.tsx`。
 - 前端传输类型必须从 `frontend/src/generated/api.ts` 派生，禁止手写重复类型。
 
 ## API Surface / Interface

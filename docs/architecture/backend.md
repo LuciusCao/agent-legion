@@ -53,17 +53,15 @@ server/app/
 │   ├── video_knowledge.py
 │   └── ...
 ├── db/                     # 数据库层
-│   ├── schema.py           # 表结构定义
-│   └── queries/            # 共享查询构造
+│   └── schema.py           # 表结构定义
 ├── jobs/                   # Job 领域查询与类型
-│   └── queries/            # JobQueries、WorkspaceQueries 等
+│   └── queries/            # JobQueries（含 WorkspaceQueriesMixin）等
 ├── cms/                    # CMS 客户端
 │   ├── auth.py             # 认证
 │   ├── client.py           # HTTP 客户端
 │   ├── knowledge.py        # 知识库查询
 │   └── question.py         # 题库查询
 ├── configuration/          # 配置加载与 owned-keys 校验
-├── quality/                # 架构不变量与豁免运行时检查
 ├── video_capabilities/     # 视频能力合约与投影
 ├── executors/              # Executor 配置、Runtime、租赁调度
 ├── agents.py               # Agent 发现与状态跟踪
@@ -416,7 +414,7 @@ server/app/
   7. `assemble_video_metadata` — 生成 `metadata.json`、`report.md`
   8. `package_video_job` — 创建 ZIP package
 
-- 可以提交空 URL 的视频，系统会记录为 `status: missing_url`、`current_phase: waiting_for_url`，worker 会跳过直到补 URL。
+- direct URL intake 会校验 URL，非法即拒绝；knowledge 模式空 URL 在 `download_video` 节点执行期报错失败（`server/app/workflows/video_knowledge_source.py`）。
 - 任一 node 失败会把 Job 置为 `failed`，错误写入数据库与日志文件。
 - 支持从任意 node 重跑；重跑会清除该 node 及下游所有 artifacts。
 - `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
@@ -433,15 +431,14 @@ Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py
 
 ## Database
 
-- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前 `SCHEMA_VERSION = 16`）：
-  - `videos` — 旧版视频队列（迁移后仅读）
+- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前 `SCHEMA_VERSION = 21`）：
   - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `resource_config_json`, `default_entity`, `intake_config_json`）。`resource_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（兼容窗口内老明文仍可读，见下文 Secrets Vault）
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
   - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
   - `workflow_revisions` — workflow 版本修订历史
-  - `packages` — 已创建 package 路径
-- 初始化器在 PostgreSQL advisory lock 下按版本应用 schema；旧 SQLite 数据通过一次性离线导入器迁移。
-- `JobQueries.connect()` 与 `WorkspaceQueries.connect()` 是上下文管理器，确保 `conn.close()`。
+  - `workspace_packages` — 已创建 package 路径
+- 初始化器在 PostgreSQL advisory lock 下按版本应用 schema。
+- `JobQueries.connect()` 是上下文管理器（定义在 `JobQueriesBase`），确保 `conn.close()`；workspace 侧查询由 `WorkspaceQueriesMixin` 合并进统一的 `JobQueries`。
 - `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
 - SQL 占位符约定：**新 SQL 一律写 psycopg 的 `%s`**，不要再写 SQLite 风格的 `?`。存量 `?` 由 `server/app/db/dialect.py` 盲替换为 `%s`，该层无法区分占位符与 Postgres JSON 的 `?`/`?|`/`?&` 操作符；`scripts/check_architecture.py` 的 SQL 占位符检查（基线 `config/architecture/sql-placeholders-baseline.json`）按 ratchet 方式只降不升，新文件出现任何 SQL `?` 即失败，改写存量后同步下调基线。

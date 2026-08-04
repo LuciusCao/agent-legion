@@ -19,8 +19,10 @@ objects in its application schema.
 ## Capacity for 200–300 agents
 
 Agent count and database connection count are deliberately decoupled. Each API
-process uses a bounded pool (currently 32 connections) and returns connections
-after short transactions. Remote queue claims use `FOR UPDATE SKIP LOCKED`, so
+process uses a bounded pool (currently 32 connections, overridable via the
+`AGENT_LEGION_DB_POOL_MAX_SIZE` environment variable; see
+`server/app/db/pools.py:16-17`) and returns connections after short
+transactions. Remote queue claims use `FOR UPDATE SKIP LOCKED`, so
 different workers can claim different rows concurrently; an advisory lock per
 worker prevents its concurrent polls from exceeding `slots`. Executor lease
 claims use an advisory lock per executor so capacity checks stay correct across

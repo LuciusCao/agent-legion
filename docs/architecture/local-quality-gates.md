@@ -17,7 +17,7 @@ provide.
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: full quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
 | PR / push to `develop`, `main`, `master` | Full | CI jobs `backend-unit` + `backend-postgres-a/b/c` + `frontend-*` + `rust` + `e2e-smoke` |
-| Nightly schedule, manual dispatch | Extended | CI job `ci-extended` |
+| Nightly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
 only the affected quick-gate lanes locally: frontend-only changes skip the
@@ -80,6 +80,12 @@ unaffected. Passing evidence is shared through the same Git common directory.
 - **e2e-smoke** — the deterministic browser smoke suite.
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Runs only on
   the nightly schedule and manual dispatch; PR and push runs skip it.
+- **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
+  re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
+  PR/push stays Chromium-only) plus a workspace stress run
+  (`scripts/stress/run_e2e_stress.py`, 50 agents / 2000 jobs / 300s at 200
+  events/s, asserting p95 click latency and uploading the stress report).
+  Runs only on the nightly schedule and manual dispatch.
 
 The postgres tier shards are a deterministic `md5(nodeid) % 3` collection
 filter (`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`). Every pytest shard

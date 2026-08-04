@@ -197,6 +197,14 @@ the flavor switch. Facts to know before flipping the field:
   mains (`question-key-info-v1` etc.), then the rest. Each step is an
   independent single-field change with its own rollback.
 
+  > **Status note (kept for historical record):** the actual migration did not
+  > follow this order. As of the current `config/workflow.yaml`, the
+  > question-chain agents (5 definitions) are already all `runtime: velites`,
+  > while the video-chain agents (4 definitions) still run `runtime: pi`. The
+  > suggestion above remains the intended playbook for migrating the remaining
+  > video-chain agents; treat the original ordering as historical context, not
+  > a description of the current state.
+
 ## 7. Troubleshooting
 
 | Symptom | Cause | Action |
