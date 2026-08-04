@@ -123,36 +123,33 @@ function TokenUsageBreakdown({ usage }: { usage: RunUsage | null }) {
         <TokenMetric label="Cache read" value={cache_read_tokens} />
         <TokenMetric label="Total" value={total_tokens} highlight />
       </div>
-      <div className={styles.sectionTitle}>费用明细</div>
-      {cost ? (
-        <div className={styles.grid}>
-          <CostMetric
-            label="Input"
-            value={cost.input}
-            currency={cost.currency}
-          />
-          <CostMetric
-            label="Output"
-            value={cost.output}
-            currency={cost.currency}
-          />
-          <CostMetric
-            label="Cache read"
-            value={cost.cache_read}
-            currency={cost.currency}
-          />
-          <CostMetric
-            label="Total"
-            value={cost.total}
-            currency={cost.currency}
-            highlight
-          />
-        </div>
-      ) : (
-        <p className={styles.empty}>未配置价格</p>
-      )}
-      {usage.pricing_missing && (
-        <div className={styles.pricingMissing}>缺少定价配置</div>
+      {cost && (
+        <>
+          <div className={styles.sectionTitle}>费用明细</div>
+          <div className={styles.grid}>
+            <CostMetric
+              label="Input"
+              value={cost.input}
+              currency={cost.currency}
+            />
+            <CostMetric
+              label="Output"
+              value={cost.output}
+              currency={cost.currency}
+            />
+            <CostMetric
+              label="Cache read"
+              value={cost.cache_read}
+              currency={cost.currency}
+            />
+            <CostMetric
+              label="Total"
+              value={cost.total}
+              currency={cost.currency}
+              highlight
+            />
+          </div>
+        </>
       )}
     </div>
   )
