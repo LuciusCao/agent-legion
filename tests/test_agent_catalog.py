@@ -46,6 +46,34 @@ def test_agent_definition_rejects_unsafe_skill_path() -> None:
         )
 
 
+@pytest.mark.no_db
+def test_agent_definition_accepts_velites_runtime() -> None:
+    definition = AgentDefinition.model_validate(
+        {
+            "capability": "cap",
+            "runtime": "velites",
+            "skill": "question/generate",
+        }
+    )
+
+    assert definition.runtime == "velites"
+    # runtime participates in the immutable snapshot hash (migration => new revision).
+    pi_twin = AgentDefinition(capability="cap", runtime="pi", skill="question/generate")
+    assert definition.definition_hash() != pi_twin.definition_hash()
+
+
+@pytest.mark.no_db
+def test_agent_definition_rejects_unknown_runtime() -> None:
+    with pytest.raises(ValidationError):
+        AgentDefinition.model_validate(
+            {
+                "capability": "cap",
+                "runtime": "rust",
+                "skill": "question/generate",
+            }
+        )
+
+
 def test_agent_definition_accepts_config_schema_and_hashes_it() -> None:
     with_schema = AgentDefinition.model_validate(
         {

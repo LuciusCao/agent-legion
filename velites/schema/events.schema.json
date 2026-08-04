@@ -293,7 +293,7 @@
       ]
     },
     "Message": {
-      "description": "One conversation message. Assistant metadata (`usage`, `provider`, `model`,\n`stopReason`, `errorMessage`) and tool-result metadata (`toolCallId`,\n`toolName`, `isError`) are only present on the roles they apply to; `None`\nfields are skipped on the wire.",
+      "description": "One conversation message. Assistant metadata (`usage`, `provider`, `model`,\n`stopReason`, `errorMessage`, `timing`) and tool-result metadata (`toolCallId`,\n`toolName`, `isError`) are only present on the roles they apply to; `None`\nfields are skipped on the wire.",
       "type": "object",
       "properties": {
         "content": {
@@ -333,6 +333,17 @@
           "anyOf": [
             {
               "$ref": "#/$defs/StopReason"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "timing": {
+          "description": "Request-level timing (velites extension); only set by real providers\non successful completions — the stub provider and error events omit it.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RequestTiming"
             },
             {
               "type": "null"
@@ -404,6 +415,35 @@
       },
       "required": [
         "missing"
+      ]
+    },
+    "RequestTiming": {
+      "description": "Request-level timing of one LLM completion (velites extension; Pi has no\nequivalent). Attached to the assistant message of the SUCCESSFUL attempt —\nfailed transient attempts surface as pi-compatible error `message_end`\nevents without timing. All durations are wall-clock milliseconds measured\nby the provider:\n\n- `ttfbMs`: POST sent → first SSE `data:` chunk (for the non-streaming\n  JSON fallback dialect: → response headers);\n- `streamMs`: first → last SSE `data:` chunk (`[DONE]` or connection end);\n- `totalMs`: POST sent → stream end.\n\nTokens-per-second is NOT stored: consumers derive it as\n`usage.output / (streamMs / 1000)`.",
+      "type": "object",
+      "properties": {
+        "streamMs": {
+          "description": "First → last stream chunk, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "totalMs": {
+          "description": "POST sent → stream end, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        },
+        "ttfbMs": {
+          "description": "POST sent → first response chunk, in milliseconds.",
+          "type": "integer",
+          "format": "uint64",
+          "minimum": 0
+        }
+      },
+      "required": [
+        "ttfbMs",
+        "streamMs",
+        "totalMs"
       ]
     },
     "Role": {
@@ -550,7 +590,7 @@
       ]
     },
     "Usage": {
-      "description": "Token usage of one assistant message. `cacheRead` is camelCase on the wire.",
+      "description": "Token usage of one assistant message. `cacheRead` is camelCase on the wire.\n\nPi-aligned semantics: `input` EXCLUDES cache-read tokens (the provider's\n`prompt_tokens` includes them; subtracting avoids double-billing the\ncached part), so `input + cacheRead` reconstructs `prompt_tokens`.",
       "type": "object",
       "properties": {
         "cacheRead": {
@@ -559,6 +599,7 @@
           "minimum": 0
         },
         "input": {
+          "description": "Non-cached input tokens (pi-aligned; excludes `cacheRead`).",
           "type": "integer",
           "format": "uint64",
           "minimum": 0

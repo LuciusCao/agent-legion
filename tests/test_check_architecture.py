@@ -5,6 +5,8 @@ import pytest
 from scripts.check_architecture import check_repository, forbidden_imports, is_scheduler_path
 from tests.architecture_budget_helpers import write_neutral_budget_governance
 
+pytestmark = pytest.mark.no_db
+
 
 def write(path: Path, content: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -77,7 +79,7 @@ def test_rejects_route_importing_cms_client(tmp_path):
     ],
 )
 def test_rejects_scheduler_boundary_forbidden_imports(tmp_path, source, expected_error):
-    write(tmp_path / "server/app/workflow_worker_thread.py", source)
+    write(tmp_path / "server/app/workflow_worker/thread.py", source)
     write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
@@ -259,12 +261,37 @@ def test_forbidden_imports_submodule_match():
 
 
 def test_is_scheduler_path_workflow_worker_thread():
-    assert is_scheduler_path("server/app/workflow_worker_thread.py")
+    assert is_scheduler_path("server/app/workflow_worker/thread.py")
+    assert is_scheduler_path("server/app/workflow_worker/thread.py")
+
+
+def test_rejects_packaged_workflow_worker_accessing_runner_attribute(tmp_path):
+    write(
+        tmp_path / "server/app/workflow_worker/thread.py",
+        "class Worker:\n    def run(self, node):\n        if node.runner == 'local':\n            pass\n",
+    )
+    write_neutral_budget_governance(tmp_path)
+
+    errors = check_repository(tmp_path)
+
+    assert any(".runner or .agent" in error for error in errors)
+
+
+def test_rejects_packaged_workflow_worker_scheduler_boundary(tmp_path):
+    write(
+        tmp_path / "server/app/workflow_worker/thread.py",
+        "import subprocess\n",
+    )
+    write_neutral_budget_governance(tmp_path)
+
+    errors = check_repository(tmp_path)
+
+    assert any("scheduler boundary" in error and "subprocess" in error for error in errors)
 
 
 def test_rejects_workflow_worker_accessing_runner_attribute(tmp_path):
     write(
-        tmp_path / "server/app/workflow_worker_thread.py",
+        tmp_path / "server/app/workflow_worker/thread.py",
         "class Worker:\n    def run(self, node):\n        if node.runner == 'local':\n            pass\n",
     )
     write_neutral_budget_governance(tmp_path)
@@ -276,7 +303,7 @@ def test_rejects_workflow_worker_accessing_runner_attribute(tmp_path):
 
 def test_rejects_workflow_worker_accessing_agent_attribute(tmp_path):
     write(
-        tmp_path / "server/app/workflow_worker_thread.py",
+        tmp_path / "server/app/workflow_worker/thread.py",
         "class Worker:\n    def run(self, node):\n        if node.agent is not None:\n            pass\n",
     )
     write_neutral_budget_governance(tmp_path)
@@ -300,7 +327,7 @@ def test_rejects_scheduler_using_futures_length_for_capacity(tmp_path):
 
 def test_rejects_scheduler_threadpool_keyed_by_workspace(tmp_path):
     write(
-        tmp_path / "server/app/workflow_worker_thread.py",
+        tmp_path / "server/app/workflow_worker/thread.py",
         "from concurrent.futures import ThreadPoolExecutor\n"
         "class Worker:\n"
         "    def build(self, workspace_id):\n"

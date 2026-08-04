@@ -1,6 +1,10 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.architecture.configuration import check_configuration_ownership
+
+pytestmark = pytest.mark.no_db
 
 
 def _write(path: Path, text: str) -> None:

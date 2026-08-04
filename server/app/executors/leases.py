@@ -9,17 +9,17 @@ from server.app.db.retry import retry_on_database_conflict
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
+from server.app.events.aggregator import record_job_update
 from server.app.executors import _lease_write_paths
 from server.app.executors._lease_config_failure import fail_without_lease
 from server.app.executors._lease_control import active_lease_counts
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
     ConfigurationFailureRequest,
     ExecutionResult,
     LeaseClaimRequest,
 )
-from server.app.job_events import record_job_update
 from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)
@@ -105,7 +105,7 @@ class ExecutorLeaseRepository:
         with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and status='active' and expires_at>? limit 1",
-                (job_id, _database_timestamp(now)),
+                (job_id, database_timestamp(now)),
             ).fetchone()
             return row is not None
 
@@ -113,7 +113,7 @@ class ExecutorLeaseRepository:
         with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and node_key=? and status='active' and expires_at>? limit 1",
-                (job_id, node_key, _database_timestamp(now)),
+                (job_id, node_key, database_timestamp(now)),
             ).fetchone()
             return row is not None
 

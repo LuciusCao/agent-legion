@@ -96,10 +96,29 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 | `agent_start` / `agent_end` | 日志渲染 | `messages`、`error`；M3 起 `agent_end` 增加可选 `reason`（`budget_exceeded` / `cancelled`，正常结束与模型错误时缺省） |
 | `turn_start` / `turn_end` | 日志渲染 | `turnIndex`、`message`、`toolResults` |
 | `message_start` | 日志渲染 | `message` |
-| `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage` |
+| `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage`、可选 `timing`（见下） |
 | `auto_retry_start` | 重试可观测性（pi 兼容，无渲染） | `attempt`（1 起）、`maxAttempts`、`delayMs`、`error` |
 | `tool_execution_start` / `tool_execution_end` | 日志渲染 | `toolCallId`、`toolName`、`args`、`result.content`、`isError` |
 | `outputs_validation` | 输出自检结果（velites 扩展，无渲染） | `missing`（字符串数组）；只要给了 `--require-output` 且运行正常结束/预算耗尽结束就**总是**发出（含 `missing: []`），便于 Host 明确判定；取消或未恢复的模型错误路径不发 |
+
+### 请求级计时（velites 扩展，Pi 无对应能力）
+
+assistant `message` 上的可选 `timing` 字段（`src/events.rs` 的 `RequestTiming`），
+由真实 provider（`openai_compat`）在**成功**完成的请求上填充，stub provider 与
+错误 `message_end`（transient 失败 / 未恢复）一律缺省（`None`，wire 上整个键不出现）。
+三个子字段均为 wall-clock 毫秒整数：
+
+| 字段 | 语义 |
+|---|---|
+| `ttfbMs` | POST 发出 → 首个 SSE `data:` chunk（非流式 JSON 回退方言则为 → 响应头） |
+| `streamMs` | 首个 → 末个 SSE `data:` chunk（`[DONE]` 或连接结束） |
+| `totalMs` | POST 发出 → 流结束 |
+
+不变式：`ttfbMs ≤ totalMs`、`streamMs ≤ totalMs`。重试场景每次 attempt 独立计时，
+最终只挂在成功那次的 assistant message 上（`auto_retry_start` 失败对无时间字段）。
+TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计算。
+该字段为 additive 扩展，Host 现有消费方（`token_usage` / `pi_event_scan` /
+`job_log_renderer`）均为 `dict.get` 风格，对未知字段天然容忍。
 
 ### 明确不发
 
@@ -188,6 +207,19 @@ macOS seatbelt 的两处实现注记（实测 macOS 15，`deny default` 下 dyld
 `file-read-data` 附加 `(literal "/")`（根目录在启动时被打开）。内容边界不受影响：
 允许根之外的 `open(O_RDONLY)` 与 `readdir` 仍被 EPERM 拒绝。
 
+python3 读白名单（2026-08-02 金丝雀事故修复）：uv/Homebrew 系解释器的
+libpython 经 `@rpath` 从安装前缀加载，前缀不在系统读白名单内时沙箱内
+`python3` 直接 dyld 失败。启动时按 which 语义探测 PATH 上的 `python3`
+（纯 PATH 搜索，不起子进程），把两层根以**只读**加入 seatbelt 白名单：
+canonicalize 穿透 `.venv` symlink 得到的安装前缀（`bin` 的父目录）；以及
+当 PATH 条目是 venv（`<venv>/bin/python3` 且存在 `<venv>/pyvenv.cfg`）时的
+venv 根——CPython 的 site.py 先 stat（元数据全局放行）再 open `pyvenv.cfg`，
+不在白名单内会在解释器启动时直接 EPERM 致命失败（B 面验证实测），放行
+venv 根同时保证其 site-packages 可导入。防呆：安装前缀必须真实存在且
+路径含 `python`，否则跳过（避免 `/usr/bin/python3` 误把 `/usr` 加进白名单
+——系统路径本就覆盖）；探测失败静默跳过。Linux 的 `--ro-bind / /`
+天然覆盖所有解释器位置，无需等价逻辑。
+
 ## 6. CLI 接口
 
 ```
@@ -209,6 +241,10 @@ velites --mode json \
 ## 7. Provider 层
 
 - 仅实现 OpenAI chat completions（SSE streaming）；请求/重试/usage 解析一处收敛；
+- usage 口径对齐 pi：`input = prompt_tokens − cacheRead`（provider 的 `prompt_tokens`
+  **含**缓存命中部分，pi 的 `input` 不含；缓存部分只经 `cacheRead` 单列计费，直接透传
+  `prompt_tokens` 会把缓存部分双重计费——2026-08-01 生产数据核对：pi input 27.5k +
+  cache 420k = velites 修复前 input 447k），`saturating_sub` 兜底异常网关；
 - `thinking` 参数按 provider 映射（初期只支持 gateway 现有映射，PoC 已验证）；
 - 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
   （PoC P2 发现），模型白名单在 `config/workflow.yaml` 侧约束并写进运维文档；
@@ -234,8 +270,9 @@ velites --mode json \
 
 ## 8. 工具实现
 
-- **read**：路径必须解析在 cwd 内（拒绝逃逸），支持行区间读取；
-- **write**：tmp + rename 原子写，同 cwd 沙箱；
+- **read**：路径必须解析在 cwd 或任一 `--skill` 目录 / session dir 内（后两者为只读
+  根，与 §5 OS 沙箱的读放行口径一致；`..`/symlink 逃逸一律拒绝），支持行区间读取；
+- **write**：tmp + rename 原子写，仅限 cwd 沙箱（skill/session 目录绝不可写）；
 - **bash**：`cwd=job_dir`，env 继承父进程；超时 → 进程组 TERM → grace → KILL（对齐
   Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
   必须能跑 `python3`（skill scripts 依赖，worker 镜像已具备）；

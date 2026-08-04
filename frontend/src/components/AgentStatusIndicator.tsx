@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom'
 import { IconButton, Switch } from '@mui/material'
 import { MaterialIcon } from './MaterialIcon'
 import { AgentConnectionDot } from './AgentConnectionDot'
+import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { AgentWorkerStatusList } from './AgentWorkerStatusList'
 import styles from './AgentStatusIndicator.module.css'
@@ -14,10 +15,12 @@ export interface AgentStatusIndicatorProps {
 export function AgentStatusIndicator({
   workspaceId,
 }: AgentStatusIndicatorProps) {
-  const allAgents = useUiStore((state) => state.agents)
-  const workerPaused = useUiStore((state) => state.getWorkerPaused(workspaceId))
-  const fetchWorkerStatus = useUiStore((state) => state.fetchWorkerStatus)
-  const setWorkerPaused = useUiStore((state) => state.setWorkerPaused)
+  const allAgents = useAgentsStore((state) => state.agents)
+  const workerPaused = useAgentsStore((state) =>
+    state.getWorkerPaused(workspaceId)
+  )
+  const fetchWorkerStatus = useAgentsStore((state) => state.fetchWorkerStatus)
+  const setWorkerPaused = useAgentsStore((state) => state.setWorkerPaused)
   const showToast = useUiStore((state) => state.showToast)
 
   const agents = useMemo(

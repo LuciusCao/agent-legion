@@ -9,13 +9,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import threading
-from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from worker._atomic import atomic_write
 from worker.status_reader import read_current_executions, read_runtime_status
 
 ENV_VAR = "AGENT_WORKER_STATUS_FILE"
@@ -45,14 +44,13 @@ class ExecutionStatusReporter:
         return cls(Path(raw) if raw else None)
 
     def start(self, execution_id: str, **fields: Any) -> None:
-        entry = {
-            "execution_id": execution_id,
-            **fields,
-            "phase": "claimed",
-            "started_at": datetime.now(UTC).isoformat(),
-        }
         with self._lock:
-            self._executions[execution_id] = entry
+            self._executions[execution_id] = {
+                "execution_id": execution_id,
+                **fields,
+                "phase": "claimed",
+                "started_at": datetime.now(UTC).isoformat(),
+            }
             self._flush()
 
     def set_phase(self, execution_id: str, phase: str) -> None:
@@ -60,6 +58,17 @@ class ExecutionStatusReporter:
             if execution_id in self._executions:
                 self._executions[execution_id]["phase"] = phase
                 self._flush()
+
+    def upsert_phase(self, execution_id: str, phase: str, **fields: Any) -> None:
+        with self._lock:
+            if execution_id not in self._executions:
+                self._executions[execution_id] = {
+                    "execution_id": execution_id,
+                    **fields,
+                    "started_at": datetime.now(UTC).isoformat(),
+                }
+            self._executions[execution_id]["phase"] = phase
+            self._flush()
 
     def finish(self, execution_id: str) -> None:
         with self._lock:
@@ -82,18 +91,6 @@ class ExecutionStatusReporter:
             "remote": self._remote,
         }
         try:
-            descriptor, temporary = tempfile.mkstemp(
-                dir=self._path.parent, prefix=f"{self._path.stem}."
-            )
-            try:
-                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle, ensure_ascii=False)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, self._path)
-            except BaseException:
-                with suppress(OSError):
-                    os.unlink(temporary)
-                raise
+            atomic_write(self._path, json.dumps(payload, ensure_ascii=False))
         except OSError as exc:  # 状态展示降级为"无当前执行"，不影响任务本身
             print(f"status file write failed: {exc}", flush=True)

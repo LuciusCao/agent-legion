@@ -1480,7 +1480,7 @@ export interface components {
        * Runtime
        * @enum {string}
        */
-      runtime: 'pi' | 'openclaw'
+      runtime: 'pi' | 'openclaw' | 'velites'
       /** Skill */
       skill: string
       /** Skill Commit */
@@ -1843,6 +1843,10 @@ export interface components {
     HealthResponse: {
       /** Ok */
       ok: boolean
+      /** Workers */
+      workers?: {
+        [key: string]: string
+      } | null
     }
     /** JobBatchRequest */
     JobBatchRequest: {
@@ -2043,6 +2047,8 @@ export interface components {
       /** Exclude Ids */
       exclude_ids?: string[]
       filter?: components['schemas']['JobFilterPayload'] | null
+      /** From Node Key */
+      from_node_key?: string | null
       /** Job Ids */
       job_ids?: string[]
       /**
@@ -2333,6 +2339,16 @@ export interface components {
        * @enum {string}
        */
       granularity: '6h' | '24h' | '30d'
+      summary: components['schemas']['OpsMetricsSummary']
+    }
+    /** OpsMetricsSummary */
+    OpsMetricsSummary: {
+      /** Active Executions */
+      active_executions: number | null
+      /** Online Workers */
+      online_workers: number | null
+      recent_hour_runs: components['schemas']['RecentHourRunSummary']
+      recent_hour_tokens: components['schemas']['RecentHourTokenSummary']
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
@@ -2376,6 +2392,28 @@ export interface components {
         | null
       /** Stem */
       stem?: string | null
+    }
+    /** RecentHourRunSummary */
+    RecentHourRunSummary: {
+      /** Completed */
+      completed: number
+      /** Duration P50 Seconds */
+      duration_p50_seconds: number | null
+      /** Duration P95 Seconds */
+      duration_p95_seconds: number | null
+      /** Failed */
+      failed: number
+    }
+    /** RecentHourTokenSummary */
+    RecentHourTokenSummary: {
+      /** Cache Read Tokens */
+      cache_read_tokens: number
+      /** Input Tokens */
+      input_tokens: number
+      /** Output Tokens */
+      output_tokens: number
+      /** Total Tokens */
+      total_tokens: number
     }
     /** RegisterAgentWorkerRequest */
     RegisterAgentWorkerRequest: {

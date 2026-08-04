@@ -15,7 +15,7 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
 - check: architecture.scheduler_threadpool
-  path: server/app/workflow_worker_thread.py:self._pools[executor_id]
+  path: server/app/workflow_worker/thread.py:self._pools[executor_id]
   reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor
     definition to submit adapter executions; each pool is bounded by the executor's
     global capacity and keyed by executor_id, not workspace.
@@ -145,3 +145,13 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
   ceiling: 132
+- check: architecture.file_budget
+  path: worker/supervisor.py
+  reason: The develop merge stacked two intentional, individually in-budget
+    changes on this module — the worker runtime status/metrics cleanup helper
+    and the control-plane upload queue statistics (execution-count aggregates
+    plus configurable upload concurrency). Extract the upload/status
+    aggregation block from the supervisor loop after the merge lands.
+  owner: agent-worker
+  remove_when: issues/open/033-P3-worker-supervisor-upload-aggregation-split.md
+  ceiling: 245

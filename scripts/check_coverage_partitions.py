@@ -41,7 +41,7 @@ PARTITIONS: tuple[Partition, ...] = (
     Partition(
         "backend agent dispatch",
         "backend",
-        ("server/app/agent_dispatch.py", "server/app/agent_dispatch_pool.py"),
+        ("server/app/agent_broker/dispatch.py", "server/app/agent_broker/dispatch_pool.py"),
         80.0,
     ),
     Partition(

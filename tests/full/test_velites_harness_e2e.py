@@ -9,6 +9,7 @@ token 计量落库。环境无 cargo 且无可复用 debug 产物时 skip 而非
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -18,10 +19,19 @@ from typing import Any
 
 import pytest
 
+from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker.dispatch import AgentDispatchService
+from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
+from server.app.agent_workers import AgentWorkerRegistry
+from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
+from server.app.services.artifact_store import ArtifactStore
+from server.app.settings import Settings
 from server.app.workflows.pi_runner import PiRunner
+from server.app.workflows.schema import WorkflowNode
 from tests.helpers.executor_worker import make_pi_skill
 from tests.postgres_support import TEST_DATABASE_URL
+from tests.test_agent_broker import _insert_job_rows
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 VELITES_BINARY = REPO_ROOT / "velites" / "target" / "debug" / "velites"
@@ -234,7 +244,9 @@ def test_velites_flavor_end_to_end(tmp_path: Path) -> None:
         for e in events
         if e["type"] == "message_end" and e["message"].get("usage")
     ]
-    assert [u["input"] for u in usages] == [11, 23]
+    # usage.input 口径 = prompt_tokens - cacheRead（pi 口径，缓存不双重计费）：
+    # 第一跳 11 - 3 = 8，第二跳无缓存 23。
+    assert [u["input"] for u in usages] == [8, 23]
 
     # 声明产物落盘 + run.json。
     assert (job_dir / OUTPUT_NAME).is_file()
@@ -246,9 +258,174 @@ def test_velites_flavor_end_to_end(tmp_path: Path) -> None:
     with job_db.connect() as conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
     assert row is not None
-    assert row["input_tokens"] == 34
+    assert row["input_tokens"] == 31
     assert row["output_tokens"] == 12
     assert row["cache_read_tokens"] == 3
-    assert row["total_tokens"] == 49
+    assert row["total_tokens"] == 46
     assert row["provider"] == "gateway"
     assert row["model"] == "stub-model"
+
+
+class _LocalSkillManager:
+    """Test double for SkillManager: serves a pre-built skill tree from base_dir."""
+
+    def __init__(self, base_dir: Path) -> None:
+        self.base_dir = base_dir
+
+    def get_skill_dir(self, skill: str, execution_id: str) -> Path:
+        return self.base_dir / skill
+
+    def cleanup_execution(self, execution_id: str) -> None:
+        return None
+
+
+@pytest.mark.full_gate
+def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -> None:
+    """runtime=velites 全链路：dispatch 冻结 manifest → claim 重渲染 → 按
+    command_spec 真跑 velites 二进制。全局 flavor=pi 证明 runtime 钉死实现。"""
+    binary = _velites_binary()
+    gateway = _StubGateway()
+    try:
+        skill_root = tmp_path / "skills"
+        make_pi_skill(skill_root, "question_comprehension_info/generate_key_info")
+        skill_dir = skill_root / "question_comprehension_info/generate_key_info"
+
+        definition = AgentDefinition(
+            capability="generate",
+            runtime="velites",
+            skill="question_comprehension_info/generate_key_info",
+        )
+        sync_agent_definitions(TEST_DATABASE_URL, {"velites-agent": definition})
+        _insert_job_rows(
+            job_db,
+            job_id="job-1",
+            node_key="generate",
+            limit=5,
+            workspace_id="test-workspace",
+            agent_id="velites-agent",
+        )
+        job_dir = tmp_path / "jobs" / "job-1"
+        job_dir.mkdir(parents=True, exist_ok=True)
+        (job_dir / "questions_parsed.json").write_text('{"questions": []}', encoding="utf-8")
+
+        settings = Settings(
+            root_dir=tmp_path,
+            data_dir=tmp_path,
+            videos_dir=tmp_path / "videos",
+            logs_dir=tmp_path / "logs",
+            packages_dir=tmp_path / "packages",
+            jobs_dir=tmp_path / "jobs",
+            config={},
+            executor_runtime=ExecutorRuntimeConfig.model_validate(
+                {
+                    "workflows": {
+                        "enabled": True,
+                        "pi": {
+                            # flavor=pi 是反证：runtime=velites 必须忽略它。
+                            "flavor": "pi",
+                            "binary": str(binary),
+                            "provider": "gateway",
+                            "model": "stub-model",
+                            "timeout_seconds": 120,
+                        },
+                    },
+                    "openclaw": {"command_template": ["openclaw"]},
+                }
+            ),
+        )
+        bundle_dir = tmp_path / "bundles"
+        bundle_dir.mkdir()
+        broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir)
+        store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
+        service = AgentDispatchService(settings, broker, store)
+        service.skill_manager = _LocalSkillManager(skill_root)
+
+        node = WorkflowNode(
+            key="generate", label="generate", capability="generate", outputs=[OUTPUT_NAME]
+        )
+        enqueued = service.enqueue(
+            agent_id="velites-agent",
+            definition=definition,
+            workspace={"id": "test-workspace"},
+            job={"id": "job-1"},
+            workflow_key="questions",
+            node=node,
+            job_dir=job_dir,
+            log_path=tmp_path / "job-1.log",
+            inputs=("questions_parsed.json",),
+        )
+        assert enqueued is True
+
+        # manifest 入队即冻结：flavor 被钉为 velites，binary 显式配置保持不变。
+        with job_db.connect() as conn:
+            row = conn.execute(
+                "select manifest_json from agent_execution_requests where job_id='job-1'"
+            ).fetchone()
+        frozen = json.loads(row["manifest_json"])
+        assert frozen["runtime"] == "velites"
+        assert frozen["pi"]["flavor"] == "velites"
+        assert frozen["pi"]["binary"] == str(binary)
+
+        registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+        registry.issue_token(
+            worker_id="worker-v",
+            name="worker-v",
+            runtimes=["velites"],
+            max_concurrency=1,
+        )
+        claim = broker.claim("worker-v")
+        assert claim is not None
+        # claim 重渲染与冻结 manifest 一致，产出 velites argv。
+        assert claim.manifest["pi"]["flavor"] == "velites"
+        command = claim.manifest["command_spec"]["command"]
+        assert command[0] == str(binary)
+        for flag in PI_ONLY_FLAGS:
+            assert flag not in command
+        assert command[command.index("--require-output") + 1] == OUTPUT_NAME
+
+        # Worker 执行语义：占位符替换后 Popen（worker/execution_prepare.py 同款）。
+        session_dir = tmp_path / "session"
+        session_dir.mkdir()
+        prompt_file = tmp_path / "prompt.md"
+        prompt_file.write_text(claim.manifest["command_spec"]["prompt"], encoding="utf-8")
+        substitutions = {
+            "{job_dir}": str(job_dir),
+            "{skill_dir}": str(skill_dir),
+            "{session_dir}": str(session_dir),
+            "{session_name}": "job-1:generate:e2e",
+            "{prompt_file}": str(prompt_file),
+        }
+        argv = command
+        for placeholder, value in substitutions.items():
+            argv = [part.replace(placeholder, value) for part in argv]
+        env = {
+            **os.environ,
+            "VELITES_BASE_URL": gateway.base_url,
+            "VELITES_API_KEY": "stub-key",
+        }
+        proc = subprocess.run(
+            argv, cwd=job_dir, env=env, capture_output=True, text=True, timeout=300
+        )
+
+        assert proc.returncode == 0, proc.stderr[-500:]
+        assert (job_dir / OUTPUT_NAME).is_file()
+        # json 模式事件流走 stdout（Host/Worker 消费侧），保持 pi 兼容子集。
+        events = [json.loads(line) for line in proc.stdout.splitlines() if line.strip()]
+        types = [event["type"] for event in events]
+        assert types[0] == "session"
+        assert types[-2:] == ["outputs_validation", "agent_end"]
+        assert "message_update" not in types
+        assert "tool_execution_update" not in types
+        # session mirror 落在 --session-dir 下。
+        assert (session_dir / "session.jsonl").is_file()
+
+        broker.release_slot(claim.execution_id, "worker-v", claim.lease_id)
+        broker.mark_done(claim.execution_id, "worker-v", claim.lease_id, {"status": "completed"})
+        with job_db.connect() as conn:
+            state = conn.execute(
+                "select state from agent_execution_requests where execution_id=?",
+                (claim.execution_id,),
+            ).fetchone()
+        assert state["state"] == "done"
+    finally:
+        gateway.close()

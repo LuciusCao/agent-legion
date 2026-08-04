@@ -200,6 +200,22 @@ def test_agent_end_reason_contract(schema: dict[str, Any]) -> None:
     assert {"budget_exceeded", "cancelled"} <= values
 
 
+def test_message_timing_extension_optional(schema: dict[str, Any]) -> None:
+    """velites request-level timing (TTFB / stream / total) on assistant messages.
+
+    Additive velites extension: present only on successful real-provider
+    completions, so it must stay optional and carry integer milliseconds.
+    """
+    message = _message_schema(schema, "MessageEndEvent")
+    assert "timing" in message["properties"], "message.timing missing"
+    assert "timing" not in message.get("required", []), "timing must stay optional"
+    timing = _object_schema(schema, _ref_branch(schema, message["properties"]["timing"]))
+    for field in ("ttfbMs", "streamMs", "totalMs"):
+        assert field in timing["properties"], f"timing.{field} missing"
+        assert timing["properties"][field]["type"] == "integer"
+        assert field in timing["required"], f"timing.{field} must be required when present"
+
+
 def test_renderer_consumed_message_fields(schema: dict[str, Any]) -> None:
     """job_log_renderer.py:120-182 — role/content blocks/toolResult metadata."""
     message = _message_schema(schema, "MessageEndEvent")

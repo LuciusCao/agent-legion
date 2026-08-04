@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 from worker import upload_queue
-from worker.execution_lifecycle import heartbeat_loop
+from worker.execution_lifecycle import HeartbeatConfig, heartbeat_loop
 from worker.status import ExecutionStatusReporter
 from worker.upload_queue import PENDING_FILENAME, UploadQueue, UploadTask
 
@@ -166,14 +166,16 @@ def test_heartbeat_quiesced_before_report(tmp_path: Path) -> None:
     beat = threading.Thread(
         target=heartbeat_loop,
         args=(
-            client,
-            task.execution_id,
-            task.lease_id,
-            task.heartbeat_stop,
-            0.05,
-            threading.Event(),
-            {"proc": None},
-            threading.Event(),
+            HeartbeatConfig(
+                client=client,
+                execution_id=task.execution_id,
+                lease_id=task.lease_id,
+                stop=task.heartbeat_stop,
+                interval=0.05,
+                ownership_lost=threading.Event(),
+                proc_ref={"proc": None},
+                adopted=threading.Event(),
+            ),
         ),
         daemon=True,
     )
@@ -265,3 +267,80 @@ def test_depth_gauge_tracks_queued_work(tmp_path: Path) -> None:
     queue.submit(_task(work_root))
     queue.shutdown()  # drains (tasks bail out immediately on stop)
     assert queue.depth == 0
+
+
+class BlockingReportClient(QueueFakeClient):
+    """Report call parks on a gate so queue depth can be observed deterministically."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    def report(
+        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        self.entered.set()
+        assert self.release.wait(10)
+        return super().report(execution_id, lease_id, metadata, archive)
+
+
+def _restore_two_pending(work_root: Path) -> None:
+    for execution_id in ("exec-1", "exec-2"):
+        execution_dir = _execution_dir(work_root, execution_id)
+        task = _task(work_root, execution_id=execution_id)
+        marker = execution_dir / PENDING_FILENAME
+        marker.write_text(json.dumps(task.to_json()), encoding="utf-8")
+
+
+def test_restore_backlog_visible_as_queued_upload(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    _restore_two_pending(work_root)
+    client = BlockingReportClient()
+    status_path = tmp_path / "status.json"
+    queue = UploadQueue(
+        client,
+        ExecutionStatusReporter(status_path),
+        max_concurrency=1,
+        heartbeat_interval=0.05,
+        stop=threading.Event(),
+    )
+    assert queue.restore(work_root) == 2
+    assert client.entered.wait(10)
+    try:
+        # exec-1 占住唯一上传线程；exec-2 积压在池外，也必须以 queued_upload 可见。
+        executions = json.loads(status_path.read_text(encoding="utf-8"))["executions"]
+        assert executions["exec-1"]["phase"] == "uploading"
+        assert executions["exec-2"]["phase"] == "queued_upload"
+        assert executions["exec-2"]["node_key"] == "node_a"
+    finally:
+        client.release.set()
+        queue.shutdown()
+    assert len(client.reports) == 2
+
+
+def test_submit_existing_entry_only_updates_phase(tmp_path: Path) -> None:
+    work_root = tmp_path / "work"
+    _execution_dir(work_root)
+    status_path = tmp_path / "status.json"
+    reporter = ExecutionStatusReporter(status_path)
+    reporter.start("exec-1", node_key="node_a")
+    original = json.loads(status_path.read_text(encoding="utf-8"))["executions"]["exec-1"]
+    client = BlockingReportClient()
+    queue = UploadQueue(
+        client,
+        reporter,
+        max_concurrency=1,
+        heartbeat_interval=0.05,
+        stop=threading.Event(),
+    )
+    queue.submit(_task(work_root))
+    assert client.entered.wait(10)
+    try:
+        entry = json.loads(status_path.read_text(encoding="utf-8"))["executions"]["exec-1"]
+        assert entry["phase"] == "uploading"
+        assert entry["started_at"] == original["started_at"]
+    finally:
+        client.release.set()
+        queue.shutdown()
+    assert len(client.reports) == 1

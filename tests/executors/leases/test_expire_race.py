@@ -14,7 +14,7 @@ from pathlib import Path
 
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_lifecycle import _expire_lease_row
-from server.app.executors._lease_transactions import _database_timestamp
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
 from server.app.jobs import JobQueries
@@ -34,7 +34,7 @@ def _claimed_stale_lease(job_db: JobQueries, repo: ExecutorLeaseRepository, name
         _claim_request(workspace_id, job_id, executor_id="pi-default", local_node_limit=None)
     )
     assert claim is not None
-    past = _database_timestamp(datetime.now(UTC) - timedelta(seconds=10))
+    past = database_timestamp(datetime.now(UTC) - timedelta(seconds=10))
     with write_transaction(job_db.path) as conn:
         conn.execute(
             "update executor_leases set expires_at=? where id=?",
@@ -54,7 +54,7 @@ def test_expire_skips_lease_finished_concurrently(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     repo = ExecutorLeaseRepository(job_db.path, job_db=job_db, data_dir=tmp_path)
     _, job_id, claim = _claimed_stale_lease(job_db, repo, "ws-expire-finish")
-    now_str = _database_timestamp(datetime.now(UTC))
+    now_str = database_timestamp(datetime.now(UTC))
 
     with write_transaction(job_db.path) as conn1:
         stale = conn1.execute(_STALE_SELECT, (now_str,)).fetchall()
@@ -74,7 +74,7 @@ def test_expire_skips_lease_renewed_concurrently(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     repo = ExecutorLeaseRepository(job_db.path, job_db=job_db, data_dir=tmp_path)
     _, job_id, claim = _claimed_stale_lease(job_db, repo, "ws-expire-renew")
-    now_str = _database_timestamp(datetime.now(UTC))
+    now_str = database_timestamp(datetime.now(UTC))
 
     with write_transaction(job_db.path) as conn1:
         stale = conn1.execute(_STALE_SELECT, (now_str,)).fetchall()

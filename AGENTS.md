@@ -46,6 +46,9 @@
   走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由
   CI 与 `./scripts/check.sh` 强制）。多 worktree 并行时用 `AGENT_LEGION_TEST_WORKERS`
   限制 pytest worker 数（默认 `-n auto` 吃满所有核）。
+- 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增
+  `tests/` 根目录文件；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过
+  TRUNCATE 隔离。
 
 ## 5. Architecture Governance
 
@@ -72,9 +75,12 @@
   声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
   workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
   （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
-- velites（`velites/` crate，pi 的自研 Rust 替代）：Workspace Executor 扩展链不变
-  （capability → executor → allocation → binding → local limit），harness flavor
-  切换只经 `workflows.pi.flavor` 配置，workflow 节点不感知 harness 实现。
+- velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
+  runtime，由 `AgentDefinition.runtime` 声明（`config/workflow.yaml` `agents:` 段，
+  per-agent 灰度/回退都是单字段改动）。`workflows.pi.flavor` 只作用于
+  `runtime: pi` 的 agent 做实现选择；`runtime: velites` 钉死 velites 实现、忽略
+  flavor。Workflow 节点不感知 runtime/harness 实现。Worker 声明 velites 前必须
+  先在 PATH 提供 velites 二进制（启动预检缺失即拒启动）。
   事件 schema 改动必须同步 `velites/schema/events.schema.json`
   （`cargo run --bin velites-schema -- schema/events.schema.json`）并保证契约测试
   （`velites/tests/schema_current.rs`、`golden_events.rs`）通过；事件流只保留 Host

@@ -6,12 +6,13 @@ from datetime import UTC, datetime
 from typing import Any
 
 from server.app.events import JobEventManager
+from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.job_events import broadcast_job_update, record_job_update
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services._job_batch_ops import batch_run_to as _batch_run_to
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
@@ -56,7 +57,7 @@ class JobExecutionService:
         node_key: str | None = None,
         reason_code: str | None = None,
         message: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JobOperationResult:
         return {
             "job_id": job_id,
             "operation": operation,
@@ -80,14 +81,14 @@ class JobExecutionService:
         job_id: str,
         target_node_key: str,
         start_node_key: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JobOperationResult:
         job = self.job_db.get_job(job_id)
         if job is None:
-            return self._result(
+            raise JobOperationError(
                 job_id, "run_to", "failed", target_node_key, "not_found", "Job not found"
             )
         if job["workspace_id"] != workspace_id:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "failed",
@@ -97,7 +98,7 @@ class JobExecutionService:
             )
         definition = self._definition(job)
         if target_node_key not in definition.nodes:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "failed",
@@ -109,17 +110,17 @@ class JobExecutionService:
         try:
             closure = ancestor_closure(definition, target_node_key)
         except ExecutionControlError as exc:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "failed",
                 target_node_key,
                 "node_not_found",
                 str(exc),
-            )
+            ) from exc
 
         if self._has_active_lease(job_id):
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "skipped",
@@ -138,14 +139,14 @@ class JobExecutionService:
         definition: WorkflowDefinition,
         target_node_key: str,
         closure: frozenset[str],
-    ) -> dict[str, Any]:
+    ) -> JobOperationResult:
         job_id = str(job["id"])
         node_statuses = {
             node["node_key"]: node["status"] for node in self.job_db.list_job_nodes(job_id)
         }
 
         if node_statuses.get(target_node_key) == "completed":
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "skipped",
@@ -157,18 +158,18 @@ class JobExecutionService:
         try:
             self.job_db.apply_run_to_atomic(job_id, target_node_key, closure, now=self._now())
         except JobMutationConflict as exc:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "skipped",
                 target_node_key,
                 exc.reason_code,
                 str(exc),
-            )
+            ) from exc
         except ValueError as exc:
-            return self._result(
+            raise JobOperationError(
                 job_id, "run_to", "failed", target_node_key, "node_not_found", str(exc)
-            )
+            ) from exc
 
         if self.job_event_buffer is not None:
             record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
@@ -183,10 +184,10 @@ class JobExecutionService:
         target_node_key: str,
         start_node_key: str,
         closure: frozenset[str],
-    ) -> dict[str, Any]:
+    ) -> JobOperationResult:
         job_id = str(job["id"])
         if start_node_key not in definition.nodes:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "failed",
@@ -196,7 +197,7 @@ class JobExecutionService:
             )
 
         if start_node_key not in closure:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "failed",
@@ -223,27 +224,27 @@ class JobExecutionService:
         except JobMutationConflict as exc:
             if staged is not None:
                 staged.rollback()
-            return self._result(
+            raise JobOperationError(
                 job_id, "run_to", "skipped", target_node_key, exc.reason_code, str(exc)
-            )
+            ) from exc
         except ValueError as exc:
             if staged is not None:
                 staged.rollback()
-            return self._result(
+            raise JobOperationError(
                 job_id, "run_to", "failed", target_node_key, "cleanup_failed", str(exc)
-            )
+            ) from exc
         except Exception as exc:
             logger.exception("Failed to persist run-to target for job %s", job_id)
             if staged is not None:
                 staged.rollback()
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "run_to",
                 "failed",
                 target_node_key,
                 "rerun_failed",
                 str(exc),
-            )
+            ) from exc
 
         commit_staged_outputs(staged, job_id, "run-to")
         if self.job_event_buffer is not None:
@@ -252,12 +253,14 @@ class JobExecutionService:
             broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "run_to", "succeeded", target_node_key)
 
-    def continue_job(self, workspace_id: str, job_id: str) -> dict[str, Any]:
+    def continue_job(self, workspace_id: str, job_id: str) -> JobOperationResult:
         job = self.job_db.get_job(job_id)
         if job is None:
-            return self._result(job_id, "continue", "failed", None, "not_found", "Job not found")
+            raise JobOperationError(
+                job_id, "continue", "failed", None, "not_found", "Job not found"
+            )
         if job["workspace_id"] != workspace_id:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "continue",
                 "failed",
@@ -269,23 +272,23 @@ class JobExecutionService:
         try:
             self.job_db.resume_job(job_id)
         except JobMutationConflict as exc:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "continue",
                 "skipped",
                 None,
                 exc.reason_code,
                 str(exc),
-            )
+            ) from exc
         except ValueError as exc:
-            return self._result(
+            raise JobOperationError(
                 job_id,
                 "continue",
                 "failed",
                 None,
                 "not_found" if "Job not found" in str(exc) else "resume_failed",
                 str(exc),
-            )
+            ) from exc
 
         if self.job_event_buffer is not None:
             record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
@@ -300,6 +303,6 @@ class JobExecutionService:
         target_node_key: str,
         start_node_key: str | None = None,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> list[JobOperationResult]:
         """Run the selected jobs to a target node; kwargs take job_filter/exclude_ids."""
         return _batch_run_to(self, workspace_id, job_ids, target_node_key, start_node_key, **kwargs)

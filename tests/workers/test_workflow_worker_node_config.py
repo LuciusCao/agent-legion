@@ -11,7 +11,7 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import RecordingExecutor, _local_node, _make_definition

@@ -1,10 +1,8 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { fetchFailedNodeRuns } from '../../api'
+import { useAsync } from '../../hooks/useAsync'
 import type { JobSummary } from '../../types'
-import type {
-  FailedNodeRunItem,
-  FailureCategory,
-} from '../../types/failureTypes'
+import type { FailureCategory } from '../../types/failureTypes'
 import {
   countJobsByFailureCategory,
   failedModeConfirmLabel,
@@ -22,11 +20,14 @@ export type JobRerunConfirmArgs = [
   fromFailedNode: boolean,
   jobIds?: string[],
   failureCategory?: FailureCategory,
+  fromNodeKey?: string,
 ]
 
 export type FailureCategoryState = {
   selection: FailureCategorySelection
   setSelection: (value: FailureCategorySelection) => void
+  fromNodeKey: string | null
+  setFromNodeKey: (value: string | null) => void
   counts: FailureCategoryCounts | null
   failedCount: number
   canConfirm: boolean
@@ -35,7 +36,7 @@ export type FailureCategoryState = {
 }
 
 /**
- * 失败类别子选项状态：failedMode 激活时懒加载一次类别计数，
+ * 失败类别子选项状态：failedMode 激活时懒加载类别计数，
  * 加载失败静默降级为不显示计数（counts 保持 null）。
  */
 export function useFailureCategories(
@@ -44,28 +45,22 @@ export function useFailureCategories(
   failedJobs: JobSummary[]
 ): FailureCategoryState {
   const [selection, setSelection] = useState<FailureCategorySelection>('all')
-  const [failedRuns, setFailedRuns] = useState<FailedNodeRunItem[] | null>(null)
-  const requestedRef = useRef(false)
+  const [fromNodeKey, setFromNodeKey] = useState<string | null>(null)
 
   const workspaceId = failureContext?.workspaceId
   const workflowKey = failureContext?.workflowKey
 
-  useEffect(() => {
-    if (!failedMode || !workspaceId || requestedRef.current) return
-    requestedRef.current = true
-    let stale = false
-    fetchFailedNodeRuns(workspaceId, { workflowKey })
-      .then((data) => {
-        if (stale) return
-        setFailedRuns(data.runs ?? [])
+  // 加载失败时 error 不消费：chips 保持可见但不显示计数（静默降级）。
+  const { data: failedRuns } = useAsync(
+    async () => {
+      const data = await fetchFailedNodeRuns(workspaceId ?? '', {
+        workflowKey,
       })
-      .catch(() => {
-        // Silent degradation: chips stay visible without counts.
-      })
-    return () => {
-      stale = true
-    }
-  }, [failedMode, workspaceId, workflowKey])
+      return data.runs ?? []
+    },
+    [failedMode, workspaceId, workflowKey],
+    { enabled: failedMode && !!workspaceId }
+  )
 
   const failedJobIds = useMemo(
     () => failedJobs.map((job) => job.id),
@@ -88,13 +83,18 @@ export function useFailureCategories(
   return {
     selection,
     setSelection,
+    fromNodeKey,
+    setFromNodeKey,
     counts,
     failedCount,
     canConfirm,
     confirmLabel: failedModeConfirmLabel(selection, counts, failedCount),
-    confirmArgs: () =>
-      selection === 'all'
-        ? [null, true]
-        : [null, true, failedJobIds, selection],
+    confirmArgs: () => {
+      if (selection === 'all') return [null, true]
+      const args: JobRerunConfirmArgs = [null, true, failedJobIds, selection]
+      // 指定起始节点时追加（仅具体失败类型支持；'all' 维持原语义）。
+      if (fromNodeKey) args.push(fromNodeKey)
+      return args
+    },
   }
 }
