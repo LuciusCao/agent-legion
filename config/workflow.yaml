@@ -1,27 +1,27 @@
 agents:
   question-key-info-v1:
     capability: generate_key_info
-    runtime: pi
+    runtime: velites
     skill: question_comprehension_info/generate_key_info
     tools: [read, write, bash]
   question-key-info-review-v1:
     capability: review_key_info
-    runtime: pi
+    runtime: velites
     skill: question_comprehension_info/review_key_info
     tools: [read, write, bash]
   question-possible-errors-v1:
     capability: generate_possible_errors
-    runtime: pi
+    runtime: velites
     skill: question_comprehension_info/generate_possible_errors
     tools: [read, write, bash]
   question-possible-errors-review-v1:
     capability: review_possible_errors
-    runtime: pi
+    runtime: velites
     skill: question_comprehension_info/review_possible_errors
     tools: [read, write, bash]
   question-difficulty-v1:
     capability: assess_comprehension_difficulty
-    runtime: pi
+    runtime: velites
     skill: question_comprehension_info/assess_comprehension_difficulty
     tools: [read, write, bash]
   video-subtitle-review-v1:
@@ -117,7 +117,7 @@ workflows:
     # Headless harness 选择：pi（Node Pi CLI）| velites（自研 Rust harness，见
     # docs/architecture/velites-harness.md）。缺省 pi；非法值启动即报错（fail-fast）。
     # 切到 velites 时 binary 未显式覆盖则自动用 velites 二进制；`flavor: pi` 单字段即回退。
-    flavor: pi
+    flavor: velites
     # velites 逃生门：true 时 velites 命令追加 --no-sandbox（生产沙箱异常时
     # 免发版降级为无沙箱运行，仍保留事件契约/预算/取消等全部可控性）。
     velites_no_sandbox: false
