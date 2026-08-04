@@ -61,7 +61,7 @@ class EmptyClaimTrigger:
             ).fetchone()
             if row is not None:
                 if reasons:
-                    log_blocked_queue(conn, reasons)
+                    log_blocked_queue(dsn, conn, reasons)
                 return
         if callback is None:
             return

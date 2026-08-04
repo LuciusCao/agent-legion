@@ -294,6 +294,8 @@ server/app/
 | JobDetailResponse | BaseModel | job: JobSummaryResponse, nodes: list[JobNodeResponse], runs: list[NodeRunResp... | app/routes/job_view_contracts.py |
 | MetricBucket | BaseModel | bucket_start: str, online_workers: int, online_workers_max: int, active_execu... | app/routes/metrics_contracts.py |
 | OpsMetricsResponse | BaseModel | granularity: Literal['6h', '24h', '30d'], buckets: list[MetricBucket], summar... | app/routes/metrics_contracts.py |
+| QueueSummary | BaseModel | queued: int, oldest_queued_at: str | None, recent_hour_unclaimable_failed: int | app/routes/metrics_queue_contracts.py |
+| QueueAlert | BaseModel | kind: Literal['blocked', 'stalled'], at: str | None, reasons: dict[str, int] | app/routes/metrics_queue_contracts.py |
 | RecentHourTokenSummary | BaseModel | input_tokens: int, output_tokens: int, cache_read_tokens: int, total_tokens: ... | app/routes/metrics_summary_contracts.py |
 | RecentHourRunSummary | BaseModel | completed: int, failed: int, duration_p50_seconds: float | None, duration_p95... | app/routes/metrics_summary_contracts.py |
 | OpsMetricsSummary | BaseModel | online_workers: int | None, active_executions: int | None, recent_hour_tokens... | app/routes/metrics_summary_contracts.py |
