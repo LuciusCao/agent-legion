@@ -870,6 +870,7 @@
     "server/app/workflows/__init__.py": 11,
     "server/app/workflows/cms_helpers.py": 57,
     "server/app/workflows/comprehension_common.py": 44,
+    "server/app/workflows/comprehension_contract.py": 80,
     "server/app/workflows/comprehension_eligibility.py": 98,
     "server/app/workflows/conditions.py": 51,
     "server/app/workflows/definition.py": 41,
