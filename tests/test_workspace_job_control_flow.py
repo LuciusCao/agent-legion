@@ -23,8 +23,11 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
 from server.app.services.workflow_catalog import WorkflowCatalogService
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.storage_paths import resolve_job_dir
+from server.app.workflow_worker.execution import reap_futures
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
+from tests.helpers.auth import authenticate_client
 
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_KEY = "test_control_flow"
@@ -148,7 +151,7 @@ def _drain(worker: WorkflowWorkerThread, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         worker._poll()
-        worker._reap_futures()
+        reap_futures(worker)
         if not worker._futures and not worker._poll():
             # One more pass to claim any newly-ready nodes.
             break
@@ -206,8 +209,11 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
 
-    with TestClient(app) as client:
-        ws_response = client.post("/api/workspaces", json={"name": "Control Flow"})
+    with authenticate_client(TestClient(app)) as client:
+        ws_response = client.post(
+            "/api/workspaces",
+            json={"name": "Control Flow", "default_workflow_key": WORKFLOW_KEY},
+        )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
 
@@ -316,12 +322,13 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
         with zipfile.ZipFile(io.BytesIO(download_response.content)) as zf:
             names = zf.namelist()
-        assert any("prepare.json" in name for name in names)
-        assert any("merge.json" in name for name in names)
+        assert "manifest.json" in names
+        assert not any("prepare.json" in name for name in names)
+        assert not any("merge.json" in name for name in names)
 
         # 8. delete removes database rows, storage, and logs.
         job = app.state.job_db.get_job(job_id)
-        storage_dir = Path(str(job["storage_dir"]))
+        storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         log_dir = app.state.settings.logs_dir / "jobs"
         log_files = list(log_dir.glob(f"{job_id}-*.log"))
         assert storage_dir.exists()
@@ -357,8 +364,11 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
 
-    with TestClient(app) as client:
-        ws_response = client.post("/api/workspaces", json={"name": "Terminal State"})
+    with authenticate_client(TestClient(app)) as client:
+        ws_response = client.post(
+            "/api/workspaces",
+            json={"name": "Terminal State", "default_workflow_key": WORKFLOW_KEY},
+        )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
@@ -407,8 +417,11 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
 
-    with TestClient(app) as client:
-        ws_response = client.post("/api/workspaces", json={"name": "Paused State"})
+    with authenticate_client(TestClient(app)) as client:
+        ws_response = client.post(
+            "/api/workspaces",
+            json={"name": "Paused State", "default_workflow_key": WORKFLOW_KEY},
+        )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)

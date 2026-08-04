@@ -1,4 +1,5 @@
 from scripts.architecture.repository import check_repository
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
 def test_rejects_frontend_workflow_concurrency_contract(tmp_path):
@@ -9,9 +10,7 @@ def test_rejects_frontend_workflow_concurrency_contract(tmp_path):
         "export const read = (workflow: Workflow) => workflow.concurrency\n",
         encoding="utf-8",
     )
-    config = tmp_path / "config/architecture-budgets.json"
-    config.parent.mkdir(parents=True)
-    config.write_text('{"route_exemptions": [], "files": {}}', encoding="utf-8")
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 

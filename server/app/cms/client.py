@@ -1,18 +1,30 @@
-import os
 from dataclasses import dataclass
 from typing import Any
 
 import requests
 
-DEFAULT_KNOWLEDGE_URL = (
-    "http://cms.internal.example.com/v2/knowledge/detail?bank_version=v5&country_id=1&subject_id=2"
-)
-DEFAULT_QUESTION_URL = (
-    "http://cms.internal.example.com/v2/question/detail?bank_version=v5&country_id=1&subject_id=2"
-)
-DEFAULT_QUESTION_LIST_URL = (
-    "http://cms.internal.example.com/v2/question/list?bank_version=v5&country_id=1&subject_id=2"
-)
+from server.app.cms.env import resolve_cms_env
+
+
+class CmsClientError(RuntimeError):
+    pass
+
+
+def require_api_url(api_url: str | None, resource: str) -> str:
+    """Return the configured CMS URL or fail with migration guidance.
+
+    There is no built-in fallback host anymore (config governance G2): the URL
+    must come from ``cms.base_url`` (yaml) / ``CMS_BASE_URL`` (env), or
+    from an ``api_url`` bound in the workspace resource config.
+    """
+    url = str(api_url or "").strip()
+    if url:
+        return url
+    raise CmsClientError(
+        f"CMS {resource} URL is not configured: set cms.base_url in "
+        "config/agent_legion.yaml (or env CMS_BASE_URL), or bind api_url in "
+        "the workspace resource config"
+    )
 
 
 def _build_headers(token: str | None) -> dict[str, str]:
@@ -26,9 +38,12 @@ def _build_headers(token: str | None) -> dict[str, str]:
 
 
 def _fetch_json(url: str, params: dict[str, Any], token: str | None, timeout: int = 15) -> dict:
-    resp = requests.get(url, params=params, headers=_build_headers(token), timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()  # type: ignore[no-any-return]
+    try:
+        resp = requests.get(url, params=params, headers=_build_headers(token), timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
+    except (requests.RequestException, ValueError) as exc:
+        raise CmsClientError(f"CMS request failed: {exc}") from exc
 
 
 @dataclass(frozen=True)
@@ -44,7 +59,7 @@ def get_token(env: str, config: dict[str, Any] | None = None) -> str | None:
     from server.app.cms.auth import _generate_prod_token
 
     config = config or {}
-    token = os.environ.get("BASECMS_TOKEN")
+    token = resolve_cms_env("CMS_TOKEN")
     if token:
         return token
     token = config.get("token")

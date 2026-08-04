@@ -35,14 +35,12 @@ EXPECTED_OPERATIONS = {
         "/api/workspaces/{workspace_id}/settings/test-connection",
     ): "WorkspaceSettingsTestResponse",
     ("post", "/api/workspaces/{workspace_id}/job-batches"): "JobBatchResponse",
-    ("post", "/api/job-batches"): "JobBatchResponse",
     ("get", "/api/workspaces/{workspace_id}/jobs"): "JobsResponse",
     ("post", "/api/workspaces/{workspace_id}/jobs/batch-rerun"): "BatchJobMutationResponse",
     ("delete", "/api/workspaces/{workspace_id}/jobs/batch"): "BatchJobMutationResponse",
     ("post", "/api/workspaces/{workspace_id}/jobs/batch-run-to"): "BatchJobMutationResponse",
     ("get", "/api/workspaces/{workspace_id}/runs"): "WorkspaceRunsResponse",
     ("get", "/api/workspaces/{workspace_id}/dag"): "WorkspaceDagResponse",
-    ("get", "/api/jobs"): "JobsResponse",
     ("get", "/api/jobs/{job_id}"): "JobDetailResponse",
     ("delete", "/api/jobs/{job_id}"): "DeleteJobResponse",
     ("post", "/api/jobs/{job_id}/nodes/{node_key}/rerun"): "JobMutationResultResponse",
@@ -50,6 +48,9 @@ EXPECTED_OPERATIONS = {
     ("post", "/api/jobs/{job_id}/continue"): "JobMutationResultResponse",
     ("get", "/api/jobs/{job_id}/artifacts/{artifact_name}"): "ArtifactResponse",
     ("get", "/api/jobs/{job_id}/runs/{run_id}/log"): "JobLogResponse",
+    ("get", "/api/jobs/{job_id}/runs/{run_id}/token-usage"): "TokenUsageRunResponse",
+    ("get", "/api/jobs/{job_id}/token-usage"): "TokenUsageJobResponse",
+    ("get", "/api/workspaces/{workspace_id}/token-usage"): "TokenUsageWorkspaceResponse",
     ("get", "/api/jobs/{job_id}/{invalid_path}"): "ArtifactResponse",
 }
 
@@ -115,18 +116,35 @@ def test_workspace_job_error_contract(client, method, path, expected_status, exp
     assert response.json() == {"detail": expected_detail}
 
 
+def test_catch_all_router_does_not_shadow_job_log_endpoint(client):
+    """Regression: the `/jobs/{job_id}/{invalid_path:path}` catch-all must be
+    registered after `/jobs/{job_id}/runs/{run_id}/log`, otherwise valid log
+    requests are misrouted and return 'Invalid job path' instead of 'Run not found'.
+    """
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/jobs/{job_id}/runs/999/log")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Run not found"}
+
+
 def _create_test_job(client):
+    ws_response = client.post(
+        "/api/workspaces",
+        json={"name": "test_ws", "default_workflow_key": "question_comprehension_info"},
+    )
+    assert ws_response.status_code == 200
+    workspace_id = ws_response.json()["workspace"]["id"]
     response = client.post(
-        "/api/job-batches",
+        f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "workflow_key": "question_content",
-            "source_kind": "direct_ids",
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
             "question_ids": ["Q001"],
             "knowledge_codes": [],
         },
     )
     assert response.status_code == 200
-    return response.json()["jobs"][0]["id"]
+    return workspace_id, response.json()["jobs"][0]["id"]
 
 
 def _assert_job_summary(summary: JobSummaryResponse) -> None:
@@ -134,6 +152,7 @@ def _assert_job_summary(summary: JobSummaryResponse) -> None:
     assert isinstance(summary.total_nodes, int)
     assert summary.active_node_key is None or isinstance(summary.active_node_key, str)
     assert isinstance(summary.error_summary, str)
+    assert isinstance(summary.packed, int)
     assert isinstance(summary.execution_control, ExecutionControlSummaryResponse)
     assert isinstance(summary.node_summaries, list)
     for node_summary in summary.node_summaries:
@@ -145,8 +164,8 @@ def _assert_job_summary(summary: JobSummaryResponse) -> None:
 
 
 def test_get_jobs_returns_typed_job_summaries(client):
-    job_id = _create_test_job(client)
-    response = client.get("/api/jobs")
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs")
     assert response.status_code == 200
     body = JobsResponse.model_validate(response.json())
     summary = next(job for job in body.jobs if job.id == job_id)
@@ -154,8 +173,8 @@ def test_get_jobs_returns_typed_job_summaries(client):
 
 
 def test_get_workspace_jobs_returns_typed_job_summaries(client):
-    job_id = _create_test_job(client)
-    response = client.get("/api/workspaces/default/jobs")
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs")
     assert response.status_code == 200
     body = JobsResponse.model_validate(response.json())
     summary = next(job for job in body.jobs if job.id == job_id)
@@ -163,7 +182,7 @@ def test_get_workspace_jobs_returns_typed_job_summaries(client):
 
 
 def test_get_job_detail_returns_typed_job_summary(client):
-    job_id = _create_test_job(client)
+    workspace_id, job_id = _create_test_job(client)
     response = client.get(f"/api/jobs/{job_id}")
     assert response.status_code == 200
     body = JobDetailResponse.model_validate(response.json())
@@ -172,3 +191,22 @@ def test_get_job_detail_returns_typed_job_summary(client):
     assert isinstance(body.nodes, list)
     assert isinstance(body.runs, list)
     assert isinstance(body.artifacts, list)
+
+
+def test_get_jobs_returns_absolute_storage_dir(client):
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs")
+    assert response.status_code == 200
+    body = response.json()
+    summary = next(job for job in body["jobs"] if job["id"] == job_id)
+    assert Path(summary["storage_dir"]).is_absolute()
+    assert summary["storage_dir"].endswith(f"{workspace_id}/{job_id}")
+
+
+def test_get_job_detail_returns_absolute_storage_dir(client):
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert Path(body["job"]["storage_dir"]).is_absolute()
+    assert body["job"]["storage_dir"].endswith(f"{workspace_id}/{job_id}")

@@ -97,6 +97,25 @@ class FakeLeaseRepository:
         return True
 
 
+class SequencedLeaseRepository:
+    """Lease repository that returns heartbeat states from a sequence."""
+
+    def __init__(self, states: list[bool]) -> None:
+        self.states = states
+        self.heartbeats: list[tuple[str, int]] = []
+        self.finished: list[tuple[str, ExecutionResult]] = []
+
+    def heartbeat(self, lease_id: str, ttl_seconds: int) -> bool:
+        self.heartbeats.append((lease_id, ttl_seconds))
+        if not self.states:
+            return True
+        return self.states.pop(0)
+
+    def finish(self, lease_id: str, result: ExecutionResult) -> bool:
+        self.finished.append((lease_id, result))
+        return True
+
+
 class FakeRegistry:
     """Registry that always returns the configured fake executor."""
 
@@ -222,7 +241,7 @@ def test_runtime_periodic_heartbeat(job_dir: Path) -> None:
 
     thread, holder = _run_in_thread(runtime, claim, context)
     try:
-        executor.execute_started.wait(timeout=1.0)
+        assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
         # Wait long enough for at least one heartbeat to fire.
         time.sleep(0.05)
         assert len(leases.heartbeats) >= 1
@@ -255,7 +274,7 @@ def test_runtime_lost_lease_cancels_and_fails(job_dir: Path) -> None:
 
     thread, holder = _run_in_thread(runtime, claim, context)
     try:
-        executor.execute_started.wait(timeout=1.0)
+        assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
         # Wait for the heartbeat thread to detect the lost lease and cancel.
         thread.join(timeout=1.0)
     finally:
@@ -270,6 +289,36 @@ def test_runtime_lost_lease_cancels_and_fails(job_dir: Path) -> None:
     assert claim.execution_id in executor.cancel_calls
     assert len(leases.finished) == 1
     assert leases.finished[0][0] == claim.lease_id
+
+
+def test_runtime_tolerates_transient_heartbeat_failure(job_dir: Path) -> None:
+    executor = FakeExecutor("fake")
+    leases = SequencedLeaseRepository([False, True, True])
+    registry = FakeRegistry(executor)
+    runtime = ExecutionRuntime(
+        leases=leases,
+        registry=registry,
+        heartbeat_interval_seconds=0.01,
+        lease_ttl_seconds=90,
+        heartbeat_failure_threshold=2,
+    )
+    claim = _make_claim()
+    context = _make_context(claim, job_dir)
+
+    thread, holder = _run_in_thread(runtime, claim, context)
+    try:
+        assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
+        time.sleep(0.05)
+        executor.unblock()
+    finally:
+        thread.join(timeout=1.0)
+        if thread.is_alive():
+            executor.unblock()
+            thread.join(timeout=1.0)
+
+    assert holder["result"].status == "completed"
+    assert executor.cancel_calls == []
+    assert len(leases.finished) == 1
 
 
 def test_runtime_cancellation_result_finishes_lease(job_dir: Path) -> None:
@@ -292,3 +341,28 @@ def test_runtime_cancellation_result_finishes_lease(job_dir: Path) -> None:
     assert len(leases.finished) == 1
     assert leases.finished[0][0] == claim.lease_id
     assert leases.finished[0][1] == result
+
+
+def test_runtime_result_log_path_remains_absolute(job_dir: Path) -> None:
+    context_log_path = job_dir / "run.log"
+    executor = FakeExecutor(
+        "fake",
+        result=ExecutionResult(status="completed", exit_code=0, log_path=str(context_log_path)),
+    )
+    leases = FakeLeaseRepository()
+    registry = FakeRegistry(executor)
+    runtime = ExecutionRuntime(
+        leases=leases,
+        registry=registry,
+        heartbeat_interval_seconds=0.01,
+        lease_ttl_seconds=30,
+    )
+    claim = _make_claim()
+    context = _make_context(claim, job_dir)
+
+    result = runtime.run(claim, context)
+
+    assert result.log_path == str(context_log_path)
+    assert Path(result.log_path).is_absolute()
+    assert len(leases.finished) == 1
+    assert leases.finished[0][1].log_path == str(context_log_path)

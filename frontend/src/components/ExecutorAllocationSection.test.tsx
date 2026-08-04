@@ -11,7 +11,7 @@ const catalog = [
     global_capacity: 4,
   },
   {
-    id: 'pi-default',
+    id: 'pi',
     kind: 'pi' as const,
     capabilities: ['review'],
     global_capacity: 2,
@@ -43,7 +43,7 @@ describe('ExecutorAllocationSection', () => {
     render(<ExecutorAllocationSection />)
 
     expect(screen.getByText('local-default')).toBeInTheDocument()
-    expect(screen.getByText('pi-default')).toBeInTheDocument()
+    expect(screen.getByLabelText('分配 pi')).toBeInTheDocument()
     expect(screen.getByText('openclaw-main')).toBeInTheDocument()
     expect(screen.getAllByText('local').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('pi').length).toBeGreaterThanOrEqual(1)
@@ -59,10 +59,10 @@ describe('ExecutorAllocationSection', () => {
   it('allocation toggle is off when the workspace has no allocation', () => {
     render(<ExecutorAllocationSection />)
 
-    const switches = document.querySelectorAll('md-switch')
+    const switches = screen.getAllByRole('checkbox')
     expect(switches.length).toBe(catalog.length)
     switches.forEach((switchEl) => {
-      expect(switchEl).not.toHaveAttribute('selected')
+      expect(switchEl).not.toBeChecked()
     })
   })
 
@@ -84,11 +84,9 @@ describe('ExecutorAllocationSection', () => {
 
     render(<ExecutorAllocationSection />)
 
-    const inputs = document.querySelectorAll(
-      'md-outlined-text-field[label="工作空间上限"]'
-    )
+    const inputs = screen.getAllByLabelText('工作空间上限')
     expect(inputs.length).toBe(1)
-    expect(inputs[0]).toHaveAttribute('value', '2')
+    expect(inputs[0]).toHaveValue(2)
   })
 
   it('input min is 1 and max is the executor global capacity', () => {
@@ -109,9 +107,7 @@ describe('ExecutorAllocationSection', () => {
 
     render(<ExecutorAllocationSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="工作空间上限"]'
-    )
+    const input = screen.getByLabelText('工作空间上限')
     expect(input).toHaveAttribute('min', '1')
     expect(input).toHaveAttribute('max', '4')
   })
@@ -134,7 +130,9 @@ describe('ExecutorAllocationSection', () => {
 
     render(<ExecutorAllocationSection />)
 
-    const switchEl = document.querySelector('md-switch') as HTMLElement
+    const switchEl = screen.getByRole('checkbox', {
+      name: /分配 local-default/,
+    })
     fireEvent.click(switchEl)
 
     await waitFor(() => {
@@ -169,7 +167,9 @@ describe('ExecutorAllocationSection', () => {
 
     render(<ExecutorAllocationSection />)
 
-    const switchEl = document.querySelector('md-switch') as HTMLElement
+    const switchEl = screen.getByRole('checkbox', {
+      name: /分配 local-default/,
+    })
     fireEvent.click(switchEl)
 
     await waitFor(() => {
@@ -204,7 +204,9 @@ describe('ExecutorAllocationSection', () => {
 
     render(<ExecutorAllocationSection />)
 
-    const switchEl = document.querySelector('md-switch') as HTMLElement
+    const switchEl = screen.getByRole('checkbox', {
+      name: /分配 local-default/,
+    })
     fireEvent.click(switchEl)
 
     await waitFor(() => {
@@ -254,7 +256,9 @@ describe('ExecutorAllocationSection', () => {
 
     render(<ExecutorAllocationSection />)
 
-    const switchEl = document.querySelector('md-switch') as HTMLElement
+    const switchEl = screen.getByRole('checkbox', {
+      name: /分配 local-default/,
+    })
     fireEvent.click(switchEl)
 
     await waitFor(() => {

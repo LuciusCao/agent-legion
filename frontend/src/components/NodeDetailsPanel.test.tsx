@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from '@testing-library/react'
 import { describe, it, expect, vi } from 'vitest'
 import { NodeDetailsPanel } from './NodeDetailsPanel'
-import type { DagNodeData } from './DagNode'
+import type { DagNodeData } from './dag/DagNode'
 import type { components } from '../generated/api'
 
 const baseData: DagNodeData = {
@@ -25,6 +25,7 @@ const baseRun: components['schemas']['NodeRunResponse'] = {
   node_key: 'generate_summary',
   run_dir: '/tmp/run',
   session_dir: '/tmp/session',
+  runner: '',
 }
 
 describe('NodeDetailsPanel', () => {
@@ -75,10 +76,13 @@ describe('NodeDetailsPanel', () => {
     ['running', 'hourglass_empty', '运行中'],
     ['completed', 'check_circle', '已完成'],
     ['failed', 'error', '失败'],
-    ['stale', 'warning', '过期'],
+    ['stale', 'warning', '需重跑'],
+    ['ready', 'play_circle', '就绪'],
+    ['not_applicable', 'block', '不适用'],
   ] as const)(
     'renders %s status with icon %s and label %s',
     (status, icon, label) => {
+      void icon
       render(
         <NodeDetailsPanel
           nodeKey="generate_summary"
@@ -87,7 +91,7 @@ describe('NodeDetailsPanel', () => {
           onViewLogs={vi.fn()}
         />
       )
-      expect(screen.getByText(icon)).toBeInTheDocument()
+      expect(screen.getByTestId(`node-icon-${status}`)).toBeInTheDocument()
       expect(screen.getByText(label)).toBeInTheDocument()
     }
   )
@@ -104,6 +108,44 @@ describe('NodeDetailsPanel', () => {
     const button = screen.getByText('查看日志')
     expect(button).toBeInTheDocument()
     expect(button).toHaveAttribute('type', 'button')
+  })
+
+  it('shows the runner in the latest run card when present', () => {
+    render(
+      <NodeDetailsPanel
+        nodeKey="generate_summary"
+        data={baseData}
+        latestRun={{
+          id: 3,
+          status: 'completed',
+          started_at: '2026-07-18 10:00:00.000000',
+          exit_code: 0,
+          error_message: '',
+          runner: 'mac-mini-3',
+        }}
+        onViewLogs={vi.fn()}
+      />
+    )
+    expect(screen.getByText(/mac-mini-3/)).toBeInTheDocument()
+  })
+
+  it('omits the runner badge when empty', () => {
+    render(
+      <NodeDetailsPanel
+        nodeKey="generate_summary"
+        data={baseData}
+        latestRun={{
+          id: 3,
+          status: 'completed',
+          started_at: '2026-07-18 10:00:00.000000',
+          exit_code: 0,
+          error_message: '',
+          runner: '',
+        }}
+        onViewLogs={vi.fn()}
+      />
+    )
+    expect(screen.queryByText(/Runner/)).not.toBeInTheDocument()
   })
 
   it('renders error_message when latestRun has one', () => {

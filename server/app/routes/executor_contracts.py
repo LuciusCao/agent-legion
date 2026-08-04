@@ -1,17 +1,8 @@
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-
-class ExecutorDefinitionResponse(BaseModel):
-    id: str
-    kind: Literal["local", "pi", "openclaw"]
-    global_capacity: int = Field(ge=1)
-    capabilities: list[str]
-
-
-class ExecutorCatalogResponse(BaseModel):
-    executors: list[ExecutorDefinitionResponse]
+from server.app.routes.workspace_contracts import ResourceBinding, WorkspaceRecord
 
 
 class ExecutorAllocationRequest(BaseModel):
@@ -40,6 +31,20 @@ class WorkspaceExecutorConfigurationResponse(BaseModel):
     bindings: list[NodeBindingRequest]
     node_limits: list[NodeLimitRequest]
     migration_warnings: list[str]
+    agent_capacity: int | None = None
+
+
+class WorkspaceAgentRouteEntry(BaseModel):
+    workflow_key: str
+    node_key: str
+    node_label: str
+    capability: str
+    agent_id: str
+    agent_skill: str
+
+
+class WorkspaceAgentRoutesResponse(BaseModel):
+    routes: list[WorkspaceAgentRouteEntry]
 
 
 class WorkspaceSettingsPayload(BaseModel):
@@ -47,7 +52,7 @@ class WorkspaceSettingsPayload(BaseModel):
     intakeModes: list[str]
     labelOverrides: dict[str, str]
     workflowKey: str
-    resources: dict[str, Any]
+    resources: dict[str, ResourceBinding]
 
 
 class WorkspaceConfigurationSettingsRequest(BaseModel):
@@ -69,9 +74,12 @@ class WorkspaceConfigurationRequest(BaseModel):
     executor_allocations: list[ExecutorAllocationRequest] = Field(default_factory=list)
     node_bindings: list[NodeBindingRequest] = Field(default_factory=list)
     node_limits: list[NodeLimitRequest] = Field(default_factory=list)
+    # Workspace-level Agent concurrency limit; null/absent leaves it unchanged.
+    agent_capacity: int | None = Field(default=None, ge=1)
 
 
 class WorkspaceConfigurationResponse(BaseModel):
-    workspace: dict[str, Any]
+    workspace: WorkspaceRecord
     settings: WorkspaceSettingsPayload
     executor_configuration: WorkspaceExecutorConfigurationResponse
+    agent_capacity: int | None = None

@@ -1,7 +1,10 @@
 import pytest
 from pydantic import ValidationError
 
-from server.app.executors.config import load_executor_definitions
+from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
+from server.app.executors.config import LocalExecutorConfig
+from server.app.executors.definitions import load_executor_definitions
+from server.app.executors.kinds import UnknownExecutorKindError
 
 
 def test_loads_discriminated_executor_definitions() -> None:
@@ -11,7 +14,7 @@ def test_loads_discriminated_executor_definitions() -> None:
                 "kind": "local",
                 "global_capacity": 4,
                 "capabilities": {
-                    "fetch_questions": {"handler": "reading_analysis.fetch_questions"}
+                    "fetch_questions": {"handler": "question_comprehension_info.fetch_questions"}
                 },
             },
             "pi-default": {
@@ -19,7 +22,7 @@ def test_loads_discriminated_executor_definitions() -> None:
                 "global_capacity": 8,
                 "capabilities": {
                     "review_keywords": {
-                        "skill": "reading_analysis/review_keywords",
+                        "skill": "question_comprehension_info/review_key_info",
                         "tools": ["read", "write", "bash"],
                     }
                 },
@@ -45,7 +48,7 @@ def test_rejects_non_positive_global_capacity(capacity: object) -> None:
 
 
 def test_rejects_unknown_executor_kind() -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(UnknownExecutorKindError, match="'bad'.*unknown kind 'unknown'"):
         load_executor_definitions(
             {"bad": {"kind": "unknown", "global_capacity": 1, "capabilities": {}}}
         )
@@ -58,7 +61,9 @@ def test_rejects_empty_capability_name() -> None:
                 "local-default": {
                     "kind": "local",
                     "global_capacity": 4,
-                    "capabilities": {"": {"handler": "reading_analysis.fetch_questions"}},
+                    "capabilities": {
+                        "": {"handler": "question_comprehension_info.fetch_questions"}
+                    },
                 }
             }
         )
@@ -73,6 +78,58 @@ def test_rejects_unsafe_pi_skill_path(skill: str) -> None:
                     "kind": "pi",
                     "global_capacity": 8,
                     "capabilities": {"review_keywords": {"skill": skill}},
+                }
+            }
+        )
+
+
+def test_loads_local_capability_config_schema() -> None:
+    definitions = load_executor_definitions(
+        {
+            "local-default": {
+                "kind": "local",
+                "global_capacity": 4,
+                "capabilities": {
+                    "fetch_questions": {
+                        "handler": "question_comprehension_info.fetch_questions",
+                        "config_schema": {
+                            "type": "object",
+                            "properties": {"bank_version": {"type": "string"}},
+                        },
+                    }
+                },
+            }
+        }
+    )
+    local = definitions["local-default"]
+    assert isinstance(local, LocalExecutorConfig)
+    assert local.capabilities["fetch_questions"].config_schema == {
+        "type": "object",
+        "properties": {"bank_version": {"type": "string"}},
+    }
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "array"},
+        {"type": "object", "properties": {"x": {"type": "weird"}}},
+        {"type": "object", "properties": {"x": {"type": "integer", "default": "nan"}}},
+    ],
+)
+def test_rejects_invalid_local_capability_config_schema(schema: object) -> None:
+    with pytest.raises(ValidationError):
+        load_executor_definitions(
+            {
+                "local-default": {
+                    "kind": "local",
+                    "global_capacity": 4,
+                    "capabilities": {
+                        "fetch_questions": {
+                            "handler": "question_comprehension_info.fetch_questions",
+                            "config_schema": schema,
+                        }
+                    },
                 }
             }
         )

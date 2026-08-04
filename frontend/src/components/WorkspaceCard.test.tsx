@@ -53,7 +53,7 @@ describe('WorkspaceCard', () => {
   it('calls onClick when clicked', () => {
     const props = createProps()
     render(<WorkspaceCard {...props} />)
-    const card = screen.getByRole('button')
+    const card = screen.getByTestId('workspace-card')
     fireEvent.click(card)
     expect(props.onClick).toHaveBeenCalledTimes(1)
   })
@@ -61,7 +61,7 @@ describe('WorkspaceCard', () => {
   it('calls onClick on Enter key', () => {
     const props = createProps()
     render(<WorkspaceCard {...props} />)
-    const card = screen.getByRole('button')
+    const card = screen.getByTestId('workspace-card')
     fireEvent.keyDown(card, { key: 'Enter' })
     expect(props.onClick).toHaveBeenCalledTimes(1)
   })
@@ -69,58 +69,8 @@ describe('WorkspaceCard', () => {
   it('calls onClick on Space key', () => {
     const props = createProps()
     render(<WorkspaceCard {...props} />)
-    const card = screen.getByRole('button')
+    const card = screen.getByTestId('workspace-card')
     fireEvent.keyDown(card, { key: ' ' })
     expect(props.onClick).toHaveBeenCalledTimes(1)
-  })
-
-  it('shows delete button for non-system workspaces', () => {
-    const onDelete = vi.fn()
-    const { container } = render(
-      <WorkspaceCard {...createProps({ isSystem: false, onDelete })} />
-    )
-    const deleteBtn = container.querySelector('md-icon-button')
-    expect(deleteBtn).toBeInTheDocument()
-  })
-
-  it('hides delete button for system workspaces', () => {
-    const onDelete = vi.fn()
-    const { container } = render(
-      <WorkspaceCard {...createProps({ isSystem: true, onDelete })} />
-    )
-    const deleteBtn = container.querySelector('md-icon-button')
-    expect(deleteBtn).not.toBeInTheDocument()
-  })
-
-  it('hides delete button when onDelete is not provided', () => {
-    const { container } = render(
-      <WorkspaceCard
-        {...createProps({ isSystem: false, onDelete: undefined })}
-      />
-    )
-    const deleteBtn = container.querySelector('md-icon-button')
-    expect(deleteBtn).not.toBeInTheDocument()
-  })
-
-  it('calls onDelete when delete button is clicked', () => {
-    const onDelete = vi.fn()
-    const { container } = render(
-      <WorkspaceCard {...createProps({ isSystem: false, onDelete })} />
-    )
-    const deleteBtn = container.querySelector('md-icon-button')!
-    fireEvent.click(deleteBtn)
-    expect(onDelete).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not call onClick when delete button is clicked', () => {
-    const onClick = vi.fn()
-    const onDelete = vi.fn()
-    const { container } = render(
-      <WorkspaceCard {...createProps({ onClick, isSystem: false, onDelete })} />
-    )
-    const deleteBtn = container.querySelector('md-icon-button')!
-    fireEvent.click(deleteBtn)
-    expect(onClick).not.toHaveBeenCalled()
-    expect(onDelete).toHaveBeenCalledTimes(1)
   })
 })

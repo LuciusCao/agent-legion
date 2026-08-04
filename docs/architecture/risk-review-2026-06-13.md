@@ -1,4 +1,4 @@
-# Video Hive 架构风险 Review 报告
+# Agent Legion 架构风险 Review 报告
 
 **日期**：2026-06-13  
 **分支**：`codex/workspace-executor-governance`  
@@ -9,7 +9,7 @@
 
 ## 1. 总体结论
 
-Video Hive 当前是一个**功能成熟、架构门禁完善**的本地教育视频处理控制台。Phase 5/6 的 executor governance 规则已经在代码和门禁中落地，大部分明显越界（如 route 直接调用 Video Hive phase、service 导入 FastAPI、手写前端 transport 类型等）都能被 `scripts/check_architecture.py` 拦截。
+Agent Legion 当前是一个**功能成熟、架构门禁完善**的本地教育视频处理控制台。Phase 5/6 的 executor governance 规则已经在代码和门禁中落地，大部分明显越界（如 route 直接调用 legacy video pipeline phase、service 导入 FastAPI、手写前端 transport 类型等）都能被 `scripts/check_architecture.py` 拦截。
 
 但系统在以下方面仍存在显著风险：
 
@@ -85,7 +85,7 @@ Video Hive 当前是一个**功能成熟、架构门禁完善**的本地教育�
 - **位置**：`config/pipeline.yaml:17-36`
 - **问题**：
   - `cms.token_gen.secret`、`cms.token` 明文存放；
-  - 使用 macOS 专属绝对路径（`/opt/homebrew/...`、`/Users/user/...`）。
+  - 使用 macOS 专属绝对路径（`/opt/homebrew/...`、`/Users/<user>/...`）。
 - **风险**：
   - 密钥易误提交；
   - 跨平台 / 容器部署直接失败；
@@ -263,11 +263,11 @@ Video Hive 当前是一个**功能成熟、架构门禁完善**的本地教育�
 
 ---
 
-## 8. 相关 Open Issues
+## 8. 相关已知问题
 
-以下已存在的 issue 与本报告发现高度相关：
+以下已知问题与本报告发现高度相关（内部 issue 跟踪，未随仓库公开）：
 
-- `issues/open/008-P2-backend-data-layer-edge-cases.md`：`.env` 解析、`assemble.py` 空字幕、`_broadcast` 静默失败、日志分页。
-- `issues/open/011-P2-testing-and-architecture-debt.md`：`AgentStatusManager` 职责混杂、`Database` 类耦合事件通知。
-- `issues/open/028-P1-test-coverage-gaps.md`：`pipelines/skills.py` 0% 覆盖、`routes/packages.py` 覆盖不足。
-- `issues/open/035-P2-cors-middleware-config.md`：生产前端 API target / CORS 未解决。
+- 后端数据层边界情况：`.env` 解析、`assemble.py` 空字幕、`_broadcast` 静默失败、日志分页。
+- 测试与架构债务：`AgentStatusManager` 职责混杂、`Database` 类耦合事件通知。
+- 测试覆盖缺口：`pipelines/skills.py` 0% 覆盖、`routes/packages.py` 覆盖不足。
+- CORS 中间件配置：生产前端 API target / CORS 未解决。

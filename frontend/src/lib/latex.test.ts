@@ -4,6 +4,7 @@ import {
   extractLatexParts,
   sanitizeLatex,
   renderLatexInHtml,
+  normalizeLatexForKatex,
 } from './latex'
 
 describe('decodeHtmlEntities', () => {
@@ -122,6 +123,24 @@ describe('sanitizeLatex', () => {
   })
 })
 
+describe('normalizeLatexForKatex', () => {
+  it('converts MathType array repetition syntax to a KaTeX column', () => {
+    expect(
+      normalizeLatexForKatex(
+        '\\left\\{{\\begin{array}{*{20}{l}}{x+y=22}\\\\{2x+y=40}\\end{array}}\\right.'
+      )
+    ).toBe(
+      '\\left\\{{\\begin{array}{l}{x+y=22}\\\\{2x+y=40}\\end{array}}\\right.'
+    )
+  })
+
+  it('leaves supported array declarations unchanged', () => {
+    expect(normalizeLatexForKatex('\\begin{array}{cc}a&b\\end{array}')).toBe(
+      '\\begin{array}{cc}a&b\\end{array}'
+    )
+  })
+})
+
 describe('renderLatexInHtml', () => {
   it('renders latex in plain text within html', () => {
     const html = '<p>面积 $S=\\pi r^2$ 公式</p>'
@@ -143,6 +162,14 @@ describe('renderLatexInHtml', () => {
     const result = renderLatexInHtml(html)
     expect(result).toContain('katex')
     expect(result).toContain('x = ')
+  })
+
+  it('renders MathType array repetition syntax', () => {
+    const html =
+      '<p>$\\left\\{{\\begin{array}{*{20}{l}}{x+y=22}\\\\{2x+y=40}\\end{array}}\\right.$</p>'
+    const result = renderLatexInHtml(html)
+    expect(result).toContain('katex')
+    expect(result).not.toContain('*{20}{l}')
   })
 
   it('downgrades display formula to inline', () => {

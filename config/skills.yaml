@@ -1,0 +1,28 @@
+skills:
+  question_comprehension_info/assess_comprehension_difficulty:
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
+    ref: v1.1.8
+  question_comprehension_info/generate_key_info:
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
+    ref: v1.3.9
+  question_comprehension_info/generate_possible_errors:
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
+    ref: v1.3.5
+  question_comprehension_info/review_key_info:
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_key_info
+    ref: v1.1.12
+  question_comprehension_info/review_possible_errors:
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
+    ref: v1.3.6
+  video_knowledge/generate_chapters:
+    repo: ~/.agents/skills/agent-legion/video_knowledge/generate_chapters
+    ref: v1.0.2
+  video_knowledge/generate_interactions:
+    repo: ~/.agents/skills/agent-legion/video_knowledge/generate_interactions
+    ref: v1.0.3
+  video_knowledge/review_subtitles:
+    repo: ~/.agents/skills/agent-legion/video_knowledge/review_subtitles
+    ref: v1.0.3
+  video_knowledge/review_video_content:
+    repo: ~/.agents/skills/agent-legion/video_knowledge/review_video_content
+    ref: v1.0.4

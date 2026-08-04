@@ -1,6 +1,18 @@
 import asyncio
 import json
 import subprocess
+from types import SimpleNamespace
+
+
+class _FakeAuthService:
+    def authenticate(self, token):
+        return {"id": "u1", "role": "admin"}
+
+
+_FAKE_WS_ATTRS = {
+    "cookies": {"agent_legion_session": "tok"},
+    "app": SimpleNamespace(state=SimpleNamespace(auth_service=_FakeAuthService())),
+}
 
 
 def test_agents_websocket_sends_initial_list(client, monkeypatch):
@@ -18,10 +30,11 @@ def test_agents_websocket_sends_initial_list(client, monkeypatch):
 
     with client.websocket_connect("/api/agents") as ws:
         data = ws.receive_json()
-        assert len(data) == 1
-        assert data[0]["id"] == "main"
-        assert data[0]["name"] == "Main"
-        assert data[0]["busy"] is False
+        assert data["type"] == "snapshot"
+        assert len(data["agents"]) == 1
+        assert data["agents"][0]["id"] == "main"
+        assert data["agents"][0]["name"] == "Main"
+        assert data["agents"][0]["busy"] is False
 
 
 def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
@@ -38,7 +51,8 @@ def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
     agent_manager.discover()
 
     with client.websocket_connect("/api/agents") as ws:
-        ws.receive_json()
+        snapshot = ws.receive_json()
+        assert snapshot["type"] == "snapshot"
         agent_manager.set_busy(
             "main",
             {
@@ -50,151 +64,83 @@ def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
             },
         )
         data = ws.receive_json()
-        assert data[0]["busy"] is True
-        assert data[0]["current_video_id"] == "v1"
-        assert data[0]["current_title"] == "T1"
+        assert data["type"] == "agent_busy"
+        assert data["agent"]["id"] == "main"
+        assert data["agent"]["busy"] is True
+        assert data["agent"]["current_video_id"] == "v1"
+        assert data["agent"]["current_title"] == "T1"
 
         agent_manager.set_idle("main")
         data = ws.receive_json()
-        assert data[0]["busy"] is False
-        assert data[0]["current_video_id"] is None
+        assert data["type"] == "agent_idle"
+        assert data["agent"]["busy"] is False
+        assert data["agent"]["current_video_id"] is None
 
 
-def test_video_event_manager_broadcast():
-    import asyncio
-    import json
+def test_agents_websocket_clean_disconnect_stays_silent(caplog):
+    import logging
 
-    from server.app.events import VideoEventManager
+    from fastapi import WebSocketDisconnect
+    from fastapi.routing import APIWebSocketRoute
 
-    async def _test():
-        manager = VideoEventManager()
-        manager._loop = asyncio.get_running_loop()
-        queue = asyncio.Queue()
-        manager._clients.add(queue)
+    from server.app.agents import AgentStatusManager
+    from server.app.routes.agents import create_agents_router
 
-        manager.broadcast({"id": "v1", "status": "running"})
-        await asyncio.sleep(0)  # yield so call_soon callback runs
-        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
-        data = json.loads(payload)
-        assert data["type"] == "video_updated"
-        assert data["video"]["id"] == "v1"
+    class _FakeWebSocket:
+        cookies = _FAKE_WS_ATTRS["cookies"]
+        app = _FAKE_WS_ATTRS["app"]
 
-        manager.broadcast_delete("v1")
-        await asyncio.sleep(0)
-        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
-        data = json.loads(payload)
-        assert data["type"] == "video_deleted"
-        assert data["video_id"] == "v1"
+        async def accept(self):
+            pass
 
-    asyncio.run(_test())
+        async def send_json(self, data):
+            pass
 
-
-def test_video_event_manager_max_clients():
-    import asyncio
-    from unittest.mock import MagicMock
-
-    from server.app.events import VideoEventManager
+        async def receive_text(self):
+            raise WebSocketDisconnect()
 
     async def _test():
-        manager = VideoEventManager()
-        manager._loop = asyncio.get_running_loop()
-
-        for _ in range(VideoEventManager.MAX_CLIENTS + 5):
-            await manager.connect(MagicMock())
-
-        assert len(manager._clients) == VideoEventManager.MAX_CLIENTS
+        manager = AgentStatusManager()
+        router = create_agents_router(manager)
+        ws_route = next(r for r in router.routes if isinstance(r, APIWebSocketRoute))
+        ws = _FakeWebSocket()
+        with caplog.at_level(logging.WARNING, logger="server.app.routes.agents"):
+            await ws_route.endpoint(ws)
+        assert ws not in manager._clients
 
     asyncio.run(_test())
+    assert caplog.records == []
 
 
-def test_video_event_manager_queue_full_cleanup():
-    import asyncio
+def test_agents_websocket_logs_unexpected_receive_error(caplog):
+    import logging
 
-    from server.app.events import VideoEventManager
+    from fastapi.routing import APIWebSocketRoute
+
+    from server.app.agents import AgentStatusManager
+    from server.app.routes.agents import create_agents_router
+
+    class _FakeWebSocket:
+        cookies = _FAKE_WS_ATTRS["cookies"]
+        app = _FAKE_WS_ATTRS["app"]
+
+        async def accept(self):
+            pass
+
+        async def send_json(self, data):
+            pass
+
+        async def receive_text(self):
+            raise RuntimeError("boom")
 
     async def _test():
-        manager = VideoEventManager()
-        manager._loop = asyncio.get_running_loop()
-        full_queue = asyncio.Queue(maxsize=1)
-        full_queue.put_nowait("block")
-        manager._clients.add(full_queue)
+        manager = AgentStatusManager()
+        router = create_agents_router(manager)
+        ws_route = next(r for r in router.routes if isinstance(r, APIWebSocketRoute))
+        ws = _FakeWebSocket()
+        await ws_route.endpoint(ws)
+        assert ws not in manager._clients
 
-        normal_queue = asyncio.Queue()
-        manager._clients.add(normal_queue)
-
-        manager.broadcast({"id": "v1", "status": "running"})
-        await asyncio.sleep(0)
-
-        # Full queue should have been evicted
-        assert full_queue not in manager._clients
-        # Normal queue should have received the message
-        payload = await asyncio.wait_for(normal_queue.get(), timeout=1.0)
-        assert "v1" in payload
-
-    asyncio.run(_test())
-
-
-def test_database_broadcast_on_create_and_delete(client):
-    import json
-
-    async def _test():
-        event_manager = client.app.state.video_event_manager
-        event_manager._loop = asyncio.get_running_loop()
-
-        queue = asyncio.Queue()
-        event_manager._clients.add(queue)
-
-        # Create video triggers broadcast (create_video + update_video may both fire)
-        created = client.post(
-            "/api/videos",
-            json={
-                "items": [
-                    {
-                        "url": "https://example.com/sse_test.mp4",
-                        "title": "SSE Test",
-                        "content_type": "knowledge",
-                        "external_id": "SSE001",
-                    }
-                ]
-            },
-        )
-        assert created.status_code == 200
-        video_id = created.json()["videos"][0]["id"]
-
-        await asyncio.sleep(0)
-        # Drain creation events
-        while not queue.empty():
-            await queue.get()
-
-        # Delete video triggers broadcast_delete
-        deleted = client.delete(f"/api/videos/{video_id}")
-        assert deleted.status_code == 200
-
-        await asyncio.sleep(0)
-        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
-        data = json.loads(payload)
-        assert data["type"] == "video_deleted"
-        assert data["video_id"] == video_id
-
-    asyncio.run(_test())
-
-
-def test_broadcast_package_ready():
-    import asyncio
-
-    from server.app.events import VideoEventManager
-
-    async def _test():
-        mgr = VideoEventManager()
-        mgr._loop = asyncio.get_running_loop()
-        queue = asyncio.Queue()
-        mgr._clients.add(queue)
-
-        mgr.broadcast_package_ready("/api/packages/test.zip")
-        await asyncio.sleep(0)
-        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
-        data = json.loads(payload)
-        assert data["type"] == "package_ready"
-        assert data["download_url"] == "/api/packages/test.zip"
-
-    asyncio.run(_test())
+    with caplog.at_level(logging.ERROR, logger="server.app.routes.agents"):
+        asyncio.run(_test())
+    assert any("receive loop failed" in record.getMessage() for record in caplog.records)

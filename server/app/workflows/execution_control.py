@@ -20,10 +20,14 @@ def ancestor_closure(definition: WorkflowDefinition, target_node_key: str) -> fr
         )
 
     closure: set[str] = {target_node_key}
+    incoming: dict[str, list[str]] = {key: [] for key in definition.nodes}
+    for edge in definition.edges:
+        incoming[edge.target].append(edge.source)
+
     stack = [target_node_key]
     while stack:
         key = stack.pop()
-        for dep in definition.nodes[key].after:
+        for dep in incoming[key]:
             if dep not in closure:
                 closure.add(dep)
                 stack.append(dep)

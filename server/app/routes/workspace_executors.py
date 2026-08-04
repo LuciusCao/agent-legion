@@ -1,10 +1,11 @@
 from fastapi import APIRouter
 
+from server.app.routes.executor_catalog_contracts import ExecutorCatalogResponse
 from server.app.routes.executor_contracts import (
-    ExecutorCatalogResponse,
     WorkspaceExecutorConfigurationResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.skill_catalog_route import create_skill_catalog_router
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_executor_configuration import (
@@ -40,4 +41,5 @@ def create_workspace_executors_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
+    router.include_router(create_skill_catalog_router(settings))
     return router

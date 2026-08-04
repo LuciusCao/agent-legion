@@ -1,59 +1,37 @@
+import { Button, Chip } from '@mui/material'
+import type { VideoArtifacts } from '../types'
 import { useArtifactStore } from '../stores/artifactStore'
 import { useInteractionStore } from '../stores/interactionStore'
 import { INTERACTION_TYPE_LABELS } from '../labels'
-import { parseTimeSeconds } from '../helpers'
-import { LaTeXText } from './LaTeXText'
+import { parseTimeSeconds } from '../lib/formatters'
+import { RichText } from './RichText'
+import {
+  formatIssue,
+  getGlobalStatus,
+  getReviewMap,
+  STATUS_LABELS,
+} from './nodePanelHelpers'
 import styles from './NodePanel.module.css'
-
-interface ReviewEntry {
-  item_id: string
-  status: string
-  issues?: Array<{ title?: string; details?: string }>
-}
-
-interface ReviewResult {
-  status?: string
-  reviews?: ReviewEntry[]
-}
-
-function getReviewMap(review: unknown): Map<string, ReviewEntry> {
-  const map = new Map<string, ReviewEntry>()
-  if (!review || typeof review !== 'object') return map
-  const r = review as ReviewResult
-  if (Array.isArray(r.reviews)) {
-    for (const entry of r.reviews) {
-      if (entry.item_id) {
-        map.set(entry.item_id, entry)
-      }
-    }
-  }
-  return map
-}
-
-function getGlobalStatus(review: unknown): string | undefined {
-  if (!review || typeof review !== 'object') return undefined
-  return (review as ReviewResult).status
-}
-
-function formatIssue(issue: { title?: string; details?: string }): string {
-  if (issue.title && issue.details) return `${issue.title}：${issue.details}`
-  return issue.details || issue.title || ''
-}
-
-const STATUS_LABELS: Record<string, { text: string; color: string }> = {
-  published: { text: '已通过', color: '#2e7d32' },
-  pending_review: { text: '待审', color: '#ed6c02' },
-  rejected: { text: '驳回', color: '#ba1a1a' },
-}
 
 interface NodePanelProps {
   onSeek?: (time: number) => void
   replayInteraction?: (index: number) => void
+  artifacts?: VideoArtifacts
+  triggeredNodeIndexes?: Set<number>
 }
 
-export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
-  const { artifacts } = useArtifactStore()
-  const { triggeredNodeIndexes } = useInteractionStore()
+export function NodePanel({
+  onSeek,
+  replayInteraction,
+  artifacts: artifactsProp,
+  triggeredNodeIndexes: triggeredNodeIndexesProp,
+}: NodePanelProps) {
+  const { artifacts: storeArtifacts } = useArtifactStore()
+  const { triggeredNodeIndexes: storeTriggeredNodeIndexes } =
+    useInteractionStore()
+  const artifacts = artifactsProp ?? storeArtifacts
+  const triggeredNodeIndexes =
+    triggeredNodeIndexesProp ?? storeTriggeredNodeIndexes
   const nodes = artifacts.interactions
   const reviewMap = getReviewMap(artifacts.review)
   const globalStatus = getGlobalStatus(artifacts.review)
@@ -87,15 +65,17 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
               <span
                 style={{
                   fontVariantNumeric: 'tabular-nums',
-                  color: 'var(--md-sys-color-primary)',
+                  color: '#1a73e8',
                 }}
               >
                 {formatTime(triggerTime)}
               </span>
               <span>
-                <LaTeXText>{node.instruction || '交互节点'}</LaTeXText>
+                <RichText mode="inline">
+                  {node.instruction || '交互节点'}
+                </RichText>
               </span>
-              <md-assist-chip label={typeLabel} />
+              <Chip label={typeLabel} size="small" />
             </div>
             {node.options && node.options.length > 0 && (
               <div
@@ -108,12 +88,14 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
                 onClick={(e) => e.stopPropagation()}
               >
                 {node.options.map((opt, j) => (
-                  <md-outlined-button
+                  <Button
                     key={opt.id ?? j}
-                    disabled={answered || undefined}
+                    variant="outlined"
+                    disabled={answered}
+                    size="small"
                   >
-                    <LaTeXText>{opt.text}</LaTeXText>
-                  </md-outlined-button>
+                    <RichText mode="inline">{opt.text}</RichText>
+                  </Button>
                 ))}
               </div>
             )}
@@ -141,7 +123,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
                       margin: 0,
                       paddingLeft: '16px',
                       fontSize: '0.75rem',
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#5f6368',
                     }}
                   >
                     {issues.map((issue, idx) => (

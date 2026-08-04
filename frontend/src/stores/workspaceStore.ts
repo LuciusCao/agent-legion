@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { WorkspaceRecord } from '../types'
-import type { WorkspaceStats } from '../workspaceTypes'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 import {
   fetchWorkspaces,
   createWorkspace as apiCreateWorkspace,
@@ -17,7 +17,10 @@ type WorkspaceState = {
   error: string | null
 
   fetchWorkspaces: () => Promise<void>
-  createWorkspace: (name: string) => Promise<WorkspaceRecord>
+  createWorkspace: (
+    name: string,
+    workflowKey: string
+  ) => Promise<WorkspaceRecord>
   updateWorkspace: (
     id: string,
     fields: {
@@ -25,7 +28,6 @@ type WorkspaceState = {
       description?: string
       default_workflow_key?: string
       default_entity?: string
-      cms_config?: Record<string, unknown>
       resource_config?: Record<string, unknown>
       intake_config?: Record<string, unknown>
     }
@@ -53,9 +55,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     }
   },
 
-  async createWorkspace(name: string) {
+  async createWorkspace(name: string, workflowKey: string) {
     try {
-      const ws = await apiCreateWorkspace(name)
+      const ws = await apiCreateWorkspace(name, workflowKey)
       set((s) => ({ workspaces: [...s.workspaces, ws], error: null }))
       return ws
     } catch (err) {

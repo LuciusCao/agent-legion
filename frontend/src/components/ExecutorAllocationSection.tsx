@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react'
+import { FormControlLabel, Switch, TextField } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 import { ExecutorAllocationRemovalDialog } from './ExecutorAllocationRemovalDialog'
 
@@ -32,7 +33,7 @@ export function ExecutorAllocationSection() {
           fontSize: 14,
           fontWeight: 500,
           margin: '0 0 12px',
-          color: 'var(--md-sys-color-on-surface-variant)',
+          color: '#43474e',
         }}
       >
         执行器分配
@@ -60,7 +61,7 @@ export function ExecutorAllocationSection() {
                 display: 'grid',
                 gap: 8,
                 padding: 12,
-                border: '1px solid var(--md-sys-color-outline-variant)',
+                border: '1px solid #c3c6cf',
                 borderRadius: 12,
               }}
             >
@@ -71,36 +72,48 @@ export function ExecutorAllocationSection() {
                   gap: 12,
                 }}
               >
-                <md-switch
-                  selected={isAllocated || undefined}
-                  onClick={() => {
-                    if (isAllocated) {
-                      requestExecutorRemoval(executor.id)
-                    } else {
-                      setExecutorAllocation(executor.id, 1)
-                    }
-                  }}
-                  aria-label={`分配 ${executor.id}`}
-                />
-                <span
-                  style={{
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={isAllocated}
+                      onChange={() => {
+                        if (isAllocated) {
+                          requestExecutorRemoval(executor.id)
+                        } else {
+                          setExecutorAllocation(executor.id, 1)
+                        }
+                      }}
+                      inputProps={{ 'aria-label': `分配 ${executor.id}` }}
+                    />
+                  }
+                  label={
+                    <span
+                      style={{
+                        flex: 1,
+                        fontWeight: 500,
+                        minWidth: 0,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {executor.id}
+                    </span>
+                  }
+                  sx={{
+                    margin: 0,
                     flex: 1,
-                    fontWeight: 500,
                     minWidth: 0,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
+                    '.MuiFormControlLabel-label': { flex: 1, minWidth: 0 },
                   }}
-                >
-                  {executor.id}
-                </span>
+                />
                 <span
                   style={{
                     fontSize: 12,
                     padding: '2px 8px',
                     borderRadius: 999,
-                    background: 'var(--md-sys-color-surface-variant)',
-                    color: 'var(--md-sys-color-on-surface-variant)',
+                    background: '#f0f0f0',
+                    color: '#43474e',
                     flexShrink: 0,
                   }}
                 >
@@ -111,7 +124,7 @@ export function ExecutorAllocationSection() {
               <div
                 style={{
                   fontSize: 12,
-                  color: 'var(--md-sys-color-on-surface-variant)',
+                  color: '#43474e',
                 }}
               >
                 全局容量: {executor.global_capacity}
@@ -119,29 +132,27 @@ export function ExecutorAllocationSection() {
               <div
                 style={{
                   fontSize: 12,
-                  color: 'var(--md-sys-color-on-surface-variant)',
+                  color: '#43474e',
                 }}
               >
                 支持能力: {executor.capabilities.join(', ')}
               </div>
 
               {isAllocated && (
-                <md-outlined-text-field
+                <TextField
+                  variant="outlined"
                   type="number"
-                  min={1}
-                  max={executor.global_capacity}
+                  inputProps={{ min: 1, max: executor.global_capacity }}
                   value={allocation.concurrency_limit}
                   label="工作空间上限"
-                  onInput={(event: Event) => {
-                    const value = Number(
-                      (event.target as HTMLInputElement).value
-                    )
+                  onChange={(event) => {
+                    const value = Number(event.target.value)
                     setExecutorAllocation(
                       executor.id,
                       Number.isNaN(value) ? 1 : value
                     )
                   }}
-                  style={{ width: 140 }}
+                  sx={{ width: 140 }}
                 />
               )}
             </li>

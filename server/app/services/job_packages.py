@@ -1,55 +1,50 @@
 from __future__ import annotations
 
-import logging
-from typing import Any, TypedDict
+from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.pipeline.package import create_workspace_package
+from server.app.pipeline.package import WORKSPACE_PACKAGE_FILES, create_workspace_package
+from server.app.services.job_selection_resolver import (
+    EmptyJobSelectionError,
+    resolve_batch_selection,
+)
+from server.app.services.workspace_package_artifacts import workspace_artifact_names
+from server.app.services.workspace_package_clear_packed import (
+    WorkspacePackageClearPackedMixin,
+)
+from server.app.services.workspace_package_contracts import (
+    JobPackageItemResult,
+    JobPackageResult,
+)
+from server.app.services.workspace_package_lifecycle import (
+    WorkspacePackageLifecycleMixin,
+    WorkspacePackageLockedError,  # noqa: F401
+    WorkspacePackageNotFoundError,  # noqa: F401
+)
 from server.app.settings import Settings
-
-logger = logging.getLogger(__name__)
-
-
-class JobPackageItemResult(TypedDict):
-    job_id: str
-    status: str
-    reason_code: str | None
-    message: str | None
+from server.app.storage_paths import make_data_relative
 
 
-class JobPackageResult(TypedDict):
-    results: list[JobPackageItemResult]
-    succeeded_count: int
-    failed_count: int
-    package_filename: str | None
-    download_url: str | None
-
-
-class JobPackageService:
+class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecycleMixin):
     def __init__(self, job_db: JobQueries, settings: Settings) -> None:
         self.job_db = job_db
         self.settings = settings
 
-    def _result(
-        self,
-        job_id: str,
-        status: str,
-        reason_code: str | None = None,
-        message: str | None = None,
-    ) -> JobPackageItemResult:
-        return {
-            "job_id": job_id,
-            "status": status,
-            "reason_code": reason_code,
-            "message": message,
-        }
+    def list_workspace_packages(self, workspace_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        return self.job_db.list_workspace_packages(workspace_id, limit=limit)
 
-    def package(self, workspace_id: str, job_ids: list[str]) -> JobPackageResult:
+    def package(
+        self, workspace_id: str, job_ids: list[str] | None = None, **kwargs: Any
+    ) -> JobPackageResult:
+        """Package the selected jobs; kwargs take job_filter/exclude_ids."""
+        ids = resolve_batch_selection(self.job_db, workspace_id, job_ids, **kwargs)
+        if not ids:
+            raise EmptyJobSelectionError("No job_ids provided or matched by the filter")
         results: list[JobPackageItemResult] = []
         eligible_jobs: list[dict[str, Any]] = []
         seen: set[str] = set()
 
-        for job_id in job_ids:
+        for job_id in ids:
             normalized = job_id.strip()
             if not normalized or normalized in seen:
                 continue
@@ -98,11 +93,27 @@ class JobPackageService:
 
         workspace_packages_dir = self.settings.packages_dir / f"workspace-{workspace_id}"
         workspace_packages_dir.mkdir(parents=True, exist_ok=True)
+        artifact_names = workspace_artifact_names(
+            self.settings.root_dir,
+            {str(job.get("workflow_key", "")) for job in eligible_jobs},
+            set(WORKSPACE_PACKAGE_FILES),
+        )
         package_path, count = create_workspace_package(
-            eligible_jobs, workspace_packages_dir, self.settings.jobs_dir
+            eligible_jobs,
+            workspace_packages_dir,
+            self.settings.jobs_dir,
+            artifact_names=artifact_names,
         )
         package_filename = package_path.name
         download_url = f"/api/workspaces/{workspace_id}/packages/{package_filename}"
+
+        size_bytes = package_path.stat().st_size
+        relative_path = make_data_relative(package_path, self.settings.data_dir)
+        name = f"批次 ({count}个任务)"
+        self.job_db.insert_workspace_package(
+            workspace_id, relative_path, name=name, job_count=count, size_bytes=size_bytes
+        )
+        self.job_db.set_jobs_packed([job["id"] for job in eligible_jobs], packed=1)
 
         response["package_filename"] = package_filename
         response["download_url"] = download_url

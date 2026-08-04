@@ -2,59 +2,58 @@ import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
-import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
-import { WorkspaceStatCards } from '../components/WorkspaceStatCards'
-import { JobList } from '../components/JobList'
+import { useJobFilterRefetch } from '../hooks/useJobFilterRefetch'
+import { useWorkspacePackageActions } from '../hooks/useWorkspacePackageActions'
+import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
+import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
+import { JobFilterBar } from '../components/job/JobFilterBar'
+import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
 import {
   JobActionBar,
   type JobActionBarFilter,
-} from '../components/JobActionBar'
+} from '../components/job/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
+import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
 import { fetchWorkflowDefinition } from '../api'
-import type { WorkflowDefinitionRecord } from '../types'
+import { useAsync } from '../hooks/useAsync'
+import {
+  selectFilterCounts,
+  selectFilteredJobIds,
+} from '../stores/job/selectors'
 import styles from './WorkspaceMainPage.module.css'
-
-const sectionStyle = {
-  padding: 16,
-  borderRadius: 12,
-  background: 'var(--md-sys-color-surface)',
-} as React.CSSProperties
 
 export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const { fetchWorkspaceStats, workspaceStats } = useWorkspaceStore()
-  const {
-    fetchJobs,
-    jobs,
-    selectedIds,
-    statusFilter,
-    setStatusFilter,
-    searchQuery,
-    setSearchQuery,
-    selectAll,
-    selectFailed,
-    clearSelection,
-    batchDelete,
-    batchPackage,
-    batchRerun,
-    batchRunTo,
-    getFilteredJobs,
-    selectMode,
-    toggleSelectMode,
-    batchRerunLoading,
-    batchPackageLoading,
-    batchDeleteLoading,
-    batchRunToLoading,
-  } = useJobStore()
-
-  const [workflowDefinition, setWorkflowDefinition] =
-    useState<WorkflowDefinitionRecord | null>(null)
-  const [workflowError, setWorkflowError] = useState<string | null>(null)
+  const jobIds = useJobStore((state) => state.jobIds)
+  const filterConfig = useJobStore((state) => state.filterConfig)
+  const setFilterConfig = useJobStore((state) => state.setFilterConfig)
+  const selectAll = useJobStore((state) => state.selectAll)
+  const selectFailed = useJobStore((state) => state.selectFailed)
+  const selectUnpacked = useJobStore((state) => state.selectUnpacked)
+  const clearSelection = useJobStore((state) => state.clearSelection)
+  const batchDelete = useJobStore((state) => state.batchDelete)
+  const batchRunTo = useJobStore((state) => state.batchRunTo)
+  const filteredJobIds = useJobStore(selectFilteredJobIds)
+  const selectMode = useJobStore((state) => state.selectMode)
+  const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
+  const batchRerunLoading = useJobStore((state) => state.batchRerunLoading)
+  const batchPackageLoading = useJobStore((state) => state.batchPackageLoading)
+  const batchClearPackedLoading = useJobStore(
+    (state) => state.batchClearPackedLoading
+  )
+  const batchDeleteLoading = useJobStore((state) => state.batchDeleteLoading)
+  const batchRunToLoading = useJobStore((state) => state.batchRunToLoading)
+  const batchUpgradeWorkflowLoading = useJobStore(
+    (state) => state.batchUpgradeWorkflowLoading
+  )
+  const jobsLoading = useJobStore((state) => state.isLoading)
 
   useWorkspaceEvents(workspaceId)
+  useJobFilterRefetch(workspaceId)
 
   useEffect(() => {
     if (workspaceId) {
@@ -62,55 +61,27 @@ export default function WorkspaceMainPage() {
     }
   }, [workspaceId, fetchWorkspaceStats])
 
-  useEffect(() => {
-    if (!workspaceId) return
-    fetchJobs(workspaceId)
-  }, [workspaceId, fetchJobs])
-
-  useEffect(() => {
-    const workflowKey = workspaceId
-      ? workspaceStats[workspaceId]?.workflow_key
-      : undefined
-    if (!workflowKey) return
-    let stale = false
-    fetchWorkflowDefinition(workflowKey)
-      .then((data) => {
-        if (stale) return
-        setWorkflowDefinition(data.workflow)
-      })
-      .catch((err) => {
-        if (stale) return
-        setWorkflowError(err instanceof Error ? err.message : String(err))
-      })
-    return () => {
-      stale = true
-    }
-  }, [workspaceId, workspaceStats])
-
-  const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
-  const [searchInputValue, setSearchInputValue] = useState(searchQuery)
+  const workflowKey = workspaceId
+    ? workspaceStats[workspaceId]?.workflow_key
+    : undefined
+  const { data: workflowResult, error: workflowError } = useAsync(
+    () => fetchWorkflowDefinition(workflowKey ?? ''),
+    [workspaceId, workflowKey],
+    { enabled: !!workflowKey }
+  )
+  const workflowDefinition = workflowResult?.workflow ?? null
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
-  const currentStats = workspaceId ? workspaceStats[workspaceId] : undefined
-  const counts = useMemo(() => {
-    const jobStats = currentStats?.job_stats || {}
-    const pending = jobStats.pending ?? 0
-    const running = jobStats.running ?? 0
-    const completed = jobStats.completed ?? 0
-    const failed = jobStats.failed ?? 0
-    return {
-      all: pending + running + completed + failed,
-      pending,
-      running,
-      completed,
-      failed,
-    }
-  }, [currentStats])
-
-  const filteredJobs = getFilteredJobs()
-  const totalJobs = counts.all
-  const selectedJobs = jobs.filter((j) => selectedIds.has(j.id))
+  const filterCounts = useJobStore(selectFilterCounts)
+  const totalJobs = useJobStore((state) => state.totalJobs) ?? jobIds.length
+  const filtersActive =
+    filterConfig.status !== null ||
+    filterConfig.search.trim() !== '' ||
+    filterConfig.workflowVersion !== null ||
+    filterConfig.activeNodeKey !== null
+  const { selectedJobs, selectedCount, allMatchingCount } =
+    useWorkspaceSelection()
 
   const workflowNodesByKey = useMemo(() => {
     if (!workflowDefinition) return {}
@@ -119,31 +90,19 @@ export default function WorkspaceMainPage() {
 
   const filters: JobActionBarFilter[] = [
     { key: 'all', label: '全选', onClick: selectAll },
+    { key: 'unpacked', label: '仅未打包', onClick: selectUnpacked },
     { key: 'failed', label: '仅失败', onClick: selectFailed },
     { key: 'clear', label: '取消选择', onClick: clearSelection },
   ]
 
-  const handleRerun = async (nodeKey: string) => {
-    if (!workspaceId) return
-    await batchRerun(workspaceId, nodeKey)
-  }
+  const { handleRerun, failureContext } = useWorkspaceRerunActions(workspaceId)
 
   const handleRunTo = async (targetKey: string, startKey?: string) => {
-    if (!workspaceId) return
-    await batchRunTo(workspaceId, targetKey, startKey)
+    if (workspaceId) await batchRunTo(workspaceId, targetKey, startKey)
   }
 
-  const handlePackage = async () => {
-    if (!workspaceId) return
-    const result = await batchPackage(workspaceId)
-    if (result.download_url) {
-      window.open(result.download_url, '_blank')
-    }
-  }
-
-  const handleDelete = () => {
-    setDeleteDialogOpen(true)
-  }
+  const { handlePackage, handleClearPacked, handleUpgradeWorkflow } =
+    useWorkspacePackageActions(workspaceId)
 
   const handleDeleteConfirm = async () => {
     if (!workspaceId) return
@@ -172,32 +131,40 @@ export default function WorkspaceMainPage() {
         display: 'flex',
         flexDirection: 'column',
         gap: 16,
+        height: '100%',
       }}
     >
       {selectMode && (
         <>
           <JobActionBar
             jobs={selectedJobs}
-            selectedCount={selectedIds.size}
+            selectedCount={selectedCount}
+            allMatchingCount={allMatchingCount}
             workflowDefinition={workflowDefinition}
             workflowNodesByKey={workflowNodesByKey}
             mode="batch"
             loading={
               batchRerunLoading ||
               batchPackageLoading ||
+              batchClearPackedLoading ||
               batchDeleteLoading ||
-              batchRunToLoading
+              batchRunToLoading ||
+              batchUpgradeWorkflowLoading
             }
             filters={filters}
             onExitSelectMode={toggleSelectMode}
+            failureContext={failureContext}
             onRerun={handleRerun}
             onRunTo={handleRunTo}
             onPackage={handlePackage}
-            onDelete={handleDelete}
+            onClearPacked={handleClearPacked}
+            onDelete={() => setDeleteDialogOpen(true)}
+            onUpgradeWorkflow={handleUpgradeWorkflow}
           />
           <BatchDeleteDialog
             open={deleteDialogOpen}
-            count={selectedIds.size}
+            count={selectedCount}
+            allMatching={allMatchingCount != null}
             onClose={() => setDeleteDialogOpen(false)}
             onConfirm={handleDeleteConfirm}
           />
@@ -208,39 +175,31 @@ export default function WorkspaceMainPage() {
         <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
 
-      <section style={sectionStyle}>
-        <div className={styles.filterRow}>
-          <WorkspaceStatCards
-            counts={counts}
-            activeFilter={statusFilter}
-            onFilterChange={(filter) =>
-              setStatusFilter(
-                filter as 'all' | 'pending' | 'running' | 'completed' | 'failed'
-              )
-            }
-          />
-          <md-outlined-text-field
-            type="search"
-            placeholder="搜索 ID 或标题"
-            value={searchInputValue}
-            onInput={(e: React.FormEvent<HTMLElement>) => {
-              const value = (e.target as HTMLInputElement).value
-              setSearchInputValue(value)
-              debouncedSetSearchQuery(value)
-            }}
-            style={{ width: 280, flexShrink: 0 }}
-          />
-        </div>
+      <section>
+        <JobFilterBar
+          key={workspaceId}
+          filterConfig={filterConfig}
+          counts={filterCounts}
+          workflowDefinition={workflowDefinition}
+          onChange={setFilterConfig}
+        />
       </section>
 
-      {filteredJobs.length === 0 && totalJobs === 0 ? (
-        <section style={sectionStyle}>
+      {filteredJobIds.length === 0 &&
+      totalJobs === 0 &&
+      !jobsLoading &&
+      !filtersActive ? (
+        <section className={styles.section}>
           <EmptyStateGuide steps={emptyStateSteps} />
         </section>
       ) : (
-        <section style={{ ...sectionStyle, flex: 1, padding: 0 }}>
+        <section className={styles.sectionFill}>
           {workspaceId ? <JobList workspaceId={workspaceId} /> : null}
         </section>
+      )}
+
+      {workspaceId && (
+        <WorkspacePackageHistoryDialog workspaceId={workspaceId} />
       )}
     </div>
   )

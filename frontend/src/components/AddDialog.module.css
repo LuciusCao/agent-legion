@@ -3,9 +3,9 @@
 }
 
 .type-btn.active {
-  background-color: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary);
-  border-color: var(--md-sys-color-primary);
+  background-color: #000000;
+  color: #ffffff;
+  border-color: #000000;
 }
 
 .add-results {
@@ -20,11 +20,19 @@
   grid-template-columns: minmax(0, 120px) minmax(0, 140px) minmax(0, 1fr);
   gap: 8px;
   padding: 8px;
-  border: 1px solid var(--md-sys-color-outline-variant);
+  border: 1px solid #e5e7eb;
   border-radius: 8px;
 }
 
 .add-result > span {
   min-width: 0;
   overflow-wrap: anywhere;
+}
+
+.no-modes-hint {
+  color: #ba1a1a;
+  font-size: 14px;
+  padding: 8px;
+  border: 1px solid #ba1a1a;
+  border-radius: 8px;
 }

@@ -1,7 +1,7 @@
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 ExecutionStatus = Literal["completed", "failed", "cancelled"]
 
@@ -24,6 +24,9 @@ class ExecutionContext:
     inputs: tuple[str, ...]
     expected_outputs: tuple[str, ...]
     runtime: Mapping[str, object] = field(default_factory=dict)
+    # Effective node config resolved at dispatch (spec D15); empty for
+    # executors whose capability declares no config_schema.
+    node_config: Mapping[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -33,8 +36,19 @@ class ExecutionResult:
     error_message: str = ""
     command: tuple[str, ...] = ()
     log_path: str = ""
+    run_dir: str = ""
+    session_dir: str = ""
     session_reference: str = ""
+    skill_version: str = ""
     produced_artifacts: tuple[str, ...] = ()
+    runner: str = ""
+    # Explicit failure classification; the lease finish path falls back to
+    # rule-based classification when these are empty.
+    failure_category: str = ""
+    failure_detail: str = ""
+    # Shard executions return their per-shard output payload here; the lease
+    # finish path persists it into node_shards.output_json for reduce fan-in.
+    output_json: str = ""
 
 
 @dataclass(frozen=True)
@@ -52,6 +66,7 @@ class LeaseClaimRequest:
     execution_mode: Literal["full", "until_node"] = "full"
     target_node_key: str | None = None
     allowed_node_keys: tuple[str, ...] = ()
+    shard_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -76,3 +91,4 @@ class ClaimedExecution:
     node_key: str
     capability: str
     log_path: str
+    shard_index: int | None = None

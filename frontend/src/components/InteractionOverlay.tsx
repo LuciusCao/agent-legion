@@ -1,6 +1,7 @@
 import { useRef, useState } from 'react'
+import { Button } from '@mui/material'
 import type { InteractionNode } from '../types'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 import styles from './InteractionOverlay.module.css'
 
 type InteractionOption = NonNullable<InteractionNode['options']>[number]
@@ -96,11 +97,11 @@ export function InteractionOverlay({
       <div className={styles.practiceToast}>
         <span className={styles.badge}>例题试做</span>
         <p className={styles.cardTitle}>
-          <LaTeXText>{node.instruction || '先试做'}</LaTeXText>
+          <RichText mode="inline">{node.instruction || '先试做'}</RichText>
         </p>
         {node.hint && (
           <p className={styles.hintText}>
-            <LaTeXText>{node.hint}</LaTeXText>
+            <RichText mode="inline">{node.hint}</RichText>
           </p>
         )}
         <div className={styles.actionRow}>
@@ -129,11 +130,13 @@ export function InteractionOverlay({
         <div className={styles.summaryPanel}>
           <div className={styles.summaryBody} aria-label="互动小结内容">
             <p className={styles.cardTitle}>
-              <LaTeXText>{node.instruction || '按顺序选择'}</LaTeXText>
+              <RichText mode="inline">
+                {node.instruction || '按顺序选择'}
+              </RichText>
             </p>
             {node.reference_sentence && (
               <p className={styles.hintText}>
-                <LaTeXText>{node.reference_sentence}</LaTeXText>
+                <RichText mode="inline">{node.reference_sentence}</RichText>
               </p>
             )}
             <div className={styles.optionGrid}>
@@ -153,7 +156,7 @@ export function InteractionOverlay({
                     aria-pressed={selected}
                     onClick={() => toggleSummaryOption(option)}
                   >
-                    <LaTeXText>{option.text}</LaTeXText>
+                    <RichText mode="inline">{option.text}</RichText>
                   </button>
                 )
               })}
@@ -182,7 +185,7 @@ export function InteractionOverlay({
                 >
                   <span className={styles.summaryOrderIndex}>{index + 1}</span>
                   <span className={styles.summaryOrderText}>
-                    <LaTeXText>{option.text}</LaTeXText>
+                    <RichText mode="inline">{option.text}</RichText>
                   </span>
                   <span className={styles.summaryOrderControls}>
                     <button
@@ -255,11 +258,11 @@ export function InteractionOverlay({
       <div className={styles.interactionOverlay}>
         <div className={styles.practiceCard}>
           <p className={styles.cardTitle}>
-            <LaTeXText>{node.instruction || '互动'}</LaTeXText>
+            <RichText mode="inline">{node.instruction || '互动'}</RichText>
           </p>
           {node.reference_sentence && (
             <p className={styles.hintText}>
-              <LaTeXText>{node.reference_sentence}</LaTeXText>
+              <RichText mode="inline">{node.reference_sentence}</RichText>
             </p>
           )}
           <div className={styles.optionGrid}>
@@ -270,7 +273,7 @@ export function InteractionOverlay({
                 key={i}
                 onClick={onContinue}
               >
-                <LaTeXText>{opt.text}</LaTeXText>
+                <RichText mode="inline">{opt.text}</RichText>
               </button>
             ))}
           </div>
@@ -285,24 +288,29 @@ export function InteractionOverlay({
     <div className={styles.interactionOverlay}>
       <div className={styles.sentenceCard}>
         <p>
-          <LaTeXText>{node.instruction || '连词成句'}</LaTeXText>
+          <RichText mode="inline">{node.instruction || '连词成句'}</RichText>
         </p>
         <div className={styles.sentenceBox}>{currentSentence.join(' ')}</div>
         {words.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {words.map((word, index) => (
-              <md-outlined-button
+              <Button
                 key={`${word}-${index}`}
+                variant="outlined"
                 onClick={() => onWordClick(word)}
               >
                 {word}
-              </md-outlined-button>
+              </Button>
             ))}
           </div>
         )}
         <div>
-          <md-text-button onClick={onReset}>重置</md-text-button>
-          <md-filled-button onClick={onContinue}>确认</md-filled-button>
+          <Button variant="text" onClick={onReset}>
+            重置
+          </Button>
+          <Button variant="contained" onClick={onContinue}>
+            确认
+          </Button>
         </div>
       </div>
     </div>

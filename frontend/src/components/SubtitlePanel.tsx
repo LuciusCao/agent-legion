@@ -1,16 +1,20 @@
 import React, { useMemo } from 'react'
+import { List, ListItemButton, ListItemText } from '@mui/material'
+import type { VideoArtifacts } from '../types'
 import { useArtifactStore } from '../stores/artifactStore'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 
 export const SubtitlePanel = React.memo(function SubtitlePanel({
   currentTime,
   onSeek,
+  subtitles: subtitlesProp,
 }: {
   currentTime: number
   onSeek: (time: number) => void
+  subtitles?: VideoArtifacts['subtitles']
 }) {
   const { artifacts } = useArtifactStore()
-  const subtitles = artifacts.subtitles
+  const subtitles = subtitlesProp ?? artifacts.subtitles
 
   const activeIndex = useMemo(() => {
     return subtitles.findIndex(
@@ -19,26 +23,30 @@ export const SubtitlePanel = React.memo(function SubtitlePanel({
   }, [subtitles, currentTime])
 
   return (
-    <md-list className="tab-panel">
+    <List className="tab-panel" disablePadding>
       {subtitles.map((sub, i) => (
-        <md-list-item
+        <ListItemButton
           key={i}
-          type="button"
-          className={i === activeIndex ? 'active' : ''}
+          selected={i === activeIndex}
           onClick={() => onSeek(sub.start)}
+          dense
         >
-          <div
-            slot="headline"
-            style={{ fontVariantNumeric: 'tabular-nums', minWidth: '100px' }}
-          >
-            {formatTime(sub.start)} → {formatTime(sub.end)}
-          </div>
-          <div slot="supporting-text">
-            <LaTeXText>{sub.text}</LaTeXText>
-          </div>
-        </md-list-item>
+          <ListItemText
+            primary={
+              <span
+                style={{
+                  fontVariantNumeric: 'tabular-nums',
+                  minWidth: '100px',
+                }}
+              >
+                {formatTime(sub.start)} → {formatTime(sub.end)}
+              </span>
+            }
+            secondary={<RichText mode="inline">{sub.text}</RichText>}
+          />
+        </ListItemButton>
       ))}
-    </md-list>
+    </List>
   )
 })
 

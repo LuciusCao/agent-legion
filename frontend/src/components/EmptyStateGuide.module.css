@@ -14,7 +14,7 @@
   font-size: 48px;
   width: 48px;
   height: 48px;
-  color: var(--md-sys-color-primary);
+  color: #000000;
 }
 
 .title {
@@ -24,7 +24,7 @@
 
 .subtitle {
   margin: 0;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   font-size: 14px;
 }
 
@@ -40,13 +40,13 @@
   gap: 16px;
   padding: 16px;
   border-radius: 12px;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: var(--md-sys-color-surface);
+  border: 1px solid #e0e0e0;
+  background: #ffffff;
 }
 
 .locked {
   opacity: 0.55;
-  background: var(--md-sys-color-surface-container-low);
+  background: #fafafa;
 }
 
 .stepIcon {
@@ -56,14 +56,14 @@
   width: 40px;
   height: 40px;
   border-radius: 50%;
-  background: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background: #e0e0e0;
+  color: #1a1c1e;
   flex-shrink: 0;
 }
 
 .locked .stepIcon {
-  background: var(--md-sys-color-surface-container-highest);
-  color: var(--md-sys-color-on-surface-variant);
+  background: #f0f0f0;
+  color: #43474e;
 }
 
 .stepBody {
@@ -77,7 +77,7 @@
 
 .stepDesc {
   margin: 0 0 12px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   font-size: 13px;
   line-height: 1.4;
 }
@@ -86,14 +86,14 @@
   padding: 6px 14px;
   border-radius: 8px;
   border: 0;
-  background: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary);
+  background: #000000;
+  color: #ffffff;
   cursor: pointer;
   font-size: 13px;
 }
 
 .stepAction:disabled {
-  background: var(--md-sys-color-outline);
-  color: var(--md-sys-color-surface);
+  background: #c3c6cf;
+  color: #ffffff;
   cursor: not-allowed;
 }

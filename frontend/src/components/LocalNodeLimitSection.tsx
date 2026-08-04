@@ -1,3 +1,4 @@
+import { TextField } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 
 export function LocalNodeLimitSection() {
@@ -36,7 +37,7 @@ export function LocalNodeLimitSection() {
           fontSize: 14,
           fontWeight: 500,
           margin: '0 0 12px',
-          color: 'var(--md-sys-color-on-surface-variant)',
+          color: '#43474e',
         }}
       >
         本地节点并发
@@ -68,15 +69,13 @@ export function LocalNodeLimitSection() {
               }}
             >
               <span style={{ fontSize: 14, minWidth: 120 }}>{node.label}</span>
-              <md-outlined-text-field
+              <TextField
                 type="number"
-                min={1}
-                max={max}
+                inputProps={{ min: 1, max }}
                 label={`${node.label} 并发上限`}
-                aria-label={`${node.label} 并发上限`}
                 value={limit?.concurrency_limit ?? ''}
-                onInput={(event: Event) => {
-                  const raw = (event.target as HTMLInputElement).value
+                onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
+                  const raw = event.target.value
                   const value = Number(raw)
                   setNodeLimit(
                     workflowKey,
@@ -84,12 +83,13 @@ export function LocalNodeLimitSection() {
                     raw === '' || Number.isNaN(value) ? null : value
                   )
                 }}
-                style={{ width: 140 }}
+                size="small"
+                sx={{ width: 140 }}
               />
               <span
                 style={{
                   fontSize: 12,
-                  color: 'var(--md-sys-color-on-surface-variant)',
+                  color: '#43474e',
                 }}
               >
                 上限: {max}

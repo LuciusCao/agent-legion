@@ -7,8 +7,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 AUTO_START = "<!-- AUTO-GENERATED: scripts/generate_architecture.py -->"
 AUTO_END = "<!-- END AUTO-GENERATED -->"
 TODO_PLACEHOLDER_PATTERN = re.compile(r"<!--\s*TODO:\s*.*?(?:AST|自动生成).*?-->", re.IGNORECASE)
@@ -104,7 +102,7 @@ def extract_fastapi_routes(root: Path) -> str:
                 continue
             prefix = _find_router_prefix(node.body, "router")
             for child in ast.walk(node):
-                if not isinstance(child, ast.FunctionDef) or child is node:
+                if not isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)) or child is node:
                     continue
                 for dec in child.decorator_list:
                     if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
@@ -189,32 +187,10 @@ def extract_models(root: Path) -> str:
 
 
 def extract_frontend_routes(root: Path) -> str:
-    """Extract React Router routes from frontend/src/App.tsx."""
-    app_tsx = root / "frontend" / "src" / "App.tsx"
-    if not app_tsx.exists():
-        return "_No App.tsx found._\n"
+    """Extract React Router routes from frontend/src/AppRoutes.tsx."""
+    from scripts.generate_architecture_frontend import extract_frontend_routes as _extract
 
-    content = app_tsx.read_text(encoding="utf-8")
-    lines = ["| 路径 | 页面组件 |", "|------|----------|"]
-
-    # Match <Route path="..." element={<Component />} />
-    # or <Route index element={<Component />} />
-    pattern = re.compile(
-        r'<Route\s+(?:(path=["\']([^"\']+)["\'])|(index))\s+element=\{<([A-Za-z_][A-Za-z0-9_]*)'
-    )
-
-    found = False
-    for m in pattern.finditer(content):
-        path = m.group(2) if m.group(2) else "(index)"
-        component = m.group(4)
-        if component in ("Navigate",):
-            continue
-        lines.append(f"| `{path}` | {component} |")
-        found = True
-
-    if not found:
-        return "_No routes found._\n"
-    return "\n".join(lines) + "\n"
+    return _extract(root)
 
 
 # ---------------------------------------------------------------------------
@@ -222,49 +198,11 @@ def extract_frontend_routes(root: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _extract_str_list(node: ast.AST) -> list[str]:
-    """Extract list of string constants from an AST node."""
-    if not isinstance(node, ast.List):
-        return []
-    result = []
-    for elt in node.elts:
-        if isinstance(elt, ast.Constant) and isinstance(elt.value, str):
-            result.append(elt.value)
-    return result
-
-
 def extract_pipeline_phases(root: Path) -> str:
-    """Extract video pipeline phase sequences from pipeline/phases.py."""
-    phases_file = root / "server" / "app" / "pipeline" / "phases.py"
-    if not phases_file.exists():
-        return "_No phases.py found._\n"
+    """Extract video pipeline node sequence from config/workflows/video_knowledge.yaml."""
+    from scripts.generate_architecture_pipeline import extract_pipeline_phases as _extract
 
-    try:
-        tree = ast.parse(phases_file.read_text(encoding="utf-8"))
-    except SyntaxError:
-        return "_Could not parse phases.py._\n"
-
-    knowledge_phases: list[str] = []
-    question_phases: list[str] = []
-
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name):
-                    if target.id == "KNOWLEDGE_PHASES":
-                        knowledge_phases = _extract_str_list(node.value)
-                    elif target.id == "QUESTION_PHASES":
-                        question_phases = _extract_str_list(node.value)
-
-    lines = []
-    if knowledge_phases:
-        lines.append("**知识视频（8 阶段）：**")
-        lines.append(" → ".join(f"`{p}`" for p in knowledge_phases))
-    if question_phases:
-        lines.append("**题目解析视频（6 阶段）：**")
-        lines.append(" → ".join(f"`{p}`" for p in question_phases))
-
-    return "\n".join(lines) + "\n" if lines else "_No phase sequences found._\n"
+    return _extract(root)
 
 
 # ---------------------------------------------------------------------------
@@ -273,22 +211,32 @@ def extract_pipeline_phases(root: Path) -> str:
 
 
 def extract_config(root: Path) -> str:
-    """Extract top-level config keys from config/workflow.yaml."""
-    config_file = root / "config" / "workflow.yaml"
-    if not config_file.exists():
-        return "_No workflow.yaml found._\n"
+    """Extract top-level config keys from the composed domain configuration."""
+    project_root = root.resolve()
 
     try:
-        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        from server.app.configuration.loader import load_application_config
     except Exception:
-        return "_Could not parse workflow.yaml._\n"
+        return "_Could not load configuration loader._\n"
 
+    try:
+        loaded = load_application_config(project_root)
+    except Exception:
+        return "_Could not parse configuration._\n"
+
+    data = loaded.config
     if not isinstance(data, dict):
         return "_Invalid config format._\n"
 
     descriptions = {
+        "data_dir": "数据目录",
+        "server": "HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）",
+        "worker": "后台 worker 并发配置",
         "asr": "ASR 提供商配置（whisper / SenseVoice）",
+        "cms": "CMS 集成配置",
+        "resource_providers": "资源提供方声明（path/url_key 及各自可调参数的 config_schema，含 secret 标记）",
         "openclaw": "OpenClaw 命令模板与工作目录",
+        "executors": "Workspace 执行器定义",
         "workflows": "Agent Legion DAG 工作流开关",
     }
 
@@ -340,11 +288,17 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Generate architecture doc sections")
     parser.add_argument("--root", type=Path, default=Path.cwd(), help="Repository root")
     parser.add_argument("--module", choices=list(MODULES.keys()), help="Only generate one module")
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Do not write; fail if generated sections drift from the docs",
+    )
     args = parser.parse_args()
 
     root = args.root.resolve()
     modules = [args.module] if args.module else list(MODULES.keys())
 
+    drifted: list[str] = []
     for name in modules:
         rel_path, generator = MODULES[name]
         doc_path = root / rel_path
@@ -355,8 +309,24 @@ def main() -> int:
         content = doc_path.read_text(encoding="utf-8")
         new_section = generator(root)
         new_content = replace_section(content, new_section)
+        if args.check:
+            if new_content != content:
+                drifted.append(rel_path)
+            continue
         doc_path.write_text(new_content, encoding="utf-8")
         print(f"Updated {rel_path}")
+
+    if args.check:
+        if drifted:
+            print(
+                "Architecture docs drift detected; regenerate with "
+                "`uv run python scripts/generate_architecture.py`:",
+                file=sys.stderr,
+            )
+            for rel_path in drifted:
+                print(f"  - {rel_path}", file=sys.stderr)
+            return 1
+        print("Architecture docs are up to date.")
 
     return 0
 

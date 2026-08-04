@@ -4,30 +4,36 @@ import pytest
 
 from server.app.jobs.queries import JobQueries
 from server.app.workflows.definition import load_workflow_definition
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_create_batch_and_question_jobs(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
 
     batch = queries.create_batch(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_kind="mixed",
         source_payload={"knowledge_codes": ["K001"], "question_ids": ["Q001"]},
+        workspace_id=workspace["id"],
     )
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q001",
         batch_id=batch["id"],
         title="Question Q001",
         node_keys=["fetch_question_context", "assemble_package"],
+        workspace_id=workspace["id"],
     )
 
-    assert batch["workflow_key"] == "question_content"
+    assert batch["workflow_key"] == "question_comprehension_info"
     assert batch["workspace_id"] == "default"
-    assert job["id"] == "default_question_content_Q001"
+    assert job["id"] == "default_question_comprehension_info_Q001"
     assert job["workspace_id"] == "default"
-    assert job["storage_dir"].endswith("jobs/default/default_question_content_Q001")
+    assert job["storage_dir"].endswith("jobs/default/default_question_comprehension_info_Q001")
     nodes = queries.list_job_nodes(job["id"])
     assert [node["node_key"] for node in nodes] == [
         "fetch_question_context",
@@ -37,19 +43,23 @@ def test_create_batch_and_question_jobs(tmp_path):
 
 
 def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("Math Sprint")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace(
+        "Math Sprint", default_workflow_key="question_comprehension_info"
+    )
 
     default_job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q100",
         batch_id="",
         title="Question Q100",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
     workspace_job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q100",
         batch_id="",
@@ -59,8 +69,8 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
     )
 
     assert workspace["id"] == "math_sprint"
-    assert default_job["id"] == "default_question_content_Q100"
-    assert workspace_job["id"] == "math_sprint_question_content_Q100"
+    assert default_job["id"] == "default_question_comprehension_info_Q100"
+    assert workspace_job["id"] == "math_sprint_question_comprehension_info_Q100"
     assert [job["id"] for job in queries.list_jobs(workspace_id="default")] == [default_job["id"]]
     assert [job["id"] for job in queries.list_jobs(workspace_id=workspace["id"])] == [
         workspace_job["id"]
@@ -72,14 +82,16 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
 
 
 def test_node_run_lifecycle(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q002",
         batch_id="",
         title="Question Q002",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
 
     run = queries.start_node_run(job["id"], "fetch_question_context", ["local"], "log.txt")
@@ -94,16 +106,18 @@ def test_node_run_lifecycle(tmp_path):
 
 
 def test_start_node_run_claims_each_node_only_once(tmp_path):
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     first = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     second = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    first.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = first.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q-CLAIM",
         batch_id="",
         title="Question Q-CLAIM",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
 
     claimed = first.start_node_run(job["id"], "fetch_question_context", ["local"], "first.log")
@@ -115,36 +129,41 @@ def test_start_node_run_claims_each_node_only_once(tmp_path):
 
 
 def test_create_job_rejects_identity_collision(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q003",
         batch_id="",
         title="Question Q003",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
 
     with pytest.raises(ValueError, match="identity collision"):
         queries.create_job(
-            workflow_key="question_content",
+            workflow_key="question_comprehension_info",
             source_type="knowledge_code",
             source_id="Q003",
             batch_id="",
             title="Knowledge Q003",
             node_keys=["fetch_question_context"],
+            workspace_id="default",
         )
 
 
 def test_start_node_run_rejects_missing_node(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q004",
         batch_id="",
         title="Question Q004",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
 
     with pytest.raises(ValueError, match="Unknown job node"):
@@ -154,28 +173,30 @@ def test_start_node_run_rejects_missing_node(tmp_path):
 
 
 def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q200",
         batch_id="",
         title="Question Q200",
         node_keys=list(definition.nodes),
+        workspace_id="default",
     )
     for node_key in definition.nodes:
         queries.update_job_node(job["id"], node_key, status="completed", error_message="old error")
 
     queries.mark_node_for_rerun(
         job["id"],
-        "question_understanding",
-        ["misconception_analysis", "assemble_package"],
+        "clean_and_parse",
+        ["generate_key_info", "assemble_comprehension_info"],
     )
 
-    selected = queries.get_job_node(job["id"], "question_understanding")
-    downstream = queries.get_job_node(job["id"], "misconception_analysis")
-    terminal = queries.get_job_node(job["id"], "assemble_package")
+    selected = queries.get_job_node(job["id"], "clean_and_parse")
+    downstream = queries.get_job_node(job["id"], "generate_key_info")
+    terminal = queries.get_job_node(job["id"], "assemble_comprehension_info")
     rerun_job = queries.get_job(job["id"])
 
     assert selected is not None
@@ -188,21 +209,23 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
     assert downstream["status"] == "stale"
     assert downstream["error_message"] == ""
     assert terminal is not None
-    assert terminal["stale_reason"] == "upstream question_understanding rerun"
+    assert terminal["stale_reason"] == "upstream clean_and_parse rerun"
     assert rerun_job is not None
     assert rerun_job["status"] == "queued"
     assert rerun_job["error_message"] == ""
 
 
 def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q202",
         batch_id="",
         title="Question Q202",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
 
     with pytest.raises(ValueError, match="Unknown job node"):
@@ -210,14 +233,16 @@ def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
 
 
 def test_start_node_run_clears_stale_reason(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q203",
         batch_id="",
         title="Question Q203",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
     queries.update_job_node(
         job["id"],
@@ -236,14 +261,16 @@ def test_start_node_run_clears_stale_reason(tmp_path):
 
 
 def test_start_node_run_persists_run_and_session_directories(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q203",
         batch_id="",
         title="Question Q203",
         node_keys=["fetch_question_context"],
+        workspace_id="default",
     )
     run = queries.start_node_run(
         job["id"],

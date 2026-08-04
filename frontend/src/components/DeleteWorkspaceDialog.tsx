@@ -1,4 +1,12 @@
 import { useState } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
+} from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
 
 type Props = {
@@ -26,9 +34,8 @@ export default function DeleteWorkspaceDialog({
     onClose()
   }
 
-  if (!open) return null
-
-  const confirmed = inputValue.trim() === workspaceName.trim()
+  const confirmed =
+    workspaceName.trim() !== '' && inputValue.trim() === workspaceName.trim()
 
   async function handleConfirm() {
     if (!confirmed) return
@@ -47,82 +54,69 @@ export default function DeleteWorkspaceDialog({
   }
 
   return (
-    <md-dialog
-      open
-      onClosed={handleClose}
-      style={
-        { '--md-dialog-container-color': '#ffffff' } as React.CSSProperties
-      }
-    >
-      <div slot="headline">{WORKSPACE_LABELS.deleteWorkspace}</div>
-      <div
-        slot="content"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-          minWidth: 320,
-        }}
-      >
+    <Dialog open={open} onClose={handleClose}>
+      <DialogTitle>{WORKSPACE_LABELS.deleteWorkspace}</DialogTitle>
+      <DialogContent>
         <div
           style={{
-            padding: 12,
-            borderRadius: 8,
-            background: 'var(--md-sys-color-error-container)',
-            color: 'var(--md-sys-color-on-error-container)',
-            fontSize: 14,
-            lineHeight: 1.6,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+            minWidth: 320,
           }}
         >
-          <strong>此操作不可撤销。</strong>
-          <br />
-          删除后，Workspace「{workspaceName}」及其所有任务记录将被永久移除，
-          但磁盘上的产物文件不会自动清理。
-        </div>
-        <p
-          style={{
-            margin: 0,
-            fontSize: 14,
-            color: 'var(--md-sys-color-on-surface-variant)',
-          }}
-        >
-          请输入 Workspace 名称「<strong>{workspaceName}</strong>」以确认删除。
-        </p>
-        <md-outlined-text-field
-          label={WORKSPACE_LABELS.workspaceName}
-          aria-label={WORKSPACE_LABELS.workspaceName}
-          value={inputValue}
-          onInput={(e: Event) =>
-            setInputValue((e.target as HTMLInputElement).value)
-          }
-          disabled={isDeleting || undefined}
-          style={{ width: '100%' }}
-        />
-        {error && (
-          <div style={{ color: 'var(--md-sys-color-error)', fontSize: 13 }}>
-            {error}
+          <div
+            style={{
+              padding: 12,
+              borderRadius: 8,
+              background: '#fee2e2',
+              color: '#b91c1c',
+              fontSize: 14,
+              lineHeight: 1.6,
+            }}
+          >
+            <strong>此操作不可撤销。</strong>
+            <br />
+            删除后，Workspace「{workspaceName}」及其所有任务记录将被永久移除，
+            但磁盘上的产物文件不会自动清理。
           </div>
-        )}
-      </div>
-      <div slot="actions">
-        <md-text-button
-          onClick={handleClose}
-          disabled={isDeleting || undefined}
-        >
+          <p
+            style={{
+              margin: 0,
+              fontSize: 14,
+              color: '#43474e',
+            }}
+          >
+            请输入 Workspace 名称「<strong>{workspaceName}</strong>
+            」以确认删除。
+          </p>
+          <TextField
+            variant="outlined"
+            label={WORKSPACE_LABELS.workspaceName}
+            value={inputValue}
+            onChange={(e) => setInputValue(e.target.value)}
+            onInput={(e) => setInputValue((e.target as HTMLInputElement).value)}
+            disabled={isDeleting}
+            fullWidth
+          />
+          {error && (
+            <div style={{ color: '#ba1a1a', fontSize: 13 }}>{error}</div>
+          )}
+        </div>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={handleClose} disabled={isDeleting}>
           取消
-        </md-text-button>
-        <md-filled-button
-          style={
-            {
-              '--md-sys-color-primary': 'var(--md-sys-color-error)',
-            } as React.CSSProperties
-          }
+        </Button>
+        <Button
+          variant="contained"
+          color="error"
           onClick={handleConfirm}
-          disabled={!confirmed || isDeleting || undefined}
+          disabled={!confirmed || isDeleting}
         >
           {isDeleting ? '删除中…' : WORKSPACE_LABELS.confirmDelete}
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

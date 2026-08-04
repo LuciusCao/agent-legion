@@ -2,6 +2,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.routes.workspace_contracts import (
+    CmsServiceStatus,
+    ResourceProviderDefinition,
+    WorkspaceRecord,
+)
+
 
 class JobBatchRequest(BaseModel):
     workflow_key: str = "question_comprehension_info"
@@ -9,6 +15,7 @@ class JobBatchRequest(BaseModel):
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
     knowledge_codes: list[str] = Field(default_factory=list)
+    async_processing: bool = False
 
 
 class JobBatchResponse(BaseModel):
@@ -21,9 +28,8 @@ class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    default_workflow_key: str = "question_comprehension_info"
+    default_workflow_key: str
     default_entity: str = "question"
-    cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
     intake_config: dict[str, Any] = Field(default_factory=dict)
 
@@ -35,7 +41,6 @@ class WorkspaceUpdateRequest(BaseModel):
     description: str | None = None
     default_workflow_key: str | None = None
     default_entity: str | None = None
-    cms_config: dict[str, Any] | None = None
     resource_config: dict[str, Any] | None = None
     intake_config: dict[str, Any] | None = None
 
@@ -47,13 +52,12 @@ class WorkspaceSettingsResponse(BaseModel):
 class WorkspaceSettingsSectionRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    cmsUrl: str | None = None
-    cmsToken: str | None = None
     entityType: str | None = None
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
     workflowKey: str | None = None
     resources: dict[str, Any] | None = None
+    nodeConfig: dict[str, dict[str, Any]] | None = None
 
 
 class WorkspaceSettingsTestResponse(BaseModel):
@@ -62,11 +66,11 @@ class WorkspaceSettingsTestResponse(BaseModel):
 
 
 class WorkspaceResponse(BaseModel):
-    workspace: dict[str, Any]
+    workspace: WorkspaceRecord
 
 
 class WorkspacesResponse(BaseModel):
-    workspaces: list[dict[str, Any]]
+    workspaces: list[WorkspaceRecord]
 
 
 class DeleteJobResponse(BaseModel):
@@ -116,8 +120,8 @@ class DeleteWorkspaceResponse(BaseModel):
 
 
 class ResourceProvidersResponse(BaseModel):
-    providers: list[dict[str, Any]]
+    providers: list[ResourceProviderDefinition]
 
 
 class GlobalServicesResponse(BaseModel):
-    cms: dict[str, Any]
+    cms: CmsServiceStatus

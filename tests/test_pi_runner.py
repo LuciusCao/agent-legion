@@ -1,10 +1,15 @@
 import json
+import time
 from pathlib import Path
 
 import pytest
 
 from server.app.jobs import JobQueries
-from server.app.workflows.pi_runner import PiConfig, PiRunner
+from server.app.workflows.pi_command_builder import build_pi_command
+from server.app.workflows.pi_config import PiConfig
+from server.app.workflows.pi_runner import PiRunner
+from server.app.workflows.skill_version import resolve_skill_version
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
@@ -18,24 +23,27 @@ def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
         },
         skill_root=tmp_path / "skills",
     )
-    command = runner.build_command(
-        skill_dir=tmp_path / "skills/reading_analysis/extract_keywords",
+    command = build_pi_command(
+        runner.config,
+        skill_dir=tmp_path / "skills/question_comprehension_info/generate_key_info",
         session_dir=tmp_path / "run/session",
         tools=["read", "write", "bash"],
-        session_name="job-1:extract_keywords:7",
+        session_name="job-1:generate_key_info:7",
         prompt_file=tmp_path / "run/prompt.md",
     )
 
     assert command[:3] == ["pi", "--mode", "json"]
     assert "--session-dir" in command
     assert "--no-skills" in command
-    assert command[command.index("--skill") + 1].endswith("extract_keywords")
+    assert command[command.index("--skill") + 1].endswith("generate_key_info")
     assert command[command.index("--tools") + 1] == "read,write,bash"
     assert "--no-context-files" in command
     assert "--no-extensions" in command
     assert "--no-prompt-templates" in command
     assert "--approve" in command
     assert "--no-session" not in command
+    assert command[-2] == f"@{tmp_path / 'run/prompt.md'}"
+    assert command[-1] == "Execute the attached node instructions."
 
 
 def test_build_pi_command_omits_empty_provider_and_model(tmp_path):
@@ -43,7 +51,8 @@ def test_build_pi_command_omits_empty_provider_and_model(tmp_path):
         {"binary": "pi", "provider": "", "model": "", "thinking": "low"},
         skill_root=tmp_path / "skills",
     )
-    command = runner.build_command(
+    command = build_pi_command(
+        runner.config,
         skill_dir=tmp_path / "skills/foo",
         session_dir=tmp_path / "run/session",
         tools=["read"],
@@ -64,7 +73,8 @@ def test_build_pi_command_includes_provider_and_model_when_set(tmp_path):
         },
         skill_root=tmp_path / "skills",
     )
-    command = runner.build_command(
+    command = build_pi_command(
+        runner.config,
         skill_dir=tmp_path / "skills/foo",
         session_dir=tmp_path / "run/session",
         tools=["read"],
@@ -104,6 +114,87 @@ def test_pirunner_rejects_invalid_timeout():
         )
 
 
+def _git_env():
+    import os
+
+    env = {**dict(os.environ)}
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_WORK_TREE", None)
+    env.pop("GIT_INDEX_FILE", None)
+    return env
+
+
+def test_resolve_skill_version_returns_empty_for_non_git_dir(tmp_path):
+    assert resolve_skill_version(tmp_path) == ""
+
+
+def test_resolve_skill_version_returns_commit_for_untagged_commit(tmp_path):
+    import subprocess
+
+    env = _git_env()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=env)
+    (tmp_path / "file.txt").write_text("x")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@test.com"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Test"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"],
+        check=True,
+        env=env,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    ).stdout.strip()
+
+    assert resolve_skill_version(tmp_path) == commit
+
+
+def test_resolve_skill_version_returns_tag_and_commit(tmp_path):
+    import subprocess
+
+    env = _git_env()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=env)
+    (tmp_path / "file.txt").write_text("x")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@test.com"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Test"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "tag", "v1.2.3"], check=True, env=env)
+    commit = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    ).stdout.strip()
+
+    assert resolve_skill_version(tmp_path) == f"v1.2.3@{commit}"
+
+
 def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     # Create a fake pi executable that writes valid JSON lines and creates outputs
     fake_pi = tmp_path / "fake_pi"
@@ -124,7 +215,7 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     )
 
     # Create a fake skill with validator
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text(
@@ -139,7 +230,7 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -169,6 +260,8 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     assert "end_time" in run_meta
     assert run_meta["start_time"] is not None
     assert run_meta["end_time"] is not None
+    assert "skill_version" in run_meta
+    assert run_meta["skill_version"] == ""
 
 
 def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
@@ -183,7 +276,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text(
@@ -195,17 +288,21 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
     )
     validator.chmod(0o755)
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = job_db.create_job(
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id="b1",
         title="Q1",
         node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
     )
-    job_dir = Path(job["storage_dir"])
+    job_dir = tmp_path / job["storage_dir"]
     job_dir.mkdir(parents=True, exist_ok=True)
 
     result = runner.run(
@@ -223,12 +320,72 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
     assert len(runs) == 1
     assert runs[0]["status"] == "completed"
     assert runs[0]["exit_code"] == 0
-    assert runs[0]["run_dir"] == str(result.run_dir)
-    assert runs[0]["session_dir"] == str(result.session_dir)
+    assert (tmp_path / runs[0]["run_dir"]).resolve() == result.run_dir.resolve()
+    assert (tmp_path / runs[0]["session_dir"]).resolve() == result.session_dir.resolve()
     assert json.loads(runs[0]["command_json"])[0] == str(fake_pi)
 
     node = job_db.get_job_node(job["id"], "extract_keywords")
     assert node["status"] == "completed"
+
+
+def test_run_persists_skill_version(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"questions": []}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    )
+    validator.chmod(0o755)
+
+    db_path = TEST_DATABASE_URL
+    job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="b1",
+        title="Q1",
+        node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
+    )
+    job_dir = tmp_path / job["storage_dir"]
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+        skill_version="v1.2.3@abc123def456",
+    )
+
+    assert result.status == "completed"
+
+    run_meta = json.loads((result.run_dir / "run.json").read_text())
+    assert run_meta["skill_version"] == "v1.2.3@abc123def456"
+
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 1
+    assert runs[0]["skill_version"] == "v1.2.3@abc123def456"
 
 
 def test_run_fails_when_output_missing(tmp_path, monkeypatch):
@@ -241,7 +398,7 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text("#!/usr/bin/env python3\nimport sys\n")
@@ -249,7 +406,7 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -265,13 +422,28 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
     assert result.exit_code != 0
 
 
-def test_run_fails_when_binary_missing(tmp_path):
+def test_run_fails_with_model_error_when_pi_exits_zero(tmp_path):
+    """Pi can exit 0 while the upstream model call fails (e.g. provider 400).
+
+    The runner must report the model error, not a misleading missing-output error.
+    """
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        "#!/bin/bash\n"
+        "cat <<'JSONL'\n"
+        '{"type":"session","version":3,"id":"test-session","timestamp":"2026-06-18T10:00:00.000Z"}\n'
+        '{"type":"message_start","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"gateway","model":"your-model-a","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"400 status code (no body)"}}\n'
+        '{"type":"message_end","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"gateway","model":"your-model-a","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"400 status code (no body)"}}\n'
+        "JSONL\n"
+    )
+    fake_pi.chmod(0o755)
+
     runner = PiRunner.from_config(
-        {"binary": str(tmp_path / "nonexistent"), "timeout_seconds": 10},
+        {"binary": str(fake_pi), "timeout_seconds": 10},
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text("#!/usr/bin/env python3\nimport sys\n")
@@ -279,7 +451,39 @@ def test_run_fails_when_binary_missing(tmp_path):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json", "keywords_report.json"],
+        job_db=None,
+        job_dir=job_dir,
+    )
+
+    assert result.status == "failed"
+    assert result.exit_code != 0
+    assert "Pi model call failed" in result.error_message
+    assert "400 status code (no body)" in result.error_message
+
+
+def test_run_fails_when_binary_missing(tmp_path):
+    runner = PiRunner.from_config(
+        {"binary": str(tmp_path / "nonexistent"), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text("#!/usr/bin/env python3\nimport sys\n")
+    validator.chmod(0o755)
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -307,7 +511,7 @@ def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text(
@@ -317,7 +521,7 @@ def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -331,3 +535,153 @@ def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
 
     assert result.status == "failed"
     assert "validation failed" in result.error_message
+
+
+def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"questions": []}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    )
+    validator.chmod(0o755)
+
+    db_path = TEST_DATABASE_URL
+    job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="b1",
+        title="Q1",
+        node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
+    )
+    job_dir = tmp_path / job["storage_dir"]
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+    )
+
+    assert result.status == "completed"
+    assert result.run_dir.is_absolute()
+    assert result.session_dir.is_absolute()
+
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 1
+    assert runs[0]["log_path"].startswith("jobs/")
+    assert runs[0]["run_dir"].startswith("jobs/")
+    assert runs[0]["session_dir"].startswith("jobs/")
+    assert not Path(runs[0]["log_path"]).is_absolute()
+    assert not Path(runs[0]["run_dir"]).is_absolute()
+    assert not Path(runs[0]["session_dir"]).is_absolute()
+
+
+def test_run_cleans_up_old_run_dirs_on_retry(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"questions": []}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    )
+    validator.chmod(0o755)
+
+    db_path = TEST_DATABASE_URL
+    job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="b1",
+        title="Q1",
+        node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
+    )
+    job_dir = tmp_path / job["storage_dir"]
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    result1 = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+    )
+    first_run_dir = result1.run_dir
+
+    # Ensure distinct birthtimes so the cleanup heuristic keeps the newest run.
+    time.sleep(0.05)
+
+    # Reset the node so the retry can start a fresh node run.
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='ready', finished_at=null, error_message='' "
+            "where job_id=? and node_key=?",
+            (job["id"], "extract_keywords"),
+        )
+
+    result2 = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+    )
+
+    assert result2.status == "completed"
+    assert not first_run_dir.exists()
+    assert result2.run_dir.exists()
+
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 2
+    # The older node_run record should have its run_dir cleared.
+    old_run = next(r for r in runs if r["run_dir"] == "")
+    new_run = next(r for r in runs if r["run_dir"] != "")
+    assert old_run["status"] == "completed"
+    assert new_run["status"] == "completed"
+    assert Path(tmp_path / new_run["run_dir"]).resolve() == result2.run_dir.resolve()

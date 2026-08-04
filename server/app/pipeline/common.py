@@ -1,45 +1,19 @@
 import re
 from pathlib import Path
-from typing import Any
-from urllib.parse import urlparse
-
-
-def resolve_video_dir(video: Any, videos_dir: Path) -> Path:
-    """Return the video directory, resolving storage_dir safely against videos_dir."""
-    from server.app.storage_paths import resolve_video_dir as _resolve_video_dir
-
-    return _resolve_video_dir(video, videos_dir)
-
-
-def get_video_id(url: str) -> str:
-    path = urlparse(url).path
-    name = Path(path).name or "video"
-    stem = Path(name).stem or name
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", stem).strip("_") or "video"
-
-
-def normalize_identifier(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_-]+", "_", value.strip()).strip("_")
-
-
-def make_record_id(source_url: str, content_type: str, external_id: str) -> str:
-    normalized = normalize_identifier(external_id)
-    if normalized:
-        return f"{content_type}_{normalized}"
-    if source_url:
-        return get_video_id(source_url)
-    return "video"
 
 
 def parse_time(value: str) -> float:
     parts = value.strip().replace(",", ".").split(":")
-    if len(parts) == 2:
-        minutes, seconds = parts
-        return int(minutes) * 60 + float(seconds)
-    if len(parts) == 3:
-        hours, minutes, seconds = parts
-        return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-    raise ValueError(f"Unknown timestamp: {value}")
+    try:
+        if len(parts) == 2:
+            minutes, seconds = parts
+            return int(minutes) * 60 + float(seconds)
+        if len(parts) == 3:
+            hours, minutes, seconds = parts
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+    except ValueError:
+        pass
+    raise ValueError(f"Unknown timestamp: {value}") from None
 
 
 def _parse_srt_block(lines: list[str], subtitles: list[dict]) -> None:
@@ -52,11 +26,16 @@ def _parse_srt_block(lines: list[str], subtitles: list[dict]) -> None:
     )
     if not match:
         return
+    try:
+        start = parse_time(match.group(1))
+        end = parse_time(match.group(2))
+    except ValueError:
+        return
     subtitles.append(
         {
             "index": int(lines[0]) if lines[0].isdigit() else len(subtitles) + 1,
-            "start": parse_time(match.group(1)),
-            "end": parse_time(match.group(2)),
+            "start": start,
+            "end": end,
             "text": "\n".join(lines[2:]),
         }
     )

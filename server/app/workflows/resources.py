@@ -3,47 +3,11 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
-RESOURCE_PROVIDERS = {
-    "question_detail": {
-        "provider": "cms.question.detail",
-        "url_key": "question_detail_url",
-    },
-    "by_knowledge": {
-        "provider": "cms.question.list_by_knowledge",
-        "url_key": "question_list_url",
-    },
-}
-
-RESOURCE_PARAM_KEYS = ("bank_version", "country_id", "subject_id", "page_size")
-
-
-def _resource_config_from_legacy_cms(cms_config: dict[str, Any]) -> dict[str, Any]:
-    resources: dict[str, Any] = {}
-    if cms_config.get("question_detail_url"):
-        resources["question_detail"] = {
-            "provider": "cms.question.detail",
-            "config": {
-                "api_url": cms_config["question_detail_url"],
-                **{
-                    key: cms_config[key]
-                    for key in ("bank_version", "country_id", "subject_id")
-                    if key in cms_config
-                },
-            },
-        }
-    if cms_config.get("question_list_url"):
-        resources["by_knowledge"] = {
-            "provider": "cms.question.list_by_knowledge",
-            "config": {
-                "api_url": cms_config["question_list_url"],
-                **{
-                    key: cms_config[key]
-                    for key in ("bank_version", "country_id", "subject_id", "page_size")
-                    if key in cms_config
-                },
-            },
-        }
-    return {"resources": resources} if resources else {}
+from server.app.workflows.resource_providers import (
+    ResourceProviderDeclarations,
+    load_resource_provider_declarations,
+)
+from server.app.workflows.resource_schemas import resource_param_keys
 
 
 def _merge_resource_config(
@@ -65,10 +29,14 @@ def _merge_resource_config(
     return result
 
 
-def _append_resource_params(api_url: str, config: dict[str, Any]) -> str:
+def _append_resource_params(
+    api_url: str,
+    config: dict[str, Any],
+    param_keys: tuple[str, ...],
+) -> str:
     parsed = urlparse(api_url)
     query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    for key in RESOURCE_PARAM_KEYS:
+    for key in param_keys:
         value = config.get(key)
         if value not in (None, ""):
             query[key] = str(value)
@@ -96,39 +64,29 @@ def resolve_cms_resource(
     workspace: dict[str, Any] | None,
     batch_payload: dict[str, Any] | None,
     resource_key: str,
+    node_config: dict[str, Any] | None = None,
+    declarations: ResourceProviderDeclarations | None = None,
 ) -> dict[str, Any]:
+    if declarations is None:
+        # Fallback for call sites that only carry the raw config mapping
+        # (e.g. hand-built executor contexts); composition roots inject the
+        # declarations parsed and validated at load_settings time.
+        declarations = load_resource_provider_declarations(
+            settings_config.get("resource_providers") if isinstance(settings_config, dict) else None
+        )
     cms_config = settings_config.get("cms", {}) if isinstance(settings_config, dict) else {}
     result = dict(cms_config) if isinstance(cms_config, dict) else {}
-    defaults = RESOURCE_PROVIDERS.get(resource_key, {})
+    defaults = declarations.providers.get(resource_key, {})
     provider = str(defaults.get("provider") or "")
     url_key = str(defaults.get("url_key") or "")
 
     resource_config: dict[str, Any] = {}
-    if isinstance(cms_config, dict):
-        resource_config = _merge_resource_config(
-            resource_config,
-            _resource_config_from_legacy_cms(cms_config),
-        )
     if workspace:
         workspace_resource_config = workspace.get("resource_config")
-        workspace_cms_config = workspace.get("cms_config")
-        if isinstance(workspace_cms_config, dict):
-            resource_config = _merge_resource_config(
-                resource_config,
-                _resource_config_from_legacy_cms(workspace_cms_config),
-            )
-            result.update(workspace_cms_config)
         if isinstance(workspace_resource_config, dict):
             resource_config = _merge_resource_config(resource_config, workspace_resource_config)
     if batch_payload:
-        batch_cms_config = batch_payload.get("cms_config")
         batch_resource_config = batch_payload.get("resource_config")
-        if isinstance(batch_cms_config, dict):
-            resource_config = _merge_resource_config(
-                resource_config,
-                _resource_config_from_legacy_cms(batch_cms_config),
-            )
-            result.update(batch_cms_config)
         if isinstance(batch_resource_config, dict):
             resource_config = _merge_resource_config(resource_config, batch_resource_config)
 
@@ -152,11 +110,21 @@ def resolve_cms_resource(
         dict(raw_binding_config) if isinstance(raw_binding_config, dict) else {}
     )
     result.update(binding_config)
+    if node_config:
+        # Executor node config (spec D15) wins over bindings and defaults for
+        # the non-secret parameters its capability config_schema declares.
+        result.update({key: value for key, value in node_config.items() if value not in (None, "")})
+    # Explicit legacy URLs (settings-level question_*_url) win over the URL
+    # derived from resource_providers base_url + path.
     api_url = str(
-        binding_config.get("api_url") or result.get("api_url") or result.get(url_key) or ""
+        binding_config.get("api_url") or result.get(url_key) or result.get("api_url") or ""
     )
     if api_url:
-        api_url = _append_resource_params(api_url, binding_config)
+        # Params come from the merged result so global cms defaults (e.g.
+        # bank_version) reach the URL even without a workspace binding.
+        api_url = _append_resource_params(
+            api_url, result, resource_param_keys(resource_key, declarations.schemas)
+        )
         result["api_url"] = api_url
         if url_key:
             result[url_key] = api_url

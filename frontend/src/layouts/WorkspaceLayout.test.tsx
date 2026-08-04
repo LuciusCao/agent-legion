@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceLayout from './WorkspaceLayout'
 import appBarStyles from '../components/AppBar.module.css'
-import { createMockUiState } from '../testing/fixtures'
+import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -47,16 +48,28 @@ vi.mock('../stores/workspaceStore', () => ({
   }),
 }))
 
-const setWorkerPausedMock = vi.fn()
 const fetchWorkerStatusMock = vi.fn()
+const setWorkspacePackageDialogOpenMock = vi.fn()
+const setTokenUsageDialogOpenMock = vi.fn()
+
+vi.mock('../stores/agentsStore', () => ({
+  useAgentsStore: (
+    selector?: (state: ReturnType<typeof createMockAgentsState>) => unknown
+  ) => {
+    const state = createMockAgentsState({
+      fetchWorkerStatus: fetchWorkerStatusMock,
+    })
+    return selector ? selector(state) : state
+  },
+}))
 
 vi.mock('../stores/uiStore', () => ({
   useUiStore: (
     selector?: (state: ReturnType<typeof createMockUiState>) => unknown
   ) => {
     const state = createMockUiState({
-      fetchWorkerStatus: fetchWorkerStatusMock,
-      setWorkerPaused: setWorkerPausedMock,
+      setWorkspacePackageDialogOpen: setWorkspacePackageDialogOpenMock,
+      setTokenUsageDialogOpen: setTokenUsageDialogOpenMock,
     })
     return selector ? selector(state) : state
   },
@@ -65,8 +78,9 @@ vi.mock('../stores/uiStore', () => ({
 describe('WorkspaceLayout', () => {
   beforeEach(() => {
     mockNavigate.mockClear()
-    setWorkerPausedMock.mockClear()
     fetchWorkerStatusMock.mockClear()
+    setWorkspacePackageDialogOpenMock.mockClear()
+    setTokenUsageDialogOpenMock.mockClear()
     fetchWorkerStatusMock.mockResolvedValue(undefined)
   })
 
@@ -127,6 +141,21 @@ describe('WorkspaceLayout', () => {
     )
     fireEvent.click(screen.getByLabelText('设置'))
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/settings')
+  })
+
+  it('navigates to workflow studio when workflow studio button is clicked', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByLabelText('Workflow Studio'))
+    expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/workflow-studio')
   })
 
   it('navigates to home when home button is clicked', () => {
@@ -193,5 +222,54 @@ describe('WorkspaceLayout', () => {
       </MemoryRouter>
     )
     expect(screen.getByLabelText('Agent 状态')).toBeInTheDocument()
+  })
+
+  it('opens workspace package history dialog when package button is clicked', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByLabelText('包历史'))
+    expect(setWorkspacePackageDialogOpenMock).toHaveBeenCalledWith(true)
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('navigates to token usage page when token analysis button is clicked', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByLabelText('Token 使用分析'))
+    expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/token-usage')
+    expect(setTokenUsageDialogOpenMock).not.toHaveBeenCalled()
+  })
+
+  it('renders token analysis button on the job detail page', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    expect(screen.getByLabelText('Token 使用分析')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Token 使用分析'))
+    expect(setTokenUsageDialogOpenMock).toHaveBeenCalledWith(true)
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 })

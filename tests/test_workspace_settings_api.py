@@ -3,34 +3,39 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
+from tests.helpers.auth import authenticate_client
 
 
 def test_workspace_settings_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "test_ws", "default_workflow_key": "question_comprehension_info"},
+        )
+        assert ws.status_code == 200
+        workspace_id = ws.json()["workspace"]["id"]
         connection = c.patch(
-            "/api/workspaces/default/settings/connection",
+            f"/api/workspaces/{workspace_id}/settings/connection",
             json={
                 "resources": {"question_detail": {"enabled": True, "config": {}}},
-                "cmsUrl": "https://cms.example",
-                "cmsToken": "secret",
             },
         )
         intake = c.patch(
-            "/api/workspaces/default/settings/intake",
+            f"/api/workspaces/{workspace_id}/settings/intake",
             json={
                 "entityType": "video",
-                "intakeModes": ["direct_ids"],
-                "labelOverrides": {"direct_ids": "输入 ID"},
+                "intakeModes": ["batch_by_ids"],
+                "labelOverrides": {"batch_by_ids": "输入 ID"},
             },
         )
         workflow = c.patch(
-            "/api/workspaces/default/settings/workflow",
-            json={"workflowKey": "question_content"},
+            f"/api/workspaces/{workspace_id}/settings/workflow",
+            json={"workflowKey": "question_comprehension_info"},
         )
-        fetched = c.get("/api/workspaces/default/settings")
-        test_connection = c.post("/api/workspaces/default/settings/test-connection")
+        fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
+        test_connection = c.post(f"/api/workspaces/{workspace_id}/settings/test-connection")
 
     assert connection.status_code == 200
     assert intake.status_code == 200
@@ -41,24 +46,30 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "cmsToken" not in settings
     assert settings["resources"]["question_detail"]["enabled"] is True
     assert settings["entityType"] == "video"
-    assert settings["intakeModes"] == ["direct_ids"]
-    assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
-    assert settings["workflowKey"] == "question_content"
-    workspace = app.state.job_db.get_workspace("default")
+    assert settings["intakeModes"] == ["batch_by_ids"]
+    assert settings["labelOverrides"] == {"batch_by_ids": "输入 ID"}
+    assert settings["workflowKey"] == "question_comprehension_info"
+    workspace = app.state.job_db.get_workspace(workspace_id)
     assert "pipeline_config" not in workspace
 
 
 def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "test_ws", "default_workflow_key": "question_comprehension_info"},
+        )
+        assert ws.status_code == 200
+        workspace_id = ws.json()["workspace"]["id"]
         response = c.patch(
-            "/api/workspaces/default/settings/workflow",
+            f"/api/workspaces/{workspace_id}/settings/workflow",
             json={
-                "workflowKey": "question_content",
+                "workflowKey": "question_comprehension_info",
                 "localConcurrency": 5,
                 "agentConcurrency": 3,
-                "nodeLocalConcurrency": {"fetch_question_context": 2},
+                "nodeLocalConcurrency": {"fetch_questions": 2},
             },
         )
 
@@ -69,7 +80,7 @@ def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path)
         e["loc"][-1] for e in detail if e.get("type") == "extra_forbidden" and e.get("loc")
     }
     assert extra_fields == legacy_fields
-    workspace = app.state.job_db.get_workspace("default")
+    workspace = app.state.job_db.get_workspace(workspace_id)
     assert "pipeline_config" not in workspace
 
 
@@ -86,3 +97,153 @@ def test_workflow_openapi_contract_is_capability_only(tmp_path: Path) -> None:
     assert "agent" not in node
     assert "concurrency" not in detail
     assert "concurrency" not in summary
+
+
+def test_lists_workspace_workflow_revisions(client):
+    response = client.post(
+        "/api/workspaces",
+        json={"name": "Workflow Studio", "default_workflow_key": "question_comprehension_info"},
+    )
+    workspace_id = response.json()["workspace"]["id"]
+
+    revisions = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions")
+
+    assert revisions.status_code == 200
+    payload = revisions.json()
+    assert "revisions" in payload
+
+
+def _inject_key_info_config_schema(app) -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "max_items": {"type": "integer", "default": 10, "minimum": 1, "maximum": 100}
+        },
+    }
+    agents = dict(app.state.settings.agent_definitions)
+    original = agents["question-key-info-v1"]
+    agents["question-key-info-v1"] = original.model_copy(update={"config_schema": schema})
+    app.state.settings.agent_definitions = agents
+
+
+def test_workspace_settings_nodes_round_trip(tmp_path):
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    _inject_key_info_config_schema(app)
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "nodes_ws", "default_workflow_key": "question_comprehension_info"},
+        )
+        assert ws.status_code == 200
+        workspace_id = ws.json()["workspace"]["id"]
+
+        fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
+        assert fetched.status_code == 200
+        settings = fetched.json()["settings"]
+        assert settings["nodeConfig"] == {}
+        # generate_key_info comes from the Agent catalog; fetch_questions is an
+        # executor capability whose schema is declared in workflow.yaml (D15).
+        assert set(settings["nodeConfigSchemas"]) == {"generate_key_info", "fetch_questions"}
+
+        saved = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {"max_items": 5}}},
+        )
+        assert saved.status_code == 200
+        assert saved.json()["settings"]["nodeConfig"] == {"generate_key_info": {"max_items": 5}}
+
+        saved_executor = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"bank_version": "v6"}}},
+        )
+        assert saved_executor.status_code == 200
+        assert saved_executor.json()["settings"]["nodeConfig"] == {
+            "generate_key_info": {"max_items": 5},
+            "fetch_questions": {"bank_version": "v6"},
+        }
+
+        cleared = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {}, "fetch_questions": {}}},
+        )
+        assert cleared.status_code == 200
+        assert cleared.json()["settings"]["nodeConfig"] == {}
+
+    workspace = app.state.job_db.get_workspace(workspace_id)
+    assert workspace["node_config"] == {"question_comprehension_info": {}}
+
+
+def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    _inject_key_info_config_schema(app)
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "nodes_ws_bad", "default_workflow_key": "question_comprehension_info"},
+        )
+        workspace_id = ws.json()["workspace"]["id"]
+
+        unknown_key = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {"nope": 1}}},
+        )
+        out_of_bounds = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"generate_key_info": {"max_items": 0}}},
+        )
+        executor_unknown_key = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"max_items": 5}}},
+        )
+        unknown_node = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"not_a_node": {"max_items": 5}}},
+        )
+
+    assert unknown_key.status_code == 400
+    assert out_of_bounds.status_code == 400
+    # fetch_questions is an executor node with a declared schema (D15);
+    # max_items is not part of it.
+    assert executor_unknown_key.status_code == 400
+    assert unknown_node.status_code == 400
+
+
+def test_workspace_settings_resources_are_schema_validated(tmp_path):
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "res_ws", "default_workflow_key": "question_comprehension_info"},
+        )
+        workspace_id = ws.json()["workspace"]["id"]
+
+        fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
+        assert fetched.status_code == 200
+        resource_schemas = fetched.json()["settings"]["resourceSchemas"]
+        assert set(resource_schemas) == {"question_detail", "by_knowledge", "knowledge_video"}
+        assert "page_size" in resource_schemas["by_knowledge"]["schema"]["properties"]
+
+        bad_type = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/resources",
+            json={"resources": {"by_knowledge": {"enabled": True, "config": {"page_size": "x"}}}},
+        )
+        unknown_key = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/resources",
+            json={"resources": {"question_detail": {"enabled": True, "config": {"evil": 1}}}},
+        )
+        ok = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/resources",
+            json={"resources": {"by_knowledge": {"enabled": True, "config": {"page_size": 100}}}},
+        )
+
+    assert bad_type.status_code == 400
+    assert unknown_key.status_code == 400
+    assert ok.status_code == 200
+    # Secret schema fields surface as write-only markers in the payload.
+    assert ok.json()["settings"]["resources"]["by_knowledge"]["config"] == {
+        "page_size": 100,
+        "token": {"secret_set": False},
+    }

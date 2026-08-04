@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
@@ -8,12 +7,25 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import Request
 
+from server.app.db.connection import DatabaseConnection, connect_database
 from server.app.events import JobEventManager
-from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
+from server.app.events.aggregator import (
+    build_job_patch_batch_payload,
+    build_resync_required_payload,
+    record_job_update,
+)
+from server.app.events.bus import _EVICTED, InProcessEventBus, workspace_channel
+from server.app.executors.leases import ExecutorLeaseRepository, database_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_patch_queries import JobPatchQueryService
+from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workspace_executor_configuration import (
+    WorkspaceExecutorConfigurationService,
+)
 from server.app.settings import Settings
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 class FakeJobDB:
@@ -45,7 +57,7 @@ class FakeJobDB:
 
     @contextmanager
     def lease_guarded_mutation(self, job_id, now, *, reject_running_nodes):
-        yield MagicMock(spec=sqlite3.Connection)
+        yield MagicMock(spec=DatabaseConnection)
 
     @staticmethod
     def mark_nodes_for_rerun_in_transaction(conn, job_id, node_keys, downstream_map):
@@ -62,9 +74,29 @@ class FakeJobDB:
 
 @pytest.fixture
 def manager():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
-    return m
+    bus = InProcessEventBus()
+    bus.attach_loop(asyncio.new_event_loop())
+    return JobEventManager(bus)
+
+
+@pytest.fixture
+def job_query_service(job_db, settings):
+    return JobQueryService(
+        job_db,
+        settings,
+        WorkflowCatalogService(settings),
+        WorkspaceExecutorConfigurationService(job_db),
+    )
+
+
+@pytest.fixture
+def job_patch_query_service(job_db, settings):
+    return JobPatchQueryService(
+        job_db,
+        settings,
+        WorkflowCatalogService(settings),
+        WorkspaceExecutorConfigurationService(job_db),
+    )
 
 
 def _insert_workspace_job(conn):
@@ -83,16 +115,17 @@ def _insert_workspace_job(conn):
 def _insert_lease(conn, lease_id, expires_at, status="active"):
     _insert_workspace_job(conn)
     now = datetime.now(UTC)
-    now_str = _sqlite_timestamp(now)
+    now_str = database_timestamp(now)
     conn.execute("insert into job_nodes(job_id, node_key, status) values ('j1', 'n1', 'pending')")
     cursor = conn.execute(
         """
         insert into node_runs(job_id, node_key, status, started_at)
         values ('j1', 'n1', 'running', ?)
+        returning id
         """,
         (now_str,),
     )
-    node_run_id = cursor.lastrowid
+    node_run_id = cursor.fetchone()["id"]
     conn.execute(
         """
         insert into executor_leases(
@@ -107,20 +140,17 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
             status,
             now_str,
             now_str,
-            _sqlite_timestamp(expires_at),
+            database_timestamp(expires_at),
         ),
     )
 
 
 def _ws1_queue(manager):
-    queue = asyncio.Queue()
-    manager._get_workspace_queues("ws1").add(queue)
-    return queue
+    return manager.bus.subscribe(workspace_channel("ws1"))
 
 
 def test_broadcast_jobs_created_queues_message(manager):
-    queue = asyncio.Queue()
-    manager._get_workspace_queues("ws1").add(queue)
+    queue = manager.bus.subscribe(workspace_channel("ws1"))
     manager.broadcast_jobs_created("ws1", [{"id": "j1"}], {"pending": 1})
     assert not queue.empty()
     data = queue.get_nowait()
@@ -129,10 +159,8 @@ def test_broadcast_jobs_created_queues_message(manager):
 
 
 def test_broadcast_isolated_by_workspace(manager):
-    q1 = asyncio.Queue()
-    q2 = asyncio.Queue()
-    manager._get_workspace_queues("ws1").add(q1)
-    manager._get_workspace_queues("ws2").add(q2)
+    q1 = manager.bus.subscribe(workspace_channel("ws1"))
+    q2 = manager.bus.subscribe(workspace_channel("ws2"))
     manager.broadcast_job_updated("ws1", "j1", {"pending": 1})
     assert not q1.empty()
     assert q2.empty()
@@ -140,12 +168,12 @@ def test_broadcast_isolated_by_workspace(manager):
 
 def test_finish_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
     expires_at = datetime.now(UTC) + timedelta(hours=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -164,11 +192,11 @@ def test_finish_broadcasts_job_updated(manager, tmp_path):
 
 def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_workspace_job(conn)
         conn.execute(
@@ -198,12 +226,12 @@ def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
 
 def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
     expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -222,11 +250,11 @@ def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
 
 def test_recover_orphaned_running_jobs_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_workspace_job(conn)
         conn.execute("update jobs set status='running' where id='j1'")
@@ -245,15 +273,15 @@ def test_recover_orphaned_running_jobs_broadcasts_job_updated(manager, tmp_path)
 
 
 def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
-    from server.app import executors
+    from server.app.executors import _lease_write_paths
 
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
     expires_at = datetime.now(UTC) + timedelta(hours=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -261,9 +289,11 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
         conn.close()
 
     monkeypatch.setattr(
-        executors.leases,
+        _lease_write_paths,
         "finish_lease",
-        lambda _conn, _lease_id, _result: (_ for _ in ()).throw(RuntimeError("simulated failure")),
+        lambda _conn, _lease_id, _result, _data_dir=None: (_ for _ in ()).throw(
+            RuntimeError("simulated failure")
+        ),
     )
 
     queue = _ws1_queue(manager)
@@ -273,29 +303,30 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
 
 
 def test_connect_evicts_oldest_at_capacity():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
-    m.MAX_CLIENTS = 2
-    q1 = asyncio.Queue()
-    q2 = asyncio.Queue()
-    m._get_workspace_queues("ws1").add(q1)
-    m._get_workspace_queues("ws2").add(q2)
+    bus = InProcessEventBus()
+    loop = asyncio.new_event_loop()
+    bus.attach_loop(loop)
+    bus.MAX_CLIENTS = 2
+    m = JobEventManager(bus)
+    q1 = bus.subscribe(workspace_channel("ws1"))
+    q2 = bus.subscribe(workspace_channel("ws2"))
 
     async def add_third() -> None:
         request = MagicMock(spec=Request)
-        await m.connect(request, "ws3")
+        await m.connect(request, workspace_channel("ws3"))
 
-    asyncio.set_event_loop(m._loop)
-    m._loop.run_until_complete(add_third())
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(add_third())
 
-    assert q1 not in m._get_workspace_queues("ws1")
-    assert q2 in m._get_workspace_queues("ws2")
+    assert q1.get_nowait() is _EVICTED
+    assert q1 not in bus._subscribers.get(workspace_channel("ws1"), {})
+    assert q2 in bus._subscribers[workspace_channel("ws2")]
 
 
 def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
     from server.app.services.job_deletion import JobDeletionService
 
-    lease_repo = ExecutorLeaseRepository(tmp_path / "leases.sqlite")
+    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL)
     settings = MagicMock(spec=Settings)
     settings.logs_dir = tmp_path / "logs"
     settings.jobs_dir = tmp_path / "jobs"
@@ -315,7 +346,7 @@ def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
 def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
     from server.app.services.job_deletion import JobDeletionService
 
-    lease_repo = ExecutorLeaseRepository(tmp_path / "leases.sqlite")
+    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL)
     settings = MagicMock(spec=Settings)
     settings.logs_dir = tmp_path / "logs"
     settings.jobs_dir = tmp_path / "jobs"
@@ -324,7 +355,7 @@ def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
     service = JobDeletionService(FakeJobDB(), lease_repo, settings, job_event_manager=manager)
 
     expires_at = datetime.now(UTC) + timedelta(hours=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -332,8 +363,11 @@ def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
         conn.close()
 
     queue = _ws1_queue(manager)
-    result = service.delete("ws1", "j1")
-    assert result["status"] == "failed"
+    from server.app.services.job_operation_error import JobOperationError
+
+    with pytest.raises(JobOperationError) as exc_info:
+        service.delete("ws1", "j1")
+    assert exc_info.value.status == "failed"
     assert queue.empty()
 
 
@@ -399,42 +433,38 @@ def test_continue_job_broadcasts_job_updated(manager):
 
 
 def test_evicted_client_stops_streaming():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
-    m.MAX_CLIENTS = 2
+    bus = InProcessEventBus()
+    loop = asyncio.new_event_loop()
+    bus.attach_loop(loop)
+    bus.MAX_CLIENTS = 2
+    m = JobEventManager(bus)
 
     async def connect_workspace(ws: str) -> asyncio.Queue[str]:
         request = MagicMock(spec=Request)
-        await m.connect(request, ws)
-        return next(iter(m._get_workspace_queues(ws)))
+        await m.connect(request, workspace_channel(ws))
+        return next(iter(bus._subscribers[workspace_channel(ws)]))
 
-    asyncio.set_event_loop(m._loop)
-    q1 = m._loop.run_until_complete(connect_workspace("ws1"))
-    stop_event_q1 = m._stop_events[q1]
-    q2 = m._loop.run_until_complete(connect_workspace("ws2"))
-    q3 = m._loop.run_until_complete(connect_workspace("ws3"))
+    asyncio.set_event_loop(loop)
+    q1 = loop.run_until_complete(connect_workspace("ws1"))
+    q2 = loop.run_until_complete(connect_workspace("ws2"))
+    q3 = loop.run_until_complete(connect_workspace("ws3"))
 
-    assert q1 not in m._get_workspace_queues("ws1")
-    assert q2 in m._get_workspace_queues("ws2")
-    assert q3 in m._get_workspace_queues("ws3")
-    # The evicted queue's stop event should be set so its generator exits.
-    assert stop_event_q1.is_set()
-    assert m._stop_events.get(q1) is None
+    assert q1.get_nowait() is _EVICTED
+    assert q1 not in bus._subscribers.get(workspace_channel("ws1"), {})
+    assert q2 in bus._subscribers[workspace_channel("ws2")]
+    assert q3 in bus._subscribers[workspace_channel("ws3")]
 
 
 def test_dead_queue_stops_streaming():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
+    bus = InProcessEventBus()
+    bus.attach_loop(asyncio.new_event_loop())
 
     queue = MagicMock(spec=asyncio.Queue)
     queue.put_nowait.side_effect = RuntimeError("dead")
-    m._get_workspace_queues("ws1").add(queue)
-    stop_event = asyncio.Event()
-    m._stop_events[queue] = stop_event
+    bus._subscribers.setdefault(workspace_channel("ws1"), {})[queue] = None
 
-    m._broadcast("ws1", json.dumps({"type": "ping"}))
-    assert queue not in m._get_workspace_queues("ws1")
-    assert stop_event.is_set()
+    bus.publish(workspace_channel("ws1"), json.dumps({"type": "ping"}))
+    assert queue not in bus._subscribers.get(workspace_channel("ws1"), {})
 
 
 def test_run_to_broadcasts_job_updated(manager, tmp_path):
@@ -442,7 +472,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
     from server.app.services.job_execution import JobExecutionService
     from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     jobs_dir = tmp_path / "jobs"
     job_db = JobQueries(db_path, jobs_dir)
 
@@ -535,7 +565,128 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
         job_event_manager=manager,
     )
     queue = _ws1_queue(manager)
-    result = service.rerun("ws1", "j1", "node_a")
-    assert result["status"] == "skipped"
-    assert result["reason_code"] == "conflict"
+    from server.app.services.job_operation_error import JobOperationError
+
+    with pytest.raises(JobOperationError) as exc_info:
+        service.rerun("ws1", "j1", "node_a")
+    assert exc_info.value.status == "skipped"
+    assert exc_info.value.reason_code == "conflict"
     assert queue.empty()
+
+
+def test_job_event_manager_builds_patch_batch_payload():
+    payload = build_job_patch_batch_payload(
+        workspace_id="ws1",
+        revision=42,
+        stats={"running": 2},
+        jobs=[{"id": "job1", "status": "running"}],
+        deleted_job_ids=["job2"],
+    )
+
+    data = json.loads(payload)
+    assert data["type"] == "job_patch_batch"
+    assert data["workspace_id"] == "ws1"
+    assert data["revision"] == 42
+    assert data["stats"] == {"running": 2}
+    assert data["jobs"] == [{"id": "job1", "status": "running"}]
+    assert data["deleted_job_ids"] == ["job2"]
+
+
+def test_job_event_manager_builds_resync_payload():
+    payload = build_resync_required_payload(
+        workspace_id="ws1",
+        latest_revision=99,
+        reason="revision_too_old",
+    )
+
+    data = json.loads(payload)
+    assert data == {
+        "type": "resync_required",
+        "workspace_id": "ws1",
+        "latest_revision": 99,
+        "reason": "revision_too_old",
+    }
+
+
+@pytest.fixture
+def fake_job_db():
+    class _FakeJobDB:
+        def __init__(self):
+            self.jobs = {}
+
+        def get_job(self, job_id):
+            return self.jobs.get(job_id)
+
+    return _FakeJobDB()
+
+
+class FakeJobEventBuffer:
+    def __init__(self):
+        self.updated = []
+        self.created = []
+        self.deleted = []
+
+    def record_job_updated(self, workspace_id, job_id):
+        self.updated.append((workspace_id, job_id))
+        return 1
+
+    def record_job_created(self, workspace_id, job_id):
+        self.created.append((workspace_id, job_id))
+        return 1
+
+    def record_job_deleted(self, workspace_id, job_id):
+        self.deleted.append((workspace_id, job_id))
+        return 1
+
+
+def test_record_job_update_uses_event_buffer(fake_job_db):
+    buffer = FakeJobEventBuffer()
+    fake_job_db.jobs["job1"] = {"id": "job1", "workspace_id": "ws1"}
+
+    record_job_update(fake_job_db, buffer, "job1")
+
+    assert buffer.updated == [("ws1", "job1")]
+
+
+def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service, job_db):
+    job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    batch1 = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["q1"]},
+        workspace_id="ws1",
+    )
+    job1 = job_db.create_job(
+        workspace_id="ws1",
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="q1",
+        batch_id=batch1["id"],
+        title="Question 1",
+        node_keys=["question_understanding"],
+    )
+    batch2 = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["q2"]},
+        workspace_id="ws1",
+    )
+    job2 = job_db.create_job(
+        workspace_id="ws1",
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="q2",
+        batch_id=batch2["id"],
+        title="Question 2",
+        node_keys=["question_understanding"],
+    )
+
+    summaries = job_patch_query_service.list_patch_summaries("ws1", [job1["id"]])
+
+    assert [summary["id"] for summary in summaries] == [job1["id"]]
+    assert summaries[0]["workspace_id"] == "ws1"
+    assert "status" in summaries[0]
+    assert "active_node_key" in summaries[0]
+    assert "completed_nodes" in summaries[0]
+    assert "total_nodes" in summaries[0]
+    assert job2["id"] not in [summary["id"] for summary in summaries]

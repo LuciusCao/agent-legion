@@ -82,6 +82,54 @@ describe('useJobQuestion', () => {
     expect(result.current.question).toBeNull()
   })
 
+  it('returns null when questions field is not an array', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({ questions: 'bad' }),
+    })
+
+    const { result } = renderHook(() => useJobQuestion('job1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.question).toBeNull()
+    expect(result.current.error).toBe('')
+  })
+
+  it('returns null when questions array is empty', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({ questions: [] }),
+    })
+
+    const { result } = renderHook(() => useJobQuestion('job1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.question).toBeNull()
+    expect(result.current.error).toBe('')
+  })
+
+  it('returns null when first question is not an object', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({ questions: ['string'] }),
+    })
+
+    const { result } = renderHook(() => useJobQuestion('job1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.question).toBeNull()
+    expect(result.current.error).toBe('')
+  })
+
+  it('returns null when normalized field is missing', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({ questions: [{ question_id: 'Q1' }] }),
+    })
+
+    const { result } = renderHook(() => useJobQuestion('job1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.question).toBeNull()
+    expect(result.current.error).toBe('')
+  })
+
   it('refetches when the question artifact refresh key changes', async () => {
     mockFetchJobArtifact
       .mockRejectedValueOnce(new Error('not found'))

@@ -1,21 +1,59 @@
 import hashlib
 import hmac
 import json
-import os
 import time
+from collections.abc import Mapping
 from typing import Any
 
 import requests
 
+from server.app.cms.client import CmsClientError
+from server.app.cms.env import resolve_cms_env
 
-def _token_gen_config(config: dict[str, Any]) -> dict[str, str]:
+_TOKEN_GEN_ENV = {
+    "app_id": "CMS_APP_ID",
+    "nonce": "CMS_NONCE",
+    "secret": "CMS_SECRET",
+    "url": "CMS_TOKEN_URL",
+}
+
+
+def _token_gen_config(config: Mapping[str, Any]) -> dict[str, str]:
+    """Resolve token_gen keys, environment first, then in-memory config.
+
+    Env reads go through :func:`resolve_cms_env`, which arbitrates the
+    authoritative ``CMS_*`` names against the deprecated ``BASECMS_*``
+    aliases. The in-memory ``token_gen`` section only ever comes from env
+    injection or a workspace binding; the yaml ``cms.token_gen`` section was
+    retired in config governance G2 and is rejected at load time.
+    """
     cfg = config.get("token_gen") or {}
+    if not isinstance(cfg, Mapping):
+        cfg = {}
     return {
-        "app_id": str(os.environ.get("BASECMS_APP_ID") or cfg.get("app_id") or ""),
-        "nonce": str(os.environ.get("BASECMS_NONCE") or cfg.get("nonce") or ""),
-        "secret": str(os.environ.get("BASECMS_SECRET") or cfg.get("secret") or ""),
-        "url": str(os.environ.get("BASECMS_TOKEN_URL") or cfg.get("url") or ""),
+        key: str(resolve_cms_env(env_key) or cfg.get(key) or "")
+        for key, env_key in _TOKEN_GEN_ENV.items()
     }
+
+
+def cms_token_available(cms_config: Mapping[str, Any] | None) -> bool:
+    """Return True when CMS credentials resolve from any supported source.
+
+    Priority: env ``CMS_TOKEN`` (deprecated alias ``BASECMS_TOKEN``) >
+    binding/config ``token`` (vault secret_refs must be resolved by the
+    caller beforehand) > the four token_gen keys (env first, then in-memory
+    config).
+    """
+    if cms_config is None:
+        cms_config = {}
+    # Callers pass raw config values; a malformed cms section must not crash.
+    if not isinstance(cms_config, Mapping):
+        return False  # type: ignore[unreachable]
+    if resolve_cms_env("CMS_TOKEN"):
+        return True
+    if cms_config.get("token"):
+        return True
+    return all(_token_gen_config(cms_config).values())
 
 
 def _generate_prod_token(config: dict[str, Any]) -> str | None:
@@ -33,16 +71,19 @@ def _generate_prod_token(config: dict[str, Any]) -> str | None:
         "nonce": cfg["nonce"],
         "secret": cfg["secret"],
     }
-    resp = requests.post(
-        cfg["url"], json=payload, headers={"Content-Type": "application/json"}, timeout=10
-    )
-    resp.raise_for_status()
-    result = resp.json()
+    try:
+        resp = requests.post(
+            cfg["url"], json=payload, headers={"Content-Type": "application/json"}, timeout=10
+        )
+        resp.raise_for_status()
+        result = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise CmsClientError(f"CMS token request failed: {exc}") from exc
     token: str | None = result.get("token")
     if not token:
         data = result.get("data")
         if isinstance(data, dict):
             token = data.get("token")
     if not token:
-        raise Exception(f"生成 token 失败，响应: {json.dumps(result, ensure_ascii=False)}")
+        raise CmsClientError(f"生成 token 失败，响应: {json.dumps(result, ensure_ascii=False)}")
     return token

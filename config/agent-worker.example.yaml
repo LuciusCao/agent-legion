@@ -1,0 +1,45 @@
+# 该 YAML 仅作为首次启动的引导配置。Worker Service 导入后，可在
+# http://127.0.0.1:8787 页面中修改并立即应用。导入后再修改本文件不会自动
+# 生效（status 的 mounted_config_diverged 会提示分叉）；控制台与 API（除
+# /api/health 外）由状态目录下自动生成的 control_token（0600）保护。
+host_url: http://agent-legion-host:8000
+worker_id: home-mac-mini-1
+name: Home Mac mini
+# 可选值：pi / openclaw / velites。声明 velites 需先在 PATH 提供 velites 二进制。
+runtimes: [pi]
+max_concurrency: 10
+# Worker 执行进程每次启动/重启都先关闭 claim；需通过控制台或 workerctl 主动开启。
+# 关闭后不再 claim 新任务，但不会中断已领取的任务。
+claim_enabled: false
+# 必须与 workflow 节点现有的 capability 完全匹配。
+capabilities: [video_generate, subtitle_review]
+# 只有 provider 和 model 都匹配时才会领取任务。
+models:
+  - provider: openai
+    model: gpt-5.2
+labels:
+  os: macos
+  arch: arm64
+# The Worker NEVER declares workspaces: its workspace admission scope is
+# defined entirely by the registration token presented at register time
+# (global management token = all workspaces; a scoped token from
+# POST /api/agent-register-tokens = that workspace only). The server stores
+# the resolved scope and enforces it at claim.
+register_token_file: /run/secrets/agent_worker_register_token
+work_root: /var/lib/agent-legion-worker
+poll_interval_seconds: 2
+heartbeat_interval_seconds: 15
+# Grace for SIGTERMing active Agent subprocesses on worker shutdown; keep it
+# below the container stop_grace_period (30s in deploy/compose.worker.yaml) so
+# result reporting still fits in the budget.
+shutdown_grace_seconds: 25
+# Result delivery shaping (all optional). Agent 进程退出后立即释放执行槽位，
+# 压缩/归档/上传/上报由有界上传队列完成（upload_pending.json 落盘，重启恢复）；
+# 队列打满 upload_backlog_limit 时暂停领取新任务（缺省 = 2 × max_concurrency）。
+# upload_max_concurrency: 4
+# download_max_concurrency: 8
+# upload_backlog_limit: 20
+# 传输类调用（bundle/artifact 下载、artifact/result 上传）的单次 socket 超时秒数；
+# 控制类调用（claim/heartbeat/release-slot）固定 30s。
+# transfer_timeout_seconds: 120
+environment: {}

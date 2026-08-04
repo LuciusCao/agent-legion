@@ -1,0 +1,26 @@
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #f0f0f0;
+  color: #5f6267;
+  font-size: 12px;
+  line-height: 16px;
+  white-space: nowrap;
+  vertical-align: middle;
+}
+
+.chip svg {
+  font-size: 14px;
+}
+
+.text {
+  font-weight: 500;
+}
+
+.outdated {
+  background: #e3f2fd;
+  color: #1565c0;
+}

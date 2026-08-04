@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { AppBar } from './AppBar'
 import styles from './AppBar.module.css'
 
@@ -19,11 +20,21 @@ describe('AppBar', () => {
   it('renders title and home button', () => {
     render(
       <MemoryRouter>
-        <AppBar title="Video Hive" home />
+        <AppBar title="Agent Legion" home />
       </MemoryRouter>
     )
-    expect(screen.getByText('Video Hive')).toBeInTheDocument()
+    expect(screen.getByText('Agent Legion')).toBeInTheDocument()
     expect(screen.getByTestId('app-bar-home')).toBeInTheDocument()
+  })
+
+  it('renders subtitle when provided', () => {
+    render(
+      <MemoryRouter>
+        <AppBar title="Sample Video" subtitle="VID-001" />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('Sample Video')).toBeInTheDocument()
+    expect(screen.getByText('VID-001')).toBeInTheDocument()
   })
 
   it('prefers backTo over home', () => {
@@ -63,7 +74,7 @@ describe('AppBar', () => {
     mockedUseNavigate.mockReturnValue(navigate)
     render(
       <MemoryRouter>
-        <AppBar title="Video Hive" home />
+        <AppBar title="Agent Legion" home />
       </MemoryRouter>
     )
     fireEvent.click(screen.getByTestId('app-bar-home'))

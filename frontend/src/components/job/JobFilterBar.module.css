@@ -1,0 +1,39 @@
+.panel {
+  position: sticky;
+  top: 16px;
+  z-index: 10;
+  margin-top: 4px;
+  margin-bottom: 4px;
+  padding: 12px;
+}
+
+.row {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.control,
+.workflowVersionControl {
+  flex: 0 0 180px;
+  min-width: 180px;
+  width: 180px;
+}
+
+.workflowVersionControl > :global(.MuiFormControl-root) {
+  width: 100%;
+}
+
+.search {
+  flex: 0 0 280px;
+  min-width: 280px;
+  width: 280px;
+}
+
+.chips {
+  margin-top: 12px;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

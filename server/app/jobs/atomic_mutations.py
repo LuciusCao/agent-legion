@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import AbstractContextManager, contextmanager
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Protocol
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import DatabaseConnection
+from server.app.db.transaction import write_transaction
+from server.app.workflows.sharding import delete_shards
 
 
 class JobMutationConflict(ValueError):
@@ -17,26 +17,23 @@ class JobMutationConflict(ValueError):
 
 
 class _AtomicMutationQueries(Protocol):
-    path: Path
+    path: str
 
 
-def _timestamp(value: datetime) -> str:
-    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+def _timestamp(value: datetime) -> datetime:
+    return value.astimezone(UTC)
 
 
 @contextmanager
 def lease_guarded_mutation(
-    path: Path,
+    path: str,
     job_id: str,
     now: datetime,
     *,
     reject_running_nodes: bool,
-) -> Iterator[sqlite3.Connection]:
+) -> Iterator[DatabaseConnection]:
     """Serialize a Job mutation with lease claims and validate busy state."""
-    conn = connect_sqlite(path)
-    conn.isolation_level = None
-    try:
-        conn.execute("begin immediate")
+    with write_transaction(path) as conn:
         active_lease = conn.execute(
             """
             select 1 from executor_leases
@@ -57,17 +54,10 @@ def lease_guarded_mutation(
                 raise JobMutationConflict("busy", "Job has running nodes")
 
         yield conn
-        conn.execute("commit")
-    except Exception:
-        if conn.in_transaction:
-            conn.execute("rollback")
-        raise
-    finally:
-        conn.close()
 
 
 def apply_run_to(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     target_node_key: str,
     closure: frozenset[str],
@@ -88,16 +78,17 @@ def apply_run_to(
         f"""
         update job_nodes
         set status='pending', stale_reason='', error_message='',
-            started_at=null, finished_at=null
+            started_at=null, finished_at=null, created_at=current_timestamp
         where job_id=? and node_key in ({placeholders}) and status != 'completed'
         """,
         (job_id, *sorted(closure)),
     )
+    delete_shards(conn, job_id, closure)
     set_run_to_control(conn, job_id, target_node_key)
 
 
 def set_run_to_control(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     target_node_key: str,
 ) -> None:
@@ -114,35 +105,48 @@ def set_run_to_control(
 
 
 def mark_nodes_for_rerun(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     node_keys: Sequence[str],
     downstream_map: dict[str, list[str]],
 ) -> None:
-    for node_key in node_keys:
-        cursor = conn.execute(
-            """
-            update job_nodes
-            set status='pending', stale_reason='', error_message='',
-                started_at=null, finished_at=null
-            where job_id=? and node_key=?
-            """,
-            (job_id, node_key),
-        )
-        if cursor.rowcount == 0:
-            raise ValueError(f"Unknown job node: {job_id}.{node_key}")
-
     descendants = {
         descendant
         for node_key in node_keys
         for descendant in downstream_map.get(node_key, [])
         if descendant not in node_keys
     }
+    affected_nodes = set(node_keys) | descendants
+    placeholders = ",".join("?" * len(affected_nodes))
+    conn.execute(
+        f"""
+        update node_runs
+        set run_dir='', session_dir=''
+        where job_id=? and node_key in ({placeholders})
+        """,
+        (job_id, *sorted(affected_nodes)),
+    )
+    delete_shards(conn, job_id, affected_nodes)
+    for node_key in node_keys:
+        cursor = conn.execute(
+            """
+            update job_nodes
+            set status='pending', stale_reason='', error_message='',
+                failure_category='', failure_detail='',
+                started_at=null, finished_at=null, created_at=current_timestamp
+            where job_id=? and node_key=?
+            """,
+            (job_id, node_key),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Unknown job node: {job_id}.{node_key}")
     for descendant in descendants:
         conn.execute(
             """
             update job_nodes
-            set status='stale', stale_reason='upstream rerun', error_message=''
+            set status='stale', stale_reason='upstream rerun', error_message='',
+                failure_category='', failure_detail='',
+                created_at=current_timestamp
             where job_id=? and node_key=?
             """,
             (job_id, descendant),
@@ -157,7 +161,7 @@ def mark_nodes_for_rerun(
     )
 
 
-def delete_job(conn: sqlite3.Connection, job_id: str) -> None:
+def delete_job(conn: DatabaseConnection, job_id: str) -> None:
     cursor = conn.execute("delete from jobs where id=?", (job_id,))
     if cursor.rowcount == 0:
         raise ValueError("Job not found")
@@ -166,7 +170,7 @@ def delete_job(conn: sqlite3.Connection, job_id: str) -> None:
 _RESUMABLE_JOB_STATUSES = {"paused"}
 
 
-def resume_job(conn: sqlite3.Connection, job_id: str) -> None:
+def resume_job(conn: DatabaseConnection, job_id: str) -> None:
     """Resume a job inside an active transaction.
 
     Only ``paused`` jobs may be resumed. The status check and the state
@@ -220,7 +224,7 @@ class AtomicJobMutationsMixin:
         now: datetime,
         *,
         reject_running_nodes: bool,
-    ) -> AbstractContextManager[sqlite3.Connection]:
+    ) -> AbstractContextManager[DatabaseConnection]:
         return lease_guarded_mutation(
             self.path,
             job_id,
@@ -245,17 +249,8 @@ class AtomicJobMutationsMixin:
             apply_run_to(conn, job_id, target_node_key, closure)
 
     @staticmethod
-    def apply_run_to_in_transaction(
-        conn: sqlite3.Connection,
-        job_id: str,
-        target_node_key: str,
-        closure: frozenset[str],
-    ) -> None:
-        apply_run_to(conn, job_id, target_node_key, closure)
-
-    @staticmethod
     def mark_nodes_for_rerun_in_transaction(
-        conn: sqlite3.Connection,
+        conn: DatabaseConnection,
         job_id: str,
         node_keys: Sequence[str],
         downstream_map: dict[str, list[str]],
@@ -264,16 +259,12 @@ class AtomicJobMutationsMixin:
 
     @staticmethod
     def set_run_to_control_in_transaction(
-        conn: sqlite3.Connection,
+        conn: DatabaseConnection,
         job_id: str,
         target_node_key: str,
     ) -> None:
         set_run_to_control(conn, job_id, target_node_key)
 
     @staticmethod
-    def delete_job_in_transaction(conn: sqlite3.Connection, job_id: str) -> None:
+    def delete_job_in_transaction(conn: DatabaseConnection, job_id: str) -> None:
         delete_job(conn, job_id)
-
-    @staticmethod
-    def resume_job_in_transaction(conn: sqlite3.Connection, job_id: str) -> None:
-        resume_job(conn, job_id)

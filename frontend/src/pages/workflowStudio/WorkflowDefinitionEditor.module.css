@@ -1,0 +1,28 @@
+.editorLabel {
+  display: block;
+  margin: 16px 0 6px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #43474e;
+  letter-spacing: 0.025em;
+}
+
+.yamlEditor {
+  width: 100%;
+  min-height: 240px;
+  border: 1px solid #e0e0e0;
+  border-radius: 8px;
+  padding: 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  box-sizing: border-box;
+  background: #fafafa;
+  color: #1a1c1e;
+}
+
+.yamlEditor:focus {
+  outline: none;
+  border-color: #000000;
+}

@@ -1,0 +1,103 @@
+"""Pydantic contracts for the Agent Worker control-plane routes."""
+
+from __future__ import annotations
+
+from typing import Any
+
+from pydantic import BaseModel, Field
+
+
+class RegisterAgentWorkerRequest(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=64)
+    name: str = Field(default="", max_length=128)
+    runtimes: list[str] = Field(min_length=1)
+    capabilities: list[str] = Field(default_factory=list)
+    models: list[dict[str, str]] = Field(default_factory=list)
+    max_concurrency: int = Field(gt=0, le=1024)
+    labels: dict[str, Any] = Field(default_factory=dict)
+    protocol_version: int = Field(default=1, ge=1)
+    # Informational only: no agent_workers column stores it yet.
+    image_version: str = Field(default="", max_length=128)
+
+
+class RegisterAgentWorkerResponse(BaseModel):
+    worker_token: str
+    # Server-resolved workspace admission scope; [] means all workspaces.
+    allowed_workspaces: list[str]
+
+
+class CreateAgentRegisterTokenRequest(BaseModel):
+    workspace_id: str | None = Field(default=None, max_length=128)
+    label: str = Field(default="", max_length=128)
+
+
+class AgentRegisterTokenCreatedResponse(BaseModel):
+    token_id: str
+    # Plaintext, returned exactly once at issuance.
+    register_token: str
+    workspace_id: str | None
+    label: str
+
+
+class AgentRegisterTokenSummary(BaseModel):
+    token_id: str
+    workspace_id: str | None
+    label: str
+    created_at: str
+    revoked: bool
+
+
+class AgentRegisterTokensResponse(BaseModel):
+    tokens: list[AgentRegisterTokenSummary]
+
+
+class AgentRegisterTokenRevokeResponse(BaseModel):
+    revoked: bool
+
+
+class ClaimAgentExecutionRequest(BaseModel):
+    worker_id: str = Field(min_length=1, max_length=64)
+    # Live re-declaration of the worker's machine-wide capacity: the Host
+    # records it as the enforced max_concurrency, so dynamic resizes on the
+    # worker take effect without re-registration.
+    max_concurrency: int | None = Field(default=None, gt=0, le=1024)
+
+
+class AgentWorkerSummary(BaseModel):
+    worker_id: str
+    name: str
+    runtimes: list[str]
+    capabilities: list[str]
+    models: list[dict[str, str]]
+    max_concurrency: int
+    labels: dict[str, str]
+    protocol_version: int
+    # Server-side workspace admission scope; [] means all workspaces.
+    allowed_workspaces: list[str]
+    registered_at: str
+    last_seen_at: str
+    # True while the Worker's last authenticated call is within the online
+    # threshold; registered-but-silent Workers show as offline.
+    online: bool
+    revoked: bool
+
+
+class AgentWorkersResponse(BaseModel):
+    workers: list[AgentWorkerSummary]
+
+
+class AgentWorkerRevokeResponse(BaseModel):
+    worker_id: str
+    revoked: bool
+
+
+class AgentClaimResponse(BaseModel):
+    execution_id: str
+    lease_id: str
+    workspace_id: str
+    job_id: str
+    workflow_key: str
+    node_key: str
+    agent_id: str
+    manifest: dict[str, Any]
+    bundle_url: str

@@ -4,40 +4,49 @@ from pathlib import Path
 
 import pytest
 
-from server.app.db.connection import connect_sqlite
+from server.app.agent_broker import AgentExecutionBroker
+from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
 from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.sweeper import SweeperThread
 from server.app.jobs.queries import JobQueries
 from server.app.settings import Settings
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowIntake,
     WorkflowNode,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
-def tmp_db(tmp_path: Path) -> Path:
-    path = tmp_path / "recovery.sqlite"
+def tmp_db(tmp_path: Path) -> str:
+    del tmp_path
+    path = TEST_DATABASE_URL
     init_db(path)
     return path
 
 
 @pytest.fixture
-def queries(tmp_db: Path) -> JobQueries:
-    jobs_dir = tmp_db.parent / "jobs"
+def queries(tmp_db: str, tmp_path: Path) -> JobQueries:
+    jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     return JobQueries(tmp_db, jobs_dir)
 
 
 @pytest.fixture
-def repo(tmp_db: Path) -> ExecutorLeaseRepository:
-    return ExecutorLeaseRepository(tmp_db)
+def repo(tmp_db: str, queries: JobQueries) -> ExecutorLeaseRepository:
+    return ExecutorLeaseRepository(tmp_db, data_dir=queries.jobs_dir.parent)
+
+
+@pytest.fixture
+def broker(tmp_db: str, tmp_path: Path) -> AgentExecutionBroker:
+    return AgentExecutionBroker(tmp_db, bundle_dir=tmp_path / "agent_bundles")
 
 
 def _local_node(key: str) -> WorkflowNode:
@@ -107,7 +116,7 @@ def _claim(workspace_id: str, job_id: str, repo: ExecutorLeaseRepository) -> Non
         capability="fetch",
         local_node_limit=1,
         lease_ttl_seconds=60,
-        log_path="/tmp/recovery.log",
+        log_path=str(repo.data_dir / "logs" / "recovery.log"),
     )
     claim = repo.try_claim(request)
     assert claim is not None
@@ -115,7 +124,7 @@ def _claim(workspace_id: str, job_id: str, repo: ExecutorLeaseRepository) -> Non
 
 def _set_expired(repo: ExecutorLeaseRepository, lease_id: str) -> None:
     past = datetime.now(UTC) - timedelta(seconds=10)
-    conn = connect_sqlite(repo.path)
+    conn = connect_database(repo.path)
     try:
         conn.execute(
             "update executor_leases set expires_at=? where id=?",
@@ -212,7 +221,7 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
 
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path)
+    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
     expired = fresh_repo.expire_stale(datetime.now(UTC))
 
     assert expired == [lease_id]
@@ -226,8 +235,10 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
     assert job["status"] == "failed"
 
 
-def test_fresh_worker_start_expires_stale_leases(
-    tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
+def test_fresh_sweeper_start_expires_stale_leases(
+    queries: JobQueries,
+    repo: ExecutorLeaseRepository,
+    broker: AgentExecutionBroker,
 ) -> None:
     workspace_id, job_id = _setup_workspace(queries, "fresh-worker")
     _claim(workspace_id, job_id, repo)
@@ -240,9 +251,10 @@ def test_fresh_worker_start_expires_stale_leases(
     lease_id = lease_row["id"]
     _set_expired(repo, lease_id)
 
-    worker = _make_worker(tmp_path, queries, repo)
-    worker.start()
-    worker.stop()
+    # The startup sweep moved from the worker thread to the sweeper (task 8).
+    sweeper = SweeperThread(repo, broker)
+    sweeper.start()
+    sweeper.stop()
 
     with queries.connect() as conn:
         lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
@@ -281,7 +293,7 @@ def test_recovery_frees_global_and_workspace_capacity(
     lease_id = lease_row["id"]
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path)
+    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
     expired = fresh_repo.expire_stale(datetime.now(UTC))
     assert expired == [lease_id]
 
@@ -296,7 +308,7 @@ def test_recovery_frees_global_and_workspace_capacity(
             capability="fetch",
             local_node_limit=1,
             lease_ttl_seconds=60,
-            log_path="/tmp/recovery-b.log",
+            log_path=str(fresh_repo.data_dir / "logs" / "recovery-b.log"),
         )
     )
     assert claim_b is not None
@@ -304,7 +316,10 @@ def test_recovery_frees_global_and_workspace_capacity(
 
 
 def test_recovery_does_not_resubmit_failed_node(
-    tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
+    tmp_path: Path,
+    queries: JobQueries,
+    repo: ExecutorLeaseRepository,
+    broker: AgentExecutionBroker,
 ) -> None:
     workspace_id, job_id = _setup_workspace(queries, "no-resubmit")
     _claim(workspace_id, job_id, repo)
@@ -317,10 +332,12 @@ def test_recovery_does_not_resubmit_failed_node(
     lease_id = lease_row["id"]
     _set_expired(repo, lease_id)
 
-    worker = _make_worker(tmp_path, queries, repo)
-    worker.start()
-    worker.stop()
+    # The startup sweep that expires the lease now lives in the sweeper (task 8).
+    sweeper = SweeperThread(repo, broker)
+    sweeper.start()
+    sweeper.stop()
 
+    worker = _make_worker(tmp_path, queries, repo)
     processed = worker._poll()
     assert processed is False
 
@@ -351,7 +368,7 @@ def test_recovery_is_idempotent(
     node_run_id = run_row["id"]
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path)
+    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
     first = fresh_repo.expire_stale(datetime.now(UTC))
     second = fresh_repo.expire_stale(datetime.now(UTC))
 

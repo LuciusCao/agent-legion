@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 from collections.abc import Callable
@@ -11,66 +10,37 @@ from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import Settings
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import load_registered_workflow
-
-_LEGACY_AGENT_TABLE_SQL = """
-create table if not exists workspace_agent_assignments (
-    workspace_id text not null,
-    agent_id text not null,
-    concurrency_limit integer not null default 1,
-    primary key (workspace_id, agent_id)
-)
-"""
-
-_LEGACY_BOOTSTRAP_TABLE_SQL = """
-create table if not exists workspace_executor_bootstrap_state (
-    workspace_id text primary key,
-    completed_at text not null default current_timestamp,
-    foreign key(workspace_id) references workspaces(id) on delete cascade
-)
-"""
+from server.app.workflows.resource_providers import ResourceProviderDeclarations
 
 
 def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
-    """Recreate legacy tables removed from base schema so tests can seed pre-V005 state.
-
-    Accepts either a sqlite3.Connection or any object with a ``connect()`` context
-    manager that yields a connection.
-    """
-    import sqlite3
-
-    if isinstance(db_or_conn, sqlite3.Connection):
-        db_or_conn.execute(_LEGACY_AGENT_TABLE_SQL)
-        db_or_conn.execute(_LEGACY_BOOTSTRAP_TABLE_SQL)
-        return
-
-    with db_or_conn.connect() as conn:
-        conn.execute(_LEGACY_AGENT_TABLE_SQL)
-        conn.execute(_LEGACY_BOOTSTRAP_TABLE_SQL)
+    """Compatibility no-op for tests that predate authoritative configuration."""
+    del db_or_conn
 
 
 def make_workflow_worker(
     tmp_path: Path,
     queries: JobQueries,
     *,
-    workflow_key: str = "reading_analysis",
+    workflow_key: str = "question_comprehension_info",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
 ) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:
     """Build a configured WorkflowWorkerThread for *workflow_key*."""
     from server.app import main as app_main
     from server.app.executors.leases import ExecutorLeaseRepository
-    from server.app.executors.legacy_migration import finalize_legacy_executor_schema
     from server.app.executors.runtime import ExecutionRuntime
 
     definition = load_registered_workflow(Path("."), workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    # Avoid real CMS/network calls in tests; isolated child processes re-import
-    # modules and do not inherit parent monkeypatches.
-    settings.config.pop("cms", None)
-    settings.config.pop("resource_providers", None)
+    # Avoid real CMS/network calls in tests: empty declarations make every
+    # resource resolve to no provider/api_url, and the declarations travel
+    # with the executor context into isolated child processes (which do not
+    # inherit parent monkeypatches).
+    settings.resource_providers = ResourceProviderDeclarations()
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {
@@ -84,7 +54,7 @@ def make_workflow_worker(
     )
 
     registry = app_main.build_executor_registry(settings, queries)
-    leases = ExecutorLeaseRepository(queries.path)
+    leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,
@@ -100,12 +70,6 @@ def make_workflow_worker(
         settings=settings,
     )
     worker._definitions = [definition]
-    with queries.connect() as conn:
-        definitions = [definition]
-        with contextlib.suppress(KeyError, FileNotFoundError):
-            definitions.append(load_registered_workflow(Path("."), "question_comprehension_info"))
-        finalize_legacy_executor_schema(conn, definitions, settings.executor_definitions)
-
     return worker, definition
 
 
@@ -125,13 +89,6 @@ class GoodProvider(TranscriptionProvider):
             "2\n00:00:10,000 --> 00:00:20,000\n第二段讲解。\n",
             encoding="utf-8",
         )
-
-
-class TestProvider(TranscriptionProvider):
-    name = "sensevoice"
-
-    def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
-        output_path.write_text("1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8")
 
 
 class ChapterRunner:
@@ -162,22 +119,6 @@ class ChapterRunner:
         )()
 
 
-class InputItem:
-    def __init__(
-        self,
-        url: str = "",
-        title: str = "",
-        content_type: str = "knowledge",
-        external_id: str = "",
-        source_uuid: str = "",
-    ):
-        self.url = url
-        self.title = title
-        self.content_type = content_type
-        self.external_id = external_id
-        self.source_uuid = source_uuid
-
-
 def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     """Create a temporary project root/data dir and patch create_app to use them."""
     root_dir = tmp_path / "root"
@@ -197,6 +138,19 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             shutil.copy2(src_file, workflows_dst / src_file.name)
 
     from server.app import main as app_main
+    from server.app.agent_catalog import load_agent_definitions
+    from server.app.configuration import load_application_config
+    from server.app.workflows.resource_providers import load_resource_provider_declarations
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    # The app boots against the isolated test schema with the real Agent
+    # catalog: the Settings defaults (public dev database_url, empty catalog)
+    # would otherwise make startup sync wipe the dev database's agent state.
+    real_config = load_application_config(real_root).config
+    agent_definitions = load_agent_definitions(real_config.get("agents", {}))
+    # Settings-payload endpoints mask and describe resource bindings with the
+    # real provider declarations.
+    resource_providers = load_resource_provider_declarations(real_config.get("resource_providers"))
 
     def fake_load_settings(
         data_dir: Path | None = None, config_path: Path | None = None
@@ -210,6 +164,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             packages_dir=resolved / "packages",
             jobs_dir=resolved / "jobs",
             config={},
+            database_url=TEST_DATABASE_URL,
+            agent_definitions=agent_definitions,
+            resource_providers=resource_providers,
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)

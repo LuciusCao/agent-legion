@@ -1,3 +1,14 @@
+from tests.helpers.auth import authenticate_client
+from tests.postgres_support import TEST_DATABASE_URL
+
+
+def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+    return client.post(
+        "/api/workspaces",
+        json={"name": name, "default_workflow_key": default_workflow_key},
+    ).json()["workspace"]["id"]
+
+
 def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -5,17 +16,18 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c, "default", "question_comprehension_info")
         response = c.put(
-            "/api/workspaces/default/configuration",
+            f"/api/workspaces/{ws_id}/configuration",
             json={
                 "name": "Updated Workspace",
                 "description": "Atomic settings",
                 "settings": {
                     "entityType": "video",
-                    "intakeModes": ["direct_ids"],
-                    "labelOverrides": {"direct_ids": "Video IDs"},
-                    "workflowKey": "question_content",
+                    "intakeModes": ["batch_by_ids"],
+                    "labelOverrides": {"batch_by_ids": "Video IDs"},
+                    "workflowKey": "question_comprehension_info",
                     "resources": {"question_detail": {"enabled": True, "config": {}}},
                 },
                 "executor_allocations": [
@@ -23,15 +35,15 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_content",
-                        "node_key": "fetch_question_context",
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
                         "executor_id": "local-default",
                     },
                 ],
                 "node_limits": [
                     {
-                        "workflow_key": "question_content",
-                        "node_key": "fetch_question_context",
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
                         "concurrency_limit": 3,
                     },
                 ],
@@ -43,19 +55,19 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     assert body["workspace"]["name"] == "Updated Workspace"
     assert body["settings"]["entityType"] == "video"
     assert body["executor_configuration"]["allocations"] == [
-        {"executor_id": "local-default", "workspace_id": "default", "concurrency_limit": 4},
+        {"executor_id": "local-default", "workspace_id": ws_id, "concurrency_limit": 4},
     ]
     assert body["executor_configuration"]["bindings"] == [
         {
-            "workflow_key": "question_content",
-            "node_key": "fetch_question_context",
+            "workflow_key": "question_comprehension_info",
+            "node_key": "fetch_questions",
             "executor_id": "local-default",
         },
     ]
     assert body["executor_configuration"]["node_limits"] == [
         {
-            "workflow_key": "question_content",
-            "node_key": "fetch_question_context",
+            "workflow_key": "question_comprehension_info",
+            "node_key": "fetch_questions",
             "concurrency_limit": 3,
         },
     ]
@@ -68,19 +80,47 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
-        original = c.get("/api/workspaces/default").json()["workspace"]
-        response = c.put(
-            "/api/workspaces/default/configuration",
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c, "rollback", "question_comprehension_info")
+
+        # Establish a known good configuration first.
+        c.put(
+            f"/api/workspaces/{ws_id}/configuration",
             json={
-                "name": "Must Roll Back",
-                "settings": {"workflowKey": "question_content"},
+                "name": "Rollback Test",
+                "settings": {"workflowKey": "question_comprehension_info"},
                 "executor_allocations": [
                     {"executor_id": "local-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_content",
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
+                        "executor_id": "local-default",
+                    },
+                ],
+                "node_limits": [
+                    {
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
+                        "concurrency_limit": 2,
+                    },
+                ],
+            },
+        )
+        original_config = app.state.job_db.get_workspace_executor_configuration(ws_id)
+
+        response = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "name": "Must Roll Back",
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [
+                    {"executor_id": "local-default", "concurrency_limit": 4},
+                ],
+                "node_bindings": [
+                    {
+                        "workflow_key": "question_comprehension_info",
                         "node_key": "unknown_node",
                         "executor_id": "local-default",
                     },
@@ -88,66 +128,166 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
                 "node_limits": [],
             },
         )
-        persisted = c.get("/api/workspaces/default").json()["workspace"]
+        persisted = c.get(f"/api/workspaces/{ws_id}").json()["workspace"]
 
     assert response.status_code == 400
-    assert persisted["name"] == original["name"]
-    config = app.state.job_db.get_workspace_executor_configuration("default")
-    # Startup bootstrap materialized reading_analysis defaults for the default
-    # workspace; the failed PUT rolls back to that state.
-    assert config["allocations"] == [
-        {"workspace_id": "default", "executor_id": "local-default", "concurrency_limit": 1}
-    ]
-    assert config["bindings"] == [
-        {
-            "workflow_key": "reading_analysis",
-            "node_key": "clean_and_parse",
-            "executor_id": "local-default",
-        },
-        {
-            "workflow_key": "reading_analysis",
-            "node_key": "fetch_questions",
-            "executor_id": "local-default",
-        },
-    ]
-    assert config["node_limits"] == [
-        {
-            "workflow_key": "reading_analysis",
-            "node_key": "clean_and_parse",
-            "concurrency_limit": 1,
-        },
-        {
-            "workflow_key": "reading_analysis",
-            "node_key": "fetch_questions",
-            "concurrency_limit": 1,
-        },
-    ]
+    # The invalid PUT must not change the workspace or its executor configuration.
+    assert persisted["name"] == "Rollback Test"
+    config = app.state.job_db.get_workspace_executor_configuration(ws_id)
+    assert config == original_config
 
 
-def test_app_startup_materializes_executor_configuration_for_default_workspace(tmp_path):
+def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.jobs import JobQueries
     from server.app.main import create_app
-    from tests.helpers import ensure_legacy_workspace_tables
 
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
-    ensure_legacy_workspace_tables(queries)
-    with queries.connect() as conn:
-        conn.execute(
-            "insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit) values (?, ?, ?)",
-            ("default", "pi", 3),
-        )
+    workspace = queries.create_workspace(
+        "Materialized", default_workflow_key="question_comprehension_info"
+    )
+    ws_id = workspace["id"]
+    queries.replace_workspace_executor_configuration(
+        ws_id,
+        [
+            {"executor_id": "local-default", "concurrency_limit": 1},
+        ],
+        [],
+        [],
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    with TestClient(app) as c:
-        response = c.get("/api/workspaces/default/executor-configuration")
+    with authenticate_client(TestClient(app)) as c:
+        response = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
 
     assert response.status_code == 200
-    assert {row["executor_id"] for row in response.json()["allocations"]} == {
-        "local-default",
-        "pi-default",
-    }
+    assert {row["executor_id"] for row in response.json()["allocations"]} == {"local-default"}
+
+
+def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c, "residue", "question_comprehension_info")
+        # Seed rows left behind by the retired `pi` Executor alongside valid
+        # local-default rows, bypassing PUT validation like the legacy writers did.
+        app.state.job_db.replace_workspace_executor_configuration(
+            ws_id,
+            [
+                {"executor_id": "pi", "concurrency_limit": 2},
+                {"executor_id": "local-default", "concurrency_limit": 8},
+            ],
+            [
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "clean_and_parse",
+                    "executor_id": "pi",
+                },
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "fetch_questions",
+                    "executor_id": "local-default",
+                },
+            ],
+            [
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "clean_and_parse",
+                    "concurrency_limit": 1,
+                },
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "fetch_questions",
+                    "concurrency_limit": 2,
+                },
+            ],
+        )
+
+        # The frontend saves by echoing back what GET returned.
+        loaded = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
+        assert loaded.status_code == 200
+        config = loaded.json()
+        response = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [
+                    {
+                        "executor_id": row["executor_id"],
+                        "concurrency_limit": row["concurrency_limit"],
+                    }
+                    for row in config["allocations"]
+                ],
+                "node_bindings": config["bindings"],
+                "node_limits": config["node_limits"],
+            },
+        )
+        assert response.status_code == 200
+
+    # The successful full replace physically removed the retired Executor rows.
+    persisted = app.state.job_db.get_workspace_executor_configuration(ws_id)
+    assert {row["executor_id"] for row in persisted["allocations"]} == {"local-default"}
+    assert {row["executor_id"] for row in persisted["bindings"]} == {"local-default"}
+    assert [(row["workflow_key"], row["node_key"]) for row in persisted["node_limits"]] == [
+        ("question_comprehension_info", "fetch_questions")
+    ]
+
+
+def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c, "capacity", "question_comprehension_info")
+        saved = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [],
+                "node_bindings": [],
+                "node_limits": [],
+                "agent_capacity": 7,
+            },
+        )
+        assert saved.status_code == 200
+        assert saved.json()["agent_capacity"] == 7
+
+        loaded = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
+        assert loaded.status_code == 200
+        assert loaded.json()["agent_capacity"] == 7
+
+        # Omitting agent_capacity leaves the saved value unchanged.
+        omitted = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [],
+                "node_bindings": [],
+                "node_limits": [],
+            },
+        )
+        assert omitted.status_code == 200
+        assert omitted.json()["agent_capacity"] == 7
+
+        invalid = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [],
+                "node_bindings": [],
+                "node_limits": [],
+                "agent_capacity": 0,
+            },
+        )
+        assert invalid.status_code == 422

@@ -8,15 +8,12 @@ import logging
 import sys
 from pathlib import Path
 
-# Allow running the script directly from the repository root.
+import yaml
+
+from scripts.quality.exemptions import load_exemptions, validate_exemptions
+from scripts.quality.invariants import load_registry, validate_registry
+
 project_root = Path(__file__).resolve().parents[1]
-if str(project_root) not in sys.path:
-    sys.path.insert(0, str(project_root))
-
-import yaml  # noqa: E402
-
-from server.app.quality.exemptions import load_exemptions, validate_exemptions  # noqa: E402
-from server.app.quality.invariants import load_registry, validate_registry  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -27,12 +24,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--registry",
-        default="config/architecture-invariants.yaml",
+        default="config/architecture/architecture-invariants.yaml",
         help="Path to the invariant registry YAML file.",
     )
     parser.add_argument(
         "--exemptions",
-        default="config/architecture-exemptions.yaml",
+        default="config/architecture/architecture-exemptions.yaml",
         help="Path to the exemption registry YAML file.",
     )
     args = parser.parse_args(argv)

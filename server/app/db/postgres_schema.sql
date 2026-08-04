@@ -1,0 +1,466 @@
+create table if not exists workspaces (
+  id text primary key,
+  name text not null,
+  default_workflow_key text not null default 'question_comprehension_info',
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp,
+  cms_config_json text not null default '{}',
+  resource_config_json text not null default '{}',
+  node_config_json text not null default '{}',
+  default_entity text not null default 'question',
+  intake_config_json text not null default '{}',
+  description text not null default ''
+);
+
+-- Idempotent upgrade path for databases created before schema v14:
+-- `create table if not exists` above does not add columns to existing tables.
+alter table workspaces add column if not exists node_config_json text not null default '{}';
+
+create table if not exists workspace_executor_allocations (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  executor_id text not null,
+  concurrency_limit integer not null check(concurrency_limit > 0),
+  primary key(workspace_id, executor_id)
+);
+
+create table if not exists workspace_node_bindings (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  executor_id text not null,
+  primary key(workspace_id, workflow_key, node_key)
+);
+
+create table if not exists workspace_node_limits (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  concurrency_limit integer not null check(concurrency_limit > 0),
+  primary key(workspace_id, workflow_key, node_key)
+);
+
+create table if not exists agent_definitions (
+  agent_id text primary key,
+  capability text not null,
+  runtime text not null,
+  definition_json text not null,
+  definition_hash text not null,
+  enabled integer not null default 1 check(enabled in (0, 1)),
+  updated_at timestamptz not null default current_timestamp
+);
+
+create table if not exists workspace_node_routes (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  target_kind text not null check(target_kind in ('handler_executor', 'agent')),
+  target_id text not null,
+  primary key(workspace_id, workflow_key, node_key)
+);
+
+create table if not exists workspace_node_capacities (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  max_concurrency integer not null check(max_concurrency > 0),
+  source_revision_id text not null default '',
+  updated_at timestamptz not null default current_timestamp,
+  primary key(workspace_id, workflow_key, node_key)
+);
+
+-- Workspace-level Agent execution capacity (supersedes per-node
+-- workspace_node_capacities for Agent routing; the node table remains only
+-- as a legacy projection that publish now prunes). A workspace WITHOUT a row
+-- has no configured Agent limit and is treated as unlimited at claim time.
+create table if not exists workspace_agent_capacities (
+  workspace_id text primary key references workspaces(id) on delete cascade,
+  max_concurrency integer not null check(max_concurrency > 0),
+  updated_at timestamptz not null default current_timestamp
+);
+
+create table if not exists job_batches (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  source_kind text not null,
+  source_payload_json text not null default '{}',
+  status text not null default 'created',
+  created_count integer not null default 0,
+  error_message text not null default '',
+  created_at timestamptz not null default current_timestamp
+);
+
+create table if not exists jobs (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  source_type text not null,
+  source_id text not null,
+  batch_id text not null default '',
+  title text not null default '',
+  status text not null default 'queued',
+  storage_dir text not null default '',
+  error_message text not null default '',
+  stem text not null default '',
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp,
+  execution_mode text not null default 'full' check(execution_mode in ('full', 'until_node')),
+  target_node_key text,
+  execution_paused integer not null default 0 check(execution_paused in (0, 1)),
+  pause_reason text not null default '',
+  packed integer not null default 0,
+  workflow_revision_id text not null default '',
+  workflow_definition_hash text not null default '',
+  workflow_definition_snapshot_json text not null default '',
+  outcome text not null default '',
+  workflow_version integer
+);
+
+create table if not exists job_nodes (
+  id bigint generated by default as identity primary key,
+  job_id text not null references jobs(id) on delete cascade,
+  node_key text not null,
+  status text not null default 'pending',
+  stale_reason text not null default '',
+  error_message text not null default '',
+  started_at timestamptz,
+  finished_at timestamptz,
+  created_at timestamptz not null default current_timestamp,
+  unique(job_id, node_key)
+);
+
+create table if not exists node_runs (
+  id bigint generated by default as identity primary key,
+  job_id text not null references jobs(id) on delete cascade,
+  node_key text not null,
+  status text not null,
+  started_at timestamptz not null default current_timestamp,
+  finished_at timestamptz,
+  command_json text not null default '[]',
+  exit_code integer,
+  log_path text not null default '',
+  error_message text not null default '',
+  run_dir text not null default '',
+  session_dir text not null default '',
+  skill_version text not null default '',
+  runner text not null default ''
+);
+
+create table if not exists executor_leases (
+  id text primary key,
+  execution_id text not null unique,
+  executor_id text not null,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  job_id text not null references jobs(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  node_run_id bigint not null references node_runs(id) on delete cascade,
+  status text not null check(status in ('active', 'released', 'expired')),
+  acquired_at timestamptz not null,
+  heartbeat_at timestamptz not null,
+  expires_at timestamptz not null
+);
+
+create table if not exists workspace_packages (
+  id bigint generated by default as identity primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  path text not null,
+  name text not null default '',
+  job_count integer not null default 0,
+  size_bytes bigint not null default 0,
+  locked integer not null default 0,
+  created_at timestamptz not null default current_timestamp
+);
+
+create table if not exists workflow_revisions (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  version integer not null,
+  status text not null check(status in ('draft', 'active', 'archived')),
+  definition_json text not null,
+  definition_hash text not null,
+  created_at timestamptz not null default current_timestamp,
+  published_at timestamptz,
+  unique(workspace_id, workflow_key, version)
+);
+
+create table if not exists node_run_token_usage (
+  id bigint generated by default as identity primary key,
+  node_run_id bigint not null unique references node_runs(id) on delete cascade,
+  job_id text not null references jobs(id) on delete cascade,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  node_key text not null,
+  provider text not null default '',
+  model text not null default '',
+  skill_version text not null default '',
+  message_count integer not null default 0,
+  input_tokens bigint not null default 0,
+  output_tokens bigint not null default 0,
+  cache_read_tokens bigint not null default 0,
+  total_tokens bigint not null default 0,
+  usage_source text not null default 'events_jsonl',
+  is_complete integer not null default 1 check(is_complete in (0, 1)),
+  parse_error text not null default '',
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);
+
+create table if not exists agent_workers (
+  worker_id text primary key,
+  name text not null default '',
+  runtimes_json text not null,
+  capabilities_json text not null default '[]',
+  models_json text not null default '[]',
+  max_concurrency integer not null check(max_concurrency > 0),
+  labels_json text not null default '{}',
+  protocol_version integer not null,
+  token_hash text not null,
+  -- Server-resolved workspace admission scope: '[]' means all workspaces
+  -- (the pre-v7 behavior for already-registered workers). Populated only from
+  -- the registration credential (global register token or scoped token),
+  -- never from Worker-supplied fields.
+  allowed_workspaces_json text not null default '[]',
+  registered_at timestamptz not null,
+  last_seen_at timestamptz not null,
+  revoked_at timestamptz
+);
+alter table agent_workers add column if not exists allowed_workspaces_json text not null default '[]';
+alter table agent_workers add column if not exists capabilities_json text not null default '[]';
+alter table agent_workers add column if not exists models_json text not null default '[]';
+
+-- Workspace-scoped Agent Worker registration tokens (EXEC-WORKERACL-001).
+-- workspace_id NULL means the token admits Workers to ALL workspaces; a
+-- scoped row admits only its workspace. Only token_hash is stored; the
+-- plaintext is returned exactly once at issuance.
+create table if not exists agent_register_tokens (
+  id text primary key,
+  token_hash text not null,
+  workspace_id text references workspaces(id) on delete cascade,
+  label text not null default '',
+  created_at timestamptz not null default current_timestamp,
+  revoked_at timestamptz
+);
+
+create table if not exists agent_execution_requests (
+  execution_id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  job_id text not null references jobs(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  agent_id text not null,
+  agent_definition_hash text not null,
+  node_concurrency_limit integer not null check(node_concurrency_limit > 0),
+  state text not null default 'queued'
+    check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled')),
+  worker_id text,
+  lease_id text,
+  node_run_id bigint,
+  attempt integer not null default 0,
+  queued_at timestamptz not null,
+  claimed_at timestamptz,
+  heartbeat_at timestamptz,
+  finished_at timestamptz,
+  manifest_json text not null,
+  outcome_json text
+);
+alter table agent_execution_requests add column if not exists lease_id text;
+alter table agent_execution_requests add column if not exists node_run_id bigint;
+-- State evolution: 'reporting' (result upload pending; execution slot released).
+-- Drop/re-add so databases created before this state existed pick it up.
+alter table agent_execution_requests drop constraint if exists agent_execution_requests_state_check;
+alter table agent_execution_requests add constraint agent_execution_requests_state_check
+  check(state in ('queued', 'claimed', 'reporting', 'done', 'cancelled'));
+
+create index if not exists idx_agent_requests_claim
+  on agent_execution_requests(state, queued_at, execution_id);
+-- Claim candidate lookup walks only the per-workspace queued head (schema
+-- v18); a full queued scan priced every row and made claims O(queue depth).
+create index if not exists idx_agent_requests_queued_head
+  on agent_execution_requests(workspace_id, queued_at, execution_id)
+  where state = 'queued';
+create index if not exists idx_agent_requests_node_active
+  on agent_execution_requests(workspace_id, workflow_key, node_key, state);
+create index if not exists idx_agent_requests_worker_active
+  on agent_execution_requests(worker_id, state);
+-- One active request per node; 'reporting' still owns the node until the
+-- result commits, so it must block re-enqueue too.
+drop index if exists idx_agent_requests_one_active_node;
+create unique index if not exists idx_agent_requests_one_active_node
+  on agent_execution_requests(job_id, node_key)
+  where state in ('queued', 'claimed', 'reporting');
+-- Stockpile gate's done-rate window scan (schema v20,
+-- server.app.agent_stock); partial, so only done rows pay for it.
+create index if not exists idx_agent_requests_done_recent
+  on agent_execution_requests(finished_at)
+  where state = 'done';
+
+create table if not exists job_event_seq (
+  id integer primary key check(id = 1),
+  value bigint not null
+);
+insert into job_event_seq(id, value) values (1, 0) on conflict(id) do nothing;
+
+create table if not exists worker_control_state (
+  scope text primary key,
+  paused integer not null default 1,
+  updated_by text not null,
+  updated_at timestamptz not null
+);
+
+create table if not exists artifacts (
+  hash text primary key,
+  size bigint not null,
+  created_at timestamptz not null default current_timestamp
+);
+
+create table if not exists artifact_refs (
+  job_id text not null references jobs(id) on delete cascade,
+  node_key text not null,
+  name text not null,
+  hash text not null references artifacts(hash),
+  primary key(job_id, node_key, name)
+);
+
+create table if not exists node_shards (
+  job_id text not null references jobs(id) on delete cascade,
+  node_key text not null,
+  shard_index integer not null,
+  status text not null default 'pending',
+  input_json text not null default '{}',
+  output_json text not null default '',
+  error_message text not null default '',
+  execution_id text not null default '',
+  started_at timestamptz,
+  finished_at timestamptz,
+  primary key(job_id, node_key, shard_index)
+);
+
+create index if not exists idx_workspaces_created_at on workspaces(created_at);
+create index if not exists idx_job_batches_workspace on job_batches(workspace_id, created_at);
+alter table job_batches
+  add column if not exists updated_at timestamptz not null default current_timestamp;
+create index if not exists idx_job_batches_intake_queue
+  on job_batches(status, updated_at) where status in ('queued', 'processing');
+create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status);
+create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
+create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
+create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
+-- Snapshot pagination (list_jobs_paginated) and the legacy unbounded job list
+-- both filter by workspace and order by (created_at desc, id desc); without
+-- this index every page re-sorts all jobs of the workspace.
+create index if not exists idx_jobs_workspace_created_at on jobs(workspace_id, created_at desc, id desc);
+create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
+create index if not exists idx_node_runs_job_id on node_runs(job_id);
+-- get_latest_node_run_for_workspace orders by started_at desc with limit 1;
+-- the index lets Postgres walk runs newest-first instead of sorting them all.
+create index if not exists idx_node_runs_started_at on node_runs(started_at desc);
+create index if not exists idx_node_runs_status_finished_at on node_runs(status, finished_at);
+create index if not exists idx_jobs_status on jobs(status);
+create index if not exists idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at);
+create index if not exists idx_executor_leases_workspace_active on executor_leases(workspace_id, executor_id, status, expires_at);
+create index if not exists idx_executor_leases_workflow_node_active on executor_leases(workspace_id, workflow_key, node_key, status, expires_at);
+create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
+create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
+
+drop table if exists remote_executions;
+drop table if exists remote_workers;
+create index if not exists idx_workspace_packages_workspace_id on workspace_packages(workspace_id, created_at desc);
+create index if not exists idx_workflow_revisions_active on workflow_revisions(workspace_id, workflow_key, status);
+create index if not exists idx_node_run_token_usage_workspace on node_run_token_usage(workspace_id, node_key);
+create index if not exists idx_node_run_token_usage_model on node_run_token_usage(provider, model);
+create index if not exists idx_node_run_token_usage_skill_version on node_run_token_usage(skill_version);
+create index if not exists idx_node_runs_run_dir on node_runs(run_dir);
+create index if not exists idx_node_run_token_usage_job_id on node_run_token_usage(job_id);
+create index if not exists idx_artifact_refs_hash on artifact_refs(hash);
+
+-- One-time seed (schema v6): the legacy per-workspace `pi` executor
+-- allocation was the de-facto workspace-level Agent limit before
+-- workspace_agent_capacities existed. This runs only inside the
+-- version-gated replay (once per SCHEMA_VERSION bump) and uses
+-- `on conflict do nothing`, so values an operator later edits through
+-- workspace settings are never overwritten by a later replay.
+insert into workspace_agent_capacities(workspace_id, max_concurrency)
+select workspace_id, concurrency_limit
+from workspace_executor_allocations
+where executor_id = 'pi'
+on conflict(workspace_id) do nothing;
+
+-- Failure classification (schema v9): persisted category/detail for failed
+-- node runs, mirrored onto job_nodes so detail views read them directly.
+alter table node_runs add column if not exists failure_category text not null default '';
+alter table node_runs add column if not exists failure_detail text not null default '';
+alter table job_nodes add column if not exists failure_category text not null default '';
+alter table job_nodes add column if not exists failure_detail text not null default '';
+create index if not exists idx_node_runs_failure on node_runs(status, failure_category);
+
+-- Ops metrics (schema v11): minute-granularity host operations samples
+-- (online Workers, claimed executions, token throughput), rolled up to
+-- hour/day granularity by the /api/metrics/overview query.
+-- Schema v12 adds worker_id: '' is the global aggregate row, any other
+-- value is a per-Worker sample for the same bucket. Uniqueness lives in
+-- uq_ops_metric_samples_bucket_worker (not an inline constraint) so fresh
+-- and v11-upgraded databases share the same shape for upsert inference.
+create table if not exists ops_metric_samples (
+  id bigint generated by default as identity primary key,
+  bucket_start timestamptz not null,
+  worker_id text not null default '',
+  online_workers integer not null default 0,
+  active_executions integer not null default 0,
+  input_tokens bigint not null default 0,
+  output_tokens bigint not null default 0,
+  cache_read_tokens bigint not null default 0,
+  total_tokens bigint not null default 0,
+  created_at timestamptz not null default current_timestamp
+);
+alter table ops_metric_samples add column if not exists worker_id text not null default '';
+alter table ops_metric_samples drop constraint if exists ops_metric_samples_bucket_start_key;
+create index if not exists idx_ops_metric_samples_bucket on ops_metric_samples(bucket_start);
+create unique index if not exists uq_ops_metric_samples_bucket_worker
+  on ops_metric_samples(bucket_start, worker_id);
+
+-- Auth (schema v13): local users, revocable server-side sessions, and
+-- per-workspace membership for the B-end self-hosted rollout. Session rows
+-- store only the sha256 of the bearer token so a database leak does not
+-- expose usable credentials (SECURITY-AUTH-001).
+create table if not exists users (
+  id text primary key,
+  username text not null unique,
+  display_name text not null default '',
+  password_hash text,
+  role text not null default 'member' check(role in ('admin', 'member')),
+  disabled_at timestamptz,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);
+
+create table if not exists sessions (
+  token_hash text primary key,
+  user_id text not null references users(id) on delete cascade,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_sessions_user_id on sessions(user_id);
+create index if not exists idx_sessions_expires_at on sessions(expires_at);
+
+create table if not exists workspace_members (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  user_id text not null references users(id) on delete cascade,
+  role text not null default 'editor' check(role in ('editor', 'viewer')),
+  created_at timestamptz not null default current_timestamp,
+  primary key (workspace_id, user_id)
+);
+create index if not exists idx_workspace_members_user_id on workspace_members(user_id);
+
+-- Vault (schema v16): per-workspace secrets encrypted with the Fernet master
+-- key (VAULT-SECRET-001). Only ciphertext is stored; plaintext never leaves
+-- the vault service layer and is never returned by the API.
+create table if not exists workspace_secrets (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  name text not null,
+  ciphertext text not null,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp,
+  primary key(workspace_id, name)
+);

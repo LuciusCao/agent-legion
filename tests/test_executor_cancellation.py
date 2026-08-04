@@ -19,10 +19,11 @@ from server.app.executors.config import OpenClawCapabilityConfig, PiCapabilityCo
 from server.app.executors.local import LocalExecutor
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.openclaw import OpenClawExecutor
+from server.app.executors.openclaw_runner import OpenClawRunner
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_runner import PiConfig
 
 
@@ -90,10 +91,8 @@ def cooperative_handler(
 ) -> None:
     runtime = runtime or {}
     token = runtime.get("cancellation")
-    for _ in range(1000):
-        if token is not None:
-            token.raise_if_cancelled()
-        time.sleep(0.005)
+    if token is not None:
+        token.raise_if_cancelled()
     (job_dir / "out.json").write_text("{}", encoding="utf-8")
 
 
@@ -206,6 +205,20 @@ def _pi_skill(skill_dir: Path) -> None:
     )
 
 
+class _StubSkillManager(SkillManager):
+    """SkillManager stub that returns an existing on-disk skill directory."""
+
+    def __init__(self, base_dir: Path) -> None:
+        super().__init__(
+            config_path=base_dir / "skills.yaml",
+            lock_path=base_dir / "skills.lock",
+            base_dir=base_dir,
+        )
+
+    def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
+        return self.base_dir / skill_key
+
+
 class TestPiExecutorCancellation:
     @pytest.mark.slow
     @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups require POSIX")
@@ -214,14 +227,18 @@ class TestPiExecutorCancellation:
         fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
         fake_pi.chmod(0o755)
 
-        skill_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
+        skill_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
         _pi_skill(skill_dir)
 
         executor = PiExecutor(
             "pi-default",
             PiConfig(binary=str(fake_pi), cancellation_grace_seconds=0.3),
-            tmp_path / "skills",
-            {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
+            _StubSkillManager(tmp_path / "skills"),
+            {
+                "generate_key_info": PiCapabilityConfig(
+                    skill="question_comprehension_info/generate_key_info"
+                )
+            },
         )
         job_dir = tmp_path / "job"
         job_dir.mkdir()
@@ -233,9 +250,9 @@ class TestPiExecutorCancellation:
             executor_id="pi-default",
             workspace_id="ws-a",
             job_id="job-1",
-            workflow_key="reading_analysis",
-            node_key="extract_keywords",
-            capability="extract_keywords",
+            workflow_key="question_comprehension_info",
+            node_key="generate_key_info",
+            capability="generate_key_info",
             workspace={},
             job={"id": "job-1", "storage_dir": str(job_dir)},
             job_dir=job_dir,
@@ -291,7 +308,7 @@ class TestOpenClawExecutorCancellation:
             executor_id="oc-default",
             workspace_id="ws-a",
             job_id="job-1",
-            workflow_key="reading_analysis",
+            workflow_key="question_comprehension_info",
             node_key="interaction_generate",
             capability="interaction_generate",
             workspace={},
@@ -334,7 +351,7 @@ class FakeCancellingExecutor:
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         token = (context.runtime or {}).get("cancellation")
         self.tokens.append(token)
-        token.wait(timeout=10)
+        assert token.wait(timeout=10), "cancellation token was not set in time"
         return ExecutionResult(
             status="cancelled",
             exit_code=-1,

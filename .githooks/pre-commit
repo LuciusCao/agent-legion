@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+while IFS= read -r name; do
+  if [[ -n "$name" ]]; then
+    unset "$name"
+  fi
+done < <(git rev-parse --local-env-vars)
+
+"$ROOT_DIR/scripts/check-fast.sh"

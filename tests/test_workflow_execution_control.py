@@ -17,9 +17,10 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
-from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import (
     WorkflowDefinition,
+    WorkflowEdge,
     WorkflowIntake,
     WorkflowNode,
 )
@@ -28,24 +29,26 @@ from server.app.workflows.execution_control import (
     allowed_nodes,
     ancestor_closure,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
-def tmp_db(tmp_path: Path) -> Path:
-    path = tmp_path / "control.sqlite"
+def tmp_db(tmp_path: Path) -> str:
+    del tmp_path
+    path = TEST_DATABASE_URL
     init_db(path)
     return path
 
 
 @pytest.fixture
-def queries(tmp_db: Path) -> JobQueries:
-    jobs_dir = tmp_db.parent / "jobs"
+def queries(tmp_db: str, tmp_path: Path) -> JobQueries:
+    jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     return JobQueries(tmp_db, jobs_dir)
 
 
 @pytest.fixture
-def repo(tmp_db: Path) -> ExecutorLeaseRepository:
+def repo(tmp_db: str) -> ExecutorLeaseRepository:
     return ExecutorLeaseRepository(tmp_db)
 
 
@@ -76,6 +79,26 @@ def test_ancestor_closure_for_branched_target() -> None:
     definition = _branched_definition()
     closure = ancestor_closure(definition, "target")
     assert closure == frozenset({"root", "left", "target"})
+
+
+def test_ancestor_closure_uses_edges_when_after_is_empty() -> None:
+    definition = WorkflowDefinition(
+        key="edge_only",
+        label="Edge Only",
+        intake=WorkflowIntake(),
+        nodes={
+            "root": WorkflowNode(key="root", label="Root", capability="root"),
+            "gate": WorkflowNode(key="gate", label="Gate", capability="gate"),
+            "target": WorkflowNode(key="target", label="Target", capability="target"),
+        },
+        edges=[
+            WorkflowEdge(source="root", target="gate"),
+            WorkflowEdge(source="gate", target="target"),
+        ],
+        schema_version=2,
+    )
+
+    assert ancestor_closure(definition, "target") == frozenset({"root", "gate", "target"})
 
 
 def test_ancestor_closure_unknown_target_raises() -> None:
@@ -121,7 +144,7 @@ def _claim_request(
     global_capacity: int = 2,
     local_node_limit: int | None = 1,
     ttl: int = 60,
-    log_path: str = "/tmp/run.log",
+    log_path: str = "logs/run.log",
     workflow_key: str = "branched",
     capability: str = "root",
 ) -> LeaseClaimRequest:
@@ -148,10 +171,10 @@ def _setup_workspace(
     target_node_key: str | None = None,
     executor_id: str = "local-default",
 ) -> tuple[str, str]:
-    workspace = queries.create_workspace(name="control-ws", default_workflow_key="branched")
+    workspace = queries.create_workspace(name="control-ws", default_workflow_key=definition.key)
     workspace_id = workspace["id"]
     job = queries.create_job(
-        workflow_key="branched",
+        workflow_key=definition.key,
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -172,7 +195,7 @@ def _setup_workspace(
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
-                (workspace_id, "branched", node.key, executor_id),
+                (workspace_id, definition.key, node.key, executor_id),
             )
         conn.execute(
             """
@@ -191,7 +214,7 @@ def _setup_workspace(
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
-                (workspace_id, "branched", node.key, 1),
+                (workspace_id, definition.key, node.key, 1),
             )
     return workspace_id, job_id
 
@@ -359,6 +382,64 @@ def test_target_completion_pauses_job_atomically(
     assert job["status"] == "paused"
     assert job["execution_paused"] == 1
     assert job["pause_reason"] == "target_reached"
+
+
+def test_terminal_target_completion_marks_job_completed(
+    queries: JobQueries,
+    repo: ExecutorLeaseRepository,
+) -> None:
+    definition = WorkflowDefinition(
+        key="linear",
+        label="Linear",
+        intake=WorkflowIntake(),
+        nodes={
+            "root": WorkflowNode(key="root", label="Root", capability="root"),
+            "target": WorkflowNode(
+                key="target", label="Target", capability="target", after=["root"]
+            ),
+        },
+    )
+    workspace_id, job_id = _setup_workspace(queries, definition, target_node_key="target")
+    allowed = allowed_nodes(
+        definition,
+        {"execution_mode": "until_node", "target_node_key": "target"},
+    )
+
+    root_claim = repo.try_claim(
+        _claim_request(
+            workspace_id,
+            job_id,
+            "root",
+            execution_mode="until_node",
+            target_node_key="target",
+            allowed_node_keys=tuple(sorted(allowed)),
+            capability="root",
+            workflow_key="linear",
+        )
+    )
+    assert isinstance(root_claim, ClaimedExecution)
+    repo.finish(root_claim.lease_id, ExecutionResult(status="completed", exit_code=0))
+
+    target_claim = repo.try_claim(
+        _claim_request(
+            workspace_id,
+            job_id,
+            "target",
+            execution_mode="until_node",
+            target_node_key="target",
+            allowed_node_keys=tuple(sorted(allowed)),
+            capability="target",
+            workflow_key="linear",
+        )
+    )
+    assert isinstance(target_claim, ClaimedExecution)
+    repo.finish(target_claim.lease_id, ExecutionResult(status="completed", exit_code=0))
+
+    job = queries.get_job(job_id)
+    assert job is not None
+    assert job["status"] == "completed"
+    assert job["execution_paused"] == 0
+    assert job["pause_reason"] == ""
 
 
 def _make_worker(

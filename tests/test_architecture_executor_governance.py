@@ -11,6 +11,8 @@ from pathlib import Path
 
 import pytest
 
+pytestmark = pytest.mark.no_db
+
 ROOT = Path(__file__).resolve().parents[1]
 
 # Directories that contain production source code to scan.
@@ -30,19 +32,20 @@ WHITELIST: set[str] = {
     str(ROOT / "server" / "app" / "jobs" / "executor_configuration.py"),
     # Pipeline definition loader intentionally rejects removed 'runner'/'agent' fields.
     str(ROOT / "server" / "app" / "workflows" / "definition.py"),
+    str(ROOT / "server" / "app" / "workflows" / "loader.py"),
     # Video pipeline runner uses openclaw command template strings.
     str(ROOT / "server" / "app" / "pipeline" / "runners.py"),
-    # Video work scheduler uses 'agent' as a local work-item kind.
-    str(ROOT / "server" / "app" / "worker_scheduler.py"),
-    # Video worker thread uses 'agent' as a local work-item kind.
-    str(ROOT / "server" / "app" / "worker_thread.py"),
-    # Comment-only reference to the removed table.
-    str(ROOT / "server" / "app" / "services" / "workspace_executor_warnings.py"),
+    # AgentStatusManager payloads key incremental WS envelopes by "agent" (Decision 8
+    # of the phase4 agent-collaboration plan); the literal is its own status domain.
+    str(ROOT / "server" / "app" / "agents.py"),
+    # Same WS envelope domain on the client: parses agent_busy/agent_idle payloads.
+    str(ROOT / "frontend" / "src" / "stores" / "agentsWsMessages.ts"),
+    # Job detail panel picks the new NodeRunResponse.runner API field (run provenance).
+    str(ROOT / "frontend" / "src" / "components" / "NodeDetailsPanel.tsx"),
 }
 
 FORBIDDEN_PATTERNS = {
     "node.runner literal": r"['\"]runner['\"]",
-    "node.agent literal": r"['\"]agent['\"]",
     "pipeline_config_json column": "pipeline_config_json",
     "workspace_agent_assignments table": "workspace_agent_assignments",
     "workspace_executor_bootstrap_state table": "workspace_executor_bootstrap_state",

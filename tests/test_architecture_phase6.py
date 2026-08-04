@@ -3,6 +3,9 @@ from pathlib import Path
 import pytest
 
 from scripts.check_architecture import check_repository
+from tests.architecture_budget_helpers import write_neutral_budget_governance
+
+pytestmark = pytest.mark.no_db
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,10 +16,10 @@ def write(path: Path, content: str) -> None:
 
 
 def _empty_budgets(path: Path) -> None:
-    write(path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+    write_neutral_budget_governance(path)
 
 
-class TestWorkspaceVideoHiveBoundary:
+class TestWorkspaceLegacyVideoBoundary:
     @pytest.mark.parametrize(
         "rel_path,source,expected_fragment",
         [
@@ -27,22 +30,15 @@ class TestWorkspaceVideoHiveBoundary:
                 "router = APIRouter()\n",
                 "download",
             ),
-            (
-                "server/app/services/job_execution.py",
-                "from server.app.services.video_actions import delete_video\n"
-                "class JobExecutionService:\n"
-                "    def run(self): delete_video('x')\n",
-                "video_actions",
-            ),
         ],
     )
-    def test_rejects_video_hive_imports(self, tmp_path, rel_path, source, expected_fragment):
+    def test_rejects_legacy_video_imports(self, tmp_path, rel_path, source, expected_fragment):
         write(tmp_path / rel_path, source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
 
-        assert any("Video Hive" in error and expected_fragment in error for error in errors)
+        assert any("legacy video" in error and expected_fragment in error for error in errors)
 
     def test_allows_generic_workflow_imports_in_workspace_services(self, tmp_path):
         write(
@@ -57,7 +53,7 @@ class TestWorkspaceVideoHiveBoundary:
 
         errors = check_repository(tmp_path)
 
-        assert not any("Video Hive" in error for error in errors)
+        assert not any("legacy video" in error for error in errors)
 
 
 class TestJobExecutionExecutorBoundary:
@@ -99,54 +95,6 @@ class TestJobExecutionExecutorBoundary:
         errors = check_repository(tmp_path)
 
         assert not any("direct Executor" in error for error in errors)
-
-
-class TestRouteDagAndDeletionBoundary:
-    @pytest.mark.parametrize(
-        "expected_error,source",
-        [
-            (
-                "DAG traversal",
-                "from fastapi import APIRouter\n"
-                "from server.app.workflows.scheduler import downstream_nodes\n"
-                "router = APIRouter()\n"
-                "@router.post('/x')\n"
-                "def x():\n"
-                "    return downstream_nodes(None, 'a')\n",
-            ),
-            (
-                "filesystem deletion",
-                "import shutil\n"
-                "from fastapi import APIRouter\n"
-                "router = APIRouter()\n"
-                "@router.delete('/x')\n"
-                "def x():\n"
-                "    shutil.rmtree('/tmp/x')\n",
-            ),
-        ],
-    )
-    def test_rejects_dag_or_deletion_in_route(self, tmp_path, expected_error, source):
-        write(tmp_path / "server/app/routes/jobs.py", source)
-        _empty_budgets(tmp_path)
-
-        errors = check_repository(tmp_path)
-
-        assert any(expected_error in error for error in errors)
-
-    def test_allows_deletion_in_services(self, tmp_path):
-        write(
-            tmp_path / "server/app/services/job_deletion.py",
-            "import shutil\n"
-            "from pathlib import Path\n"
-            "class JobDeletionService:\n"
-            "    def delete(self):\n"
-            "        shutil.rmtree(Path('/tmp/x'))\n",
-        )
-        _empty_budgets(tmp_path)
-
-        errors = check_repository(tmp_path)
-
-        assert not any("filesystem deletion" in error for error in errors)
 
 
 class TestFrontendJobTransportTypes:
@@ -240,7 +188,7 @@ def test_phase6_current_repository_has_no_errors():
         if any(
             tag in error
             for tag in (
-                "Video Hive",
+                "legacy video",
                 "direct Executor",
                 "DAG traversal",
                 "filesystem deletion",

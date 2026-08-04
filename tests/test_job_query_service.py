@@ -1,13 +1,18 @@
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
 
+from server.app.executors._lease_transactions import database_timestamp
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
+from server.app.storage_paths import make_data_relative, resolve_job_dir
 
 
 @pytest.fixture
@@ -21,15 +26,17 @@ def query_service(job_db, settings):
 
 
 def create_question_job(job_db, source_id: str) -> dict[str, Any]:
-    workspace = job_db.get_workspace("default") or job_db.create_workspace("default")
+    workspace = job_db.get_workspace("default") or job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content",
-        "direct_ids",
+        "question_comprehension_info",
+        "batch_by_ids",
         {"question_ids": [source_id]},
         workspace_id=workspace["id"],
     )
     job: dict[str, Any] = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id=source_id,
         batch_id=batch["id"],
@@ -41,7 +48,7 @@ def create_question_job(job_db, source_id: str) -> dict[str, Any]:
 
 
 def test_job_query_service_lists_jobs(query_service, job_db):
-    job_db.create_workspace("default")
+    job_db.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = query_service.list_jobs("default")
     assert isinstance(job, list)
 
@@ -71,6 +78,88 @@ def test_list_jobs_returns_typed_node_summaries(query_service, job_db):
     }
 
 
+def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_service, job_db):
+    workspace = job_db.create_workspace(
+        "versioned", default_workflow_key="question_comprehension_info"
+    )
+    definition = WorkflowCatalogService(query_service.settings).definition(
+        "question_comprehension_info"
+    )
+    revision_service = WorkflowRevisionService(job_db)
+    original = revision_service.publish_workspace_revision(workspace["id"], definition)
+    current = revision_service.publish_workspace_revision(workspace["id"], definition)
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+
+    listed = query_service.list_jobs(workspace["id"])
+
+    assert listed[0]["workflow_version"] == 1
+    assert listed[0]["current_workflow_revision_id"] == current["id"]
+    assert listed[0]["current_workflow_revision_version"] == 2
+    assert listed[0]["is_workflow_outdated"] is True
+
+
+def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=[
+            "assemble_comprehension_info",
+            "assess_comprehension_difficulty",
+            "classify_comprehension_eligibility",
+            "clean_and_parse",
+            "fetch_questions",
+            "finalize_non_uploadable",
+            "generate_key_info",
+            "generate_possible_errors",
+            "review_key_info",
+            "review_possible_errors",
+        ],
+        workspace_id=workspace["id"],
+    )
+
+    listed = query_service.list_jobs(job["workspace_id"])
+
+    node_keys = [node["node_key"] for node in listed[0]["node_summaries"]]
+    assert node_keys[:3] == [
+        "fetch_questions",
+        "clean_and_parse",
+        "classify_comprehension_eligibility",
+    ]
+    assert node_keys.index("assemble_comprehension_info") > node_keys.index(
+        "assess_comprehension_difficulty"
+    )
+
+
 def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
     for source_id in ("Q1", "Q2", "Q3"):
         create_question_job(job_db, source_id=source_id)
@@ -80,7 +169,13 @@ def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
     @contextmanager
     def traced():
         with original() as conn:
-            conn.set_trace_callback(statements.append)
+            execute = conn.execute
+
+            def traced_execute(sql, params=None):
+                statements.append(sql)
+                return execute(sql, params)
+
+            monkeypatch.setattr(conn, "execute", traced_execute)
             yield conn
 
     monkeypatch.setattr(job_db, "_connect_read", traced)
@@ -90,13 +185,45 @@ def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
     assert len(node_selects) == 1
 
 
+def test_list_jobs_does_not_reload_each_job_for_execution_control(
+    query_service, job_db, monkeypatch
+):
+    for source_id in ("Q1", "Q2", "Q3"):
+        create_question_job(job_db, source_id=source_id)
+    statements: list[str] = []
+    original = job_db._connect_read
+
+    @contextmanager
+    def traced():
+        with original() as conn:
+            execute = conn.execute
+
+            def traced_execute(sql, params=None):
+                statements.append(sql)
+                return execute(sql, params)
+
+            monkeypatch.setattr(conn, "execute", traced_execute)
+            yield conn
+
+    monkeypatch.setattr(job_db, "_connect_read", traced)
+    query_service.list_jobs("default")
+
+    job_selects = [sql for sql in statements if "from jobs" in sql.lower()]
+    assert len(job_selects) == 1
+
+
 def test_job_query_service_detail_enriches_nodes(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -116,13 +243,86 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
         assert node["executor_kind"] is None
 
 
-def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_service, job_db):
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=[
+            "assemble_comprehension_info",
+            "classify_comprehension_eligibility",
+            "clean_and_parse",
+            "fetch_questions",
+        ],
+        workspace_id=workspace["id"],
+    )
+
+    detail = query_service.detail(job["id"])
+
+    assert [node["node_key"] for node in detail["nodes"]] == [
+        "fetch_questions",
+        "clean_and_parse",
+        "classify_comprehension_eligibility",
+        "assemble_comprehension_info",
+    ]
+    nodes = {node["node_key"]: node for node in detail["nodes"]}
+    assert nodes["classify_comprehension_eligibility"]["after"] == ["clean_and_parse"]
+
+
+def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
+    query_service, job_db, settings
+):
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=["question_understanding"],
+        workspace_id=workspace["id"],
+    )
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "result.json").write_text('{"ok": true}', encoding="utf-8")
+    (storage_dir / "nested").mkdir(parents=True, exist_ok=True)
+
+    detail = query_service.detail(job["id"])
+
+    assert detail["artifacts"] == ["result.json"]
+
+
+def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_service, job_db):
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -134,16 +334,10 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
         workspace["id"],
         allocations=[
             {"executor_id": "local-default", "concurrency_limit": 1},
-            {"executor_id": "pi-default", "concurrency_limit": 1},
         ],
         bindings=[
             {
-                "workflow_key": "question_content",
-                "node_key": "question_understanding",
-                "executor_id": "pi-default",
-            },
-            {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
             },
@@ -154,19 +348,24 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["executor_id"] == "pi-default"
-    assert nodes["question_understanding"]["executor_kind"] == "pi"
+    assert nodes["question_understanding"]["executor_id"] is None
+    assert nodes["question_understanding"]["executor_kind"] is None
     assert nodes["assemble_package"]["executor_id"] == "local-default"
     assert nodes["assemble_package"]["executor_kind"] == "local"
 
 
 def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -178,18 +377,12 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
         workspace["id"],
         allocations=[
             {"executor_id": "local-default", "concurrency_limit": 1},
-            {"executor_id": "pi-default", "concurrency_limit": 1},
         ],
         bindings=[
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
-            },
-            {
-                "workflow_key": "reading_analysis",
-                "node_key": "assemble_package",
-                "executor_id": "pi-default",
             },
         ],
         node_limits=[],
@@ -203,12 +396,17 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
 
 
 def test_workspace_run_service_filters_runs(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -225,9 +423,16 @@ def test_workspace_run_service_filters_runs(query_service, job_db):
 
 
 def test_workspace_dag_preserves_status_buckets(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    definition = query_service.workflows.definition(workspace["default_workflow_key"])
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
 
     payload = query_service.workspace_dag(workspace["id"])
@@ -238,3 +443,302 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
         "failed",
         "stale",
     }
+
+
+def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -> dict[str, Any]:
+    workspace = job_db.create_workspace(
+        workspace_id, default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job: dict[str, Any] = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=["assemble_package"],
+        workspace_id=workspace["id"],
+    )
+    log_path = make_data_relative(
+        settings.data_dir / "logs" / "jobs" / "example.log", settings.data_dir
+    )
+    run_dir = make_data_relative(
+        settings.data_dir / "jobs" / "ws" / "job" / "runs" / "node" / "token", settings.data_dir
+    )
+    session_dir = make_data_relative(
+        settings.data_dir / "jobs" / "ws" / "job" / "runs" / "node" / "token" / "session",
+        settings.data_dir,
+    )
+    job_db.start_node_run(
+        job["id"],
+        "assemble_package",
+        ["cmd"],
+        log_path,
+        run_dir=run_dir,
+        session_dir=session_dir,
+    )
+    return job
+
+
+def test_list_jobs_resolves_storage_dir_absolute(query_service, job_db, settings):
+    job = create_question_job(job_db, source_id="Q1")
+
+    listed = query_service.list_jobs(job["workspace_id"])
+
+    assert len(listed) == 1
+    expected_suffix = f"{job['workspace_id']}/{job['id']}"
+    assert listed[0]["storage_dir"] == str(settings.jobs_dir / expected_suffix)
+    assert Path(listed[0]["storage_dir"]).is_absolute()
+
+
+def test_detail_resolves_storage_dir_and_run_paths_absolute(query_service, job_db, settings):
+    job = _create_job_with_node_run(job_db, settings)
+
+    detail = query_service.detail(job["id"])
+
+    expected_suffix = f"{job['workspace_id']}/{job['id']}"
+    assert detail["job"]["storage_dir"] == str(settings.jobs_dir / expected_suffix)
+    assert Path(detail["job"]["storage_dir"]).is_absolute()
+
+    assert len(detail["runs"]) == 1
+    run = detail["runs"][0]
+    assert run["log_path"] == str(settings.data_dir / "logs" / "jobs" / "example.log")
+    assert run["run_dir"] == str(
+        settings.data_dir / "jobs" / "ws" / "job" / "runs" / "node" / "token"
+    )
+    assert run["session_dir"] == str(
+        settings.data_dir / "jobs" / "ws" / "job" / "runs" / "node" / "token" / "session"
+    )
+    assert all(Path(run[field]).is_absolute() for field in ("log_path", "run_dir", "session_dir"))
+
+
+def test_workspace_runs_resolves_run_paths_absolute(query_service, job_db, settings):
+    job = _create_job_with_node_run(job_db, settings)
+
+    runs = query_service.workspace_runs(job["workspace_id"])
+
+    assert len(runs) == 1
+    run = runs[0]
+    assert run["log_path"] == str(settings.data_dir / "logs" / "jobs" / "example.log")
+    assert run["run_dir"] == str(
+        settings.data_dir / "jobs" / "ws" / "job" / "runs" / "node" / "token"
+    )
+    assert run["session_dir"] == str(
+        settings.data_dir / "jobs" / "ws" / "job" / "runs" / "node" / "token" / "session"
+    )
+
+
+def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, settings):
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=["assemble_package"],
+        workspace_id=workspace["id"],
+    )
+    log_path = make_data_relative(
+        settings.data_dir / "logs" / "jobs" / "empty.log", settings.data_dir
+    )
+    job_db.start_node_run(job["id"], "assemble_package", ["cmd"], log_path)
+
+    detail = query_service.detail(job["id"])
+
+    run = detail["runs"][0]
+    assert run["log_path"] == str(settings.data_dir / "logs" / "jobs" / "empty.log")
+    assert run["run_dir"] == ""
+    assert run["session_dir"] == ""
+
+
+def test_query_service_does_not_mutate_repository_records(query_service, job_db, settings):
+    job = _create_job_with_node_run(job_db, settings)
+    original_job = job_db.get_job(job["id"])
+    original_run = job_db.list_node_runs(job["id"])[0]
+    original_storage_dir = original_job["storage_dir"]
+    original_log_path = original_run["log_path"]
+
+    query_service.detail(job["id"])
+    query_service.list_jobs(job["workspace_id"])
+    query_service.workspace_runs(job["workspace_id"])
+
+    assert job_db.get_job(job["id"])["storage_dir"] == original_storage_dir
+    assert job_db.list_node_runs(job["id"])[0]["log_path"] == original_log_path
+
+
+def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db):
+    workspace = job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_questions"],
+        workspace_id=workspace["id"],
+        workflow_revision_id="question_comprehension_info:v1",
+        workflow_definition_hash="hash1",
+        workflow_definition_snapshot_json='{"key":"question_comprehension_info"}',
+    )
+    job_db.update_job_status(job["id"], "completed")
+    job_db.update_job_outcome(job["id"], "non_uploadable")
+
+    detail = query_service.detail(job["id"])["job"]
+
+    assert detail["workflow_revision_id"] == "question_comprehension_info:v1"
+    assert detail["workflow_definition_hash"] == "hash1"
+    assert detail["outcome"] == "non_uploadable"
+    assert "current_workflow_revision_id" in detail
+    assert "current_workflow_revision_version" in detail
+
+
+def _create_two_node_job(job_db) -> dict[str, Any]:
+    workspace = job_db.get_workspace("default") or job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job: dict[str, Any] = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=["question_understanding", "assemble_package"],
+        workspace_id=workspace["id"],
+    )
+    return job
+
+
+def _bind_agent(job_db, workspace_id: str, node_key: str) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
+            " values (?, 'question_comprehension_info', ?, 'agent', 'question-key-info-v1')"
+            " on conflict(workspace_id, workflow_key, node_key) do update set"
+            " target_kind='agent', target_id=excluded.target_id",
+            (workspace_id, node_key),
+        )
+
+
+def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_id: str) -> None:
+    run = job_db.start_node_run(
+        job["id"], node_key, ["cmd"], f"logs/jobs/{job['id']}-{node_key}.log"
+    )
+    assert run is not None
+    now = datetime.now(UTC)
+    with job_db.connect() as conn:
+        conn.execute(
+            """
+            insert into executor_leases(
+                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
+                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                f"lease-{execution_id}",
+                execution_id,
+                "agent:question-key-info-v1",
+                job["workspace_id"],
+                job["id"],
+                job["workflow_key"],
+                node_key,
+                run["id"],
+                database_timestamp(now),
+                database_timestamp(now),
+                database_timestamp(now + timedelta(seconds=300)),
+            ),
+        )
+
+
+def _insert_agent_request(job_db, execution_id: str, job, node_key: str) -> None:
+    with job_db.connect() as conn:
+        definition = conn.execute(
+            "select definition_hash from agent_definitions where agent_id='question-key-info-v1'"
+        ).fetchone()
+        conn.execute(
+            "insert into agent_execution_requests(execution_id, workspace_id, job_id, workflow_key,"
+            " node_key, agent_id, agent_definition_hash, node_concurrency_limit, queued_at, manifest_json)"
+            " values (?, ?, ?, ?, ?, 'question-key-info-v1', ?, 20, current_timestamp, '{}')",
+            (
+                execution_id,
+                job["workspace_id"],
+                job["id"],
+                job["workflow_key"],
+                node_key,
+                definition["definition_hash"],
+            ),
+        )
+
+
+def test_job_detail_projects_agent_and_claimed_worker(query_service, job_db):
+    job = _create_two_node_job(job_db)
+    _bind_agent(job_db, job["workspace_id"], "question_understanding")
+    _insert_active_lease(job_db, job, "question_understanding", "exec-agent-1")
+    _insert_agent_request(job_db, "exec-agent-1", job, "question_understanding")
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set state='claimed', worker_id='worker-mac-1'"
+            " where execution_id='exec-agent-1'"
+        )
+
+    detail = query_service.detail(job["id"])
+
+    nodes = {node["node_key"]: node for node in detail["nodes"]}
+    assert nodes["question_understanding"]["agent_id"] == "question-key-info-v1"
+    assert nodes["question_understanding"]["executor_id"] is None
+    assert nodes["question_understanding"]["worker_id"] == "worker-mac-1"
+    assert nodes["assemble_package"]["worker_id"] is None
+
+
+def test_job_detail_worker_id_none_while_agent_execution_queued(query_service, job_db):
+    job = _create_two_node_job(job_db)
+    _bind_agent(job_db, job["workspace_id"], "question_understanding")
+    _insert_active_lease(job_db, job, "question_understanding", "exec-agent-2")
+    _insert_agent_request(job_db, "exec-agent-2", job, "question_understanding")
+
+    detail = query_service.detail(job["id"])
+
+    nodes = {node["node_key"]: node for node in detail["nodes"]}
+    assert nodes["question_understanding"]["agent_id"] == "question-key-info-v1"
+    assert nodes["question_understanding"]["worker_id"] is None
+
+
+def test_job_detail_worker_id_none_after_agent_lease_released(query_service, job_db):
+    job = _create_two_node_job(job_db)
+    _bind_agent(job_db, job["workspace_id"], "question_understanding")
+    _insert_active_lease(job_db, job, "question_understanding", "exec-agent-3")
+    _insert_agent_request(job_db, "exec-agent-3", job, "question_understanding")
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set state='claimed', worker_id='worker-mac-2'"
+            " where execution_id='exec-agent-3'"
+        )
+        conn.execute(
+            "update executor_leases set status='released' where execution_id=?",
+            ("exec-agent-3",),
+        )
+
+    detail = query_service.detail(job["id"])
+
+    nodes = {node["node_key"]: node for node in detail["nodes"]}
+    assert nodes["question_understanding"]["worker_id"] is None

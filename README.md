@@ -1,315 +1,197 @@
-# Video Hive
+# Agent Legion
 
-Local processing console for educational videos. It queues knowledge videos and question explanation videos, downloads and transcribes them, runs the applicable openclaw content stages, previews partial/final artifacts, and packages completed JSON for handoff.
+Agent Legion is a self-hosted console that turns AI agents into a managed
+production line for educational content. You define a workflow as a DAG of
+**capabilities**, submit a batch of work (video URLs, knowledge codes, question
+IDs), and Agent Legion schedules every node across local and remote agent
+executors — with a live UI to watch, rerun, and package the results.
 
-## Current Shape
+It ships with two production workflows:
 
-- Backend: FastAPI, SQLite, background worker.
-- Python tooling: `uv` for dependency/runtime management, `ruff` for lint/format, `mypy` for type checking.
-- Frontend: Vite + TypeScript, ESLint + Prettier.
-- Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
-- Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
-- Agent Legion workflow model: workspace-scoped DAG jobs with configurable workflow definitions (`config/workflows/`).
+- **`video_knowledge`** — turn raw knowledge videos into structured teaching
+  packages: download → transcribe → subtitle review → chaptering → interaction
+  design → content review → assemble → package.
+- **`question_comprehension_info`** — generate structured comprehension
+  metadata for math word problems: fetch from CMS → parse → eligibility
+  classification → key-info & error generation/review → difficulty scoring →
+  assemble.
 
-## Setup
+## Features
 
-```bash
-uv sync
-cd frontend
-npm install
+- **Workspace-scoped DAG workflows.** Workflows are YAML files in
+  `config/workflows/`; nodes declare only a business `capability` and their
+  input/output artifacts — never how to run them. Rerun a single node, run to
+  a target node, or continue from a pause; downstream staleness is tracked
+  automatically.
+- **Batch intake.** Create job batches through
+  `POST /api/workspaces/{id}/job-batches`: submit video URLs directly, or
+  resolve videos/questions from the CMS by knowledge code or ID list.
+- **Pluggable agent runtimes.** Agent nodes run headlessly through the Pi CLI
+  or **velites** — Agent Legion's own Rust harness (&lt;50 ms cold start vs
+  Pi's ~1.6 s, a fraction of the memory, same pi-compatible event stream).
+  Switch per deployment with `workflows.pi.flavor`.
+- **Versioned external skills.** Each capability maps to a skill in a
+  standalone git repository, declared in `config/skills.yaml` and pinned by
+  `config/skills.lock`. Every run restores the locked ref, so workflow output
+  is reproducible.
+- **Local & remote executors.** Capacity is granted through executor leases;
+  remote **Agent Workers** register over HTTP, claim executions, stream
+  heartbeats, and upload artifacts — scale out by adding machines.
+- **Real-time console.** React SPA with a live DAG view (React Flow), SSE
+  dashboard events, WebSocket agent status, run logs, artifacts, token-usage
+  statistics, and failure-category batch rerun.
+- **Local ASR.** Subtitle transcription via whisper.cpp with automatic
+  fallback to SenseVoice when the result is missing, too short, or degenerate.
+- **Secrets vault.** Workspace secrets (CMS tokens, `secret: true` binding
+  fields) are Fernet-encrypted at rest; configs and snapshots carry only
+  `secret_ref` — never plaintext.
+- **Multi-user with workspace ACL.** Cookie sessions + CSRF guard, admin user
+  management, per-workspace editor/viewer membership.
+- **PostgreSQL control plane.** One authoritative database coordinates
+  multi-process and multi-machine scheduling; artifacts and run traces live
+  under `data/`.
+
+## Architecture
+
+```
+Browser (React SPA)
+   │ REST / SSE / WebSocket
+   ▼
+FastAPI Host ─────────────────────────────────────────┐
+   │ routes → services → workflows (DAG scheduler)    │
+   │                       │ executor leases          │
+   ▼                       ▼                          ▼
+PostgreSQL          Local executors            Agent Workers (remote)
+(control plane)     pipeline nodes             claim → run → artifacts
+   │                       │                          │
+   ▼                       ▼                          ▼
+data/  (videos, logs, packages, jobs, run traces)
+        agent nodes → Pi CLI / velites → external skills (git, locked)
 ```
 
-When running inside a restricted sandbox, keep the uv cache in the project:
+- **Backend**: Python 3.11+, FastAPI, Uvicorn, PostgreSQL
+- **Frontend**: React 18, TypeScript, Vite, Zustand, MUI v6, React Flow
+- **Agent harness**: velites (Rust, `velites/`) or Pi CLI (Node)
+- **Tooling**: `uv` + Ruff + mypy (Python), npm + ESLint + Prettier (frontend),
+  pytest + Vitest + cargo test
+
+Key design rules (enforced by architecture checks, see
+[AGENTS.md](AGENTS.md) and [docs/architecture/](docs/architecture/)):
+
+- Workflow nodes declare `capability` only — runner, agent, and skill wiring
+  live in the executor layer.
+- Routes are thin HTTP adapters; business logic lives in services; executors
+  acquire capacity exclusively through leases.
+- Frontend transport types are generated from the backend OpenAPI schema
+  (`frontend/src/generated/api.ts`), never hand-written.
+- Secrets enter the vault or env only — tracked config yaml rejects secret
+  values at startup.
+
+## Quick Start
+
+Prerequisites: Python 3.11+, Node 18+, PostgreSQL, [`uv`](https://docs.astral.sh/uv/).
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv sync
+uv sync                                     # Python deps
+createdb agent_legion
+cp .env.example .env                        # fill in secrets
+export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+cd frontend && npm install && cd ..
 ```
 
-> For architecture details, code style, and testing conventions, see [AGENTS.md](AGENTS.md).
+Run (two terminals):
+
+```bash
+# backend (binds 127.0.0.1 only — never expose with 0.0.0.0)
+uv run uvicorn server.app.main:app --reload --reload-dir server --port 8000
+
+# frontend dev server (proxies /api to the backend)
+cd frontend && npm run dev
+```
+
+First start redirects to `/setup` to create the admin user. For production,
+`cd frontend && npm run build` — the backend then serves the SPA from
+`http://127.0.0.1:8000`.
+
+Common tasks have Makefile shortcuts (`make help` lists all):
+
+```bash
+make dev-backend      # backend dev server
+make dev-frontend     # frontend dev server
+make check-quick      # quick quality gate (daily)
+make check            # full quality gate (before handoff)
+make api-generate     # regenerate frontend API types
+make skills-lock      # refresh config/skills.lock
+make install-hooks    # install pre-commit / pre-push gates
+```
 
 ## Configuration
 
-Edit `config/workflow.yaml`.
+Config is split by domain under `config/`; each file owns a fixed set of
+top-level keys and anything else fails startup:
 
-- `asr.provider`: `auto`, `whisper`, or `sensevoice`.
-- `asr.whisper.binary`: local `whisper-cli`.
-- `asr.whisper.model`: local whisper medium model.
-- `asr.sensevoice.script`: SenseVoice SRT script.
-- `asr.sensevoice.model_dir`: local `SenseVoiceSmall` model.
-- `openclaw.command_template`: command argument list. Supported placeholders: `{prompt_file}`, `{video_id}`, `{video_dir}`.
-- `openclaw.cwd`: working directory for openclaw.
+| File | Owns |
+|------|------|
+| `config/app.yaml` | database URL, paths, HTTP, cleanup, monitoring, token pricing |
+| `config/agent_legion.yaml` | ASR, CMS, resource providers, OpenClaw |
+| `config/workflow.yaml` | agent catalog, agent workers, executors, Pi/velites runtime |
+| `config/workflows/*.yaml` | workflow DAG definitions |
+| `config/skills.yaml` + `skills.lock` | skill sources and pinned refs |
 
-In `auto` ASR mode, Video Hive tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
+Secrets are never written to yaml: database URL comes from
+`AGENT_LEGION_DATABASE_URL`, the vault master key from
+`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`, the bootstrap admin password from
+`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`, and CMS tokens from `CMS_*` env vars
+or the workspace vault. Full reference:
+[docs/architecture/backend.md](docs/architecture/backend.md).
 
-> See [AGENTS.md](AGENTS.md) for full configuration reference.
+## Agent Runtimes
 
-## Video Types
+Agent nodes execute through external skills — standalone git repositories
+containing `SKILL.md`, an output contract, and a validator — typically checked
+out under `~/.agents/skills/agent-legion/<workflow>/<capability>/` and pinned
+by `config/skills.lock`.
 
-Video Hive treats knowledge videos and question explanation videos differently.
+Two harness flavors run them:
 
-| Type | Required ID | URL | Pipeline |
-| --- | --- | --- | --- |
-| `knowledge` | knowledge code | optional at intake | download → transcribe → subtitle review → chapter generation → interaction generation → content review → assemble |
-| `question` | question ID | optional at intake | download → transcribe → subtitle review → chapter generation → assemble |
+- **Pi CLI** (default): `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`,
+  then `pi` to authenticate and `./scripts/check-pi.sh` to verify. Configure
+  provider/model/timeout under `workflows.pi` in `config/workflow.yaml`.
+- **velites** (rolling out): a single static Rust binary built from `velites/`
+  (`cargo build --release`), emitting the same event stream the host consumes.
+  Enable with `workflows.pi.flavor: velites`; rolling back to `pi` needs no
+  data migration. See
+  [docs/architecture/velites-harness.md](docs/architecture/velites-harness.md).
 
-If a knowledge code or question ID currently has no video URL, add it anyway with an empty URL. The record is stored with:
-
-- `status`: `missing_url`
-- `current_phase`: `waiting_for_url`
-
-The worker skips `missing_url` records until a URL is supplied later.
-
-Compatibility with the existing `~/CatPuru/projects/cms-extensions/engineering/llm_claude` fetch flow:
-
-- knowledge rows: `tag_code -> knowledge_code`, `url -> source_url`
-- question rows: `question_uuid -> question_id`, `url -> source_url`
-
-Question explanation videos do not produce interactive nodes. Their assembled `metadata.json` keeps `nodes: []`, and the deterministic assemble path can create an empty `interactions.json`.
-
-## Run
-
-Backend with automatic worker:
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8000
-```
-
-Frontend during development:
-
-```bash
-cd frontend
-npm run dev
-```
-
-Open the Vite URL shown by npm.
-
-Generated frontend transport types are committed to `frontend/src/generated/api.ts`. After changing
-any Pydantic response model, regenerate them before committing:
-
-```bash
-cd frontend
-npm run api:generate
-```
-
-The frontend calls the backend API on the same origin in production; during development, Vite proxies `/api` to `VITE_API_TARGET` from `frontend/.env` and defaults to `http://127.0.0.1:8000`.
-
-For multiple coding agents working in separate git worktrees, give each worktree its own backend/frontend ports and local frontend env:
-
-```bash
-# worktree A
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8001
-cd frontend
-cp .env.example .env
-printf 'VITE_API_TARGET=http://127.0.0.1:8001\n' > .env
-npm run dev -- --port 5174
-```
-
-Use different ports for each additional worktree, and keep each worktree's default `data/` directory separate so SQLite state, logs, videos, packages, and jobs do not overlap.
-
-Production-style frontend build:
-
-```bash
-cd frontend
-npm run build
-```
-
-After `frontend/dist` exists, the FastAPI backend serves it from `http://127.0.0.1:8000`.
+Every node execution leaves a full trace under
+`{job_dir}/runs/{node_key}/{run_token}/` (prompt, event stream, stderr,
+metadata), so any agent decision can be audited after the fact.
 
 ## Quality Gates
 
-Quick gate (for daily development):
+- `./scripts/check-quick.sh` — daily gate: Ruff, mypy, pytest, architecture
+  invariant/contract checks, ESLint/Prettier/typecheck/Vitest, cargo
+  fmt/clippy/test.
+- `./scripts/check.sh` — full gate before handoff, with coverage floors
+  (backend 85%) and the frontend production build; also runs on GitHub
+  Actions for PRs and pushes.
+- `make install-hooks` — versioned pre-commit (fast checks) and pre-push
+  (smoke tier, lane-trimmed by pushed paths) hooks.
 
-```bash
-./scripts/check-quick.sh
-```
+Details and CI policy:
+[docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md).
 
-Runs Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture
-contract checks (`scripts/check_architecture.py`), generated API type drift check
-(`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest, and the spec health check
-(`scripts/verify_specs.py --check`).
+Load testing harnesses for large agent fleets live in `scripts/stress/` and
+`frontend/stress/` (synthetic event streams, workspace UI stress, end-to-end
+browser runs).
 
-Full gate (before committing or handing off):
+## Documentation
 
-```bash
-./scripts/check.sh
-```
-
-Runs the quick gate plus the frontend production build.
-
-Install the optional pre-commit hook:
-
-```bash
-./scripts/install-git-hooks.sh
-```
-
-> See [AGENTS.md](AGENTS.md) for architecture details, code style conventions, and security notes.
-
-## Pipeline
-
-Common phases:
-
-1. `download`: saves `{video_id}.mp4`.
-2. `transcribe`: writes `subtitles.srt` and `transcription.json`.
-3. `subtitle_review`: real openclaw command writes reviewed subtitles and report.
-4. `chapter_generate`: real openclaw command writes chapters.
-
-Knowledge-only phases:
-
-5. `interaction_generate`: real openclaw command writes interactions.
-6. `content_review`: real openclaw command writes checklist and review result.
-
-Final phase:
-
-7. `assemble`: writes `metadata.json` and `report.md`.
-
-The package endpoint creates a zip with per-video JSON plus `manifest.json`. The manifest includes `content_type`, `external_id`, `knowledge_code`, and `question_id`.
-
-## Pi Agent Runner
-
-Video Hive can execute `reading_analysis` workflow agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
-
-### Installation
-
-```bash
-npm install -g --ignore-scripts @earendil-works/pi-coding-agent
-pi
-# Follow the login prompt to authenticate
-./scripts/check-pi.sh
-```
-
-### Configuration
-
-Pi settings live in `config/workflow.yaml` under `workflows.pi`:
-
-```yaml
-workflows:
-  enabled: true
-  pi:
-    binary: pi
-    provider: ""        # empty = use Pi default
-    model: ""           # empty = use Pi default
-    thinking: low
-    timeout_seconds: 600
-    environment:
-      PI_SKIP_VERSION_CHECK: "1"
-      PI_TELEMETRY: "0"
-```
-
-- `provider` / `model`: leave empty to use Pi's configured default.
-- `timeout_seconds`: per-node timeout. Pi is terminated if it exceeds this.
-- `environment`: merged into Pi's subprocess environment.
-
-### Repository Skills
-
-Each agent node in `reading_analysis` maps to one repository-owned skill under `server/app/workflows/skills/reading_analysis/{node_key}/`. Every skill contains:
-
-- `SKILL.md` — execution workflow and I/O contract
-- `references/output-contract.md` — field-level artifact specification
-- `scripts/validate_output.py` — node-specific validator
-
-Pi loads **only** the declared skill. Automatic skill discovery, extensions, prompt templates, and context files are disabled.
-
-### Run Directory Layout
-
-Every Pi execution creates a fresh trace under `{job_dir}/runs/{node_key}/{run_token}/`:
-
-```
-runs/extract_keywords/550e8400-e29b-41d4-a716-446655440000/
-  prompt.md          # orchestration prompt passed to Pi
-  events.jsonl       # Pi JSON event stream (stdout)
-  stderr.log         # Pi diagnostic output (stderr)
-  run.json           # metadata: command, start/end time, exit code, error
-  session/           # Pi session directory
-```
-
-Previous runs are preserved. Rerunning a node deletes that node's and all downstream nodes' declared outputs, but never touches `runs/` history.
-
-### Authentication
-
-Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
-
-## Phase 5 Workspace Executor Migration
-
-If you are upgrading from a pre-Phase-5 database that still contains Workspace Agent
-assignments or `pipeline_config_json`, run the one-time finalizer before starting the server:
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --check
-UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --apply
-```
-
-- `--check` is read-only and prints a JSON report. An empty `issues` list means finalization can
-  proceed safely.
-- `--apply` creates a timestamped SQLite backup beside `data/video_hive.sqlite` and then migrates
-  legacy Agent/Workflow settings into Executor allocations, bindings, and local Node limits.
-
-If the report lists unknown legacy Agent IDs, either configure an equivalent Executor in
-`config/workflow.yaml` or manually remediate the `workspace_agent_assignments` rows before
-retrying. The server refuses to start until `--check` reports zero issues.
-
-## API Notes
-
-Add a knowledge video with URL:
-
-```json
-{
-  "items": [
-    {
-      "content_type": "knowledge",
-      "external_id": "K001",
-      "title": "知识点标题",
-      "url": "https://example.com/k001.mp4"
-    }
-  ]
-}
-```
-
-Add a question explanation record before its URL is available:
-
-```json
-{
-  "items": [
-    {
-      "content_type": "question",
-      "external_id": "Q001",
-      "title": "题目解析标题",
-      "url": ""
-    }
-  ]
-}
-```
-
-Useful endpoints (video pipeline):
-
-- `POST /api/videos`
-- `GET /api/videos`
-- `GET /api/videos/{video_id}`
-- `DELETE /api/videos/{video_id}` deletes the queue record and that video's local storage directory.
-- `POST /api/videos/{video_id}/rerun`
-- `GET /api/videos/{video_id}/artifacts`
-- `GET /api/videos/{video_id}/logs`
-- `POST /api/worker/tick` processes one local non-agent phase; agent phases are handled by the background worker runner pool.
-- `POST /api/package`
-
-Agent Legion workflow (workspace / job) endpoints:
-
-- `GET /api/workflows/{workflow_key}` — workflow definition metadata (includes `intake.modes` without `task_entity` / `resolver`)
-- `GET /api/workspaces` — list workspaces
-- `POST /api/workspaces` — create workspace (supports `default_entity` and `intake_config`)
-- `GET /api/workspaces/{workspace_id}` — get workspace (returns `default_entity` and `intake_config`)
-- `PATCH /api/workspaces/{workspace_id}` — update workspace (supports `default_entity` and `intake_config`)
-- `POST /api/workspaces/{workspace_id}/job-batches` — create a batch of jobs (supports `entity`; defaults to workspace `default_entity`)
-- `GET /api/workspaces/{workspace_id}/jobs` — list jobs in workspace
-- `GET /api/jobs/{job_id}` — job detail with nodes, runs, artifacts
-- `GET /api/jobs/{job_id}/artifacts/{artifact_name}` — read job artifact
-- `GET /api/jobs/{job_id}/runs/{run_id}/log` — safe run log content
-- `POST /api/jobs/{job_id}/nodes/{node_key}/rerun` — rerun a node and mark downstream nodes stale
-- `POST /api/jobs/{job_id}/run-to` — run only the ancestor closure up to a target node
-- `POST /api/jobs/{job_id}/continue` — continue a paused job after a run-to target was reached
-- `DELETE /api/jobs/{job_id}` — delete job records, storage, and logs
-- `POST /api/workspaces/{workspace_id}/jobs/package` — package completed jobs
-
-Generic Workspace Job code follows the boundary: UI reads persisted Node state, mutations call
-services, and the scheduler claims Nodes through Executor leases. See [AGENTS.md](AGENTS.md) for
-Phase 6 architecture rules and wrong examples.
-
+- [docs/architecture/](docs/architecture/) — module-by-module architecture
+  (backend, frontend, pipeline, deployment, project structure)
+- [AGENTS.md](AGENTS.md) — operating rules and boundary constraints for AI
+  agents working in this repo
+- [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md) — remote
+  worker deployment
+- [docs/remote-execution-runbook.md](docs/remote-execution-runbook.md) —
+  remote execution operations

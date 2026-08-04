@@ -1,14 +1,17 @@
-import shutil
+from pathlib import Path
 
 import pytest
 
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.storage_paths import make_data_relative
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
 
 @pytest.fixture
 def mutation_service(tmp_path):
-    return JobArtifactMutationService(tmp_path)
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    return JobArtifactMutationService(jobs_dir)
 
 
 @pytest.fixture
@@ -25,16 +28,21 @@ def definition():
     )
 
 
+def _make_job(storage_dir: Path, data_dir: Path) -> dict[str, str]:
+    return {"storage_dir": make_data_relative(storage_dir, data_dir)}
+
+
 def test_stage_outputs_moves_selected_and_descendant_outputs(
     tmp_path, mutation_service, definition
 ):
-    storage_dir = tmp_path / "job"
-    storage_dir.mkdir()
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
     (storage_dir / "a.json").write_text("a")
     (storage_dir / "b.json").write_text("b")
     (storage_dir / "c.json").write_text("c")
 
-    job = {"storage_dir": str(storage_dir)}
+    job = _make_job(storage_dir, data_dir)
     staged = mutation_service.stage_outputs(job, ["b"], definition)
 
     assert not (storage_dir / "b.json").exists()
@@ -49,12 +57,13 @@ def test_stage_outputs_moves_selected_and_descendant_outputs(
 
 
 def test_stage_outputs_rollback_restores_files(tmp_path, mutation_service, definition):
-    storage_dir = tmp_path / "job"
-    storage_dir.mkdir()
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
     (storage_dir / "a.json").write_text("a")
     (storage_dir / "b.json").write_text("b")
 
-    job = {"storage_dir": str(storage_dir)}
+    job = _make_job(storage_dir, data_dir)
     staged = mutation_service.stage_outputs(job, ["a"], definition)
 
     assert not (storage_dir / "a.json").exists()
@@ -65,11 +74,12 @@ def test_stage_outputs_rollback_restores_files(tmp_path, mutation_service, defin
 
 
 def test_stage_outputs_ignores_missing_files(tmp_path, mutation_service, definition):
-    storage_dir = tmp_path / "job"
-    storage_dir.mkdir()
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
     (storage_dir / "a.json").write_text("a")
 
-    job = {"storage_dir": str(storage_dir)}
+    job = _make_job(storage_dir, data_dir)
     staged = mutation_service.stage_outputs(job, ["b"], definition)
 
     assert (storage_dir / "a.json").exists()
@@ -78,14 +88,15 @@ def test_stage_outputs_ignores_missing_files(tmp_path, mutation_service, definit
 
 
 def test_stage_outputs_preserves_inputs_and_unrelated_files(tmp_path, mutation_service, definition):
-    storage_dir = tmp_path / "job"
-    storage_dir.mkdir()
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
     (storage_dir / "a.json").write_text("a")
     (storage_dir / "b.json").write_text("b")
     (storage_dir / "c.json").write_text("c")
     (storage_dir / "extra.log").write_text("log")
 
-    job = {"storage_dir": str(storage_dir)}
+    job = _make_job(storage_dir, data_dir)
     staged = mutation_service.stage_outputs(job, ["b"], definition)
     staged.commit()
 
@@ -93,6 +104,25 @@ def test_stage_outputs_preserves_inputs_and_unrelated_files(tmp_path, mutation_s
     assert (storage_dir / "extra.log").exists()
     assert not (storage_dir / "b.json").exists()
     assert not (storage_dir / "c.json").exists()
+
+
+def test_stage_outputs_removes_affected_run_history_only(tmp_path, mutation_service, definition):
+    storage_dir = tmp_path / "jobs" / "job"
+    (storage_dir / "runs" / "a" / "run-1").mkdir(parents=True)
+    (storage_dir / "runs" / "b" / "run-1").mkdir(parents=True)
+    (storage_dir / "runs" / "c" / "run-1").mkdir(parents=True)
+    (storage_dir / "runs" / "a" / "run-1" / "events.jsonl").write_text("ancestor")
+    (storage_dir / "runs" / "b" / "run-1" / "events.jsonl").write_text("selected")
+    (storage_dir / "runs" / "c" / "run-1" / "events.jsonl").write_text("downstream")
+
+    staged = mutation_service.stage_outputs(_make_job(storage_dir, tmp_path), ["b"], definition)
+
+    assert (storage_dir / "runs" / "a").exists()
+    assert not (storage_dir / "runs" / "b").exists()
+    assert not (storage_dir / "runs" / "c").exists()
+
+    staged.commit()
+    assert not (storage_dir / ".staged" / "runs" / "b").exists()
 
 
 def test_stage_outputs_rejects_escape_paths(tmp_path, mutation_service):
@@ -104,20 +134,22 @@ def test_stage_outputs_rejects_escape_paths(tmp_path, mutation_service):
             "a": WorkflowNode(key="a", label="A", capability="a", outputs=["../escape.json"]),
         },
     )
-    storage_dir = tmp_path / "job"
-    storage_dir.mkdir()
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
 
-    job = {"storage_dir": str(storage_dir)}
+    job = _make_job(storage_dir, data_dir)
     with pytest.raises(ValueError, match="escapes"):
         mutation_service.stage_outputs(job, ["a"], definition)
 
 
 def test_stage_outputs_idempotent_commit_and_rollback(tmp_path, mutation_service, definition):
-    storage_dir = tmp_path / "job"
-    storage_dir.mkdir()
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
     (storage_dir / "a.json").write_text("a")
 
-    job = {"storage_dir": str(storage_dir)}
+    job = _make_job(storage_dir, data_dir)
     staged = mutation_service.stage_outputs(job, ["a"], definition)
     staged.commit()
     staged.commit()
@@ -128,8 +160,11 @@ def test_stage_outputs_idempotent_commit_and_rollback(tmp_path, mutation_service
 def test_stage_outputs_restores_partial_moves_when_later_move_fails(
     tmp_path, mutation_service, definition, monkeypatch
 ):
-    storage_dir = tmp_path / "job"
-    storage_dir.mkdir()
+    import shutil
+
+    data_dir = tmp_path
+    storage_dir = data_dir / "jobs" / "job"
+    storage_dir.mkdir(parents=True)
     (storage_dir / "a.json").write_text("a")
     (storage_dir / "b.json").write_text("b")
 
@@ -145,8 +180,9 @@ def test_stage_outputs_restores_partial_moves_when_later_move_fails(
 
     monkeypatch.setattr("server.app.services.job_artifact_mutation.shutil.move", flaky_move)
 
+    job = _make_job(storage_dir, data_dir)
     with pytest.raises(OSError, match="disk failure"):
-        mutation_service.stage_outputs({"storage_dir": str(storage_dir)}, ["a"], definition)
+        mutation_service.stage_outputs(job, ["a"], definition)
 
     assert (storage_dir / "a.json").read_text() == "a"
     assert (storage_dir / "b.json").read_text() == "b"

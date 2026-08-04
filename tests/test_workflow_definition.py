@@ -34,48 +34,30 @@ def test_workflow_node_loads_capability(tmp_path: Path) -> None:
     assert load_workflow_definition(path).nodes["one"].capability == "fetch_questions"
 
 
-def test_load_question_content_definition():
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+def test_load_question_comprehension_info_definition():
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
 
-    assert definition.key == "question_content"
-    assert definition.label == "题目内容生成"
-    direct_mode = definition.intake.modes["direct_ids"]
-    assert direct_mode.label == "直接输入 ID"
-    assert direct_mode.input_field == "question_ids"
-    assert direct_mode.resource == ""
-    knowledge_mode = definition.intake.modes["by_knowledge"]
-    assert knowledge_mode.label == "按知识点查询"
-    assert knowledge_mode.input_field == "knowledge_codes"
-    assert knowledge_mode.resource == "by_knowledge"
-    assert definition.nodes["fetch_question_context"].label == "获取题目上下文"
-    assert definition.nodes["question_understanding"].label == "题目理解"
-    assert definition.nodes["question_understanding"].after == ["fetch_question_context"]
-    assert definition.nodes["assemble_package"].inputs == [
-        "question_context.json",
-        "understanding.json",
-        "natural_reading.md",
-        "misconceptions.json",
-        "solution_steps.json",
-        "faq.json",
-        "content_graph.json",
-        "interactive_template.json",
-        "review_result.json",
+    assert definition.key == "question_comprehension_info"
+    assert definition.label == "题目审题信息生成 DAG"
+    batch_by_ids = definition.intake.modes["batch_by_ids"]
+    assert batch_by_ids.label == "按题目ID批量"
+    assert batch_by_ids.input_field == "question_ids"
+    batch_by_knowledge = definition.intake.modes["batch_by_knowledge"]
+    assert batch_by_knowledge.label == "按知识点批量"
+    assert batch_by_knowledge.input_field == "knowledge_codes"
+    assert definition.nodes["fetch_questions"].label == "获取题目"
+    assert definition.nodes["fetch_questions"].resources == [
+        "question_detail",
+        "by_knowledge",
     ]
-
-
-def test_load_reading_analysis_capabilities():
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-
-    assert definition.key == "reading_analysis"
-    assert definition.label == "题目审题分析 工作流"
-    assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
-
-    node = definition.nodes["extract_keywords"]
-    assert node.capability == "extract_keywords"
-    assert node.after == ["clean_and_parse"]
-    assert definition.nodes["fetch_questions"].capability == "fetch_questions"
-    assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
-    assert definition.nodes["mark_question"].capability == "mark_question"
+    assert definition.nodes["clean_and_parse"].label == "清洗与解析"
+    assert definition.nodes["clean_and_parse"].after == ["fetch_questions"]
+    assert definition.nodes["assemble_comprehension_info"].inputs == [
+        "questions_parsed_lean.json",
+        "key_info_reviewed.json",
+        "possible_errors_reviewed.json",
+        "comprehension_difficulty.json",
+    ]
 
 
 def test_reject_unknown_dependency(tmp_path):
@@ -217,15 +199,21 @@ def test_load_question_comprehension_info_capabilities():
     assert list(definition.nodes) == [
         "fetch_questions",
         "clean_and_parse",
+        "classify_comprehension_eligibility",
         "generate_key_info",
         "review_key_info",
         "generate_possible_errors",
         "review_possible_errors",
         "assess_comprehension_difficulty",
         "assemble_comprehension_info",
+        "finalize_non_uploadable",
     ]
     assert definition.nodes["fetch_questions"].capability == "fetch_questions"
     assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
+    assert (
+        definition.nodes["classify_comprehension_eligibility"].capability
+        == "classify_comprehension_eligibility"
+    )
     assert definition.nodes["generate_key_info"].after == ["clean_and_parse"]
     assert definition.nodes["review_key_info"].after == ["generate_key_info"]
     assert definition.nodes["generate_possible_errors"].after == ["review_key_info"]
@@ -241,3 +229,114 @@ def test_load_question_comprehension_info_capabilities():
         "comprehension_info.json",
         "manifest.json",
     ]
+    assert definition.nodes["finalize_non_uploadable"].capability == "finalize_non_uploadable"
+    assert definition.nodes["finalize_non_uploadable"].terminal is not None
+    assert definition.nodes["finalize_non_uploadable"].terminal.outcome == "non_uploadable"
+
+
+def test_workflow_node_loads_config_mapping(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_questions\noutputs: [out.json]\n"
+            "config:\n      page_size: 20\n      subject_id: math"
+        ),
+    )
+    node = load_workflow_definition(path).nodes["one"]
+    assert node.config == {"page_size": 20, "subject_id": "math"}
+
+
+def test_workflow_node_config_defaults_to_empty(tmp_path: Path) -> None:
+    path = write_workflow(tmp_path, node_body="capability: fetch_questions\noutputs: [out.json]")
+    assert load_workflow_definition(path).nodes["one"].config == {}
+
+
+def test_workflow_node_rejects_non_mapping_config(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body="capability: fetch_questions\noutputs: [out.json]\nconfig: [page_size]",
+    )
+    with pytest.raises(WorkflowDefinitionError, match="config must be a mapping"):
+        load_workflow_definition(path)
+
+
+def test_workflow_node_loads_resources(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body="capability: fetch_questions\noutputs: [out.json]\nresources: [question_detail]",
+    )
+    definition = load_workflow_definition(path, resource_providers={"question_detail": {}})
+    assert definition.nodes["one"].resources == ["question_detail"]
+
+
+def test_workflow_node_resources_default_to_empty(tmp_path: Path) -> None:
+    path = write_workflow(tmp_path, node_body="capability: fetch_questions\noutputs: [out.json]")
+    assert load_workflow_definition(path).nodes["one"].resources == []
+
+
+def test_workflow_node_rejects_non_list_resources(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body="capability: fetch_questions\noutputs: [out.json]\nresources: question_detail",
+    )
+    with pytest.raises(WorkflowDefinitionError, match="resources must be a list of strings"):
+        load_workflow_definition(path)
+
+
+def test_workflow_node_rejects_unknown_resource(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body="capability: fetch_questions\noutputs: [out.json]\nresources: [nope]",
+    )
+    with pytest.raises(WorkflowDefinitionError, match="unknown resource 'nope'"):
+        load_workflow_definition(path, resource_providers={"question_detail": {}})
+
+
+def test_node_resources_round_trip_through_job_snapshot(tmp_path: Path) -> None:
+    from server.app.services.workflow_revision_format import (
+        definition_from_job_snapshot,
+        serialize_definition,
+    )
+
+    path = write_workflow(
+        tmp_path,
+        node_body="capability: fetch_questions\noutputs: [out.json]\nresources: [question_detail]",
+    )
+    definition = load_workflow_definition(path)
+    snapshot = serialize_definition(definition)
+    restored = definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
+    assert restored is not None
+    assert restored.nodes["one"].resources == ["question_detail"]
+
+
+def test_node_config_round_trips_through_job_snapshot(tmp_path: Path) -> None:
+    from server.app.services.workflow_revision_format import (
+        definition_from_job_snapshot,
+        serialize_definition,
+    )
+
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_questions\noutputs: [out.json]\nconfig:\n      page_size: 20"
+        ),
+    )
+    definition = load_workflow_definition(path)
+    snapshot = serialize_definition(definition)
+    restored = definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
+    assert restored is not None
+    assert restored.nodes["one"].config == {"page_size": 20}
+
+
+def test_legacy_snapshot_without_node_config_still_loads() -> None:
+    from server.app.services.workflow_revision_format import definition_from_job_snapshot
+
+    snapshot = (
+        '{"key":"test","label":"Test","schema_version":1,'
+        '"nodes":{"one":{"key":"one","label":"One","capability":"fetch_questions",'
+        '"after":[],"inputs":[],"outputs":["out.json"],"terminal":null,'
+        '"execution":{"provider":"","model":"","thinking":"","prompt":""}}},"edges":[]}'
+    )
+    restored = definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
+    assert restored is not None
+    assert restored.nodes["one"].config == {}

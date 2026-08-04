@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from server.app.executors.config import ExecutorConfig
@@ -15,6 +15,7 @@ def validate_workspace_executor_configuration(
     allocations: Sequence[Mapping[str, Any]],
     bindings: Sequence[Mapping[str, Any]],
     node_limits: Sequence[Mapping[str, Any]],
+    agent_capabilities: Collection[str] = (),
 ) -> None:
     allocation_by_id: dict[str, Mapping[str, Any]] = {}
     for allocation in allocations:
@@ -41,13 +42,17 @@ def validate_workspace_executor_configuration(
             raise InvalidOperationError(f"Duplicate Node binding {workflow_key}.{node_key}")
         if workflow_key != workflow.key or node_key not in workflow.nodes:
             raise InvalidOperationError(f"Unknown Workflow Node {workflow_key}.{node_key}")
+        capability = workflow.nodes[node_key].capability
+        if capability in agent_capabilities:
+            raise InvalidOperationError(
+                f"Agent Node {workflow_key}.{node_key} is routed by Agent ID, not Executor binding"
+            )
         executor_id = str(binding["executor_id"])
         if executor_id not in allocation_by_id:
             raise InvalidOperationError(
                 f"Executor {executor_id} is not allocated to this Workspace"
             )
         executor = executor_definitions[executor_id]
-        capability = workflow.nodes[node_key].capability
         if capability not in executor.capabilities:
             raise InvalidOperationError(
                 f"Executor {executor_id} does not support capability {capability} "

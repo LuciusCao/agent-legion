@@ -5,54 +5,26 @@ import json
 import logging
 import os
 import subprocess
-import sys
 import time
 import uuid
-from dataclasses import dataclass, field
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
-from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.services.pi_event_compression import compress_pi_events
+from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
+from server.app.services.token_usage_capture import capture_and_persist_token_usage
+from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
+from server.app.workflows.output_validation import run_output_validator
+from server.app.workflows.pi_command_builder import build_pi_command
+from server.app.workflows.pi_config import PiConfig, PiRunResult
+from server.app.workflows.pi_prompt import build_pi_prompt
+from server.app.workflows.pi_protocol import detect_model_error
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class PiConfig:
-    binary: str = "pi"
-    provider: str = ""
-    model: str = ""
-    thinking: str = "low"
-    timeout_seconds: int = 600
-    cancellation_grace_seconds: int = 5
-    environment: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    def from_runtime(cls, config: PiRuntimeConfig) -> PiConfig:
-        """Build an immutable PiConfig from a validated PiRuntimeConfig."""
-        return cls(
-            binary=config.binary,
-            provider=config.provider,
-            model=config.model,
-            thinking=config.thinking or "low",
-            timeout_seconds=config.timeout_seconds,
-            cancellation_grace_seconds=config.cancellation_grace_seconds,
-            environment=dict(config.environment),
-        )
-
-
-@dataclass(frozen=True)
-class PiRunResult:
-    status: ExecutionStatus
-    exit_code: int
-    command: list[str]
-    run_dir: Path
-    session_dir: Path
-    error_message: str = ""
 
 
 class PiRunner:
@@ -62,60 +34,7 @@ class PiRunner:
 
     @classmethod
     def from_config(cls, raw: dict[str, Any], skill_root: Path) -> PiRunner:
-        binary = raw.get("binary")
-        if not binary or not isinstance(binary, str):
-            raise ValueError("Pi binary is required")
-        timeout = raw.get("timeout_seconds", 600)
-        if not isinstance(timeout, int) or timeout < 1:
-            raise ValueError("Pi timeout_seconds must be a positive integer")
-        env = raw.get("environment", {})
-        if not isinstance(env, dict):
-            env = {}
-        config = PiConfig(
-            binary=binary,
-            provider=str(raw.get("provider", "")),
-            model=str(raw.get("model", "")),
-            thinking=str(raw.get("thinking", "low")),
-            timeout_seconds=timeout,
-            environment={str(k): str(v) for k, v in env.items()},
-        )
-        return cls(config, skill_root)
-
-    def build_command(
-        self,
-        *,
-        skill_dir: Path,
-        session_dir: Path,
-        tools: list[str],
-        session_name: str,
-        prompt_file: Path,
-    ) -> list[str]:
-        cmd: list[str] = [
-            self.config.binary,
-            "--mode",
-            "json",
-            "--session-dir",
-            str(session_dir),
-            "--name",
-            session_name,
-            "--no-context-files",
-            "--no-extensions",
-            "--no-prompt-templates",
-            "--no-skills",
-            "--skill",
-            str(skill_dir),
-            "--tools",
-            ",".join(tools),
-            "--approve",
-        ]
-        if self.config.provider:
-            cmd.extend(["--provider", self.config.provider])
-        if self.config.model:
-            cmd.extend(["--model", self.config.model])
-        if self.config.thinking:
-            cmd.extend(["--thinking", self.config.thinking])
-        cmd.extend([str(prompt_file), "Execute the attached node instructions."])
-        return cmd
+        return cls(PiConfig.from_config(raw), skill_root)
 
     def run(
         self,
@@ -133,7 +52,12 @@ class PiRunner:
         execution_id: str | None = None,
         cancellation_token: CancellationToken | None = None,
         tracker: SubprocessTracker | None = None,
+        skill_version: str = "",
+        config: PiConfig | None = None,
+        additional_prompt: str = "",
+        node_config: Mapping[str, Any] | None = None,
     ) -> PiRunResult:
+        run_config = config or self.config
         if job_dir is None:
             if jobs_dir is None:
                 raise ManagedPathError(
@@ -142,6 +66,7 @@ class PiRunner:
                     root_kind="job",
                 )
             job_dir = resolve_job_dir(job, jobs_dir)
+        data_dir = job_db.jobs_dir.parent if job_db is not None else None
         run_token = str(uuid.uuid4())
         run_dir = job_dir / "runs" / node_key / run_token
         session_dir = run_dir / "session"
@@ -152,7 +77,7 @@ class PiRunner:
         events_file = run_dir / "events.jsonl"
         stderr_file = run_dir / "stderr.log"
 
-        prompt = self._build_prompt(
+        prompt = build_pi_prompt(
             job_id=job["id"],
             node_key=node_key,
             job_dir=job_dir,
@@ -160,16 +85,20 @@ class PiRunner:
             validator_script=skill_dir / "scripts" / "validate_output.py",
             inputs=inputs,
             outputs=outputs,
+            additional_prompt=additional_prompt,
         )
         prompt_file.write_text(prompt, encoding="utf-8")
 
         session_name = f"{job['id']}:{node_key}:{run_token}"
-        command = self.build_command(
+        command = build_pi_command(
+            run_config,
             skill_dir=skill_dir,
             session_dir=session_dir,
             tools=tools or ["read", "write", "bash"],
             session_name=session_name,
             prompt_file=prompt_file,
+            expected_outputs=outputs,
+            node_config=node_config,
         )
 
         run_record: dict[str, Any] | None = None
@@ -179,13 +108,15 @@ class PiRunner:
 
         try:
             if job_db is not None and persist_run:
+                data_dir = job_db.jobs_dir.parent
                 run_record = job_db.start_node_run(
                     job["id"],
                     node_key,
                     command,
-                    str(events_file),
-                    run_dir=str(run_dir),
-                    session_dir=str(session_dir),
+                    make_data_relative(events_file, data_dir),
+                    run_dir=make_data_relative(run_dir, data_dir),
+                    session_dir=make_data_relative(session_dir, data_dir),
+                    skill_version=skill_version,
                 )
                 if run_record is None:
                     return PiRunResult(
@@ -195,10 +126,11 @@ class PiRunner:
                         run_dir=run_dir,
                         session_dir=session_dir,
                         error_message="node run not in a startable state",
+                        skill_version=skill_version,
                     )
 
             env = dict(os.environ)
-            env.update(self.config.environment)
+            env.update(run_config.environment)
 
             with (
                 open(events_file, "w") as stdout_fh,
@@ -221,40 +153,35 @@ class PiRunner:
                         cancellation_token=cancellation_token,
                         tracker=tracker,
                         execution_id=effective_execution_id,
+                        config=run_config,
                     )
                 finally:
                     if tracker is not None:
                         tracker.unregister(effective_execution_id)
         except FileNotFoundError:
             exit_code = 127
-            error_message = f"Pi binary not found: {self.config.binary}"
+            error_message = f"Pi binary not found: {run_config.binary}"
         except Exception as exc:
             exit_code = 1
             error_message = str(exc)
 
         # Validate outputs
         if exit_code == 0:
-            missing = [o for o in outputs if not (job_dir / o).is_file()]
-            if missing:
+            model_error = self._detect_model_error(events_file)
+            if model_error:
                 exit_code = 1
-                error_message = f"Missing outputs after Pi run: {', '.join(missing)}"
+                error_message = f"Pi model call failed: {model_error}"
+            else:
+                missing = [o for o in outputs if not (job_dir / o).is_file()]
+                if missing:
+                    exit_code = 1
+                    error_message = f"Missing outputs after Pi run: {', '.join(missing)}"
 
         if exit_code == 0:
-            validator = skill_dir / "scripts" / "validate_output.py"
-            if validator.is_file():
-                try:
-                    val_proc = subprocess.run(
-                        [sys.executable, str(validator), str(job_dir)],
-                        capture_output=True,
-                        text=True,
-                        timeout=30,
-                    )
-                    if val_proc.returncode != 0:
-                        exit_code = 1
-                        error_message = f"Output validation failed: {val_proc.stderr.strip()}"
-                except Exception as exc:
-                    exit_code = 1
-                    error_message = f"Validator error: {exc}"
+            validation_error = run_output_validator(skill_dir, job_dir)
+            if validation_error:
+                exit_code = 1
+                error_message = validation_error
 
         end_time = datetime.datetime.now(datetime.UTC).isoformat()
         run_meta = {
@@ -265,13 +192,14 @@ class PiRunner:
             "end_time": end_time,
             "exit_code": exit_code,
             "model": {
-                "provider": self.config.provider,
-                "model": self.config.model,
-                "thinking": self.config.thinking,
+                "provider": run_config.provider,
+                "model": run_config.model,
+                "thinking": run_config.thinking,
             },
             "inputs": inputs,
             "outputs": outputs,
             "skill": str(skill_dir),
+            "skill_version": skill_version,
             "error_message": error_message,
         }
         (run_dir / "run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
@@ -279,6 +207,24 @@ class PiRunner:
         status: ExecutionStatus = "completed" if exit_code == 0 else "failed"
         if job_db is not None and persist_run and run_record is not None:
             job_db.finish_node_run(run_record["id"], status, exit_code, error_message)
+            try:
+                workspace_id = str(job.get("workspace_id", ""))
+                with job_db.connect() as conn:
+                    capture_and_persist_token_usage(conn, run_dir, run_record, workspace_id)
+            except Exception:
+                logger.debug(
+                    "Failed to capture token usage for run %s", run_record["id"], exc_info=True
+                )
+
+        # Finalize the run: drop streaming deltas (only the final snapshots are
+        # needed for log rendering) and remove older run dirs for this node.
+        if data_dir is not None and job_db is not None:
+            try:
+                compress_pi_events(events_file)
+                with job_db.connect() as conn:
+                    cleanup_extra_runs_for_node(conn, data_dir, job_dir, node_key)
+            except Exception:
+                logger.exception("Failed to finalize run for %s/%s", job_dir.name, node_key)
 
         return PiRunResult(
             status=status,
@@ -287,6 +233,7 @@ class PiRunner:
             run_dir=run_dir,
             session_dir=session_dir,
             error_message=error_message,
+            skill_version=skill_version,
         )
 
     def _wait_for_process(
@@ -296,6 +243,7 @@ class PiRunner:
         cancellation_token: CancellationToken | None,
         tracker: SubprocessTracker | None,
         execution_id: str,
+        config: PiConfig,
     ) -> tuple[int, str]:
         start = time.monotonic()
         while True:
@@ -303,31 +251,31 @@ class PiRunner:
                 if tracker is not None:
                     tracker.cancel(execution_id)
                 else:
-                    self._terminate_direct(proc)
-                return self._collect_exit(proc, cancelled=True)
+                    self._terminate_direct(proc, config)
+                return self._collect_exit(proc, config, cancelled=True)
             poll = proc.poll()
             if poll is not None:
                 return poll, ""
-            if time.monotonic() - start > self.config.timeout_seconds:
+            if time.monotonic() - start > config.timeout_seconds:
                 if tracker is not None:
                     tracker.cancel(execution_id)
                 else:
-                    self._terminate_direct(proc)
-                return -1, f"Pi session timed out after {self.config.timeout_seconds}s"
+                    self._terminate_direct(proc, config)
+                return -1, f"Pi session timed out after {config.timeout_seconds}s"
 
-    def _terminate_direct(self, proc: subprocess.Popen[Any]) -> None:
+    def _terminate_direct(self, proc: subprocess.Popen[Any], config: PiConfig) -> None:
         proc.terminate()
         try:
-            proc.wait(timeout=self.config.cancellation_grace_seconds)
+            proc.wait(timeout=config.cancellation_grace_seconds)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
 
     def _collect_exit(
-        self, proc: subprocess.Popen[Any], cancelled: bool = False
+        self, proc: subprocess.Popen[Any], config: PiConfig, cancelled: bool = False
     ) -> tuple[int, str]:
         try:
-            exit_code = proc.wait(timeout=self.config.cancellation_grace_seconds)
+            exit_code = proc.wait(timeout=config.cancellation_grace_seconds)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
@@ -335,38 +283,5 @@ class PiRunner:
         error_message = "execution was cancelled" if cancelled else ""
         return exit_code, error_message
 
-    def _build_prompt(
-        self,
-        *,
-        job_id: str,
-        node_key: str,
-        job_dir: Path,
-        skill_dir: Path,
-        validator_script: Path,
-        inputs: list[str],
-        outputs: list[str],
-    ) -> str:
-        lines: list[str] = [
-            "Execute the loaded node skill for this Video Hive workflow job.",
-            "",
-            f"Job ID: {job_id}",
-            f"Node: {node_key}",
-            f"Working directory: {job_dir}",
-            f"Skill directory: {skill_dir}",
-            f"Validator script: {validator_script}",
-            "",
-            "Declared inputs:",
-        ]
-        for inp in inputs:
-            lines.append(f"- {inp}")
-        lines.append("")
-        lines.append("Required outputs:")
-        for out in outputs:
-            lines.append(f"- {out}")
-        lines.append("")
-        lines.append(
-            "Write required outputs directly into the working directory. "
-            "Do not modify inputs or create undeclared root-level artifacts. "
-            "Finish after all required outputs are written and correct."
-        )
-        return "\n".join(lines) + "\n"
+    def _detect_model_error(self, events_file: Path) -> str | None:
+        return detect_model_error(events_file)
