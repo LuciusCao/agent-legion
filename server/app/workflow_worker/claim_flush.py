@@ -33,6 +33,7 @@ class PreparedClaim:
     log_path: Path
     inputs: tuple[str, ...]
     node_config: dict[str, Any]
+    node_code: str | None = None
 
 
 def flush_prepared_claims(worker: WorkflowWorkerThread) -> None:
@@ -64,5 +65,6 @@ def flush_prepared_claims(worker: WorkflowWorkerThread) -> None:
                 expected_outputs=tuple(prepared.node.outputs),
                 runtime={"node_execution": asdict(prepared.node.execution)},
                 node_config=prepared.node_config,
+                node_code=prepared.node_code,
             )
             submit_claim(worker, executor_id, claimed, context)

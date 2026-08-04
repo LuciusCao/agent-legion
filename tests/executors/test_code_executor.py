@@ -163,3 +163,35 @@ def test_cancel_before_start(tmp_path: Path, context: ExecutionContext) -> None:
     executor.cancel(context.execution_id)
     result = executor.execute(context)
     assert result.status == "cancelled"
+
+
+def test_execute_custom_node_code_from_source(tmp_path: Path, context: ExecutionContext) -> None:
+    """context.node_code (EXEC-CODE-002) is loaded from the string, not the file."""
+    path = _write_node(
+        tmp_path,
+        "node_builtin.py",
+        """
+        def run(job, job_dir, runtime):
+            (job_dir / "out.json").write_text('{"origin": "builtin"}', encoding="utf-8")
+        """,
+    )
+    custom_source = textwrap.dedent(
+        """
+        def run(job, job_dir, runtime):
+            (job_dir / "out.json").write_text('{"origin": "custom"}', encoding="utf-8")
+        """
+    )
+    executor = _executor(tmp_path, path)
+    result = executor.execute(replace(context, node_code=custom_source))
+    assert result.status == "completed"
+    assert (tmp_path / "out.json").read_text(encoding="utf-8") == '{"origin": "custom"}'
+
+
+def test_execute_custom_node_code_without_run_fails(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    result = executor.execute(replace(context, node_code="X = 1\n"))
+    assert result.status == "failed"
+    assert "callable 'run'" in result.error_message

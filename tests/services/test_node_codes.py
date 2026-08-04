@@ -9,7 +9,12 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
-from server.app.services.node_codes import MAX_CODE_BYTES, NodeCodeService
+from server.app.services.node_codes import (
+    MAX_CODE_BYTES,
+    NodeCodeService,
+    freeze_node_code_versions,
+    resolve_dispatch_node_code,
+)
 
 VALID_CODE = "def run(job, job_dir, runtime):\n    return None\n"
 UPDATED_CODE = "async def run(job, job_dir, runtime):\n    return 1\n"
@@ -145,3 +150,56 @@ def test_gate_disabled_rejects_every_entry(job_db, workspace_id) -> None:
         gated.rollback(workspace_id, WF, NODE, 1, "user:u1")
     with pytest.raises(CustomNodesDisabledError):
         gated.archive_all(workspace_id, WF, NODE)
+
+
+def test_get_code_by_version_reads_archived_rows(service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    row = service.get_code_by_version(workspace_id, WF, NODE, 1)
+
+    assert row is not None
+    assert row["status"] == "archived"
+    assert row["code"] == VALID_CODE
+    assert service.get_code_by_version(workspace_id, WF, NODE, 99) is None
+
+
+def test_freeze_node_code_versions_pins_only_published(job_db, service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    # A draft without publish is not pinned.
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+
+    pins = freeze_node_code_versions(job_db.path, True, workspace_id, WF, [NODE, "download_video"])
+
+    assert list(pins) == [NODE]
+    assert pins[NODE]["version"] == 1
+    published = service.get_code_by_version(workspace_id, WF, NODE, 1)
+    assert pins[NODE]["code_hash"] == published["code_hash"]
+    # Gate off: intake never touches the table.
+    assert freeze_node_code_versions(job_db.path, False, workspace_id, WF, [NODE]) == {}
+
+
+def test_resolve_dispatch_node_code_priority(job_db, service, workspace_id) -> None:
+    # Builtin: no custom code at all.
+    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) is None
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) == VALID_CODE
+    # A frozen job keeps v1 even after v2 is published.
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    frozen = {"version": 1, "code_hash": "whatever"}
+    assert (
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen) == VALID_CODE
+    )
+    # Archived frozen versions stay readable.
+    service.archive_all(workspace_id, WF, NODE)
+    assert (
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen) == VALID_CODE
+    )
+    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) is None
+    # Gate off: builtin, no error.
+    assert resolve_dispatch_node_code(job_db.path, False, workspace_id, WF, NODE, frozen) is None

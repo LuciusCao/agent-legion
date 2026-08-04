@@ -384,6 +384,12 @@ invariants:
       - kind: integration
         target: tests/services/test_node_codes.py
         gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_worker_node_code.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_execute_custom_node_code_from_source
+        gate: quick
 
   - id: SECURITY-WORKER-001
     statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."

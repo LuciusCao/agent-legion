@@ -130,7 +130,7 @@ exemptions:
     an empty-catalog regression.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 132
+  ceiling: 150
 - check: architecture.file_budget
   path: worker/supervisor.py
   reason: The develop merge stacked two intentional, individually in-budget

@@ -6,6 +6,11 @@ same contract as local handlers. Execution uses the same isolated
 multiprocessing child pattern as the local executor, plus a per-capability
 timeout. Paths must stay inside the repository root (EXEC-CODE-001) so node
 code is always git-reviewed and CI-gated.
+
+Custom node code (EXEC-CODE-002) arrives as text on ``ExecutionContext.
+node_code`` — resolved at dispatch from the frozen job version or the
+published DB version — and is loaded from the string instead of the file; the
+``run`` contract is identical.
 """
 
 from __future__ import annotations
@@ -47,6 +52,19 @@ def _load_run_callable(file_path: str, repo_root: str):
     return run
 
 
+def _load_run_from_source(source: str):
+    """Build a module from custom code text and return its ``run`` callable."""
+    spec = importlib.util.spec_from_loader("_code_node_custom", loader=None)
+    if spec is None:
+        raise ValueError("Cannot build module spec for custom node code")
+    module = importlib.util.module_from_spec(spec)
+    exec(compile(source, "<custom_node>", "exec"), module.__dict__)
+    run = getattr(module, "run", None)
+    if not callable(run):
+        raise ValueError("Custom node code does not expose a callable 'run'")
+    return run
+
+
 def _run_code_node(
     file_path: str,
     repo_root: str,
@@ -54,6 +72,7 @@ def _run_code_node(
     job_dir_str: str,
     runtime: dict[str, Any],
     conn: Any,
+    code_source: str | None = None,
 ) -> None:
     """Target run in an isolated multiprocessing child."""
     log_path = runtime.get("log_path")
@@ -72,10 +91,15 @@ def _run_code_node(
             logger.exception("Failed to redirect run log to %s", log_path)
 
     prefix = f"[code:{runtime.get('node_key', '')}]"
-    logger.info("%s start capability=%s path=%s", prefix, runtime.get("capability", ""), file_path)
+    origin = "custom" if code_source is not None else f"path={file_path}"
+    logger.info("%s start capability=%s %s", prefix, runtime.get("capability", ""), origin)
 
     try:
-        run = _load_run_callable(file_path, repo_root)
+        run = (
+            _load_run_from_source(code_source)
+            if code_source is not None
+            else _load_run_callable(file_path, repo_root)
+        )
         job_db_path = runtime.pop("_job_db_path", None)
         jobs_dir = runtime.pop("_jobs_dir", None)
         if job_db_path and jobs_dir:
@@ -215,6 +239,7 @@ class CodeExecutor:
                 str(context.job_dir),
                 runtime,
                 child_conn,
+                context.node_code,
             ),
         )
         process.start()

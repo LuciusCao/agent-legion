@@ -113,6 +113,7 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
             workspace_id,
             request.definition_yaml,
             settings.executor_definitions,
+            settings.executor_runtime.workflows.custom_nodes_enabled,
         )
         return WorkflowDraftValidationResponse(valid=valid, errors=errors)
 

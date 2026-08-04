@@ -27,6 +27,14 @@ class ExecutionContext:
     # Effective node config resolved at dispatch (spec D15); empty for
     # executors whose capability declares no config_schema.
     node_config: Mapping[str, Any] = field(default_factory=dict)
+    # Custom node code text resolved at dispatch (EXEC-CODE-002); None means
+    # the builtin repo-tracked implementation. The code text rides the context
+    # (instead of a DB reference the child would re-resolve) so the isolated
+    # child process needs no DB access for code loading — the parent already
+    # does the per-dispatch DB reads for secrets, so this adds no extra round
+    # trip. This deviates from design §5's "DB read inside the child" for that
+    # simplicity reason.
+    node_code: str | None = None
 
 
 @dataclass(frozen=True)

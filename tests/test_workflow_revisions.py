@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 
@@ -6,19 +7,23 @@ from fastapi.testclient import TestClient
 
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
+from server.app.services.node_codes import NodeCodeService
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
     validate_workflow_for_publish,
     workflow_definition_from_yaml_string,
 )
 from server.app.services.workflow_revision_format import (
+    definition_hash,
     definition_to_yaml,
+    serialize_definition,
     workflow_definition_to_response_payload,
 )
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import (
     WorkflowDefinition,
     load_workflow_definition,
+    workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
 from tests.helpers.auth import authenticate_client
@@ -490,3 +495,73 @@ def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:
     terminal_nodes = [node for node in payload["nodes"] if node.get("terminal")]
     assert terminal_nodes
     assert all(node["terminal"]["outcome"] for node in terminal_nodes)
+
+
+def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
+    """Publish snapshots published custom code versions as node_code_pins."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-pins", default_workflow_key="question_comprehension_info"
+    )
+    codes = NodeCodeService(queries.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries)
+
+    service.publish_workspace_revision(workspace["id"], definition)
+    active = service.get_active(workspace["id"], definition.key)
+
+    payload = json.loads(active["definition_json"])
+    pins = payload["node_code_pins"]
+    assert pins["fetch_questions"]["version"] == 1
+    assert len(pins["fetch_questions"]["code_hash"]) == 64
+    assert "clean_and_parse" not in pins
+    # Pins are publish-moment state, not part of the definition: the hash
+    # covers the pure definition only.
+    assert active["definition_hash"] == definition_hash(serialize_definition(definition))
+    # The definition round-trip ignores the sibling pins key.
+    workflow_definition_from_dict(payload)
+
+
+def test_publish_revision_without_custom_codes_has_no_pins(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-no-pins", default_workflow_key="question_comprehension_info"
+    )
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries)
+
+    service.publish_workspace_revision(workspace["id"], definition)
+    active = service.get_active(workspace["id"], definition.key)
+
+    assert "node_code_pins" not in json.loads(active["definition_json"])
+
+
+def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-gated-pins", default_workflow_key="question_comprehension_info"
+    )
+    codes = NodeCodeService(queries.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries, custom_nodes_enabled=False)
+
+    service.publish_workspace_revision(workspace["id"], definition)
+    active = service.get_active(workspace["id"], definition.key)
+
+    assert "node_code_pins" not in json.loads(active["definition_json"])

@@ -215,3 +215,63 @@ def test_job_intake_handles_large_batch_across_default_chunks(job_db, settings):
 
     assert result["created_count"] == 1200
     assert len({job["id"] for job in result["jobs"]}) == 1200
+
+
+def test_job_intake_freezes_node_code_versions(job_db, settings):
+    """Intake snapshots published custom code versions into the batch payload."""
+    from server.app.services.node_codes import NodeCodeService
+
+    workspace = _create_workspace_with_revision(job_db, settings)
+    codes = NodeCodeService(job_db.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+
+    result = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": ["Q1"],
+            "knowledge_codes": [],
+        },
+    )
+
+    batch = job_db.get_batch(str(result["jobs"][0]["batch_id"]))
+    import json
+
+    payload = json.loads(batch["source_payload_json"])
+    pins = payload["node_code_versions"]
+    assert pins["fetch_questions"]["version"] == 1
+    assert len(pins["fetch_questions"]["code_hash"]) == 64
+    # Nodes without published custom code are not pinned.
+    assert "clean_and_parse" not in pins
+
+
+def test_job_intake_freezes_empty_when_no_custom_codes(job_db, settings):
+    _create_workspace_with_revision(job_db, settings)
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+
+    result = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": ["Q1"],
+            "knowledge_codes": [],
+        },
+    )
+
+    batch = job_db.get_batch(str(result["jobs"][0]["batch_id"]))
+    import json
+
+    payload = json.loads(batch["source_payload_json"])
+    assert payload["node_code_versions"] == {}

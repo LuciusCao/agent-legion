@@ -18,6 +18,7 @@ def publish_workflow_draft(
     workspace_id: str,
     definition_yaml: str,
     settings_executor_definitions: dict[str, Any],
+    custom_nodes_enabled: bool = True,
 ) -> tuple[bool, list[str]]:
     errors = validate_workflow_definition(definition_yaml)
     if errors:
@@ -31,5 +32,7 @@ def publish_workflow_draft(
     )
     if errors:
         return False, errors
-    WorkflowRevisionService(job_db).save_workspace_revision(workspace_id, definition)
+    WorkflowRevisionService(job_db, custom_nodes_enabled).save_workspace_revision(
+        workspace_id, definition
+    )
     return True, []
