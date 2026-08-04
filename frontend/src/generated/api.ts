@@ -1429,6 +1429,76 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Node Code */
+    get: operations['get_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get']
+    /** Save Node Code Draft */
+    put: operations['save_node_code_draft_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_put']
+    post?: never
+    /** Archive Node Code */
+    delete: operations['archive_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Publish Node Code */
+    post: operations['publish_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_publish_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Rollback Node Code */
+    post: operations['rollback_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_rollback_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Node Code Versions */
+    get: operations['list_node_code_versions_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -3087,6 +3157,87 @@ export interface components {
        * @enum {string}
        */
       type: 'added' | 'removed' | 'modified'
+    }
+    /** WorkflowNodeCodeArchiveResponse */
+    WorkflowNodeCodeArchiveResponse: {
+      /** Archived */
+      archived: number
+    }
+    /** WorkflowNodeCodeDraftRequest */
+    WorkflowNodeCodeDraftRequest: {
+      /** Change Note */
+      change_note?: string | null
+      /** Code */
+      code: string
+    }
+    /** WorkflowNodeCodeResponse */
+    WorkflowNodeCodeResponse: {
+      /** Code */
+      code: string
+      /**
+       * Has Draft
+       * @default false
+       */
+      has_draft: boolean
+      /**
+       * Origin
+       * @enum {string}
+       */
+      origin: 'builtin' | 'custom'
+      /** Path */
+      path?: string | null
+      /** Version */
+      version?: number | null
+    }
+    /** WorkflowNodeCodeRollbackRequest */
+    WorkflowNodeCodeRollbackRequest: {
+      /** Version */
+      version: number
+    }
+    /** WorkflowNodeCodeVersionResponse */
+    WorkflowNodeCodeVersionResponse: {
+      /** Change Note */
+      change_note?: string | null
+      /** Code */
+      code: string
+      /** Code Hash */
+      code_hash: string
+      /** Created At */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /** Status */
+      status: string
+      /** Version */
+      version: number
+    }
+    /** WorkflowNodeCodeVersionSummary */
+    WorkflowNodeCodeVersionSummary: {
+      /** Change Note */
+      change_note?: string | null
+      /** Code Hash */
+      code_hash: string
+      /** Created At */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /** Status */
+      status: string
+      /** Version */
+      version: number
+    }
+    /** WorkflowNodeCodeVersionsResponse */
+    WorkflowNodeCodeVersionsResponse: {
+      /** Versions */
+      versions: components['schemas']['WorkflowNodeCodeVersionSummary'][]
     }
     /** WorkflowNodeExecutionResponse */
     WorkflowNodeExecutionResponse: {
@@ -6462,6 +6613,212 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowRevisionDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_node_code_draft_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowNodeCodeDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeArchiveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  publish_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_publish_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  rollback_node_code_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_rollback_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowNodeCodeRollbackRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_node_code_versions_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeVersionsResponse']
         }
       }
       /** @description Validation Error */

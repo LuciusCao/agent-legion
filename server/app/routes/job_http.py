@@ -4,6 +4,7 @@ from fastapi import HTTPException
 
 from server.app.services.job_errors import (
     ConflictError,
+    CustomNodesDisabledError,
     InvalidOperationError,
     JobServiceError,
     NotFoundError,
@@ -22,6 +23,8 @@ def require_workflows_enabled(settings: Settings) -> None:
 def raise_job_http_error(error: JobServiceError) -> Never:
     if isinstance(error, NotFoundError):
         raise HTTPException(status_code=404, detail=str(error)) from error
+    if isinstance(error, CustomNodesDisabledError):
+        raise HTTPException(status_code=403, detail=str(error)) from error
     if isinstance(error, UnsupportedOperationError):
         raise HTTPException(status_code=501, detail=str(error)) from error
     if isinstance(error, PayloadTooLargeError):

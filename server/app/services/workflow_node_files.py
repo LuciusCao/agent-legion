@@ -82,3 +82,20 @@ def referencing_capabilities(
 
 def _display_path(path: Path) -> str:
     return f"{WORKFLOW_NODES_DIR}/{path.name}"
+
+
+def builtin_code_path(
+    executor_definitions: Mapping[str, ExecutorConfig], capability: str
+) -> str | None:
+    """Repo-relative path of the builtin code file serving ``capability``.
+
+    Mirrors the Studio inspector's lookup: the first code executor whose
+    capability detail declares a path wins.
+    """
+    for definition in executor_definitions.values():
+        if not isinstance(definition, CodeExecutorConfig):
+            continue
+        cap_config = definition.capabilities.get(capability)
+        if cap_config is not None:
+            return cap_config.path
+    return None

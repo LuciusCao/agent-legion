@@ -28,6 +28,7 @@ from .packages import create_packages_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
+from .workflow_node_codes import create_workflow_node_codes_router
 from .workflow_node_files import create_workflow_node_files_router
 from .workflow_revisions import create_workflow_revisions_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
@@ -89,6 +90,7 @@ def create_router(
     secured(workspaces_router)
     secured(create_workspace_settings_router(workspace_configuration, settings))
     secured(create_workflow_revisions_router(job_db, settings))
+    secured(create_workflow_node_codes_router(job_db, settings))
     secured(create_workspace_configuration_router(workspace_configuration, settings))
     executors_router = create_workspace_executors_router(
         executor_catalog, workspace_executor_configuration, settings
