@@ -25,6 +25,7 @@ from server.app.agent_broker.claim import (
     claim_in_transaction,
 )
 from server.app.agent_broker.empty import EmptyClaimTrigger
+from server.app.agent_broker.manifest_guard import require_routable_pi_model
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.agent_worker_capacity import touch_worker
 from server.app.db.connection import DatabaseDsn
@@ -101,6 +102,9 @@ class AgentExecutionBroker:
         return row is not None
 
     def enqueue(self, request: AgentExecutionRequest) -> str | None:
+        # Fail fast on unroutable manifests (placeholder/empty model): they
+        # would otherwise poison the queue head forever (issue #13).
+        require_routable_pi_model(request.manifest)
         execution_id = request.execution_id or str(uuid.uuid4())
         try:
             with write_transaction(self.database_dsn) as conn:
@@ -168,13 +172,16 @@ class AgentExecutionBroker:
     ) -> AgentClaim | None:
         try:
             with write_transaction(self.database_dsn) as conn:
-                claimed = claim_in_transaction(self, conn, worker_id, declared_max_concurrency)
+                claimed, skip_reasons = claim_in_transaction(
+                    self, conn, worker_id, declared_max_concurrency
+                )
         except ClaimRacedError:
             return None
         if claimed is None:
             # Demand signal: a Worker found no work; restock immediately when
-            # the queue is truly empty (debounced, see empty).
-            self.empty_claim.note_empty_claim(self.database_dsn)
+            # the queue is truly empty, or surface the skip-reason histogram
+            # when unclaimable stock blocked the claim (debounced, see empty).
+            self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
         # Record only after the commit has succeeded, never inside the tx.
         if claimed is not None:
             record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)

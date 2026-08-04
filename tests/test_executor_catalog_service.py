@@ -81,5 +81,6 @@ def test_catalog_exposes_agent_definitions_with_runtime_defaults(
     assert agent["skill"] == "video_knowledge/review_video_content"
     assert agent["tools"] == ["read", "write", "bash"]
     assert agent["provider"] == "gateway"
-    assert agent["model"] == "your-model"
+    # yaml 默认 model 已清空（issue #13）：占位符 model 在 enqueue 被拒。
+    assert agent["model"] == ""
     assert agent["thinking"] == "low"
