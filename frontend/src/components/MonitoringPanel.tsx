@@ -11,39 +11,18 @@ import type { OpsGranularity } from '../api/metrics'
 import { listAgentWorkers } from '../api/workerTokens'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
+import { fmt, fmtDuration, makeTimeFormatter } from '../lib/monitoringFormat'
 import { MetricsChart } from './MetricsChart'
+import {
+  QueueAlertBanner,
+  QueueDepthChartSection,
+  QueueSummaryCards,
+} from './MonitoringQueueSection'
 import type { ChartSeries } from '../lib/metricsChartOptions'
 import { useAsync } from '../hooks/useAsync'
 import styles from './MonitoringPanel.module.css'
 
 const REFRESH_MS = 30_000
-
-function fmt(value: number | null | undefined) {
-  return typeof value === 'number' ? value.toLocaleString('zh-CN') : '-'
-}
-
-// 耗时展示：不足 1 分钟按秒，否则「Xm YYs」；无数据（窗口内无完成 run）显示占位符。
-function fmtDuration(seconds: number | null | undefined) {
-  if (typeof seconds !== 'number') return '-'
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const minutes = Math.floor(seconds / 60)
-  const rest = Math.round(seconds % 60)
-  return `${minutes}m ${pad(rest)}s`
-}
-
-function pad(n: number) {
-  return String(n).padStart(2, '0')
-}
-
-function makeTimeFormatter(granularity: OpsGranularity) {
-  return (iso: string) => {
-    const d = new Date(iso)
-    // 30d 的 4 小时桶需要「日期 + 小时」才能区分同一天内的多个桶
-    if (granularity === '30d')
-      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-  }
-}
 
 // 图表 series 为静态常量，保证引用稳定（MetricsChart 依赖引用相等性决定重建时机）
 const CONCURRENCY_SERIES: ChartSeries[] = [
@@ -135,6 +114,8 @@ export function MonitoringPanel() {
         </div>
       </header>
 
+      <QueueAlertBanner summary={summary} />
+
       <div className={styles.summaryGrid}>
         <div className={styles.metric}>
           <div className={styles.metricLabel}>当前在线 Worker</div>
@@ -185,7 +166,13 @@ export function MonitoringPanel() {
             {fmtDuration(hourlyRuns?.duration_p95_seconds)}
           </div>
         </div>
+        <QueueSummaryCards queue={summary?.queue} />
       </div>
+
+      <QueueDepthChartSection
+        granularity={granularity}
+        formatTime={formatTime}
+      />
 
       <div className={styles.chartSection}>
         <h3>Worker 与执行并发{loading && !data ? '（加载中…）' : ''}</h3>

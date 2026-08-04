@@ -18,6 +18,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import read_connection
+from server.app.services._ops_metrics_queue import query_queue_summary
 
 if TYPE_CHECKING:
     from server.app.services.ops_metrics import OpsMetricsService
@@ -81,4 +82,5 @@ def query_summary(service: OpsMetricsService, worker_id: str | None = None) -> d
             "duration_p50_seconds": (float(runs["p50"]) if runs["p50"] is not None else None),
             "duration_p95_seconds": (float(runs["p95"]) if runs["p95"] is not None else None),
         },
+        **query_queue_summary(service),
     }

@@ -120,6 +120,13 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
             "active_executions",
             "recent_hour_tokens",
             "recent_hour_runs",
+            "queue",
+            "queue_alert",
+        }
+        assert set(summary["queue"]) == {
+            "queued",
+            "oldest_queued_at",
+            "recent_hour_unclaimable_failed",
         }
         runs = summary["recent_hour_runs"]
         assert runs["completed"] == 1

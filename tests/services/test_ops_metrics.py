@@ -94,6 +94,7 @@ def _insert_execution(
     *,
     worker_id: str | None = None,
     node_run_id: int | None = None,
+    queued_at: datetime = _NOW,
 ) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
@@ -104,7 +105,7 @@ def _insert_execution(
               worker_id, node_run_id, queued_at, manifest_json
             ) values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 5, ?, ?, ?, ?, '{}')
             """,
-            (execution_id, f"node-{execution_id}", state, worker_id, node_run_id, _NOW),
+            (execution_id, f"node-{execution_id}", state, worker_id, node_run_id, queued_at),
         )
 
 
@@ -114,6 +115,7 @@ def _insert_sample(
     worker_id: str = "",
     online_workers: int = 0,
     active_executions: int = 0,
+    queued: int = 0,
     input_tokens: int = 0,
     output_tokens: int = 0,
     cache_read_tokens: int = 0,
@@ -124,14 +126,15 @@ def _insert_sample(
             """
             insert into ops_metric_samples(
               bucket_start, worker_id, online_workers, active_executions,
-              input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+              queued, input_tokens, output_tokens, cache_read_tokens, total_tokens
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 bucket_start,
                 worker_id,
                 online_workers,
                 active_executions,
+                queued,
                 input_tokens,
                 output_tokens,
                 cache_read_tokens,
@@ -566,3 +569,124 @@ def test_query_summary_excludes_host_local_handler_runs() -> None:
     assert runs["failed"] == 0
     assert runs["duration_p50_seconds"] == 60.0
     assert runs["duration_p95_seconds"] == 60.0
+
+
+def test_sample_once_records_queue_depth_on_global_row() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-q1", "queued")
+    _insert_execution("ex-q2", "queued")
+    _insert_execution("ex-c1", "claimed")
+
+    _service().sample_once(_NOW)
+
+    row = _fetch_sample(_bucket_start(_NOW))
+    assert row is not None
+    assert row["queued"] == 2
+    assert row["active_executions"] == 1
+
+
+def test_query_series_includes_queued_fields() -> None:
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    _insert_sample(now - timedelta(minutes=1), queued=123, online_workers=1)
+
+    rows = _service().query_series("6h")
+
+    assert len(rows) == 1
+    assert rows[0]["queued"] == 123
+    assert rows[0]["queued_max"] == 123
+
+
+def test_query_summary_reports_queue_depth_oldest_and_sweeper_count() -> None:
+    _seed_workspace_job()
+    oldest = datetime.now(UTC) - timedelta(hours=3)
+    _insert_execution("ex-old", "queued", queued_at=oldest)
+    _insert_execution("ex-new", "queued", queued_at=datetime.now(UTC))
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for index in range(2):
+            conn.execute(
+                "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
+                " values ('job-1', ?, 'failed', 'unclaimable_model', current_timestamp)",
+                (f"poison-{index}",),
+            )
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
+            " values ('job-1', 'old-poison', 'failed', 'unclaimable_model', ?)",
+            (datetime.now(UTC) - timedelta(hours=2),),
+        )
+
+    summary = _service().query_summary()
+
+    assert summary["queue"]["queued"] == 2
+    assert summary["queue"]["oldest_queued_at"] is not None
+    assert summary["queue"]["recent_hour_unclaimable_failed"] == 2
+    assert summary["queue_alert"] is None or summary["queue_alert"]["kind"] == "stalled"
+
+
+def test_queue_alert_blocked_from_fresh_signal() -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
+            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 8}', current_timestamp)"
+        )
+
+    alert = _service().query_summary()["queue_alert"]
+
+    assert alert is not None
+    assert alert["kind"] == "blocked"
+    assert alert["reasons"] == {"capability_or_model_mismatch": 8}
+    assert alert["at"] is not None
+
+
+def test_queue_alert_ignores_stale_signal() -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
+            " values (1, 'blocked', '{}', ?)",
+            (datetime.now(UTC) - timedelta(minutes=30),),
+        )
+
+    assert _service().query_summary()["queue_alert"] is None
+
+
+def test_queue_alert_stalled_when_queue_idle_with_online_workers() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-stuck", "queued", queued_at=datetime.now(UTC) - timedelta(minutes=5))
+    _insert_sample(_bucket_start(datetime.now(UTC)), online_workers=2, active_executions=0)
+
+    alert = _service().query_summary()["queue_alert"]
+
+    assert alert is not None
+    assert alert["kind"] == "stalled"
+
+
+def test_queue_alert_none_when_executions_running_or_no_workers() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-waiting", "queued", queued_at=datetime.now(UTC) - timedelta(minutes=5))
+    # Worker 忙满（有执行在跑）不算停滞。
+    _insert_sample(_bucket_start(datetime.now(UTC)), online_workers=2, active_executions=3)
+    assert _service().query_summary()["queue_alert"] is None
+
+    # 没有在线 worker 时不误报（部署缺口由在线 Worker 卡片呈现）。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from ops_metric_samples")
+    _insert_sample(_bucket_start(datetime.now(UTC)), online_workers=0, active_executions=0)
+    assert _service().query_summary()["queue_alert"] is None
+
+
+def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
+    import json as _json
+
+    from server.app.agent_broker.empty_diagnostics import log_blocked_queue
+
+    _seed_workspace_job()
+    _insert_execution("ex-head", "queued")
+    with read_connection(TEST_DATABASE_URL) as conn:
+        log_blocked_queue(TEST_DATABASE_URL, conn, {"capability_or_model_mismatch": 3})
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select kind, reasons_json from agent_queue_signals where id=1"
+        ).fetchone()
+    assert row is not None
+    assert row["kind"] == "blocked"
+    assert _json.loads(row["reasons_json"]) == {"capability_or_model_mismatch": 3}
