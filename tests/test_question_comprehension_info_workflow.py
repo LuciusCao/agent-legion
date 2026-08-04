@@ -2,6 +2,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 import yaml
 
 from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
@@ -619,3 +620,119 @@ def test_assemble_comprehension_info_passes_uploader_v1_schema_validation(tmp_pa
     assert validated.comprehension_difficulty == 65
     assert len(validated.key_info_list) == 1
     assert validated.key_info_list[0].question.text == "小明参加了多少场象棋比赛？"
+
+
+def _write_assemble_inputs(
+    artifact_dir: Path,
+    *,
+    key_info_extra: dict | None = None,
+    possible_error_extra: dict | None = None,
+) -> None:
+    (artifact_dir / "questions_parsed_lean.json").write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question_id": "Q100",
+                        "stem": "小明参加了14场象棋比赛，胜5场，负5场，其余为平局。",
+                        "options": [{"label": "A", "text": "4场"}],
+                        "answer": "A",
+                        "analysis": [],
+                        "fingerprint": None,
+                        "fingerprint_source": "missing",
+                        "fingerprint_missing": True,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    key_info_item = {
+        "key_info_id": "ki_001",
+        "type": "given",
+        "content": {"text": "14场", "position": {"start": 6, "end": 9}},
+        "question": {
+            "text": "小明参加了多少场象棋比赛？",
+            "options": [{"label": "A", "text": "14场", "is_correct": True}],
+        },
+        "question_comprehension_ability": "information_locating",
+    }
+    if key_info_extra:
+        key_info_item.update(key_info_extra)
+    (artifact_dir / "key_info_reviewed.json").write_text(
+        json.dumps(
+            {"question_id": "Q100", "key_info_list": [key_info_item]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    possible_error_item = {
+        "error_id": "pe_001",
+        "error_type": "question_comprehension",
+        "position": 1,
+        "error_answer": ["5"],
+        "error_description": "学生只看了胜5场，直接选5。",
+        "cognitive_basis": "学生只关注部分条件，忽略总数。",
+        "related_key_info_ids": ["ki_001"],
+    }
+    if possible_error_extra:
+        possible_error_item.update(possible_error_extra)
+    (artifact_dir / "possible_errors_reviewed.json").write_text(
+        json.dumps(
+            {"question_id": "Q100", "possible_error_list": [possible_error_item]},
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "comprehension_difficulty.json").write_text(
+        json.dumps({"question_id": "Q100", "comprehension_difficulty": 65}),
+        encoding="utf-8",
+    )
+
+
+@pytest.mark.parametrize(
+    "key_info_extra,possible_error_extra,match",
+    [
+        ({"reason": "valid hidden item"}, None, "key_info_list\\[0\\].*reason"),
+        (None, {"decision": "approved"}, "possible_error_list\\[0\\].*decision"),
+        (
+            None,
+            None,
+            None,
+        ),
+    ],
+)
+def test_assemble_comprehension_info_rejects_extra_fields(
+    tmp_path, key_info_extra, possible_error_extra, match
+):
+    db_path = TEST_DATABASE_URL
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    job = queries.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q100",
+        batch_id="batch1",
+        title="Question Q100",
+        node_keys=["assemble_comprehension_info"],
+        workspace_id=workspace["id"],
+    )
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
+    _write_assemble_inputs(
+        artifact_dir,
+        key_info_extra=key_info_extra,
+        possible_error_extra=possible_error_extra,
+    )
+
+    if match is None:
+        assemble_comprehension_info(job, artifact_dir, {})
+        payload = json.loads((artifact_dir / "comprehension_info.json").read_text(encoding="utf-8"))
+        registry.validate("v1", payload["comprehension_data"])
+        return
+
+    with pytest.raises(ValueError, match=match):
+        assemble_comprehension_info(job, artifact_dir, {})
+    assert not (artifact_dir / "comprehension_info.json").exists()

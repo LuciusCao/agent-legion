@@ -14,6 +14,7 @@ from server.app.workflows.comprehension_common import (
     _load_json_object,
     _single_parsed_question,
 )
+from server.app.workflows.comprehension_contract import assert_comprehension_lists_contract
 from server.app.workflows.comprehension_eligibility import (
     classify_comprehension_eligibility,
     finalize_non_uploadable,
@@ -172,11 +173,16 @@ def assemble_comprehension_info(
     if fingerprint is not None and not isinstance(fingerprint, str):
         raise ValueError("fingerprint must be a string or null")
 
+    key_info_list = key_info.get("key_info_list", [])
+    possible_error_list = possible_errors.get("possible_error_list", [])
+    check_cancellation(context)
+    assert_comprehension_lists_contract(key_info_list, possible_error_list)
+
     comprehension_data = {
         "fingerprint": fingerprint,
         "comprehension_difficulty": difficulty.get("comprehension_difficulty"),
-        "key_info_list": key_info.get("key_info_list", []),
-        "possible_error_list": possible_errors.get("possible_error_list", []),
+        "key_info_list": key_info_list,
+        "possible_error_list": possible_error_list,
     }
     payload = {
         "question_id": source_id,
