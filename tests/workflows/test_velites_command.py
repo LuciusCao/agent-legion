@@ -247,7 +247,7 @@ def test_resolve_execution_fails_fast_on_unknown_runtime() -> None:
         resolve_execution_block(_node(), workspace, "openclaw")
 
 
-# --- legacy 本地 pi runner 链（PiConfig flavor 解析，不经 broker manifest） ---
+# --- 保留的本地 pi runner 链（PiConfig flavor 解析，不经 broker manifest） ---
 
 
 def test_piconfig_from_config_flavor_parsing() -> None:

@@ -488,7 +488,7 @@ Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py
 Workflow Studio 提供可视化 workflow 编辑能力，与版本修订历史集成。
 
 - **Routes**: `routes/workflow_revisions.py`, `routes/workflow_draft_compare.py`
-- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`; `/api/executors` 同时返回独立的 Agent Catalog 投影，供编辑器按 capability 获取 runtime、skill、tools 与 provider/model/thinking 默认值
+- **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`; `/api/executors` 同时返回已发布 Agent Catalog 投影（versioned_entities），供编辑器按 capability 获取 runtime、skill、tools；provider/model/thinking 的「继承默认」提示改读 workspace settings 的 agentDefaults
 - **DB**: PostgreSQL `workflow_revisions` 表与版本化 schema 初始化
 - **Frontend**: `pages/WorkflowStudioPage.tsx`, `pages/workflowStudio/`
 
@@ -567,11 +567,11 @@ token 用量计价已产品化：定价存于 `global_settings` 表（`token_usa
 
 `config/workflow.yaml` 核心配置项：
 
-- `agents`: Agent 目录（AgentDefinition），声明各 capability 的 runtime / skill / tools / `config_schema`
 - `agent_workers`: Agent Worker 注册设置（`register_token` / `register_token_file` 等；token 值亦可经 env `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 注入）
 - `executors`: code / pi / openclaw 执行器定义；code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键
 - `workflows.enabled`: 是否启用 Agent Legion DAG workflow worker
-- `workflows.pi`: Pi agent runner 配置（provider, model, timeout, environment）
+
+Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（全局，workspace_id NULL），经 Studio「Agent 管理」或 `/api/agent-definitions` 做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workspace `default_agent_*`（Settings「Agent 默认配置」）→ 报错（无全局兜底）；thinking 可空（空 = runtime 决定）。
 
 其他配置文件：
 

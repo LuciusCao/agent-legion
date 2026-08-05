@@ -42,13 +42,15 @@ def test_preflight_passes_when_binaries_present(monkeypatch: pytest.MonkeyPatch)
 
 
 @pytest.mark.no_db
-def test_preflight_pi_accepts_velites_only_install(monkeypatch: pytest.MonkeyPatch) -> None:
-    # flavor=velites 的部署里 runtime: pi 的 argv[0] 是 velites：只装 velites
-    # 的 Worker（如精简容器）声明 pi 不应被误拒。
+def test_preflight_pi_requires_pi_binary(monkeypatch: pytest.MonkeyPatch) -> None:
+    # runtime 钉死二进制（phase 3）：runtime: pi 的 argv[0] 恒为 pi，只装
+    # velites 的 Worker 声明 pi 必须被拒。
     monkeypatch.setattr(
         shutil, "which", lambda binary: "/usr/local/bin/velites" if binary == "velites" else None
     )
-    assert preflight_error(["pi"]) is None
+    error = preflight_error(["pi"])
+    assert error is not None
+    assert "运行时 'pi'" in error
 
 
 @pytest.mark.no_db

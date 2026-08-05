@@ -1,6 +1,6 @@
 # velites 升格为一级 Runtime 实施计划
 
-状态：**已落地**（Phase 1：PR #20；Phase 2：PR #21 + 审题链路迁移 2026-08-03；金丝雀关闭 `14ec130f` 2026-08-04；Phase 3 阶段 B 文档收口随本状态更新提交）。**阶段 C 已取消**：2026-08-04 用户决策 pi 作为可选 runtime 长期保留（不退役），flavor 相应长期保留。
+状态：**已落地**（Phase 1：PR #20；Phase 2：PR #21 + 审题链路迁移 2026-08-03；金丝雀关闭 `14ec130f` 2026-08-04；Phase 3 阶段 B 文档收口随本状态更新提交）。**阶段 C 已取消**：2026-08-04 用户决策 pi 作为可选 runtime 长期保留（不退役）。**后续（2026-08-05，agent 配置治理 phase 3）**：flavor 层已随 `workflows.pi` yaml 块一并退役——`AgentDefinition.runtime` 直接钉死命令构建器，4 个 video agent 经 schema v27 翻转为 `runtime: velites`；本文 flavor 相关描述均为历史记录。
 范围：`server/app/agent_broker/`、`server/app/agent_catalog.py`、`server/app/routes/`、`worker/`、`config/`、`frontend/src/generated/`
 关联文档：[velites-harness.md](velites-harness.md)（harness 设计）、[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)（证据矩阵）、`config/architecture/architecture-invariants.yaml`（invariant registry）
 

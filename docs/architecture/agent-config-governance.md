@@ -1,5 +1,11 @@
 # Agent 配置治理方案（v3 - 最终确认版）
 
+> **状态（2026-08-05）**：Phase 1–4 已全部完成。yaml `agents:` 段与
+> `workflows.pi` 块已退役（schema v27，`agent_definitions` 表已删除，
+> published `runtime: pi` 定义已翻转为 velites）；Agent 定义经 Studio
+> 管理并发布进 `versioned_entities`；manifest 执行块统一为 `execution.*`。
+> 本文档保留为设计定稿记录。
+
 ## 背景与目标
 
 ### 现状问题
