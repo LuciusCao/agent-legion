@@ -1,7 +1,6 @@
 import { fetchJobFacets, fetchJobsSnapshot } from '../api'
-import { useJobStore } from '../stores/jobStore'
+import { toJobListFilterParams, useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { toJobListFilterParams } from '../stores/job/listFilterParams'
 
 /**
  * Load the first page of the server-filtered job list plus the facet counts.

@@ -5,7 +5,7 @@ import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 
-from server.app.agent_bundle import AgentBundleError, extract_agent_result
+from server.app.agent_broker.agent_bundle import AgentBundleError, extract_agent_result
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
 from server.app.services.artifact_store import ArtifactStore

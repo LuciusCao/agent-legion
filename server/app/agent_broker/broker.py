@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from psycopg import IntegrityError
 
 from server.app.agent_broker import reaper, release, sweepers
+from server.app.agent_broker.agent_worker_capacity import touch_worker
 from server.app.agent_broker.claim import (
     AgentClaim,
     ClaimRacedError,
@@ -27,13 +28,12 @@ from server.app.agent_broker.claim import (
 from server.app.agent_broker.empty import EmptyClaimTrigger
 from server.app.agent_broker.manifest_guard import require_routable_pi_model
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
-from server.app.agent_worker_capacity import touch_worker
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
 
 if TYPE_CHECKING:
-    from server.app.agents import AgentStatusManager
+    from server.app.events.agents import AgentStatusManager
     from server.app.jobs import JobQueries
 
 _ACTIVE_LEASE_CONSTRAINT = "idx_agent_requests_one_active_node"

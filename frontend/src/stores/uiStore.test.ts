@@ -25,3 +25,25 @@ describe('uiStore', () => {
     })
   })
 })
+
+describe('pageHeaderStore', () => {
+  it('defaults page header state to null', () => {
+    expect(useUiStore.getState().pageTitle).toBe(null)
+    expect(useUiStore.getState().pageSubtitle).toBe(null)
+    expect(useUiStore.getState().detailPageActions).toBe(null)
+  })
+
+  it('sets page title and subtitle', () => {
+    useUiStore.getState().setPageTitle('Title')
+    useUiStore.getState().setPageSubtitle('Subtitle')
+    expect(useUiStore.getState().pageTitle).toBe('Title')
+    expect(useUiStore.getState().pageSubtitle).toBe('Subtitle')
+  })
+
+  it('sets detail page actions', () => {
+    useUiStore.getState().setDetailPageActions('action')
+    expect(useUiStore.getState().detailPageActions).not.toBe(null)
+    useUiStore.getState().setDetailPageActions(null)
+    expect(useUiStore.getState().detailPageActions).toBe(null)
+  })
+})

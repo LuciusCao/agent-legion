@@ -3,7 +3,7 @@ import subprocess
 import threading
 from pathlib import Path
 
-from server.app.agents import AgentStatus, AgentStatusManager
+from server.app.events.agents import AgentStatus, AgentStatusManager
 from server.app.executors.openclaw_runner import OpenClawRunner
 from server.app.pipeline.runners import list_openclaw_agents
 
@@ -82,7 +82,7 @@ def test_broadcast_controller_is_public():
 
 
 def test_discover_uses_injected_callable():
-    from server.app.agents import AgentStatusManager
+    from server.app.events.agents import AgentStatusManager
 
     manager = AgentStatusManager(
         discover_agents=lambda: [{"id": "agent_1", "identityName": "Worker One"}]
@@ -94,7 +94,7 @@ def test_discover_uses_injected_callable():
 
 
 def test_discover_without_injection_returns_empty():
-    from server.app.agents import AgentStatusManager
+    from server.app.events.agents import AgentStatusManager
 
     assert AgentStatusManager().discover() == []
 

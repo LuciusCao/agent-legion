@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from server.app.agent_bundle import build_agent_bundle
+from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker.execution_prepare import prepare_execution
 
 

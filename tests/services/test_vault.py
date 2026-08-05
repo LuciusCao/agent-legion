@@ -12,6 +12,8 @@ from server.app.services.vault import (
     VaultError,
     VaultMasterKeyMissingError,
     VaultService,
+)
+from server.app.services.vault_resources import (
     apply_resource_secret_fields,
     resource_secret_name,
     strip_resource_secret_fields,

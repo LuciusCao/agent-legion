@@ -4,7 +4,7 @@ import {
   startJobFetch,
   finishJobFetch,
   failJobFetch,
-} from './fetchState'
+} from './fetch'
 import { createJobSummary, createJobState } from './testHelpers'
 
 describe('resetForWorkspace', () => {

@@ -10,7 +10,6 @@ import {
 import { Route, Routes } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import JobDetailPage from './JobDetailPage'
-import { usePageHeaderStore } from '../stores/pageHeaderStore'
 import { useUiStore } from '../stores/uiStore'
 
 const mockDetail = {
@@ -89,11 +88,11 @@ const mockDetail = {
   artifacts: ['question.json'],
 }
 
-// JobDetailPage injects app-bar actions into usePageHeaderStore, but WorkspaceLayout/AppBar
+// JobDetailPage injects app-bar actions into useUiStore, but WorkspaceLayout/AppBar
 // is not rendered in this isolated test, so ActionRenderer renders the stored actions
 // so tests can interact with them.
 function ActionRenderer() {
-  const actions = usePageHeaderStore((state) => state.detailPageActions)
+  const actions = useUiStore((state) => state.detailPageActions)
   return <div data-testid="detail-actions-host">{actions}</div>
 }
 

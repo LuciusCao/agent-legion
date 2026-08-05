@@ -1,8 +1,8 @@
 from typing import Any
 
+from server.app.executors.local_handler_loader import build_local_handlers
 from server.app.executors.pi import build_skill_manager
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
-from server.app.local_handler_loader import build_local_handlers
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.skills.manager import SkillManager

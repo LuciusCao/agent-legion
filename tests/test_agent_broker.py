@@ -11,7 +11,7 @@ from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
 from server.app.agent_workers import AgentWorkerRegistry
-from server.app.agents import AgentStatusManager
+from server.app.events.agents import AgentStatusManager
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.workflows.schema import WorkflowNode

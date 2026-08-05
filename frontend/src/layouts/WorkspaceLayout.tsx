@@ -5,7 +5,6 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
-import { usePageHeaderStore } from '../stores/pageHeaderStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
@@ -32,8 +31,10 @@ export default function WorkspaceLayout() {
     addDialogWorkspaceId,
     setWorkspacePackageDialogOpen,
     setTokenUsageDialogOpen,
+    pageTitle,
+    pageSubtitle,
+    detailPageActions,
   } = useUiStore()
-  const { pageTitle, pageSubtitle, detailPageActions } = usePageHeaderStore()
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
   const isDetailPage =

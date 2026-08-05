@@ -1,4 +1,4 @@
-from server.app.agents import AgentStatus
+from server.app.events.agents import AgentStatus
 
 
 def test_agents_get_returns_typed_public_projection(client) -> None:

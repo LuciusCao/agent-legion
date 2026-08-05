@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { api } from '../api'
 import { createRealtimeChannel, type RealtimeChannel } from '../lib/realtime'
-import { parseAgentsWsMessage, upsertAgent } from './agentsWsMessages'
+import { parseAgentsWsMessage, upsertAgent } from '../lib/agentsWsMessages'
 import { useExecutorsStore } from './executorsStore'
 import type { AgentStatus, WorkerStatusResponse } from '../types'
 
