@@ -1,20 +1,18 @@
 import React, { useMemo } from 'react'
 import { List, ListItemButton, ListItemText } from '@mui/material'
 import type { VideoArtifacts } from '../types'
-import { useVideoNodeStore } from '../stores/videoNodeStore'
 import { RichText } from './RichText'
 
 export const SubtitlePanel = React.memo(function SubtitlePanel({
   currentTime,
   onSeek,
-  subtitles: subtitlesProp,
+  artifacts,
 }: {
   currentTime: number
   onSeek: (time: number) => void
-  subtitles?: VideoArtifacts['subtitles']
+  artifacts: VideoArtifacts
 }) {
-  const { artifacts } = useVideoNodeStore()
-  const subtitles = subtitlesProp ?? artifacts.subtitles
+  const subtitles = artifacts.subtitles
 
   const activeIndex = useMemo(() => {
     return subtitles.findIndex(

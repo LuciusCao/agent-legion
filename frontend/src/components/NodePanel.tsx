@@ -15,20 +15,18 @@ import styles from './NodePanel.module.css'
 interface NodePanelProps {
   onSeek?: (time: number) => void
   replayInteraction?: (index: number) => void
-  artifacts?: VideoArtifacts
+  artifacts: VideoArtifacts
   triggeredNodeIndexes?: Set<number>
 }
 
 export function NodePanel({
   onSeek,
   replayInteraction,
-  artifacts: artifactsProp,
+  artifacts,
   triggeredNodeIndexes: triggeredNodeIndexesProp,
 }: NodePanelProps) {
-  const { artifacts: storeArtifacts } = useVideoNodeStore()
   const { triggeredNodeIndexes: storeTriggeredNodeIndexes } =
     useVideoNodeStore()
-  const artifacts = artifactsProp ?? storeArtifacts
   const triggeredNodeIndexes =
     triggeredNodeIndexesProp ?? storeTriggeredNodeIndexes
   const nodes = artifacts.interactions

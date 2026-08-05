@@ -1,7 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor, act } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { useJobComprehensionInfo } from './useJobComprehensionInfo'
 import { fetchJobArtifact } from '../api'
+import { createTestQueryClient } from '../testing/testQueryClient'
+import { queryKeys } from '../lib/queryKeys'
+import type { JobDetail } from '../types/jobTypes'
 
 vi.mock('../api', async () => {
   const actual = await vi.importActual<typeof import('../api')>('../api')
@@ -12,6 +17,21 @@ vi.mock('../api', async () => {
 })
 
 const mockFetchJobArtifact = vi.mocked(fetchJobArtifact)
+
+let queryClient: QueryClient
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children)
+}
+
+function makeDetail(nodes: Record<string, unknown>[]): JobDetail {
+  return {
+    job: { id: 'job1', status: 'running', updated_at: 't0' },
+    nodes,
+    runs: [],
+    artifacts: [],
+  } as unknown as JobDetail
+}
 
 function artifact(content: string) {
   return { content, name: 'test' }
@@ -31,12 +51,15 @@ const baseInfo = {
 describe('useJobComprehensionInfo', () => {
   beforeEach(() => {
     mockFetchJobArtifact.mockReset()
+    queryClient = createTestQueryClient()
   })
 
   it('returns comprehension info from main artifact', async () => {
     mockFetchJobArtifact.mockResolvedValue(artifact(JSON.stringify(baseInfo)))
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).toEqual(baseInfo)
@@ -65,7 +88,9 @@ describe('useJobComprehensionInfo', () => {
         )
       )
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info?.question_id).toBe('q1')
@@ -84,7 +109,9 @@ describe('useJobComprehensionInfo', () => {
         null as unknown as Awaited<ReturnType<typeof fetchJobArtifact>>
       )
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).toBeNull()
@@ -98,7 +125,9 @@ describe('useJobComprehensionInfo', () => {
         artifact(JSON.stringify({ possible_error_list: [] }))
       )
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).toBeNull()
@@ -114,7 +143,9 @@ describe('useJobComprehensionInfo', () => {
         artifact(JSON.stringify({ possible_error_list: 'bad' }))
       )
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).not.toBeNull()
@@ -137,7 +168,9 @@ describe('useJobComprehensionInfo', () => {
       .mockRejectedValueOnce(new Error('possible errors reviewed failed'))
       .mockRejectedValueOnce(new Error('possible errors raw failed'))
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).not.toBeNull()
@@ -165,7 +198,9 @@ describe('useJobComprehensionInfo', () => {
         )
       )
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).not.toBeNull()
@@ -198,7 +233,9 @@ describe('useJobComprehensionInfo', () => {
         )
       )
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).not.toBeNull()
@@ -220,24 +257,44 @@ describe('useJobComprehensionInfo', () => {
         artifact(JSON.stringify({ possible_error_list: [] }))
       )
 
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'), {
+      wrapper,
+    })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.info).toBeNull()
     expect(result.current.error).toBe('')
   })
 
-  it('refetches when refresh key changes', async () => {
+  it('refetches when the comprehension version changes in the shared detail query', async () => {
     mockFetchJobArtifact.mockResolvedValue(artifact(JSON.stringify(baseInfo)))
 
-    const { rerender } = renderHook(
-      ({ refreshKey }) => useJobComprehensionInfo('job1', refreshKey),
-      { initialProps: { refreshKey: 'a' } }
+    const assembleNode = {
+      node_key: 'assemble_comprehension_info',
+      status: 'running',
+      started_at: '2026-06-18T09:00:00Z',
+    }
+    queryClient.setQueryData(
+      queryKeys.jobDetail('job1'),
+      makeDetail([assembleNode])
     )
+
+    renderHook(() => useJobComprehensionInfo('job1'), { wrapper })
 
     await waitFor(() => expect(mockFetchJobArtifact).toHaveBeenCalledTimes(1))
 
-    rerender({ refreshKey: 'b' })
+    act(() => {
+      queryClient.setQueryData(
+        queryKeys.jobDetail('job1'),
+        makeDetail([
+          {
+            ...assembleNode,
+            status: 'completed',
+            finished_at: '2026-06-18T10:00:00Z',
+          },
+        ])
+      )
+    })
 
     await waitFor(() => expect(mockFetchJobArtifact).toHaveBeenCalledTimes(2))
   })

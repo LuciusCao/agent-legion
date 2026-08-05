@@ -63,33 +63,3 @@ describe('interactionStore', () => {
     expect(useVideoNodeStore.getState().currentSentence).toEqual([])
   })
 })
-
-describe('artifactStore', () => {
-  beforeEach(() => {
-    useVideoNodeStore.setState({
-      artifacts: {
-        subtitles: [],
-        chapters: [],
-        interactions: [],
-        metadata: null,
-        review: null,
-        checklist: null,
-      },
-    })
-  })
-
-  it('resets artifacts', () => {
-    useVideoNodeStore.setState({
-      artifacts: {
-        subtitles: [{ index: 1, start: 1, end: 3, text: 'hello' }],
-        chapters: [],
-        interactions: [],
-        metadata: null,
-        review: null,
-        checklist: null,
-      },
-    })
-    useVideoNodeStore.getState().resetArtifacts()
-    expect(useVideoNodeStore.getState().artifacts.subtitles).toHaveLength(0)
-  })
-})

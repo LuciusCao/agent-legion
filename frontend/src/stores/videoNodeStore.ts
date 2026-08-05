@@ -1,11 +1,9 @@
 import { create } from 'zustand'
-import type { VideoArtifacts } from '../types'
 
 interface VideoNodeState {
   triggeredNodeIndexes: Set<number>
   dismissedNodeIndexes: Set<number>
   currentSentence: string[]
-  artifacts: VideoArtifacts
   triggerInteraction: (index: number) => void
   dismissInteraction: (index: number) => void
   replayInteraction: (index: number) => void
@@ -13,23 +11,12 @@ interface VideoNodeState {
   pushWord: (word: string) => void
   clearSentence: () => void
   clearInteractions: () => void
-  resetArtifacts: () => void
-}
-
-const emptyArtifacts: VideoArtifacts = {
-  subtitles: [],
-  chapters: [],
-  interactions: [],
-  metadata: null,
-  review: null,
-  checklist: null,
 }
 
 export const useVideoNodeStore = create<VideoNodeState>((set) => ({
   triggeredNodeIndexes: new Set(),
   dismissedNodeIndexes: new Set(),
   currentSentence: [],
-  artifacts: emptyArtifacts,
   triggerInteraction: (index) => {
     set((state) => {
       const next = new Set(state.triggeredNodeIndexes)
@@ -74,5 +61,4 @@ export const useVideoNodeStore = create<VideoNodeState>((set) => ({
       dismissedNodeIndexes: new Set(),
       currentSentence: [],
     }),
-  resetArtifacts: () => set({ artifacts: emptyArtifacts }),
 }))

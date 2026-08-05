@@ -1,6 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { QuestionContentPanel } from './QuestionContentPanel'
+import { TestQueryProvider } from '../../testing/testQueryClient'
+
+function renderPanel(ui: ReactElement) {
+  return render(ui, { wrapper: TestQueryProvider })
+}
 
 const mockFetchJobArtifact = vi.fn()
 
@@ -173,7 +179,7 @@ describe('QuestionContentPanel regression', () => {
 
   it('does not white screen when switching between possible errors', async () => {
     mockFetchJobArtifact.mockResolvedValue(realQuestions)
-    render(
+    renderPanel(
       <QuestionContentPanel
         jobId="job1"
         keyInfoPreviewable
@@ -198,7 +204,7 @@ describe('QuestionContentPanel regression', () => {
 
   it('keeps only one of key info or possible error active at a time', async () => {
     mockFetchJobArtifact.mockResolvedValue(realQuestions)
-    render(
+    renderPanel(
       <QuestionContentPanel
         jobId="job1"
         keyInfoPreviewable

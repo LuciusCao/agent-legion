@@ -46,8 +46,6 @@ function extractAnswerItems(answer: unknown): string[] | null {
 
 export interface QuestionContentPanelProps {
   jobId: string
-  refreshKey?: string
-  comprehensionRefreshKey?: string
   keyInfoPreviewable?: boolean
   possibleErrorsPreviewable?: boolean
   keyInfoReviewAttempted?: boolean
@@ -56,23 +54,17 @@ export interface QuestionContentPanelProps {
 
 export function QuestionContentPanel({
   jobId,
-  refreshKey,
-  comprehensionRefreshKey,
   keyInfoPreviewable = false,
   possibleErrorsPreviewable = false,
   keyInfoReviewAttempted = false,
   possibleErrorsReviewAttempted = false,
 }: QuestionContentPanelProps) {
-  const { question, loading, error } = useJobQuestion(jobId, refreshKey)
-  const { info: comprehensionInfo } = useJobComprehensionInfo(
-    jobId,
-    comprehensionRefreshKey ?? refreshKey
-  )
+  const { question, loading, error } = useJobQuestion(jobId)
+  const { info: comprehensionInfo } = useJobComprehensionInfo(jobId)
   const { reports: reviewReports } = useJobReviewReports(
     jobId,
     keyInfoReviewAttempted,
-    possibleErrorsReviewAttempted,
-    comprehensionRefreshKey ?? refreshKey
+    possibleErrorsReviewAttempted
   )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedErrorId, setSelectedErrorId] = useState<string | null>(null)
