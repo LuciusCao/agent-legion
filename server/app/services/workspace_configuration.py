@@ -220,6 +220,22 @@ class WorkspaceConfigurationService:
                 patch,
                 self.settings.executor_definitions,
             )
+        elif section == "agent-defaults":
+            defaults = patch.get("agentDefaults")
+            if not isinstance(defaults, dict):
+                raise InvalidOperationError("agentDefaults payload is required")
+            values: dict[str, Any] = {}
+            for key in ("provider", "model", "thinking"):
+                value = defaults.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise InvalidOperationError(f"agentDefaults.{key} must be a string")
+                values[key] = value
+            workspace = self.job_db.update_workspace(
+                workspace_id,
+                default_agent_provider=values["provider"],
+                default_agent_model=values["model"],
+                default_agent_thinking=values["thinking"],
+            )
 
         else:
             raise NotFoundError("Unknown settings section")

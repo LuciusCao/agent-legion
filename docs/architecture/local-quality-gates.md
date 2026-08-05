@@ -16,8 +16,8 @@ provide.
 | Push (any branch) | Smoke (default): static checks + smoke test tier, lanes trimmed by pushed paths | `scripts/check-quick.sh` with `GATE_TIER=smoke` |
 | Push with `AGENT_LEGION_GATE_LEVEL=quick` | Quick: full quick suite, lanes trimmed | `scripts/check-quick.sh` |
 | Push with `AGENT_LEGION_GATE_LEVEL=full` | Full, locally | `scripts/check.sh` |
-| PR / push to `develop`, `main`, `master` | Full | CI jobs `backend-unit` + `backend-postgres-a/b/c` + `frontend-*` + `rust` + `e2e-smoke` |
-| Nightly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` |
+| PR to `develop`/`main`/`master`, push to `main`/`master` | Full | CI jobs `backend-unit` + `backend-postgres-a/b/c` + `frontend-*` + `rust` + `e2e-smoke` |
+| Weekly schedule, manual dispatch | Extended | CI jobs `ci-extended` + `nightly-e2e` |
 
 The pre-push hook diffs the pushed commits against their remote base and runs
 only the affected quick-gate lanes locally: frontend-only changes skip the
@@ -57,8 +57,14 @@ unaffected. Passing evidence is shared through the same Git common directory.
 
 ## CI Workflow
 
-`.github/workflows/quality-gate.yml` runs on pull requests and pushes to
-`develop` / `main` / `master`, nightly (schedule), plus manual dispatch:
+`.github/workflows/quality-gate.yml` runs on pull requests to
+`develop` / `main` / `master`, pushes to `main` / `master` (a `develop`
+merge is already covered by its PR gate, so push runs there were dropped to
+save Actions minutes), a weekly schedule, plus manual dispatch. Docs-only
+changes (`docs/**`, `**/*.md`, `LICENSE`) do not trigger the workflow at all
+(`paths-ignore`). Schedule runs skip every regular lane in the `changes` job
+— the full gate already ran on the push/PR that produced the code — so only
+`ci-extended` and `nightly-e2e` run weekly:
 
 - **backend-unit** — static checks (ruff, format, mypy, architecture contracts,
   invariant registry, spec health) plus the PostgreSQL-offline unit tier
@@ -79,13 +85,13 @@ unaffected. Passing evidence is shared through the same Git common directory.
   and `cargo test` in `velites/`.
 - **e2e-smoke** — the deterministic browser smoke suite.
 - **ci-extended** — `tests/ci -m ci_extended` stress scenarios. Runs only on
-  the nightly schedule and manual dispatch; PR and push runs skip it.
+  the weekly schedule and manual dispatch; PR and push runs skip it.
 - **nightly-e2e** — multi-browser smoke E2E (the deterministic browser suite
   re-run on Chromium, Firefox, and WebKit via `scripts/e2e/run_browser_smoke.py`;
   PR/push stays Chromium-only) plus a workspace stress run
   (`scripts/stress/run_e2e_stress.py`, 50 agents / 2000 jobs / 300s at 200
   events/s, asserting p95 click latency and uploading the stress report).
-  Runs only on the nightly schedule and manual dispatch.
+  Runs only on the weekly schedule and manual dispatch.
 
 The postgres tier shards are a deterministic `md5(nodeid) % 3` collection
 filter (`scripts/pytest_gate_shard.py`, `GATE_SHARD=i/n`). Every pytest shard
@@ -169,7 +175,7 @@ The `ci-extended` CI job covers the areas that previously required a manual
 - filesystem deletion, path validation, or artifact recovery;
 - release tags or a large multi-branch integration.
 
-The job runs on the nightly schedule, so no manual step is needed for routine
+The job runs on the weekly schedule, so no manual step is needed for routine
 work; use `workflow_dispatch` to run it against any ref before a risky merge
 (schema migrations, executor concurrency, filesystem deletion, release
 tags). If a deterministic test cannot run in the CI environment, record the
@@ -183,7 +189,7 @@ available. Do not record passing evidence for a partial gate.
   run as parallel CI jobs on every PR/push.
 - CI adds the PostgreSQL and full layers on every PR/push, so database and
   cross-control-plane regressions are still caught server-side before merge.
-- Stress evidence runs nightly instead of on every push, trading same-day
+- Stress evidence runs weekly instead of on every push, trading same-day
   detection for a much cheaper push loop; risky changes can trigger it on
   demand via `workflow_dispatch`.
 - Hooks can still be bypassed with `--no-verify`; the required status checks

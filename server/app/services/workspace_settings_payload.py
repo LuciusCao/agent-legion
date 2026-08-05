@@ -30,4 +30,9 @@ def workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
         "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
         "workflowKey": workflow_key,
         "nodeConfig": node_overrides,
+        "agentDefaults": {
+            "provider": str(workspace.get("default_agent_provider") or ""),
+            "model": str(workspace.get("default_agent_model") or ""),
+            "thinking": str(workspace.get("default_agent_thinking") or ""),
+        },
     }

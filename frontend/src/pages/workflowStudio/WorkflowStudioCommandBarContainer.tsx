@@ -5,6 +5,7 @@ type Props = {
   studio: ReturnType<typeof useWorkflowStudio>
   onOpenChanges: () => void
   onOpenYaml: () => void
+  onOpenAgents: () => void
   onValidate: () => void
 }
 
@@ -29,6 +30,7 @@ export function WorkflowStudioCommandBarContainer(props: Props) {
       revisionLoadError={studio.revisionLoadError}
       onOpenChanges={props.onOpenChanges}
       onOpenYaml={props.onOpenYaml}
+      onOpenAgents={props.onOpenAgents}
       onSelectRevision={studio.selectRevision}
       onValidate={props.onValidate}
       onPublish={() => void studio.requestPublish()}

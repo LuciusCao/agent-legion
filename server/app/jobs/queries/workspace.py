@@ -120,6 +120,9 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         default_entity: str | None = None,
         intake_config: dict[str, Any] | None = None,
         node_config: dict[str, Any] | None = None,
+        default_agent_provider: str | None = None,
+        default_agent_model: str | None = None,
+        default_agent_thinking: str | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -152,6 +155,12 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 ensure_ascii=False,
                 sort_keys=True,
             )
+        if default_agent_provider is not None:
+            fields["default_agent_provider"] = default_agent_provider.strip()
+        if default_agent_model is not None:
+            fields["default_agent_model"] = default_agent_model.strip()
+        if default_agent_thinking is not None:
+            fields["default_agent_thinking"] = default_agent_thinking.strip()
         if not fields:
             workspace = self.get_workspace(workspace_id)
             if workspace is None:

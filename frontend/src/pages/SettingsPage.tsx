@@ -12,6 +12,7 @@ import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
+import { AgentDefaultsSection } from '../components/settings/AgentDefaultsSection'
 import { DangerZone } from '../components/settings/DangerZone'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
@@ -76,6 +77,7 @@ export function SettingsPage() {
       { id: 'workflow', label: '工作流' },
       { id: 'executors', label: '执行器' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
+      { id: 'agent-defaults', label: 'Agent 默认配置' },
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
       ...(hasCodeNodes
         ? [{ id: 'code-node-concurrency', label: '代码节点并发' }]
@@ -187,6 +189,11 @@ export function SettingsPage() {
             <AgentRoutingSection />
             <WorkerTokensSection />
           </section>
+          <AgentDefaultsSection
+            workspaceId={workspaceId}
+            agentDefaults={settings.agentDefaults}
+            onSaved={(agentDefaults) => setSettings({ agentDefaults })}
+          />
           {isAdmin && <WorkspaceMembersSection workspaceId={workspaceId} />}
           {hasCodeNodes && (
             <section id="code-node-concurrency" className={styles.section}>

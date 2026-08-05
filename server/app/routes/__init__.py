@@ -18,6 +18,7 @@ from ..services.workspace_configuration import WorkspaceConfigurationService
 from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
 from ..settings import Settings
 from ..worker_control import WorkspaceWorkerControl
+from .agent_definitions import create_agent_definitions_router
 from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
 from .artifacts import create_artifacts_router
@@ -25,6 +26,7 @@ from .common import create_common_router
 from .job_route_group import include_job_routes
 from .metrics import create_metrics_router
 from .packages import create_packages_router
+from .skills import create_skills_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
@@ -91,6 +93,8 @@ def create_router(
     secured(create_workspace_settings_router(workspace_configuration, settings))
     secured(create_workflow_revisions_router(job_db, settings))
     secured(create_workflow_node_codes_router(job_db, settings))
+    secured(create_agent_definitions_router(job_db, settings))
+    secured(create_skills_router(settings))
     secured(create_workspace_configuration_router(workspace_configuration, settings))
     executors_router = create_workspace_executors_router(
         executor_catalog, workspace_executor_configuration, settings

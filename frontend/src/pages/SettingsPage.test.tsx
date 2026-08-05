@@ -208,6 +208,7 @@ describe('SettingsPage', () => {
       '工作流',
       '执行器',
       'Agent 与 Worker',
+      'Agent 默认配置',
       '代码节点并发',
       '危险操作',
     ])
@@ -225,6 +226,7 @@ describe('SettingsPage', () => {
       '工作流',
       '执行器',
       'Agent 与 Worker',
+      'Agent 默认配置',
       '危险操作',
     ])
     expect(navButtons[0]).toHaveAttribute('aria-current', 'true')

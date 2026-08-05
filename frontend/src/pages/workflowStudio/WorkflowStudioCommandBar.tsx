@@ -24,6 +24,7 @@ type Props = {
   revisionLoadError?: string | null
   onOpenChanges: () => void
   onOpenYaml: () => void
+  onOpenAgents: () => void
   onSelectRevision: (revisionId: string) => void
   onValidate: () => void
   onPublish: () => void
@@ -50,6 +51,7 @@ export function WorkflowStudioCommandBar({
   revisionLoadError,
   onOpenChanges,
   onOpenYaml,
+  onOpenAgents,
   onSelectRevision,
   onValidate,
   onPublish,
@@ -84,6 +86,7 @@ export function WorkflowStudioCommandBar({
       <WorkflowStudioGlobalActions
         onOpenChanges={onOpenChanges}
         onOpenYaml={onOpenYaml}
+        onOpenAgents={onOpenAgents}
       />
       <WorkflowRevisionSelect
         revisions={revisions}

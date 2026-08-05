@@ -118,6 +118,74 @@ def test_lists_workspace_workflow_revisions(client):
     assert "revisions" in payload
 
 
+def test_workspace_settings_agent_defaults_round_trip(client):
+    response = client.post(
+        "/api/workspaces",
+        json={"name": "agent_defaults_ws", "default_workflow_key": "question_comprehension_info"},
+    )
+    workspace_id = response.json()["workspace"]["id"]
+
+    fetched = client.get(f"/api/workspaces/{workspace_id}/settings")
+    assert fetched.status_code == 200
+    assert fetched.json()["settings"]["agentDefaults"] == {
+        "provider": "",
+        "model": "",
+        "thinking": "",
+    }
+
+    saved = client.patch(
+        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
+        json={
+            "agentDefaults": {
+                "provider": "deepseek",
+                "model": "deepseek-v4-flash",
+                "thinking": "low",
+            }
+        },
+    )
+    assert saved.status_code == 200
+    assert saved.json()["settings"]["agentDefaults"] == {
+        "provider": "deepseek",
+        "model": "deepseek-v4-flash",
+        "thinking": "low",
+    }
+
+    # Partial patch: only the model changes; provider/thinking are kept.
+    partial = client.patch(
+        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
+        json={"agentDefaults": {"model": "deepseek-v4-pro"}},
+    )
+    assert partial.status_code == 200
+    assert partial.json()["settings"]["agentDefaults"] == {
+        "provider": "deepseek",
+        "model": "deepseek-v4-pro",
+        "thinking": "low",
+    }
+
+    workspace = client.get(f"/api/workspaces/{workspace_id}/settings").json()
+    assert workspace["settings"]["agentDefaults"]["model"] == "deepseek-v4-pro"
+
+
+def test_workspace_settings_agent_defaults_reject_bad_payload(client):
+    response = client.post(
+        "/api/workspaces",
+        json={"name": "agent_defaults_bad", "default_workflow_key": "question_comprehension_info"},
+    )
+    workspace_id = response.json()["workspace"]["id"]
+
+    missing = client.patch(
+        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
+        json={},
+    )
+    assert missing.status_code == 400
+
+    wrong_type = client.patch(
+        f"/api/workspaces/{workspace_id}/settings/agent-defaults",
+        json={"agentDefaults": {"model": 5}},
+    )
+    assert wrong_type.status_code == 422
+
+
 def _inject_key_info_config_schema(app) -> None:
     schema = {
         "type": "object",
