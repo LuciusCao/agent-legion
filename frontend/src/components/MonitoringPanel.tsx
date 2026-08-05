@@ -1,11 +1,4 @@
 import { useMemo, useState } from 'react'
-import {
-  FormControl,
-  MenuItem,
-  Select,
-  ToggleButton,
-  ToggleButtonGroup,
-} from '@mui/material'
 import { fetchOpsMetrics } from '../api/metrics'
 import type { OpsGranularity } from '../api/metrics'
 import { listAgentWorkers } from '../api/workerTokens'
@@ -13,6 +6,7 @@ import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
 import { fmt, fmtDuration, makeTimeFormatter } from '../lib/monitoringFormat'
 import { MetricsChart } from './MetricsChart'
+import { MonitoringHeader } from './MonitoringHeader'
 import {
   QueueAlertBanner,
   QueueDepthChartSection,
@@ -30,13 +24,18 @@ const CONCURRENCY_SERIES: ChartSeries[] = [
   { key: 'active_executions', label: '活跃执行', color: '#2563eb' },
 ]
 
+// workspace 视图的并发图只画活跃执行（在线 Worker 是 fleet 级指标）。
+const ACTIVE_SERIES: ChartSeries[] = [
+  { key: 'active_executions', label: '活跃执行', color: '#2563eb' },
+]
+
 const TOKEN_SERIES: ChartSeries[] = [
   { key: 'input_tokens', label: '输入', color: '#2563eb' },
   { key: 'output_tokens', label: '输出', color: '#7c3aed' },
   { key: 'cache_read_tokens', label: '缓存读', color: '#0891b2' },
 ]
 
-export function MonitoringPanel() {
+export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
   const [granularity, setGranularity] = useState<OpsGranularity>('6h')
   const [workerId, setWorkerId] = useState('')
 
@@ -44,13 +43,15 @@ export function MonitoringPanel() {
   const { data: workerList } = useAsync(() => listAgentWorkers(), [])
   const workers = workerList ?? []
 
+  // workspace 与 worker 两种过滤不可叠加（采样行各属其类）；ws 视图隐藏过滤器。
   const { data, loading, error } = useAsync(
     () =>
       fetchOpsMetrics({
         granularity,
-        ...(workerId ? { worker_id: workerId } : {}),
+        ...(workerId && !workspaceId ? { worker_id: workerId } : {}),
+        ...(workspaceId ? { workspace_id: workspaceId } : {}),
       }),
-    [granularity, workerId],
+    [granularity, workerId, workspaceId],
     { refetchInterval: REFRESH_MS }
   )
 
@@ -76,59 +77,32 @@ export function MonitoringPanel() {
 
   return (
     <section className={styles.panel} aria-label="运维监控">
-      <header className={styles.header}>
-        <div className={styles.titleGroup}>
-          <h2>运维监控</h2>
-          <p>在线 Worker、执行并发与 token 吞吐趋势，每 30 秒自动刷新。</p>
-        </div>
-        <div className={styles.controls}>
-          <FormControl size="small">
-            <Select
-              value={workerId}
-              onChange={(e) => setWorkerId(e.target.value)}
-              displayEmpty
-              inputProps={{ 'aria-label': '选择 Worker' }}
-            >
-              <MenuItem value="">全部 Worker</MenuItem>
-              {workers.map((w) => (
-                <MenuItem key={w.worker_id} value={w.worker_id}>
-                  {w.name || w.worker_id}
-                  {w.online ? '（在线）' : '（离线）'}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={granularity}
-            onChange={(_e, value: OpsGranularity | null) => {
-              if (value) setGranularity(value)
-            }}
-            aria-label="时间粒度"
-          >
-            <ToggleButton value="6h">近 6 小时</ToggleButton>
-            <ToggleButton value="24h">近 24 小时</ToggleButton>
-            <ToggleButton value="30d">近 30 天</ToggleButton>
-          </ToggleButtonGroup>
-        </div>
-      </header>
+      <MonitoringHeader
+        workspaceId={workspaceId}
+        granularity={granularity}
+        onGranularityChange={setGranularity}
+        workerId={workerId}
+        onWorkerChange={setWorkerId}
+        workers={workers}
+      />
 
       <QueueAlertBanner summary={summary} />
 
       <div className={styles.summaryGrid}>
-        <div className={styles.metric}>
-          <div className={styles.metricLabel}>当前在线 Worker</div>
-          <div
-            className={styles.metricValue}
-            data-testid="online-workers-summary"
-          >
-            {fmt(summary?.online_workers)}
+        {!workspaceId && (
+          <div className={styles.metric}>
+            <div className={styles.metricLabel}>当前在线 Worker</div>
+            <div
+              className={styles.metricValue}
+              data-testid="online-workers-summary"
+            >
+              {fmt(summary?.online_workers)}
+            </div>
+            <div className={styles.metricMeta}>
+              窗口峰值 {fmt(latest?.online_workers_max)}
+            </div>
           </div>
-          <div className={styles.metricMeta}>
-            窗口峰值 {fmt(latest?.online_workers_max)}
-          </div>
-        </div>
+        )}
         <div className={styles.metric}>
           <div className={styles.metricLabel}>当前活跃执行</div>
           <div
@@ -172,15 +146,19 @@ export function MonitoringPanel() {
       <QueueDepthChartSection
         granularity={granularity}
         formatTime={formatTime}
+        workspaceId={workspaceId}
       />
 
       <div className={styles.chartSection}>
-        <h3>Worker 与执行并发{loading && !data ? '（加载中…）' : ''}</h3>
+        <h3>
+          {workspaceId ? '执行并发' : 'Worker 与执行并发'}
+          {loading && !data ? '（加载中…）' : ''}
+        </h3>
         <MetricsChart
           buckets={buckets}
           ariaLabel="在线 Worker 与活跃执行趋势"
           formatTime={formatTime}
-          series={CONCURRENCY_SERIES}
+          series={workspaceId ? ACTIVE_SERIES : CONCURRENCY_SERIES}
         />
       </div>
 

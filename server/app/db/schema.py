@@ -6,7 +6,7 @@ from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.migrations import migrate_workspace_cms_config
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 22
+SCHEMA_VERSION = 23
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 # Vault (schema v16): idempotent DDL lives here because the architecture gate
@@ -56,5 +56,5 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (?, ?)",
-                (SCHEMA_VERSION, "ops_queued_and_agent_queue_signals"),
+                (SCHEMA_VERSION, "ops_metric_samples_workspace_scope"),
             )
