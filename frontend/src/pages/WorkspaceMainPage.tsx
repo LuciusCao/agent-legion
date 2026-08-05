@@ -1,12 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { useWorkspaceStore } from '../stores/workspaceStore'
 import {
   selectFilterCounts,
   selectFilteredJobIds,
   useJobStore,
 } from '../stores/jobStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
+import { useWorkspaceStats } from '../hooks/useWorkspaceStats'
 import { useJobFilterRefetch } from '../hooks/useJobFilterRefetch'
 import { useWorkspacePackageActions } from '../hooks/useWorkspacePackageActions'
 import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
@@ -27,7 +27,7 @@ import styles from './WorkspaceMainPage.module.css'
 export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
-  const { fetchWorkspaceStats, workspaceStats } = useWorkspaceStore()
+  const { data: workspaceStats } = useWorkspaceStats(workspaceId)
   const jobIds = useJobStore((state) => state.jobIds)
   const filterConfig = useJobStore((state) => state.filterConfig)
   const setFilterConfig = useJobStore((state) => state.setFilterConfig)
@@ -55,15 +55,7 @@ export default function WorkspaceMainPage() {
   useWorkspaceEvents(workspaceId)
   useJobFilterRefetch(workspaceId)
 
-  useEffect(() => {
-    if (workspaceId) {
-      fetchWorkspaceStats(workspaceId)
-    }
-  }, [workspaceId, fetchWorkspaceStats])
-
-  const workflowKey = workspaceId
-    ? workspaceStats[workspaceId]?.workflow_key
-    : undefined
+  const workflowKey = workspaceStats?.workflow_key
   const { data: workflowResult, error: workflowError } = useAsync(
     () => fetchWorkflowDefinition(workflowKey ?? ''),
     [workspaceId, workflowKey],

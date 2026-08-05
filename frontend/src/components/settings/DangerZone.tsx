@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@mui/material'
-import { useWorkspaceStore } from '../../stores/workspaceStore'
+import { useDeleteWorkspace } from '../../hooks/useWorkspaceMutations'
 import DeleteWorkspaceDialog from '../DeleteWorkspaceDialog'
 import styles from './DangerZone.module.css'
 
@@ -12,11 +12,11 @@ interface Props {
 
 export function DangerZone({ workspaceId, workspaceName }: Props) {
   const navigate = useNavigate()
-  const { deleteWorkspace } = useWorkspaceStore()
+  const deleteWorkspace = useDeleteWorkspace()
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
   async function handleConfirm() {
-    await deleteWorkspace(workspaceId)
+    await deleteWorkspace.mutateAsync(workspaceId)
     setDeleteDialogOpen(false)
     navigate('/')
   }

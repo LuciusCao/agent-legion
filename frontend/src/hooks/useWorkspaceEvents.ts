@@ -30,7 +30,7 @@ export function useWorkspaceEvents(
     let closed = false
     let stale = false
     const refresh = () =>
-      refreshWorkspaceEvents(workspaceId, () => stale || closed)
+      refreshWorkspaceEvents(queryClient, workspaceId, () => stale || closed)
 
     const scheduleJobRefresh = () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
@@ -46,6 +46,7 @@ export function useWorkspaceEvents(
 
     const processEvent = (event: MessageEvent) => {
       handleWorkspaceEvent(
+        queryClient,
         event,
         workspaceId,
         statsOnly,
@@ -56,6 +57,7 @@ export function useWorkspaceEvents(
     }
 
     const loadSnapshot = createLoadSnapshot(
+      queryClient,
       workspaceId,
       snapshotLoadingRef,
       pendingEventsRef,

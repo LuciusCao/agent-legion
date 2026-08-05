@@ -1,12 +1,13 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { TokenUsagePage } from './TokenUsagePage'
-import { useWorkspaceStore } from '../stores/workspaceStore'
 
-vi.mock('../stores/workspaceStore', () => ({
-  useWorkspaceStore: vi.fn(),
+vi.mock('../api', () => ({
+  fetchWorkspaces: vi.fn().mockResolvedValue({
+    workspaces: [{ id: 'ws1', name: '测试空间' }],
+  }),
 }))
 
 vi.mock('../api/tokenUsage', () => ({
@@ -46,22 +47,14 @@ function renderPage(initialEntries = ['/workspaces/ws1/token-usage']) {
 
 describe('TokenUsagePage', () => {
   it('renders page title with workspace name', async () => {
-    vi.mocked(useWorkspaceStore).mockReturnValue({
-      currentWorkspace: { id: 'ws1', name: '测试空间' },
-    } as ReturnType<typeof useWorkspaceStore>)
     renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('测试空间 / Token 使用分析')).toBeInTheDocument()
-    })
+    expect(
+      await screen.findByText('测试空间 / Token 使用分析')
+    ).toBeInTheDocument()
   })
 
   it('renders back button to workspace', async () => {
-    vi.mocked(useWorkspaceStore).mockReturnValue({
-      currentWorkspace: { id: 'ws1', name: '测试空间' },
-    } as ReturnType<typeof useWorkspaceStore>)
     renderPage()
-    await waitFor(() => {
-      expect(screen.getByTestId('app-bar-back')).toBeInTheDocument()
-    })
+    expect(await screen.findByTestId('app-bar-back')).toBeInTheDocument()
   })
 })

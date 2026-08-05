@@ -7,4 +7,6 @@ import type { OpsMetricsParams } from '../api/metrics'
 export const queryKeys = {
   agentWorkers: () => ['agentWorkers'] as const,
   opsMetrics: (params: OpsMetricsParams) => ['opsMetrics', params] as const,
+  workspaces: () => ['workspaces'] as const,
+  workspaceStats: (id: string) => ['workspaceStats', id] as const,
 }

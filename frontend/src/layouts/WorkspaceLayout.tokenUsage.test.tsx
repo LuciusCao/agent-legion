@@ -5,8 +5,8 @@ import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceLayout from './WorkspaceLayout'
 import { useAgentsStore } from '../stores/agentsStore'
 
-vi.mock('../stores/workspaceStore', () => ({
-  useWorkspaceStore: () => ({
+vi.mock('../api', () => ({
+  fetchWorkspaces: vi.fn().mockResolvedValue({
     workspaces: [
       {
         id: 'ws1',
@@ -15,18 +15,6 @@ vi.mock('../stores/workspaceStore', () => ({
         default_entity: 'question',
       },
     ],
-    currentWorkspace: {
-      id: 'ws1',
-      name: '测试空间',
-      default_workflow_key: 'question_content',
-      default_entity: 'question',
-    },
-    workspaceStats: {
-      ws1: { workflow_key: 'question_content', job_stats: {} },
-    },
-    fetchWorkspaces: vi.fn(),
-    setCurrentWorkspace: vi.fn(),
-    fetchWorkspaceStats: vi.fn(),
   }),
 }))
 

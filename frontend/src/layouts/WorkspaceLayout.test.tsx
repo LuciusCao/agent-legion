@@ -23,8 +23,8 @@ vi.mock('../views/WorkspaceJobDetail', () => ({
   default: () => <div data-testid="job-detail">JobDetail</div>,
 }))
 
-vi.mock('../stores/workspaceStore', () => ({
-  useWorkspaceStore: () => ({
+vi.mock('../api', () => ({
+  fetchWorkspaces: vi.fn().mockResolvedValue({
     workspaces: [
       {
         id: 'ws1',
@@ -33,18 +33,6 @@ vi.mock('../stores/workspaceStore', () => ({
         default_entity: 'question',
       },
     ],
-    currentWorkspace: {
-      id: 'ws1',
-      name: '测试空间',
-      default_workflow_key: 'question_content',
-      default_entity: 'question',
-    },
-    workspaceStats: {
-      ws1: { workflow_key: 'question_content', job_stats: {} },
-    },
-    fetchWorkspaces: vi.fn(),
-    setCurrentWorkspace: vi.fn(),
-    fetchWorkspaceStats: vi.fn(),
   }),
 }))
 
@@ -84,7 +72,7 @@ describe('WorkspaceLayout', () => {
     fetchWorkerStatusMock.mockResolvedValue(undefined)
   })
 
-  it('renders app bar with workspace name and no workflow tag', () => {
+  it('renders app bar with workspace name and no workflow tag', async () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
@@ -95,7 +83,7 @@ describe('WorkspaceLayout', () => {
         </Routes>
       </MemoryRouter>
     )
-    expect(screen.getByText('测试空间')).toBeInTheDocument()
+    expect(await screen.findByText('测试空间')).toBeInTheDocument()
     expect(screen.queryByText('question_content')).not.toBeInTheDocument()
   })
 

@@ -1,7 +1,7 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect } from 'react'
 import { useParams, useNavigate, Outlet, useLocation } from 'react-router-dom'
 import { IconButton } from '@mui/material'
-import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useCurrentWorkspace } from '../hooks/useWorkspaces'
 import { useJobStore } from '../stores/jobStore'
 import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
@@ -14,13 +14,7 @@ export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const {
-    workspaces,
-    currentWorkspace,
-    fetchWorkspaces,
-    setCurrentWorkspace,
-    fetchWorkspaceStats,
-  } = useWorkspaceStore()
+  const currentWorkspace = useCurrentWorkspace()
 
   const { fetchWorkerStatus } = useAgentsStore()
   const {
@@ -40,37 +34,6 @@ export default function WorkspaceLayout() {
   const isDetailPage =
     workspaceId &&
     location.pathname.startsWith(`/workspaces/${workspaceId}/jobs/`)
-  useEffect(() => {
-    if (workspaces.length === 0) {
-      fetchWorkspaces()
-    }
-  }, [workspaces.length, fetchWorkspaces])
-  useEffect(() => {
-    const ws = workspaces.find((w) => w.id === workspaceId)
-    setCurrentWorkspace(ws || null)
-  }, [workspaceId, workspaces, setCurrentWorkspace])
-  const lastFetchedId = useRef<string | null>(null)
-  const refreshStats = useCallback(() => {
-    if (workspaceId) {
-      lastFetchedId.current = workspaceId
-      fetchWorkspaceStats(workspaceId)
-    }
-  }, [workspaceId, fetchWorkspaceStats])
-  useEffect(() => {
-    if (workspaceId && workspaceId !== lastFetchedId.current) {
-      refreshStats()
-    }
-  }, [workspaceId, refreshStats])
-  useEffect(() => {
-    const handleVisibility = () => {
-      if (!document.hidden && workspaceId) {
-        refreshStats()
-      }
-    }
-    document.addEventListener('visibilitychange', handleVisibility)
-    return () =>
-      document.removeEventListener('visibilitychange', handleVisibility)
-  }, [workspaceId, refreshStats])
   useEffect(() => {
     if (workspaceId) {
       fetchWorkerStatus(workspaceId)

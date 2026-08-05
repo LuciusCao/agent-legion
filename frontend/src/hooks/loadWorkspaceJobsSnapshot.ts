@@ -1,6 +1,8 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { fetchJobFacets, fetchJobsSnapshot } from '../api'
 import { toJobListFilterParams, useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
+import { queryKeys } from '../lib/queryKeys'
+import type { WorkspaceStats } from '../types/workspaceTypes'
 
 /**
  * Load the first page of the server-filtered job list plus the facet counts.
@@ -8,6 +10,7 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
  * filter changes mid-load, a refreshFirstPage owns the list, so bail out.
  */
 export async function loadWorkspaceJobsSnapshot(
+  queryClient: QueryClient,
   workspaceId: string,
   isStale: () => boolean
 ): Promise<void> {
@@ -15,10 +18,10 @@ export async function loadWorkspaceJobsSnapshot(
   const params = toJobListFilterParams(filterConfig)
   const first = await fetchJobsSnapshot(workspaceId, 500, undefined, params)
   if (isStale() || useJobStore.getState().filterConfig !== filterConfig) return
-  useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
-    ...useWorkspaceStore.getState().workspaceStats[workspaceId],
-    job_stats: first.stats ?? {},
-  })
+  queryClient.setQueryData<WorkspaceStats | undefined>(
+    queryKeys.workspaceStats(workspaceId),
+    (old) => ({ ...old, job_stats: first.stats ?? {} }) as WorkspaceStats
+  )
   useJobStore
     .getState()
     .setJobsPage(

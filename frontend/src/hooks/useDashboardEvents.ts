@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
-import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useQueryClient } from '@tanstack/react-query'
 import { createRealtimeChannel } from '../lib/realtime'
+import { queryKeys } from '../lib/queryKeys'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
 interface DashboardStatsPayload {
@@ -9,6 +10,7 @@ interface DashboardStatsPayload {
 }
 
 export function useDashboardEvents(): void {
+  const queryClient = useQueryClient()
   useEffect(() => {
     if (typeof EventSource === 'undefined') return
     const channel = createRealtimeChannel({
@@ -21,7 +23,7 @@ export function useDashboardEvents(): void {
           if (payload.type !== 'workspace_stats_batch') return
           for (const workspace of payload.workspaces) {
             const { id, ...stats } = workspace
-            useWorkspaceStore.getState().setWorkspaceStats(id, stats)
+            queryClient.setQueryData(queryKeys.workspaceStats(id), stats)
           }
         } catch {
           // ignore invalid payloads
@@ -29,5 +31,5 @@ export function useDashboardEvents(): void {
       },
     })
     return () => channel.close()
-  }, [])
+  }, [queryClient])
 }

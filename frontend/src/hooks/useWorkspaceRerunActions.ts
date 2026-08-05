@@ -1,16 +1,14 @@
 import { useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useWorkspaceStats } from './useWorkspaceStats'
 import type { FailureCategory } from '../types/failureTypes'
 import type { FailureCategoryContext } from '../components/JobRerunDialog/useFailureCategories'
 
 export function useWorkspaceRerunActions(workspaceId: string | undefined) {
   const batchRerun = useJobStore((state) => state.batchRerun)
   const rerunByFailure = useJobStore((state) => state.rerunByFailureCategory)
-  const workspaceStats = useWorkspaceStore((state) => state.workspaceStats)
+  const { data: workspaceStats } = useWorkspaceStats(workspaceId)
 
-  const workflowKey = workspaceId
-    ? workspaceStats[workspaceId]?.workflow_key
-    : undefined
+  const workflowKey = workspaceStats?.workflow_key
   const failureContext: FailureCategoryContext | undefined = workspaceId
     ? { workspaceId, workflowKey }
     : undefined
