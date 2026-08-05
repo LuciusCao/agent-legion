@@ -237,11 +237,11 @@ def test_save_draft_guard_rejects_concurrently_published_row(
     service, workspace_id, monkeypatch
 ) -> None:
     """A stale draft view must not overwrite a row published in between."""
-    import server.app.services.node_codes as node_codes
+    import server.app.services.versioned_entities as versioned_entities
 
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     published = service.publish(workspace_id, WF, NODE)
-    monkeypatch.setattr(node_codes, "_latest_with_status", lambda *args: dict(published))
+    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(published))
     with pytest.raises(ConflictError):
         service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u2")
     # The published row is untouched.
@@ -252,12 +252,12 @@ def test_publish_guard_rejects_concurrently_archived_draft(
     service, workspace_id, monkeypatch
 ) -> None:
     """A stale draft view must not resurrect an archived row into published."""
-    import server.app.services.node_codes as node_codes
+    import server.app.services.versioned_entities as versioned_entities
 
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     stale_draft = service.list_versions(workspace_id, WF, NODE)[0]
     service.archive_all(workspace_id, WF, NODE)
-    monkeypatch.setattr(node_codes, "_latest_with_status", lambda *args: dict(stale_draft))
+    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(stale_draft))
     with pytest.raises(ConflictError):
         service.publish(workspace_id, WF, NODE)
     assert service.get_effective_code(workspace_id, WF, NODE) is None
@@ -267,10 +267,10 @@ def test_insert_version_collision_maps_to_conflict_error(
     service, workspace_id, monkeypatch
 ) -> None:
     """A unique-constraint race surfaces as ConflictError (409), not a 500."""
-    import server.app.services.node_codes as node_codes
+    import server.app.services.versioned_entities as versioned_entities
 
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     service.archive_all(workspace_id, WF, NODE)
-    monkeypatch.setattr(node_codes, "_next_version", lambda *args: 1)
+    monkeypatch.setattr(versioned_entities, "_next_version", lambda *args: 1)
     with pytest.raises(ConflictError):
         service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")

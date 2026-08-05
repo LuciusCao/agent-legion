@@ -9,7 +9,10 @@ create table if not exists workspaces (
   node_config_json text not null default '{}',
   default_entity text not null default 'question',
   intake_config_json text not null default '{}',
-  description text not null default ''
+  description text not null default '',
+  default_agent_provider text not null default '',
+  default_agent_model text not null default '',
+  default_agent_thinking text not null default ''
 );
 
 -- Idempotent upgrade path for databases created before schema v14:
@@ -516,3 +519,27 @@ create table if not exists workflow_node_codes (
 create unique index if not exists workflow_node_codes_published
   on workflow_node_codes(workspace_id, workflow_key, node_key)
   where status = 'published';
+
+-- Versioned entities (schema v26): unified draft → published → archived
+-- lifecycle storage for custom node codes ('node_code') and Agent definitions
+-- ('agent'). workspace_id is NULL for global entities; NULLS NOT DISTINCT
+-- keeps the uniqueness guarantees meaningful for those rows (PostgreSQL 15+).
+create table if not exists versioned_entities (
+  id text primary key,
+  entity_type text not null check(entity_type in ('node_code', 'agent')),
+  workspace_id text references workspaces(id) on delete cascade,
+  entity_key text not null,
+  version integer not null,
+  status text not null check(status in ('draft', 'published', 'archived')),
+  definition_json text not null,
+  definition_hash text not null,
+  created_by text not null,
+  created_at timestamptz not null default current_timestamp,
+  published_at timestamptz,
+  unique nulls not distinct(entity_type, workspace_id, entity_key, version)
+);
+create unique index if not exists versioned_entities_published
+  on versioned_entities(entity_type, workspace_id, entity_key) nulls not distinct
+  where status = 'published';
+create index if not exists idx_versioned_entities_type_key
+  on versioned_entities(entity_type, entity_key);
