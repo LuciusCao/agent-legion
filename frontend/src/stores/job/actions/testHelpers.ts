@@ -55,8 +55,6 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     batchRunToLoading: false,
     continueLoading: false,
     batchUpgradeWorkflowLoading: false,
-    fetchJobs: async () => {},
-    setJobsAndFinishLoading: () => {},
     resetForWorkspace: () => {},
     failJobFetch: () => {},
     setJobsSnapshot: () => {},

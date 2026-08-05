@@ -12,7 +12,6 @@ import * as api from '../api'
 
 vi.mock('../api')
 
-const mockFetchJobs = vi.mocked(api.fetchJobs)
 const mockFetchJobsSnapshot = vi.mocked(api.fetchJobsSnapshot)
 const mockFetchJobFacets = vi.mocked(api.fetchJobFacets)
 const makeJob = createJobSummary
@@ -66,7 +65,6 @@ describe('useWorkspaceEvents', () => {
       error: null,
     })
     vi.clearAllMocks()
-    mockFetchJobs.mockResolvedValue({ jobs: [] })
     mockFetchJobsSnapshot.mockResolvedValue({
       workspace_id: 'ws1',
       revision: 0,
@@ -117,7 +115,6 @@ describe('useWorkspaceEvents', () => {
       )
       expect(useJobStore.getState().jobsById.j1?.status).toBe('running')
     })
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('receiving a non-heartbeat message invalidates workspace stats', async () => {
@@ -153,7 +150,6 @@ describe('useWorkspaceEvents', () => {
       { queryKey: queryKeys.workspaceStats('ws1') },
       { throwOnError: true }
     )
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('coalesces rapid job update messages into one stats invalidation', async () => {
@@ -188,7 +184,6 @@ describe('useWorkspaceEvents', () => {
     })
 
     expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(1)
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('closes the EventSource on cleanup', () => {
@@ -286,7 +281,6 @@ describe('useWorkspaceEvents', () => {
     })
 
     expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(1)
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('updates workspace stats from payload stats', async () => {
@@ -411,7 +405,6 @@ describe('useWorkspaceEvents', () => {
     await waitFor(() => {
       expect(useJobStore.getState().jobsById.j1.status).toBe('running')
     })
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('resyncs instead of dropping events when the pending queue overflows', async () => {
