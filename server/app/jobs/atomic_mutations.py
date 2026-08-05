@@ -37,7 +37,7 @@ def lease_guarded_mutation(
         active_lease = conn.execute(
             """
             select 1 from executor_leases
-            where job_id=? and status='active' and expires_at>?
+            where job_id=%s and status='active' and expires_at>%s
             limit 1
             """,
             (job_id, _timestamp(now)),
@@ -47,7 +47,7 @@ def lease_guarded_mutation(
 
         if reject_running_nodes:
             running_node = conn.execute(
-                "select 1 from job_nodes where job_id=? and status='running' limit 1",
+                "select 1 from job_nodes where job_id=%s and status='running' limit 1",
                 (job_id,),
             ).fetchone()
             if running_node is not None:
@@ -63,7 +63,7 @@ def apply_run_to(
     closure: frozenset[str],
 ) -> None:
     target = conn.execute(
-        "select status from job_nodes where job_id=? and node_key=?",
+        "select status from job_nodes where job_id=%s and node_key=%s",
         (job_id, target_node_key),
     ).fetchone()
     if target is None:
@@ -71,7 +71,7 @@ def apply_run_to(
     if target["status"] == "completed":
         raise JobMutationConflict("target_already_completed", "Target node is already completed")
 
-    placeholders = ",".join("?" for _ in closure)
+    placeholders = ",".join("%s" for _ in closure)
     if not placeholders:
         raise ValueError("Run-to closure cannot be empty")
     conn.execute(
@@ -79,7 +79,7 @@ def apply_run_to(
         update job_nodes
         set status='pending', stale_reason='', error_message='',
             started_at=null, finished_at=null, created_at=current_timestamp
-        where job_id=? and node_key in ({placeholders}) and status != 'completed'
+        where job_id=%s and node_key in ({placeholders}) and status != 'completed'
         """,
         (job_id, *sorted(closure)),
     )
@@ -95,10 +95,10 @@ def set_run_to_control(
     conn.execute(
         """
         update jobs
-        set status='queued', execution_mode='until_node', target_node_key=?,
+        set status='queued', execution_mode='until_node', target_node_key=%s,
             execution_paused=0, pause_reason='', error_message='',
             updated_at=current_timestamp
-        where id=?
+        where id=%s
         """,
         (target_node_key, job_id),
     )
@@ -117,12 +117,12 @@ def mark_nodes_for_rerun(
         if descendant not in node_keys
     }
     affected_nodes = set(node_keys) | descendants
-    placeholders = ",".join("?" * len(affected_nodes))
+    placeholders = ",".join("%s" for _ in affected_nodes)
     conn.execute(
         f"""
         update node_runs
         set run_dir='', session_dir=''
-        where job_id=? and node_key in ({placeholders})
+        where job_id=%s and node_key in ({placeholders})
         """,
         (job_id, *sorted(affected_nodes)),
     )
@@ -134,7 +134,7 @@ def mark_nodes_for_rerun(
             set status='pending', stale_reason='', error_message='',
                 failure_category='', failure_detail='',
                 started_at=null, finished_at=null, created_at=current_timestamp
-            where job_id=? and node_key=?
+            where job_id=%s and node_key=%s
             """,
             (job_id, node_key),
         )
@@ -147,7 +147,7 @@ def mark_nodes_for_rerun(
             set status='stale', stale_reason='upstream rerun', error_message='',
                 failure_category='', failure_detail='',
                 created_at=current_timestamp
-            where job_id=? and node_key=?
+            where job_id=%s and node_key=%s
             """,
             (job_id, descendant),
         )
@@ -155,14 +155,14 @@ def mark_nodes_for_rerun(
         """
         update jobs
         set status='queued', error_message='', updated_at=current_timestamp
-        where id=?
+        where id=%s
         """,
         (job_id,),
     )
 
 
 def delete_job(conn: DatabaseConnection, job_id: str) -> None:
-    cursor = conn.execute("delete from jobs where id=?", (job_id,))
+    cursor = conn.execute("delete from jobs where id=%s", (job_id,))
     if cursor.rowcount == 0:
         raise ValueError("Job not found")
 
@@ -177,7 +177,7 @@ def resume_job(conn: DatabaseConnection, job_id: str) -> None:
     transition happen in the same transaction.
     """
     job = conn.execute(
-        "select status, pause_reason from jobs where id=?",
+        "select status, pause_reason from jobs where id=%s",
         (job_id,),
     ).fetchone()
     if job is None:
@@ -197,7 +197,7 @@ def resume_job(conn: DatabaseConnection, job_id: str) -> None:
                 target_node_key=null,
                 pause_reason='',
                 updated_at=current_timestamp
-            where id=?
+            where id=%s
             """,
             (job_id,),
         )
@@ -209,7 +209,7 @@ def resume_job(conn: DatabaseConnection, job_id: str) -> None:
                 execution_paused=0,
                 pause_reason='',
                 updated_at=current_timestamp
-            where id=?
+            where id=%s
             """,
             (job_id,),
         )

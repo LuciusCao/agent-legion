@@ -79,7 +79,7 @@ class AgentWorkerRegistry:
         with write_transaction(self.database_dsn) as conn:
             for workspace in scope:
                 exists = conn.execute(
-                    "select 1 from workspaces where id=?", (workspace,)
+                    "select 1 from workspaces where id=%s", (workspace,)
                 ).fetchone()
                 if exists is None:
                     raise ValueError(f"workspace {workspace!r} does not exist")
@@ -90,7 +90,7 @@ class AgentWorkerRegistry:
                   max_concurrency, labels_json,
                   protocol_version, token_hash, allowed_workspaces_json,
                   registered_at, last_seen_at, revoked_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, null)
                 on conflict(worker_id) do update set
                   name=excluded.name,
                   runtimes_json=excluded.runtimes_json,
@@ -135,13 +135,13 @@ class AgentWorkerRegistry:
         with write_transaction(self.database_dsn) as conn:
             if workspace_id is not None:
                 exists = conn.execute(
-                    "select 1 from workspaces where id=?", (workspace_id,)
+                    "select 1 from workspaces where id=%s", (workspace_id,)
                 ).fetchone()
                 if exists is None:
                     raise ValueError(f"workspace {workspace_id!r} does not exist")
             conn.execute(
                 "insert into agent_register_tokens(id, token_hash, workspace_id, label)"
-                " values (?, ?, ?, ?)",
+                " values (%s, %s, %s, %s)",
                 (token_id, token_hash, workspace_id, label),
             )
         return token_id, f"{token_id}.{secret}"
@@ -156,7 +156,7 @@ class AgentWorkerRegistry:
             return None
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
-                "select * from agent_register_tokens where id=?", (token_id,)
+                "select * from agent_register_tokens where id=%s", (token_id,)
             ).fetchone()
         if row is None or row["revoked_at"] is not None:
             return None
@@ -187,7 +187,7 @@ class AgentWorkerRegistry:
     def revoke_register_token(self, token_id: str) -> bool:
         with write_transaction(self.database_dsn) as conn:
             result = conn.execute(
-                "update agent_register_tokens set revoked_at=current_timestamp where id=?",
+                "update agent_register_tokens set revoked_at=current_timestamp where id=%s",
                 (token_id,),
             )
             return result.rowcount > 0
@@ -198,7 +198,7 @@ class AgentWorkerRegistry:
             return None
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
-                "select * from agent_workers where worker_id=?", (worker_id,)
+                "select * from agent_workers where worker_id=%s", (worker_id,)
             ).fetchone()
         if row is None or row["revoked_at"] is not None:
             return None
@@ -209,7 +209,7 @@ class AgentWorkerRegistry:
         # every few seconds, so this is the liveness signal behind `online`.
         with write_transaction(self.database_dsn) as conn:
             conn.execute(
-                "update agent_workers set last_seen_at=current_timestamp where worker_id=?",
+                "update agent_workers set last_seen_at=current_timestamp where worker_id=%s",
                 (worker_id,),
             )
         # Reflect the just-written timestamp so this call already reads online.
@@ -223,7 +223,7 @@ class AgentWorkerRegistry:
     def revoke(self, worker_id: str) -> bool:
         with write_transaction(self.database_dsn) as conn:
             result = conn.execute(
-                "update agent_workers set revoked_at=current_timestamp where worker_id=?",
+                "update agent_workers set revoked_at=current_timestamp where worker_id=%s",
                 (worker_id,),
             )
             return result.rowcount > 0

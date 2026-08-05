@@ -95,6 +95,6 @@ def migrate_workspace_cms_config(conn: Any) -> None:
             continue
         resource_config["resources"] = resources
         conn.execute(
-            "update workspaces set resource_config_json=? where id=?",
+            "update workspaces set resource_config_json=%s where id=%s",
             (json.dumps(resource_config, ensure_ascii=False, sort_keys=True), row["id"]),
         )

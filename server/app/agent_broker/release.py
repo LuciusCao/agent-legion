@@ -27,7 +27,7 @@ def release_slot(
     with write_transaction(broker.database_dsn) as conn:
         updated = conn.execute(
             "update agent_execution_requests set state='reporting'"
-            " where execution_id=? and worker_id=? and lease_id=? and state='claimed'",
+            " where execution_id=%s and worker_id=%s and lease_id=%s and state='claimed'",
             (execution_id, worker_id, lease_id),
         )
     return updated.rowcount > 0

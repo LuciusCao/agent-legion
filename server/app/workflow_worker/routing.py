@@ -65,7 +65,7 @@ def _resolve_uncached(
         route = conn.execute(
             """
             select target_kind, target_id from workspace_node_routes
-            where workspace_id=? and workflow_key=? and node_key=?
+            where workspace_id=%s and workflow_key=%s and node_key=%s
             """,
             (workspace_id, workflow_key, node_key),
         ).fetchone()
