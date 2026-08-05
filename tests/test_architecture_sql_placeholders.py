@@ -56,6 +56,26 @@ def test_collect_counts_skips_files_without_sql_qmarks(tmp_path):
     assert collect_sql_placeholder_counts(tmp_path) == {"server/app/dirty.py": 1}
 
 
+def test_collect_counts_scans_tests_and_scripts_roots(tmp_path):
+    write(tmp_path / "tests/test_repo.py", 'SQL = "SELECT 1 WHERE a = ?"\n')
+    write(tmp_path / "scripts/backfill.py", 'SQL = "DELETE FROM t WHERE a = ?"\n')
+
+    assert collect_sql_placeholder_counts(tmp_path) == {
+        "tests/test_repo.py": 1,
+        "scripts/backfill.py": 1,
+    }
+
+
+def test_collect_counts_excludes_fixture_files(tmp_path):
+    write(
+        tmp_path / "tests/test_architecture_sql_placeholders.py",
+        'SQL = "SELECT 1 WHERE a = ?"\n',
+    )
+    write(tmp_path / "tests/db/test_dialect_guard.py", 'SQL = "SELECT 1 WHERE b = ?"\n')
+
+    assert collect_sql_placeholder_counts(tmp_path) == {}
+
+
 def test_rejects_qmark_in_file_without_baseline_entry(tmp_path):
     write(tmp_path / "server/app/repo.py", 'SQL = "SELECT * FROM t WHERE id = ?"\n')
     write_neutral_budget_governance(tmp_path)
