@@ -7,8 +7,7 @@
     "server/app/agent_broker/sweepers.py": 19,
     "server/app/agent_broker/unclaimable.py": 5,
     "server/app/agent_catalog.py": 6,
-    "server/app/agent_stock.py": 1,
-    "server/app/agent_worker_capacity.py": 3,
+    "server/app/agent_broker/agent_worker_capacity.py": 3,
     "server/app/agent_workers.py": 23,
     "server/app/db/migrations.py": 2,
     "server/app/db/schema.py": 3,
@@ -54,6 +53,7 @@
     "server/app/services/workflow_revision_runtime.py": 3,
     "server/app/services/workspace_agent_routes.py": 2,
     "server/app/worker_control.py": 5,
+    "server/app/workflow_worker/agent_stock.py": 1,
     "server/app/workflow_worker/routing.py": 3,
     "server/app/workflow_worker/shards.py": 2,
     "server/app/workflows/sharding.py": 35

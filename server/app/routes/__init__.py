@@ -5,9 +5,9 @@ from fastapi import APIRouter, Depends
 from ..agent_broker import AgentExecutionBroker
 from ..agent_completion import AgentCompletionHandler
 from ..agent_workers import AgentWorkerRegistry
-from ..agents import AgentStatusManager
 from ..auth.dependencies import require_workspace_access
 from ..events import JobEventManager
+from ..events.agents import AgentStatusManager
 from ..jobs import JobQueries
 from ..services.artifact_store import ArtifactStore
 from ..services.executor_catalog import ExecutorCatalogService

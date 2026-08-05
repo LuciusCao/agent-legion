@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.services.vault import mask_resource_secrets
+from server.app.services.vault_resources import mask_resource_secrets
 from server.app.workflows.resource_providers import ResourceProviderDeclarations
 from server.app.workflows.resource_schemas import resource_schemas_payload
 

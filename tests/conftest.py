@@ -21,10 +21,10 @@ import psycopg
 from psycopg import sql
 
 from server.app.agent_catalog import load_agent_definitions, sync_agent_definitions
-from server.app.agents import AgentStatusManager
 from server.app.configuration import load_application_config
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
+from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.settings import PROJECT_ROOT, load_settings
 

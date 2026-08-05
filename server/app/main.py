@@ -9,13 +9,13 @@ from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
 from server.app.agent_catalog import sync_agent_definitions
 from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
-from server.app.agents import AgentStatusManager
 from server.app.auth.service import build_auth_service
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
+from server.app.events.agents import AgentStatusManager
 from server.app.events.aggregator import build_workspace_event_aggregator
 from server.app.events.bus import InProcessEventBus
-from server.app.executor_registry_factory import build_executor_registry
+from server.app.executors.executor_registry_factory import build_executor_registry
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.pi import build_skill_manager
 from server.app.executors.sweeper import SweeperThread

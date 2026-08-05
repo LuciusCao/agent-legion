@@ -1,9 +1,10 @@
 from typing import Any
 
-from server.app.agents import AgentStatusManager
+from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.vault import VaultService, apply_resources_patch
+from server.app.services.vault import VaultService
+from server.app.services.vault_resources import apply_resources_patch
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_validation import (

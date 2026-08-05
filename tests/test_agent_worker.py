@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.agent_bundle import build_agent_bundle
+from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
 from worker.registration_retry import register_with_retry
 from worker.status import ExecutionStatusReporter, read_current_executions, read_runtime_status

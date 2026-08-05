@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from server.app.agent_stock import (
+from server.app.workflow_worker.agent_stock import (
     AgentStockConfig,
     StockBucket,
     StockSnapshot,

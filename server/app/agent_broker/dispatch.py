@@ -5,11 +5,11 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from server.app.agent_artifacts import stage_agent_inputs
+from server.app.agent_broker.agent_artifacts import stage_agent_inputs
+from server.app.agent_broker.agent_bundle import build_agent_bundle, cleanup_bundle_on_error
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_broker.runtime_dispatch import pi_config_for_runtime
-from server.app.agent_bundle import build_agent_bundle, cleanup_bundle_on_error
 from server.app.agent_catalog import AgentDefinition
 from server.app.config_schema import manifest_safe_config
 from server.app.executors._pi_skill import build_skill_manager, get_skill_version, resolve_skill_dir

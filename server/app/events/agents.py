@@ -8,7 +8,7 @@ from typing import Any
 
 from fastapi import WebSocket
 
-from server.app.agent_broadcast import AgentBroadcastController
+from server.app.events.agent_broadcast import AgentBroadcastController
 from server.app.events.bus import _EVICTED, EventBus
 
 logger = logging.getLogger(__name__)

@@ -13,7 +13,7 @@
 | `videos/` | 视频能力（video_knowledge workspace） | 视频文件 `videos/<video_id>/<video_id>.mp4`（`server/app/video_capabilities/_video_paths.py:25`） | 内容产物，随视频记录生命周期 |
 | `packages/` | Workspace 打包导出 | 导出包 `packages/workspace-<workspace_id>/workspace-jobs-*.zip`（`server/app/pipeline/workspace_package.py:23-32`、`server/app/services/job_packages.py:94`） | 导出产物，可重新生成 |
 | `artifacts/` | `ArtifactStore` | 内容寻址存储：`artifacts/<digest[:2]>/<digest>`，外加 `.staging/` 暂存区（`server/app/services/artifact_store.py:46-57`） | Worker 回传 artifact 的持久存储，带 GC grace |
-| `agent_bundles/` | `AgentExecutionBroker` / dispatch | 派发给 Worker 的 bundle `<execution_id>.tar.gz`，Worker 回传的结果包 `*.result.tar.gz`（`server/app/agent_broker/dispatch.py:118`、`server/app/agent_result_commit.py:34-37`） | 在途传输文件。结果提交后即删除，孤儿文件由 reaper 清扫（`server/app/agent_broker/broker.py:299-306`、`server/app/agent_broker/reaper.py:55-60`） |
+| `agent_bundles/` | `AgentExecutionBroker` / dispatch | 派发给 Worker 的 bundle `<execution_id>.tar.gz`，Worker 回传的结果包 `*.result.tar.gz`（`server/app/agent_broker/dispatch.py:118`、`server/app/agent_broker/agent_result_commit.py:34-37`） | 在途传输文件。结果提交后即删除，孤儿文件由 reaper 清扫（`server/app/agent_broker/broker.py:299-306`、`server/app/agent_broker/reaper.py:55-60`） |
 
 清理节奏由 `config/app.yaml:11-14` 的 `cleanup` 段控制（`log_retention_days`、`run_dir_retention_days`、`interval_seconds`），加载逻辑见 `server/app/services/log_cleanup.py:21-34`。
 

@@ -5,8 +5,7 @@ from types import SimpleNamespace
 import pytest
 
 from server.app.services.job_errors import InvalidOperationError, UnsupportedOperationError
-from server.app.services.job_intake_registry import RESOLVERS, ResolverSpec
-from server.app.services.job_intake_resolver import resolve_candidates
+from server.app.services.job_intake_registry import RESOLVERS, ResolverSpec, resolve_candidates
 from server.app.services.job_intake_video import resolve_cms_video_candidates
 
 
