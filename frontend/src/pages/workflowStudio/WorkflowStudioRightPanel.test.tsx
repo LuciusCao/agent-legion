@@ -148,7 +148,7 @@ describe('WorkflowStudioRightPanel', () => {
     )
   })
 
-  it('hides both cards without admin role, code path, or config schema', () => {
+  it('hides both cards when the node has no code path or config schema', () => {
     renderPanel({
       executorCatalog: [
         {

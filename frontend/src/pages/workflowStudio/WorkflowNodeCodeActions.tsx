@@ -38,12 +38,12 @@ export function WorkflowNodeCodeActions(props: {
           编辑
         </Button>
       )}
-      {props.isCustom && (
+      {props.hasDraft && (
         <Button
           variant="outlined"
           size="small"
           onClick={props.onPublish}
-          disabled={props.busy || !props.hasDraft}
+          disabled={props.busy}
         >
           发布
         </Button>

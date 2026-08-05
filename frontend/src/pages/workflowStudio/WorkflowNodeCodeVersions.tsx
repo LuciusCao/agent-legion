@@ -7,6 +7,7 @@ import styles from './WorkflowNodeCodeSection.module.css'
 type VersionsResponse =
   components['schemas']['WorkflowNodeCodeVersionsResponse']
 type VersionSummary = components['schemas']['WorkflowNodeCodeVersionSummary']
+type VersionDetail = components['schemas']['WorkflowNodeCodeVersionResponse']
 
 const STATUS_LABELS: Record<string, string> = {
   draft: '草稿',
@@ -21,10 +22,26 @@ function formatTime(value: string) {
 
 function VersionRow(props: {
   version: VersionSummary
+  versionsUrl: string
   onRollback: (version: number) => void
   disabled: boolean
 }) {
   const { version } = props
+  const [expanded, setExpanded] = useState(false)
+  const [code, setCode] = useState<string | null>(null)
+  const [viewError, setViewError] = useState('')
+
+  const toggleView = () => {
+    if (!expanded && code === null && !viewError) {
+      api<VersionDetail>(`${props.versionsUrl}/${version.version}`)
+        .then((detail) => setCode(detail.code))
+        .catch((err: unknown) =>
+          setViewError(err instanceof Error ? err.message : '加载失败')
+        )
+    }
+    setExpanded((value) => !value)
+  }
+
   return (
     <div className={styles.versionRow}>
       <span className={styles.versionTitle}>
@@ -35,6 +52,15 @@ function VersionRow(props: {
         {version.change_note ? ` · ${version.change_note}` : ''} ·{' '}
         {formatTime(version.created_at)}
       </span>
+      <Button
+        variant="text"
+        size="small"
+        onClick={toggleView}
+        aria-expanded={expanded}
+        aria-label={`查看 v${version.version} 代码`}
+      >
+        查看
+      </Button>
       {version.status !== 'published' && (
         <Button
           variant="text"
@@ -44,6 +70,19 @@ function VersionRow(props: {
         >
           回滚到此版本
         </Button>
+      )}
+      {expanded && (
+        <div className={styles.versionCode}>
+          {viewError ? (
+            <div role="alert" className={styles.error}>
+              {viewError}
+            </div>
+          ) : code === null ? (
+            <div className={styles.hint}>加载代码中...</div>
+          ) : (
+            <pre className={styles.code}>{code}</pre>
+          )}
+        </div>
       )}
     </div>
   )
@@ -94,6 +133,7 @@ export function WorkflowNodeCodeVersions(props: {
         <VersionRow
           key={version.id}
           version={version}
+          versionsUrl={props.url}
           onRollback={props.onRollback}
           disabled={props.disabled}
         />
