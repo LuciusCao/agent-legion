@@ -10,12 +10,12 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _seed_workspace(conn, workspace_id: str, concurrency: int = 4) -> None:
     conn.execute(
-        "insert into workspaces(id, name) values (?, ?) on conflict do nothing",
+        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(
         "insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)"
-        " values (?, 'local-default', ?) on conflict do nothing",
+        " values (%s, 'local-default', %s) on conflict do nothing",
         (workspace_id, concurrency),
     )
     for workflow_key, node_key in (
@@ -25,7 +25,7 @@ def _seed_workspace(conn, workspace_id: str, concurrency: int = 4) -> None:
     ):
         conn.execute(
             "insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)"
-            " values (?, ?, ?, 'local-default') on conflict do nothing",
+            " values (%s, %s, %s, 'local-default') on conflict do nothing",
             (workspace_id, workflow_key, node_key),
         )
 
