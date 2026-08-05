@@ -1,9 +1,13 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { createElement, type ReactNode } from 'react'
 import { renderHook, waitFor, act } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { useWorkspaceEvents } from './useWorkspaceEvents'
 import { createJobSummary, useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { EventSourceMock } from '../testing/eventSourceMock'
+import { createTestQueryClient } from '../testing/testQueryClient'
+import { queryKeys } from '../lib/queryKeys'
 import * as api from '../api'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
@@ -33,8 +37,16 @@ const emptyFilterParams = {
 
 describe('useWorkspaceEvents', () => {
   const originalEventSource = globalThis.EventSource
+  let testClient = createTestQueryClient()
+
+  // Hook 内的 workers invalidate 走 useQueryClient，每个用例给独立 client。
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: testClient }, children)
+  const renderEvents = (...args: Parameters<typeof useWorkspaceEvents>) =>
+    renderHook(() => useWorkspaceEvents(...args), { wrapper })
 
   beforeEach(() => {
+    testClient = createTestQueryClient()
     EventSourceMock.reset()
     globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
     useJobStore.setState({
@@ -67,7 +79,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('connects to workspace SSE endpoint', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     await waitFor(() => {
       expect(EventSourceMock.instances.length).toBe(1)
     })
@@ -85,7 +97,7 @@ describe('useWorkspaceEvents', () => {
       next_cursor: null,
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -106,7 +118,7 @@ describe('useWorkspaceEvents', () => {
 
   it('receiving a non-heartbeat message triggers refresh', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -138,7 +150,7 @@ describe('useWorkspaceEvents', () => {
 
   it('coalesces rapid job update messages into one stats refresh', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -171,7 +183,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('closes the EventSource on cleanup', () => {
-    const { unmount } = renderHook(() => useWorkspaceEvents('ws1'))
+    const { unmount } = renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     unmount()
@@ -188,7 +200,7 @@ describe('useWorkspaceEvents', () => {
       jobsWorkspaceId: 'ws1',
     })
 
-    renderHook(() => useWorkspaceEvents('ws2'))
+    renderEvents('ws2')
 
     expect(useJobStore.getState().jobs).toEqual([])
     expect(useJobStore.getState().isLoading).toBe(true)
@@ -204,7 +216,7 @@ describe('useWorkspaceEvents', () => {
       next_cursor: null,
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -220,7 +232,7 @@ describe('useWorkspaceEvents', () => {
   it('clears a previous error after successful refresh', async () => {
     useJobStore.setState({ error: 'previous error' })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -233,18 +245,18 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('does not connect when enabled is false', () => {
-    renderHook(() => useWorkspaceEvents('ws1', false))
+    renderEvents('ws1', false)
     expect(EventSourceMock.instances.length).toBe(0)
   })
 
   it('does not connect when workspaceId is undefined', () => {
-    renderHook(() => useWorkspaceEvents(undefined))
+    renderEvents(undefined)
     expect(EventSourceMock.instances.length).toBe(0)
   })
 
   it('statsOnly fetches workspace stats but not jobs on refresh', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1', true, true))
+    renderEvents('ws1', true, true)
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -271,7 +283,7 @@ describe('useWorkspaceEvents', () => {
     mockFetchWorkspaceStats.mockResolvedValue({
       job_stats: { running: 2, completed: 5 },
     } as unknown as WorkspaceStats)
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -301,7 +313,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('ignores messages for other workspaces', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -328,7 +340,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('ignores heartbeat messages', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -352,7 +364,7 @@ describe('useWorkspaceEvents', () => {
 
   it('reconnects after an error', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -368,7 +380,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('applies job patch batch without fetching all jobs', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -410,7 +422,7 @@ describe('useWorkspaceEvents', () => {
       })
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -447,7 +459,7 @@ describe('useWorkspaceEvents', () => {
       jobs: [makeJob({ id: 'j2', workspace_id: 'ws1', status: 'completed' })],
       next_cursor: null,
     })
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -479,7 +491,7 @@ describe('useWorkspaceEvents', () => {
       next_cursor: 'cursor-page-2',
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -500,7 +512,7 @@ describe('useWorkspaceEvents', () => {
 
   it('debounces a facet refresh after a job patch batch', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -528,5 +540,42 @@ describe('useWorkspaceEvents', () => {
       await vi.advanceTimersByTimeAsync(750)
     })
     expect(mockFetchJobFacets).toHaveBeenCalledTimes(2)
+  })
+
+  it('invalidates the agent workers query after the debounce tiers', async () => {
+    vi.useFakeTimers()
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1')
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'job_updated',
+            workspace_id: 'ws1',
+            job_id: 'job1',
+          }),
+        })
+      )
+    })
+
+    // 事件先进 750ms 的 job 刷新防抖，再进 750ms 的 workers invalidate 防抖。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(invalidateSpy).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.agentWorkers(),
+    })
   })
 })

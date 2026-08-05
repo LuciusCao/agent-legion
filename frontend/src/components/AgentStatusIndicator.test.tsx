@@ -1,8 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
-import { useExecutorsStore, type WorkerSummary } from '../stores/executorsStore'
+import { useExecutorsStore } from '../stores/executorsStore'
+import type { AgentWorkerSummary as WorkerSummary } from '../api/workerTokens'
 import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
@@ -18,7 +19,11 @@ function renderIndicator() {
 const fetchWorkerStatusMock = vi.fn()
 const setWorkerPausedMock = vi.fn()
 const showToastMock = vi.fn()
-const refreshWorkersMock = vi.fn()
+const listAgentWorkersMock = vi.fn()
+
+vi.mock('../api/workerTokens', () => ({
+  listAgentWorkers: () => listAgentWorkersMock(),
+}))
 
 function makeWorker(overrides: Partial<WorkerSummary> = {}): WorkerSummary {
   return {
@@ -80,12 +85,8 @@ describe('AgentStatusIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockWorkerPausedByWorkspace = {}
-    useExecutorsStore.setState({
-      workers: [],
-      connectionStatus: {},
-      refreshWorkers: refreshWorkersMock,
-    })
-    refreshWorkersMock.mockResolvedValue(undefined)
+    useExecutorsStore.setState({ connectionStatus: {} })
+    listAgentWorkersMock.mockResolvedValue([])
     mockAgents = [
       makeAgentStatus({
         id: 'main',
@@ -215,26 +216,24 @@ describe('AgentStatusIndicator', () => {
     ).not.toBeInTheDocument()
   })
 
-  it('refreshes registered workers on mount', () => {
+  it('fetches registered workers on mount', async () => {
     renderIndicator()
-    expect(refreshWorkersMock).toHaveBeenCalled()
+    await waitFor(() => expect(listAgentWorkersMock).toHaveBeenCalled())
   })
 
-  it('shows online and offline chips with last-seen heartbeat', () => {
-    useExecutorsStore.setState({
-      workers: [
-        makeWorker({ worker_id: 'w-online', name: 'Online Mac', online: true }),
-        makeWorker({
-          worker_id: 'w-offline',
-          name: 'Offline Mac',
-          online: false,
-          last_seen_at: '2026-07-22 01:00:00',
-        }),
-      ],
-    })
+  it('shows online and offline chips with last-seen heartbeat', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({ worker_id: 'w-online', name: 'Online Mac', online: true }),
+      makeWorker({
+        worker_id: 'w-offline',
+        name: 'Offline Mac',
+        online: false,
+        last_seen_at: '2026-07-22 01:00:00',
+      }),
+    ])
     renderIndicator()
     expect(screen.getByText('已注册 Worker')).toBeInTheDocument()
-    expect(screen.getByText('Online Mac')).toBeInTheDocument()
+    await screen.findByText('Online Mac')
     expect(screen.getByText('Offline Mac')).toBeInTheDocument()
     expect(screen.getByTitle('最近心跳 2026-07-22 02:15:31')).toHaveTextContent(
       '在线'
@@ -244,55 +243,51 @@ describe('AgentStatusIndicator', () => {
     )
   })
 
-  it('filters workers by allowed workspaces; empty list means all workspaces', () => {
-    useExecutorsStore.setState({
-      workers: [
-        makeWorker({ worker_id: 'w-global', name: 'Global Mac' }),
-        makeWorker({
-          worker_id: 'w-scoped',
-          name: 'Scoped Mac',
-          allowed_workspaces: ['ws1'],
-        }),
-        makeWorker({
-          worker_id: 'w-other',
-          name: 'Other Mac',
-          allowed_workspaces: ['ws2'],
-        }),
-      ],
-    })
+  it('filters workers by allowed workspaces; empty list means all workspaces', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({ worker_id: 'w-global', name: 'Global Mac' }),
+      makeWorker({
+        worker_id: 'w-scoped',
+        name: 'Scoped Mac',
+        allowed_workspaces: ['ws1'],
+      }),
+      makeWorker({
+        worker_id: 'w-other',
+        name: 'Other Mac',
+        allowed_workspaces: ['ws2'],
+      }),
+    ])
     renderIndicator()
-    expect(screen.getByText('Global Mac')).toBeInTheDocument()
+    await screen.findByText('Global Mac')
     expect(screen.getByText('Scoped Mac')).toBeInTheDocument()
     expect(screen.queryByText('Other Mac')).not.toBeInTheDocument()
   })
 
-  it('does not show revoked workers', () => {
-    useExecutorsStore.setState({
-      workers: [
-        makeWorker({
-          worker_id: 'w-revoked',
-          name: 'Revoked Mac',
-          revoked: true,
-        }),
-      ],
-    })
+  it('does not show revoked workers', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({
+        worker_id: 'w-revoked',
+        name: 'Revoked Mac',
+        revoked: true,
+      }),
+    ])
     renderIndicator()
+    // 等 workers 查询 resolve 后再断言缺失，避免抢在数据到达之前。
+    await act(async () => {})
     expect(screen.queryByText('Revoked Mac')).not.toBeInTheDocument()
     // Local agent rows without a registered Worker still render.
     expect(screen.getByText('Main')).toBeInTheDocument()
   })
 
-  it('merges registered worker info and workspace workload into one row', () => {
-    useExecutorsStore.setState({
-      workers: [
-        makeWorker({
-          worker_id: 'mac-air',
-          name: 'MacbookAir',
-          online: true,
-          max_concurrency: 30,
-        }),
-      ],
-    })
+  it('merges registered worker info and workspace workload into one row', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({
+        worker_id: 'mac-air',
+        name: 'MacbookAir',
+        online: true,
+        max_concurrency: 30,
+      }),
+    ])
     mockAgents = [
       makeAgentStatus({
         id: 'mac-air',
@@ -304,25 +299,23 @@ describe('AgentStatusIndicator', () => {
       }),
     ]
     renderIndicator()
+    await screen.findByText('在线')
     expect(screen.getAllByText('MacbookAir')).toHaveLength(1)
     expect(screen.getByText('忙碌 3/30')).toBeInTheDocument()
-    expect(screen.getByText('在线')).toBeInTheDocument()
   })
 
-  it('falls back to worker capacity when no workload row exists yet', () => {
-    useExecutorsStore.setState({
-      workers: [
-        makeWorker({
-          worker_id: 'w-idle',
-          name: 'Idle Mac',
-          online: true,
-          max_concurrency: 10,
-        }),
-      ],
-    })
+  it('falls back to worker capacity when no workload row exists yet', async () => {
+    listAgentWorkersMock.mockResolvedValue([
+      makeWorker({
+        worker_id: 'w-idle',
+        name: 'Idle Mac',
+        online: true,
+        max_concurrency: 10,
+      }),
+    ])
     mockAgents = []
     renderIndicator()
-    expect(screen.getByText('Idle Mac')).toBeInTheDocument()
+    await screen.findByText('Idle Mac')
     expect(screen.getByText('空闲 0/10')).toBeInTheDocument()
   })
 })

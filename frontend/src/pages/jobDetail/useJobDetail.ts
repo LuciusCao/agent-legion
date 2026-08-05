@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQueryClient } from '@tanstack/react-query'
 import { fetchJobDetail, deleteJob } from '../../api'
 import { rerunJob, runToJob } from '../../api/jobApi'
 import { useUiStore } from '../../stores/uiStore'
-import { useExecutorsStore } from '../../stores/executorsStore'
+import { invalidateAgentWorkers } from '../../lib/agentWorkersInvalidation'
 import type { JobDetail } from '../../types/jobTypes'
 import { useContinueJobAction } from './useContinueJobAction'
 import { pageSubtitle } from './jobDetailTitle'
@@ -16,6 +17,7 @@ export function useJobDetail(
   jobId: string | undefined
 ) {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const { setPageTitle, setPageSubtitle } = useUiStore()
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [error, setError] = useState('')
@@ -46,8 +48,8 @@ export function useJobDetail(
 
   useEffect(() => {
     // Refresh executor visibility once on job detail mount.
-    void useExecutorsStore.getState().refreshWorkers()
-  }, [])
+    invalidateAgentWorkers(queryClient)
+  }, [queryClient])
 
   useEffect(() => {
     if (!jobId) return

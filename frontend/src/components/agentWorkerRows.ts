@@ -1,4 +1,4 @@
-import type { WorkerSummary } from '../stores/executorsStore'
+import type { AgentWorkerSummary as WorkerSummary } from '../api/workerTokens'
 import type { AgentStatus } from '../types'
 
 export interface WorkerRow {

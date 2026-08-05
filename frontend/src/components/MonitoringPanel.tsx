@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react'
-import { fetchOpsMetrics } from '../api/metrics'
+import { useQuery } from '@tanstack/react-query'
 import type { OpsGranularity } from '../api/metrics'
 import { listAgentWorkers } from '../api/workerTokens'
+import { queryKeys } from '../lib/queryKeys'
+import { useOpsMetrics } from '../hooks/useOpsMetrics'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
 import { fmt, fmtDuration, makeTimeFormatter } from '../lib/monitoringFormat'
@@ -13,7 +15,6 @@ import {
   QueueSummaryCards,
 } from './MonitoringQueueSection'
 import type { ChartSeries } from '../lib/metricsChartOptions'
-import { useAsync } from '../hooks/useAsync'
 import styles from './MonitoringPanel.module.css'
 
 const REFRESH_MS = 30_000
@@ -40,19 +41,21 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
   const [workerId, setWorkerId] = useState('')
 
   // Worker 列表拉取失败不阻塞监控数据，仅不提供过滤选项（error 不消费）。
-  const { data: workerList } = useAsync(() => listAgentWorkers(), [])
+  const { data: workerList } = useQuery({
+    queryKey: queryKeys.agentWorkers(),
+    queryFn: listAgentWorkers,
+  })
   const workers = workerList ?? []
 
   // workspace 与 worker 两种过滤不可叠加（采样行各属其类）；ws 视图隐藏过滤器。
-  const { data, loading, error } = useAsync(
-    () =>
-      fetchOpsMetrics({
-        granularity,
-        ...(workerId && !workspaceId ? { worker_id: workerId } : {}),
-        ...(workspaceId ? { workspace_id: workspaceId } : {}),
-      }),
-    [granularity, workerId, workspaceId],
-    { refetchInterval: REFRESH_MS }
+  // 与 QueueDepthChartSection 同参数时共享同一 queryKey，自动合并为一次请求。
+  const { data, isPending, error } = useOpsMetrics(
+    {
+      granularity,
+      ...(workerId && !workspaceId ? { worker_id: workerId } : {}),
+      ...(workspaceId ? { workspace_id: workspaceId } : {}),
+    },
+    REFRESH_MS
   )
 
   const formatTime = useMemo(
@@ -72,7 +75,7 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
   const hourlyRuns = summary?.recent_hour_runs
 
   if (error) {
-    return <p className={styles.error}>监控数据加载失败：{error}</p>
+    return <p className={styles.error}>监控数据加载失败：{error.message}</p>
   }
 
   return (
@@ -152,7 +155,7 @@ export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
       <div className={styles.chartSection}>
         <h3>
           {workspaceId ? '执行并发' : 'Worker 与执行并发'}
-          {loading && !data ? '（加载中…）' : ''}
+          {isPending ? '（加载中…）' : ''}
         </h3>
         <MetricsChart
           buckets={buckets}

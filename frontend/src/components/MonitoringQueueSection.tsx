@@ -1,7 +1,6 @@
 import { useMemo } from 'react'
-import { fetchOpsMetrics } from '../api/metrics'
 import type { OpsGranularity, OpsMetricsResponse } from '../api/metrics'
-import { useAsync } from '../hooks/useAsync'
+import { useOpsMetrics } from '../hooks/useOpsMetrics'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { MetricsChart } from './MetricsChart'
 import type { ChartSeries } from '../lib/metricsChartOptions'
@@ -133,14 +132,10 @@ export function QueueDepthChartSection({
   workspaceId?: string
 }) {
   // 与监控面板同频（30s）刷新；全局视图不带过滤，ws 视图按 workspace 过滤。
-  const { data, loading } = useAsync(
-    () =>
-      fetchOpsMetrics({
-        granularity,
-        ...(workspaceId ? { workspace_id: workspaceId } : {}),
-      }),
-    [granularity, workspaceId],
-    { refetchInterval: 30_000 }
+  // 参数与 MonitoringPanel 主查询一致时共享 queryKey，合并为一次请求。
+  const { data, isPending } = useOpsMetrics(
+    { granularity, ...(workspaceId ? { workspace_id: workspaceId } : {}) },
+    30_000
   )
   const buckets = useMemo(
     () => (data ? fillWindowBuckets(data.buckets, granularity) : []),
@@ -150,7 +145,7 @@ export function QueueDepthChartSection({
     <div className={panelStyles.chartSection}>
       <h3>
         队列深度{workspaceId ? '' : '（全局）'}
-        {loading && !data ? '（加载中…）' : ''}
+        {isPending ? '（加载中…）' : ''}
       </h3>
       <MetricsChart
         buckets={buckets}
