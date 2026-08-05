@@ -20,14 +20,32 @@ def test_workspace_secrets_table_exists() -> None:
     assert columns == {"workspace_id", "name", "ciphertext", "created_at", "updated_at"}
 
 
-def test_schema_v21_recorded() -> None:
-    assert SCHEMA_VERSION == 21
+def test_schema_v22_recorded() -> None:
+    assert SCHEMA_VERSION == 22
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=?", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "global_settings"
+    assert row["name"] == "ops_queued_and_agent_queue_signals"
+
+
+def test_schema_v22_queue_health_objects_exist() -> None:
+    """v22: ops_metric_samples.queued 列与 agent_queue_signals 单行表。"""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        columns = {
+            row["column_name"]
+            for row in conn.execute(
+                "select column_name from information_schema.columns"
+                " where table_schema=current_schema() and table_name='ops_metric_samples'"
+            ).fetchall()
+        }
+        signal = conn.execute(
+            "select 1 from information_schema.tables"
+            " where table_schema=current_schema() and table_name='agent_queue_signals'"
+        ).fetchone()
+    assert "queued" in columns
+    assert signal is not None
 
 
 def test_agent_requests_done_recent_index_exists() -> None:
