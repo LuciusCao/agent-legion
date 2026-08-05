@@ -78,7 +78,7 @@
     "frontend/src/components/MaterialIcon.tsx": 28,
     "frontend/src/components/MetricsChart.module.css": 66,
     "frontend/src/components/MetricsChart.tsx": 123,
-    "frontend/src/components/MonitoringHeader.tsx": 89,
+    "frontend/src/components/MonitoringHeader.tsx": 87,
     "frontend/src/components/MonitoringPanel.module.css": 100,
     "frontend/src/components/MonitoringPanel.tsx": 186,
     "frontend/src/components/MonitoringQueueSection.module.css": 37,
