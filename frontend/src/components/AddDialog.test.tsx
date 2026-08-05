@@ -3,6 +3,12 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { AddDialog } from './AddDialog'
 import { api, fetchWorkflowDefinition } from '../api'
 import { useUiStore } from '../stores/uiStore'
+import { TestQueryProvider } from '../testing/testQueryClient'
+import type { ReactElement } from 'react'
+
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -32,12 +38,14 @@ describe('AddDialog', () => {
   })
 
   it('renders dialog with correct title', () => {
-    render(<AddDialog open={true} onClose={vi.fn()} />)
+    renderWithClient(<AddDialog open={true} onClose={vi.fn()} />)
     expect(screen.getByText('添加资源')).toBeInTheDocument()
   })
 
   it('disables submit button when input is empty and enables after typing', () => {
-    render(<AddDialog open={true} onClose={vi.fn()} context="video" />)
+    renderWithClient(
+      <AddDialog open={true} onClose={vi.fn()} context="video" />
+    )
 
     const button = screen.getByRole('button', { name: '加入队列' })
     expect(button).toBeDisabled()
@@ -48,7 +56,9 @@ describe('AddDialog', () => {
   })
 
   it('switches the video content type and updates the input label', () => {
-    render(<AddDialog open={true} onClose={vi.fn()} context="video" />)
+    renderWithClient(
+      <AddDialog open={true} onClose={vi.fn()} context="video" />
+    )
 
     fireEvent.click(screen.getByText('题目'))
 
@@ -85,7 +95,7 @@ describe('AddDialog', () => {
       })
       .mockRejectedValueOnce(new Error('Backend failure'))
 
-    render(
+    renderWithClient(
       <AddDialog
         open={true}
         onClose={vi.fn()}
@@ -96,6 +106,10 @@ describe('AddDialog', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('导入模式')).toBeInTheDocument()
+    })
+    // 等工作流定义到达（模式选项就绪）后再操作。
+    await waitFor(() => {
+      expect(screen.getAllByText('按题目ID批量').length).toBeGreaterThan(0)
     })
 
     enterResourceIds('5cf31cfe5805488fe22aea87b3853267')
@@ -150,7 +164,7 @@ describe('AddDialog', () => {
         jobs: [],
       })
 
-    render(
+    renderWithClient(
       <AddDialog
         open={true}
         onClose={vi.fn()}
@@ -161,6 +175,10 @@ describe('AddDialog', () => {
 
     await waitFor(() => {
       expect(screen.getByLabelText('导入模式')).toBeInTheDocument()
+    })
+    // 等工作流定义到达（模式选项就绪）后再操作。
+    await waitFor(() => {
+      expect(screen.getAllByText('按知识点批量').length).toBeGreaterThan(0)
     })
 
     selectMode('按题目ID批量')
@@ -237,7 +255,7 @@ describe('AddDialog', () => {
         jobs: [],
       })
 
-    const { rerender } = render(
+    const { rerender } = renderWithClient(
       <AddDialog
         open={false}
         onClose={vi.fn()}
@@ -247,16 +265,22 @@ describe('AddDialog', () => {
     )
 
     rerender(
-      <AddDialog
-        open={true}
-        onClose={vi.fn()}
-        context="workspace"
-        workspaceId="ws1"
-      />
+      <TestQueryProvider>
+        <AddDialog
+          open={true}
+          onClose={vi.fn()}
+          context="workspace"
+          workspaceId="ws1"
+        />
+      </TestQueryProvider>
     )
 
     await waitFor(() => {
       expect(screen.getByLabelText('导入模式')).toBeInTheDocument()
+    })
+    // 等工作流定义到达（模式选项就绪）后再操作。
+    await waitFor(() => {
+      expect(screen.getAllByText('按知识点批量').length).toBeGreaterThan(0)
     })
 
     selectMode('按题目ID批量')
@@ -311,7 +335,7 @@ describe('AddDialog', () => {
       },
     })
 
-    render(
+    renderWithClient(
       <AddDialog
         open={true}
         onClose={vi.fn()}

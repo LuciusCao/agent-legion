@@ -1,5 +1,6 @@
+import { useQuery } from '@tanstack/react-query'
 import { api } from '../../api'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { useWorkspaces } from '../../hooks/useWorkspaces'
 import type { WorkspaceResponse } from '../../types'
 
@@ -9,15 +10,16 @@ export function useWorkspaceDisplayName(workspaceId: string | undefined) {
     (workspace) => workspace.id === workspaceId
   )?.name
 
-  const { data: loaded } = useAsync(async () => {
-    if (!workspaceId || workspaceName) return null
-    const result = await api<WorkspaceResponse>(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}`
-    )
-    return { workspaceId, name: result.workspace.name || null }
-  }, [workspaceId, workspaceName])
+  // 列表里没有该 workspace 时的单条回退加载；与 AddDialog 共享同一 key。
+  const { data: loadedName } = useQuery({
+    queryKey: extraQueryKeys.workspace(workspaceId ?? ''),
+    queryFn: () =>
+      api<WorkspaceResponse>(
+        `/api/workspaces/${encodeURIComponent(workspaceId ?? '')}`
+      ),
+    select: (result) => result.workspace.name || null,
+    enabled: !!workspaceId && !workspaceName,
+  })
 
-  const loadedName =
-    loaded && loaded.workspaceId === workspaceId ? loaded.name : null
   return workspaceName || loadedName || workspaceId || 'workspace'
 }

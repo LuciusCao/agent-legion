@@ -4,6 +4,8 @@ import { IconButton } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 import { useAuthStore } from '../stores/authStore'
 import { useSettingsScrollSpy } from '../hooks/useSettingsScrollSpy'
+import { useSettingStoreHydration } from '../hooks/useWorkspaceSettingsQuery'
+import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
@@ -24,7 +26,6 @@ export function SettingsPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
   const {
-    setWorkspaceId,
     workspaceName,
     workspaceDescription,
     settings,
@@ -34,18 +35,24 @@ export function SettingsPage() {
     isDirty,
     isSaving,
     saveError,
-    workflowDefinition,
-    executorCatalog,
     executorConfiguration,
     testStatus,
     saveAll,
     testConnection,
     resetTestStatus,
-    fetchSettings,
-    fetchWorkflowDefinition,
   } = useSettingStore()
 
+  // 服务端快照经 react-query 拉取并水合进 store（切换工作区重置草稿；
+  // 非 dirty 时同步后台 refetch）。loadError 由 hook 写入 saveError。
+  const settingsQuery = useSettingStoreHydration(workspaceId)
+  const settingsSnapshot = settingsQuery.data
+  const { data: workflowDefinitionData } = useWorkflowDefinitionQuery(
+    settings.workflowKey
+  )
+  const workflowDefinition = workflowDefinitionData ?? null
+
   const codeBoundNodeKeys = useMemo(() => {
+    const executorCatalog = settingsSnapshot?.executorCatalog ?? []
     if (!workflowDefinition) return new Set<string>()
     const allocatedIds = new Set(
       executorConfiguration.allocations.map((a) => a.executor_id)
@@ -66,7 +73,7 @@ export function SettingsPage() {
         })
         .map((node) => node.key)
     )
-  }, [workflowDefinition, executorConfiguration, executorCatalog])
+  }, [workflowDefinition, executorConfiguration, settingsSnapshot])
 
   const hasCodeNodes = codeBoundNodeKeys.size > 0
 
@@ -91,16 +98,8 @@ export function SettingsPage() {
     useSettingsScrollSpy(navItems)
 
   useEffect(() => {
-    if (!workspaceId) return
-    setWorkspaceId(workspaceId)
     resetTestStatus()
-    void fetchSettings(workspaceId)
-  }, [workspaceId, setWorkspaceId, resetTestStatus, fetchSettings])
-
-  useEffect(() => {
-    if (!settings.workflowKey) return
-    void fetchWorkflowDefinition()
-  }, [settings.workflowKey, fetchWorkflowDefinition])
+  }, [workspaceId, resetTestStatus])
 
   if (!workspaceId) return null
 

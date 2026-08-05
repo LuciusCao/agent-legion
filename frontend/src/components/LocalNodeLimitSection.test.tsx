@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { LocalNodeLimitSection } from './LocalNodeLimitSection'
 import { useSettingStore } from '../stores/settingStore'
@@ -59,12 +59,26 @@ const workflowDefinition = {
   ],
 }
 
+// executorCatalog/workflowDefinition 已迁入 react-query；mock 快照 hook，
+// draft（executorConfiguration）仍写 store。
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useWorkspaceSettingsSnapshot: () => ({
+    workflowDefinition,
+    executorCatalog: catalog,
+    agentRoutes: [],
+  }),
+}))
+
 describe('LocalNodeLimitSection', () => {
   beforeEach(() => {
     useSettingStore.setState({
       workspaceId: 'ws1',
-      executorCatalog: catalog,
-      workflowDefinition,
+      settings: {
+        entityType: 'question',
+        intakeModes: [],
+        labelOverrides: {},
+        workflowKey: 'sample_workflow',
+      },
       executorConfiguration: {
         allocations: [
           {

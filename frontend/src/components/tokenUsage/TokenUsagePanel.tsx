@@ -7,18 +7,15 @@ import {
   Chip,
   Button,
 } from '@mui/material'
-import { fetchWorkspaceTokenUsage } from '../../api/tokenUsage'
-import { useAsync } from '../../hooks/useAsync'
+import { toErrorMessage } from '../../lib/queryError'
 import { MaterialIcon } from '../MaterialIcon'
+import {
+  useWorkspaceTokenUsage,
+  type TokenUsageFilters,
+} from './useWorkspaceTokenUsage'
 import styles from './TokenUsagePanel.module.css'
 
 type GroupBy = 'node' | 'model' | 'skill_version' | 'node_skill_version'
-
-interface FilterState {
-  nodeKey: string
-  model: string
-  skillVersion: string
-}
 
 const GROUPS: { key: GroupBy; label: string }[] = [
   { key: 'node', label: '按节点' },
@@ -44,7 +41,7 @@ function formatCoverage(value: number | null | undefined) {
 
 export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
   const [groupBy, setGroupBy] = useState<GroupBy>('node')
-  const [filters, setFilters] = useState<FilterState>({
+  const [filters, setFilters] = useState<TokenUsageFilters>({
     nodeKey: '',
     model: '',
     skillVersion: '',
@@ -56,13 +53,10 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
     setExpanded(new Set())
   }, [workspaceId, groupBy, filters])
 
-  const { data, loading, error } = useAsync(() => {
-    const params = new URLSearchParams({ group_by: groupBy })
-    if (filters.nodeKey) params.set('node_key', filters.nodeKey)
-    if (filters.model) params.set('model', filters.model)
-    if (filters.skillVersion) params.set('skill_version', filters.skillVersion)
-    return fetchWorkspaceTokenUsage(workspaceId, params)
-  }, [workspaceId, groupBy, filters])
+  const query = useWorkspaceTokenUsage(workspaceId, groupBy, filters)
+  const data = query.data ?? null
+  const loading = query.isLoading
+  const error = toErrorMessage(query.error)
 
   const summary = data?.summary
 

@@ -1,19 +1,28 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ExecutorAllocationRemovalDialog } from './ExecutorAllocationRemovalDialog'
 import { useSettingStore } from '../stores/settingStore'
 
+// executorCatalog 已迁入 react-query；mock 快照 hook，draft 仍写 store。
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useWorkspaceSettingsSnapshot: () => ({
+    workflowDefinition: null,
+    executorCatalog: [
+      {
+        id: 'code-default',
+        kind: 'code' as const,
+        capabilities: ['ingest'],
+        global_capacity: 4,
+      },
+    ],
+    agentRoutes: [],
+  }),
+}))
+
 describe('ExecutorAllocationRemovalDialog', () => {
   beforeEach(() => {
     useSettingStore.setState({
-      executorCatalog: [
-        {
-          id: 'code-default',
-          kind: 'code' as const,
-          capabilities: ['ingest'],
-          global_capacity: 4,
-        },
-      ],
+      workspaceId: 'ws1',
       executorConfiguration: {
         allocations: [
           {

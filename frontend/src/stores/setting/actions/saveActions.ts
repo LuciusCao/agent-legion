@@ -1,5 +1,7 @@
 import { api } from '../../../api'
 import type { WorkspaceConfigurationResponse } from '../../../types'
+import { queryClient } from '../../../lib/queryClient'
+import { extraQueryKeys } from '../../../lib/queryKeysExtra'
 import {
   normalizeExecutorConfiguration,
   type SettingState,
@@ -36,8 +38,7 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
               ),
               node_bindings: executorConfiguration.bindings,
               node_limits: executorConfiguration.node_limits,
-              // null = unset: omit so the backend keeps the stored value
-              // (absent/null agent_capacity means "unchanged" on the PUT).
+              // null = unset：省略该字段，PUT 保留后端已存的 agent_capacity。
               ...(executorConfiguration.agent_capacity != null
                 ? { agent_capacity: executorConfiguration.agent_capacity }
                 : {}),
@@ -59,6 +60,10 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
           isDirty: false,
         })
         useUiStore.getState().showToast('设置已保存', 'success')
+        // 失效 settings 缓存，后台 refetch 同步刚保存的服务端状态。
+        void queryClient.invalidateQueries({
+          queryKey: extraQueryKeys.workspaceSettings(workspaceId),
+        })
       } catch (err) {
         const message = err instanceof Error ? err.message : '保存失败'
         set({ saveError: message })

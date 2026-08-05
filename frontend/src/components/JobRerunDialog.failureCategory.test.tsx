@@ -1,10 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { JobRerunDialog } from './JobRerunDialog'
 import { makeJob } from '../testing/fixtures'
 import type { WorkflowDefinitionRecord } from '../types'
 import type { FailedNodeRunItem } from '../types/failureTypes'
 import { fetchFailedNodeRuns } from '../api'
+import { TestQueryProvider } from '../testing/testQueryClient'
 
 vi.mock('../api', () => ({
   fetchFailedNodeRuns: vi.fn(),
@@ -54,7 +56,7 @@ function makeRun(overrides: Partial<FailedNodeRunItem>): FailedNodeRunItem {
 function renderDialog(
   overrides: Partial<Parameters<typeof JobRerunDialog>[0]> = {}
 ) {
-  return render(
+  return renderWithClient(
     <JobRerunDialog
       open
       allowFailedNodeMode
@@ -93,6 +95,10 @@ const workflowJobs = () => [
     workflow_key: 'question_content',
   }),
 ]
+
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
 
 describe('JobRerunDialog failure category mode', () => {
   beforeEach(() => {

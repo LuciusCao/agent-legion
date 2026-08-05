@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { fetchFailedNodeRuns } from '../../api'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import type { JobSummary } from '../../types'
 import type { FailureCategory } from '../../types/failureTypes'
 import {
@@ -51,16 +52,16 @@ export function useFailureCategories(
   const workflowKey = failureContext?.workflowKey
 
   // 加载失败时 error 不消费：chips 保持可见但不显示计数（静默降级）。
-  const { data: failedRuns } = useAsync(
-    async () => {
+  const { data: failedRuns } = useQuery({
+    queryKey: extraQueryKeys.failedNodeRuns(workspaceId ?? '', workflowKey),
+    queryFn: async () => {
       const data = await fetchFailedNodeRuns(workspaceId ?? '', {
         workflowKey,
       })
       return data.runs ?? []
     },
-    [failedMode, workspaceId, workflowKey],
-    { enabled: failedMode && !!workspaceId }
-  )
+    enabled: failedMode && !!workspaceId,
+  })
 
   const failedJobIds = useMemo(
     () => failedJobs.map((job) => job.id),

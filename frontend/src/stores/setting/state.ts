@@ -1,12 +1,16 @@
-import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../../types'
-import type {
-  ExecutorDefinition,
-  WorkspaceExecutorConfiguration,
-} from '../../types/executorTypes'
-import type { components } from '../../generated/api'
+import type { WorkspaceSettings } from '../../types'
+import type { WorkspaceExecutorConfiguration } from '../../types/executorTypes'
 
-export type WorkspaceAgentRouteEntry =
-  components['schemas']['WorkspaceAgentRouteEntry']
+/**
+ * hydrateSettings 的输入（由 useWorkspaceSettingsQuery 拉取组装）。
+ * 快照本体只存 react-query 缓存，store 只保留 draft 与 original* 基准。
+ */
+export interface HydrateSettingsInput {
+  workspaceName: string
+  workspaceDescription: string
+  settings: WorkspaceSettings
+  executorConfiguration: WorkspaceExecutorConfiguration
+}
 
 export type TestStatus = {
   state: 'idle' | 'testing' | 'success' | 'failed'
@@ -24,13 +28,10 @@ export type SettingState = {
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
-  workflowDefinition: WorkflowDefinitionRecord | null
   testStatus: TestStatus
-  executorCatalog: ExecutorDefinition[]
   executorConfiguration: WorkspaceExecutorConfiguration
   originalExecutorConfiguration: WorkspaceExecutorConfiguration | null
   pendingAllocationRemoval: string | null
-  agentRoutes: WorkspaceAgentRouteEntry[]
   setWorkspaceId: (id: string) => void
   setWorkspaceName: (name: string) => void
   setWorkspaceDescription: (description: string) => void
@@ -50,8 +51,7 @@ export type SettingState = {
     nodeKey: string,
     limit: number | null
   ) => void
-  fetchSettings: (workspaceId: string) => Promise<void>
-  fetchWorkflowDefinition: () => Promise<void>
+  hydrateSettings: (workspaceId: string, snapshot: HydrateSettingsInput) => void
   saveAll: () => Promise<void>
   testConnection: () => Promise<void>
   resetTestStatus: () => void

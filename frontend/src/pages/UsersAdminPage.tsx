@@ -1,10 +1,12 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { useAuthStore } from '../stores/authStore'
 import { createUser, listUsers, updateUser } from '../api/authApi'
 import type { UserResponse } from '../api/authApi'
-import { useAsync } from '../hooks/useAsync'
+import { extraQueryKeys } from '../lib/queryKeysExtra'
+import { toErrorMessage } from '../lib/queryError'
 import styles from './UsersAdminPage.module.css'
 
 function errorMessage(error: unknown): string {
@@ -19,19 +21,20 @@ export default function UsersAdminPage() {
   const [role, setRole] = useState<'admin' | 'member'>('member')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [refreshKey, setRefreshKey] = useState(0)
+  const queryClient = useQueryClient()
 
   const isAdmin = currentUser?.role === 'admin'
 
-  const { data: userList, error: listError } = useAsync(
-    () => listUsers(),
-    [isAdmin, refreshKey],
-    { enabled: isAdmin }
-  )
+  const { data: userList, error: listQueryError } = useQuery({
+    queryKey: extraQueryKeys.users(),
+    queryFn: listUsers,
+    enabled: isAdmin,
+  })
+  const listError = toErrorMessage(listQueryError)
   const users = userList ?? []
 
   function refresh() {
-    setRefreshKey((key) => key + 1)
+    void queryClient.invalidateQueries({ queryKey: extraQueryKeys.users() })
   }
 
   async function handleCreate() {

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   listMembers,
   listUsers,
@@ -6,7 +7,8 @@ import {
   removeMember,
 } from '../../api/authApi'
 import type { MemberResponse } from '../../api/authApi'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { toErrorMessage } from '../../lib/queryError'
 import settingsStyles from '../../pages/SettingsPage.module.css'
 import styles from './WorkspaceMembersSection.module.css'
 
@@ -23,14 +25,21 @@ export function WorkspaceMembersSection({ workspaceId }: Props) {
   const [role, setRole] = useState<'editor' | 'viewer'>('editor')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [refreshKey, setRefreshKey] = useState(0)
+  const queryClient = useQueryClient()
 
-  const { data: lists, error: listError } = useAsync(
-    () => Promise.all([listMembers(workspaceId), listUsers()]),
-    [workspaceId, refreshKey]
-  )
+  const { data: lists, error: listQueryError } = useQuery({
+    queryKey: extraQueryKeys.workspaceMembers(workspaceId),
+    queryFn: () => Promise.all([listMembers(workspaceId), listUsers()]),
+  })
+  const listError = toErrorMessage(listQueryError)
   const members = lists?.[0] ?? []
   const users = lists?.[1] ?? []
+
+  function refresh() {
+    void queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.workspaceMembers(workspaceId),
+    })
+  }
 
   const memberIds = new Set(members.map((m) => m.id))
   const candidates = users.filter(
@@ -44,7 +53,7 @@ export function WorkspaceMembersSection({ workspaceId }: Props) {
     try {
       await putMember(workspaceId, { user_id: selectedUserId, role })
       setSelectedUserId('')
-      setRefreshKey((key) => key + 1)
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     } finally {
@@ -57,7 +66,7 @@ export function WorkspaceMembersSection({ workspaceId }: Props) {
     setError('')
     try {
       await removeMember(workspaceId, member.id)
-      setRefreshKey((key) => key + 1)
+      refresh()
     } catch (err) {
       setError(errorMessage(err))
     }

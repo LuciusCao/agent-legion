@@ -1,6 +1,8 @@
 import { render, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { TokenUsageJobPanel } from './TokenUsageJobPanel'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 
 const mockFetchJobTokenUsage = vi.fn()
 
@@ -57,6 +59,10 @@ const baseResponse = {
   runs_without_usage: 0,
 }
 
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
+
 describe('TokenUsageJobPanel', () => {
   beforeEach(() => {
     mockFetchJobTokenUsage.mockReset()
@@ -64,7 +70,7 @@ describe('TokenUsageJobPanel', () => {
   })
 
   it('fetches and renders total summary', async () => {
-    render(<TokenUsageJobPanel jobId="j1" />)
+    renderWithClient(<TokenUsageJobPanel jobId="j1" />)
     await waitFor(() => {
       expect(mockFetchJobTokenUsage).toHaveBeenCalledWith('j1')
     })
@@ -73,7 +79,7 @@ describe('TokenUsageJobPanel', () => {
   })
 
   it('renders run rows', async () => {
-    render(<TokenUsageJobPanel jobId="j1" />)
+    renderWithClient(<TokenUsageJobPanel jobId="j1" />)
     expect(await screen.findByText('extract')).toBeInTheDocument()
     expect(screen.getByText('completed')).toBeInTheDocument()
   })
@@ -94,7 +100,7 @@ describe('TokenUsageJobPanel', () => {
       runs_with_usage: 1,
       runs_without_usage: 1,
     })
-    render(<TokenUsageJobPanel jobId="j1" />)
+    renderWithClient(<TokenUsageJobPanel jobId="j1" />)
     expect(await screen.findByText('未记录到 token 用量')).toBeInTheDocument()
   })
 })

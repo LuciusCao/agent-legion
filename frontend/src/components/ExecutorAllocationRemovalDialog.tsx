@@ -6,15 +6,16 @@ import {
   DialogTitle,
 } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
+import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 
 export function ExecutorAllocationRemovalDialog() {
   const {
     pendingAllocationRemoval,
-    executorCatalog,
     executorConfiguration,
     cancelExecutorRemoval,
     confirmExecutorRemoval,
   } = useSettingStore()
+  const { executorCatalog } = useWorkspaceSettingsSnapshot()
 
   if (!pendingAllocationRemoval) return null
 
