@@ -53,10 +53,10 @@ class JobExecutionControlMixin:
             cursor = conn.execute(
                 """
                 update jobs
-                set execution_mode=?,
-                    target_node_key=?,
+                set execution_mode=%s,
+                    target_node_key=%s,
                     updated_at=current_timestamp
-                where id=?
+                where id=%s
                 """,
                 (clean_mode, target, job_id),
             )
@@ -69,13 +69,13 @@ class JobExecutionControlMixin:
             raise ValueError("target_node_key is required")
         with self.connect() as conn:
             job = conn.execute(
-                "select workflow_key from jobs where id=?",
+                "select workflow_key from jobs where id=%s",
                 (job_id,),
             ).fetchone()
             if job is None:
                 raise ValueError("Job not found")
             node = conn.execute(
-                "select 1 from job_nodes where job_id=? and node_key=?",
+                "select 1 from job_nodes where job_id=%s and node_key=%s",
                 (job_id, target),
             ).fetchone()
             if node is None:
@@ -90,7 +90,7 @@ class JobExecutionControlMixin:
                 set execution_mode='full',
                     target_node_key=null,
                     updated_at=current_timestamp
-                where id=?
+                where id=%s
                 """,
                 (job_id,),
             )
@@ -104,9 +104,9 @@ class JobExecutionControlMixin:
                 """
                 update jobs
                 set execution_paused=1,
-                    pause_reason=?,
+                    pause_reason=%s,
                     updated_at=current_timestamp
-                where id=?
+                where id=%s
                 """,
                 (clean_reason, job_id),
             )

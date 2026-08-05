@@ -63,7 +63,7 @@ def _seed_old_root(old_root: Path) -> None:
                 id, workspace_id, workflow_key, source_type, source_id,
                 batch_id, title, storage_dir, status
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 JOB_ID,
@@ -82,7 +82,7 @@ def _seed_old_root(old_root: Path) -> None:
             insert into node_runs(
                 job_id, node_key, status, log_path, run_dir, session_dir
             )
-            values (?, ?, ?, ?, ?, ?)
+            values (%s, %s, %s, %s, %s, %s)
             """,
             (
                 JOB_ID,

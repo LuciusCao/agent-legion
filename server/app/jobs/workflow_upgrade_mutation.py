@@ -13,12 +13,12 @@ def upgrade_job_workflow(
     workflow_definition_snapshot_json: str,
     node_keys: list[str],
 ) -> None:
-    conn.execute("delete from job_nodes where job_id=?", (job_id,))
+    conn.execute("delete from job_nodes where job_id=%s", (job_id,))
     for node_key in node_keys:
         conn.execute(
             """
             insert into job_nodes(job_id, node_key, status, created_at)
-            values (?, ?, 'pending', current_timestamp)
+            values (%s, %s, 'pending', current_timestamp)
             """,
             (job_id, node_key),
         )
@@ -27,16 +27,16 @@ def upgrade_job_workflow(
         update jobs
         set status='queued',
             error_message='',
-            workflow_revision_id=?,
-            workflow_version=?,
-            workflow_definition_hash=?,
-            workflow_definition_snapshot_json=?,
+            workflow_revision_id=%s,
+            workflow_version=%s,
+            workflow_definition_hash=%s,
+            workflow_definition_snapshot_json=%s,
             execution_mode='full',
             target_node_key=null,
             execution_paused=0,
             pause_reason='',
             updated_at=current_timestamp
-        where id=?
+        where id=%s
         """,
         (
             workflow_revision_id,

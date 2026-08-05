@@ -41,22 +41,22 @@ class _UsageFilters:
 
     def usage_where(self, workspace_id: str) -> tuple[str, list[Any]]:
         """Return (where_sql, params) for node_run_token_usage filter queries."""
-        clauses = ["workspace_id = ?"]
+        clauses = ["workspace_id = %s"]
         params: list[Any] = [workspace_id]
         if self.node_key:
-            clauses.append("node_key = ?")
+            clauses.append("node_key = %s")
             params.append(self.node_key)
         if self.job_id:
-            clauses.append("job_id = ?")
+            clauses.append("job_id = %s")
             params.append(self.job_id)
         if self.provider:
-            clauses.append("provider = ?")
+            clauses.append("provider = %s")
             params.append(self.provider)
         if self.model:
-            clauses.append("model = ?")
+            clauses.append("model = %s")
             params.append(self.model)
         if self.skill_version:
-            clauses.append("skill_version = ?")
+            clauses.append("skill_version = %s")
             params.append(self.skill_version)
         return " and ".join(clauses), params
 
@@ -68,24 +68,24 @@ class _UsageFilters:
         excluded from the count. Runs without any usage row are still
         included.
         """
-        clauses = ["jobs.workspace_id = ?"]
+        clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
         if self.node_key:
-            clauses.append("node_runs.node_key = ?")
+            clauses.append("node_runs.node_key = %s")
             params.append(self.node_key)
         if self.job_id:
-            clauses.append("node_runs.job_id = ?")
+            clauses.append("node_runs.job_id = %s")
             params.append(self.job_id)
 
         usage_filter_clauses: list[str] = []
         if self.provider is not None:
-            usage_filter_clauses.append("(u.provider != ? or u.provider is null)")
+            usage_filter_clauses.append("(u.provider != %s or u.provider is null)")
             params.append(self.provider)
         if self.model is not None:
-            usage_filter_clauses.append("(u.model != ? or u.model is null)")
+            usage_filter_clauses.append("(u.model != %s or u.model is null)")
             params.append(self.model)
         if self.skill_version is not None:
-            usage_filter_clauses.append("(u.skill_version != ? or u.skill_version is null)")
+            usage_filter_clauses.append("(u.skill_version != %s or u.skill_version is null)")
             params.append(self.skill_version)
 
         if usage_filter_clauses:
@@ -175,7 +175,7 @@ def _query_workspace_group_aggregates(
             where {where}
             group by {group_by_sql}
             order by total_tokens desc
-            limit ?
+            limit %s
             """,
             params,
         ).fetchall()

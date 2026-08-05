@@ -23,7 +23,7 @@ def _fetch_sample(
     with read_connection(TEST_DATABASE_URL) as conn:
         return conn.execute(
             "select * from ops_metric_samples"
-            " where bucket_start = ? and worker_id = ? and workspace_id = ?",
+            " where bucket_start = %s and worker_id = %s and workspace_id = %s",
             (bucket_start, worker_id, workspace_id),
         ).fetchone()
 
@@ -31,12 +31,12 @@ def _fetch_sample(
 def _seed_workspace_job(job_id: str = "job-1", workspace_id: str = "ops-ws") -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, 'Ops') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Ops') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, ?, 'questions', 'question', ?) on conflict(id) do nothing",
+            " values (%s, %s, 'questions', 'question', %s) on conflict(id) do nothing",
             (job_id, workspace_id, job_id),
         )
 
@@ -55,7 +55,7 @@ def _insert_token_usage(
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status)"
-            " values (?, ?, 'generate', 'completed')",
+            " values (%s, %s, 'generate', 'completed')",
             (run_id, job_id),
         )
         conn.execute(
@@ -63,7 +63,7 @@ def _insert_token_usage(
             insert into node_run_token_usage(
               node_run_id, job_id, workspace_id, node_key, provider, model,
               input_tokens, output_tokens, cache_read_tokens, total_tokens, created_at
-            ) values (?, ?, ?, 'generate', 'p', 'm', ?, ?, ?, ?, ?)
+            ) values (%s, %s, %s, 'generate', 'p', 'm', %s, %s, %s, %s, %s)
             """,
             (
                 run_id,
@@ -85,7 +85,7 @@ def _insert_worker(worker_id: str, last_seen_at: datetime, *, revoked: bool = Fa
             insert into agent_workers(
               worker_id, name, runtimes_json, max_concurrency, protocol_version,
               token_hash, registered_at, last_seen_at, revoked_at
-            ) values (?, 'w', '["pi"]', 1, 1, 'hash', ?, ?, ?)
+            ) values (%s, 'w', '["pi"]', 1, 1, 'hash', %s, %s, %s)
             """,
             (worker_id, last_seen_at, last_seen_at, last_seen_at if revoked else None),
         )
@@ -106,7 +106,7 @@ def _insert_execution(
               execution_id, workspace_id, job_id, workflow_key, node_key,
               agent_id, agent_definition_hash, node_concurrency_limit, state,
               worker_id, node_run_id, queued_at, manifest_json
-            ) values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 5, ?, ?, ?, ?, '{}')
+            ) values (%s, 'ops-ws', 'job-1', 'questions', %s, 'agent-1', 'hash', 5, %s, %s, %s, %s, '{}')
             """,
             (execution_id, f"node-{execution_id}", state, worker_id, node_run_id, queued_at),
         )
@@ -130,7 +130,7 @@ def _insert_sample(
             insert into ops_metric_samples(
               bucket_start, worker_id, online_workers, active_executions,
               queued, input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 bucket_start,
@@ -166,7 +166,7 @@ def test_sample_once_upserts_existing_bucket() -> None:
     with read_connection(TEST_DATABASE_URL) as conn:
         count = conn.execute(
             "select count(*) as c from ops_metric_samples"
-            " where bucket_start = ? and worker_id = ''",
+            " where bucket_start = %s and worker_id = ''",
             (_bucket_start(_NOW),),
         ).fetchone()["c"]
     assert count == 1
@@ -270,7 +270,7 @@ def test_sample_once_upserts_per_worker_rows_idempotently() -> None:
     with read_connection(TEST_DATABASE_URL) as conn:
         rows = conn.execute(
             "select worker_id, workspace_id from ops_metric_samples"
-            " where bucket_start = ? order by worker_id, workspace_id",
+            " where bucket_start = %s order by worker_id, workspace_id",
             (bucket,),
         ).fetchall()
     # 全局行 + per-worker 行之外，claimed 执行还产生 per-workspace 行（v23）。
@@ -466,7 +466,7 @@ def _insert_node_run(
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status, started_at, finished_at)"
-            " values (?, ?, 'generate', ?, ?, ?)",
+            " values (%s, %s, 'generate', %s, %s, %s)",
             (run_id, job_id, status, started_at, finished_at),
         )
         if agent_run:
@@ -477,8 +477,8 @@ def _insert_node_run(
                     agent_id, agent_definition_hash, node_concurrency_limit,
                     state, queued_at, node_run_id, manifest_json
                 )
-                values (?, 'ops-ws', ?, 'questions', 'generate', 'agent-1', 'hash', 1,
-                        'done', ?, ?, '{}')
+                values (%s, 'ops-ws', %s, 'questions', 'generate', 'agent-1', 'hash', 1,
+                        'done', %s, %s, '{}')
                 """,
                 (f"exec-{run_id}", job_id, started_at, run_id),
             )
@@ -614,12 +614,12 @@ def test_query_summary_reports_queue_depth_oldest_and_sweeper_count() -> None:
         for index in range(2):
             conn.execute(
                 "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
-                " values ('job-1', ?, 'failed', 'unclaimable_model', current_timestamp)",
+                " values ('job-1', %s, 'failed', 'unclaimable_model', current_timestamp)",
                 (f"poison-{index}",),
             )
         conn.execute(
             "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
-            " values ('job-1', 'old-poison', 'failed', 'unclaimable_model', ?)",
+            " values ('job-1', 'old-poison', 'failed', 'unclaimable_model', %s)",
             (datetime.now(UTC) - timedelta(hours=2),),
         )
 
@@ -652,7 +652,7 @@ def test_queue_alert_ignores_stale_signal() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
-            " values (1, 'blocked', '{}', ?)",
+            " values (1, 'blocked', '{}', %s)",
             (datetime.now(UTC) - timedelta(minutes=30),),
         )
 
@@ -724,7 +724,7 @@ def test_query_series_scopes_to_workspace_rows() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into ops_metric_samples(bucket_start, worker_id, workspace_id, queued)"
-            " values (?, '', 'ops-ws', 7), (?, '', '', 99)",
+            " values (%s, '', 'ops-ws', 7), (%s, '', '', 99)",
             (bucket, bucket),
         )
 
@@ -745,7 +745,7 @@ def _insert_execution_ws(
               execution_id, workspace_id, job_id, workflow_key, node_key,
               agent_id, agent_definition_hash, node_concurrency_limit, state,
               queued_at, manifest_json
-            ) values (?, ?, ?, 'questions', ?, 'agent-1', 'hash', 5, ?, ?, '{}')
+            ) values (%s, %s, %s, 'questions', %s, 'agent-1', 'hash', 5, %s, %s, '{}')
             """,
             (execution_id, workspace_id, job_id, f"node-{execution_id}", state, queued_at),
         )
@@ -777,8 +777,8 @@ def test_queue_alert_stalled_scopes_to_workspace() -> None:
         bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=1)
         conn.execute(
             "insert into ops_metric_samples(bucket_start, worker_id, workspace_id,"
-            " online_workers, active_executions) values (?, '', '', 2, 0),"
-            " (?, '', 'ops-ws', 0, 0)",
+            " online_workers, active_executions) values (%s, '', '', 2, 0),"
+            " (%s, '', 'ops-ws', 0, 0)",
             (bucket, bucket),
         )
 

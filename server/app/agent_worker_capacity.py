@@ -7,7 +7,7 @@ from typing import Any
 
 def touch_worker(conn: Any, worker_id: str) -> None:
     conn.execute(
-        "update agent_workers set last_seen_at=current_timestamp where worker_id=?",
+        "update agent_workers set last_seen_at=current_timestamp where worker_id=%s",
         (worker_id,),
     )
 
@@ -23,7 +23,7 @@ def sync_declared_capacity(conn: Any, worker: Any, declared_max_concurrency: int
     max_concurrency = int(worker["max_concurrency"])
     if declared_max_concurrency is not None and declared_max_concurrency != max_concurrency:
         conn.execute(
-            "update agent_workers set max_concurrency=? where worker_id=?",
+            "update agent_workers set max_concurrency=%s where worker_id=%s",
             (declared_max_concurrency, worker["worker_id"]),
         )
         return declared_max_concurrency

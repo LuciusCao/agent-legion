@@ -1,9 +1,11 @@
-"""Ratchet guard against new SQLite-style ``?`` SQL placeholders.
+"""Permanent guard against SQLite-style ``?`` SQL placeholders.
 
-``server/app/db/dialect.py`` blindly rewrites every ``?`` to psycopg's ``%s``,
-which would corrupt Postgres JSON operators (``?``, ``?|``, ``?&``). New SQL
-must be written with ``%s`` directly; existing ``?`` usage is recorded in
-``config/architecture/sql-placeholders-baseline.json`` and may only shrink.
+The SQLite→PostgreSQL migration (issue #17) rewrote every placeholder to
+psycopg's ``%s`` and retired the blind-rewrite shim in
+``server/app/db/dialect.py`` (it would corrupt Postgres JSON operators
+``?``, ``?|``, ``?&``). The baseline is empty; any ``?`` inside a SQL-looking
+string literal is an error. ``postgres_sql`` keeps a runtime guard for
+dynamically assembled SQL this static check cannot see.
 """
 
 from __future__ import annotations

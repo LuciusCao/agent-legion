@@ -125,7 +125,7 @@ def sync_agent_definitions(
                 insert into agent_definitions(
                   agent_id, capability, runtime, definition_json,
                   definition_hash, enabled, updated_at
-                ) values (?, ?, ?, ?, ?, 1, current_timestamp)
+                ) values (%s, %s, %s, %s, %s, 1, current_timestamp)
                 on conflict(agent_id) do update set
                   capability=excluded.capability,
                   runtime=excluded.runtime,
@@ -153,7 +153,7 @@ def get_agent_definition(
     with read_connection(database_dsn) as conn:
         row = conn.execute(
             "select definition_json, definition_hash from agent_definitions"
-            " where agent_id=? and enabled=1",
+            " where agent_id=%s and enabled=1",
             (agent_id,),
         ).fetchone()
     if row is None or (definition_hash is not None and row["definition_hash"] != definition_hash):

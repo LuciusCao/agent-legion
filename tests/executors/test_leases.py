@@ -36,16 +36,16 @@ def lease_repo(tmp_path: Path):
 def _setup_workspace_and_job(job_db: JobQueries) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, ?)",
+            "insert into workspaces(id, name) values (%s, %s)",
             ("ws-1", "Test"),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (?, ?, ?, ?, ?)",
+            "values (%s, %s, %s, %s, %s)",
             ("job-1", "ws-1", "question_comprehension_info", "question", "q-1"),
         )
         conn.execute(
-            "insert into job_nodes(job_id, node_key, status) values (?, ?, ?)",
+            "insert into job_nodes(job_id, node_key, status) values (%s, %s, %s)",
             ("job-1", "review_keywords", "pending"),
         )
 

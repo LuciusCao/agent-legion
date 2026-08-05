@@ -55,10 +55,10 @@ def find_candidate_runs(
     ]
     params: list[Any] = []
     if workspace_id:
-        clauses.append("j.workspace_id = ?")
+        clauses.append("j.workspace_id = %s")
         params.append(workspace_id)
     if since:
-        clauses.append("r.finished_at >= ?::timestamptz")
+        clauses.append("r.finished_at >= %s::timestamptz")
         params.append(since)
     with read_connection(database_dsn) as conn:
         rows = conn.execute(
@@ -152,10 +152,10 @@ def mark_failed(
         for job_id, rows in by_job.items():
             busy = conn.execute(
                 """
-                select 1 from job_nodes where job_id=? and status='running'
+                select 1 from job_nodes where job_id=%s and status='running'
                 union
                 select 1 from agent_execution_requests
-                where job_id=? and state in ('queued', 'claimed', 'reporting')
+                where job_id=%s and state in ('queued', 'claimed', 'reporting')
                 """,
                 (job_id, job_id),
             ).fetchone()
@@ -180,9 +180,9 @@ def mark_failed(
                 updated = conn.execute(
                     """
                     update job_nodes
-                    set status='failed', error_message=?,
-                        failure_category=?, failure_detail=?
-                    where job_id=? and node_key=? and status='completed'
+                    set status='failed', error_message=%s,
+                        failure_category=%s, failure_detail=%s
+                    where job_id=%s and node_key=%s and status='completed'
                     """,
                     (message, category, detail, job_id, node_key),
                 )
@@ -195,7 +195,7 @@ def mark_failed(
                       job_id, node_key, status, finished_at, exit_code, error_message,
                       skill_version, runner, failure_category, failure_detail
                     )
-                    values (?, ?, 'failed', current_timestamp, 1, ?, ?, ?, ?, ?)
+                    values (%s, %s, 'failed', current_timestamp, 1, %s, %s, %s, %s, %s)
                     """,
                     (
                         job_id,
@@ -215,13 +215,13 @@ def mark_failed(
                 conn.execute(
                     """
                     update job_nodes
-                    set status='stale', stale_reason=?
-                    where job_id=? and node_key=? and status='completed'
+                    set status='stale', stale_reason=%s
+                    where job_id=%s and node_key=%s and status='completed'
                     """,
                     (STALE_REASON, job_id, node_key),
                 )
             failed_now = conn.execute(
-                "select 1 from job_nodes where job_id=? and status='failed'",
+                "select 1 from job_nodes where job_id=%s and status='failed'",
                 (job_id,),
             ).fetchone()
             if failed_now is not None:
@@ -229,7 +229,7 @@ def mark_failed(
                     """
                     update jobs
                     set status='failed', outcome='', updated_at=current_timestamp
-                    where id=? and status != 'running'
+                    where id=%s and status != 'running'
                     """,
                     (job_id,),
                 )

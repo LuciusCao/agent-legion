@@ -36,8 +36,8 @@ def save_revision_runtime_or_publish(
     definition_json = serialize_definition(definition)
     with job_db.connect() as conn:
         row = conn.execute(
-            "update workflow_revisions set definition_json=?, definition_hash=?"
-            " where id=? returning *",
+            "update workflow_revisions set definition_json=%s, definition_hash=%s"
+            " where id=%s returning *",
             (definition_json, definition_hash(definition_json), active["id"]),
         ).fetchone()
     if row is None:

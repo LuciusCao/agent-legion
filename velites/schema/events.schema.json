@@ -149,7 +149,7 @@
   ],
   "$defs": {
     "AgentEndEvent": {
-      "description": "`agent_end` event: final line of the stream. `error` is present only when\nthe run ended with an unrecovered model error (exit code stays 0, matching\nPi; the Host judges failure from the event stream). `reason` is present\nonly on budget exhaustion or cancellation (exit code also stays 0 — see\n`cancel.rs`).",
+      "description": "`agent_end` event: final line of the stream. `error` is present only when\nthe run ended with an unrecovered model error (exit code stays 0, matching\nPi; the Host judges failure from the event stream). `reason` is present\nonly on budget exhaustion or cancellation (exit code also stays 0 — see\n`cancel.rs`).\n\nSchema v2: unlike Pi, this event does NOT carry the full `messages`\nhistory — no Host consumer reads it, and every message already appeared\nin its own `message_end` / `tool_execution_end` event.",
       "type": "object",
       "properties": {
         "error": {
@@ -157,12 +157,6 @@
             "string",
             "null"
           ]
-        },
-        "messages": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Message"
-          }
         },
         "reason": {
           "anyOf": [
@@ -174,10 +168,7 @@
             }
           ]
         }
-      },
-      "required": [
-        "messages"
-      ]
+      }
     },
     "AgentStartEvent": {
       "description": "`agent_start` event: emitted once before the first turn.",
@@ -550,18 +541,9 @@
       ]
     },
     "TurnEndEvent": {
-      "description": "`turn_end` event: assistant message plus the tool results it triggered.",
+      "description": "`turn_end` event: turn boundary marker only (schema v2). Pi re-serializes\nthe assistant `message` and its `toolResults` here; velites does not — the\nassistant message is already carried by this turn's `message_end`, and the\ntool results by the `tool_execution_end.result.content` events.",
       "type": "object",
       "properties": {
-        "message": {
-          "$ref": "#/$defs/Message"
-        },
-        "toolResults": {
-          "type": "array",
-          "items": {
-            "$ref": "#/$defs/Message"
-          }
-        },
         "turnIndex": {
           "type": "integer",
           "format": "uint32",
@@ -569,9 +551,7 @@
         }
       },
       "required": [
-        "turnIndex",
-        "message",
-        "toolResults"
+        "turnIndex"
       ]
     },
     "TurnStartEvent": {

@@ -14,7 +14,7 @@ def get_binding(
     row = conn.execute(
         """
         select executor_id from workspace_node_bindings
-        where workspace_id=? and workflow_key=? and node_key=?
+        where workspace_id=%s and workflow_key=%s and node_key=%s
         """,
         (workspace_id, workflow_key, node_key),
     ).fetchone()
@@ -30,7 +30,7 @@ def get_local_node_limit(
     row = conn.execute(
         """
         select concurrency_limit from workspace_node_limits
-        where workspace_id=? and workflow_key=? and node_key=?
+        where workspace_id=%s and workflow_key=%s and node_key=%s
         """,
         (workspace_id, workflow_key, node_key),
     ).fetchone()
@@ -46,7 +46,7 @@ def has_local_node_limit(
     row = conn.execute(
         """
         select 1 from workspace_node_limits
-        where workspace_id=? and workflow_key=? and node_key=?
+        where workspace_id=%s and workflow_key=%s and node_key=%s
         """,
         (workspace_id, workflow_key, node_key),
     ).fetchone()

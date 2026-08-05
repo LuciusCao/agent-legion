@@ -44,25 +44,25 @@ def _seed_request(
     sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, ?) on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, %s) on conflict(id) do nothing",
             (workspace_id, workspace_id),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, ?, 'questions', 'question', ?)",
+            " values (%s, %s, 'questions', 'question', %s)",
             (job_id, workspace_id, job_id),
         )
-        conn.execute("insert into job_nodes(job_id, node_key) values (?, ?)", (job_id, node_key))
+        conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (?, 'questions', ?, 'agent', 'generator-v1')"
+            " values (%s, 'questions', %s, 'agent', 'generator-v1')"
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
             (workspace_id, node_key),
         )
         if workspace_cap is not None:
             conn.execute(
                 "insert into workspace_agent_capacities(workspace_id, max_concurrency)"
-                " values (?, ?)"
+                " values (%s, %s)"
                 " on conflict(workspace_id) do update"
                 " set max_concurrency=excluded.max_concurrency",
                 (workspace_id, workspace_cap),
@@ -166,7 +166,7 @@ def test_late_result_and_zombie_heartbeat_rejected_after_requeue(job_db) -> None
     assert first is not None
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), execution_id),
         )
     assert broker.sweep_expired_claims() == [execution_id]
@@ -201,13 +201,13 @@ def test_sweep_does_not_requeue_a_just_completed_node(job_db) -> None:
     assert claim is not None
     with job_db.connect() as conn:
         # Simulate completion.finish() having landed: lease released, node completed.
-        conn.execute("update executor_leases set status='released' where id=?", (claim.lease_id,))
+        conn.execute("update executor_leases set status='released' where id=%s", (claim.lease_id,))
         conn.execute(
             "update job_nodes set status='completed', finished_at=current_timestamp"
             " where job_id='finish-race-job' and node_key='generate'"
         )
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), execution_id),
         )
 
@@ -226,7 +226,7 @@ def test_claim_rotates_across_workspaces(job_db) -> None:
     # Force a global-FIFO-hostile ordering: every big-workspace request is older.
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set queued_at=? where workspace_id='big-workspace'",
+            "update agent_execution_requests set queued_at=%s where workspace_id='big-workspace'",
             (datetime.now(UTC) - timedelta(hours=1),),
         )
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
@@ -350,7 +350,7 @@ def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
     assert job_db.get_job("stale-def-job")["status"] == "failed"
     with job_db._connect_read() as conn:
         row = conn.execute(
-            "select state from agent_execution_requests where execution_id=?",
+            "select state from agent_execution_requests where execution_id=%s",
             (execution_id,),
         ).fetchone()
     assert row["state"] == "done"
@@ -365,7 +365,7 @@ def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
 def _request_state(job_db, execution_id: str) -> str:
     with job_db._connect_read() as conn:
         row = conn.execute(
-            "select state from agent_execution_requests where execution_id=?",
+            "select state from agent_execution_requests where execution_id=%s",
             (execution_id,),
         ).fetchone()
     return str(row["state"])
@@ -395,7 +395,7 @@ def test_unclaimable_model_requests_are_failed_by_sweeper(job_db) -> None:
     assert _request_state(job_db, execution_id) == "done"
     with job_db._connect_read() as conn:
         row = conn.execute(
-            "select outcome_json from agent_execution_requests where execution_id=?",
+            "select outcome_json from agent_execution_requests where execution_id=%s",
             (execution_id,),
         ).fetchone()
     outcome = json.loads(row["outcome_json"])
@@ -574,7 +574,7 @@ def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> No
         conn.execute(
             "insert into workflow_revisions("
             " id, workspace_id, workflow_key, version, status, definition_json, definition_hash)"
-            " values ('rev-1', 'test-workspace', 'questions', 1, 'active', ?, 'hash-1')",
+            " values ('rev-1', 'test-workspace', 'questions', 1, 'active', %s, 'hash-1')",
             (
                 json.dumps(
                     {
@@ -590,7 +590,7 @@ def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> No
         conn.execute("update jobs set workflow_revision_id='rev-1' where id='revision-job'")
         # The manifest only carries an unclaimable placeholder model.
         conn.execute(
-            "update agent_execution_requests set manifest_json=? where execution_id=?",
+            "update agent_execution_requests set manifest_json=%s where execution_id=%s",
             (
                 json.dumps(
                     {

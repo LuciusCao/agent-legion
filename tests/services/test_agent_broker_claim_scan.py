@@ -35,24 +35,24 @@ def _insert_job_rows(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, 'Test') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, ?, 'questions', 'question', ?)",
+            " values (%s, %s, 'questions', 'question', %s)",
             (job_id, workspace_id, job_id),
         )
-        conn.execute("insert into job_nodes(job_id, node_key) values (?, ?)", (job_id, node_key))
+        conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (?, 'questions', ?, 'agent', ?)"
+            " values (%s, 'questions', %s, 'agent', %s)"
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
             (workspace_id, node_key, agent_id),
         )
         conn.execute(
             "insert into workspace_agent_capacities(workspace_id, max_concurrency)"
-            " values (?, 20) on conflict(workspace_id) do nothing",
+            " values (%s, 20) on conflict(workspace_id) do nothing",
             (workspace_id,),
         )
 
@@ -113,7 +113,7 @@ def _pin_queue_order(job_db, job_ids: list[str]) -> None:
     with job_db.connect() as conn:
         for offset, job_id in enumerate(job_ids):
             conn.execute(
-                "update agent_execution_requests set queued_at=? where job_id=?",
+                "update agent_execution_requests set queued_at=%s where job_id=%s",
                 (base + timedelta(seconds=offset), job_id),
             )
 

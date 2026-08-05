@@ -57,17 +57,17 @@ def _fail_node(
         conn.execute(
             """
             update node_runs
-            set status='failed', error_message=?, failure_category=?, failure_detail=?,
+            set status='failed', error_message=%s, failure_category=%s, failure_detail=%s,
                 finished_at=current_timestamp
-            where id=?
+            where id=%s
             """,
             (error_message, category, detail, run["id"]),
         )
         conn.execute(
-            "update job_nodes set status='failed', error_message=? where job_id=? and node_key=?",
+            "update job_nodes set status='failed', error_message=%s where job_id=%s and node_key=%s",
             (error_message, job["id"], node_key),
         )
-        conn.execute("update jobs set status='failed' where id=?", (job["id"],))
+        conn.execute("update jobs set status='failed' where id=%s", (job["id"],))
         conn.execute("commit")
 
 
@@ -189,7 +189,7 @@ def test_recovered_node_is_not_rerun_again(rerun_service, job_db, workspace):
         conn.execute(
             """
             insert into node_runs(job_id, node_key, status, started_at, finished_at)
-            values (?, 'clean_and_parse', 'completed', current_timestamp, current_timestamp)
+            values (%s, 'clean_and_parse', 'completed', current_timestamp, current_timestamp)
             """,
             (job["id"],),
         )
@@ -215,7 +215,7 @@ def test_rerun_clears_failure_fields_on_job_nodes(rerun_service, job_db, workspa
     with job_db.connect() as conn:
         conn.execute(
             "update job_nodes set failure_category='technical',"
-            " failure_detail='stale_definition' where job_id=? and node_key=?",
+            " failure_detail='stale_definition' where job_id=%s and node_key=%s",
             (job["id"], "clean_and_parse"),
         )
         conn.execute("commit")

@@ -18,14 +18,14 @@ def _make_db(tmp_path):
 
 
 def _seed_workspace(conn, workspace_id="ws1"):
-    conn.execute("insert into workspaces(id, name) values (?, ?)", (workspace_id, workspace_id))
+    conn.execute("insert into workspaces(id, name) values (%s, %s)", (workspace_id, workspace_id))
 
 
 def _insert_job(conn, job_id, workspace_id="ws1"):
     conn.execute(
         """
         insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
-        values (?, ?, 'wf', 'question', ?)
+        values (%s, %s, 'wf', 'question', %s)
         """,
         (job_id, workspace_id, job_id),
     )
@@ -44,7 +44,7 @@ def _insert_node_run(
     conn.execute(
         """
         insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
-        values (?, ?, ?, ?, ?, ?)
+        values (%s, %s, %s, %s, %s, %s)
         """,
         (job_id, node_key, status, log_path, run_dir, finished_at),
     )

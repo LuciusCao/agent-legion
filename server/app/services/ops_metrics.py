@@ -76,14 +76,14 @@ class OpsMetricsService:
             online_workers = _fetch_one(
                 conn,
                 "select count(*) as c from agent_workers"
-                " where revoked_at is null and last_seen_at >= ?",
+                " where revoked_at is null and last_seen_at >= %s",
                 (online_since,),
             )["c"]
             online_worker_ids = {
                 row["worker_id"]
                 for row in conn.execute(
                     "select worker_id from agent_workers"
-                    " where revoked_at is null and last_seen_at >= ?",
+                    " where revoked_at is null and last_seen_at >= %s",
                     (online_since,),
                 ).fetchall()
             }
@@ -113,7 +113,7 @@ class OpsMetricsService:
                        coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
                        coalesce(sum(total_tokens), 0) as total_tokens
                 from node_run_token_usage
-                where created_at >= ? and created_at < ?
+                where created_at >= %s and created_at < %s
                 """,
                 (bucket_start, bucket_end),
             )
@@ -128,7 +128,7 @@ class OpsMetricsService:
                            coalesce(sum(u.total_tokens), 0) as total_tokens
                     from node_run_token_usage u
                     join agent_execution_requests r on r.node_run_id = u.node_run_id
-                    where u.created_at >= ? and u.created_at < ?
+                    where u.created_at >= %s and u.created_at < %s
                       and r.worker_id is not null
                     group by r.worker_id
                     """,
@@ -165,7 +165,7 @@ class OpsMetricsService:
         cutoff = (now or datetime.now(UTC)) - timedelta(days=self._retention_days)
         with write_transaction(self._database_dsn) as conn:
             result = conn.execute(
-                "delete from ops_metric_samples where bucket_start < ?", (cutoff,)
+                "delete from ops_metric_samples where bucket_start < %s", (cutoff,)
             )
             return result.rowcount
 

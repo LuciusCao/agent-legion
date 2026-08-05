@@ -63,7 +63,7 @@ def heartbeat(repo: ExecutorLeaseRepository, lease_id: str, ttl_seconds: int) ->
 def finish(repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult) -> bool:
     with write_transaction(repo.path) as conn:
         lease = conn.execute(
-            "select job_id from executor_leases where id=?", (lease_id,)
+            "select job_id from executor_leases where id=%s", (lease_id,)
         ).fetchone()
         job_id = str(lease["job_id"]) if lease else None
         result_flag = finish_lease(conn, lease_id, result, repo.data_dir)
@@ -89,7 +89,7 @@ def finish(repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult
 def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
-            "select job_id from executor_leases where status='active' and expires_at<=?",
+            "select job_id from executor_leases where status='active' and expires_at<=%s",
             (database_timestamp(now),),
         ).fetchall()
         affected_job_ids = list({str(row["job_id"]) for row in rows})
@@ -143,7 +143,7 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
             started_at=null,
             finished_at=null,
             created_at=current_timestamp
-        where job_id=? and status='running'
+        where job_id=%s and status='running'
           and not exists (
               select 1 from executor_leases l
               where l.job_id = job_nodes.job_id and l.status='active'
@@ -157,7 +157,7 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
         # next tick. A job with no running nodes at all only needs its status
         # resynced (stale 'running' with no lease).
         lease = conn.execute(
-            "select 1 from executor_leases where job_id=? and status='active' limit 1",
+            "select 1 from executor_leases where job_id=%s and status='active' limit 1",
             (job_id,),
         ).fetchone()
         if lease is not None:
@@ -176,8 +176,8 @@ def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -
             error_message='orphaned recovery',
             failure_category='technical',
             failure_detail='worker_orphaned',
-            finished_at=?
-        where job_id=? and status='running'
+            finished_at=%s
+        where job_id=%s and status='running'
           and not exists (
               select 1 from executor_leases l
               where l.job_id = node_runs.job_id and l.status='active'

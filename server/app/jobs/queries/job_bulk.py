@@ -59,7 +59,7 @@ class JobBulkQueriesMixin(JobQueriesBase):
             )
 
         with self.connect() as conn:
-            placeholders = ",".join("?" for _ in job_ids)
+            placeholders = ",".join("%s" for _ in job_ids)
             existing = conn.execute(
                 f"select * from jobs where id in ({placeholders})", job_ids
             ).fetchall()
@@ -79,7 +79,7 @@ class JobBulkQueriesMixin(JobQueriesBase):
                   id, workspace_id, workflow_key, source_type, source_id, batch_id, title,
                   storage_dir, stem, workflow_revision_id, workflow_version,
                   workflow_definition_hash, workflow_definition_snapshot_json
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict(id) do update set
                   title=excluded.title, stem=excluded.stem, batch_id=excluded.batch_id,
                   updated_at=current_timestamp
@@ -89,7 +89,7 @@ class JobBulkQueriesMixin(JobQueriesBase):
             conn.executemany(
                 """
                 insert into job_nodes(job_id, node_key, status, created_at)
-                values (?, ?, 'pending', current_timestamp)
+                values (%s, %s, 'pending', current_timestamp)
                 on conflict(job_id, node_key) do nothing
                 """,
                 [(job_id, node_key) for job_id in job_ids for node_key in node_keys],

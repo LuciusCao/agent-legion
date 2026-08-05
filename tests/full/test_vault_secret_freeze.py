@@ -59,7 +59,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     # Persistence: only ciphertext at rest, no plaintext anywhere in the DB row.
     with job_db.connect() as conn:
         row = conn.execute(
-            "select ciphertext from workspace_secrets where workspace_id=? and name=?",
+            "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
             (workspace_id, name),
         ).fetchone()
     assert row["ciphertext"] != PLAINTEXT

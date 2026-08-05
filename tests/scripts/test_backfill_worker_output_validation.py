@@ -122,8 +122,8 @@ def test_find_candidate_runs_filters_by_workspace_and_since(
     bwv.find_candidate_runs("dsn", workspace_id="ws-1", since="2026-07-01")
 
     sql, params = conn.queries[0]
-    assert "j.workspace_id = ?" in sql
-    assert "r.finished_at >= ?::timestamptz" in sql
+    assert "j.workspace_id = %s" in sql
+    assert "r.finished_at >= %s::timestamptz" in sql
     assert params == ["ws-1", "2026-07-01"]
 
 

@@ -207,7 +207,7 @@ def _read_shard_rows(worker: WorkflowWorkerThread, job_id: str, node_key: str) -
     with worker.job_db._connect_read() as conn:
         rows = conn.execute(
             "select shard_index, status, input_json from node_shards"
-            " where job_id=? and node_key=? order by shard_index",
+            " where job_id=%s and node_key=%s order by shard_index",
             (job_id, node_key),
         ).fetchall()
     return [dict(row) for row in rows]

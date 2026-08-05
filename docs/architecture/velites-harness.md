@@ -98,8 +98,8 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 | 事件 | 消费方 | 关键字段 |
 |---|---|---|
 | `session` | `shared/pi_events.py` allowlist / 日志渲染 | `sessionId`（可用 `--name` 等价标识） |
-| `agent_start` / `agent_end` | 日志渲染 | `messages`、`error`；M3 起 `agent_end` 增加可选 `reason`（`budget_exceeded` / `cancelled`，正常结束与模型错误时缺省） |
-| `turn_start` / `turn_end` | 日志渲染 | `turnIndex`、`message`、`toolResults` |
+| `agent_start` / `agent_end` | 日志渲染 | `error`；M3 起 `agent_end` 增加可选 `reason`（`budget_exceeded` / `cancelled`，正常结束与模型错误时缺省）。schema v2 起 `agent_end` 不再携带 `messages` 全量历史（无 Host 消费方，消息内容已由各 `message_end` / `tool_execution_end` 承载） |
+| `turn_start` / `turn_end` | 日志渲染 | `turnIndex`。schema v2 起 `turn_end` 不再携带 `message` / `toolResults` 冗余拷贝（同回合 `message_end` 与 `tool_execution_end.result.content` 已是唯一内容载体） |
 | `message_start` | 日志渲染 | `message` |
 | `message_end` | **token 计量 + 失败判定** | `message.usage.{input,output,cacheRead}`、`provider`、`model`、`stopReason`、`content[]`（`text`/`thinking`/`toolCall`）、`errorMessage`、可选 `timing`（见下） |
 | `auto_retry_start` | 重试可观测性（pi 兼容，无渲染） | `attempt`（1 起）、`maxAttempts`、`delayMs`、`error` |

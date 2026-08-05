@@ -26,12 +26,12 @@ class BatchQueriesMixin(BatchQueueQueriesMixin, JobQueriesBase):
                 f"""
                 insert into job_batches(
                   id, workspace_id, workflow_key, source_kind, source_payload_json, status
-                ) values (?, ?, ?, ?, ?, ?)
+                ) values (%s, %s, %s, %s, %s, %s)
                 {BATCH_UPSERT_CONFLICT}
                 """,
                 (batch_id, workspace_id, workflow_key, source_kind, payload_json, status),
             )
-            row = conn.execute("select * from job_batches where id=?", (batch_id,)).fetchone()
+            row = conn.execute("select * from job_batches where id=%s", (batch_id,)).fetchone()
         if row is None:
             raise RuntimeError("job batch upsert did not return a row")
         return dict(row)
@@ -40,5 +40,5 @@ class BatchQueriesMixin(BatchQueueQueriesMixin, JobQueriesBase):
         if not batch_id:
             return None
         with self._connect_read() as conn:
-            row = conn.execute("select * from job_batches where id=?", (batch_id,)).fetchone()
+            row = conn.execute("select * from job_batches where id=%s", (batch_id,)).fetchone()
         return dict(row) if row else None

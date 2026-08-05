@@ -30,7 +30,7 @@ def _make_job(db_path, job_id: str) -> None:
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
-            " title, status, storage_dir) values (?, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
+            " title, status, storage_dir) values (%s, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
             (job_id,),
         )
 
@@ -102,7 +102,7 @@ def test_put_reasserts_catalog_row_for_existing_blob(store):
     h = store.put(b"content")
     # Simulate the crash window: blob on disk, catalog row missing.
     with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute("delete from artifacts where hash = ?", (h,))
+        conn.execute("delete from artifacts where hash = %s", (h,))
     assert store.put(b"content") == h
     # artifact_refs.hash FK is satisfied again, so add_ref must not fail.
     store.add_ref("job-1", "node-a", "out.json", h)
@@ -131,6 +131,6 @@ def test_delete_unreferenced_tolerates_unlink_failure(store, monkeypatch):
     monkeypatch.undo()
     # The committed row deletion stands; the blob file remains as an orphan.
     with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute("select hash from artifacts where hash = ?", (h,)).fetchone()
+        row = conn.execute("select hash from artifacts where hash = %s", (h,)).fetchone()
     assert row is None
     assert (store.root / h[:2] / h).is_file()
