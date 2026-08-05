@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
-import { useJobStore } from '../stores/jobStore'
-import { matchesFilterPayload } from '../stores/job/filterLogic/matchesFilterPayload'
+import { matchesFilterPayload, useJobStore } from '../stores/jobStore'
 
 /**
  * Effective checked ids for the job list rows. In 'allMatching' selection

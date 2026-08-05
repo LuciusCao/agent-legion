@@ -39,7 +39,7 @@ _FORBIDDEN_PATTERN_WHITELIST = {
     # not a legacy Workflow node declaration.
     "server/app/events/agents.py",
     # Same WS envelope domain on the client: parses agent_busy/agent_idle payloads.
-    "frontend/src/stores/agentsWsMessages.ts",
+    "frontend/src/lib/agentsWsMessages.ts",
     # Job detail panel picks the new NodeRunResponse.runner API field (run provenance).
     "frontend/src/components/NodeDetailsPanel.tsx",
 }

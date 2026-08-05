@@ -56,10 +56,10 @@ frontend/src/
 │   └── ...
 ├── stores/                 # Zustand 状态管理
 │   ├── workspaceStore.ts
-│   ├── jobStore.ts
+│   ├── jobStore.ts         # job/ 家族唯一对外入口（shim re-export）
 │   ├── job/                # Job 领域子状态
 │   ├── setting/
-│   ├── artifactStore.ts
+│   ├── videoNodeStore.ts   # 视频节点面板（互动触发 + 产物持有）
 │   └── ...
 ├── hooks/                  # React 自定义 Hooks
 │   ├── useWorkspaceEvents.ts

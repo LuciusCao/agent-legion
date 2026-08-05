@@ -1,6 +1,5 @@
 import { FormControl, InputLabel, MenuItem, Select } from '@mui/material'
-import type { JobFilterConfig } from '../../stores/job/state'
-import type { FilterCounts } from '../../stores/job/selectors'
+import type { JobFilterConfig, FilterCounts } from '../../stores/jobStore'
 import filterStyles from '../FilterControls.module.css'
 
 export interface NodeOption {

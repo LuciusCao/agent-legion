@@ -1,6 +1,9 @@
 import { FormControl, InputLabel, MenuItem, Select } from '@mui/material'
-import type { JobFilterConfig, JobStatus } from '../../stores/job/state'
-import type { FilterCounts } from '../../stores/job/selectors'
+import type {
+  JobFilterConfig,
+  JobStatus,
+  FilterCounts,
+} from '../../stores/jobStore'
 import { JOB_STATUS_LABELS } from '../../labels'
 import filterStyles from '../FilterControls.module.css'
 

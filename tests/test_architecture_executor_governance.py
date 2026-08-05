@@ -37,9 +37,9 @@ WHITELIST: set[str] = {
     str(ROOT / "server" / "app" / "pipeline" / "runners.py"),
     # AgentStatusManager payloads key incremental WS envelopes by "agent" (Decision 8
     # of the phase4 agent-collaboration plan); the literal is its own status domain.
-    str(ROOT / "server" / "app" / "agents.py"),
+    str(ROOT / "server" / "app" / "events" / "agents.py"),
     # Same WS envelope domain on the client: parses agent_busy/agent_idle payloads.
-    str(ROOT / "frontend" / "src" / "stores" / "agentsWsMessages.ts"),
+    str(ROOT / "frontend" / "src" / "lib" / "agentsWsMessages.ts"),
     # Job detail panel picks the new NodeRunResponse.runner API field (run provenance).
     str(ROOT / "frontend" / "src" / "components" / "NodeDetailsPanel.tsx"),
 }
