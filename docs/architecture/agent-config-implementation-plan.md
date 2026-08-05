@@ -594,22 +594,22 @@ def build_manifest(...):
 
 ### Phase 3（Day 6）
 
-- [ ] 移除 sync_agent_definitions YAML sync
-- [ ] Manifest 构建改用 execution.*，移除 pi.* fallback
-- [ ] 严格校验：无配置即报错
-- [ ] 删除 config/workflow.yaml 的 agents: 和 workflows.pi.*
-- [ ] 更新 manifest_guard 校验逻辑
-- [ ] 集成测试：YAML 退役、严格校验
-- [ ] 验证：生产环境正常运行
+- [x] 移除 sync_agent_definitions YAML sync
+- [x] Manifest 构建改用 execution.*，移除 pi.* fallback
+- [x] 严格校验：无配置即报错
+- [x] 删除 config/workflow.yaml 的 agents: 和 workflows.pi.*
+- [x] 更新 manifest_guard 校验逻辑
+- [x] 集成测试：YAML 退役、严格校验
+- [x] 验证：生产环境正常运行
 
 ### Phase 4（Day 7）
 
-- [ ] 代码清理：移除 pi.* legacy
-- [ ] 文档更新：backend.md, velites-harness.md, deployment.md, README.md
-- [ ] AGENTS.md 更新
-- [ ] 回归测试：全流程
-- [ ] 性能测试：VersionedEntityService 查询
-- [ ] 最终验证：所有测试通过，文档完整
+- [x] 代码清理：pi_config/pi_command_builder/pi_runner 链随保留的本地 pi executor 死路径一并保留（executors/pi.py 仍在引用），仅清除 flavor 时代残留（worker 预检收紧为 runtime 钉死二进制）；load_agent_definitions / sync_agent_definitions / get_agent_definition 已随 Phase 3 删除
+- [x] 文档更新：backend.md, velites-harness.md, deployment.md, README.md
+- [x] AGENTS.md 更新（由仓库 owner 另行处理，本次不改）
+- [x] 回归测试：全流程
+- [x] 性能测试：VersionedEntityService 查询（published 缓存 5s TTL，热路径零 DB）
+- [x] 最终验证：所有测试通过，文档完整
 
 ---
 

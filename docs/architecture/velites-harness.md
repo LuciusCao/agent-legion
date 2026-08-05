@@ -78,9 +78,10 @@ agent 框架；依赖清单评审纳入 PR。
 
 worker 侧进程模型不变：`worker/executor.py` 每个 claim 起一个 velites 子进程
 （`subprocess.Popen(cwd=job_dir, start_new_session=True)`），stdout 即事件流。
-二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；实现选择经
-`AgentDefinition.runtime` + `workflows.pi.flavor` 分派
-（`server/app/agent_broker/runtime_dispatch.py`）——pi 不退役、长期保留，
+二进制经 Dockerfile 新增 rust build stage 打进 worker 镜像；命令构建由
+`AgentDefinition.runtime` 钉死分派（`server/app/agent_broker/dispatch.py`，
+EXEC-RUNTIME-DISPATCH-001）——pi → pi argv、velites → velites argv、
+openclaw 未实现即 fail-fast；pi 不退役、长期保留，
 灰度/回退均为单 agent 定义的单字段配置改动（详见 §9）。
 
 ## 4. 事件 Schema v1：pi 兼容子集（velites/json1）
@@ -323,34 +324,33 @@ fail-closed 报错，内置节点不受影响。
 
 ## 9. 与 Agent Legion 的集成与切换
 
-**当前模型（2026-08-03 起，升格 plan 落地）**：pi、openclaw、velites 是平级
-runtime，由 `AgentDefinition.runtime` 声明（`config/workflow.yaml` `agents:`
-段）。命令构建按 runtime 分派（EXEC-RUNTIME-DISPATCH-001）：`runtime: velites`
-钉死 velites 实现并忽略 flavor；`runtime: pi` 的实现由
-`workflows.pi.flavor: pi|velites` 选择；openclaw 未实现，dispatch fail-fast。
-灰度/回退粒度是单个 agent 定义的单字段 yaml 改动，操作手册见
+**当前模型（2026-08-05 起，agent 配置治理 phase 3 落地）**：pi、openclaw、
+velites 是平级 runtime，由 `AgentDefinition.runtime` 声明（定义存
+`versioned_entities` 表，Studio「Agent 管理」维护；yaml `agents:` 段与
+`workflows.pi` 块已退役，出现在 yaml 中启动即报错）。命令构建按 runtime
+钉死分派（EXEC-RUNTIME-DISPATCH-001）：`runtime: velites` → velites argv、
+`runtime: pi` → pi argv；openclaw 未实现，dispatch fail-fast。执行配置
+（provider/model/thinking）按严格链解析：节点 `execution.*` 覆盖 →
+workspace `default_agent_*` → 报错，无全局兜底。manifest 的执行块统一为
+`execution.*`（`binary/provider/model/thinking/timeout_seconds/no_sandbox`），
+不再有 `pi.*` 键。灰度/回退粒度是单个 agent 定义的单字段改动，操作手册见
 `docs/remote-execution-runbook.md` §6。
 
-**flavor 的现状定位（阶段 B，2026-08-04 金丝雀关闭后）**：flavor 已收窄为
-`runtime: pi` agent 的实现选择层——生产 tracked 默认 `flavor: velites`，
-其实际消费者仅剩保持 `runtime: pi` 的 4 个 video_knowledge agent（审题链路
-5 个 agent 已迁 `runtime: velites`）。**在 video agent 迁出 `runtime: pi` 或
-该链路下线之前，flavor 仍是决定它们跑 pi 还是 velites 二进制的活跃路径，
-不能删除或忽略**；配置与校验同时为既有配置文件保留启动兼容。新增 agent
-应直接声明 `runtime: velites`，不要再依赖 flavor 路径。
+**flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
+块一并删除。此前保持 `runtime: pi` 的 4 个 video_knowledge agent 已由
+schema v27 migration 翻转为 `runtime: velites`（新发 published 版本、归档
+旧版）。`PiRuntimeConfig` 只剩硬编码默认（flavor="pi"），专供保留的本地
+pi executor 死路径（`executors/pi.py` + PiRunner）。
 
 **pi 的定位（2026-08-04 用户决策）**：pi **不退役**，作为可选 runtime 长期
 保留——velites 是生产主力，pi 作为备选实现与对照基线继续可用
-（`runtime: pi` + `flavor: pi` 即完整 pi 路径）。flavor 相应长期保留为
-`runtime: pi` agent 的实现选择层，不做删除规划。若未来仅出于卫生目的清理
-（如 manifest `"pi"` 块改为 runtime 中性名、command_spec version 升级），
-另行立项评估，与退役无关。
+（`runtime: pi` 即完整 pi 路径）。若未来仅出于卫生目的清理
+（如 command_spec version 升级），另行立项评估，与退役无关。
 
-**回退**：单 agent 异常把该定义迁回 `runtime: pi`（flavor 为 velites 时仍跑
-velites 二进制；要回 pi 二进制需同时落 `flavor: pi`）；系统性异常
-`flavor: pi` + 定义全部迁回 `runtime: pi` 一次配置完成；沙箱异常
-`workflows.pi.velites_no_sandbox: true` 免发版降级为无沙箱运行（保留事件
-契约/预算/取消等全部可控性），对 `runtime: velites` 同样有效。
+**回退**：单 agent 异常把该定义迁回 `runtime: pi`（Studio 改一个字段即
+完成）；系统性异常将全部定义迁回 `runtime: pi`。沙箱异常当前需发版调整
+（`velites_no_sandbox` 配置项已随 `workflows.pi` 退役；`execution.no_sandbox`
+在 manifest 恒为 false）。
 
 **历史灰度路径（已完成，存档）**：
 

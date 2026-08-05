@@ -574,7 +574,7 @@ invariants:
         gate: quick
 
   - id: EXEC-RUNTIME-DISPATCH-001
-    statement: "Agent command construction is selected by AgentDefinition.runtime: velites pins the velites builder regardless of workflows.pi.flavor (binary default normalization follows the same rule as PiRuntimeConfig._flavor_binary); pi delegates implementation choice to flavor, bit-for-bit unchanged; unknown runtimes fail fast at dispatch before any manifest is frozen."
+    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workspace default, else dispatch fails fast before any manifest is frozen; unknown runtimes fail fast the same way."
     owner: workspace-executor
     risk: high
     evidence:
