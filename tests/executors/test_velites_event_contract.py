@@ -12,6 +12,12 @@ Consumer surface (re-verify against the code when updating this file):
 - ``server/app/services/token_usage.py:57-76,134-142`` — usage/provider/model
 - ``shared/pi_model_error.py:16-45`` — errorMessage/stopReason
 - ``server/app/services/job_log_renderer.py:86,120-182`` — render fields
+
+Schema v2: ``turn_end`` carries only ``turnIndex`` and ``agent_end`` no
+longer carries the full ``messages`` history — the redundant payload copies
+were never read by any Host consumer and inflated events.jsonl 2-3x on long
+runs. ``message_end`` / ``tool_execution_end`` remain the sole content
+carriers.
 """
 
 from __future__ import annotations
@@ -137,10 +143,19 @@ def test_message_end_assistant_metadata(schema: dict[str, Any]) -> None:
 
 def test_error_message_field_optional(schema: dict[str, Any]) -> None:
     """shared/pi_model_error.py:40-42 — errorMessage present on messages, may be absent."""
-    for event_def in ("MessageStartEvent", "MessageEndEvent", "TurnEndEvent"):
+    for event_def in ("MessageStartEvent", "MessageEndEvent"):
         message = _message_schema(schema, event_def)
         assert "errorMessage" in message["properties"], f"{event_def} message.errorMessage"
         assert "errorMessage" not in message.get("required", [])
+
+
+def test_turn_end_carries_only_turn_index(schema: dict[str, Any]) -> None:
+    """Schema v2: turn_end is a bare boundary marker (no message/toolResults copies)."""
+    event = schema["$defs"]["TurnEndEvent"]
+    assert "turnIndex" in event["properties"], "turn_end.turnIndex missing"
+    assert "turnIndex" in event["required"]
+    assert "message" not in event["properties"], "turn_end.message must stay trimmed"
+    assert "toolResults" not in event["properties"], "turn_end.toolResults must stay trimmed"
 
 
 def test_auto_retry_start_contract(schema: dict[str, Any]) -> None:
@@ -191,6 +206,8 @@ def test_agent_end_reason_contract(schema: dict[str, Any]) -> None:
     event = schema["$defs"]["AgentEndEvent"]
     assert "reason" in event["properties"], "agent_end.reason missing"
     assert "reason" not in event.get("required", []), "reason must stay optional"
+    # Schema v2: the full message history copy is gone for good.
+    assert "messages" not in event["properties"], "agent_end.messages must stay trimmed"
     reason = _deref(schema, _ref_branch(schema, event["properties"]["reason"]))
     # schemars renders documented unit variants as oneOf+const, otherwise enum.
     values = set(reason.get("enum", []))

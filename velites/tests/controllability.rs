@@ -18,6 +18,8 @@ fn run_velites(cwd: &Path, fixture: &Path, extra_args: &[&str]) -> std::process:
         "stub".into(),
         "--stub-fixture".into(),
         fixture.to_string_lossy().into_owned(),
+        "--session-dir".into(),
+        cwd.join("session").to_string_lossy().into_owned(),
         // These tests exercise controllability, not confinement; CI's Linux
         // lane has no bwrap, and the default-on sandbox fails closed.
         // Confinement itself is covered by tests/os_sandbox.rs.
@@ -37,6 +39,16 @@ fn parse_events(stdout: &[u8]) -> Vec<serde_json::Value> {
         .lines()
         .filter(|line| !line.trim().is_empty())
         .map(|line| serde_json::from_str(line).expect("each stdout line must be valid JSON"))
+        .collect()
+}
+
+/// Session mirror messages (schema v2: `agent_end` no longer carries the
+/// history, so injected user notices are verified via the session log).
+fn session_messages(cwd: &Path) -> Vec<serde_json::Value> {
+    std::fs::read_to_string(cwd.join("session/session.jsonl"))
+        .expect("session log missing")
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
         .collect()
 }
 
@@ -70,7 +82,8 @@ fn max_tokens_triggers_budget_exceeded() {
     let agent_end = events.last().unwrap();
     assert_eq!(agent_end["type"], "agent_end");
     assert_eq!(agent_end["reason"], "budget_exceeded");
-    let history = agent_end["messages"].as_array().unwrap();
+    assert!(agent_end.get("messages").is_none());
+    let history = session_messages(cwd);
     assert!(history.iter().any(|m| m["role"] == "user"
         && m["content"][0]["text"]
             .as_str()
@@ -114,7 +127,7 @@ fn require_output_remediation_then_validation_ok() {
     assert_eq!(agent_end["type"], "agent_end");
     assert!(agent_end.get("reason").is_none());
     // The remediation notice names the missing artifact.
-    let history = agent_end["messages"].as_array().unwrap();
+    let history = session_messages(cwd);
     assert!(history.iter().any(|m| m["role"] == "user"
         && m["content"][0]["text"]
             .as_str()
