@@ -9,9 +9,10 @@ import type { useWorkflowStudio } from './useWorkflowStudio'
 import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPanel'
 import { WorkflowDefinitionEditor } from './WorkflowDefinitionEditor'
 import { WorkflowValidationPanel } from './WorkflowValidationPanel'
+import { AgentsPanel } from './AgentsPanel'
 import styles from './WorkflowStudioGlobalDialog.module.css'
 
-export type WorkflowStudioGlobalMode = 'changes' | 'yaml'
+export type WorkflowStudioGlobalMode = 'changes' | 'yaml' | 'agents'
 
 type Props = {
   mode: WorkflowStudioGlobalMode | null
@@ -41,9 +42,14 @@ export function WorkflowStudioGlobalDialog({ mode, studio, onClose }: Props) {
       PaperProps={{ className: styles.paper }}
     >
       <DialogTitle>
-        {mode === 'yaml' ? 'YAML 高级编辑' : '变更与校验'}
+        {mode === 'yaml'
+          ? 'YAML 高级编辑'
+          : mode === 'agents'
+            ? 'Agent 管理'
+            : '变更与校验'}
       </DialogTitle>
       <DialogContent dividers className={styles.content}>
+        {mode === 'agents' && <AgentsPanel />}
         {mode === 'changes' && (
           <div className={styles.checks}>
             <section aria-label="校验结果">

@@ -30,7 +30,7 @@ FLAVOR_VELITES = "velites"
 MAX_TURNS_KEY = "max_turns"
 MAX_TOKENS_KEY = "max_tokens"
 
-# velites CLI 原生支持的 provider 协议名；pi 命名 provider（如 gateway）统一收敛到
+# velites CLI 原生支持的 provider 协议名；pi 命名 provider（如 deepseek）统一收敛到
 # gateway 单出口（凭据见 ~/.velites/config.json，gateway 按 model 路由上游，§7）。
 VELITES_PROVIDERS = frozenset({"stub", "gateway", "openai_compat"})
 

@@ -28,7 +28,7 @@
 
 - `no-such-model-404`：`message_end.message` 带 `stopReason=error` +
   `errorMessage`，**exit 0**——与 Node pi 最终语义一致。
-- 验证中发现 gateway gateway 对坏模型返回 HTTP 200 + 非标准错误体
+- 验证中发现 deepseek gateway 对坏模型返回 HTTP 200 + 非标准错误体
   `{"code":1,"msg":"model error.","data":{}}`。已在 `openai_compat.rs` 增加
   `extract_error_detail`（兼容 OpenAI `error.message` 与 gateway `code/msg`
   两种形态），errorMessage 从模糊的 "response has no choices" 改善为

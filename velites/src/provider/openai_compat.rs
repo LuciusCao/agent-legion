@@ -365,8 +365,8 @@ impl Aggregated {
 
 /// Extract an upstream error detail from a response/chunk body. Recognizes
 /// the OpenAI shape `{"error": {"message": ...}}` and the gateway's
-/// non-standard `{"code": <non-zero>, "msg": ...}` (gateway returns HTTP 200
-/// with this body for dead models, e.g. doubao-seed-2.1-turbo-2).
+/// non-standard `{"code": <non-zero>, "msg": ...}` (the gateway returns
+/// HTTP 200 with this body for dead models).
 fn extract_error_detail(value: &Value) -> Option<String> {
     if let Some(error) = value.get("error") {
         let detail = error
@@ -663,7 +663,7 @@ mod tests {
 
     #[test]
     fn extract_error_detail_gateway_code_msg_shape() {
-        // gateway gateway answers HTTP 200 with this body for dead models.
+        // The gateway answers HTTP 200 with this body for dead models.
         let value = json!({"code": 1, "msg": "model error.", "data": {}});
         assert_eq!(
             extract_error_detail(&value).as_deref(),

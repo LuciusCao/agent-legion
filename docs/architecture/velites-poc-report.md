@@ -80,12 +80,12 @@
 
 ## 6. 错误语义验证
 
-用必失败模型名 `gateway/no-such-model-xyz` 各跑一次（`poc/errtest/`）：
+用必失败模型名 `deepseek/no-such-model-xyz` 各跑一次（`poc/errtest/`）：
 
 | | Node pi | pi-rust |
 |---|---|---|
 | exit code | **0** | **1** |
-| events.jsonl | 31 行，含 `auto_retry_*` + `errorMessage`；`detect_model_error` 返回 `"Stream ended without finish_reason"` | **0 行**（启动期模型解析即失败，stderr: `Model gateway/no-such-model-xyz not found`） |
+| events.jsonl | 31 行，含 `auto_retry_*` + `errorMessage`；`detect_model_error` 返回 `"Stream ended without finish_reason"` | **0 行**（启动期模型解析即失败，stderr: `Model deepseek/no-such-model-xyz not found`） |
 | pi_runner 判定 | exit 0 → 事件流扫描出 error → failed ✓ | exit 1 → 直接 failed ✓ |
 
 另一个数据点：rust 对 `doubao-seed-2.1-turbo-2` 的运行时协议错误（gateway 返回非流式 `application/json`，rust 严格要求 SSE）表现为**事件流内 errorMessage + exit 1**。

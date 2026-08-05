@@ -102,6 +102,15 @@ server/app/
 
 | 方法 | 路径 | 处理函数 | 文件 |
 |------|------|----------|------|
+| GET | `/agent-definitions` | `list_agent_definitions` | routes/agent_definitions.py |
+| POST | `/agent-definitions` | `create_agent_definition` | routes/agent_definitions.py |
+| GET | `/agent-definitions/{agent_id}` | `get_agent_definition` | routes/agent_definitions.py |
+| GET | `/agent-definitions/{agent_id}/versions` | `list_agent_definition_versions` | routes/agent_definitions.py |
+| PUT | `/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/agent_definitions.py |
+| POST | `/agent-definitions/{agent_id}/publish` | `publish_agent_definition` | routes/agent_definitions.py |
+| POST | `/agent-definitions/{agent_id}/rollback` | `rollback_agent_definition` | routes/agent_definitions.py |
+| POST | `/agent-definitions/{agent_id}/copy` | `copy_agent_definition` | routes/agent_definitions.py |
+| DELETE | `/agent-definitions/{agent_id}` | `archive_agent_definition` | routes/agent_definitions.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | POST | `/agent-register-tokens` | `create_register_token` | routes/agent_workers.py |
@@ -148,6 +157,8 @@ server/app/
 | GET | `/workspaces/{workspace_id}/packages/{filename:path}` | `download_workspace_package` | routes/packages.py |
 | GET | `/workspaces/{workspace_id}/questions/{question_id}` | `get_question_detail` | routes/questions.py |
 | GET | `/executors/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
+| POST | `/skills/validate` | `validate_skill` | routes/skills.py |
+| GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
 | GET | `/jobs/{job_id}/token-usage` | `get_job_token_usage` | routes/token_usage.py |
 | GET | `/workspaces/{workspace_id}/token-usage` | `get_workspace_token_usage` | routes/token_usage.py |
@@ -213,6 +224,16 @@ server/app/
 | AgentWorkersRuntimeConfig | BaseModel | register_token: str, register_token_file: str, max_archive_bytes: int, min_pr... | app/executors/runtime_config.py |
 | ExecutorRuntimeConfig | BaseModel | heartbeat_interval_seconds: float, lease_ttl_seconds: int, heartbeat_failure_... | app/executors/runtime_config.py |
 | AgentDefinitionResponse | BaseModel | id: str, runtime: Literal['pi', 'openclaw', 'velites'], capability: str, skil... | app/routes/agent_catalog_contracts.py |
+| AgentDefinitionPayload | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/routes/agent_definition_contracts.py |
+| AgentCopyRequest | BaseModel | new_agent_id: str | app/routes/agent_definition_contracts.py |
+| AgentRollbackRequest | BaseModel | version: int | app/routes/agent_definition_contracts.py |
+| AgentVersionResponse | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
+| AgentVersionSummary | BaseModel | id: str, agent_id: str, version: int, status: Literal['draft', 'published', '... | app/routes/agent_definition_contracts.py |
+| AgentListItem | BaseModel | agent_id: str, capability: str, runtime: str, skill: str, version: int, statu... | app/routes/agent_definition_contracts.py |
+| AgentListResponse | BaseModel | agents: list[AgentListItem] | app/routes/agent_definition_contracts.py |
+| AgentDetailResponse | BaseModel | agent_id: str, latest: AgentVersionResponse | None, published: AgentVersionRe... | app/routes/agent_definition_contracts.py |
+| AgentVersionsResponse | BaseModel | versions: list[AgentVersionSummary] | app/routes/agent_definition_contracts.py |
+| AgentArchiveResponse | BaseModel | archived: int | app/routes/agent_definition_contracts.py |
 | RegisterAgentWorkerRequest | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | RegisterAgentWorkerResponse | BaseModel | worker_token: str, allowed_workspaces: list[str] | app/routes/agent_workers_contracts.py |
 | CreateAgentRegisterTokenRequest | BaseModel | workspace_id: str | None, label: str | app/routes/agent_workers_contracts.py |
@@ -315,6 +336,9 @@ server/app/
 | QuestionDetailResponse | BaseModel | question_id: str, title: str, normalized: QuestionNormalized, cms_payload: di... | app/routes/questions.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
 | SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, files: list[SkillFileRespon... | app/routes/skill_contracts.py |
+| SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
+| SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
+| SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
 | TokenUsageRunItem | BaseModel | run_id: int, node_key: str, status: str, usage: RunUsage | None, reason: str ... | app/routes/token_usage_contracts.py |
 | TokenUsageTotal | BaseModel | message_count: int, input_tokens: int, output_tokens: int, cache_read_tokens:... | app/routes/token_usage_contracts.py |
 | TokenUsageJobResponse | BaseModel | job_id: str, runs: list[TokenUsageRunItem], total: TokenUsageTotal, runs_with... | app/routes/token_usage_contracts.py |

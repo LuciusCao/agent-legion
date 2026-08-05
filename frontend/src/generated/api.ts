@@ -22,6 +22,127 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-definitions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Agent Definitions */
+    get: operations['list_agent_definitions_api_agent_definitions_get']
+    put?: never
+    /** Create Agent Definition */
+    post: operations['create_agent_definition_api_agent_definitions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-definitions/{agent_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Agent Definition */
+    get: operations['get_agent_definition_api_agent_definitions__agent_id__get']
+    put?: never
+    post?: never
+    /** Archive Agent Definition */
+    delete: operations['archive_agent_definition_api_agent_definitions__agent_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-definitions/{agent_id}/copy': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Copy Agent Definition */
+    post: operations['copy_agent_definition_api_agent_definitions__agent_id__copy_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-definitions/{agent_id}/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Agent Definition Draft */
+    put: operations['save_agent_definition_draft_api_agent_definitions__agent_id__draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-definitions/{agent_id}/publish': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Publish Agent Definition */
+    post: operations['publish_agent_definition_api_agent_definitions__agent_id__publish_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-definitions/{agent_id}/rollback': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Rollback Agent Definition */
+    post: operations['rollback_agent_definition_api_agent_definitions__agent_id__rollback_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-definitions/{agent_id}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Agent Definition Versions */
+    get: operations['list_agent_definition_versions_api_agent_definitions__agent_id__versions_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-executions/claim': {
     parameters: {
       query?: never
@@ -634,6 +755,40 @@ export interface paths {
     get: operations['get_metrics_overview_api_metrics_overview_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/skills/tags': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Skill Tags */
+    get: operations['list_skill_tags_api_skills_tags_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/skills/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Validate Skill */
+    post: operations['validate_skill_api_skills_validate_post']
     delete?: never
     options?: never
     head?: never
@@ -1527,6 +1682,11 @@ export interface components {
       revision: components['schemas']['WorkflowRevisionSummary']
       workflow: components['schemas']['WorkflowDefinitionResponse']
     }
+    /** AgentArchiveResponse */
+    AgentArchiveResponse: {
+      /** Archived */
+      archived: number
+    }
     /** AgentClaimResponse */
     AgentClaimResponse: {
       /** Agent Id */
@@ -1549,6 +1709,60 @@ export interface components {
       workflow_key: string
       /** Workspace Id */
       workspace_id: string
+    }
+    /** AgentCopyRequest */
+    AgentCopyRequest: {
+      /** New Agent Id */
+      new_agent_id: string
+    }
+    /** AgentCreateRequest */
+    AgentCreateRequest: {
+      /** Agent Id */
+      agent_id: string
+      /** Capability */
+      capability: string
+      /** Config Schema */
+      config_schema?: {
+        [key: string]: unknown
+      }
+      /** Requires Labels */
+      requires_labels?: {
+        [key: string]: string
+      }
+      /**
+       * Runtime
+       * @enum {string}
+       */
+      runtime: 'pi' | 'openclaw' | 'velites'
+      /** Skill */
+      skill: string
+      /** Tools */
+      tools?: string[]
+    }
+    /**
+     * AgentDefinitionPayload
+     * @description Editable Agent definition fields (pure: no provider/model/thinking).
+     */
+    AgentDefinitionPayload: {
+      /** Capability */
+      capability: string
+      /** Config Schema */
+      config_schema?: {
+        [key: string]: unknown
+      }
+      /** Requires Labels */
+      requires_labels?: {
+        [key: string]: string
+      }
+      /**
+       * Runtime
+       * @enum {string}
+       */
+      runtime: 'pi' | 'openclaw' | 'velites'
+      /** Skill */
+      skill: string
+      /** Tools */
+      tools?: string[]
     }
     /** AgentDefinitionResponse */
     AgentDefinitionResponse: {
@@ -1579,6 +1793,40 @@ export interface components {
       thinking?: string | null
       /** Tools */
       tools?: string[]
+    }
+    /** AgentDetailResponse */
+    AgentDetailResponse: {
+      /** Agent Id */
+      agent_id: string
+      latest?: components['schemas']['AgentVersionResponse'] | null
+      published?: components['schemas']['AgentVersionResponse'] | null
+    }
+    /** AgentListItem */
+    AgentListItem: {
+      /** Agent Id */
+      agent_id: string
+      /** Capability */
+      capability: string
+      /** Has Draft */
+      has_draft: boolean
+      /** Published At */
+      published_at?: string | null
+      /** Runtime */
+      runtime: string
+      /** Skill */
+      skill: string
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+    }
+    /** AgentListResponse */
+    AgentListResponse: {
+      /** Agents */
+      agents: components['schemas']['AgentListItem'][]
     }
     /** AgentRegisterTokenCreatedResponse */
     AgentRegisterTokenCreatedResponse: {
@@ -1614,6 +1862,11 @@ export interface components {
       /** Tokens */
       tokens: components['schemas']['AgentRegisterTokenSummary'][]
     }
+    /** AgentRollbackRequest */
+    AgentRollbackRequest: {
+      /** Version */
+      version: number
+    }
     /** AgentStatusResponse */
     AgentStatusResponse: {
       /** Busy */
@@ -1644,6 +1897,65 @@ export interface components {
       id: string
       /** Name */
       name: string
+    }
+    /** AgentVersionResponse */
+    AgentVersionResponse: {
+      /** Agent Id */
+      agent_id: string
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Definition */
+      definition: {
+        [key: string]: unknown
+      }
+      /** Definition Hash */
+      definition_hash: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+    }
+    /** AgentVersionSummary */
+    AgentVersionSummary: {
+      /** Agent Id */
+      agent_id: string
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Definition Hash */
+      definition_hash: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+    }
+    /** AgentVersionsResponse */
+    AgentVersionsResponse: {
+      /** Versions */
+      versions: components['schemas']['AgentVersionSummary'][]
     }
     /** AgentWorkerRevokeResponse */
     AgentWorkerRevokeResponse: {
@@ -2634,6 +2946,37 @@ export interface components {
        * @default false
        */
       truncated: boolean
+    }
+    /** SkillTagsResponse */
+    SkillTagsResponse: {
+      /** Latest Tag */
+      latest_tag?: string | null
+      /** Path */
+      path: string
+      /** Tags */
+      tags?: string[]
+    }
+    /** SkillValidateRequest */
+    SkillValidateRequest: {
+      /** Path */
+      path: string
+    }
+    /** SkillValidateResponse */
+    SkillValidateResponse: {
+      /** Error */
+      error?: string | null
+      /** Latest Tag */
+      latest_tag?: string | null
+      /** Locked Ref */
+      locked_ref?: string | null
+      /** Path */
+      path: string
+      /** Skill Key */
+      skill_key?: string | null
+      /** Tags */
+      tags?: string[]
+      /** Valid */
+      valid: boolean
     }
     /** TokenUsageCostBreakdown */
     TokenUsageCostBreakdown: {
@@ -3673,6 +4016,10 @@ export interface components {
     }
     /** WorkspaceSettingsSectionRequest */
     WorkspaceSettingsSectionRequest: {
+      /** Agentdefaults */
+      agentDefaults?: {
+        [key: string]: string
+      } | null
       /** Entitytype */
       entityType?: string | null
       /** Intakemodes */
@@ -3790,6 +4137,288 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['TokenUsagePricingConfigResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_agent_definitions_api_agent_definitions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentListResponse']
+        }
+      }
+    }
+  }
+  create_agent_definition_api_agent_definitions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_agent_definition_api_agent_definitions__agent_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_agent_definition_api_agent_definitions__agent_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentArchiveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  copy_agent_definition_api_agent_definitions__agent_id__copy_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentCopyRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_agent_definition_draft_api_agent_definitions__agent_id__draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentDefinitionPayload']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  publish_agent_definition_api_agent_definitions__agent_id__publish_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  rollback_agent_definition_api_agent_definitions__agent_id__rollback_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentRollbackRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_agent_definition_versions_api_agent_definitions__agent_id__versions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionsResponse']
         }
       }
       /** @description Validation Error */
@@ -4906,6 +5535,70 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['OpsMetricsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_skill_tags_api_skills_tags_get: {
+    parameters: {
+      query: {
+        path: string
+      }
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillTagsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  validate_skill_api_skills_validate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillValidateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillValidateResponse']
         }
       }
       /** @description Validation Error */

@@ -53,6 +53,7 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     labelOverrides: dict[str, str] | None = None
     workflowKey: str | None = None
     nodeConfig: dict[str, dict[str, Any]] | None = None
+    agentDefaults: dict[str, str] | None = None
 
 
 class WorkspaceSettingsTestResponse(BaseModel):
