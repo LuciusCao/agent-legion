@@ -76,6 +76,22 @@ def _serialize_definition(definition: dict[str, Any]) -> str:
     return json.dumps(definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
+# Partial unique index guarding one published Agent per capability.
+_CAPABILITY_INDEX = "versioned_entities_published_capability"
+
+
+def _integrity_conflict(exc: IntegrityError, entity_type: EntityType) -> ConflictError:
+    """Map index violations to ConflictError with a capability-aware message."""
+    diag = getattr(exc, "diag", None)
+    constraint = getattr(diag, "constraint_name", None) if diag is not None else None
+    if constraint == _CAPABILITY_INDEX:
+        return ConflictError(
+            f"capability is already published by another {entity_type};"
+            " exactly one published entity per capability"
+        )
+    return ConflictError("entity version allocated concurrently; retry")
+
+
 class VersionedEntityStore:
     """Draft → published → archived lifecycle engine for one entity type."""
 
@@ -213,11 +229,14 @@ class VersionedEntityStore:
             )
             # Guard: a concurrent archive_all between select and update must
             # not resurrect an archived row into published.
-            cursor = conn.execute(
-                "update versioned_entities set status='published',"
-                " published_at=current_timestamp where id=%s and status='draft'",
-                (draft["id"],),
-            )
+            try:
+                cursor = conn.execute(
+                    "update versioned_entities set status='published',"
+                    " published_at=current_timestamp where id=%s and status='draft'",
+                    (draft["id"],),
+                )
+            except IntegrityError as exc:
+                raise _integrity_conflict(exc, self._entity_type) from exc
             if cursor.rowcount == 0:
                 raise ConflictError("entity draft changed concurrently; reload and retry")
             return _get_entity_by_id(conn, draft["id"])
@@ -270,7 +289,7 @@ class VersionedEntityStore:
                     ),
                 )
             except IntegrityError as exc:
-                raise ConflictError("entity version allocated concurrently; retry") from exc
+                raise _integrity_conflict(exc, self._entity_type) from exc
             return _get_entity_by_id(conn, row_id)
 
     def archive_all(self, entity_key: str, workspace_id: str | None) -> int:

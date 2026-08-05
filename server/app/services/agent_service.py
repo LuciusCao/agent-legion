@@ -116,19 +116,29 @@ class AgentService:
             entity = self._store.publish(agent_id, None)
             _invalidate_published_cache(self._store._dsn)
             return entity
-        capability = draft.definition.get("capability")
+        self._require_free_capability(agent_id, str(draft.definition.get("capability") or ""))
+        entity = self._store.publish(agent_id, None)
+        _invalidate_published_cache(self._store._dsn)
+        return entity
+
+    def _require_free_capability(self, agent_id: str, capability: str) -> None:
+        """Service-layer capability conflict check (the DB partial unique
+        index ``versioned_entities_published_capability`` is the real guard)."""
         for other in self._store.list_published(None):
             if other.entity_key != agent_id and other.definition.get("capability") == capability:
                 raise ConflictError(
                     f"capability {capability!r} is already published by Agent"
                     f" {other.entity_key!r}; exactly one published Agent per capability"
                 )
-        entity = self._store.publish(agent_id, None)
-        _invalidate_published_cache(self._store._dsn)
-        return entity
 
     def rollback(self, agent_id: str, version: int, created_by: str) -> VersionedEntity:
         """Re-publish an old version as a new version (versions stay immutable)."""
+        source = next(
+            (v for v in self._store.list_versions(agent_id, None) if v.version == version),
+            None,
+        )
+        if source is not None:
+            self._require_free_capability(agent_id, str(source.definition.get("capability") or ""))
         entity = self._store.rollback(agent_id, version, None, created_by)
         _invalidate_published_cache(self._store._dsn)
         return entity

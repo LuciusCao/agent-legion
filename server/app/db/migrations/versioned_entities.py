@@ -28,6 +28,15 @@ create table if not exists versioned_entities (
 create unique index if not exists versioned_entities_published
   on versioned_entities(entity_type, workspace_id, entity_key) nulls not distinct
   where status = 'published';
+-- Capability uniqueness for published Agents (agent config governance):
+-- workspace routes derive from the capability alone, so two published Agents
+-- sharing one capability would make routing ambiguous. The service layer
+-- checks first; this partial index is the real guard. Re-publish stays legal
+-- because publish archives the old row before promoting the draft in one
+-- transaction.
+create unique index if not exists versioned_entities_published_capability
+  on versioned_entities((definition_json::jsonb->>'capability'))
+  where entity_type = 'agent' and status = 'published';
 create index if not exists idx_versioned_entities_type_key
   on versioned_entities(entity_type, entity_key)
 """

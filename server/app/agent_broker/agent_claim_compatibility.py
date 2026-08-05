@@ -27,12 +27,20 @@ def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
         node = (definition.get("nodes") or {}).get(str(row["node_key"])) or {}
         node_execution = node.get("execution") or {}
     frozen = manifest.get("execution") or {}
-    # Node-level edits re-resolve live at claim; values frozen at enqueue
-    # (already resolved against workspace defaults) are the fallback.
+    defaults = manifest.get("execution_defaults") or {}
+    # Revisions are immutable: "live" means a job upgraded to a new revision
+    # pin gets that revision's node execution at claim time. Resolution chain
+    # per key: current node override -> workspace defaults frozen at enqueue
+    # (execution_defaults) -> the fully resolved execution frozen at enqueue
+    # (fallback for pre-execution_defaults manifests). Removing a node
+    # override therefore falls back to the enqueue-time workspace default
+    # instead of the old baked-in override. Defaults are frozen at enqueue by
+    # design: later workspace-default edits do not propagate to already
+    # queued requests.
     manifest["execution"] = {
         **frozen,
         **{
-            key: node_execution.get(key) or frozen.get(key) or ""
+            key: node_execution.get(key) or defaults.get(key) or frozen.get(key) or ""
             for key in ("provider", "model", "thinking")
         },
     }

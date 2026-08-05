@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Button, MenuItem, TextField } from '@mui/material'
 import {
   archiveAgent,
@@ -43,7 +43,7 @@ export function AgentEditor({
   const [capability, setCapability] = useState('')
   const [runtime, setRuntime] = useState<AgentRuntime>('pi')
   const [skill, setSkill] = useState('')
-  const [tools, setTools] = useState<string[]>([])
+  const [tools, setTools] = useState<string[]>(['read', 'write', 'bash'])
   const [requiresLabels, setRequiresLabels] = useState<
     Record<string, string> | undefined
   >(undefined)
@@ -55,14 +55,10 @@ export function AgentEditor({
   const [versionsOpen, setVersionsOpen] = useState(false)
   const showToast = useUiStore((s) => s.showToast)
 
-  useEffect(() => {
-    // The parent keys this component by agent id, so the load runs once
-    // per mount and `loading` starts true via its useState initializer.
-    if (creating) return
-    let cancelled = false
-    fetchAgentDefinition(agentId)
+  const load = useCallback(() => {
+    if (creating) return Promise.resolve()
+    return fetchAgentDefinition(agentId)
       .then((detail) => {
-        if (cancelled) return
         const draft = detail.latest?.status === 'draft' ? detail.latest : null
         const source = draft ?? detail.published ?? detail.latest
         setHasDraft(draft !== null)
@@ -83,15 +79,22 @@ export function AgentEditor({
         )
       })
       .catch((err) => {
-        if (!cancelled) setError(errorMessage(err))
+        setError(errorMessage(err))
       })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
+  }, [agentId, creating])
+
+  useEffect(() => {
+    // The parent keys this component by agent id, so the load runs once
+    // per mount and `loading` starts true via its useState initializer.
+    if (creating) return
+    let cancelled = false
+    void load().finally(() => {
+      if (!cancelled) setLoading(false)
+    })
     return () => {
       cancelled = true
     }
-  }, [agentId, creating])
+  }, [load, creating])
 
   function buildPayload(): AgentDefinitionPayload | null {
     let configSchema: Record<string, unknown> | undefined
@@ -309,7 +312,9 @@ export function AgentEditor({
           onClose={() => setVersionsOpen(false)}
           onRolledBack={() => {
             setVersionsOpen(false)
-            setHasDraft(true)
+            // 后端 rollback 直接落 published 新版本（无 draft）：重新拉取详情
+            // 同步表单，并清掉 draft 标记。
+            void load().then(() => setHasDraft(false))
             onChanged()
           }}
         />

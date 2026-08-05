@@ -97,6 +97,12 @@ class AgentDispatchService:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
         execution = resolve_execution_block(node, workspace, definition.runtime)
+        # enqueue 时的 workspace 默认原始值（未经节点覆盖）：claim 重解析在
+        # 节点覆盖被移除时落回这里，而不是落回已烘焙旧覆盖的 execution 块。
+        execution_defaults = {
+            key: str(workspace.get(f"default_agent_{key}") or "")
+            for key in ("provider", "model", "thinking")
+        }
         execution_id = str(uuid.uuid4())
         skill_dir = resolve_skill_dir(self.skill_manager, definition.skill, execution_id)
         try:
@@ -120,6 +126,7 @@ class AgentDispatchService:
                 "skill_version": get_skill_version(self.skill_manager, definition.skill),
                 "log_path": str(log_path),
                 "execution": execution,
+                "execution_defaults": execution_defaults,
             }
             context = ExecutionContext(
                 execution_id=execution_id,

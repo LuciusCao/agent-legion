@@ -72,7 +72,8 @@ def _seed_request(
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    replace_agent_catalog(definitions or {agent_id: definition})
+    catalog = definitions or {agent_id: definition}
+    replace_agent_catalog(catalog)
     _insert_job_rows(
         job_db,
         job_id=job_id,
@@ -89,7 +90,7 @@ def _seed_request(
             workflow_key="questions",
             node_key=node_key,
             agent_id=agent_id,
-            agent_definition_hash=definition.definition_hash(),
+            agent_definition_hash=catalog[agent_id].definition_hash(),
             manifest={
                 "job_id": job_id,
                 "log_path": f"logs/{job_id}.log",
@@ -801,15 +802,20 @@ def test_pi_only_worker_cannot_claim_velites_request(job_db) -> None:
 
 def test_mixed_runtime_fleet_claims_matching_requests(job_db) -> None:
     """Dual-runtime coexistence: pi and velites definitions side by side, each
-    Worker claims exactly the requests of its declared runtime."""
+    Worker claims exactly the requests of its declared runtime.
+
+    Capabilities differ per definition: one published Agent per capability is
+    enforced by the DB partial unique index, so a same-capability dual-runtime
+    catalog is no longer representable.
+    """
     pi_definition = AgentDefinition(
-        capability="generate",
+        capability="generate_pi",
         runtime="pi",
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
     velites_definition = AgentDefinition(
-        capability="generate",
+        capability="generate_velites",
         runtime="velites",
         skill="question/generate",
         requires_labels={"arch": "arm64"},

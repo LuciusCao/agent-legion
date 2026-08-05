@@ -23,7 +23,7 @@ _DROP_LEGACY_TABLE = "drop table if exists agent_definitions"
 _PUBLISHED_PI_ROWS = """
 select id, entity_key, definition_json
 from versioned_entities
-where entity_type='agent' and status='published'
+where entity_type='agent' and workspace_id is null and status='published'
   and definition_json::jsonb->>'runtime' = 'pi'
 """
 

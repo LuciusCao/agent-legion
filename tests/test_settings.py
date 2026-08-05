@@ -30,7 +30,6 @@ def _clear_agent_legion_env(monkeypatch):
         "AGENT_LEGION_ASR_WHISPER_BINARY",
         "AGENT_LEGION_ASR_WHISPER_MODEL",
         "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
-        "AGENT_LEGION_PI_BINARY",
         "AGENT_LEGION_OPENCLAW_CWD",
         "AGENT_LEGION_SKIP_DOTENV",
     ):
