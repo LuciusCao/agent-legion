@@ -3,11 +3,19 @@ name: Quality Gate
 on:
   pull_request:
     branches: [develop, main, master]
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
   push:
-    branches: [develop, main, master]
-  # Nightly run: the only scheduled trigger for the ci-extended stress job.
+    # develop merges are already covered by the PR gate; keep push triggers
+    # on the trunk branches only so a merge does not burn a second full gate.
+    branches: [main, master]
+    paths-ignore: ['docs/**', '**/*.md', 'LICENSE']
+  # Weekly run: the only scheduled trigger, and it runs ONLY the nightly-e2e
+  # stress and ci-extended jobs — the changes job turns every regular lane
+  # off on schedule events (the full gate already ran on the push/PR that
+  # produced this code). Weekly, not nightly, to fit the Actions minutes
+  # budget.
   schedule:
-    - cron: '23 3 * * *'
+    - cron: '23 3 * * 1'
   workflow_dispatch:
 
 concurrency:
@@ -38,7 +46,10 @@ jobs:
   # runs api:check), velites-only changes run just the rust job, docs-only
   # changes skip the gate entirely. Shared files (config, scripts, tests,
   # workflows, anything outside frontend//velites//docs/) run the full
-  # backend+frontend gate; schedule/dispatch runs always get every lane.
+  # backend+frontend gate; dispatch runs always get every lane. Schedule
+  # (weekly) runs get NO regular lane — the full gate already ran on the
+  # push/PR that produced this code, and the schedule exists only for the
+  # nightly-e2e / ci-extended jobs at the bottom of this file.
   changes:
     name: changes
     runs-on: ubuntu-latest
@@ -67,8 +78,13 @@ jobs:
           elif [ "$EVENT_NAME" = "push" ] && [ "$PUSH_BEFORE" != "0000000000000000000000000000000000000000" ]; then
             base="$PUSH_BEFORE"
           fi
-          # No usable base (schedule, dispatch, brand-new branch): full gate.
-          if [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
+          # Weekly schedule: turn every regular lane off. The trigger exists
+          # only for the nightly-e2e / ci-extended jobs; the full gate
+          # already ran on the push/PR that produced this code.
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            backend=false; frontend=false; rust=false
+          # No usable base (dispatch, brand-new branch): full gate.
+          elif [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
             backend=false; frontend=false; rust=false
             while IFS= read -r f; do
               case "$f" in
@@ -744,7 +760,7 @@ jobs:
           path: frontend/e2e-results/
           retention-days: 5
 
-  # Nightly workspace stress + multi-browser smoke (test architecture plan,
+  # Weekly workspace stress + multi-browser smoke (test architecture plan,
   # Phase 4C). The stress step runs the existing five-minute scenario against
   # a real backend and uploads report.md + frontend-metrics.json for
   # diagnostics; the smoke step re-runs the deterministic browser suite on
@@ -867,7 +883,7 @@ jobs:
 
   ci-extended:
     name: ci-extended
-    # Repeated stress scenarios; too slow for the PR/push loop. Runs nightly
+    # Repeated stress scenarios; too slow for the PR/push loop. Runs weekly
     # (schedule) and on manual dispatch, replacing the old per-push policy.
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
@@ -928,7 +944,7 @@ jobs:
 
       # Flaky governance (test architecture plan, Phase 5D): reruns are fine
       # only for nodeids registered in tests/flaky_registry.yaml with a live
-      # deadline. Nightly-only; PR/push lanes never run this job.
+      # deadline. Schedule/dispatch-only; PR/push lanes never run this job.
       - name: Fail on unregistered reruns
         if: always()
         run: >-
