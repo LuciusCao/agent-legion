@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 import textwrap
 import time
 from dataclasses import replace
@@ -34,11 +35,31 @@ def _velites_binary() -> Path:
     return VELITES_DEBUG_BINARY
 
 
+def _sandbox_backend_available() -> bool:
+    """Probe the actual OS sandbox backend, not just the platform."""
+    if sys.platform == "darwin":
+        return shutil.which("sandbox-exec") is not None
+    if sys.platform == "linux":
+        return shutil.which("bwrap") is not None
+    return False
+
+
 def _sandboxed(monkeypatch: pytest.MonkeyPatch) -> None:
+    if not _sandbox_backend_available():
+        pytest.skip("no OS sandbox backend (macOS sandbox-exec / Linux bwrap)")
     binary = _velites_binary()
     monkeypatch.setattr(
         "server.app.executors._code_sandbox.shutil.which", lambda _name: str(binary)
     )
+
+
+# Rejection semantics differ per backend: seatbelt denies with EPERM, while
+# bwrap's selective binds leave unmounted paths simply absent (ENOENT); an
+# isolated netns has no route (ENETUNREACH).
+_DENIED_ERROR = (
+    "Operation not permitted" if sys.platform == "darwin" else "No such file or directory"
+)
+_NET_ERROR = "Operation not permitted" if sys.platform == "darwin" else "Network is unreachable"
 
 
 @pytest.fixture
@@ -282,7 +303,7 @@ def test_custom_sandbox_denies_writes_outside_job_dir(
     result = executor.execute(replace(context, node_code=custom_source))
 
     assert result.status == "failed"
-    assert "Operation not permitted" in result.error_message
+    assert _DENIED_ERROR in result.error_message
     assert not (Path.home() / ".agent-legion-sandbox-probe").exists()
 
 
@@ -317,7 +338,7 @@ def test_custom_sandbox_denies_reads_outside_allowlist(
     result = executor.execute(replace(context, node_code=custom_source))
 
     assert result.status == "failed"
-    assert "Operation not permitted" in result.error_message
+    assert _DENIED_ERROR in result.error_message
 
 
 def test_custom_sandbox_env_is_whitelisted(
@@ -367,7 +388,7 @@ def test_custom_sandbox_denies_network_by_default(
 
     denied = _executor(tmp_path, path).execute(replace(context, node_code=custom_source))
     assert denied.status == "failed"
-    assert "Operation not permitted" in denied.error_message
+    assert _NET_ERROR in denied.error_message
 
     executor_with_net = CodeExecutor(
         "code-default",

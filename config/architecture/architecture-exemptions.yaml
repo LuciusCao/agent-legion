@@ -104,7 +104,9 @@ exemptions:
   ceiling: 258
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
-  reason: Composition adds the Agent Worker control-plane router and artifact authentication dependency.
+  reason: Composition adds the Agent Worker control-plane router, the artifact
+    authentication dependency, and the workspace-scoped custom node code
+    router (EXEC-CODE-002).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
   ceiling: 113
@@ -127,7 +129,8 @@ exemptions:
     workspace-level via workspace_agent_capacities), warning and skipping revisions
     whose capability mapping is ambiguous, and skipping the reconcile entirely
     when the catalog has zero enabled definitions so routes are never pruned by
-    an empty-catalog regression.
+    an empty-catalog regression. Publish also snapshots node_code_pins (the
+    published custom code versions, EXEC-CODE-002) alongside the definition.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
   ceiling: 150

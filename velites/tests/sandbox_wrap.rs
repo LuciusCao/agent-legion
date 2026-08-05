@@ -2,8 +2,9 @@
 //!
 //! macOS seatbelt: a wrapped command may write its `--cwd` and nothing else;
 //! reads outside the allowlist fail with EPERM; the subcommand dispatch
-//! rejects unknown forms. Linux bubblewrap is covered by argv unit tests in
-//! src/sandbox.rs (CI's Linux lane has no bwrap).
+//! rejects unknown forms. The Linux bubblewrap policy is pinned by argv-level
+//! unit tests in src/sandbox.rs; Python-side integration tests probe bwrap
+//! availability and skip when it is absent (CI Linux lanes without bwrap).
 
 use std::path::Path;
 use std::process::Command;

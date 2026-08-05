@@ -390,7 +390,15 @@ invariants:
       - kind: integration
         target: tests/executors/test_code_executor.py::test_execute_custom_node_code_from_source
         gate: quick
+      - kind: integration
+        target: tests/test_workflow_revisions.py::test_publish_revision_records_node_code_pins
+        gate: quick
+      - kind: integration
+        target: tests/test_workflow_revisions.py::test_runtime_only_update_preserves_node_code_pins
+        gate: quick
 
+  # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
+  # velites/tests/sandbox_wrap.rs; registry targets allow only tests//scripts/.
   - id: EXEC-CODE-003
     statement: "Custom (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend custom code never runs unsandboxed. Builtin repo-tracked nodes keep the bare multiprocessing child (EXEC-CODE-001)."
     owner: workspace-executor

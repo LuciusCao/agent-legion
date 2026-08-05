@@ -159,3 +159,24 @@ def test_get_version_returns_code_for_any_status(workspace_with_revision) -> Non
 
 def test_anonymous_version_detail_rejected(anon_client) -> None:
     assert anon_client.get(f"{BASE}/versions/1").status_code == 401
+
+
+def test_viewer_reads_but_cannot_write(workspace_with_revision, client, job_db) -> None:
+    """Workspace viewers may read node code; every write is 403."""
+    response = client.post(
+        "/api/users",
+        json={"username": "viewer1", "password": "pw1"},
+        headers={"x-agent-legion-request": "1"},
+    )
+    assert response.status_code == 201, response.text
+    job_db.upsert_workspace_member("default", response.json()["id"], "viewer")
+    viewer = client.__class__(client.app)
+    viewer.post("/api/auth/login", json={"username": "viewer1", "password": "pw1"})
+    viewer.headers["x-agent-legion-request"] = "1"
+
+    assert viewer.get(BASE).status_code == 200
+    assert viewer.get(f"{BASE}/versions").status_code == 200
+    assert viewer.put(BASE, json={"code": CUSTOM_V1}).status_code == 403
+    assert viewer.post(f"{BASE}/publish").status_code == 403
+    assert viewer.post(f"{BASE}/rollback", json={"version": 1}).status_code == 403
+    assert viewer.delete(BASE).status_code == 403
