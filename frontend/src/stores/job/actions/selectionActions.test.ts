@@ -5,7 +5,7 @@ import { fetchJobFacets } from '../../../api'
 import type { JobFacetsResponse } from '../../../types/jobTypes'
 import type { WorkspaceStats } from '../../../types/workspaceTypes'
 import { createJobSummary } from './testHelpers'
-import { normalizeJobs } from './fetchStateHelpers'
+import { normalizeJobs } from './fetch'
 
 vi.mock('../../../api', () => ({
   fetchJobFacets: vi.fn(),

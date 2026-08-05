@@ -7,10 +7,10 @@ from typing import Any
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.download import download_video as legacy_download_video
 from server.app.pipeline.transcribe import run_transcription_with_providers
-from server.app.services.transcription_providers import build_default_providers
 from server.app.settings import load_settings
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
 from server.app.workflows.video_knowledge_source import resolve_knowledge_source
+from server.app.workflows.video_knowledge_transcription import build_default_providers
 
 
 def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:

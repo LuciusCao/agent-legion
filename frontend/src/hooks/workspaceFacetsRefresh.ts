@@ -1,6 +1,5 @@
 import { fetchJobFacets } from '../api'
-import { useJobStore } from '../stores/jobStore'
-import { toJobListFilterParams } from '../stores/job/listFilterParams'
+import { toJobListFilterParams, useJobStore } from '../stores/jobStore'
 
 /**
  * Best-effort facet refresh: filter counts and options derive from server

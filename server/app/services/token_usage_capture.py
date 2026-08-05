@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
-from server.app.services.token_usage import parse_run_usage, persist_node_run_usage
+from server.app.services.token_usage import persist_node_run_usage
+from server.app.services.token_usage_parse import parse_run_usage
 
 
 def capture_and_persist_token_usage(

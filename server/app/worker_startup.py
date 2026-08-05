@@ -4,7 +4,7 @@ import logging
 from functools import partial
 
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
-from server.app.agents import AgentStatusManager
+from server.app.events.agents import AgentStatusManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime

@@ -13,7 +13,8 @@ import pytest
 from cryptography.fernet import Fernet
 
 from server.app.services.job_intake import JobIntakeService
-from server.app.services.vault import VaultService, resource_secret_name
+from server.app.services.vault import VaultService
+from server.app.services.vault_resources import resource_secret_name
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.cms_helpers import _effective_cms_config

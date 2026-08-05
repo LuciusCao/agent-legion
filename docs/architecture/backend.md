@@ -63,10 +63,11 @@ server/app/
 │   └── question.py         # 题库查询
 ├── configuration/          # 配置加载与 owned-keys 校验
 ├── video_capabilities/     # 视频能力合约与投影
-├── executors/              # Executor 配置、Runtime、租赁调度
-├── agents.py               # Agent 发现与状态跟踪
+├── executors/              # Executor 配置、Runtime、租赁调度、registry factory
+├── events/                 # 事件总线、Agent 发现与状态跟踪（agents.py）、WS 广播
 ├── workflow_worker/      # DAG workflow worker：thread.py 线程、ready.py 每 pass
-│                         # 一次的 ready 候选收集、schedule.py lease 认领与提交
+│                         # 一次的 ready 候选收集、schedule.py lease 认领与提交、
+│                         # agent_stock.py 产能库存配置
 ```
 
 ## Data Flow
@@ -192,7 +193,6 @@ server/app/
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
-| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/agent_stock.py |
 | LocalCapabilityConfig | BaseModel | handler: str, timeout_seconds: float | None, isolation: Literal['process', 't... | app/executors/config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
 | OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
@@ -363,7 +363,7 @@ server/app/
 | JobDeleteResult | TypedDict | job_id: str, operation: str, status: str, reason_code: str | None, message: s... | app/services/job_deletion.py |
 | LogEntry | TypedDict | type: str, title: str, detail: str, truncated: bool | app/services/job_log_renderer.py |
 | JobOperationResult | TypedDict | job_id: str, operation: str, status: str, node_key: str | None, reason_code: ... | app/services/job_operation_error.py |
-| CostBreakdown | BaseModel | currency: str, input: float, output: float, cache_read: float, total: float, ... | app/services/token_usage_contracts.py |
+| CostBreakdown | BaseModel | currency: str, input: float, output: float, cache_read: float, total: float, ... | app/services/token_usage_pricing.py |
 | JobPackageItemResult | TypedDict | job_id: str, status: str, reason_code: str | None, message: str | None | app/services/workspace_package_contracts.py |
 | JobPackageResult | TypedDict | results: list[JobPackageItemResult], succeeded_count: int, failed_count: int,... | app/services/workspace_package_contracts.py |
 | SkillSourceConfig | BaseModel | repo: str, ref: str | app/skills/config.py |
@@ -374,6 +374,7 @@ server/app/
 | VideoSubtitleResponse | BaseModel | index: int, start: float, end: float, text: str | app/video_capabilities/response_contracts.py |
 | VideoJobArtifactsResponse | BaseModel | subtitles: list[VideoSubtitleResponse], chapters: list[dict[str, Any]], inter... | app/video_capabilities/response_contracts.py |
 | VideoJobDetailResponse | BaseModel | input: VideoJobInputResponse, artifacts: VideoJobArtifactsResponse | app/video_capabilities/response_contracts.py |
+| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/workflow_worker/agent_stock.py |
 
 <!-- END AUTO-GENERATED -->
 

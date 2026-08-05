@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from server.app import agent_claim_compatibility
+from server.app.agent_broker import agent_claim_compatibility
 
 # Per-worker declarations: (runtimes, capabilities, models). Claimability is
 # judged per Worker — claim.py requires a single Worker to satisfy runtime,

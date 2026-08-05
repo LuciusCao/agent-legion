@@ -83,7 +83,7 @@ def test_agents_websocket_clean_disconnect_stays_silent(caplog):
     from fastapi import WebSocketDisconnect
     from fastapi.routing import APIWebSocketRoute
 
-    from server.app.agents import AgentStatusManager
+    from server.app.events.agents import AgentStatusManager
     from server.app.routes.agents import create_agents_router
 
     class _FakeWebSocket:
@@ -117,7 +117,7 @@ def test_agents_websocket_logs_unexpected_receive_error(caplog):
 
     from fastapi.routing import APIWebSocketRoute
 
-    from server.app.agents import AgentStatusManager
+    from server.app.events.agents import AgentStatusManager
     from server.app.routes.agents import create_agents_router
 
     class _FakeWebSocket:

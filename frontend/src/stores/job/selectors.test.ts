@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { getVisibleJobs, getFilterCounts } from './selectors'
+import { getVisibleJobs } from './filterLogic/getVisibleJobs'
+import { getFilterCounts } from './filterLogic/getFilterCounts'
 import { createJobState, createJobSummary } from './actions/testHelpers'
 
 describe('getVisibleJobs', () => {

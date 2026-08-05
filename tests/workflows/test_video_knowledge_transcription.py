@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from server.app.pipeline.transcribe_providers import SenseVoiceProvider, WhisperCppProvider
-from server.app.services.transcription_providers import build_default_providers
+from server.app.workflows.video_knowledge_transcription import build_default_providers
 
 
 def test_build_default_providers_uses_config_defaults(settings) -> None:

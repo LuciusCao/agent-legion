@@ -2,7 +2,16 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.services.token_usage_contracts import CostBreakdown
+from pydantic import BaseModel
+
+
+class CostBreakdown(BaseModel):
+    currency: str
+    input: float
+    output: float
+    cache_read: float
+    total: float
+    pricing_missing: bool
 
 
 def load_pricing_config(config: dict[str, Any]) -> dict[tuple[str, str], dict[str, float]]:

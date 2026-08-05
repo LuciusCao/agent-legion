@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from server.app.agent_bundle import AgentBundleError, build_agent_bundle, extract_agent_result
+from server.app.agent_broker.agent_bundle import (
+    AgentBundleError,
+    build_agent_bundle,
+    extract_agent_result,
+)
 from server.app.agent_completion import _unpack_result
 
 
