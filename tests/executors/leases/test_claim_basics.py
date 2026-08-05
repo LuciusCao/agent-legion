@@ -37,11 +37,11 @@ def test_two_workers_claim_one_node_only_one_succeeds(
     # Exactly one node_run and one active lease were persisted.
     with queries.connect() as conn:
         runs = conn.execute(
-            "select * from node_runs where job_id=? and node_key=?",
+            "select * from node_runs where job_id=%s and node_key=%s",
             (job_id, "review_keywords"),
         ).fetchall()
         leases = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=? and status='active'",
+            "select * from executor_leases where job_id=%s and node_key=%s and status='active'",
             (job_id, "review_keywords"),
         ).fetchall()
     assert len(runs) == 1
@@ -171,10 +171,10 @@ def test_failed_claim_does_not_persist_any_state(
     assert failed is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
         nodes = conn.execute(
-            "select * from job_nodes where job_id=? and status='running'", (job_id,)
+            "select * from job_nodes where job_id=%s and status='running'", (job_id,)
         ).fetchall()
     assert len(runs) == 1
     assert len(leases) == 1
@@ -209,10 +209,10 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
 
     with queries.connect() as conn:
         lease = conn.execute(
-            "select * from executor_leases where id=?", (claim.lease_id,)
+            "select * from executor_leases where id=%s", (claim.lease_id,)
         ).fetchone()
-        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
-        job = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (claim.node_run_id,)).fetchone()
+        job = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
     assert lease["status"] == "released"
     assert run["status"] == "completed"
     assert run["exit_code"] == 0
@@ -274,12 +274,12 @@ def test_fail_without_lease_creates_failed_run_and_updates_job_status(
     assert run_id is not None
 
     with queries.connect() as conn:
-        run = conn.execute("select * from node_runs where id=?", (run_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (run_id,)).fetchone()
         node = conn.execute(
-            "select * from job_nodes where job_id=? and node_key=?",
+            "select * from job_nodes where job_id=%s and node_key=%s",
             (job_id, "review_keywords"),
         ).fetchone()
-        job = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+        job = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
     assert run["status"] == "failed"
     assert run["error_message"] == "missing binding"
     assert node["status"] == "failed"
@@ -308,7 +308,7 @@ def test_fail_without_lease_is_idempotent_for_the_same_node(
     assert second_run_id is None
     with queries.connect() as conn:
         run_count = conn.execute(
-            "select count(*) from node_runs where job_id=? and node_key=?",
+            "select count(*) from node_runs where job_id=%s and node_key=%s",
             (job_id, "review_keywords"),
         ).fetchone()[0]
     assert run_count == 1
@@ -348,13 +348,13 @@ def test_expire_stale_releases_expired_leases(
 
     with queries.connect() as conn:
         lease = conn.execute(
-            "select * from executor_leases where id=?", (claim.lease_id,)
+            "select * from executor_leases where id=%s", (claim.lease_id,)
         ).fetchone()
         node = conn.execute(
-            "select * from job_nodes where job_id=? and node_key=?",
+            "select * from job_nodes where job_id=%s and node_key=%s",
             (job_id, "review_keywords"),
         ).fetchone()
-        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (claim.node_run_id,)).fetchone()
     assert lease["status"] == "expired"
     assert node["status"] == "failed"
     assert node["error_message"] == "lease expired"

@@ -96,11 +96,11 @@ def _prepare_job(
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (ws["id"], "test", node.key, "local-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
     return ws, job

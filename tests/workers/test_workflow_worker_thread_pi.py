@@ -40,7 +40,7 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
             """
             insert into workspace_node_bindings
             (workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             """,
             (ws["id"], "test", "fetch", "pi-default"),
         )
@@ -48,7 +48,7 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
             """
             insert into workspace_executor_allocations
             (workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             """,
             (ws["id"], "pi-default", 2),
         )
@@ -98,7 +98,7 @@ def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) ->
             """
             insert into workspace_node_bindings
             (workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             """,
             (ws["id"], "test", "fetch", "local-default"),
         )
@@ -106,7 +106,7 @@ def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) ->
             """
             insert into workspace_executor_allocations
             (workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             """,
             (ws["id"], "local-default", 2),
         )

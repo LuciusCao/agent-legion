@@ -30,7 +30,7 @@ def test_session_token_is_hashed_and_revocable(client, job_db) -> None:
     assert client.get("/api/auth/me").status_code == 401
     with job_db.connect() as conn:
         row = conn.execute(
-            "select revoked_at from sessions where token_hash=?", (digest,)
+            "select revoked_at from sessions where token_hash=%s", (digest,)
         ).fetchone()
     assert row is not None and row["revoked_at"] is not None
 

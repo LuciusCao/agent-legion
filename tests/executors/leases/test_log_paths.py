@@ -40,7 +40,7 @@ def test_claim_lease_persists_relative_log_path(queries: JobQueries) -> None:
     assert claimed is not None
     with queries.connect() as conn:
         run = conn.execute(
-            "select * from node_runs where job_id=? and node_key=?",
+            "select * from node_runs where job_id=%s and node_key=%s",
             (job_id, "review_keywords"),
         ).fetchone()
     assert run is not None
@@ -68,7 +68,7 @@ def test_finish_lease_persists_relative_log_path(
     assert repo_a.finish(claim.lease_id, result) is True
 
     with queries.connect() as conn:
-        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (claim.node_run_id,)).fetchone()
     assert run is not None
     assert run["log_path"] == "logs/updated.log"
 
@@ -93,7 +93,7 @@ def test_fail_without_lease_persists_relative_log_path(
     assert run_id is not None
 
     with queries.connect() as conn:
-        run = conn.execute("select * from node_runs where id=?", (run_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (run_id,)).fetchone()
     assert run is not None
     assert run["log_path"] == "logs/error.log"
 
@@ -121,7 +121,7 @@ def test_try_claim_returns_absolute_log_path_and_persists_relative(
     assert claim.log_path == str(absolute_log)
     with queries.connect() as conn:
         run = conn.execute(
-            "select * from node_runs where job_id=? and node_key=?",
+            "select * from node_runs where job_id=%s and node_key=%s",
             (job_id, "review_keywords"),
         ).fetchone()
     assert run is not None
@@ -144,7 +144,7 @@ def test_finish_lease_canonicalizes_fallback_legacy_absolute_log_path(
     legacy_absolute_log.parent.mkdir(parents=True, exist_ok=True)
     with queries.connect() as conn:
         conn.execute(
-            "update node_runs set log_path=? where id=?",
+            "update node_runs set log_path=%s where id=%s",
             (str(legacy_absolute_log), claim.node_run_id),
         )
         conn.execute("commit")
@@ -153,7 +153,7 @@ def test_finish_lease_canonicalizes_fallback_legacy_absolute_log_path(
     assert repo_a.finish(claim.lease_id, result) is True
 
     with queries.connect() as conn:
-        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (claim.node_run_id,)).fetchone()
     assert run is not None
     assert run["log_path"] == "logs/legacy.log"
 
@@ -181,7 +181,7 @@ def test_finish_lease_persists_relative_session_dir(
     assert repo_a.finish(claim.lease_id, result) is True
 
     with queries.connect() as conn:
-        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (claim.node_run_id,)).fetchone()
     assert run is not None
     assert run["session_dir"] == absolute_session.relative_to(data_dir).as_posix()
 

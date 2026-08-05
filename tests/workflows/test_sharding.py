@@ -126,8 +126,8 @@ def _finish(db_path: Path, index: int, status: str, **kwargs) -> str:
 def _start(db_path: Path, index: int) -> None:
     with write_transaction(db_path) as conn:
         conn.execute(
-            "update node_shards set status='running', execution_id=?, started_at=current_timestamp"
-            " where job_id='j1' and node_key='review' and shard_index=?",
+            "update node_shards set status='running', execution_id=%s, started_at=current_timestamp"
+            " where job_id='j1' and node_key='review' and shard_index=%s",
             (f"exec-{index}", index),
         )
 
@@ -339,7 +339,7 @@ def _node_status(job_db: JobQueries, job_id: str, node_key: str) -> str | None:
 def _lease_rows(db_path: Path, job_id: str, node_key: str) -> list[dict]:
     with read_connection(db_path) as conn:
         rows = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=? order by acquired_at",
+            "select * from executor_leases where job_id=%s and node_key=%s order by acquired_at",
             (job_id, node_key),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -349,7 +349,7 @@ def _active_lease_count(db_path: Path, job_id: str, node_key: str) -> int:
     with read_connection(db_path) as conn:
         return conn.execute(
             "select count(*) as cnt from executor_leases"
-            " where job_id=? and node_key=? and status='active'",
+            " where job_id=%s and node_key=%s and status='active'",
             (job_id, node_key),
         ).fetchone()["cnt"]
 
@@ -357,7 +357,7 @@ def _active_lease_count(db_path: Path, job_id: str, node_key: str) -> int:
 def _node_shards(db_path: Path, job_id: str, node_key: str) -> list[dict]:
     with read_connection(db_path) as conn:
         rows = conn.execute(
-            "select * from node_shards where job_id=? and node_key=? order by shard_index",
+            "select * from node_shards where job_id=%s and node_key=%s order by shard_index",
             (job_id, node_key),
         ).fetchall()
     return [dict(row) for row in rows]

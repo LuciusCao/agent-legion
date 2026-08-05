@@ -423,7 +423,7 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
         broker.mark_done(claim.execution_id, "worker-v", claim.lease_id, {"status": "completed"})
         with job_db.connect() as conn:
             state = conn.execute(
-                "select state from agent_execution_requests where execution_id=?",
+                "select state from agent_execution_requests where execution_id=%s",
                 (claim.execution_id,),
             ).fetchone()
         assert state["state"] == "done"

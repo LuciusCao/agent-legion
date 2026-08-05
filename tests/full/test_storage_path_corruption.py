@@ -68,7 +68,7 @@ def _create_job_with_malicious_storage(job_db: JobQueries, malicious_storage_dir
     )
     with job_db.connect() as conn:
         conn.execute(
-            "update jobs set storage_dir=? where id=?",
+            "update jobs set storage_dir=%s where id=%s",
             (malicious_storage_dir, job["id"]),
         )
     return job_db.get_job(job["id"])

@@ -101,7 +101,7 @@ def test_workspace_jobs_snapshot_returns_newest_first(client_factory):
         with job_db.connect() as conn:
             for index, job_id in enumerate(created):
                 conn.execute(
-                    "update jobs set created_at = ? where id = ?",
+                    "update jobs set created_at = %s where id = %s",
                     (f"2026-07-0{index + 1} 00:00:00", job_id),
                 )
 

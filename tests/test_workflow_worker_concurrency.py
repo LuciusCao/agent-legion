@@ -132,7 +132,7 @@ def _allocate(
         conn.execute(
             """
             insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set concurrency_limit=excluded.concurrency_limit
             """,
             (workspace_id, executor_id, concurrency_limit),
@@ -150,7 +150,7 @@ def _set_node_limit(
         conn.execute(
             """
             insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             on conflict(workspace_id, workflow_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
             """,
             (workspace_id, workflow_key, node_key, concurrency_limit),
@@ -168,7 +168,7 @@ def _bind(
         conn.execute(
             """
             insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
             """,
             (workspace_id, workflow_key, node_key, executor_id),
@@ -605,9 +605,9 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
     assert claim is None
 
     with job_db.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job["id"],)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job["id"],)).fetchall()
         leases_rows = conn.execute(
-            "select * from executor_leases where job_id=?", (job["id"],)
+            "select * from executor_leases where job_id=%s", (job["id"],)
         ).fetchall()
     assert len(runs) == 0
     assert len(leases_rows) == 0

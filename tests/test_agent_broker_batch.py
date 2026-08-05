@@ -14,7 +14,7 @@ def _seed_job(job_db, job_id: str) -> None:
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, 'ws1', 'questions', 'question', ?)",
+            " values (%s, 'ws1', 'questions', 'question', %s)",
             (job_id, job_id),
         )
 
@@ -25,8 +25,8 @@ def _insert_request(job_db, *, job_id: str, node_key: str, state: str) -> None:
             "insert into agent_execution_requests(execution_id, workspace_id, job_id,"
             " workflow_key, node_key, agent_id, agent_definition_hash,"
             " node_concurrency_limit, queued_at, manifest_json, state)"
-            " values (?, 'ws1', ?, 'questions', ?, 'agent-x', 'hash', 1,"
-            " current_timestamp, '{}', ?)",
+            " values (%s, 'ws1', %s, 'questions', %s, 'agent-x', 'hash', 1,"
+            " current_timestamp, '{}', %s)",
             (f"{job_id}-{node_key}-{state}", job_id, node_key, state),
         )
 

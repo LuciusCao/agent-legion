@@ -28,17 +28,17 @@ def _fail_node(app, job_id: str, node_key: str, category: str, detail: str) -> N
         conn.execute(
             """
             update node_runs
-            set status='failed', error_message='boom', failure_category=?, failure_detail=?,
+            set status='failed', error_message='boom', failure_category=%s, failure_detail=%s,
                 finished_at=current_timestamp
-            where id=?
+            where id=%s
             """,
             (category, detail, run["id"]),
         )
         conn.execute(
-            "update job_nodes set status='failed', error_message='boom' where job_id=? and node_key=?",
+            "update job_nodes set status='failed', error_message='boom' where job_id=%s and node_key=%s",
             (job_id, node_key),
         )
-        conn.execute("update jobs set status='failed' where id=?", (job_id,))
+        conn.execute("update jobs set status='failed' where id=%s", (job_id,))
         conn.execute("commit")
 
 
