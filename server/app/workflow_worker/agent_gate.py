@@ -10,7 +10,8 @@ thousands of agent candidates pile up behind saturated Workers:
   submission, the remaining agent candidates of this pass are skipped
   without further work (local executor candidates are unaffected);
 - the stockpile limit (``server.app.agent_stock``): pairs already stocked
-  to their target are skipped, bounding bundle-build CPU/IO.
+  to their target are skipped, bounding bundle-build CPU/IO; enqueue
+  submissions within the refresh window count toward the target.
 
 All gates are advisory: the broker's unique one-active-request index and
 the enqueue re-check on the pool thread stay the authoritative dedup.
@@ -39,6 +40,9 @@ class AgentPassState:
     ``active_nodes`` / ``pool_full`` / ``stock_gated`` are per-pass (reset
     at the top of every poll); the stock snapshot persists across passes
     and refreshes on ``AgentStockConfig.refresh_seconds``.
+    ``stock_enqueued`` counts enqueue-pool submissions per
+    (workspace_id, agent_id) since the snapshot was loaded, so a frozen
+    snapshot cannot over-release; it resets when the snapshot reloads.
     """
 
     active_nodes: set[tuple[str, str]] = field(default_factory=set)
@@ -46,6 +50,7 @@ class AgentPassState:
     stock_gated: int = 0
     stock_snapshot: StockSnapshot | None = None
     stock_loaded_at: float = 0.0
+    stock_enqueued: dict[tuple[str, str], int] = field(default_factory=dict)
 
     def reset_pass(self) -> None:
         self.active_nodes = set()
@@ -78,11 +83,13 @@ def prepare_agent_pass(
     config = worker.settings.executor_runtime.agent_stock
     if not config.enabled:
         state.stock_snapshot = None
+        state.stock_enqueued.clear()
         return
     now = time.monotonic()
     if state.stock_snapshot is None or now - state.stock_loaded_at >= config.refresh_seconds:
         state.stock_snapshot = load_stock_snapshot(dispatch.broker.database_dsn, config)
         state.stock_loaded_at = now
+        state.stock_enqueued.clear()
 
 
 def _candidate_job_ids(
@@ -118,7 +125,9 @@ def agent_claim_allowed(
     if (job_id, node_key) in state.active_nodes:
         return False
     snapshot = state.stock_snapshot
-    if snapshot is not None and not snapshot.allows(workspace_id, agent_id):
+    if snapshot is not None and not snapshot.allows(
+        workspace_id, agent_id, extra=state.stock_enqueued.get((workspace_id, agent_id), 0)
+    ):
         state.stock_gated += 1
         return False
     return True
