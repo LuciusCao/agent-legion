@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from server.app.agents import AgentStatusManager
+from server.app.events.agents import AgentStatusManager
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.sweeper import SweeperThread
 from server.app.workflow_worker.thread import WorkflowWorkerThread

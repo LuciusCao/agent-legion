@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
-from server.app import agent_claim_compatibility
+from server.app.agent_broker import agent_claim_compatibility
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker

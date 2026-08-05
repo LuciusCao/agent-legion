@@ -56,13 +56,13 @@ PARTITIONS: tuple[Partition, ...] = (
     Partition(
         "backend transcription providers",
         "backend",
-        ("server/app/services/transcription_providers.py",),
+        ("server/app/workflows/video_knowledge_transcription.py",),
         70.0,
     ),
     Partition(
         "backend agent artifacts",
         "backend",
-        ("server/app/agent_artifacts.py",),
+        ("server/app/agent_broker/agent_artifacts.py",),
         70.0,
     ),
     Partition(

@@ -1,4 +1,4 @@
-"""execution_catalog_projection：provider/model/thinking 按 runtime 投影。"""
+"""execution_catalog：provider/model/thinking 按 runtime 投影。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import pytest
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
-from server.app.services.execution_catalog_projection import execution_catalog
+from server.app.services.executor_catalog import execution_catalog
 from server.app.settings import Settings
 
 

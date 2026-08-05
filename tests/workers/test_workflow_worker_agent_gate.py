@@ -7,13 +7,13 @@ from collections import deque
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from server.app.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.workflow_worker.agent_gate import (
     AgentPassState,
     agent_claim_allowed,
     prepare_agent_pass,
     request_restock,
 )
+from server.app.workflow_worker.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.workflow_worker.ready_cache import ReadyCandidate
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode

@@ -290,7 +290,7 @@ create unique index if not exists idx_agent_requests_one_active_node
   on agent_execution_requests(job_id, node_key)
   where state in ('queued', 'claimed', 'reporting');
 -- Stockpile gate's done-rate window scan (schema v20,
--- server.app.agent_stock); partial, so only done rows pay for it.
+-- server.app.workflow_worker.agent_stock); partial, so only done rows pay for it.
 create index if not exists idx_agent_requests_done_recent
   on agent_execution_requests(finished_at)
   where state = 'done';

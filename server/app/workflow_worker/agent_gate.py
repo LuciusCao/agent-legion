@@ -9,7 +9,7 @@ thousands of agent candidates pile up behind saturated Workers:
 - an enqueue-pool-full flag: once the bounded enqueue pool rejects a
   submission, the remaining agent candidates of this pass are skipped
   without further work (local executor candidates are unaffected);
-- the stockpile limit (``server.app.agent_stock``): pairs already stocked
+- the stockpile limit (``server.app.workflow_worker.agent_stock``): pairs already stocked
   to their target are skipped, bounding bundle-build CPU/IO; enqueue
   submissions within the refresh window count toward the target.
 
@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from server.app.agent_broker import batch
-from server.app.agent_stock import StockSnapshot, load_stock_snapshot
+from server.app.workflow_worker.agent_stock import StockSnapshot, load_stock_snapshot
 
 if TYPE_CHECKING:
     from collections import deque

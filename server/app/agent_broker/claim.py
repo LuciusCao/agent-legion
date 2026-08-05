@@ -14,7 +14,8 @@ import json
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from server.app import agent_claim_compatibility
+from server.app.agent_broker import agent_claim_compatibility
+from server.app.agent_broker.agent_worker_capacity import sync_declared_capacity, touch_worker
 from server.app.agent_broker.claim_scan import (
     MAX_CLAIM_ATTEMPTS,
     SCAN_ROUNDS,
@@ -28,7 +29,6 @@ from server.app.agent_broker.claim_scan import (
     fetch_candidates,
     window_saturated,
 )
-from server.app.agent_worker_capacity import sync_declared_capacity, touch_worker
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker

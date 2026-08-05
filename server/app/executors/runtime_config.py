@@ -8,9 +8,9 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from server.app.agent_stock import AgentStockConfig
 from server.app.cms.auth import cms_token_available
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
+from server.app.workflow_worker.agent_stock import AgentStockConfig
 
 
 class PiRuntimeConfig(BaseModel):

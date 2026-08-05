@@ -14,7 +14,8 @@ import pytest
 from cryptography.fernet import Fernet
 
 from server.app.cms.client import CmsVideoLookup
-from server.app.services.vault import VaultService, resource_secret_name
+from server.app.services.vault import VaultService
+from server.app.services.vault_resources import resource_secret_name
 from server.app.workflows.video_knowledge import download_video
 
 PLAINTEXT = "knowledge-video-cms-token"

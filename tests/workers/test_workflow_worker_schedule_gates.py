@@ -8,10 +8,10 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
-from server.app.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.workflow_worker.agent_claim import cached_batch_payload
 from server.app.workflow_worker.agent_gate import AgentPassState
+from server.app.workflow_worker.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflow_worker.schedule import try_claim_and_submit

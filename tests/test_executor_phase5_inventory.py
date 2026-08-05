@@ -22,7 +22,8 @@ REPLACEMENTS: dict[str, str] = {
 
 PROTECTED_LEGACY_VIDEO_PATHS: set[str] = {
     "server/app/routes/agents.py",
-    "server/app/agents.py",
+    # agents.py（AgentStatusManager）迁入 events 子包（server-app 分层澄清）。
+    "server/app/events/agents.py",
     # OpenClawRunner 自 pipeline/openclaw.py 迁入 executors（issues/closed/057）。
     "server/app/executors/openclaw_runner.py",
 }
