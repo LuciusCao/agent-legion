@@ -7,7 +7,7 @@ class JobStatusQueriesMixin(JobQueriesBase):
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
         with self._connect_read() as conn:
             rows = conn.execute(
-                "select status, count(*) as cnt from jobs where workspace_id = ? group by status",
+                "select status, count(*) as cnt from jobs where workspace_id = %s group by status",
                 (workspace_id,),
             )
             result: dict[str, int] = {}
@@ -28,7 +28,7 @@ class JobStatusQueriesMixin(JobQueriesBase):
                 select job_nodes.node_key, job_nodes.status, count(*) as cnt
                 from job_nodes
                 join jobs on jobs.id = job_nodes.job_id
-                where jobs.workspace_id = ? and jobs.workflow_key = ?
+                where jobs.workspace_id = %s and jobs.workflow_key = %s
                 group by job_nodes.node_key, job_nodes.status
                 """,
                 (workspace_id, workflow_key),

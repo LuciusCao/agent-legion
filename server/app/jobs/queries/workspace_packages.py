@@ -22,7 +22,7 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
                 insert into workspace_packages(
                   workspace_id, path, name, job_count, size_bytes, locked, created_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?)
+                values (%s, %s, %s, %s, %s, %s, %s)
                 returning id
                 """,
                 (
@@ -45,9 +45,9 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
             rows = conn.execute(
                 """
                 select * from workspace_packages
-                where workspace_id = ?
+                where workspace_id = %s
                 order by created_at desc
-                limit ?
+                limit %s
                 """,
                 (workspace_id, limit),
             )
@@ -58,7 +58,7 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
             row = conn.execute(
                 """
                 select * from workspace_packages
-                where workspace_id = ? and id = ?
+                where workspace_id = %s and id = %s
                 """,
                 (workspace_id, package_id),
             ).fetchone()
@@ -68,8 +68,8 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
         with self.connect() as conn:
             conn.execute(
                 """
-                update workspace_packages set name = ?
-                where workspace_id = ? and id = ?
+                update workspace_packages set name = %s
+                where workspace_id = %s and id = %s
                 """,
                 (name, workspace_id, package_id),
             )
@@ -80,8 +80,8 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
         with self.connect() as conn:
             conn.execute(
                 """
-                update workspace_packages set locked = ?
-                where workspace_id = ? and id = ?
+                update workspace_packages set locked = %s
+                where workspace_id = %s and id = %s
                 """,
                 (locked, workspace_id, package_id),
             )
@@ -91,7 +91,7 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
             conn.execute(
                 """
                 delete from workspace_packages
-                where workspace_id = ? and id = ?
+                where workspace_id = %s and id = %s
                 """,
                 (workspace_id, package_id),
             )
@@ -99,11 +99,11 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
     def set_jobs_packed(self, job_ids: list[str], packed: int) -> None:
         if not job_ids:
             return
-        placeholders = ",".join("?" for _ in job_ids)
+        placeholders = ",".join("%s" for _ in job_ids)
         with self.connect() as conn:
             conn.execute(
                 f"""
-                update jobs set packed = ? where id in ({placeholders})
+                update jobs set packed = %s where id in ({placeholders})
                 """,
                 (packed, *job_ids),
             )

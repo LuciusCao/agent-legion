@@ -24,20 +24,20 @@ class FailedNodeRunQueriesMixin(JobQueriesBase):
         again under a different category) after an older matching failure is
         not returned.
         """
-        inner_clauses = ["jobs.workspace_id = ?"]
+        inner_clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
         if workflow_key:
-            inner_clauses.append("jobs.workflow_key = ?")
+            inner_clauses.append("jobs.workflow_key = %s")
             params.append(workflow_key)
         outer_clauses = ["latest.rn = 1", "latest.status = 'failed'"]
         if category:
-            outer_clauses.append("latest.failure_category = ?")
+            outer_clauses.append("latest.failure_category = %s")
             params.append(category)
         if detail:
-            outer_clauses.append("latest.failure_detail = ?")
+            outer_clauses.append("latest.failure_detail = %s")
             params.append(detail)
         if since is not None:
-            outer_clauses.append("latest.finished_at >= ?")
+            outer_clauses.append("latest.finished_at >= %s")
             params.append(since)
         inner_where = " and ".join(inner_clauses)
         outer_where = " and ".join(outer_clauses)
