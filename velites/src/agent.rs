@@ -215,7 +215,6 @@ pub async fn run<P: Provider>(
         messages.push(message.clone());
         append_session(&mut config.session, &message)?;
 
-        let mut tool_results: Vec<Message> = Vec::new();
         if stop_reason == Some(StopReason::ToolUse) {
             for block in &message.content {
                 // Cancellation checkpoint: do not start further tool calls.
@@ -263,15 +262,10 @@ pub async fn run<P: Provider>(
                     Message::tool_result(id.clone(), name.clone(), output.content, output.is_error);
                 messages.push(result_message.clone());
                 append_session(&mut config.session, &result_message)?;
-                tool_results.push(result_message);
             }
         }
 
-        sink.emit(&Event::TurnEnd(TurnEndEvent {
-            turn_index,
-            message,
-            tool_results,
-        }));
+        sink.emit(&Event::TurnEnd(TurnEndEvent { turn_index }));
 
         if wrap_up.is_some() {
             wrap_up_turn_ran = true;
@@ -313,7 +307,6 @@ pub async fn run<P: Provider>(
     }
 
     sink.emit(&Event::AgentEnd(AgentEndEvent {
-        messages,
         error: final_error,
         reason: end_reason,
     }));
