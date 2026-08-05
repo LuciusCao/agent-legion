@@ -165,6 +165,7 @@ server/app/
 | PUT | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish` | `publish_node_code` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions` | `list_node_code_versions` | routes/workflow_node_codes.py |
+| GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}` | `get_node_code_version` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback` | `rollback_node_code` | routes/workflow_node_codes.py |
 | DELETE | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `archive_node_code` | routes/workflow_node_codes.py |
 | GET | `/workflow-nodes/files/{file_path:path}` | `read_workflow_node_file` | routes/workflow_node_files.py |

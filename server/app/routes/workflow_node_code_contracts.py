@@ -11,6 +11,9 @@ class WorkflowNodeCodeResponse(BaseModel):
     # Published custom version serving the node (origin=custom only).
     version: int | None = None
     has_draft: bool = False
+    # Current draft content, when one exists (drafts are editable user data).
+    draft_code: str | None = None
+    draft_version: int | None = None
 
 
 class WorkflowNodeCodeDraftRequest(BaseModel):

@@ -13,7 +13,7 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.services.node_codes import NodeCodeService
+from server.app.services.node_codes import NodeCodeService, code_hash
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
@@ -132,7 +132,7 @@ def test_dispatch_prefers_frozen_code_version(tmp_path: Path) -> None:
     codes = NodeCodeService(TEST_DATABASE_URL)
     codes.save_draft(seed_ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")
     codes.publish(seed_ws["id"], "test", "fetch")
-    frozen = {"fetch": {"version": 1, "code_hash": "frozen"}}
+    frozen = {"fetch": {"version": 1, "code_hash": code_hash(CUSTOM_V1)}}
     job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": frozen})
     # The frozen pin rides this job's batch; the workspace pins its own codes.
     codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")

@@ -129,3 +129,33 @@ def test_anonymous_access_rejected(anon_client) -> None:
     assert anon_client.get(BASE).status_code == 401
     assert anon_client.put(BASE, json={"code": CUSTOM_V1}).status_code == 401
     assert anon_client.delete(BASE).status_code == 401
+
+
+def test_get_returns_draft_content(workspace_with_revision) -> None:
+    workspace_with_revision.put(BASE, json={"code": CUSTOM_V1, "change_note": "wip"})
+
+    body = workspace_with_revision.get(BASE).json()
+
+    assert body["origin"] == "builtin"  # not published yet
+    assert body["has_draft"] is True
+    assert body["draft_code"] == CUSTOM_V1
+    assert body["draft_version"] == 1
+
+
+def test_get_version_returns_code_for_any_status(workspace_with_revision) -> None:
+    workspace_with_revision.put(BASE, json={"code": CUSTOM_V1})
+    workspace_with_revision.post(f"{BASE}/publish")
+    workspace_with_revision.put(BASE, json={"code": CUSTOM_V2})
+    workspace_with_revision.post(f"{BASE}/publish")
+
+    # Archived v1 is still readable.
+    v1 = workspace_with_revision.get(f"{BASE}/versions/1")
+    assert v1.status_code == 200
+    assert v1.json()["code"] == CUSTOM_V1
+    assert v1.json()["status"] == "archived"
+
+    assert workspace_with_revision.get(f"{BASE}/versions/99").status_code == 404
+
+
+def test_anonymous_version_detail_rejected(anon_client) -> None:
+    assert anon_client.get(f"{BASE}/versions/1").status_code == 401

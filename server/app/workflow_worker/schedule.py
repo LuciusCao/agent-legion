@@ -172,17 +172,23 @@ def try_claim_and_submit(
     # Custom node code (EXEC-CODE-002): only code-kind executors can carry
     # custom code, so other kinds skip the DB read entirely. Frozen job
     # version wins over the current published version; None keeps builtin.
+    # A frozen-pin hash mismatch fails the node (fail closed, EXEC-CODE-003).
     node_code = None
     if isinstance(worker.settings.executor_definitions.get(executor_id), CodeExecutorConfig):
         frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
-        node_code = resolve_dispatch_node_code(
-            worker.job_db.path,
-            worker.settings.executor_runtime.workflows.custom_nodes_enabled,
-            workspace_id,
-            workflow_key,
-            node_key,
-            frozen_pins.get(node_key),
-        )
+        try:
+            node_code = resolve_dispatch_node_code(
+                worker.job_db.path,
+                worker.settings.executor_runtime.workflows.custom_nodes_enabled,
+                workspace_id,
+                workflow_key,
+                node_key,
+                frozen_pins.get(node_key),
+            )
+        except ValueError as exc:
+            return fail_node_config(
+                worker, workspace_id, job, workflow_key, node, log_path, str(exc)
+            )
 
     claimed = claim_executor_node(
         worker,

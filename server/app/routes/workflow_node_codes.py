@@ -71,17 +71,28 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         except JobServiceError as exc:
             raise_job_http_error(exc)
         published = next((row for row in versions if row["status"] == "published"), None)
-        has_draft = any(row["status"] == "draft" for row in versions)
+        # list_versions is version-descending: the first draft is the current one.
+        draft = next((row for row in versions if row["status"] == "draft"), None)
+        has_draft = draft is not None
+        draft_code = str(draft["code"]) if draft is not None else None
+        draft_version = int(draft["version"]) if draft is not None else None
         if published is not None:
             return WorkflowNodeCodeResponse(
                 origin="custom",
                 code=str(published["code"]),
                 version=int(published["version"]),
                 has_draft=has_draft,
+                draft_code=draft_code,
+                draft_version=draft_version,
             )
         path, content = _read_builtin_code(capability)
         return WorkflowNodeCodeResponse(
-            origin="builtin", code=content, path=path, has_draft=has_draft
+            origin="builtin",
+            code=content,
+            path=path,
+            has_draft=has_draft,
+            draft_code=draft_code,
+            draft_version=draft_version,
         )
 
     @router.put(
@@ -138,6 +149,22 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         return WorkflowNodeCodeVersionsResponse(
             versions=[WorkflowNodeCodeVersionSummary(**row) for row in rows]
         )
+
+    @router.get(
+        "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}",
+        response_model=WorkflowNodeCodeVersionResponse,
+    )
+    def get_node_code_version(
+        workspace_id: str, workflow_key: str, node_key: str, version: int
+    ) -> WorkflowNodeCodeVersionResponse:
+        _capability(workspace_id, workflow_key, node_key)
+        try:
+            row = _service().get_code_by_version(workspace_id, workflow_key, node_key, version)
+        except JobServiceError as exc:
+            raise_job_http_error(exc)
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"No node code version {version}")
+        return WorkflowNodeCodeVersionResponse(**row)
 
     @router.post(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback",
