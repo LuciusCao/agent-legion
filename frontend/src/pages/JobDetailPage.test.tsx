@@ -295,8 +295,8 @@ describe('JobDetailPage', () => {
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    // +1 detail poll, +1 mount-time workers refresh (750ms debounce).
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    // +1 detail poll；mount 时的 workers invalidate 在无活跃观察者时不产生请求。
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it.each([['running'], ['queued']] as const)(
@@ -315,15 +315,15 @@ describe('JobDetailPage', () => {
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
-      // +1 detail poll, +1 mount-time workers refresh (750ms debounce).
-      expect(fetchMock).toHaveBeenCalledTimes(4)
+      // +1 detail poll；mount 时的 workers invalidate 在无活跃观察者时不产生请求。
+      expect(fetchMock).toHaveBeenCalledTimes(3)
 
       unmount()
 
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
-      expect(fetchMock).toHaveBeenCalledTimes(4)
+      expect(fetchMock).toHaveBeenCalledTimes(3)
     }
   )
 
@@ -408,9 +408,9 @@ describe('JobDetailPage', () => {
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    // No detail poll for a completed job; the mount-time workers refresh
-    // (750ms debounce) fires once when timers advance.
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    // No detail poll for a completed job；mount 时的 workers invalidate
+    // 在无活跃观察者（本页未挂 Worker 状态列表）时不产生请求。
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('disables rerun and package for a running job', async () => {

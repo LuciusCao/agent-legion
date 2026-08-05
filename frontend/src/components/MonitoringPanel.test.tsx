@@ -2,7 +2,17 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
+import { TestQueryProvider } from '../testing/testQueryClient'
 import { MonitoringPanel } from './MonitoringPanel'
+
+// react-query 需要 QueryClientProvider；每个用例独立 client（retry 关闭）。
+function renderPanel(props: { workspaceId?: string } = {}) {
+  return render(
+    <TestQueryProvider>
+      <MonitoringPanel {...props} />
+    </TestQueryProvider>
+  )
+}
 
 // bucket_start 必须对齐到整分钟，否则在固定时间窗网格里匹配不上会被填零。
 function bucket(offsetMinutes: number, overrides = {}) {
@@ -51,8 +61,9 @@ function summary(overrides = {}) {
   }
 }
 
-// 面板每次渲染发起两个 fetch（主数据 + 队列深度图的全局数据，子组件 effect 先
-// 执行），自定义响应必须用持久实现并在 afterEach 复原，不能用 Once 系列。
+// 主数据与队列深度图同参数时共享 queryKey（合并为一次请求），切换 Worker 过滤
+// 或 30s 轮询都会再次拉取；自定义响应必须用持久实现并在 afterEach 复原，不能
+// 用 Once 系列。
 function defaultMetricsResponse(params: { granularity: string }) {
   return Promise.resolve({
     granularity: params.granularity,
@@ -85,7 +96,7 @@ vi.mock('../api/workerTokens', () => ({
 
 describe('MonitoringPanel', () => {
   it('renders stat cards and charts from fetched buckets', async () => {
-    render(<MonitoringPanel />)
+    renderPanel()
 
     // 摘要元素首帧就以占位符 '-' 渲染，必须等内容到位而不是等元素出现，
     // 否则并行高负载下断言会抢在 fetch resolve 之前执行。
@@ -146,7 +157,7 @@ describe('MonitoringPanel', () => {
       }),
     })
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('队列堵塞')
@@ -166,7 +177,7 @@ describe('MonitoringPanel', () => {
       }),
     })
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('队列停滞')
@@ -175,7 +186,7 @@ describe('MonitoringPanel', () => {
 
   it('refetches with the new window when granularity changes', async () => {
     const user = userEvent.setup()
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await screen.findByTestId('online-workers-summary')
     await user.click(screen.getByRole('button', { name: '近 30 天' }))
@@ -194,7 +205,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('refetches with worker_id when a worker is selected', async () => {
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await screen.findByTestId('online-workers-summary')
 
@@ -227,7 +238,7 @@ describe('MonitoringPanel', () => {
   it('renders error message on fetch failure', async () => {
     mockFetchOpsMetrics.mockRejectedValue(new Error('network error'))
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     expect(
       await screen.findByText('监控数据加载失败：network error')
@@ -236,7 +247,7 @@ describe('MonitoringPanel', () => {
 
   it('keeps summary cards stable when granularity changes', async () => {
     const user = userEvent.setup()
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await waitFor(() =>
       expect(screen.getByTestId('hourly-tokens-summary')).toHaveTextContent(
@@ -275,7 +286,7 @@ describe('MonitoringPanel', () => {
       }),
     })
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await waitFor(() =>
       expect(screen.getByTestId('hourly-runs-summary')).toHaveTextContent(
@@ -301,7 +312,7 @@ describe('MonitoringPanel', () => {
       }),
     })
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     // 固定时间窗下空数据渲染为零值折线，而不是“暂无数据”占位
     await waitFor(() =>

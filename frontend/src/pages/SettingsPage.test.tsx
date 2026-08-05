@@ -14,7 +14,6 @@ import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings } from '../types'
 import { useUiStore } from '../stores/uiStore'
-import { useExecutorsStore } from '../stores/executorsStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { makeWorkspace } from '../testing/workspaceFixtures'
 import { api, fetchWorkflows } from '../api'
@@ -117,13 +116,6 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     useUiStore.setState({ toast: null })
-    // Stub the worker refresh so its debounced api('/api/agent-workers')
-    // call never lands in the shared mocked api call history.
-    useExecutorsStore.setState({
-      workers: [],
-      connectionStatus: {},
-      refreshWorkers: vi.fn().mockResolvedValue(undefined),
-    })
     useWorkspaceStore.setState({
       workspaces: [
         makeWorkspace({
