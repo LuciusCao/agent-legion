@@ -60,8 +60,8 @@ def finish_shard_execution(
         conn.execute(
             """
             update job_nodes
-            set status=?, error_message=?, finished_at=?
-            where job_id=? and node_key=?
+            set status=%s, error_message=%s, finished_at=%s
+            where job_id=%s and node_key=%s
             """,
             (aggregate, error_message, now_str, lease["job_id"], lease["node_key"]),
         )
@@ -88,8 +88,8 @@ def complete_empty_shard_node(
     cursor = conn.execute(
         """
         update job_nodes
-        set status='completed', error_message='', finished_at=?
-        where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+        set status='completed', error_message='', finished_at=%s
+        where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
         """,
         (now_str, job_id, node_key),
     )

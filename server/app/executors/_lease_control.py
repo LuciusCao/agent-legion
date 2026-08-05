@@ -13,7 +13,7 @@ def _read_job_execution_control(conn: DatabaseConnection, job_id: str) -> dict[s
         """
         select execution_mode, target_node_key, execution_paused, pause_reason
         from jobs
-        where id=?
+        where id=%s
         """,
         (job_id,),
     ).fetchone()
@@ -53,34 +53,34 @@ def _execution_control_rejects_claim(
 
 def sync_job_status(conn: DatabaseConnection, job_id: str) -> None:
     still_running = conn.execute(
-        "select 1 from job_nodes where job_id=? and status='running'",
+        "select 1 from job_nodes where job_id=%s and status='running'",
         (job_id,),
     ).fetchone()
     if still_running is not None:
         conn.execute(
-            "update jobs set status=?, updated_at=? where id=?",
+            "update jobs set status=%s, updated_at=%s where id=%s",
             ("running", database_timestamp(datetime.now(UTC)), job_id),
         )
         return
 
     any_failed = conn.execute(
-        "select 1 from job_nodes where job_id=? and status='failed'",
+        "select 1 from job_nodes where job_id=%s and status='failed'",
         (job_id,),
     ).fetchone()
     if any_failed is not None:
         conn.execute(
-            "update jobs set status=?, updated_at=? where id=?",
+            "update jobs set status=%s, updated_at=%s where id=%s",
             ("failed", database_timestamp(datetime.now(UTC)), job_id),
         )
         return
 
     paused = conn.execute(
-        "select 1 from jobs where id=? and execution_paused=1",
+        "select 1 from jobs where id=%s and execution_paused=1",
         (job_id,),
     ).fetchone()
     if paused is not None:
         conn.execute(
-            "update jobs set status=?, updated_at=? where id=?",
+            "update jobs set status=%s, updated_at=%s where id=%s",
             ("paused", database_timestamp(datetime.now(UTC)), job_id),
         )
         return
@@ -88,19 +88,19 @@ def sync_job_status(conn: DatabaseConnection, job_id: str) -> None:
     non_terminal = conn.execute(
         """
         select 1 from job_nodes
-        where job_id=? and status not in ('completed', 'not_applicable')
+        where job_id=%s and status not in ('completed', 'not_applicable')
         """,
         (job_id,),
     ).fetchone()
     if non_terminal is not None:
         conn.execute(
-            "update jobs set status=?, updated_at=? where id=?",
+            "update jobs set status=%s, updated_at=%s where id=%s",
             ("queued", database_timestamp(datetime.now(UTC)), job_id),
         )
         return
 
     conn.execute(
-        "update jobs set status=?, updated_at=? where id=?",
+        "update jobs set status=%s, updated_at=%s where id=%s",
         ("completed", database_timestamp(datetime.now(UTC)), job_id),
     )
 
@@ -115,7 +115,7 @@ def _pause_job_on_target_completion(
         """
         select execution_mode, target_node_key, status
         from jobs
-        where id=?
+        where id=%s
         """,
         (job_id,),
     ).fetchone()
@@ -131,8 +131,8 @@ def _pause_job_on_target_completion(
             set status='paused',
                 execution_paused=1,
                 pause_reason='target_reached',
-                updated_at=?
-            where id=?
+                updated_at=%s
+            where id=%s
             """,
             (now_str, job_id),
         )
@@ -143,7 +143,7 @@ def active_lease_counts(conn: DatabaseConnection, executor_id: str) -> dict[str,
     counts: dict[str, int] = {"global": 0}
 
     allocated = conn.execute(
-        "select workspace_id from workspace_executor_allocations where executor_id=?",
+        "select workspace_id from workspace_executor_allocations where executor_id=%s",
         (executor_id,),
     ).fetchall()
     for row in allocated:
@@ -153,7 +153,7 @@ def active_lease_counts(conn: DatabaseConnection, executor_id: str) -> dict[str,
         """
         select count(*) as cnt
         from executor_leases
-        where executor_id=? and status='active' and expires_at>?
+        where executor_id=%s and status='active' and expires_at>%s
         """,
         (executor_id, now_str),
     ).fetchone()
@@ -163,7 +163,7 @@ def active_lease_counts(conn: DatabaseConnection, executor_id: str) -> dict[str,
         """
         select workspace_id, count(*) as cnt
         from executor_leases
-        where executor_id=? and status='active' and expires_at>?
+        where executor_id=%s and status='active' and expires_at>%s
         group by workspace_id
         """,
         (executor_id, now_str),

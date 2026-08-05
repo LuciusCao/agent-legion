@@ -89,6 +89,6 @@ def build_executor(executor_id: str, config: BaseModel, deps: RuntimeDependencie
     kind = _KIND_REGISTRY.get(getattr(config, "kind", ""))
     if kind is None:
         raise UnknownExecutorKindError(
-            f"Executor {executor_id!r}: unknown kind {getattr(config, 'kind', '?')!r}"
+            f"Executor {executor_id!r}: unknown kind {getattr(config, 'kind', '%s')!r}"
         )
     return kind.factory(executor_id, config, deps)
