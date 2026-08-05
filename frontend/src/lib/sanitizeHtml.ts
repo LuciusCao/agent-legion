@@ -1,41 +1,28 @@
-const ALLOWED_TAGS = new Set('P BR STRONG EM UL OL LI SPAN DIV IMG'.split(' '))
+import DOMPurify from 'dompurify'
 
-const ALLOWED_ATTRIBUTES: Record<string, Set<string>> = {
-  IMG: new Set(['src', 'alt']),
-}
+// Only absolute http(s) URLs survive; relative and other schemes are dropped.
+const SAFE_SRC = /^https?:\/\//i
 
-const ALLOWED_SCHEMES = new Set(['http:', 'https:'])
-
-function isSafeSrc(value: string): boolean {
-  try {
-    return ALLOWED_SCHEMES.has(new URL(value).protocol)
-  } catch {
-    return false
+DOMPurify.addHook('afterSanitizeAttributes', (node) => {
+  if (node.tagName !== 'IMG') return
+  // DOMPurify always allows data: URIs on img (ADD_DATA_URI_TAGS only extends
+  // the built-in set), so re-check src here and drop unsafe values.
+  const src = node.getAttribute('src')
+  if (src !== null && !SAFE_SRC.test(src)) {
+    node.removeAttribute('src')
   }
-}
+  // Avoid hotlink protection blocking images via the Referer header.
+  node.setAttribute('referrerpolicy', 'no-referrer')
+})
 
 export function sanitizeHtml(html: string): string {
-  const doc = new DOMParser().parseFromString(html, 'text/html')
-  Array.from(doc.body.querySelectorAll('*')).forEach((el) => {
-    if (!ALLOWED_TAGS.has(el.tagName)) {
-      const parent = el.parentNode
-      if (!parent) return
-      while (el.firstChild) parent.insertBefore(el.firstChild, el)
-      parent.removeChild(el)
-    }
+  return DOMPurify.sanitize(html, {
+    ALLOWED_TAGS: 'p br strong em ul ol li span div img'.split(' '),
+    ALLOWED_ATTR: ['src', 'alt', 'referrerpolicy'],
+    // Disallowed tags are unwrapped, keeping their child nodes — including
+    // raw-text elements like iframe/script, whose text stays inert.
+    KEEP_CONTENT: true,
+    FORBID_CONTENTS: [],
+    ALLOWED_URI_REGEXP: SAFE_SRC,
   })
-  Array.from(doc.body.querySelectorAll('*')).forEach((el) => {
-    const allowedAttrs = ALLOWED_ATTRIBUTES[el.tagName]
-    Array.from(el.attributes).forEach((attr) => {
-      const keep =
-        allowedAttrs?.has(attr.name) &&
-        !(el.tagName === 'IMG' && attr.name === 'src' && !isSafeSrc(attr.value))
-      if (!keep) el.removeAttribute(attr.name)
-    })
-  })
-  // Avoid hotlink protection blocking images via the Referer header.
-  doc.body
-    .querySelectorAll('img')
-    .forEach((el) => el.setAttribute('referrerpolicy', 'no-referrer'))
-  return doc.body.innerHTML
 }

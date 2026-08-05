@@ -1,80 +1,57 @@
-import re
+"""SRT subtitle parsing/formatting, backed by the ``srt`` library.
+
+The public functions keep their historical signatures: ``parse_srt`` /
+``parse_srt_file`` return ``list[dict]`` with ``index``/``start``/``end``/
+``text`` fields (seconds as float), which callers unpack directly into
+``VideoSubtitleResponse``.
+"""
+
+from datetime import timedelta
 from pathlib import Path
+
+import srt
 
 
 def parse_time(value: str) -> float:
-    parts = value.strip().replace(",", ".").split(":")
+    text = value.strip().replace(",", ".")
     try:
-        if len(parts) == 2:
+        return float(srt.srt_timestamp_to_timedelta(text).total_seconds())
+    except srt.TimestampParseError:
+        pass
+    # srt 只接受 HH:MM:SS 三段式时间戳；兼容历史行为保留 MM:SS 两段式。
+    parts = text.split(":")
+    if len(parts) == 2:
+        try:
             minutes, seconds = parts
             return int(minutes) * 60 + float(seconds)
-        if len(parts) == 3:
-            hours, minutes, seconds = parts
-            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
-    except ValueError:
-        pass
+        except ValueError:
+            pass
     raise ValueError(f"Unknown timestamp: {value}") from None
 
 
-def _parse_srt_block(lines: list[str], subtitles: list[dict]) -> None:
-    if len(lines) < 3:
-        return
-    match = re.match(
-        r"(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{3})\s+-->\s+"
-        r"(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{3})",
-        lines[1],
-    )
-    if not match:
-        return
-    try:
-        start = parse_time(match.group(1))
-        end = parse_time(match.group(2))
-    except ValueError:
-        return
-    subtitles.append(
-        {
-            "index": int(lines[0]) if lines[0].isdigit() else len(subtitles) + 1,
-            "start": start,
-            "end": end,
-            "text": "\n".join(lines[2:]),
-        }
-    )
-
-
 def parse_srt(text: str) -> list[dict]:
+    """Parse SRT text, silently skipping garbled blocks (historical behavior)."""
     subtitles: list[dict] = []
-    for block in re.split(r"\n\s*\n", text.strip()):
-        lines = [line.strip() for line in block.splitlines() if line.strip()]
-        _parse_srt_block(lines, subtitles)
+    for subtitle in srt.parse(text, ignore_errors=True):
+        subtitles.append(
+            {
+                "index": subtitle.index if subtitle.index is not None else len(subtitles) + 1,
+                "start": subtitle.start.total_seconds(),
+                "end": subtitle.end.total_seconds(),
+                # 历史实现对每行 strip 并丢弃空行，保持该输出契约。
+                "text": "\n".join(
+                    line.strip() for line in subtitle.content.splitlines() if line.strip()
+                ),
+            }
+        )
     return subtitles
 
 
 def parse_srt_file(path: Path) -> list[dict]:
-    """Parse an SRT file line-by-line without loading the entire text into memory."""
     if not path.exists():
         return []
-    subtitles: list[dict] = []
-    current_block: list[str] = []
-
-    def _flush() -> None:
-        if current_block:
-            _parse_srt_block([line.strip() for line in current_block if line.strip()], subtitles)
-            current_block.clear()
-
-    with path.open("r", encoding="utf-8") as f:
-        for line in f:
-            if line.strip() == "":
-                _flush()
-            else:
-                current_block.append(line)
-        _flush()
-
-    return subtitles
+    return parse_srt(path.read_text(encoding="utf-8"))
 
 
 def format_srt_time(seconds: float) -> str:
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    millis = int(round((seconds - int(seconds)) * 1000))
-    return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+    return str(srt.timedelta_to_srt_timestamp(timedelta(seconds=seconds)))

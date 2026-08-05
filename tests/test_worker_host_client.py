@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import json
-import urllib.error
 from pathlib import Path
 
 import pytest
+import requests
 
 from worker.host_client import Client, WorkerAuthError
 
@@ -73,7 +73,7 @@ def test_upload_artifact_retries_connection_errors(
     sleeps = _patch_sleep(monkeypatch)
     responses = iter(
         [
-            urllib.error.URLError("connection reset"),
+            requests.ConnectionError("connection reset"),
             (201, json.dumps({"hash": "abc"}).encode()),
         ]
     )
@@ -95,7 +95,7 @@ def test_upload_artifact_reports_last_connection_error(
     _patch_sleep(monkeypatch)
 
     def fake_request(*args, **kwargs):
-        raise urllib.error.URLError("connection refused")
+        raise requests.ConnectionError("connection refused")
 
     monkeypatch.setattr(Client, "request", fake_request)
     with pytest.raises(RuntimeError, match="artifact upload failed: .*connection refused"):

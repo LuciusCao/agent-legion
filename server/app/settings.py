@@ -6,6 +6,8 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlencode
 
+from dotenv import load_dotenv
+
 from server.app.cms.env import resolve_cms_env, validate_cms_env_aliases
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
@@ -47,19 +49,8 @@ class Settings:
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        if key not in os.environ:
-            os.environ[key] = value
+    # override=False：已存在的环境变量优先于 .env 文件（与原手写实现一致）。
+    load_dotenv(path, override=False)
 
 
 def _str_parser(value: str) -> str:
