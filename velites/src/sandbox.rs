@@ -30,13 +30,33 @@ enum Backend {
     /// macOS seatbelt profile text, passed to `sandbox-exec -p`.
     #[cfg(target_os = "macos")]
     Seatbelt(String),
-    /// Linux bubblewrap: read-write bind mounts (everything else stays on the
-    /// read-only bind of `/`); `unshare_net` isolates the network namespace.
+    /// Linux bubblewrap policy; wrap mode and the bash tool diverge here.
     #[cfg(target_os = "linux")]
-    Bwrap {
+    Bwrap(BwrapPolicy),
+}
+
+/// Linux bubblewrap policy variants. The bash tool keeps its historical
+/// policy (read-only `/` bind, shared network namespace); `sandbox wrap`
+/// gets the strict one (selective read-only binds, private pid namespace,
+/// isolated network unless allowed).
+#[cfg(target_os = "linux")]
+enum BwrapPolicy {
+    BashTool {
         read_write: Vec<PathBuf>,
-        unshare_net: bool,
     },
+    Wrap {
+        read_only: Vec<PathBuf>,
+        read_write: Vec<PathBuf>,
+        allow_network: bool,
+    },
+}
+
+/// Which caller is building the sandbox: the bash tool (legacy policy) or
+/// the generic `sandbox wrap` subcommand (strict policy).
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SandboxMode {
+    BashTool,
+    Wrap,
 }
 
 /// Extra policy knobs for `velites sandbox wrap` (generic command wrapping,
@@ -52,6 +72,11 @@ pub struct WrapOptions {
     /// Outbound+inbound network is denied by default (macOS: no network rule
     /// in the seatbelt profile; Linux: `--unshare-net`); this flag allows it.
     pub allow_network: bool,
+    /// Directories whose LISTING is allowed without making their contents
+    /// readable (seatbelt `literal`-only read-data): Python's import system
+    /// lists each PYTHONPATH entry, so the parents of read roots need this.
+    /// Linux needs nothing: bwrap creates the bind parents in the namespace.
+    pub list_only: Vec<PathBuf>,
 }
 
 impl Sandbox {
@@ -70,7 +95,7 @@ impl Sandbox {
             read_only: skill_dirs.to_vec(),
             ..WrapOptions::default()
         };
-        Self::build(read_write, &options)
+        Self::build(read_write, &options, SandboxMode::BashTool)
     }
 
     /// Wrap an arbitrary command (the `sandbox wrap` subcommand): `cwd` is
@@ -87,11 +112,15 @@ impl Sandbox {
                 read_write.push(canonical);
             }
         }
-        Self::build(read_write, options)
+        Self::build(read_write, options, SandboxMode::Wrap)
     }
 
     #[cfg(target_os = "macos")]
-    fn build(read_write: Vec<PathBuf>, options: &WrapOptions) -> anyhow::Result<Self> {
+    fn build(
+        read_write: Vec<PathBuf>,
+        options: &WrapOptions,
+        mode: SandboxMode,
+    ) -> anyhow::Result<Self> {
         probe_macos()?;
         let mut read_only = macos_system_read_paths();
         for dir in &options.read_only {
@@ -110,30 +139,65 @@ impl Sandbox {
                 read_only.push(root);
             }
         }
+        let mut list_only = Vec::new();
+        if mode == SandboxMode::Wrap {
+            for root in options.read_only.iter().chain(options.read_write.iter()) {
+                if let Some(parent) = root.parent() {
+                    if !list_only.contains(&parent.to_path_buf()) {
+                        list_only.push(parent.to_path_buf());
+                    }
+                }
+            }
+        }
         Ok(Self {
-            backend: Backend::Seatbelt(seatbelt_profile_ext(
+            backend: Backend::Seatbelt(seatbelt_profile_opts(
                 &read_only,
                 &read_write,
+                &list_only,
                 options.allow_network,
+                // Wrap mode confines signals to the sandboxed process itself;
+                // the bash tool keeps the global allow it has always had.
+                mode == SandboxMode::Wrap,
             )),
         })
     }
 
     #[cfg(target_os = "linux")]
-    fn build(read_write: Vec<PathBuf>, options: &WrapOptions) -> anyhow::Result<Self> {
-        // Read-only extras need no extra bind: the read-only `/` bind already
-        // covers every read-only location.
+    fn build(
+        read_write: Vec<PathBuf>,
+        options: &WrapOptions,
+        mode: SandboxMode,
+    ) -> anyhow::Result<Self> {
         probe_linux()?;
+        let policy = match mode {
+            // Read-only extras need no extra bind: the read-only `/` bind
+            // already covers every read-only location.
+            SandboxMode::BashTool => BwrapPolicy::BashTool { read_write },
+            SandboxMode::Wrap => {
+                let mut read_only = Vec::new();
+                for dir in &options.read_only {
+                    read_only.push(dir.canonicalize().with_context(|| {
+                        format!("failed to canonicalize read root `{}`", dir.display())
+                    })?);
+                }
+                BwrapPolicy::Wrap {
+                    read_only,
+                    read_write,
+                    allow_network: options.allow_network,
+                }
+            }
+        };
         Ok(Self {
-            backend: Backend::Bwrap {
-                read_write,
-                unshare_net: !options.allow_network,
-            },
+            backend: Backend::Bwrap(policy),
         })
     }
 
     #[cfg(not(any(target_os = "macos", target_os = "linux")))]
-    fn build(read_write: Vec<PathBuf>, options: &WrapOptions) -> anyhow::Result<Self> {
+    fn build(
+        read_write: Vec<PathBuf>,
+        options: &WrapOptions,
+        _mode: SandboxMode,
+    ) -> anyhow::Result<Self> {
         let _ = (read_write, options);
         Err(anyhow!(
             "no filesystem sandbox backend on this platform (supported: macOS seatbelt, Linux bubblewrap)"
@@ -151,13 +215,7 @@ impl Sandbox {
                 ("sandbox-exec".to_string(), argv)
             }
             #[cfg(target_os = "linux")]
-            Backend::Bwrap {
-                read_write,
-                unshare_net,
-            } => (
-                "bwrap".to_string(),
-                bwrap_argv_opts(read_write, inner, *unshare_net),
-            ),
+            Backend::Bwrap(policy) => ("bwrap".to_string(), bwrap_argv_for(policy, inner)),
         }
     }
 }
@@ -317,7 +375,7 @@ fn seatbelt_escape(path: &Path) -> String {
         .replace('"', "\\\"")
 }
 
-/// Generate the seatbelt profile with an optional network allow rule.
+/// Generate the seatbelt profile.
 ///
 /// Structure (validated empirically on macOS 15):
 ///
@@ -334,40 +392,25 @@ fn seatbelt_escape(path: &Path) -> String {
 /// - Network is denied by default (`deny default` covers it); `allow_network`
 ///   appends an explicit outbound+inbound allow for commands that must talk
 ///   to a service (e.g. a custom node reaching the CMS).
+/// - `signal_self_only` (`sandbox wrap` mode) narrows the global signal
+///   allow to `(target self)`; the bash tool keeps the global allow.
 #[cfg(target_os = "macos")]
-fn seatbelt_profile_ext(
+fn seatbelt_profile_opts(
     read_only: &[PathBuf],
     read_write: &[PathBuf],
+    list_only: &[PathBuf],
     allow_network: bool,
+    signal_self_only: bool,
 ) -> String {
-    let mut profile = seatbelt_profile(read_only, read_write);
-    if allow_network {
-        profile.push_str("(allow network-outbound)\n(allow network-inbound)\n");
-    }
-    profile
-}
-
-/// Generate the seatbelt profile.
-///
-/// Structure (validated empirically on macOS 15):
-///
-/// - `file-read-metadata` is allowed GLOBALLY: with it restricted, dyld /
-///   libsystem kill the process at exec (abort/bus error) before `main`.
-///   Metadata (stat) alone cannot read file contents or directory entries.
-/// - `file-read-data` is restricted to the allowlist below, which must also
-///   contain `(literal "/")` — the root directory is opened at process
-///   startup. Read-data denial is what blocks content scanning (`readdir`
-///   and `open(O_RDONLY)` outside the roots fail with EPERM).
-/// - Both `literal` (the directory itself) and `subpath` (its contents) are
-///   listed per root: seatbelt treats them as distinct filters.
-/// - Read-write roots are also readable.
-#[cfg(target_os = "macos")]
-fn seatbelt_profile(read_only: &[PathBuf], read_write: &[PathBuf]) -> String {
     let mut profile = String::from("(version 1)\n(deny default)\n");
-    // What bash and its children need to run at all (no filesystem effect).
-    profile.push_str(
-        "(allow process-exec)\n(allow process-fork)\n(allow signal)\n(allow sysctl-read)\n",
-    );
+    // What a process and its children need to run at all (no filesystem effect).
+    profile.push_str("(allow process-exec)\n(allow process-fork)\n");
+    if signal_self_only {
+        profile.push_str("(allow signal (target self))\n");
+    } else {
+        profile.push_str("(allow signal)\n");
+    }
+    profile.push_str("(allow sysctl-read)\n");
     profile.push_str("(allow file-read-metadata)\n");
 
     let emit = |path: &Path, profile: &mut String| {
@@ -383,6 +426,11 @@ fn seatbelt_profile(read_only: &[PathBuf], read_write: &[PathBuf]) -> String {
     for path in read_write {
         emit(path, &mut profile);
     }
+    // List-only grants: a bare literal allows readdir on the directory but
+    // keeps every file inside unreadable.
+    for path in list_only {
+        profile.push_str(&format!("  (literal \"{}\")\n", seatbelt_escape(path)));
+    }
     profile.push_str(")\n");
 
     profile.push_str("(allow file-write*\n  (subpath \"/dev\")\n");
@@ -390,6 +438,9 @@ fn seatbelt_profile(read_only: &[PathBuf], read_write: &[PathBuf]) -> String {
         emit(path, &mut profile);
     }
     profile.push_str(")\n");
+    if allow_network {
+        profile.push_str("(allow network-outbound)\n(allow network-inbound)\n");
+    }
     profile
 }
 
@@ -432,6 +483,63 @@ fn bwrap_argv_opts(read_write: &[PathBuf], inner: &[String], unshare_net: bool) 
 #[cfg(any(target_os = "linux", test))]
 fn bwrap_argv(read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
     bwrap_argv_opts(read_write, inner, false)
+}
+
+/// Dispatch the bwrap argv per policy (bash tool vs `sandbox wrap`).
+#[cfg(target_os = "linux")]
+fn bwrap_argv_for(policy: &BwrapPolicy, inner: &[String]) -> Vec<String> {
+    match policy {
+        BwrapPolicy::BashTool { read_write } => bwrap_argv_opts(read_write, inner, false),
+        BwrapPolicy::Wrap {
+            read_only,
+            read_write,
+            allow_network,
+        } => bwrap_wrap_argv(read_only, read_write, inner, *allow_network),
+    }
+}
+
+/// `sandbox wrap` bwrap argv (strict policy): selective read-only binds
+/// instead of a blanket `/` bind, a private pid namespace with its own
+/// /proc, and an isolated network namespace unless the caller opted in.
+#[cfg(any(target_os = "linux", test))]
+fn bwrap_wrap_argv(
+    read_only: &[PathBuf],
+    read_write: &[PathBuf],
+    inner: &[String],
+    allow_network: bool,
+) -> Vec<String> {
+    let mut argv: Vec<String> = vec!["--die-with-parent".into(), "--unshare-pid".into()];
+    if !allow_network {
+        argv.push("--unshare-net".into());
+    }
+    // Read-only system roots a binary needs to start; missing ones are
+    // skipped (e.g. /lib64 on some distros).
+    for system_root in ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt"] {
+        if Path::new(system_root).is_dir() {
+            argv.extend(["--ro-bind".into(), system_root.into(), system_root.into()]);
+        }
+    }
+    for path in read_only {
+        let display = path.display().to_string();
+        argv.extend(["--ro-bind".into(), display.clone(), display]);
+    }
+    argv.extend(["--dev".into(), "/dev".into()]);
+    // Private /proc: only meaningful (and safe to expose) inside the new pid
+    // namespace created by --unshare-pid.
+    argv.extend(["--proc".into(), "/proc".into()]);
+    if read_write.iter().any(|path| path == Path::new("/tmp")) {
+        argv.extend(["--tmpfs".into(), "/tmp".into()]);
+    }
+    for path in read_write {
+        if path == Path::new("/tmp") {
+            continue;
+        }
+        let display = path.display().to_string();
+        argv.extend(["--bind".into(), display.clone(), display]);
+    }
+    argv.push("--".into());
+    argv.extend(inner.iter().cloned());
+    argv
 }
 
 #[cfg(target_os = "macos")]
@@ -513,6 +621,30 @@ mod tests {
     }
 
     #[test]
+    fn bwrap_wrap_argv_selective_binds_and_private_namespaces() {
+        let rw = vec![PathBuf::from("/job/dir"), PathBuf::from("/tmp")];
+        let ro = vec![PathBuf::from("/repo/server"), PathBuf::from("/opt/venv")];
+        let argv = bwrap_wrap_argv(&ro, &rw, &inner(), false);
+        let joined = argv.join(" ");
+        assert!(joined.contains("--unshare-pid"));
+        assert!(joined.contains("--unshare-net"));
+        // No blanket root bind in wrap mode.
+        assert!(
+            !joined.contains("--ro-bind / /"),
+            "blanket root bind leaked: {joined}"
+        );
+        assert!(joined.contains("--ro-bind /usr /usr"));
+        assert!(joined.contains("--ro-bind /repo/server /repo/server"));
+        assert!(joined.contains("--ro-bind /opt/venv /opt/venv"));
+        assert!(joined.contains("--bind /job/dir /job/dir"));
+        assert!(joined.contains("--tmpfs /tmp"));
+        // Network opt-in drops only the net unshare; pid stays private.
+        let allowed = bwrap_wrap_argv(&ro, &rw, &inner(), true).join(" ");
+        assert!(!allowed.contains("--unshare-net"));
+        assert!(allowed.contains("--unshare-pid"));
+    }
+
+    #[test]
     fn bwrap_argv_opts_unshares_network_only_when_requested() {
         let shared = bwrap_argv_opts(&[PathBuf::from("/job")], &inner(), false);
         assert!(!shared.iter().any(|a| a == "--unshare-net"));
@@ -527,9 +659,9 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn seatbelt_profile_ext_network_opt_in() {
-        let denied = seatbelt_profile_ext(&[], &[PathBuf::from("/job")], false);
+        let denied = seatbelt_profile_opts(&[], &[PathBuf::from("/job")], &[], false, false);
         assert!(!denied.contains("network-outbound"));
-        let allowed = seatbelt_profile_ext(&[], &[PathBuf::from("/job")], true);
+        let allowed = seatbelt_profile_opts(&[], &[PathBuf::from("/job")], &[], true, false);
         assert!(allowed.contains("(allow network-outbound)"));
         assert!(allowed.contains("(allow network-inbound)"));
         // The base policy stays identical: deny default with the write root.
@@ -539,11 +671,25 @@ mod tests {
 
     #[cfg(target_os = "macos")]
     #[test]
+    fn seatbelt_wrap_profile_confines_signals_to_self() {
+        let profile = seatbelt_profile_opts(&[], &[PathBuf::from("/job")], &[], false, true);
+        assert!(profile.contains("(allow signal (target self))"));
+        assert!(!profile.contains("(allow signal)\n"));
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
     fn seatbelt_profile_denies_by_default_and_lists_roots() {
-        let profile = seatbelt_profile(
+        let profile = seatbelt_profile_opts(
             &[PathBuf::from("/skill/dir")],
             &[PathBuf::from("/job/dir"), PathBuf::from("/private/tmp")],
+            &[],
+            false,
+            false,
         );
+        // Bash policy keeps the global signal allow; wrap mode narrows it.
+        assert!(profile.contains("(allow signal)"));
+        assert!(!profile.contains("(target self)"));
         assert!(profile.starts_with("(version 1)\n(deny default)\n"));
         assert!(profile.contains("(allow process-exec)"));
         assert!(profile.contains("(allow process-fork)"));
@@ -563,7 +709,8 @@ mod tests {
     #[cfg(target_os = "macos")]
     #[test]
     fn seatbelt_profile_escapes_quotes_and_backslashes() {
-        let profile = seatbelt_profile(&[PathBuf::from("/weird\"quo\\te")], &[]);
+        let profile =
+            seatbelt_profile_opts(&[PathBuf::from("/weird\"quo\\te")], &[], &[], false, false);
         assert!(profile.contains("/weird\\\"quo\\\\te"));
     }
 
@@ -711,7 +858,7 @@ mod tests {
         let path_var = std::ffi::OsString::from(venv.join("bin").to_string_lossy().into_owned());
         let roots = python_read_roots_from_path(&path_var);
 
-        let profile = seatbelt_profile(&roots, &[]);
+        let profile = seatbelt_profile_opts(&roots, &[], &[], false, false);
         for root in &roots {
             let escaped = seatbelt_escape(root);
             assert!(profile.contains(&format!("(literal \"{escaped}\")")));

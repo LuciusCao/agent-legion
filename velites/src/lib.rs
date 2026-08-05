@@ -196,6 +196,7 @@ pub fn run_sandbox_wrap(cli: cli::SandboxWrapCli) -> anyhow::Result<u8> {
         read_write: cli.allow_write.clone(),
         read_only: cli.allow_read.clone(),
         allow_network: cli.allow_network,
+        ..sandbox::WrapOptions::default()
     };
     let sandbox = sandbox::Sandbox::for_wrap(&cli.cwd, &options)
         .context("filesystem sandbox unavailable (fail-closed)")?;

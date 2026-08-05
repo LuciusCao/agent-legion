@@ -151,3 +151,14 @@ def test_by_knowledge_empty_list_raises(tmp_path: Path, monkeypatch: pytest.Monk
 
     with pytest.raises(RuntimeError, match="no questions found"):
         question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
+
+
+def test_intake_input_field_prefers_prefetched_batch() -> None:
+    """Custom sandboxed children have no job_db; the prefetched batch row wins."""
+    batch = {"source_payload_json": json.dumps({"intake_mode": {"input_field": "question_ids"}})}
+    assert (
+        question_intake._intake_input_field({"batch_id": "b1"}, {"job_batch": batch})
+        == "question_ids"
+    )
+    # No batch and no job_db → empty (builtin fallback path unchanged).
+    assert question_intake._intake_input_field({"batch_id": "b1"}, {}) == ""

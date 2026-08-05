@@ -4,17 +4,23 @@ Spawned as ``python -m server.app.executors._code_child <result>`` inside
 the velites ``sandbox wrap`` confinement: custom node code is user-supplied
 (EXEC-CODE-002) and must never run with the server process's full privileges.
 The payload pickle arrives on **stdin** (job, job_dir, runtime) so resolved
-secrets never touch the sandboxed filesystem; the result pickle at
-``<result>`` reports ``("ok" | "error", message)`` back.
+secrets never touch the sandboxed filesystem; the result at ``<result>`` is
+**JSON** (``{"status": "ok"|"error", "message": str|null}``) — never pickle,
+because the file sits in a sandbox-writable directory and the parent must not
+deserialize anything the child tree could have replaced.
 
-Cancellation is best-effort cooperative: the parent kills the process on
-timeout/cancel (same as the builtin child), and the SIGTERM handler cancels
-the runtime token first so code nodes calling ``check_cancellation`` unwind
-cleanly before the kill lands.
+Custom children get no database handle: the only builtin node that read one
+(``question_intake``) now takes a prefetched ``runtime["job_batch"]`` instead.
+
+Cancellation is best-effort cooperative: the parent kills the process group
+on timeout/cancel, and the SIGTERM handler cancels the runtime token first so
+code nodes calling ``check_cancellation`` unwind cleanly before the kill
+lands.
 """
 
 from __future__ import annotations
 
+import json
 import logging
 import pickle
 import signal
@@ -45,29 +51,23 @@ def main() -> int:
     runtime["cancellation"] = token
     prefix = f"[code:{runtime.get('node_key', '')}]"
     try:
-        job_db_path = runtime.pop("_job_db_path", None)
-        jobs_dir = runtime.pop("_jobs_dir", None)
-        if job_db_path and jobs_dir:
-            from server.app.jobs import JobQueries
-
-            runtime["job_db"] = JobQueries(str(job_db_path), Path(jobs_dir))
         run = _load_run_from_source(payload["code"])
         logger.info(
             "%s start capability=%s custom (sandboxed)", prefix, runtime.get("capability", "")
         )
         run(payload["job"], Path(payload["job_dir"]), runtime)
         logger.info("%s completed", prefix)
-        result: tuple[str, str | None] = ("ok", None)
+        result = {"status": "ok", "message": None}
     except BaseException as exc:  # the child must always report back
-        result = ("error", f"{type(exc).__name__}: {exc}")
-        logger.error("%s failed: %s", prefix, result[1])
+        result = {"status": "error", "message": f"{type(exc).__name__}: {exc}"}
+        logger.error("%s failed: %s", prefix, result["message"])
         logger.exception("Sandboxed custom code node failed")
 
     tmp_path = f"{result_path}.tmp"
-    with open(tmp_path, "wb") as handle:
-        pickle.dump(result, handle)
+    with open(tmp_path, "w", encoding="utf-8") as handle:
+        json.dump(result, handle)
     Path(tmp_path).replace(result_path)
-    return 0 if result[0] == "ok" else 1
+    return 0 if result["status"] == "ok" else 1
 
 
 if __name__ == "__main__":
