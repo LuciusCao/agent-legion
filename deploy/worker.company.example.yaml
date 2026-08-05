@@ -2,7 +2,7 @@ host_url: http://host:8000
 worker_id: company-local-1
 name: Company local Worker
 # 可选值：pi / openclaw / velites。声明 velites 需先在 PATH 提供 velites 二进制。
-runtimes: [pi]
+runtimes: [velites]
 max_concurrency: 10
 labels: {os: linux, arch: arm64, location: company}
 register_token_file: /run/secrets/agent_worker_register_token

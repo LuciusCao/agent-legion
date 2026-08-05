@@ -183,3 +183,38 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
   ceiling: 55
+- check: architecture.file_budget
+  path: server/app/db/migrations/versioned_entities.py
+  reason: The published-capability partial unique index (agent config
+    governance, one published Agent per capability) lives with the table DDL
+    it constrains; the migration file is append-only by design and shrinks
+    only when old migrations are collapsed.
+  owner: database
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 117
+- check: architecture.file_budget
+  path: server/app/executors/runtime_config.py
+  reason: Startup validation for the retained pi executor path gained a
+    three-line comment explaining the hardcoded binary default after the
+    workflows.pi yaml retirement; the file is otherwise unchanged and the pi
+    path is scheduled dead-path code.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 259
+- check: architecture.file_budget
+  path: server/app/services/versioned_entities.py
+  reason: The capability-conflict IntegrityError mapping (agent config
+    governance, DB-level one-published-Agent-per-capability guard) added a
+    small helper shared by publish and rollback; splitting the lifecycle
+    engine for nine lines would scatter one cohesive rule.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 378
+- check: architecture.file_budget
+  path: worker/executor.py
+  reason: The manifest timeout fallback alignment comment (600 -> 1800,
+    matching the Host EXECUTION_TIMEOUT_SECONDS product constant) added
+    three comment lines to the claim execution path; no logic grew.
+  owner: agent-worker
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 371

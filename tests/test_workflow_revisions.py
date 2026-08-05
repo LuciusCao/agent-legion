@@ -7,7 +7,6 @@ from fastapi.testclient import TestClient
 
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
-from server.app.services.agent_service import reset_published_agent_cache
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
@@ -200,7 +199,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
 
 
 def test_reconcile_warns_and_skips_on_ambiguous_capability(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
@@ -208,18 +207,28 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    # Simulate catalog/DB desync: a second published definition for the same capability.
-    with queries.connect() as conn:
-        conn.execute(
-            "insert into versioned_entities("
-            " id, entity_type, workspace_id, entity_key, version, status,"
-            " definition_json, definition_hash, created_by)"
-            " values ('agent:question-key-info-v2:v1', 'agent', null,"
-            " 'question-key-info-v2', 1, 'published',"
-            ' \'{"capability": "generate_key_info", "runtime": "velites",'
-            " \"skill\": \"question/generate_key_info\"}', 'hash-v2', 'user:test')"
-        )
-    reset_published_agent_cache()
+    # Simulate catalog/DB desync: a second published definition for the same
+    # capability. The DB partial unique index makes this unrepresentable via
+    # real rows, so stub the catalog read (the reconcile guard is defense in
+    # depth for catalogs produced before the index existed).
+    from server.app.agent_catalog import AgentDefinition
+
+    ambiguous = {
+        "question-key-info-v1": AgentDefinition(
+            capability="generate_key_info",
+            runtime="velites",
+            skill="question/generate_key_info",
+        ),
+        "question-key-info-v2": AgentDefinition(
+            capability="generate_key_info",
+            runtime="velites",
+            skill="question/generate_key_info_v2",
+        ),
+    }
+    monkeypatch.setattr(
+        "server.app.services.workflow_revisions.published_agent_definitions",
+        lambda _dsn: ambiguous,
+    )
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
         service.reconcile_active_agent_routes()

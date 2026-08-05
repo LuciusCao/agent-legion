@@ -219,12 +219,14 @@ def validate_runtime(
         isinstance(definition, PiExecutorConfig)
         for definition in (executor_definitions or {}).values()
     ):
+        # The workflows.pi yaml block is retired: the binary comes from the
+        # hardcoded PiRuntimeConfig default (kept for this retained pi path).
         pi_binary = str(runtime.workflows.pi.binary or "")
         if not pi_binary:
-            errors.append(("workflows.pi.binary", "missing pi binary"))
+            errors.append(("pi executor binary", "missing pi binary"))
         else:
             if _resolve_executable(pi_binary) is None:
-                errors.append(("workflows.pi.binary", "pi binary is not executable or on PATH"))
+                errors.append(("pi executor binary", "pi binary is not executable or on PATH"))
 
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
@@ -107,6 +109,51 @@ def test_rollback_restores_old_definition(service) -> None:
 def test_rollback_unknown_version_raises(service) -> None:
     with pytest.raises(NotFoundError):
         service.rollback("agent-a", 99, "user:ops")
+
+
+def test_rollback_rejects_duplicate_capability(service) -> None:
+    """rollback 与 publish 走同一 capability 冲突检查（防御层）。"""
+    service.save_draft("agent-a", DEFINITION_V1, "user:u1")
+    service.publish("agent-a")
+    other = AgentDefinition(capability="other_cap", runtime="velites", skill="q/other")
+    service.save_draft("agent-a", other, "user:u1")
+    service.publish("agent-a")
+    # agent-b now owns DEFINITION_V1's capability; rolling agent-a back to v1
+    # would collide with it.
+    service.save_draft("agent-b", DEFINITION_V1, "user:u1")
+    service.publish("agent-b")
+
+    with pytest.raises(ConflictError, match="capability"):
+        service.rollback("agent-a", 1, "user:ops")
+
+    # Archiving the owner frees the capability; the rollback then lands.
+    service.archive_all("agent-b")
+    rolled = service.rollback("agent-a", 1, "user:ops")
+    assert rolled.status == "published"
+    assert service.get_published_definition("agent-a") == DEFINITION_V1
+
+
+def test_db_index_rejects_second_published_capability(service, job_db) -> None:
+    """DB 层真实 guard：绕过 service 直接写第二行同 capability published 必失败。"""
+    from psycopg import IntegrityError
+
+    service.save_draft("agent-a", DEFINITION_V1, "user:u1")
+    service.publish("agent-a")
+
+    with pytest.raises(IntegrityError), job_db.connect() as conn:
+        conn.execute(
+            "insert into versioned_entities("
+            "id, entity_type, workspace_id, entity_key, version, status,"
+            " definition_json, definition_hash, created_by)"
+            " values ('agent:agent-b:v1', 'agent', null, 'agent-b', 1, 'published',"
+            " %s, 'hash-b', 'user:test')",
+            (json.dumps(DEFINITION_V1.model_dump(mode="json")),),
+        )
+
+    # 同一 agent re-publish（先归档旧版再发新版）不撞索引。
+    service.save_draft("agent-a", DEFINITION_V2, "user:u1")
+    republished = service.publish("agent-a")
+    assert republished.version == 2
 
 
 def test_archive_all_unpublishes(service) -> None:

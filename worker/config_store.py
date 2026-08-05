@@ -38,7 +38,7 @@ _DEFAULTS: dict[str, Any] = {
     "host_url": "",
     "worker_id": "",
     "name": "",
-    "runtimes": ["pi"],
+    "runtimes": ["velites"],
     "max_concurrency": 1,
     "upload_max_concurrency": 4,
     "models": [],
