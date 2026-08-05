@@ -42,8 +42,10 @@
   推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
   （与本地 pre-push 一致：纯前端改动跳过 backend pytest shards 但保留
   api:check、纯 `velites/` 改动只跑 rust、docs-only 全跳过、共享文件
-  全量，检测逻辑见 workflow 的 `changes` job）；ci-extended 压力门改为
-  nightly + 手动 dispatch。
+  全量，检测逻辑见 workflow 的 `changes` job）；push 触发只留
+  main/master（develop 合并已由 PR gate 覆盖）；ci-extended 压力门与
+  nightly-e2e 改为每周 schedule + 手动 dispatch，schedule 不重复跑
+  普通 lane。
 - 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试
