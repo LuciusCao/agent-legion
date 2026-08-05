@@ -1,31 +1,35 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@mui/material'
-import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useWorkspaces } from '../hooks/useWorkspaces'
+import { useWorkspaceStats } from '../hooks/useWorkspaceStats'
 import { useDashboardEvents } from '../hooks/useDashboardEvents'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
 import { UserMenu } from '../components/UserMenu'
+import type { WorkspaceRecord } from '../types'
+
+function DashboardWorkspaceCard({ workspace }: { workspace: WorkspaceRecord }) {
+  const navigate = useNavigate()
+  const { data: stats } = useWorkspaceStats(workspace.id)
+  return (
+    <WorkspaceCard
+      name={workspace.name}
+      workflowLabel={
+        stats?.workflow_label || workspace.default_workflow_key || ''
+      }
+      jobStats={stats?.job_stats || {}}
+      executorStatus={stats?.executor_status?.executors || []}
+      onClick={() => navigate(`/workspaces/${workspace.id}`)}
+    />
+  )
+}
 
 export function DashboardPage() {
-  const navigate = useNavigate()
-  const { workspaces, fetchWorkspaces, workspaceStats, fetchWorkspaceStats } =
-    useWorkspaceStore()
+  const { data: workspaces = [] } = useWorkspaces()
   const [dialogOpen, setDialogOpen] = useState(false)
 
   useDashboardEvents()
-
-  useEffect(() => {
-    fetchWorkspaces()
-  }, [fetchWorkspaces])
-
-  useEffect(() => {
-    workspaces.forEach((w) => {
-      if (!workspaceStats[w.id]) {
-        fetchWorkspaceStats(w.id)
-      }
-    })
-  }, [workspaces, workspaceStats, fetchWorkspaceStats])
 
   return (
     <div style={{ padding: 24 }}>
@@ -54,20 +58,7 @@ export function DashboardPage() {
         }}
       >
         {workspaces.map((w) => (
-          <WorkspaceCard
-            key={w.id}
-            name={w.name}
-            workflowLabel={
-              workspaceStats[w.id]?.workflow_label ||
-              w.default_workflow_key ||
-              ''
-            }
-            jobStats={workspaceStats[w.id]?.job_stats || {}}
-            executorStatus={
-              workspaceStats[w.id]?.executor_status?.executors || []
-            }
-            onClick={() => navigate(`/workspaces/${w.id}`)}
-          />
+          <DashboardWorkspaceCard key={w.id} workspace={w} />
         ))}
       </div>
 

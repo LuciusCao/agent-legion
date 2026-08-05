@@ -1,5 +1,7 @@
 import { fetchJobFacets } from '../../../api'
-import { useWorkspaceStore } from '../../workspaceStore'
+import { queryClient } from '../../../lib/queryClient'
+import { queryKeys } from '../../../lib/queryKeys'
+import type { WorkspaceStats } from '../../../types/workspaceTypes'
 import { toJobListFilterParams } from '../listFilterParams'
 import type { JobState, JobStoreSet } from '../state'
 import {
@@ -21,9 +23,12 @@ export function selectionModeActions(set: JobStoreSet, get: () => JobState) {
     },
     selectFailed() {
       const workspaceId = get().jobsWorkspaceId
+      // 非 hook 环境，直接读全局 queryClient 缓存；未缓存时返回 undefined，
+      // 与原 store 缺失该 workspace stats 时的行为一致。
       const failed = workspaceId
-        ? useWorkspaceStore.getState().workspaceStats[workspaceId]?.job_stats
-            ?.failed
+        ? queryClient.getQueryData<WorkspaceStats>(
+            queryKeys.workspaceStats(workspaceId)
+          )?.job_stats?.failed
         : undefined
       set(enterAllMatchingState(FAILED_SELECTION_FILTER, failed ?? null))
     },

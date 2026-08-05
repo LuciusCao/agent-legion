@@ -3,12 +3,21 @@ import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
+import { TestQueryProvider } from '../testing/testQueryClient'
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
   useNavigate: () => vi.fn(),
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }))
+
+function renderPage() {
+  return render(
+    <TestQueryProvider>
+      <WorkflowStudioPage />
+    </TestQueryProvider>
+  )
+}
 
 vi.mock('../api', () => {
   const activeRevisionPayload = {
@@ -64,6 +73,8 @@ vi.mock('../api', () => {
       }
       return Promise.reject(new Error(`Unhandled API path: ${path}`))
     }),
+    // 列表里不含 ws1，useWorkspaceDisplayName 走单 workspace 回退加载。
+    fetchWorkspaces: vi.fn().mockResolvedValue({ workspaces: [] }),
     fetchActiveWorkflowRevision: vi
       .fn()
       .mockResolvedValue(activeRevisionPayload),
@@ -112,14 +123,14 @@ vi.mock('../api', () => {
 
 describe('WorkflowStudioPage', () => {
   it('renders the workflow studio shell', async () => {
-    render(<WorkflowStudioPage />)
+    renderPage()
 
     expect(await screen.findByText('题目审题 / 编辑工作流')).toBeInTheDocument()
     expect(await screen.findByText('获取题目')).toBeInTheDocument()
   })
 
   it('renders workspace editor title and actions in the app bar without workflow label clutter', async () => {
-    render(<WorkflowStudioPage />)
+    renderPage()
 
     const appBar = await screen.findByTestId('app-bar')
     await screen.findByText('题目审题 / 编辑工作流')
@@ -138,7 +149,7 @@ describe('WorkflowStudioPage', () => {
 
   it('renders active revision metadata and prefilled definition', async () => {
     const user = userEvent.setup()
-    render(<WorkflowStudioPage />)
+    renderPage()
 
     expect(await screen.findByText('题目审题 / 编辑工作流')).toBeInTheDocument()
     expect(await screen.findByText('获取题目')).toBeInTheDocument()
@@ -153,7 +164,7 @@ describe('WorkflowStudioPage', () => {
 
   it('opens workflow-wide changes outside the node inspector', async () => {
     const user = userEvent.setup()
-    render(<WorkflowStudioPage />)
+    renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
     await user.click(screen.getByRole('button', { name: '查看变更' }))
@@ -167,7 +178,7 @@ describe('WorkflowStudioPage', () => {
 
   it('marks the editor dirty and resets to active definition', async () => {
     const user = userEvent.setup()
-    render(<WorkflowStudioPage />)
+    renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
     await user.click(screen.getByRole('button', { name: 'YAML 高级编辑' }))
@@ -188,7 +199,7 @@ describe('WorkflowStudioPage', () => {
 
   it('opens publish review dialog before publishing', async () => {
     const user = userEvent.setup()
-    render(<WorkflowStudioPage />)
+    renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
     await user.click(screen.getByRole('button', { name: 'YAML 高级编辑' }))
@@ -209,7 +220,7 @@ describe('WorkflowStudioPage', () => {
 
   it('publishes after confirming the review dialog', async () => {
     const user = userEvent.setup()
-    render(<WorkflowStudioPage />)
+    renderPage()
 
     await screen.findByText('题目审题 / 编辑工作流')
     await user.click(screen.getByRole('button', { name: 'YAML 高级编辑' }))

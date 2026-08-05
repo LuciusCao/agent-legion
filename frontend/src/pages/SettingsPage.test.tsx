@@ -14,15 +14,14 @@ import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings } from '../types'
 import { useUiStore } from '../stores/uiStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
-import { makeWorkspace } from '../testing/workspaceFixtures'
-import { api, fetchWorkflows } from '../api'
+import { api, deleteWorkspace, fetchWorkflows } from '../api'
 import { expectConsoleWarning } from '../test-setup'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchWorkflows: vi.fn(),
   fetchWorkspaces: vi.fn(),
+  deleteWorkspace: vi.fn(),
   listRegisterTokens: vi.fn().mockResolvedValue([]),
   listAgentWorkers: vi.fn().mockResolvedValue([]),
   createRegisterToken: vi.fn(),
@@ -32,6 +31,7 @@ vi.mock('../api', () => ({
 
 const mockApi = vi.mocked(api)
 const mockFetchWorkflows = vi.mocked(fetchWorkflows)
+const mockDeleteWorkspace = vi.mocked(deleteWorkspace)
 
 // Capture the real store actions before beforeEach replaces them with mocks.
 const originalActions = { ...useSettingStore.getState() }
@@ -116,25 +116,12 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     useUiStore.setState({ toast: null })
-    useWorkspaceStore.setState({
-      workspaces: [
-        makeWorkspace({
-          id: 'ws1',
-          name: '测试空间',
-          description: '测试描述',
-          default_workflow_key: 'question_content',
-        }),
-      ],
-      currentWorkspace: null,
-      workspaceStats: {},
-      loading: false,
-      error: null,
-      deleteWorkspace: vi.fn().mockResolvedValue(undefined),
-    })
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
     mockFetchWorkflows.mockReset()
     mockFetchWorkflows.mockResolvedValue({ workflows: [] })
+    mockDeleteWorkspace.mockReset()
+    mockDeleteWorkspace.mockResolvedValue(undefined)
   })
 
   it('renders all sections in order', async () => {
@@ -800,9 +787,6 @@ describe('SettingsPage', () => {
   })
 
   it('opens delete dialog and deletes workspace on confirm', async () => {
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined)
-    useWorkspaceStore.setState({ deleteWorkspace })
-
     renderPage()
     await act(async () => {})
 
@@ -818,7 +802,7 @@ describe('SettingsPage', () => {
 
     fireEvent.click(within(dialog).getByText('确认删除'))
     await waitFor(() => {
-      expect(deleteWorkspace).toHaveBeenCalledWith('ws1')
+      expect(mockDeleteWorkspace).toHaveBeenCalledWith('ws1')
     })
     await waitFor(() => {
       expect(screen.getByText('Dashboard')).toBeInTheDocument()
@@ -826,10 +810,9 @@ describe('SettingsPage', () => {
   })
 
   it('shows error when delete workspace fails', async () => {
-    const deleteWorkspace = vi
-      .fn()
-      .mockRejectedValue(new Error('Cannot delete workspace with running jobs'))
-    useWorkspaceStore.setState({ deleteWorkspace })
+    mockDeleteWorkspace.mockRejectedValue(
+      new Error('Cannot delete workspace with running jobs')
+    )
 
     renderPage()
     await act(async () => {})

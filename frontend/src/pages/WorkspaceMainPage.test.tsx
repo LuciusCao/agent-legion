@@ -4,7 +4,6 @@ import { Link, Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceMainPage from './WorkspaceMainPage'
 import { useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
@@ -251,13 +250,6 @@ describe('WorkspaceMainPage', () => {
       batchRunToLoading: false,
       batchUpgradeWorkflowLoading: false,
     })
-    useWorkspaceStore.setState({
-      workspaces: [],
-      currentWorkspace: null,
-      workspaceStats: { ws1: baseStats },
-      loading: false,
-      error: null,
-    })
     useAgentsStore.setState({
       agents: [
         makeAgentStatus({
@@ -342,11 +334,6 @@ describe('WorkspaceMainPage', () => {
       ...baseStats,
       job_stats: { pending: 0, running: 0, completed: 0, failed: 0 },
     }
-    useWorkspaceStore.setState({
-      workspaceStats: {
-        ws1: emptyStats,
-      },
-    })
     mockFetchWorkspaceStats.mockResolvedValue(emptyStats)
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/workspaces/ws1/stats') {

@@ -8,7 +8,7 @@ import {
   TextField,
 } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
-import { useWorkspaceStore } from '../stores/workspaceStore'
+import { useCreateWorkspace } from '../hooks/useWorkspaceMutations'
 import { WorkflowSection } from './settings/WorkflowSection'
 
 type Props = {
@@ -17,7 +17,7 @@ type Props = {
 }
 
 export default function CreateWorkspaceDialog({ open, onClose }: Props) {
-  const { createWorkspace } = useWorkspaceStore()
+  const createWorkspace = useCreateWorkspace()
   const [name, setName] = useState('')
   const [workflowKey, setWorkflowKey] = useState('')
   const [creating, setCreating] = useState(false)
@@ -36,7 +36,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
     setError(null)
     setCreating(true)
     try {
-      await createWorkspace(name.trim(), workflowKey)
+      await createWorkspace.mutateAsync({ name: name.trim(), workflowKey })
       handleClose()
     } catch (err) {
       setError(String(err))
