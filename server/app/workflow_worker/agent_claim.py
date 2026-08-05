@@ -125,6 +125,13 @@ def claim_agent_node(
         # Pool backlog full: skip this pass's remaining agent candidates.
         worker._agent_pass.pool_full = True
         return False
+    # Count the submission toward the stock gate: the snapshot stays frozen
+    # until its next refresh, and without this a single window could release
+    # several times the target (the request lands in the DB off-thread, so
+    # this slightly over-counts on enqueue failure — conservative, fine).
+    enqueued = worker._agent_pass.stock_enqueued
+    stock_key = (str(workspace_id), agent_id)
+    enqueued[stock_key] = enqueued.get(stock_key, 0) + 1
     key = f"agent:{agent_id}"
     worker._pass_claim_counts[key] = worker._pass_claim_counts.get(key, 0) + 1
     return True

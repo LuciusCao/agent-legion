@@ -127,6 +127,45 @@ def test_stock_snapshot_refreshes_on_interval() -> None:
         assert stock.call_count == 2
 
 
+def test_agent_claim_allowed_counts_enqueued_since_snapshot() -> None:
+    worker = _worker()
+    state = worker._agent_pass
+    state.stock_snapshot = StockSnapshot(
+        config=AgentStockConfig(min_stock=2, max_stock=10),
+        buckets={("ws1", "agent-x"): StockBucket(queued=1)},
+    )
+    # Snapshot says 1 of target 2 stocked: one more submission fits.
+    assert agent_claim_allowed(worker, "ws1", "job1", "fetch", "agent-x") is True
+    # The refresh window keeps the snapshot frozen at queued=1, but the
+    # submission counter must close the hole once the target is reached.
+    state.stock_enqueued[("ws1", "agent-x")] = 1
+    assert agent_claim_allowed(worker, "ws1", "job2", "fetch", "agent-x") is False
+    assert state.stock_gated == 1
+    # Other pairs are unaffected.
+    assert agent_claim_allowed(worker, "ws2", "job2", "fetch", "agent-x") is True
+
+
+def test_stock_reload_clears_enqueued_counter() -> None:
+    worker = _worker(stock=AgentStockConfig(refresh_seconds=30.0))
+    node = _node()
+    definition = WorkflowDefinition(
+        key="test", label="Test", intake=WorkflowIntake(), nodes={node.key: node}
+    )
+    queues = {"ws1": deque([_candidate(definition, node, "job1")])}
+
+    with patch(_BATCH, return_value=set()), patch(_STOCK) as stock:
+        stock.return_value = StockSnapshot(config=AgentStockConfig())
+        prepare_agent_pass(worker, queues)
+        worker._agent_pass.stock_enqueued[("ws1", "agent-x")] = 5
+        # Within the window the counter survives (snapshot stays frozen).
+        prepare_agent_pass(worker, queues)
+        assert worker._agent_pass.stock_enqueued == {("ws1", "agent-x"): 5}
+        # On reload the fresh snapshot sees the real queued rows again.
+        worker._agent_pass.stock_loaded_at -= 31.0
+        prepare_agent_pass(worker, queues)
+        assert worker._agent_pass.stock_enqueued == {}
+
+
 def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
     state = AgentPassState(
         active_nodes={("j", "n")},
@@ -134,6 +173,7 @@ def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
         stock_gated=3,
         stock_snapshot=StockSnapshot(config=AgentStockConfig()),
         stock_loaded_at=123.0,
+        stock_enqueued={("ws1", "agent-x"): 2},
     )
     state.reset_pass()
     assert state.active_nodes == set()
@@ -141,6 +181,8 @@ def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
     assert state.stock_gated == 0
     assert state.stock_snapshot is not None
     assert state.stock_loaded_at == 123.0
+    # Tied to the snapshot's lifetime, not the pass's.
+    assert state.stock_enqueued == {("ws1", "agent-x"): 2}
 
 
 def test_agent_claim_allowed_gates() -> None:

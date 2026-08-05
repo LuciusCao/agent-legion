@@ -62,10 +62,15 @@ class StockSnapshot:
     config: AgentStockConfig
     buckets: dict[tuple[str, str], StockBucket] = field(default_factory=dict)
 
-    def allows(self, workspace_id: str, agent_id: str) -> bool:
-        """True while queued stock for the pair is below its target."""
+    def allows(self, workspace_id: str, agent_id: str, extra: int = 0) -> bool:
+        """True while queued stock for the pair is below its target.
+
+        ``extra`` counts enqueue submissions made since this snapshot was
+        loaded — they are not yet visible in ``queued``, and ignoring them
+        would let a frozen snapshot over-release within its refresh window.
+        """
         bucket = self.buckets.get((workspace_id, agent_id), StockBucket())
-        return bucket.queued < bucket.target(self.config)
+        return bucket.queued + extra < bucket.target(self.config)
 
 
 def load_stock_snapshot(dsn: DatabaseDsn, config: AgentStockConfig) -> StockSnapshot:

@@ -185,11 +185,55 @@ def test_agent_enqueue_counts_pass_claim(tmp_path: Path) -> None:
 
     assert claimed is True
     assert worker._pass_claim_counts == {"agent:agent-x": 1}
+    # The submission counts toward the stock gate within the snapshot window.
+    assert worker._agent_pass.stock_enqueued == {("ws1", "agent-x"): 1}
     # The enqueue itself is submitted as a background closure.
     closure = worker.agent_dispatch.enqueue_pool.submit.call_args.args[0]
     worker.agent_dispatch.enqueue.return_value = True
     closure()
     worker.agent_dispatch.enqueue.assert_called_once()
+
+
+def test_agent_stock_gate_uses_enqueued_counter_within_window(tmp_path: Path) -> None:
+    node = _node()
+    worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
+    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
+    worker.agent_dispatch.enqueue_pool.submit.return_value = True
+    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+    # Frozen snapshot: nothing stocked yet, target 1 (min_stock floor).
+    worker._agent_pass.stock_snapshot = StockSnapshot(
+        config=AgentStockConfig(min_stock=1, max_stock=10),
+        buckets={},
+    )
+
+    first = try_claim_and_submit(
+        worker,
+        {"id": "ws1"},
+        _definition(node),
+        {"id": "job1", "batch_id": "b1"},
+        node,
+        tmp_path,
+        None,
+        None,
+        CapacitySnapshot(),
+    )
+    second = try_claim_and_submit(
+        worker,
+        {"id": "ws1"},
+        _definition(node),
+        {"id": "job2", "batch_id": "b1"},
+        node,
+        tmp_path,
+        None,
+        None,
+        CapacitySnapshot(),
+    )
+
+    assert first is True
+    # Same frozen snapshot, but the first submission fills the target.
+    assert second is False
+    assert worker._agent_pass.stock_gated == 1
+    assert worker.agent_dispatch.enqueue_pool.submit.call_count == 1
 
 
 def test_agent_enqueue_skipped_when_pool_full(tmp_path: Path) -> None:
