@@ -136,3 +136,40 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
         summaries.append(summary)
     # 采样器只写 ops_metric_samples，不动 node_runs：runs 摘要跨窗口严格一致。
     assert [s["recent_hour_runs"] for s in summaries] == [summaries[0]["recent_hour_runs"]] * 3
+
+
+def test_metrics_overview_passes_workspace_id_filter(client) -> None:
+    # 与 worker_id 过滤同一思路：旧桶 + ws 过滤避开后台采样器的行。
+    bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into ops_metric_samples(bucket_start, workspace_id, queued)"
+            " values (?, 'ops-ws', 7), (?, '', 99)",
+            (bucket, bucket),
+        )
+    response = client.get("/api/metrics/overview?granularity=6h&workspace_id=ops-ws")
+    assert response.status_code == 200
+    rows = [r for r in response.json()["buckets"] if r["bucket_start"] == bucket.isoformat()]
+    assert len(rows) == 1
+    assert rows[0]["queued"] == 7
+
+
+def test_metrics_workspace_membership_guard() -> None:
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from server.app.routes.metrics_access import enforce_workspace_membership
+
+    def _request(role):
+        job_db = SimpleNamespace(get_workspace_role=lambda ws, uid: role)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(job_db=job_db)))
+
+    # admin 直通；成员通过；非成员 404；不带 workspace_id 不校验。
+    enforce_workspace_membership(_request(None), "ops-ws", {"role": "admin", "id": "u1"})
+    enforce_workspace_membership(_request("viewer"), "ops-ws", {"role": "member", "id": "u1"})
+    enforce_workspace_membership(_request(None), None, {"role": "member", "id": "u1"})
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_workspace_membership(_request(None), "ops-ws", {"role": "member", "id": "u1"})
+    assert exc_info.value.status_code == 404
