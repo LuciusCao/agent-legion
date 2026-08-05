@@ -24,7 +24,7 @@ def active_request_keys(dsn: DatabaseDsn, job_ids: list[str]) -> set[tuple[str, 
     with read_connection(dsn) as conn:
         for start in range(0, len(job_ids), _CHUNK_SIZE):
             chunk = job_ids[start : start + _CHUNK_SIZE]
-            placeholders = ", ".join("?" for _ in chunk)
+            placeholders = ", ".join("%s" for _ in chunk)
             rows = conn.execute(
                 "select job_id, node_key from agent_execution_requests"
                 f" where job_id in ({placeholders})"

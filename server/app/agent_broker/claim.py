@@ -55,7 +55,7 @@ def claim_in_transaction(
     ``empty.py``); it accumulates across every scan round.
     """
     worker = conn.execute(
-        "select * from agent_workers where worker_id=? for update", (worker_id,)
+        "select * from agent_workers where worker_id=%s for update", (worker_id,)
     ).fetchone()
     if worker is None or worker["revoked_at"] is not None:
         raise ValueError("unknown or revoked Agent Worker")
@@ -70,7 +70,7 @@ def claim_in_transaction(
     )
     worker_active = conn.execute(
         "select count(*) as cnt from agent_execution_requests"
-        " where worker_id=? and state='claimed'",
+        " where worker_id=%s and state='claimed'",
         (worker_id,),
     ).fetchone() or {"cnt": 0}
     if int(worker_active["cnt"]) >= max_concurrency:

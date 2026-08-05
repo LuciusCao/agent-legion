@@ -67,7 +67,7 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             left join workflow_revisions wr on wr.id=j.workflow_revision_id
             where r.state='queued'
             order by r.queued_at, r.execution_id
-            limit ?
+            limit %s
             for update of r skip locked
             """,
             (_SWEEP_LIMIT,),
@@ -88,8 +88,8 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             )
             outcome = {"status": "failed", "exit_code": 1, "error_message": error}
             conn.execute(
-                "update agent_execution_requests set state='done', outcome_json=?,"
-                " finished_at=current_timestamp where execution_id=?",
+                "update agent_execution_requests set state='done', outcome_json=%s,"
+                " finished_at=current_timestamp where execution_id=%s",
                 (json.dumps(outcome), row["execution_id"]),
             )
             updated = record_failed_node_without_execution(
@@ -102,9 +102,9 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             )
             if updated is not None:
                 conn.execute(
-                    "update jobs set status='failed', error_message=?,"
+                    "update jobs set status='failed', error_message=%s,"
                     " updated_at=current_timestamp"
-                    " where id=? and status not in ('failed', 'completed')",
+                    " where id=%s and status not in ('failed', 'completed')",
                     (error, row["job_id"]),
                 )
             failed.append(str(row["execution_id"]))

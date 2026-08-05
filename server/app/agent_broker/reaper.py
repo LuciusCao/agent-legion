@@ -40,7 +40,7 @@ def reap_terminal_bundles(
     )
     params: tuple[object, ...] = ()
     if broker._reap_watermark is not None:
-        query += " and (finished_at is null or finished_at >= ?)"
+        query += " and (finished_at is null or finished_at >= %s)"
         params = (broker._reap_watermark,)
     with read_connection(broker.database_dsn) as conn:
         rows = conn.execute(query, params).fetchall()
