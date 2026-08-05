@@ -14,6 +14,7 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
+from server.app.services.agent_service import published_agent_definitions
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_pass
 from server.app.workflow_worker.claim_flush import PreparedClaim, flush_prepared_claims
@@ -121,7 +122,9 @@ class WorkflowWorkerThread:
         reap_futures(self)
 
         snapshot = load_capacity_snapshot(self.leases.path, self._executor_capacities())
-        if not snapshot.has_any_capacity() and not self.settings.agent_definitions:
+        if not snapshot.has_any_capacity() and not published_agent_definitions(
+            self.settings.database_url
+        ):
             return False
 
         scan_started = time.monotonic()

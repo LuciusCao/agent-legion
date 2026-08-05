@@ -11,23 +11,21 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from server.app.agent_catalog import load_agent_definitions
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
-from server.app.configuration import load_application_config
 from server.app.main import create_app
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.settings import PROJECT_ROOT
 from server.app.workflows.definition import load_workflow_definition
 from tests.db.test_postgres_runtime import (
     test_schema_initialization_is_idempotent as _assert_schema_idempotent,
 )
+from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.test_agent_broker import _seed_request
 from tests.test_agent_broker import (
     test_node_twenty_and_three_workers_ten_never_claim_more_than_twenty as _assert_capacity_matrix,
-)
-from tests.test_agent_catalog import (
-    test_sync_agent_definitions_replaces_enabled_catalog as _assert_catalog_sync,
 )
 
 
@@ -38,7 +36,18 @@ def test_agent_capacity_matrix_across_workers(job_db) -> None:
 
 @pytest.mark.full_gate
 def test_agent_definition_catalog_snapshot_lifecycle(job_db) -> None:
-    _assert_catalog_sync(job_db)
+    """Publish flow replaces the published catalog; reads enforce exact hashes."""
+    first = AgentDefinition(capability="generate", runtime="pi", skill="question/generate")
+    second = AgentDefinition(capability="review", runtime="openclaw", skill="question/review")
+    replace_agent_catalog({"generator-v1": first, "reviewer-v1": second})
+
+    catalog = published_agent_definitions(TEST_DATABASE_URL)
+    assert catalog == {"generator-v1": first, "reviewer-v1": second}
+
+    replace_agent_catalog({"reviewer-v1": second})
+
+    catalog = published_agent_definitions(TEST_DATABASE_URL)
+    assert catalog == {"reviewer-v1": second}
 
 
 @pytest.mark.full_gate
@@ -106,15 +115,14 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
 
 
 @pytest.mark.full_gate
-def test_startup_syncs_catalog_and_materializes_routes(client, job_db) -> None:
-    """Startup wiring: the configured catalog lands enabled, and an explicitly
+def test_startup_materializes_agent_routes(client, job_db) -> None:
+    """Startup wiring: the published catalog is visible, and an explicitly
     created workspace's active revision gets its Agent routes materialized —
     the two states whose loss caused the 'Executor pi is not registered'
     incident. No workspace is seeded at startup; the fixture workspace is
     created and published here, then the startup reconcile is replayed."""
-    configured = load_application_config(PROJECT_ROOT).config
-    expected_agents = set(load_agent_definitions(configured.get("agents", {})))
-    assert expected_agents, "test requires a non-empty configured Agent catalog"
+    expected_agents = set(published_agent_definitions(TEST_DATABASE_URL))
+    assert expected_agents, "test requires a non-empty published Agent catalog"
 
     workspace = job_db.create_workspace(
         "Route Check", default_workflow_key="question_comprehension_info"
@@ -128,10 +136,11 @@ def test_startup_syncs_catalog_and_materializes_routes(client, job_db) -> None:
     revision_service.reconcile_active_agent_routes()
 
     with job_db._connect_read() as conn:
-        enabled = {
-            row["agent_id"]
+        published = {
+            row["entity_key"]
             for row in conn.execute(
-                "select agent_id from agent_definitions where enabled=1"
+                "select entity_key from versioned_entities"
+                " where entity_type='agent' and workspace_id is null and status='published'"
             ).fetchall()
         }
         routes = conn.execute(
@@ -140,7 +149,7 @@ def test_startup_syncs_catalog_and_materializes_routes(client, job_db) -> None:
             (workspace_id,),
         ).fetchall()
 
-    assert enabled == expected_agents
+    assert published == expected_agents
     assert routes, "startup reconcile must materialize routes for the active revision"
     assert {row["target_id"] for row in routes} <= expected_agents
 

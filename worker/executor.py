@@ -124,7 +124,7 @@ def run_execution(
                 heartbeat.proc_ref["proc"] = proc
                 # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
                 pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
-                timeout = int(manifest.get("pi", {}).get("timeout_seconds", 600))
+                timeout = int(manifest.get("execution", {}).get("timeout_seconds", 600))
                 exit_code, report_result = wait_for_exit(
                     proc, timeout, shutdown, shutdown_grace, ownership_lost
                 )

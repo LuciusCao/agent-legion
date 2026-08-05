@@ -17,8 +17,9 @@ from unittest.mock import MagicMock
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
-from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
+from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
 _GOOD_MODEL = "test-model"
@@ -64,7 +65,7 @@ def _seed_definition(agent_id: str = "generator-v1") -> AgentDefinition:
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    sync_agent_definitions(TEST_DATABASE_URL, {agent_id: definition})
+    replace_agent_catalog({agent_id: definition})
     return definition
 
 
@@ -87,7 +88,7 @@ def _enqueue(
             manifest={
                 "job_id": job_id,
                 "log_path": f"logs/{job_id}.log",
-                "pi": {"provider": "gateway", "model": model},
+                "execution": {"provider": "gateway", "model": model},
             },
         )
     )
@@ -156,13 +157,13 @@ def test_claim_with_fully_unclaimable_queue_returns_none(job_db) -> None:
     assert row["c"] == 10
 
 
-def test_enqueue_rejects_unresolved_pi_model(job_db) -> None:
+def test_enqueue_rejects_unresolved_execution_model(job_db) -> None:
     definition = _seed_definition()
     _insert_job_rows(job_db, job_id="job-1")
     broker = AgentExecutionBroker(TEST_DATABASE_URL)
 
     for bad_model in ("", "your-model"):
-        with pytest.raises(ValueError, match="unresolved model"):
+        with pytest.raises(ValueError, match="unresolved provider/model"):
             _enqueue(broker, definition, job_id="job-1", model=bad_model)
     with job_db._connect_read() as conn:
         row = conn.execute("select count(*) as c from agent_execution_requests").fetchone()

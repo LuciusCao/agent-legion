@@ -26,7 +26,7 @@ from server.app.agent_broker.claim import (
     claim_in_transaction,
 )
 from server.app.agent_broker.empty import EmptyClaimTrigger
-from server.app.agent_broker.manifest_guard import require_routable_pi_model
+from server.app.agent_broker.manifest_guard import require_routable_execution
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
@@ -104,7 +104,7 @@ class AgentExecutionBroker:
     def enqueue(self, request: AgentExecutionRequest) -> str | None:
         # Fail fast on unroutable manifests (placeholder/empty model): they
         # would otherwise poison the queue head forever (issue #13).
-        require_routable_pi_model(request.manifest)
+        require_routable_execution(request.manifest)
         execution_id = request.execution_id or str(uuid.uuid4())
         try:
             with write_transaction(self.database_dsn) as conn:
@@ -120,7 +120,9 @@ class AgentExecutionBroker:
                 if route["target_id"] != request.agent_id:
                     raise ValueError("workspace node Agent route changed before enqueue")
                 definition = conn.execute(
-                    "select definition_hash from agent_definitions where agent_id=%s and enabled=1",
+                    "select definition_hash from versioned_entities"
+                    " where entity_type='agent' and workspace_id is null"
+                    " and entity_key=%s and status='published'",
                     (request.agent_id,),
                 ).fetchone()
                 if (

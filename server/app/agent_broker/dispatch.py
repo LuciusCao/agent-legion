@@ -9,16 +9,60 @@ from server.app.agent_broker.agent_artifacts import stage_agent_inputs
 from server.app.agent_broker.agent_bundle import build_agent_bundle, cleanup_bundle_on_error
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
-from server.app.agent_broker.runtime_dispatch import pi_config_for_runtime
 from server.app.agent_catalog import AgentDefinition
 from server.app.config_schema import manifest_safe_config
 from server.app.executors._pi_skill import build_skill_manager, get_skill_version, resolve_skill_dir
 from server.app.executors.models import ExecutionContext
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
-from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.pi_protocol import render_command_spec
 from server.app.workflows.schema import WorkflowNode
+
+# Retired workflows.pi.timeout_seconds (yaml governance): the execution
+# timeout is a product constant now, not configuration.
+EXECUTION_TIMEOUT_SECONDS = 1800
+
+_RUNTIME_BINARIES = {"pi": "pi", "velites": "velites"}
+
+
+def resolve_execution_block(
+    node: WorkflowNode, workspace: dict[str, Any], runtime: str
+) -> dict[str, Any]:
+    """Resolve the manifest ``execution`` block (strict, no global fallback).
+
+    provider/model resolve from the node-level override first, then the
+    workspace default; either one missing fails the enqueue with an
+    actionable error (agent config governance). thinking stays optional —
+    empty means the runtime decides. The runtime pins the command builder
+    (EXEC-RUNTIME-DISPATCH-001); unknown runtimes fail fast so no manifest
+    is ever frozen with an unbuildable command spec.
+    """
+    binary = _RUNTIME_BINARIES.get(runtime)
+    if binary is None:
+        raise ValueError(
+            f"Agent runtime {runtime!r} is not implemented yet (supported runtimes: pi, velites)"
+        )
+    provider = node.execution.provider or str(workspace.get("default_agent_provider") or "")
+    model = node.execution.model or str(workspace.get("default_agent_model") or "")
+    if not provider:
+        raise ValueError(
+            f"node {node.key} requires a provider: set the node execution provider "
+            "in Studio or the workspace default in Settings"
+        )
+    if not model:
+        raise ValueError(
+            f"node {node.key} requires a model: set the node execution model "
+            "in Studio or the workspace default in Settings"
+        )
+    thinking = node.execution.thinking or str(workspace.get("default_agent_thinking") or "")
+    return {
+        "binary": binary,
+        "provider": provider,
+        "model": model,
+        "thinking": thinking,
+        "timeout_seconds": EXECUTION_TIMEOUT_SECONDS,
+        "no_sandbox": False,
+    }
 
 
 class AgentDispatchService:
@@ -52,10 +96,7 @@ class AgentDispatchService:
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
-        pi = pi_config_for_runtime(
-            PiConfig.from_runtime(self.settings.executor_runtime.workflows.pi),
-            definition.runtime,
-        )
+        execution = resolve_execution_block(node, workspace, definition.runtime)
         execution_id = str(uuid.uuid4())
         skill_dir = resolve_skill_dir(self.skill_manager, definition.skill, execution_id)
         try:
@@ -78,20 +119,7 @@ class AgentDispatchService:
                 "skill": definition.skill,
                 "skill_version": get_skill_version(self.skill_manager, definition.skill),
                 "log_path": str(log_path),
-                "pi": {
-                    "binary": pi.binary,
-                    "flavor": pi.flavor,
-                    "provider": node.execution.provider or pi.provider,
-                    "model": node.execution.model or pi.model,
-                    "thinking": node.execution.thinking or pi.thinking,
-                    "timeout_seconds": pi.timeout_seconds,
-                    "velites_no_sandbox": pi.velites_no_sandbox,
-                },
-                "pi_defaults": {
-                    "provider": pi.provider,
-                    "model": pi.model,
-                    "thinking": pi.thinking,
-                },
+                "execution": execution,
             }
             context = ExecutionContext(
                 execution_id=execution_id,

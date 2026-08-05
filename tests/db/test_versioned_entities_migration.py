@@ -30,6 +30,21 @@ def _seed_node_code(conn, workspace_id: str, version: int, status: str) -> None:
 
 
 def _seed_agent(conn, agent_id: str, enabled: int = 1) -> None:
+    # The legacy table was dropped by the v27 cutover; migration tests recreate
+    # it to exercise the v26 copy path (fresh_schema rebuilds afterwards).
+    conn.execute(
+        """
+        create table if not exists agent_definitions (
+          agent_id text primary key,
+          capability text not null,
+          runtime text not null,
+          definition_json text not null,
+          definition_hash text not null,
+          enabled integer not null default 1 check(enabled in (0, 1)),
+          updated_at timestamptz not null default current_timestamp
+        )
+        """
+    )
     conn.execute(
         "insert into agent_definitions("
         "agent_id, capability, runtime, definition_json, definition_hash, enabled)"
@@ -130,6 +145,7 @@ def test_version_uniqueness_covers_null_workspace() -> None:
         )
 
 
+@pytest.mark.fresh_schema
 def test_migration_copies_legacy_rows_and_is_idempotent() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         _seed_workspace(conn, "ve-mig-ws")
@@ -162,4 +178,6 @@ def test_migration_copies_legacy_rows_and_is_idempotent() -> None:
         # Replay: no duplicates.
         migrate_versioned_entities(conn)
         total_after = conn.execute("select count(*) as c from versioned_entities").fetchone()["c"]
+        # 清理重建的 legacy 表，避免污染同 worker 的后续 TRUNCATE 隔离测试。
+        conn.execute("drop table if exists agent_definitions")
     assert total_after == total

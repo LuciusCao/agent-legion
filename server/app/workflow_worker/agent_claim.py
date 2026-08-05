@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ConfigurationFailureRequest
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.node_config import batch_source_payload, dispatch_effective_config
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
@@ -71,7 +72,7 @@ def claim_agent_node(
 ) -> bool:
     """Enqueue an agent-routed candidate; False when it already has a request."""
     workspace_id = workspace["id"]
-    definition_config = worker.settings.agent_definitions.get(agent_id)
+    definition_config = published_agent_definitions(worker.settings.database_url).get(agent_id)
     if definition_config is None:  # resolve_node_route already validated this
         return fail_node_config(
             worker,

@@ -1,9 +1,8 @@
-"""Shared Pi protocol builders: prompt, command, model-error scanning.
+"""Shared Agent protocol builders: prompt, command, model-error scanning.
 
 Single server-side implementation consumed by the local Pi runner and Agent
-Worker bundle builder. ``environment`` from ``manifest["pi"]`` is deliberately
-never part of a command spec: it may carry API keys, and command lines are
-persisted and shipped to workers.
+Worker bundle builder. Command lines are persisted and shipped to workers, so
+no credentials ever become part of a command spec.
 """
 
 from __future__ import annotations
@@ -78,9 +77,9 @@ def build_command(
     session_name: str,
     prompt_file: Path,
 ) -> list[str]:
-    pi = manifest["pi"]
+    execution = manifest["execution"]
     cmd: list[str] = [
-        str(pi.get("binary") or "pi"),
+        str(execution.get("binary") or "pi"),
         "--mode",
         "json",
         "--session-dir",
@@ -98,7 +97,7 @@ def build_command(
         "--approve",
     ]
     for flag, key in (("--provider", "provider"), ("--model", "model"), ("--thinking", "thinking")):
-        value = str(pi.get(key) or "")
+        value = str(execution.get(key) or "")
         if value:
             cmd.extend([flag, value])
     cmd.extend([f"@{prompt_file}", PROMPT_INSTRUCTION])
@@ -108,9 +107,8 @@ def build_command(
 def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:
     """Render prompt/command with path placeholders for Agent bundle shipping.
 
-    The returned spec never includes ``pi.environment``; workers merge env from
-    the manifest themselves. The command argv follows ``pi.flavor`` (pi |
-    velites); the placeholder mechanism is flavor-neutral.
+    The command argv follows ``manifest["runtime"]`` (pi | velites); the
+    placeholder mechanism is runtime-neutral.
     """
     job_dir = Path(JOB_DIR_PLACEHOLDER)
     skill_dir = Path(SKILL_DIR_PLACEHOLDER)

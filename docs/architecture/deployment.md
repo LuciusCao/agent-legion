@@ -53,7 +53,6 @@ scripts/
 ### 顶层配置项
 
 - `agent_workers`
-- `agents`
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
 - `cleanup`
 - `cms` — CMS 集成配置

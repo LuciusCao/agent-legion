@@ -9,7 +9,6 @@ import pytest
 from server.app.agent_broker import dispatch as agent_dispatch
 from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.agent_catalog import AgentDefinition
-from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
 
 _EXECUTION_ID = "00000000-0000-0000-0000-000000000123"
@@ -39,6 +38,7 @@ def _node() -> WorkflowNode:
         outputs=["answer.json"],
         execution=WorkflowNodeExecution(
             provider="node-provider",
+            model="node-model",
             thinking="high",
             prompt="Answer carefully",
         ),
@@ -76,19 +76,6 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
     monkeypatch.setattr(agent_dispatch, "render_command_spec", render_command_spec)
     monkeypatch.setattr(agent_dispatch, "build_agent_bundle", build_agent_bundle)
     monkeypatch.setattr(agent_dispatch.uuid, "uuid4", lambda: _EXECUTION_ID)
-    monkeypatch.setattr(
-        agent_dispatch.PiConfig,
-        "from_runtime",
-        lambda _runtime: PiConfig(
-            binary="pi-bin",
-            flavor="pi",
-            provider="default-provider",
-            model="default-model",
-            thinking="low",
-            timeout_seconds=42,
-            velites_no_sandbox=True,
-        ),
-    )
 
     service = AgentDispatchService(settings, broker, artifact_store)
     return SimpleNamespace(
@@ -154,14 +141,13 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
     assert manifest["skill_version"] == "skill-v1"
     assert manifest["command_spec"] == {"command": ["pi", "--print"]}
     assert manifest["bundle_name"] == f"{_EXECUTION_ID}.tar.gz"
-    assert manifest["pi"] == {
-        "binary": "pi-bin",
-        "flavor": "pi",
+    assert manifest["execution"] == {
+        "binary": "pi",
         "provider": "node-provider",
-        "model": "default-model",
+        "model": "node-model",
         "thinking": "high",
-        "timeout_seconds": 42,
-        "velites_no_sandbox": True,
+        "timeout_seconds": 1800,
+        "no_sandbox": False,
     }
 
     context = harness.stage_agent_inputs.call_args.args[1]

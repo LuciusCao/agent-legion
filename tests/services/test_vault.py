@@ -7,6 +7,7 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.node_secrets import node_secret_name
 from server.app.services.vault import (
@@ -152,7 +153,7 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     update_workspace_node_config(
         job_db,
         WorkflowCatalogService(settings),
-        settings.agent_definitions,
+        published_agent_definitions(settings.database_url),
         job_db.get_workspace(workspace["id"]),
         {"nodeConfig": {"fetch_questions": {"token": PLAINTEXT, "bank_version": "v9"}}},
         settings.executor_definitions,

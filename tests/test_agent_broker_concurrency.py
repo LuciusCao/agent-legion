@@ -15,8 +15,9 @@ from datetime import UTC, datetime, timedelta
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.unclaimable import fail_unclaimable_model_requests
-from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
+from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -41,7 +42,7 @@ def _seed_request(
     runtime: str = "pi",
 ) -> str:
     definition = _definition(runtime=runtime)
-    sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
+    replace_agent_catalog({"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspaces(id, name) values (%s, %s) on conflict(id) do nothing",
@@ -79,7 +80,7 @@ def _seed_request(
             manifest={
                 "job_id": job_id,
                 "log_path": f"logs/{job_id}.log",
-                "pi": {"provider": "gateway", "model": "test-model"},
+                "execution": {"provider": "gateway", "model": "test-model"},
             },
         )
     )
@@ -335,9 +336,7 @@ def test_workspace_without_capacity_row_is_unlimited(job_db) -> None:
 def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
     execution_id = _seed_request(job_db, job_id="stale-def-job")
     # Republish the Agent with changed content: the pinned hash is now gone.
-    sync_agent_definitions(
-        TEST_DATABASE_URL, {"generator-v1": _definition(skill="question/generate-v2")}
-    )
+    replace_agent_catalog({"generator-v1": _definition(skill="question/generate-v2")})
     broker = AgentExecutionBroker(TEST_DATABASE_URL)
 
     assert broker.fail_stale_definition_requests() == [execution_id]
@@ -596,7 +595,7 @@ def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> No
                     {
                         "job_id": "revision-job",
                         "log_path": "logs/revision-job.log",
-                        "pi": {"provider": "gateway", "model": "your-model"},
+                        "execution": {"provider": "gateway", "model": "your-model"},
                     }
                 ),
                 execution_id,

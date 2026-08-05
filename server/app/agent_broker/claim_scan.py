@@ -93,10 +93,15 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
         select r.*, wr.definition_json as revision_definition_json
         from eligible_workspaces ws
         cross join lateral (
-          select r2.*, d.runtime, d.capability, d.definition_json
+          select r2.*,
+                 d.definition_json::jsonb->>'runtime' as runtime,
+                 d.definition_json::jsonb->>'capability' as capability,
+                 d.definition_json
           from agent_execution_requests r2
-          join agent_definitions d
-            on d.agent_id=r2.agent_id and d.definition_hash=r2.agent_definition_hash and d.enabled=1
+          join versioned_entities d
+            on d.entity_type='agent' and d.workspace_id is null
+           and d.entity_key=r2.agent_id and d.definition_hash=r2.agent_definition_hash
+           and d.status='published'
           where r2.workspace_id=ws.workspace_id and r2.state='queued'
           order by r2.queued_at, r2.execution_id limit %s
         ) r

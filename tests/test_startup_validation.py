@@ -46,7 +46,7 @@ def test_disabled_workflows_require_no_pi_binary(tmp_path, monkeypatch):
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\nworkflows:\n  enabled: false\n  pi:\n    binary: /no/such/pi\n"
+    config += "\nworkflows:\n  enabled: false\n"
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
@@ -56,19 +56,33 @@ def test_agent_workflows_do_not_require_pi_binary_on_host(tmp_path, monkeypatch)
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\nworkflows:\n  enabled: true\n  pi:\n    binary: /no/such/pi\n"
+    config += "\nworkflows:\n  enabled: true\n"
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
 def test_enabled_workflows_accept_pi_command_from_path(tmp_path, monkeypatch):
+    """kind:pi 本地 executor（死路径保留）要求 pi 二进制在 PATH 上。
+
+    workflows.pi yaml 块已退役（agent 配置治理 phase 3），PiRuntimeConfig
+    只剩硬编码默认 binary="pi"。
+    """
     whisper = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     _make_executable(tmp_path / "pi")
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
     config = _minimal_config().format(binary=whisper, model=model, cwd=tmp_path)
-    config += "\nworkflows:\n  enabled: true\n  pi:\n    binary: pi\n"
+    config += (
+        "\nworkflows:\n  enabled: true\n"
+        "executors:\n"
+        "  pi-legacy:\n"
+        "    kind: pi\n"
+        "    global_capacity: 1\n"
+        "    capabilities:\n"
+        "      legacy_skill:\n"
+        "        skill: question/legacy\n"
+    )
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
@@ -248,8 +262,6 @@ openclaw:
     - agent
 workflows:
   enabled: true
-  pi:
-    binary: /no/pi
 """
 
     with pytest.raises(StartupValidationError) as exc_info:
@@ -259,7 +271,6 @@ workflows:
     assert "asr.whisper.binary" in fields
     assert "asr.whisper.model" in fields
     assert "openclaw.cwd" in fields
-    assert "workflows.pi.binary" not in fields
 
 
 def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch):

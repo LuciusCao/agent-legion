@@ -2,6 +2,7 @@ from typing import Any
 
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import VaultService
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -55,7 +56,7 @@ class WorkspaceConfigurationService:
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
             self.workflows,
-            self.settings.agent_definitions,
+            published_agent_definitions(self.settings.database_url),
             workspace,
             self.settings.executor_definitions,
         )
@@ -136,7 +137,8 @@ class WorkspaceConfigurationService:
             bindings=node_bindings,
             node_limits=node_limits,
             agent_capabilities={
-                definition.capability for definition in self.settings.agent_definitions.values()
+                definition.capability
+                for definition in published_agent_definitions(self.settings.database_url).values()
             },
         )
         name_value = workspace_patch.get("name")
@@ -215,7 +217,7 @@ class WorkspaceConfigurationService:
             workspace = update_workspace_node_config(
                 self.job_db,
                 self.workflows,
-                self.settings.agent_definitions,
+                published_agent_definitions(self.settings.database_url),
                 workspace,
                 patch,
                 self.settings.executor_definitions,

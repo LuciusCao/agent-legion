@@ -2,8 +2,11 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from server.app.agent_catalog import AgentDefinition
 from server.app.main import create_app
+from server.app.services.agent_service import AgentService
 from tests.helpers.auth import authenticate_client
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_workspace_settings_round_trip(tmp_path):
@@ -186,23 +189,28 @@ def test_workspace_settings_agent_defaults_reject_bad_payload(client):
     assert wrong_type.status_code == 422
 
 
-def _inject_key_info_config_schema(app) -> None:
+def _inject_key_info_config_schema() -> None:
+    """Publish a new question-key-info-v1 version carrying a config_schema."""
     schema = {
         "type": "object",
         "properties": {
             "max_items": {"type": "integer", "default": 10, "minimum": 1, "maximum": 100}
         },
     }
-    agents = dict(app.state.settings.agent_definitions)
-    original = agents["question-key-info-v1"]
-    agents["question-key-info-v1"] = original.model_copy(update={"config_schema": schema})
-    app.state.settings.agent_definitions = agents
+    service = AgentService(TEST_DATABASE_URL)
+    entity = service.get_published("question-key-info-v1")
+    assert entity is not None
+    updated = AgentDefinition.model_validate(entity.definition).model_copy(
+        update={"config_schema": schema}
+    )
+    service.save_draft("question-key-info-v1", updated, "user:test")
+    service.publish("question-key-info-v1")
 
 
 def test_workspace_settings_nodes_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    _inject_key_info_config_schema(app)
+    _inject_key_info_config_schema()
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -251,7 +259,7 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
 def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    _inject_key_info_config_schema(app)
+    _inject_key_info_config_schema()
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",

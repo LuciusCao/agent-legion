@@ -1,6 +1,8 @@
+from collections.abc import Mapping
 from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.skill_catalog import SkillCatalogService
 from server.app.settings import Settings
 
@@ -22,9 +24,7 @@ def capability_detail(capability: str, config: Any) -> dict[str, Any]:
 
 
 def executor_capability_detail(
-    settings: Settings,
     skills: SkillCatalogService,
-    kind: str,
     capability: str,
     config: Any,
 ) -> dict[str, Any]:
@@ -32,23 +32,27 @@ def executor_capability_detail(
     skill = detail.get("skill")
     if isinstance(skill, str):
         detail.update(skills.metadata(skill))
-    if kind == "pi":
-        runtime = settings.executor_runtime.workflows.pi
-        detail.update(
-            provider=runtime.provider,
-            model=runtime.model,
-            thinking=runtime.thinking,
-        )
     return detail
 
 
 def execution_catalog(
-    settings: Settings, skills: SkillCatalogService
+    settings: Settings,
+    skills: SkillCatalogService,
+    agent_definitions: Mapping[str, AgentDefinition] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
+    """Catalog of executor + Agent definitions for Studio display.
+
+    Agents come from the published DB catalog (versioned_entities). The old
+    global provider/model/thinking projection (retired ``workflows.pi``) is
+    gone: execution defaults are workspace-scoped now, so the Studio "继承默认"
+    hints read the workspace settings payload's agentDefaults instead.
+    """
+    if agent_definitions is None:
+        agent_definitions = published_agent_definitions(settings.database_url)
     return {
         "agents": [
-            _agent_entry(settings, skills, agent_id, definition)
-            for agent_id, definition in sorted(settings.agent_definitions.items())
+            _agent_entry(skills, agent_id, definition)
+            for agent_id, definition in sorted(agent_definitions.items())
         ],
         "executors": [
             {
@@ -57,9 +61,7 @@ def execution_catalog(
                 "global_capacity": definition.global_capacity,
                 "capabilities": sorted(definition.capabilities),
                 "capability_details": [
-                    executor_capability_detail(
-                        settings, skills, definition.kind, capability, config
-                    )
+                    executor_capability_detail(skills, capability, config)
                     for capability, config in sorted(definition.capabilities.items())
                 ],
             }
@@ -69,24 +71,15 @@ def execution_catalog(
 
 
 def _agent_entry(
-    settings: Settings,
     skills: SkillCatalogService,
     agent_id: str,
     definition: AgentDefinition,
 ) -> dict[str, Any]:
-    entry: dict[str, Any] = {
+    return {
         "id": agent_id,
         **definition.model_dump(mode="json"),
         **skills.metadata(definition.skill),
     }
-    if definition.runtime in ("pi", "velites"):
-        runtime = settings.executor_runtime.workflows.pi
-        entry.update(
-            provider=runtime.provider,
-            model=runtime.model,
-            thinking=runtime.thinking,
-        )
-    return entry
 
 
 class ExecutorCatalogService:

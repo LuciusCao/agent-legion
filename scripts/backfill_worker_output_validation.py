@@ -279,11 +279,14 @@ def main() -> None:
     capability_skills: dict[str, str] = {}
     with read_connection(dsn) as conn:
         for row in conn.execute(
-            "select capability, definition_json from agent_definitions where enabled != 0"
+            "select definition_json from versioned_entities"
+            " where entity_type='agent' and workspace_id is null and status='published'"
         ).fetchall():
             payload = row["definition_json"]
             payload = json.loads(payload) if isinstance(payload, str) else payload
-            capability_skills[str(row["capability"])] = str(payload.get("skill", ""))
+            capability = str(payload.get("capability", ""))
+            if capability:
+                capability_skills[capability] = str(payload.get("skill", ""))
 
     candidates = find_candidate_runs(dsn, workspace_id=args.workspace_id, since=args.since)
     print(f"candidate worker-completed node runs: {len(candidates)}")

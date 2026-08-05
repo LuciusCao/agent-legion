@@ -673,7 +673,9 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
 def _insert_agent_request(job_db, execution_id: str, job, node_key: str) -> None:
     with job_db.connect() as conn:
         definition = conn.execute(
-            "select definition_hash from agent_definitions where agent_id='question-key-info-v1'"
+            "select definition_hash from versioned_entities"
+            " where entity_type='agent' and workspace_id is null"
+            " and entity_key='question-key-info-v1' and status='published'"
         ).fetchone()
         conn.execute(
             "insert into agent_execution_requests(execution_id, workspace_id, job_id, workflow_key,"

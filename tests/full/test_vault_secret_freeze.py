@@ -13,6 +13,7 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.node_secrets import node_secret_name
 from server.app.services.vault import VaultService
@@ -46,7 +47,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     update_workspace_node_config(
         job_db,
         catalog,
-        settings.agent_definitions,
+        published_agent_definitions(settings.database_url),
         job_db.get_workspace(workspace_id),
         {
             "nodeConfig": {

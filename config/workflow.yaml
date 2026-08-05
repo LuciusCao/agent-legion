@@ -1,49 +1,3 @@
-agents:
-  question-key-info-v1:
-    capability: generate_key_info
-    runtime: velites
-    skill: question_comprehension_info/generate_key_info
-    tools: [read, write, bash]
-  question-key-info-review-v1:
-    capability: review_key_info
-    runtime: velites
-    skill: question_comprehension_info/review_key_info
-    tools: [read, write, bash]
-  question-possible-errors-v1:
-    capability: generate_possible_errors
-    runtime: velites
-    skill: question_comprehension_info/generate_possible_errors
-    tools: [read, write, bash]
-  question-possible-errors-review-v1:
-    capability: review_possible_errors
-    runtime: velites
-    skill: question_comprehension_info/review_possible_errors
-    tools: [read, write, bash]
-  question-difficulty-v1:
-    capability: assess_comprehension_difficulty
-    runtime: velites
-    skill: question_comprehension_info/assess_comprehension_difficulty
-    tools: [read, write, bash]
-  video-subtitle-review-v1:
-    capability: review_subtitles
-    runtime: pi
-    skill: video_knowledge/review_subtitles
-    tools: [read, write, bash]
-  video-chapter-generation-v1:
-    capability: generate_chapters
-    runtime: pi
-    skill: video_knowledge/generate_chapters
-    tools: [read, write, bash]
-  video-interaction-generation-v1:
-    capability: generate_interactions
-    runtime: pi
-    skill: video_knowledge/generate_interactions
-    tools: [read, write, bash]
-  video-content-review-v1:
-    capability: review_video_content
-    runtime: pi
-    skill: video_knowledge/review_video_content
-    tools: [read, write, bash]
 agent_workers:
   register_token: ""
   register_token_file: "deploy/secrets/agent_worker_register_token"
@@ -142,25 +96,3 @@ lease_ttl_seconds: 90
 heartbeat_failure_threshold: 3
 workflows:
   enabled: true
-  pi:
-    # `runtime: pi` agent 的遗留实现选择层：pi（Node Pi CLI）| velites（自研 Rust
-    # harness，见 docs/architecture/velites-harness.md §9）。仅作用于 runtime: pi
-    # 的 agent；runtime: velites 由定义钉死、忽略本项。生产默认 velites；非法值
-    # 启动即报错（fail-fast）。新增 agent 应直接声明 runtime，勿依赖本开关。
-    # 切到 velites 时 binary 未显式覆盖则自动用 velites 二进制；`flavor: pi` 单字段即回退。
-    flavor: velites
-    # velites 逃生门：true 时 velites 命令追加 --no-sandbox（生产沙箱异常时
-    # 免发版降级为无沙箱运行，仍保留事件契约/预算/取消等全部可控性）。
-    velites_no_sandbox: false
-    binary: pi
-    provider: gateway
-    # 默认 model 必须为空：占位符（如历史上的 your-model）会在 intake 冻结进
-    # manifest，导致请求永远无法被任何 worker claim 并堵死队首（issue #13）。
-    # broker 在 enqueue 时拒绝空/占位符 model，节点必须经节点或 Agent revision
-    # 的 execution.model 显式声明。
-    model: ""
-    thinking: low
-    timeout_seconds: 1800
-    environment:
-      PI_SKIP_VERSION_CHECK: '1'
-      PI_TELEMETRY: '0'

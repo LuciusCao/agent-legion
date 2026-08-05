@@ -4,9 +4,11 @@ def test_list_executors_endpoint(client):
     data = response.json()
     agent = next(item for item in data["agents"] if item["id"] == "video-content-review-v1")
     assert agent["capability"] == "review_video_content"
-    assert agent["provider"] == "gateway"
-    # yaml 默认 model 已清空（issue #13）：占位符 model 在 enqueue 被拒。
-    assert agent["model"] == ""
+    # 全局 provider/model/thinking 投影已退役（agent 配置治理 phase 3）：
+    # 执行默认走 workspace agentDefaults，catalog 不再携带这些键。
+    assert agent["runtime"] == "velites"
+    assert agent["provider"] is None
+    assert agent["model"] is None
     executors = {item["id"]: item for item in data["executors"]}
     code_executor = executors["code-default"]
     assert code_executor["kind"] == "code"

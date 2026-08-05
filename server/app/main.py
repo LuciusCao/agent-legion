@@ -6,7 +6,6 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
-from server.app.agent_catalog import sync_agent_definitions
 from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.service import build_auth_service
@@ -56,7 +55,6 @@ def create_app(
     )
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
-    sync_agent_definitions(settings.database_url, settings.agent_definitions)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
     # Resume state must not survive a restart: dispatch stays off until an

@@ -20,6 +20,7 @@ from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, 
 
 _BATCH = "server.app.workflow_worker.agent_gate.batch.active_request_keys"
 _STOCK = "server.app.workflow_worker.agent_gate.load_stock_snapshot"
+_CATALOG = "server.app.workflow_worker.agent_gate.published_agent_definitions"
 
 
 def _node(key: str = "fetch") -> WorkflowNode:
@@ -39,7 +40,6 @@ def _candidate(definition: WorkflowDefinition, node: WorkflowNode, job_id: str) 
 
 def _worker(*, stock: AgentStockConfig | None = None) -> MagicMock:
     worker = MagicMock()
-    worker.settings.agent_definitions = {"agent-x": MagicMock()}
     worker.settings.executor_runtime.agent_stock = stock or AgentStockConfig()
     worker._route_cache = {}
     worker._agent_pass = AgentPassState()
@@ -48,14 +48,13 @@ def _worker(*, stock: AgentStockConfig | None = None) -> MagicMock:
 
 def test_prepare_skips_queries_without_agent_definitions() -> None:
     worker = _worker()
-    worker.settings.agent_definitions = {}
     node = _node()
     definition = WorkflowDefinition(
         key="test", label="Test", intake=WorkflowIntake(), nodes={node.key: node}
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_BATCH) as batch, patch(_STOCK) as stock:
+    with patch(_CATALOG, return_value={}), patch(_BATCH) as batch, patch(_STOCK) as stock:
         prepare_agent_pass(worker, queues)
 
     batch.assert_not_called()
@@ -84,6 +83,7 @@ def test_prepare_batch_loads_and_filters_by_route_cache() -> None:
     snapshot = StockSnapshot(config=AgentStockConfig())
 
     with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
         patch(_BATCH, return_value={("job-agent", "review")}) as batch,
         patch(_STOCK, return_value=snapshot),
     ):
@@ -102,7 +102,11 @@ def test_prepare_skips_stock_when_disabled() -> None:
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_BATCH, return_value=set()), patch(_STOCK) as stock:
+    with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_BATCH, return_value=set()),
+        patch(_STOCK) as stock,
+    ):
         prepare_agent_pass(worker, queues)
 
     stock.assert_not_called()
@@ -117,7 +121,11 @@ def test_stock_snapshot_refreshes_on_interval() -> None:
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_BATCH, return_value=set()), patch(_STOCK) as stock:
+    with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_BATCH, return_value=set()),
+        patch(_STOCK) as stock,
+    ):
         stock.return_value = StockSnapshot(config=AgentStockConfig())
         prepare_agent_pass(worker, queues)
         prepare_agent_pass(worker, queues)
@@ -153,7 +161,11 @@ def test_stock_reload_clears_enqueued_counter() -> None:
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_BATCH, return_value=set()), patch(_STOCK) as stock:
+    with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_BATCH, return_value=set()),
+        patch(_STOCK) as stock,
+    ):
         stock.return_value = StockSnapshot(config=AgentStockConfig())
         prepare_agent_pass(worker, queues)
         worker._agent_pass.stock_enqueued[("ws1", "agent-x")] = 5

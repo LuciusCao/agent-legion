@@ -35,7 +35,7 @@ def test_prepare_execution_substitutes_prompt_placeholders(tmp_path: Path) -> No
         },
         "input_artifacts": {},
         "expected_outputs": ["output.json"],
-        "pi": {"timeout_seconds": 60},
+        "execution": {"timeout_seconds": 60},
     }
     bundle = _make_bundle(tmp_path, manifest)
     claim = {

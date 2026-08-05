@@ -21,14 +21,14 @@ import pytest
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.dispatch import AgentDispatchService
-from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.workflows.pi_runner import PiRunner
-from server.app.workflows.schema import WorkflowNode
+from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
+from tests.helpers import replace_agent_catalog
 from tests.helpers.executor_worker import make_pi_skill
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.test_agent_broker import _insert_job_rows
@@ -282,7 +282,7 @@ class _LocalSkillManager:
 @pytest.mark.full_gate
 def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -> None:
     """runtime=velites 全链路：dispatch 冻结 manifest → claim 重渲染 → 按
-    command_spec 真跑 velites 二进制。全局 flavor=pi 证明 runtime 钉死实现。"""
+    command_spec 真跑 velites 二进制。provider/model 来自节点 execution 覆盖。"""
     binary = _velites_binary()
     gateway = _StubGateway()
     try:
@@ -295,7 +295,7 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
             runtime="velites",
             skill="question_comprehension_info/generate_key_info",
         )
-        sync_agent_definitions(TEST_DATABASE_URL, {"velites-agent": definition})
+        replace_agent_catalog({"velites-agent": definition})
         _insert_job_rows(
             job_db,
             job_id="job-1",
@@ -316,22 +316,6 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
             packages_dir=tmp_path / "packages",
             jobs_dir=tmp_path / "jobs",
             config={},
-            executor_runtime=ExecutorRuntimeConfig.model_validate(
-                {
-                    "workflows": {
-                        "enabled": True,
-                        "pi": {
-                            # flavor=pi 是反证：runtime=velites 必须忽略它。
-                            "flavor": "pi",
-                            "binary": str(binary),
-                            "provider": "gateway",
-                            "model": "stub-model",
-                            "timeout_seconds": 120,
-                        },
-                    },
-                    "openclaw": {"command_template": ["openclaw"]},
-                }
-            ),
         )
         bundle_dir = tmp_path / "bundles"
         bundle_dir.mkdir()
@@ -341,7 +325,11 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
         service.skill_manager = _LocalSkillManager(skill_root)
 
         node = WorkflowNode(
-            key="generate", label="generate", capability="generate", outputs=[OUTPUT_NAME]
+            key="generate",
+            label="generate",
+            capability="generate",
+            outputs=[OUTPUT_NAME],
+            execution=WorkflowNodeExecution(provider="gateway", model="stub-model", thinking="low"),
         )
         enqueued = service.enqueue(
             agent_id="velites-agent",
@@ -356,15 +344,21 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
         )
         assert enqueued is True
 
-        # manifest 入队即冻结：flavor 被钉为 velites，binary 显式配置保持不变。
+        # manifest 入队即冻结：runtime 钉死命令构建器，execution 块携带节点覆盖。
         with job_db.connect() as conn:
             row = conn.execute(
                 "select manifest_json from agent_execution_requests where job_id='job-1'"
             ).fetchone()
         frozen = json.loads(row["manifest_json"])
         assert frozen["runtime"] == "velites"
-        assert frozen["pi"]["flavor"] == "velites"
-        assert frozen["pi"]["binary"] == str(binary)
+        assert frozen["execution"] == {
+            "binary": "velites",
+            "provider": "gateway",
+            "model": "stub-model",
+            "thinking": "low",
+            "timeout_seconds": 1800,
+            "no_sandbox": False,
+        }
 
         registry = AgentWorkerRegistry(TEST_DATABASE_URL)
         registry.issue_token(
@@ -376,9 +370,9 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
         claim = broker.claim("worker-v")
         assert claim is not None
         # claim 重渲染与冻结 manifest 一致，产出 velites argv。
-        assert claim.manifest["pi"]["flavor"] == "velites"
+        assert claim.manifest["execution"]["provider"] == "gateway"
         command = claim.manifest["command_spec"]["command"]
-        assert command[0] == str(binary)
+        assert command[0] == "velites"
         for flag in PI_ONLY_FLAGS:
             assert flag not in command
         assert command[command.index("--require-output") + 1] == OUTPUT_NAME
@@ -395,7 +389,8 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
             "{session_name}": "job-1:generate:e2e",
             "{prompt_file}": str(prompt_file),
         }
-        argv = command
+        # manifest 里的 binary 是 runtime 常量名；真跑时替换成本地构建的二进制路径。
+        argv = [str(binary), *command[1:]]
         for placeholder, value in substitutions.items():
             argv = [part.replace(placeholder, value) for part in argv]
         env = {

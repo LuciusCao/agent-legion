@@ -20,9 +20,12 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
         rows = conn.execute(
             """
             select r.workflow_key, r.node_key, r.target_id as agent_id,
-                   d.capability, d.definition_json
+                   d.definition_json::jsonb->>'capability' as capability,
+                   d.definition_json
             from workspace_node_routes r
-            join agent_definitions d on d.agent_id = r.target_id
+            join versioned_entities d
+              on d.entity_type='agent' and d.workspace_id is null
+             and d.entity_key = r.target_id and d.status='published'
             where r.workspace_id = %s and r.target_kind = 'agent'
             order by r.workflow_key, r.node_key
             """,

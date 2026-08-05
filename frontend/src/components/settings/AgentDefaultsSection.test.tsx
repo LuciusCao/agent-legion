@@ -10,7 +10,11 @@ vi.mock('../../api', () => ({
 const mockUpdate = vi.mocked(updateAgentDefaults)
 
 function renderSection(
-  agentDefaults = { provider: 'deepseek', model: 'deepseek-v4-flash', thinking: '' }
+  agentDefaults = {
+    provider: 'deepseek',
+    model: 'deepseek-v4-flash',
+    thinking: '',
+  }
 ) {
   const onSaved = vi.fn()
   render(
@@ -46,7 +50,11 @@ describe('AgentDefaultsSection', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: '保存' }))
 
-    const expected = { provider: 'deepseek', model: 'deepseek-v4-flash', thinking: 'low' }
+    const expected = {
+      provider: 'deepseek',
+      model: 'deepseek-v4-flash',
+      thinking: 'low',
+    }
     await waitFor(() =>
       expect(mockUpdate).toHaveBeenCalledWith('ws1', expected)
     )
