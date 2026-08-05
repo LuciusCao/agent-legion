@@ -1499,6 +1499,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Node Code Version */
+    get: operations['get_node_code_version_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions__version__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -3174,6 +3191,10 @@ export interface components {
     WorkflowNodeCodeResponse: {
       /** Code */
       code: string
+      /** Draft Code */
+      draft_code?: string | null
+      /** Draft Version */
+      draft_version?: number | null
       /**
        * Has Draft
        * @default false
@@ -6819,6 +6840,40 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowNodeCodeVersionsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_node_code_version_api_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_versions__version__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+        version: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
         }
       }
       /** @description Validation Error */

@@ -16,16 +16,22 @@ from __future__ import annotations
 
 import ast
 import hashlib
+import logging
 import uuid
 from typing import Any
+
+from psycopg import IntegrityError
 
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
+    ConflictError,
     CustomNodesDisabledError,
     InvalidOperationError,
     NotFoundError,
 )
+
+logger = logging.getLogger(__name__)
 
 # Custom nodes stay single-file and cohesive; oversized code is rejected.
 MAX_CODE_BYTES = 64 * 1024
@@ -123,30 +129,39 @@ class NodeCodeService:
         with write_transaction(self._dsn) as conn:
             draft = _latest_with_status(conn, workspace_id, workflow_key, node_key, "draft")
             if draft is not None:
-                conn.execute(
+                # Guard the status transition: a concurrent publish between the
+                # select above and this update must not let the write land on
+                # an already-published (immutable) row.
+                cursor = conn.execute(
                     "update workflow_node_codes set code=%s, code_hash=%s, created_by=%s,"
-                    " change_note=%s, created_at=current_timestamp where id=%s",
+                    " change_note=%s, created_at=current_timestamp"
+                    " where id=%s and status='draft'",
                     (code, code_hash(code), created_by, change_note, draft["id"]),
                 )
+                if cursor.rowcount == 0:
+                    raise ConflictError("node code draft changed concurrently; reload and retry")
                 return _get_by_id(conn, draft["id"])
             version = _next_version(conn, workspace_id, workflow_key, node_key)
             row_id = uuid.uuid4().hex
-            conn.execute(
-                f"insert into workflow_node_codes({_COLUMNS})"
-                " values (%s, %s, %s, %s, %s, 'draft', %s, %s, %s, %s,"
-                " current_timestamp, null)",
-                (
-                    row_id,
-                    workspace_id,
-                    workflow_key,
-                    node_key,
-                    version,
-                    code,
-                    code_hash(code),
-                    created_by,
-                    change_note,
-                ),
-            )
+            try:
+                conn.execute(
+                    f"insert into workflow_node_codes({_COLUMNS})"
+                    " values (%s, %s, %s, %s, %s, 'draft', %s, %s, %s, %s,"
+                    " current_timestamp, null)",
+                    (
+                        row_id,
+                        workspace_id,
+                        workflow_key,
+                        node_key,
+                        version,
+                        code,
+                        code_hash(code),
+                        created_by,
+                        change_note,
+                    ),
+                )
+            except IntegrityError as exc:
+                raise ConflictError("node code version allocated concurrently; retry") from exc
             return _get_by_id(conn, row_id)
 
     def publish(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
@@ -161,11 +176,15 @@ class NodeCodeService:
                 f" where {_NODE_FILTER} and status='published'",
                 (workspace_id, workflow_key, node_key),
             )
-            conn.execute(
+            # Guard: a concurrent archive_all between select and update must
+            # not resurrect an archived row into published.
+            cursor = conn.execute(
                 "update workflow_node_codes set status='published',"
-                " published_at=current_timestamp where id=%s",
+                " published_at=current_timestamp where id=%s and status='draft'",
                 (draft["id"],),
             )
+            if cursor.rowcount == 0:
+                raise ConflictError("node code draft changed concurrently; reload and retry")
             return _get_by_id(conn, draft["id"])
 
     def rollback(
@@ -192,22 +211,25 @@ class NodeCodeService:
                 (workspace_id, workflow_key, node_key),
             )
             row_id = uuid.uuid4().hex
-            conn.execute(
-                f"insert into workflow_node_codes({_COLUMNS})"
-                " values (%s, %s, %s, %s, %s, 'published', %s, %s, %s, %s,"
-                " current_timestamp, current_timestamp)",
-                (
-                    row_id,
-                    workspace_id,
-                    workflow_key,
-                    node_key,
-                    _next_version(conn, workspace_id, workflow_key, node_key),
-                    source["code"],
-                    source["code_hash"],
-                    created_by,
-                    change_note if change_note is not None else f"rollback to v{version}",
-                ),
-            )
+            try:
+                conn.execute(
+                    f"insert into workflow_node_codes({_COLUMNS})"
+                    " values (%s, %s, %s, %s, %s, 'published', %s, %s, %s, %s,"
+                    " current_timestamp, current_timestamp)",
+                    (
+                        row_id,
+                        workspace_id,
+                        workflow_key,
+                        node_key,
+                        _next_version(conn, workspace_id, workflow_key, node_key),
+                        source["code"],
+                        source["code_hash"],
+                        created_by,
+                        change_note if change_note is not None else f"rollback to v{version}",
+                    ),
+                )
+            except IntegrityError as exc:
+                raise ConflictError("node code version allocated concurrently; retry") from exc
             return _get_by_id(conn, row_id)
 
     def archive_all(self, workspace_id: str, workflow_key: str, node_key: str) -> int:
@@ -264,15 +286,19 @@ def freeze_node_code_versions(
     to an empty mapping so intake never touches the table when the feature is
     off.
     """
-    if not custom_nodes_enabled:
+    if not custom_nodes_enabled or not node_keys:
         return {}
-    service = NodeCodeService(database_dsn)
-    pins: dict[str, dict[str, Any]] = {}
-    for node_key in node_keys:
-        row = service.get_effective_code(workspace_id, workflow_key, node_key)
-        if row is not None:
-            pins[node_key] = {"version": row["version"], "code_hash": row["code_hash"]}
-    return pins
+    with read_connection(database_dsn) as conn:
+        rows = conn.execute(
+            "select node_key, version, code_hash from workflow_node_codes"
+            " where workspace_id=%s and workflow_key=%s"
+            " and node_key = any(%s) and status='published'",
+            (workspace_id, workflow_key, node_keys),
+        ).fetchall()
+    return {
+        str(row["node_key"]): {"version": row["version"], "code_hash": row["code_hash"]}
+        for row in rows
+    }
 
 
 def resolve_dispatch_node_code(
@@ -298,6 +324,21 @@ def resolve_dispatch_node_code(
             workspace_id, workflow_key, node_key, int(frozen["version"])
         )
         if row is not None:
+            # Fail closed on hash drift: the frozen pin and the stored code
+            # must match exactly, otherwise the snapshot was tampered with.
+            if row["code_hash"] != frozen.get("code_hash"):
+                raise ValueError(
+                    f"frozen node code hash mismatch for {workflow_key}/{node_key} "
+                    f"v{frozen['version']}"
+                )
             return str(row["code"])
+        logger.warning(
+            "frozen node code version missing, falling back to published: "
+            "workspace=%s workflow=%s node=%s version=%s",
+            workspace_id,
+            workflow_key,
+            node_key,
+            frozen.get("version"),
+        )
     row = service.get_effective_code(workspace_id, workflow_key, node_key)
     return str(row["code"]) if row is not None else None

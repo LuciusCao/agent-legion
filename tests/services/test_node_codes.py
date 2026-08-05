@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 
 from server.app.services.job_errors import (
+    ConflictError,
     CustomNodesDisabledError,
     InvalidOperationError,
     NotFoundError,
@@ -12,6 +15,7 @@ from server.app.services.job_errors import (
 from server.app.services.node_codes import (
     MAX_CODE_BYTES,
     NodeCodeService,
+    code_hash,
     freeze_node_code_versions,
     resolve_dispatch_node_code,
 )
@@ -191,7 +195,7 @@ def test_resolve_dispatch_node_code_priority(job_db, service, workspace_id) -> N
     # A frozen job keeps v1 even after v2 is published.
     service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
     service.publish(workspace_id, WF, NODE)
-    frozen = {"version": 1, "code_hash": "whatever"}
+    frozen = {"version": 1, "code_hash": code_hash(VALID_CODE)}
     assert (
         resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen) == VALID_CODE
     )
@@ -203,3 +207,70 @@ def test_resolve_dispatch_node_code_priority(job_db, service, workspace_id) -> N
     assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) is None
     # Gate off: builtin, no error.
     assert resolve_dispatch_node_code(job_db.path, False, workspace_id, WF, NODE, frozen) is None
+
+
+def test_resolve_dispatch_node_code_rejects_hash_mismatch(job_db, service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 1, "code_hash": "tampered"}
+    with pytest.raises(ValueError, match="hash mismatch"):
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+
+
+def test_resolve_dispatch_node_code_warns_and_falls_back_on_missing_version(
+    job_db, service, workspace_id, caplog
+) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 99, "code_hash": "whatever"}
+    with caplog.at_level(logging.WARNING, logger="server.app.services.node_codes"):
+        resolved = resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+
+    assert resolved == VALID_CODE  # published fallback
+    assert "frozen node code version missing" in caplog.text
+    assert "version=99" in caplog.text
+
+
+def test_save_draft_guard_rejects_concurrently_published_row(
+    service, workspace_id, monkeypatch
+) -> None:
+    """A stale draft view must not overwrite a row published in between."""
+    import server.app.services.node_codes as node_codes
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    published = service.publish(workspace_id, WF, NODE)
+    monkeypatch.setattr(node_codes, "_latest_with_status", lambda *args: dict(published))
+    with pytest.raises(ConflictError):
+        service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u2")
+    # The published row is untouched.
+    assert service.get_effective_code(workspace_id, WF, NODE)["code"] == VALID_CODE
+
+
+def test_publish_guard_rejects_concurrently_archived_draft(
+    service, workspace_id, monkeypatch
+) -> None:
+    """A stale draft view must not resurrect an archived row into published."""
+    import server.app.services.node_codes as node_codes
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    stale_draft = service.list_versions(workspace_id, WF, NODE)[0]
+    service.archive_all(workspace_id, WF, NODE)
+    monkeypatch.setattr(node_codes, "_latest_with_status", lambda *args: dict(stale_draft))
+    with pytest.raises(ConflictError):
+        service.publish(workspace_id, WF, NODE)
+    assert service.get_effective_code(workspace_id, WF, NODE) is None
+
+
+def test_insert_version_collision_maps_to_conflict_error(
+    service, workspace_id, monkeypatch
+) -> None:
+    """A unique-constraint race surfaces as ConflictError (409), not a 500."""
+    import server.app.services.node_codes as node_codes
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.archive_all(workspace_id, WF, NODE)
+    monkeypatch.setattr(node_codes, "_next_version", lambda *args: 1)
+    with pytest.raises(ConflictError):
+        service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")

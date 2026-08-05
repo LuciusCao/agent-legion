@@ -565,3 +565,47 @@ def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
     active = service.get_active(workspace["id"], definition.key)
 
     assert "node_code_pins" not in json.loads(active["definition_json"])
+
+
+def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
+    """In-place (runtime settings only) revision updates keep node_code_pins."""
+    from dataclasses import replace as dc_replace
+
+    from server.app.workflows.schema import WorkflowNodeExecution
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-pins-keep", default_workflow_key="question_comprehension_info"
+    )
+    codes = NodeCodeService(queries.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(workspace["id"], definition)
+
+    # Runtime-only change: same structure, different execution settings.
+    node = definition.nodes["generate_key_info"]
+    updated = dc_replace(
+        definition,
+        nodes={
+            **definition.nodes,
+            "generate_key_info": dc_replace(
+                node, execution=WorkflowNodeExecution(provider="deepseek", model="m2")
+            ),
+        },
+    )
+    service.save_workspace_revision(workspace["id"], updated)
+
+    active = service.get_active(workspace["id"], definition.key)
+    payload = json.loads(active["definition_json"])
+    assert payload["node_code_pins"]["fetch_questions"]["version"] == 1
+    # The runtime change did land, and no new revision was created.
+    assert payload["nodes"]["generate_key_info"]["execution"]["model"] == "m2"
+    assert active["version"] == 1
