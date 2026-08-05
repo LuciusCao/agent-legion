@@ -61,18 +61,24 @@ export function WorkflowNodeCodeSection(props: {
   // WorkflowNodeCodeSection is keyed by node in the inspector, so this effect
   // only runs on mount (and after explicit reloads via its own calls).
   const reload = useCallback(() => {
-    if (!url || !codePath) return
+    if (!url || !codePath) return undefined
+    let cancelled = false
     api<NodeCodeResponse>(url)
       .then((result) => {
+        if (cancelled) return
         setData(result)
         setLoadState('ready')
       })
       .catch((err: unknown) => {
+        if (cancelled) return
         setError(err instanceof Error ? err.message : '加载失败')
         setLoadState('error')
       })
+    return () => {
+      cancelled = true
+    }
   }, [url, codePath])
-  useEffect(reload, [reload])
+  useEffect(() => reload(), [reload])
 
   if (!url || !codePath) return null
 
@@ -147,7 +153,9 @@ export function WorkflowNodeCodeSection(props: {
         <>
           {editing ? (
             <WorkflowNodeCodeEditor
-              initialCode={data.code}
+              // An unpublished draft wins over the effective code, so
+              // re-editing never clobbers it blindly.
+              initialCode={data.draft_code ?? data.code}
               busy={busy}
               onSave={(code, note) => void saveDraft(code, note)}
               onCancel={() => setEditing(false)}

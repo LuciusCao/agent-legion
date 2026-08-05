@@ -44,6 +44,8 @@ const builtinResponse = {
   path: 'workflow_nodes/question_intake.py',
   version: null,
   has_draft: false,
+  draft_code: null,
+  draft_version: null,
 }
 
 const customResponse = {
@@ -52,6 +54,17 @@ const customResponse = {
   path: null,
   version: 1,
   has_draft: false,
+  draft_code: null,
+  draft_version: null,
+}
+
+const DRAFT_CODE = "def run(job, job_dir, runtime):\n    return 'draft'\n"
+
+const builtinWithDraft = {
+  ...builtinResponse,
+  has_draft: true,
+  draft_code: DRAFT_CODE,
+  draft_version: 1,
 }
 
 function versionRow(version: number, status: string, note?: string) {
@@ -232,6 +245,54 @@ describe('WorkflowNodeCodeSection', () => {
         'Insufficient workspace role'
       )
     )
+  })
+
+  it('shows the publish button for a builtin node with a draft', async () => {
+    mockApi.mockResolvedValue(builtinWithDraft)
+    renderSection()
+    await screen.findByText(/有未发布草稿/)
+
+    const publishButton = screen.getByRole('button', { name: '发布' })
+    mockApi.mockResolvedValueOnce(versionRow(1, 'published'))
+    mockApi.mockResolvedValueOnce(customResponse)
+    fireEvent.click(publishButton)
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe(
+        '已发布，新执行立即生效'
+      )
+    )
+    expect(mockApi.mock.calls[1][0]).toBe(`${BASE}/publish`)
+  })
+
+  it('loads the pending draft into the editor instead of the builtin code', async () => {
+    mockApi.mockResolvedValue(builtinWithDraft)
+    renderSection()
+    await screen.findByText(/有未发布草稿/)
+
+    fireEvent.click(screen.getByRole('button', { name: 'fork 为自定义节点' }))
+
+    expect(screen.getByLabelText('节点代码内容')).toHaveValue(DRAFT_CODE)
+  })
+
+  it('expands a version to view its code', async () => {
+    mockApi.mockResolvedValue({ ...customResponse, version: 2 })
+    renderSection()
+    await screen.findByText(/自定义 v2/)
+
+    mockApi.mockResolvedValueOnce({
+      versions: [{ ...versionRow(2, 'published'), code: undefined }],
+    })
+    fireEvent.click(screen.getByRole('button', { name: '版本历史' }))
+    await screen.findByText(/v2 · 已发布/)
+
+    mockApi.mockResolvedValueOnce(versionRow(2, 'published'))
+    fireEvent.click(screen.getByRole('button', { name: '查看 v2 代码' }))
+
+    expect(
+      await screen.findByText("return 'custom'", { exact: false })
+    ).toBeInTheDocument()
+    expect(mockApi.mock.calls[2][0]).toBe(`${BASE}/versions/2`)
   })
 
   it('hides write controls in read-only revision mode', async () => {
