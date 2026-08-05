@@ -180,7 +180,6 @@ export function SettingsPage() {
             <hr className={styles.sectionDivider} />
             <ExecutorAllocationSection />
             <ExecutorBindingSection />
-            {hasLocalNodes && <LocalNodeLimitSection />}
           </section>
           <section id="agent-workers" className={styles.section}>
             <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>

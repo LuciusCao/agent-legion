@@ -93,11 +93,11 @@ def _prepare_job(tmp_path: Path, node: WorkflowNode, batch_payload: dict | None 
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (ws["id"], "test", node.key, "code-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "code-default", 2),
         )
     return job_db, ws

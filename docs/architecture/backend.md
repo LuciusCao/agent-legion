@@ -199,7 +199,6 @@ server/app/
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
-| AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/agent_stock.py |
 | CodeCapabilityConfig | BaseModel | path: str, timeout_seconds: int, sandbox_network: bool, config_schema: dict[s... | app/executors/code_config.py |
 | CodeExecutorConfig | BaseModel | kind: Literal['code'], global_capacity: int, capabilities: dict[str, CodeCapa... | app/executors/code_config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |

@@ -85,7 +85,7 @@ describe('WorkerTokensSection', () => {
     })
     const globalItem = screen.getByTestId('worker-w1')
     expect(globalItem.textContent).toContain('在线')
-    expect(globalItem.textContent).toContain('local')
+    expect(globalItem.textContent).toContain('pi')
     expect(globalItem.textContent).toContain('并发上限 2')
     expect(globalItem.textContent).toContain('全部 workspace')
 

@@ -9,17 +9,17 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _seed_workspace(conn, workspace_id: str) -> None:
     conn.execute(
-        "insert into workspaces(id, name) values (?, ?) on conflict do nothing",
+        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(
         "insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)"
-        " values (?, 'local-default', 4) on conflict do nothing",
+        " values (%s, 'local-default', 4) on conflict do nothing",
         (workspace_id,),
     )
     conn.execute(
         "insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)"
-        " values (?, 'code-default', 2) on conflict do nothing",
+        " values (%s, 'code-default', 2) on conflict do nothing",
         (workspace_id,),
     )
     for node_key, executor_id in (
@@ -29,12 +29,12 @@ def _seed_workspace(conn, workspace_id: str) -> None:
     ):
         conn.execute(
             "insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)"
-            " values (?, 'question_comprehension_info', ?, ?) on conflict do nothing",
+            " values (%s, 'question_comprehension_info', %s, %s) on conflict do nothing",
             (workspace_id, node_key, executor_id),
         )
     conn.execute(
         "insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)"
-        " values (?, 'question_comprehension_info', 'clean_and_parse', 1)"
+        " values (%s, 'question_comprehension_info', 'clean_and_parse', 1)"
         " on conflict do nothing",
         (workspace_id,),
     )
@@ -42,7 +42,7 @@ def _seed_workspace(conn, workspace_id: str) -> None:
 
 def _bindings(conn, workspace_id: str) -> dict[str, str]:
     rows = conn.execute(
-        "select node_key, executor_id from workspace_node_bindings where workspace_id=?",
+        "select node_key, executor_id from workspace_node_bindings where workspace_id=%s",
         (workspace_id,),
     ).fetchall()
     return {row["node_key"]: row["executor_id"] for row in rows}
@@ -51,7 +51,7 @@ def _bindings(conn, workspace_id: str) -> dict[str, str]:
 def _allocations(conn, workspace_id: str) -> dict[str, int]:
     rows = conn.execute(
         "select executor_id, concurrency_limit from workspace_executor_allocations"
-        " where workspace_id=?",
+        " where workspace_id=%s",
         (workspace_id,),
     ).fetchall()
     return {row["executor_id"]: row["concurrency_limit"] for row in rows}

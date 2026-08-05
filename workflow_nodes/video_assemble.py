@@ -14,7 +14,6 @@ from typing import Any
 
 from server.app.pipeline.assemble import assemble_video
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
-from server.app.workflows.video_knowledge_transcription import build_default_providers
 
 logger = logging.getLogger(__name__)
 

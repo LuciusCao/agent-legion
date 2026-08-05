@@ -23,7 +23,7 @@ def _insert_workspace(
 ) -> None:
     conn.execute(
         "insert into workspaces(id, name, resource_config_json, node_config_json)"
-        " values (?, ?, ?, ?)",
+        " values (%s, %s, %s, %s)",
         (
             workspace_id,
             workspace_id,
@@ -35,14 +35,14 @@ def _insert_workspace(
 
 def _add_secret(conn: Any, workspace_id: str, name: str, ciphertext: str) -> None:
     conn.execute(
-        "insert into workspace_secrets(workspace_id, name, ciphertext) values (?, ?, ?)",
+        "insert into workspace_secrets(workspace_id, name, ciphertext) values (%s, %s, %s)",
         (workspace_id, name, ciphertext),
     )
 
 
 def _workspace_config(conn: Any, workspace_id: str) -> tuple[dict[str, Any], dict[str, Any]]:
     row = conn.execute(
-        "select resource_config_json, node_config_json from workspaces where id=?",
+        "select resource_config_json, node_config_json from workspaces where id=%s",
         (workspace_id,),
     ).fetchone()
     return json.loads(row["resource_config_json"]), json.loads(row["node_config_json"])
@@ -50,7 +50,7 @@ def _workspace_config(conn: Any, workspace_id: str) -> tuple[dict[str, Any], dic
 
 def _secrets(conn: Any, workspace_id: str) -> dict[str, str]:
     rows = conn.execute(
-        "select name, ciphertext from workspace_secrets where workspace_id=?",
+        "select name, ciphertext from workspace_secrets where workspace_id=%s",
         (workspace_id,),
     ).fetchall()
     return {row["name"]: row["ciphertext"] for row in rows}
