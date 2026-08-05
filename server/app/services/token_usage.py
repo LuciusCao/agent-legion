@@ -183,7 +183,7 @@ def persist_node_run_usage(conn: DatabaseConnection, summary: TokenUsageSummary)
           message_count, input_tokens, output_tokens, cache_read_tokens, total_tokens,
           usage_source, is_complete, parse_error, updated_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, current_timestamp)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, current_timestamp)
         on conflict(node_run_id) do update set
           job_id=excluded.job_id,
           workspace_id=excluded.workspace_id,
@@ -233,7 +233,7 @@ def build_run_usage_response(
     job_id = str(run["job_id"])
     with job_db.connect() as conn:
         row = conn.execute(
-            "select * from node_run_token_usage where node_run_id=?",
+            "select * from node_run_token_usage where node_run_id=%s",
             (run_id,),
         ).fetchone()
     if row is None:
@@ -259,7 +259,7 @@ def build_job_usage_response(
     runs = job_db.list_node_runs(job_id)
     with job_db.connect() as conn:
         rows = conn.execute(
-            "select * from node_run_token_usage where job_id=?",
+            "select * from node_run_token_usage where job_id=%s",
             (job_id,),
         ).fetchall()
     usage_by_run = {int(row["node_run_id"]): dict(row) for row in rows}

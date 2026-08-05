@@ -51,7 +51,7 @@ def validate_workflow_for_publish(
     for node in definition.nodes.values():
         with job_db._connect_read() as conn:
             row = conn.execute(
-                "select count(*) as cnt from agent_definitions where enabled=1 and capability=?",
+                "select count(*) as cnt from agent_definitions where enabled=1 and capability=%s",
                 (node.capability,),
             ).fetchone()
         count = int(row["cnt"]) if row is not None else 0
