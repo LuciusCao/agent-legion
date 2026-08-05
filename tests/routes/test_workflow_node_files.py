@@ -63,3 +63,13 @@ def test_rejected_paths(client, url_path) -> None:
 
 def test_missing_file_is_404(client) -> None:
     assert client.get("/api/workflow-nodes/files/no_such_node.py").status_code == 404
+
+
+def test_put_write_endpoint_is_gone(client) -> None:
+    """EXEC-CODE-001: no runtime API may rewrite repo node files (removed in M1)."""
+    response = client.put(
+        "/api/workflow-nodes/files/question_intake.py",
+        json={"content": "def run(job, job_dir, runtime):\n    pass\n"},
+    )
+    # GET-only route remains; the write verb is unhandled (404/405 by mount).
+    assert response.status_code in (404, 405)

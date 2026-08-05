@@ -1,6 +1,6 @@
 # Custom Workflow Nodes（DB-backed 节点代码）设计草案
 
-状态：草案 v1（未实现）
+状态：已实现（M1–M3）
 日期：2026-08-04
 关联：EXEC-CODE-001、CONFIG-MANIFEST-001、VAULT-SECRET-001
 
@@ -119,7 +119,9 @@ revision 管 DAG 结构与节点声明，节点代码管单个 capability 的实
 时各节点的 published 代码版本快照进 revision（`definition_json` 旁挂
 `node_code_pins`，或独立列）。这样任意时刻都能回答「workflow vN 发布时搭配的
 是哪些节点代码版本」，workflow 回滚（重新 publish 旧 YAML）时可按旧 revision
-的 pins 把节点代码一并 revert 到对应版本——回滚是协调一致的。
+的 pins 把节点代码一并 revert 到对应版本。注意本期 pins **只写不读**：它是可
+回溯的搭配记录，revert 是人工（或后续工具）按 pins 逐节点回滚的操作，不是
+publish 时的自动行为。
 
 **为什么不采用「版本区间绑定」**（如 workflow v1 兼容 node v1–v3）：兼容性区
 间需要机器可校验的判定依据才有意义，而节点代码的行为兼容性（读哪些上游产
@@ -192,6 +194,12 @@ revision、job 快照语义全部不变，零迁移。
   网络默认拒绝（或按 capability 白名单域名，如 CMS）。沿用 velites 的
   fail-closed 原则：探测不到沙箱后端就拒绝执行自定义节点（内置节点不受影
   响）。沙箱就绪前不对外开放在线编辑。
+- **二期落地要点**（M3 实际交付，细节见代码）：`velites sandbox wrap` 单一策
+  略源；子进程 env 白名单（PATH/TMPDIR/HOME/LANG/LC_*/PYTHONPATH）；macOS 读
+  根收窄到 server/workflow_nodes/config + 父目录 list-only grant；Linux 选择
+  性只读 bind + `--unshare-pid`/私有 /proc；signal 收紧为 `(target self)`；
+  结果通道 JSON + 严格 schema（不用 pickle）；payload 走 stdin（secret 不落
+  盘）；取消/超时杀整个进程组。
 - **三期**：资源限额（子进程 `setrlimit` CPU/内存/打开文件数）、secret 按节
   点白名单注入（当前 `resolve_secret_refs` 会把该节点 config 里的 secret 全
   部解密注入，自定义节点应只允许声明过的 key）。
@@ -216,14 +224,15 @@ revision、job 快照语义全部不变，零迁移。
 
 ## 9. SCHEMA_VERSION 跳号说明与对策
 
-现状（`server/app/db/schema.py:14,53-68`）：develop 停留在 21，本分支直接到
-24；升级判定是「`schema_migrations` 里没有 version=24 这一行就整体重放全部幂
-等迁移」，且重放后只插入 `(24, "node_cms_config")` 一行。22/23 是预留号段
-（给并行在途分支让位），但仓库内没有占用登记。
+现状（`server/app/db/schema.py`）：develop 已到 22，本分支 `SCHEMA_VERSION`
+= 25（22 code_executor_bindings / 23 local_executor_removal / 24 node_cms_config /
+25 custom_node_codes，均为本分支迁移）；升级判定是「`schema_migrations` 里没有
+version=25 这一行就整体重放全部幂等迁移」，且重放后只插入
+`(25, "custom_node_codes")` 一行。
 
-风险：若另一个分支用 24（或 22/23 之外的同号）先合并并在某环境升级过，该环
-境的 `schema_migrations` 已存在 24，本分支的迁移会被整体跳过——且没有任何报
-错。反之亦然。
+风险：若另一个分支用 25（或 22–25 任一已被本分支占用的号）先合并并在某环
+境升级过，该环境的 `schema_migrations` 已存在 25，本分支的迁移会被整体跳过
+——且没有任何报错。反之亦然。
 
 **历史低版本库的升级不需要专门处理**：升级判定只看「当前 SCHEMA_VERSION 的
 行是否存在」，与库里盖的是哪个旧版本号无关。例如本 worktree 开发库盖的 19、
@@ -260,7 +269,7 @@ workspace 首次需要修改节点」时（取其早者）执行。
 5. **验证**：每个 workspace 跑一个端到端冒烟 job，核对 dispatch 路由、节点
    产出与 CMS 连通性；确认回退路径可用（archived 全部自定义版本即回落内置
    实现）。
-6. **legacy 清理**（可延后，随 M3 之前完成）：下线
+6. **legacy 清理**（显式推迟，未随 M3 完成）：下线
    `workspaces.resource_config_json` 列及前端 `resource_config` 残留类型。
 
 回退策略：迁移本身只新增 DB 行、不改绑定链；若冒烟失败，删除/归档自定义版
