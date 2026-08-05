@@ -2,11 +2,42 @@ import { fetchJobFacets, fetchJobsSnapshot } from '../../../api'
 import type { JobFacetsResponse, JobSummary } from '../../../types/jobTypes'
 import { toJobListFilterParams } from '../listFilterParams'
 import type { JobState, JobStoreSet } from '../state'
-import {
-  appendJobsPageUpdate,
-  resetJobListForFilterChange,
-  setJobsPageUpdate,
-} from './paginationState'
+import { appendJobsSnapshotUpdate } from './appendActions'
+import { resetJobListForFilterChange } from './fetch'
+import { setJobsSnapshotUpdate } from './snapshotActions'
+
+export function setJobsPageUpdate(
+  state: JobState,
+  workspaceId: string,
+  revision: number,
+  jobs: JobSummary[],
+  total: number | null | undefined,
+  nextCursor: string | null | undefined
+): Partial<JobState> {
+  const base = setJobsSnapshotUpdate(state, workspaceId, revision, jobs)
+  if (Object.keys(base).length === 0) return {}
+  return {
+    ...base,
+    nextCursor: nextCursor ?? null,
+    hasMore: Boolean(nextCursor),
+    totalJobs: total ?? null,
+    loadingMore: false,
+  }
+}
+
+export function appendJobsPageUpdate(
+  state: JobState,
+  workspaceId: string,
+  jobs: JobSummary[],
+  nextCursor: string | null | undefined
+): Partial<JobState> {
+  return {
+    ...appendJobsSnapshotUpdate(state, workspaceId, jobs),
+    nextCursor: nextCursor ?? null,
+    hasMore: Boolean(nextCursor),
+    loadingMore: false,
+  }
+}
 
 const PAGE_SIZE = 500
 

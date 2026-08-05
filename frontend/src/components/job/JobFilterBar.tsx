@@ -1,12 +1,12 @@
 import { useMemo } from 'react'
-import { useJobStore } from '../../stores/jobStore'
-import type { JobFilterConfig } from '../../stores/job/state'
-import type { FilterCounts } from '../../stores/job/selectors'
-import type { WorkflowDefinitionRecord } from '../../types'
 import {
   makeSelectNodeOptions,
   selectWorkflowVersionOptions,
-} from '../../stores/job/selectors'
+  useJobStore,
+  type FilterCounts,
+  type JobFilterConfig,
+} from '../../stores/jobStore'
+import type { WorkflowDefinitionRecord } from '../../types'
 import { WorkflowVersionFilter } from '../WorkflowVersionFilter'
 import { JobFilterBarChips } from './JobFilterBarChips'
 import { JobStatusFilter } from './JobStatusFilter'

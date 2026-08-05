@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchJobDetail, deleteJob } from '../../api'
 import { rerunJob, runToJob } from '../../api/jobApi'
-import { usePageHeaderStore } from '../../stores/pageHeaderStore'
+import { useUiStore } from '../../stores/uiStore'
 import { useExecutorsStore } from '../../stores/executorsStore'
 import type { JobDetail } from '../../types/jobTypes'
 import { useContinueJobAction } from './useContinueJobAction'
@@ -16,7 +16,7 @@ export function useJobDetail(
   jobId: string | undefined
 ) {
   const navigate = useNavigate()
-  const { setPageTitle, setPageSubtitle } = usePageHeaderStore()
+  const { setPageTitle, setPageSubtitle } = useUiStore()
   const [detail, setDetail] = useState<JobDetail | null>(null)
   const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState(false)

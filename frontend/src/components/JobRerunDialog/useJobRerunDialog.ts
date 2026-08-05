@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { normalizeJobStatus } from '../../stores/job/state'
+import { normalizeJobStatus } from '../../stores/jobStore'
 import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
 import {
   computeOrderedNodes,

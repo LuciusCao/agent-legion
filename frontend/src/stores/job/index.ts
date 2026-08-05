@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import type { JobState } from './state'
-import { fetchActions } from './actions/fetchActions'
+import { fetchActions } from './actions/fetch'
 import { snapshotActions } from './actions/snapshotActions'
 import { appendActions } from './actions/appendActions'
 import { patchActions } from './actions/patchActions'

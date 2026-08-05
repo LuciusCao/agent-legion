@@ -1,7 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { useJobStore } from '../stores/jobStore'
+import {
+  selectFilterCounts,
+  selectFilteredJobIds,
+  useJobStore,
+} from '../stores/jobStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
 import { useJobFilterRefetch } from '../hooks/useJobFilterRefetch'
 import { useWorkspacePackageActions } from '../hooks/useWorkspacePackageActions'
@@ -18,10 +22,6 @@ import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
 import { fetchWorkflowDefinition } from '../api'
 import { useAsync } from '../hooks/useAsync'
-import {
-  selectFilterCounts,
-  selectFilteredJobIds,
-} from '../stores/job/selectors'
 import styles from './WorkspaceMainPage.module.css'
 
 export default function WorkspaceMainPage() {

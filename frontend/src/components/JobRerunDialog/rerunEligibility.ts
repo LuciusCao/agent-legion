@@ -1,4 +1,4 @@
-import { normalizeJobStatus } from '../../stores/job/state'
+import { normalizeJobStatus } from '../../stores/jobStore'
 import type { JobSummary } from '../../types'
 
 const RERUNNABLE_NODE_STATUSES = new Set(['completed', 'failed'])

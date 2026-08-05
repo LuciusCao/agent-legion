@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { useJobStore } from './jobStore'
+import { normalizeJobs, useJobStore } from './jobStore'
 import { createMockUiState, makeJob } from '../testing/fixtures'
-import { normalizeJobs } from './job/actions/fetchStateHelpers'
 
 vi.mock('../api', () => ({
   fetchJobs: vi.fn(),

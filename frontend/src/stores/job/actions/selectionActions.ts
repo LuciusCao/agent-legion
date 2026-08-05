@@ -1,4 +1,4 @@
-import { getVisibleJobs } from '../selectors'
+import { getVisibleJobs } from '../filterLogic/getVisibleJobs'
 import type { JobFilterConfig, JobState, JobStoreSet } from '../state'
 import { updateFilterConfig } from './filterSelectionState'
 import { clearedSelectionState } from './selectionModeState'

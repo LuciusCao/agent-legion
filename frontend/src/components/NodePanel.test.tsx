@@ -1,13 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { NodePanel } from './NodePanel'
-import { useArtifactStore } from '../stores/artifactStore'
-import { useInteractionStore } from '../stores/interactionStore'
+import { useVideoNodeStore } from '../stores/videoNodeStore'
 import styles from './NodePanel.module.css'
 
 describe('NodePanel', () => {
   beforeEach(() => {
-    useArtifactStore.setState({
+    useVideoNodeStore.setState({
       artifacts: {
         subtitles: [],
         chapters: [],
@@ -25,7 +24,7 @@ describe('NodePanel', () => {
         checklist: null,
       },
     })
-    useInteractionStore.setState({
+    useVideoNodeStore.setState({
       triggeredNodeIndexes: new Set(),
       dismissedNodeIndexes: new Set(),
       currentSentence: [],
@@ -46,7 +45,7 @@ describe('NodePanel', () => {
   })
 
   it('shows review status badge when review has matching item_id', () => {
-    useArtifactStore.setState({
+    useVideoNodeStore.setState({
       artifacts: {
         subtitles: [],
         chapters: [],
@@ -78,7 +77,7 @@ describe('NodePanel', () => {
   })
 
   it('falls back to global status when no per-node review exists', () => {
-    useArtifactStore.setState({
+    useVideoNodeStore.setState({
       artifacts: {
         subtitles: [],
         chapters: [],

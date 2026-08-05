@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useJobStore } from '../index'
 import { createMockUiState } from '../../../testing/fixtures'
-import { normalizeJobs } from './fetchStateHelpers'
+import { normalizeJobs } from './fetch'
 import type { JobListFilterParams } from '../../../types/jobTypes'
 import { createJobSummary } from './testHelpers'
 
