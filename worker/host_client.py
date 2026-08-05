@@ -8,10 +8,10 @@ transfers (download/upload/report/release-slot) come from the
 from __future__ import annotations
 
 import json
-import urllib.error
 import urllib.parse
-import urllib.request
 from typing import Any
+
+import requests
 
 from worker.host_transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
@@ -36,6 +36,9 @@ class Client(TransferOperations):
         self.token = token
         self.timeout = timeout
         self.transfer_timeout = transfer_timeout
+        # Session 复用 TCP 连接：lease 心跳 15s 一次、claim 轮询 2s 一次，
+        # keep-alive 避免每次调用都重新握手。
+        self.session = requests.Session()
 
     def request(
         self,
@@ -46,22 +49,17 @@ class Client(TransferOperations):
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
     ) -> tuple[int, bytes]:
-        request = urllib.request.Request(
+        response = self.session.request(
+            method,
             f"{self.host}{path}",
-            method=method,
             data=data,
             headers={
                 **({"X-Agent-Worker-Token": self.token} if self.token else {}),
                 **(headers or {}),
             },
+            timeout=self.timeout if timeout is None else timeout,
         )
-        try:
-            with urllib.request.urlopen(
-                request, timeout=self.timeout if timeout is None else timeout
-            ) as response:
-                return response.status, response.read()
-        except urllib.error.HTTPError as exc:
-            return exc.code, exc.read()
+        return response.status_code, response.content
 
     def register(self, config: dict[str, Any], management_token: str) -> str:
         payload = {
