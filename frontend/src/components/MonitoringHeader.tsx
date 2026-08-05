@@ -1,4 +1,3 @@
-import { Link } from 'react-router-dom'
 import {
   FormControl,
   MenuItem,
@@ -38,7 +37,6 @@ export function MonitoringHeader({
           {workspaceId
             ? `workspace「${workspaceId}」的队列、执行并发与 token 趋势，每 30 秒自动刷新。`
             : '在线 Worker、执行并发与 token 吞吐趋势，每 30 秒自动刷新。'}
-          {workspaceId && <Link to="/monitoring">查看全局监控</Link>}
         </p>
       </div>
       <div className={styles.controls}>

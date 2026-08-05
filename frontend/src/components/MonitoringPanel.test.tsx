@@ -335,11 +335,10 @@ describe('MonitoringPanel', () => {
     expect(
       screen.queryByRole('combobox', { name: '选择 Worker' })
     ).not.toBeInTheDocument()
-    // 副标题标注 workspace 并提供全局监控入口
+    // 副标题标注 workspace；全局监控入口不在 ws 视图（挪到首页 admin 菜单）
     expect(screen.getByText(/workspace「ops-ws」/)).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看全局监控' })).toHaveAttribute(
-      'href',
-      '/monitoring'
-    )
+    expect(
+      screen.queryByRole('link', { name: '查看全局监控' })
+    ).not.toBeInTheDocument()
   })
 })
