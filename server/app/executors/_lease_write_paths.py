@@ -25,10 +25,10 @@ from server.app.executors.models import (
     ExecutionResult,
     LeaseClaimRequest,
 )
-from server.app.services.pi_event_compression import compress_pi_events
 from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
 from server.app.storage_paths import resolve_data_path
 from server.app.workflows.sharding import delete_shards
+from shared.pi_events import compress_pi_events
 
 if TYPE_CHECKING:
     from server.app.executors.leases import ExecutorLeaseRepository

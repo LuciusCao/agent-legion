@@ -1,8 +1,9 @@
 """Single-pass scan + compression for Pi events.jsonl files.
 
-Split out of ``pi_event_compression.py`` to keep that module under its
-size budget; the compression entry point itself stays there and delegates
-here.
+Lives in ``shared/`` because both sides run it over the raw events stream:
+the Agent Worker compresses before upload, the Host compresses pi-runtime
+artifacts on its own write paths. Stdlib-only by design (see
+``shared/__init__.py``).
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
-from server.app.workflows.pi_model_error import fold_model_error
+from shared.pi_model_error import fold_model_error
 
 logger = logging.getLogger(__name__)
 
@@ -96,3 +97,13 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
 
     compressed_size = events_path.stat().st_size
     return model_error, original_size, compressed_size
+
+
+def compress_pi_events(events_path: Path) -> tuple[int, int]:
+    """Rewrite a Pi events.jsonl file keeping only events needed for rendering.
+
+    Returns ``(original_bytes, compressed_bytes)``.  If the file cannot be
+    processed it is left unchanged and ``(0, 0)`` is returned.
+    """
+    _, original, compressed = scan_and_compress_pi_events(events_path)
+    return original, compressed

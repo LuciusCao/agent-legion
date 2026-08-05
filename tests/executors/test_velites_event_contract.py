@@ -8,9 +8,9 @@ the authoritative schema exported from the Rust code
 drift fails here instead of at runtime.
 
 Consumer surface (re-verify against the code when updating this file):
-- ``server/app/services/pi_event_scan.py:27-43`` — event-type allowlist
+- ``shared/pi_events.py:30-46`` — event-type allowlist
 - ``server/app/services/token_usage.py:57-76,134-142`` — usage/provider/model
-- ``server/app/workflows/pi_model_error.py:15-44`` — errorMessage/stopReason
+- ``shared/pi_model_error.py:16-45`` — errorMessage/stopReason
 - ``server/app/services/job_log_renderer.py:86,120-182`` — render fields
 """
 
@@ -22,7 +22,7 @@ from typing import Any
 
 import pytest
 
-from server.app.services.pi_event_scan import RELEVANT_EVENT_TYPES
+from shared.pi_events import RELEVANT_EVENT_TYPES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO_ROOT / "velites" / "schema" / "events.schema.json"
@@ -91,7 +91,7 @@ def _message_schema(schema: dict[str, Any], event_def: str) -> dict[str, Any]:
 
 
 def test_event_types_cover_host_allowlist(schema: dict[str, Any]) -> None:
-    """pi_event_scan.py:27-43 — every allowlisted type must exist in the schema."""
+    """shared/pi_events.py:30-46 — every allowlisted type must exist in the schema."""
     consts = _event_type_consts(schema)
     assert consts == VELITES_EVENT_TYPES
     assert consts >= set(RELEVANT_EVENT_TYPES)
@@ -125,7 +125,7 @@ def _ref_branch(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_message_end_assistant_metadata(schema: dict[str, Any]) -> None:
-    """token_usage.py:134-142 / pi_model_error.py:39-44 — provider/model/stopReason."""
+    """token_usage.py:134-142 / shared/pi_model_error.py:40-45 — provider/model/stopReason."""
     message = _message_schema(schema, "MessageEndEvent")
     properties = message["properties"]
     for field in ("provider", "model", "stopReason", "content"):
@@ -136,7 +136,7 @@ def test_message_end_assistant_metadata(schema: dict[str, Any]) -> None:
 
 
 def test_error_message_field_optional(schema: dict[str, Any]) -> None:
-    """pi_model_error.py:40-41 — errorMessage present on messages, may be absent."""
+    """shared/pi_model_error.py:40-42 — errorMessage present on messages, may be absent."""
     for event_def in ("MessageStartEvent", "MessageEndEvent", "TurnEndEvent"):
         message = _message_schema(schema, event_def)
         assert "errorMessage" in message["properties"], f"{event_def} message.errorMessage"
@@ -146,7 +146,7 @@ def test_error_message_field_optional(schema: dict[str, Any]) -> None:
 def test_auto_retry_start_contract(schema: dict[str, Any]) -> None:
     """Pi-compatible retry observability: auto_retry_start carries the attempt counter."""
     assert "auto_retry_start" in RELEVANT_EVENT_TYPES, (
-        "pi_event_scan.py allowlist must keep auto_retry_start in compressed events.jsonl"
+        "shared/pi_events.py allowlist must keep auto_retry_start in compressed events.jsonl"
     )
     event = schema["$defs"]["AutoRetryStartEvent"]
     properties = event["properties"]
@@ -177,7 +177,7 @@ def test_tool_execution_start_contract(schema: dict[str, Any]) -> None:
 def test_outputs_validation_contract(schema: dict[str, Any]) -> None:
     """velites output self-check (M3): outputs_validation carries `missing`."""
     assert "outputs_validation" in RELEVANT_EVENT_TYPES, (
-        "pi_event_scan.py allowlist must keep outputs_validation in compressed events.jsonl"
+        "shared/pi_events.py allowlist must keep outputs_validation in compressed events.jsonl"
     )
     event = schema["$defs"]["OutputsValidationEvent"]
     missing = event["properties"]["missing"]

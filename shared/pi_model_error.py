@@ -1,8 +1,9 @@
 """Model-call failure detection for Pi ``--mode json`` event streams.
 
 Pi can exit with code 0 even when the upstream model request fails (e.g. a
-400 from the provider). Split out of ``pi_protocol.py`` to keep that module
-under its size budget; ``pi_protocol`` re-exports both names.
+400 from the provider). Lives in ``shared/`` because both the Host
+(``server/app/workflows/pi_protocol.py`` re-exports both names) and the
+Agent Worker upload pipeline consume it.
 """
 
 from __future__ import annotations

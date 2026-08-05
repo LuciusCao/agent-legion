@@ -75,7 +75,7 @@ velites（`velites/` Rust agent harness）已通过金丝雀验证：一天 4.3 
 
 ### 2.8 事件契约（不变量）
 
-velites 事件流保持 pi 消费子集 wire 兼容：Host 消费方 `server/app/services/pi_event_scan.py`、`token_usage.py`、`pi_model_error.py`、`job_log_renderer.py`；additive 扩展（message.timing）已存在。升格 runtime 不改事件 schema；`velites/schema/events.schema.json` 改动纪律（`cargo run --bin velites-schema -- schema/events.schema.json` + `velites/tests/schema_current.rs`、`golden_events.rs`）不变，EXEC-EVENT-SCHEMA-001 继续作护栏。
+velites 事件流保持 pi 消费子集 wire 兼容：Host 消费方 `shared/pi_events.py`、`token_usage.py`、`shared/pi_model_error.py`、`job_log_renderer.py`；additive 扩展（message.timing）已存在。升格 runtime 不改事件 schema；`velites/schema/events.schema.json` 改动纪律（`cargo run --bin velites-schema -- schema/events.schema.json` + `velites/tests/schema_current.rs`、`golden_events.rs`）不变，EXEC-EVENT-SCHEMA-001 继续作护栏。
 
 ## 3. 目标模型
 

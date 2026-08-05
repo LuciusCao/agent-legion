@@ -11,8 +11,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.workflows.pi_model_error import detect_model_error, fold_model_error
 from server.app.workflows.velites_command import build_command_for_flavor
+from shared.pi_model_error import detect_model_error, fold_model_error
 
 __all__ = [
     "JOB_DIR_PLACEHOLDER",
