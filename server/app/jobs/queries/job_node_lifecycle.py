@@ -11,16 +11,16 @@ class JobNodeLifecycleQueriesMixin(JobQueriesBase):
     def mark_nodes_not_applicable(self, job_id: str, node_keys: list[str], reason: str) -> None:
         if not node_keys:
             return
-        placeholders = ",".join("?" for _ in node_keys)
+        placeholders = ",".join("%s" for _ in node_keys)
         with self.connect() as conn:
             conn.execute(
                 f"""
                 update job_nodes
                 set status='not_applicable',
-                    stale_reason=?,
+                    stale_reason=%s,
                     error_message='',
                     finished_at=current_timestamp
-                where job_id=? and node_key in ({placeholders})
+                where job_id=%s and node_key in ({placeholders})
                   and status in ('pending', 'ready', 'stale')
                 """,
                 [reason, job_id, *node_keys],
@@ -37,7 +37,7 @@ class JobNodeLifecycleQueriesMixin(JobQueriesBase):
                     started_at=null,
                     finished_at=null,
                     created_at=current_timestamp
-                where job_id=? and node_key=?
+                where job_id=%s and node_key=%s
                 """,
                 (job_id, node_key),
             )
@@ -48,10 +48,10 @@ class JobNodeLifecycleQueriesMixin(JobQueriesBase):
                     """
                     update job_nodes
                     set status='stale',
-                        stale_reason=?,
+                        stale_reason=%s,
                         error_message='',
                         created_at=current_timestamp
-                    where job_id=? and node_key=?
+                    where job_id=%s and node_key=%s
                     """,
                     (f"upstream {node_key} rerun", job_id, downstream_key),
                 )
@@ -62,7 +62,7 @@ class JobNodeLifecycleQueriesMixin(JobQueriesBase):
                     error_message='',
                     packed=0,
                     updated_at=current_timestamp
-                where id=?
+                where id=%s
                 """,
                 (job_id,),
             )
@@ -78,16 +78,16 @@ class JobNodeLifecycleQueriesMixin(JobQueriesBase):
             node = definition.nodes.get(str(run["node_key"]))
             if node is not None and node.terminal is not None and status == "completed":
                 conn.execute(
-                    "update jobs set outcome=?, updated_at=current_timestamp where id=?",
+                    "update jobs set outcome=%s, updated_at=current_timestamp where id=%s",
                     (node.terminal.outcome, run["job_id"]),
                 )
         still_running = conn.execute(
-            "select 1 from job_nodes where job_id=? and status='running'",
+            "select 1 from job_nodes where job_id=%s and status='running'",
             (run["job_id"],),
         ).fetchone()
         if still_running is None:
             any_failed = conn.execute(
-                "select 1 from job_nodes where job_id=? and status='failed'",
+                "select 1 from job_nodes where job_id=%s and status='failed'",
                 (run["job_id"],),
             ).fetchone()
             if any_failed is not None:
@@ -96,12 +96,12 @@ class JobNodeLifecycleQueriesMixin(JobQueriesBase):
                 all_terminal_success = conn.execute(
                     """
                     select 1 from job_nodes
-                    where job_id=? and status not in ('completed', 'not_applicable')
+                    where job_id=%s and status not in ('completed', 'not_applicable')
                     """,
                     (run["job_id"],),
                 ).fetchone()
                 new_status = "completed" if all_terminal_success is None else "queued"
             conn.execute(
-                "update jobs set status=?, updated_at=current_timestamp where id=?",
+                "update jobs set status=%s, updated_at=current_timestamp where id=%s",
                 (new_status, run["job_id"]),
             )

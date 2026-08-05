@@ -24,7 +24,7 @@ class JobScanMarksMixin(JobQueriesBase):
         with self._connect_read() as conn:
             rows = conn.execute(
                 f"select {_ACTIVE_MARK_COLUMNS} from jobs"
-                " where workflow_key=? and status not in ('completed','failed')"
+                " where workflow_key=%s and status not in ('completed','failed')"
                 " order by created_at desc",
                 (workflow_key,),
             ).fetchall()
@@ -35,7 +35,7 @@ class JobScanMarksMixin(JobQueriesBase):
         with self._connect_read() as conn:
             row = conn.execute(
                 "select workflow_definition_snapshot_json from jobs"
-                " where workflow_definition_hash=?"
+                " where workflow_definition_hash=%s"
                 " and workflow_definition_snapshot_json != '' limit 1",
                 (definition_hash,),
             ).fetchone()
