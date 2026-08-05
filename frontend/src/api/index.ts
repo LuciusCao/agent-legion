@@ -4,7 +4,6 @@ export {
   deleteJob,
   fetchJobArtifact,
   fetchJobDetail,
-  fetchJobs,
 } from './jobsApi'
 export {
   createWorkspace,

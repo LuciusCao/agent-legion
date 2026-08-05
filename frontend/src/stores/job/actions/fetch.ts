@@ -1,9 +1,5 @@
-import { fetchJobs as apiFetchJobs } from '../../../api'
 import type { JobSummary } from '../../../types/jobTypes'
-import {
-  computeFilterCounts,
-  computeFilteredJobIds,
-} from '../filterLogic/incrementalFilters'
+import { computeFilterCounts } from '../filterLogic/incrementalFilters'
 import { createOptionAccumulator } from '../filterLogic/optionAccumulator'
 import type { JobState, JobStoreSet } from '../state'
 import { clearedSelectionState } from './selectionModeState'
@@ -67,26 +63,6 @@ export const failJobFetch =
         }
       : {}
 
-export const finishJobFetch =
-  (ws: string, jobs: JobSummary[]) =>
-  (state: JobState): Partial<JobState> => {
-    if (state.jobsWorkspaceId !== ws) return {}
-    const { jobsById, jobIds, jobIndexById, optionAccumulator } =
-      normalizeJobs(jobs)
-    const filterConfig = state.filterConfig
-    return {
-      jobs,
-      jobsById,
-      jobIds,
-      jobIndexById,
-      optionAccumulator,
-      filteredJobIds: computeFilteredJobIds(jobIds, jobsById, filterConfig),
-      filterCounts: computeFilterCounts(jobIds, jobsById, filterConfig),
-      error: null,
-      isLoading: false,
-    }
-  }
-
 export const resetForWorkspace =
   (ws: string) =>
   (state: JobState): Partial<JobState> => {
@@ -100,40 +76,10 @@ export const resetForWorkspace =
     }
   }
 
-export const startJobFetch = resetForWorkspace
-
-const inflight = new Map<string, Promise<{ jobs: JobSummary[] }>>()
-
-export function getOrStartFetch(
-  workspaceId: string
-): Promise<{ jobs: JobSummary[] }> {
-  let p = inflight.get(workspaceId)
-  if (!p) {
-    p = apiFetchJobs(workspaceId).finally(() => inflight.delete(workspaceId))
-    inflight.set(workspaceId, p)
-  }
-  return p
-}
-
 export function fetchActions(set: JobStoreSet) {
   return {
-    async fetchJobs(workspaceId: string) {
-      set(startJobFetch(workspaceId))
-      try {
-        const data = await getOrStartFetch(workspaceId)
-        set(finishJobFetch(workspaceId, data.jobs))
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : 'Failed to load jobs'
-        set(failJobFetch(workspaceId, msg))
-      }
-    },
     resetForWorkspace: (workspaceId: string) =>
       set(resetForWorkspace(workspaceId)),
-    setJobsAndFinishLoading: (jobs: JobSummary[]) =>
-      set((state) => ({
-        ...finishJobFetch(state.jobsWorkspaceId || '', jobs)(state),
-        revision: state.revision,
-      })),
     failJobFetch: (workspaceId: string, message: string) =>
       set(failJobFetch(workspaceId, message)),
   }

@@ -3,7 +3,6 @@ import { normalizeJobs, useJobStore } from './jobStore'
 import { createMockUiState, makeJob } from '../testing/fixtures'
 
 vi.mock('../api', () => ({
-  fetchJobs: vi.fn(),
   api: vi.fn(),
 }))
 
@@ -18,11 +17,9 @@ vi.mock('./uiStore', () => ({
   },
 }))
 
-import { fetchJobs } from '../api'
 import { rerunJobsByFailure } from '../api/failureApi'
 import { useUiStore } from './uiStore'
 
-const mockFetchJobs = vi.mocked(fetchJobs)
 const mockRerunJobsByFailure = vi.mocked(rerunJobsByFailure)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
@@ -45,8 +42,6 @@ describe('jobStore rerunByFailureCategory', () => {
       selectMode: true,
       refreshFirstPage: mockRefreshFirstPage,
     })
-    mockFetchJobs.mockReset()
-    mockFetchJobs.mockResolvedValue({ jobs: [] })
     mockRefreshFirstPage.mockReset()
     mockRefreshFirstPage.mockResolvedValue(undefined)
     mockRerunJobsByFailure.mockReset()
@@ -93,7 +88,6 @@ describe('jobStore rerunByFailureCategory', () => {
     )
     expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('mentions upstream reruns in the toast when rerun_nodes exceed the failed node', async () => {
@@ -132,7 +126,6 @@ describe('jobStore rerunByFailureCategory', () => {
 
     expect(mockShowToast).toHaveBeenCalledWith('server down', 'error')
     expect(useJobStore.getState().error).toBe('server down')
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('includes from_node_key in the request when a start node is given', async () => {

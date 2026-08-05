@@ -1,3 +1,4 @@
+// Job list = materialized view of the SSE snapshot+patch+revision sync protocol: a deliberately retained hand-written sync layer (react-query migration, hybrid end state). Core invariants: monotonic revision guard and incrementally maintained filterLogic derived state (see derivedStateInvariant.test.ts). Peripheral data fetching goes through react-query; do not re-add full-list fetch actions here.
 import { create } from 'zustand'
 import type { JobState } from './state'
 import { fetchActions } from './actions/fetch'

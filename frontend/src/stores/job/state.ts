@@ -44,9 +44,7 @@ export interface JobState
   batchRunToLoading: boolean
   continueLoading: boolean
   batchUpgradeWorkflowLoading: boolean
-  fetchJobs: (workspaceId: string) => Promise<void>
   resetForWorkspace: (workspaceId: string) => void
-  setJobsAndFinishLoading: (jobs: JobSummary[]) => void
   failJobFetch: (workspaceId: string, message: string) => void
   setJobsSnapshot: (
     workspaceId: string,

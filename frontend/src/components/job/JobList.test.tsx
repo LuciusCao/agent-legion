@@ -7,13 +7,8 @@ import { useJobStore } from '../../stores/jobStore'
 import type { JobSummary } from '../../types/jobTypes'
 
 vi.mock('../../api', () => ({
-  fetchJobs: vi.fn(),
   api: vi.fn(),
 }))
-
-import { fetchJobs } from '../../api'
-
-const mockFetchJobs = vi.mocked(fetchJobs)
 
 const mockJobs: JobSummary[] = [
   {
@@ -70,7 +65,6 @@ const mockJobs: JobSummary[] = [
 
 describe('JobList', () => {
   beforeEach(() => {
-    mockFetchJobs.mockReset()
     const jobIds = mockJobs.map((job) => job.id)
     const jobsById = Object.fromEntries(mockJobs.map((job) => [job.id, job]))
     useJobStore.setState({
@@ -113,7 +107,6 @@ describe('JobList', () => {
     expect(screen.getByText('Geometry')).toBeInTheDocument()
     expect(screen.getByText(/题目 · Q100/)).toBeInTheDocument()
     expect(screen.getByText(/题目 · Q200/)).toBeInTheDocument()
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('empty state shows 暂无任务', () => {
@@ -136,7 +129,6 @@ describe('JobList', () => {
     )
 
     expect(screen.getByText('暂无任务')).toBeInTheDocument()
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('renders skeleton while loading', () => {

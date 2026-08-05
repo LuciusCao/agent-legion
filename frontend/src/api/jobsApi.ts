@@ -4,20 +4,7 @@ import type {
   ArtifactResponse,
   CreateJobBatchInput,
   JobBatchResponse,
-  JobsResponse,
 } from '../types'
-
-export async function fetchJobs(
-  workspaceId: string,
-  workflowKey?: string
-): Promise<JobsResponse> {
-  const params = new URLSearchParams()
-  if (workflowKey) params.set('workflow_key', workflowKey)
-  const query = params.toString()
-  return api(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs${query ? `?${query}` : ''}`
-  )
-}
 
 export async function createJobBatch(
   workspaceId: string,
