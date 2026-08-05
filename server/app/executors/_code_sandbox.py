@@ -7,13 +7,16 @@ its internals, same as the builtin isolated child helpers).
 Fail-closed: without the velites wrapper (and thus without
 sandbox-exec/bwrap) custom code never runs unsandboxed. The child is an
 exec'd command line — the sandbox can only confine exec'd processes, not
-multiprocessing forks — so job/runtime ride a payload pickle on stdin and the
-result comes back via a pickle inside ``job_dir``.
+multiprocessing forks — so job/runtime ride a payload pickle on **stdin**
+(parent-produced, so unpickling it is safe) and the result comes back as
+strictly validated **JSON** from a file inside the sandbox-writable
+``job_dir`` (never pickle: the child tree could have replaced that file).
 """
 
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import pickle
 import shutil
@@ -36,6 +39,13 @@ if TYPE_CHECKING:
 # ``repo_root`` only in tests, where capabilities point into tmp dirs.
 _SERVER_REPO_ROOT = Path(__file__).resolve().parents[3]
 
+# Repo subdirectories the child must READ to import server/workflow_nodes
+# helpers and load yaml-indepedent config modules. Deliberately excludes the
+# repo root itself, `.env`, `deploy/` and `data/` (secrets and runtime data).
+_REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config")
+
+_RESULT_BASENAME = ".custom_node_result.json"
+
 
 def _velites_binary(executor: CodeExecutor) -> str | None:
     """PATH probe for the velites sandbox wrapper, cached per executor."""
@@ -43,6 +53,86 @@ def _velites_binary(executor: CodeExecutor) -> str | None:
         executor._velites_probed = True
         executor._velites_path = shutil.which("velites")
     return executor._velites_path
+
+
+def _child_env() -> dict[str, str]:
+    """Minimal environment for the sandboxed child.
+
+    Everything else — database DSNs, vault master key, CMS tokens
+    (AGENT_LEGION_* / CMS_* / BASECMS_*) — stays out of the sandbox.
+    """
+    env: dict[str, str] = {}
+    # sandbox-exec/bwrap are spawned by name inside the wrapper.
+    if path := os.environ.get("PATH"):
+        env["PATH"] = path
+    # tempfile and locale basics for the interpreter and node code.
+    for key in ("TMPDIR", "HOME"):
+        if value := os.environ.get(key):
+            env[key] = value
+    for key, value in os.environ.items():
+        if key == "LANG" or key.startswith("LC_"):
+            env[key] = value
+    # server package import root (computed by the caller's interpreter).
+    python_path = os.environ.get("PYTHONPATH")
+    env["PYTHONPATH"] = (
+        f"{_SERVER_REPO_ROOT}{os.pathsep}{python_path}" if python_path else str(_SERVER_REPO_ROOT)
+    )
+    return env
+
+
+def _read_roots(executor: CodeExecutor) -> list[str]:
+    """Read-only allowlist: import subdirs plus the interpreter prefixes.
+
+    The venv prefix (``sys.prefix``) keeps site-packages importable and
+    pyvenv.cfg readable; the base prefix (``sys.base_prefix``) covers
+    @rpath-loaded libpython — passed explicitly instead of relying on the
+    wrapper's PATH python3 probe, which may resolve a different interpreter
+    than ``sys.executable``.
+    """
+    roots: list[str] = []
+    repo_roots = {executor._repo_root, _SERVER_REPO_ROOT}
+    for repo_root in repo_roots:
+        for subdir in _REPO_READ_SUBDIRS:
+            candidate = repo_root / subdir
+            if candidate.is_dir():
+                roots.append(str(candidate))
+    for prefix in {sys.prefix, sys.base_prefix}:
+        if prefix:
+            roots.append(str(Path(prefix).resolve()))
+    return roots
+
+
+def _read_result(result_path: Path, log_path: Path) -> ExecutionResult | None:
+    """Parse the child's JSON result with a strict schema check.
+
+    Returns None for a successful run (outputs still need checking); any
+    non-conforming content fails the node — the file sits in a
+    sandbox-writable directory and must never be trusted blindly.
+    """
+    try:
+        document = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        document = None
+    if (
+        not isinstance(document, dict)
+        or set(document) != {"status", "message"}
+        or document["status"] not in ("ok", "error")
+        or not (document["message"] is None or isinstance(document["message"], str))
+    ):
+        return ExecutionResult(
+            status="failed",
+            exit_code=1,
+            error_message="sandboxed custom code node did not return a result",
+            log_path=str(log_path),
+        )
+    if document["status"] == "error":
+        return ExecutionResult(
+            status="failed",
+            exit_code=1,
+            error_message=str(document["message"]),
+            log_path=str(log_path),
+        )
+    return None
 
 
 def execute_custom_sandboxed(
@@ -64,11 +154,21 @@ def execute_custom_sandboxed(
 
     context.job_dir.mkdir(parents=True, exist_ok=True)
     context.log_path.parent.mkdir(parents=True, exist_ok=True)
-    result_path = context.job_dir / ".custom_node_result.pkl"
+    result_path = context.job_dir / _RESULT_BASENAME
+    # A leftover result from a previous attempt must never fake a success.
+    result_path.unlink(missing_ok=True)
     # The exec'd child builds its own cancellation token; the parent's
     # multiprocessing token cannot cross an exec boundary and is dropped.
     runtime = executor._build_runtime(context, CancellationToken(threading.Event()))
     runtime.pop("cancellation", None)
+    # Custom children get no database handle (EXEC-CODE-003): the one builtin
+    # read point (question_intake's batch payload) is prefetched here.
+    runtime.pop("_job_db_path", None)
+    runtime.pop("_jobs_dir", None)
+    if executor.job_db is not None and context.job.get("batch_id"):
+        batch = executor.job_db.get_batch(str(context.job["batch_id"]))
+        if batch:
+            runtime["job_batch"] = dict(batch)
     # The payload rides stdin: node_config may hold resolved secrets, and
     # those must never touch the (job-dir) filesystem (VAULT-SECRET-001).
     payload_bytes = pickle.dumps(
@@ -80,12 +180,8 @@ def execute_custom_sandboxed(
         }
     )
 
-    read_roots = [str(executor._repo_root)]
-    if executor._repo_root != _SERVER_REPO_ROOT:
-        read_roots.append(str(_SERVER_REPO_ROOT))
     command = [velites, "sandbox", "wrap", "--cwd", str(context.job_dir)]
-    for root in read_roots:
-        # The child imports server.app.* helpers; repos stay read-only.
+    for root in _read_roots(executor):
         command += ["--allow-read", root]
     if executor._capabilities[context.capability].sandbox_network:
         command.append("--allow-network")
@@ -98,11 +194,6 @@ def execute_custom_sandboxed(
     ]
 
     log_fd = os.open(str(context.log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
-    env = dict(os.environ)
-    python_path = env.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{_SERVER_REPO_ROOT}{os.pathsep}{python_path}" if python_path else str(_SERVER_REPO_ROOT)
-    )
     try:
         process = subprocess.Popen(
             command,
@@ -110,13 +201,28 @@ def execute_custom_sandboxed(
             stdout=log_fd,
             stderr=subprocess.STDOUT,
             cwd=str(context.job_dir),
-            env=env,
+            env=_child_env(),
+            # velites does not forward signals: terminate the whole group so
+            # sandbox-exec grandchildren are not orphaned.
+            start_new_session=True,
         )
     finally:
         os.close(log_fd)
-    assert process.stdin is not None
-    process.stdin.write(payload_bytes)
-    process.stdin.close()
+
+    # Feed the payload from a daemon thread so a slow-starting child cannot
+    # stall the deadline/cancellation loop on a full pipe buffer.
+    write_error: list[BaseException] = []
+
+    def _feed_stdin() -> None:
+        try:
+            assert process.stdin is not None
+            process.stdin.write(payload_bytes)
+            process.stdin.close()
+        except (BrokenPipeError, OSError) as exc:
+            write_error.append(exc)
+
+    feeder = threading.Thread(target=_feed_stdin, daemon=True)
+    feeder.start()
 
     parent_token_obj = (
         context.runtime.get("cancellation") if isinstance(context.runtime, Mapping) else None
@@ -125,6 +231,17 @@ def execute_custom_sandboxed(
     deadline = time.monotonic() + timeout_seconds
     try:
         while process.poll() is None:
+            if write_error:
+                executor._terminate_child(process)
+                return ExecutionResult(
+                    status="failed",
+                    exit_code=1,
+                    error_message=(
+                        "custom code child exited before reading its payload "
+                        f"({type(write_error[0]).__name__})"
+                    ),
+                    log_path=str(context.log_path),
+                )
             if parent_token is not None and parent_token.wait(timeout=0.1):
                 executor._terminate_child(process)
                 return ExecutionResult(
@@ -146,26 +263,13 @@ def execute_custom_sandboxed(
             if parent_token is None:
                 time.sleep(0.05)
 
-        try:
-            with open(result_path, "rb") as handle:
-                status, payload = pickle.load(handle)  # noqa: S301 - child-produced
-        except (OSError, pickle.UnpicklingError, EOFError, ValueError):
-            return ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message="sandboxed custom code node did not return a result",
-                log_path=str(context.log_path),
-            )
-        if status == "error":
-            return ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message=payload,
-                log_path=str(context.log_path),
-            )
+        failure = _read_result(result_path, context.log_path)
+        if failure is not None:
+            return failure
         return executor._check_outputs(context)
     finally:
         if process.poll() is None:
             executor._terminate_child(process)
+        feeder.join(timeout=1)
         with contextlib.suppress(OSError):
             result_path.unlink(missing_ok=True)

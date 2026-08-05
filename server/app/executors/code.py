@@ -24,6 +24,7 @@ import importlib.util
 import logging
 import multiprocessing
 import os
+import signal
 import subprocess
 import sys
 import threading
@@ -342,15 +343,21 @@ class CodeExecutor:
     def _terminate_child(
         self, process: multiprocessing.process.BaseProcess | subprocess.Popen[bytes]
     ) -> None:
-        process.terminate()
         if isinstance(process, subprocess.Popen):
+            # The sandboxed child is exec'd with start_new_session=True and
+            # velites does not forward signals: signal the whole process
+            # group so sandbox-exec grandchildren are not orphaned.
+            with contextlib.suppress(ProcessLookupError, PermissionError):
+                os.killpg(os.getpgid(process.pid), signal.SIGTERM)
             with contextlib.suppress(subprocess.TimeoutExpired):
                 process.wait(timeout=self.cancellation_grace_seconds)
             if process.poll() is None:
-                process.kill()
+                with contextlib.suppress(ProcessLookupError, PermissionError):
+                    os.killpg(os.getpgid(process.pid), signal.SIGKILL)
                 with contextlib.suppress(subprocess.TimeoutExpired):
                     process.wait(timeout=2)
             return
+        process.terminate()
         process.join(timeout=self.cancellation_grace_seconds)
         if process.is_alive():
             process.kill()

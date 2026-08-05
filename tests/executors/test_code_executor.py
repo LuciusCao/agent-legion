@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 import subprocess
 import textwrap
+import time
 from dataclasses import replace
 from pathlib import Path
 
@@ -288,20 +289,28 @@ def test_custom_sandbox_denies_writes_outside_job_dir(
 def test_custom_sandbox_denies_reads_outside_allowlist(
     tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Reads of files outside the allowlist (e.g. $HOME) fail with EPERM."""
+    """Repo-root secrets (`.env`) and root listing fail with EPERM.
+
+    Only `<repo>/server|workflow_nodes|config` are read-allowed; the root
+    itself is list-only (Python's importer needs the listing), never its
+    files. The probe runs inside a throwaway tmp job dir and only ever
+    *reads* a repo-tracked path.
+    """
     _sandboxed(monkeypatch)
+    from server.app.executors._code_sandbox import _SERVER_REPO_ROOT
+
+    env_probe = _SERVER_REPO_ROOT / ".env"
+    if not env_probe.exists():
+        pytest.skip("worktree has no .env to probe")
     custom_source = textwrap.dedent(
-        """
+        f"""
+        import os
         from pathlib import Path
 
         def run(job, job_dir, runtime):
-            Path(Path.home() / ".ssh" / "id_rsa").read_text(encoding="utf-8")
+            Path({str(env_probe)!r}).read_text(encoding="utf-8")
         """
     )
-    probe = Path.home() / ".ssh" / "id_rsa"
-    if not probe.exists():
-        probe.parent.mkdir(exist_ok=True)
-        probe.write_text("probe", encoding="utf-8")
     path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
     executor = _executor(tmp_path, path)
 
@@ -309,6 +318,36 @@ def test_custom_sandbox_denies_reads_outside_allowlist(
 
     assert result.status == "failed"
     assert "Operation not permitted" in result.error_message
+
+
+def test_custom_sandbox_env_is_whitelisted(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No AGENT_LEGION_* / CMS_* / BASECMS_* variables reach the child."""
+    _sandboxed(monkeypatch)
+    monkeypatch.setenv("AGENT_LEGION_CMS_TOKEN", "should-not-leak")
+    monkeypatch.setenv("CMS_TOKEN", "should-not-leak")
+    custom_source = textwrap.dedent(
+        """
+        import json
+        import os
+
+        def run(job, job_dir, runtime):
+            (job_dir / "out.json").write_text(json.dumps(sorted(os.environ)), encoding="utf-8")
+        """
+    )
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+
+    result = executor.execute(replace(context, node_code=custom_source))
+
+    assert result.status == "completed"
+    import json
+
+    keys = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    leaked = [key for key in keys if key.startswith(("AGENT_LEGION_", "CMS_", "BASECMS_"))]
+    assert leaked == []
+    assert "PATH" in keys  # sanity: the whitelist did apply, env not empty
 
 
 def test_custom_sandbox_denies_network_by_default(
@@ -345,3 +384,70 @@ def test_custom_sandbox_denies_network_by_default(
     assert allowed.status == "failed"
     # With network allowed the failure is a plain connection refusal, not EPERM.
     assert "Operation not permitted" not in allowed.error_message
+
+
+def test_read_result_validates_json_schema(tmp_path: Path) -> None:
+    """The result file is JSON with a strict schema — never pickle (EXEC-CODE-003)."""
+    from server.app.executors._code_sandbox import _read_result
+
+    target = tmp_path / "result.json"
+    log = tmp_path / "run.log"
+
+    target.write_text('{"status": "ok", "message": null}', encoding="utf-8")
+    assert _read_result(target, log) is None
+
+    target.write_text('{"status": "error", "message": "boom"}', encoding="utf-8")
+    failure = _read_result(target, log)
+    assert failure is not None and failure.status == "failed"
+    assert failure.error_message == "boom"
+
+    import pickle
+
+    target.write_bytes(pickle.dumps(("ok", None)))
+    assert _read_result(target, log) is not None  # pickle is rejected, not executed
+
+    for bad in (
+        '{"status": "ok"}',
+        '["ok", null]',
+        '{"status": "yep", "message": null}',
+        "not json",
+    ):
+        target.write_text(bad, encoding="utf-8")
+        failure = _read_result(target, log)
+        assert failure is not None and failure.status == "failed", bad
+
+
+def test_custom_cancel_kills_whole_process_group(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Cancellation kills the exec'd child's whole group (no orphaned grandchildren)."""
+    _sandboxed(monkeypatch)
+    custom_source = (
+        "import subprocess\n"
+        "import time\n\n"
+        "def run(job, job_dir, runtime):\n"
+        "    marker = job_dir / 'grandchild-survived'\n"
+        "    subprocess.Popen(['/bin/sh', '-c', f'sleep 2; touch {marker}'])\n"
+        "    time.sleep(30)\n"
+    )
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+
+    import threading as _threading
+
+    from server.app.executors.cancellation import CancellationToken
+
+    token = CancellationToken(_threading.Event())
+    canceller = _threading.Timer(0.5, token.cancel)
+    canceller.start()
+    sandboxed = replace(
+        context,
+        node_code=custom_source,
+        runtime={"cancellation": token},
+    )
+    result = executor.execute(sandboxed)
+    canceller.cancel()
+
+    assert result.status == "cancelled"
+    time.sleep(2.5)
+    assert not (tmp_path / "grandchild-survived").exists()

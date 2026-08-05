@@ -54,10 +54,15 @@ def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
 
 
 def _intake_input_field(job: dict[str, Any], context: dict[str, Any]) -> str:
-    job_db = context.get("job_db")
-    if job_db is None:
-        return ""
-    batch = job_db.get_batch(str(job.get("batch_id", "")))
+    # The dispatch layer prefetches the batch row (custom sandboxed children
+    # get no database handle, EXEC-CODE-003); the builtin child still carries
+    # job_db and falls back to a live read.
+    batch = context.get("job_batch")
+    if not isinstance(batch, dict):
+        job_db = context.get("job_db")
+        if job_db is None:
+            return ""
+        batch = job_db.get_batch(str(job.get("batch_id", "")))
     if not batch:
         return ""
     payload = _decode_json_object(batch.get("source_payload_json"))
