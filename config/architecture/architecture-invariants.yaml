@@ -476,7 +476,7 @@ invariants:
         gate: quick
 
   - id: EXEC-EVENT-SCHEMA-001
-    statement: "The velites event stream schema (velites/schema/events.schema.json, exported from velites/src/events.rs) stays wire-compatible with the Host consumers: every pi_event_scan allowlisted type exists in the schema and the consumed fields (usage/provider/model/stopReason/errorMessage/tool metadata, retry and outputs_validation payloads) keep their names and types; delta events (message_update/tool_execution_update) never appear."
+    statement: "The velites event stream schema (velites/schema/events.schema.json, exported from velites/src/events.rs) stays wire-compatible with the Host consumers: every shared/pi_events allowlisted type exists in the schema and the consumed fields (usage/provider/model/stopReason/errorMessage/tool metadata, retry and outputs_validation payloads) keep their names and types; delta events (message_update/tool_execution_update) never appear."
     owner: workspace-executor
     risk: high
     evidence:

@@ -639,7 +639,8 @@ def test_compose_keeps_control_api_local_and_state_separate_from_executions() ->
         assert "${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787:8787" in compose
         assert "worker-control:/var/lib/agent-legion-worker-control" in compose
         assert "worker-data:/var/lib/agent-legion-worker" in compose
-    assert "server/app/workflows/pi_protocol.py" in dockerfile
+    assert "COPY shared /app/shared" in dockerfile
+    assert 'python3 -c "import worker.service' in dockerfile
     assert "worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py" in dockerfile
 
 

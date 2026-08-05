@@ -14,7 +14,6 @@ from typing import Any
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
 from server.app.jobs import JobQueries
-from server.app.services.pi_event_compression import compress_pi_events
 from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
 from server.app.services.token_usage_capture import capture_and_persist_token_usage
 from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
@@ -23,6 +22,7 @@ from server.app.workflows.pi_command_builder import build_pi_command
 from server.app.workflows.pi_config import PiConfig, PiRunResult
 from server.app.workflows.pi_prompt import build_pi_prompt
 from server.app.workflows.pi_protocol import detect_model_error
+from shared.pi_events import compress_pi_events
 
 logger = logging.getLogger(__name__)
 

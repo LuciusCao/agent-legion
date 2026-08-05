@@ -97,7 +97,7 @@ token 计量依据、失败判定依据。砍 delta 不影响预览：预览渲�
 
 | 事件 | 消费方 | 关键字段 |
 |---|---|---|
-| `session` | `pi_event_scan.py` allowlist / 日志渲染 | `sessionId`（可用 `--name` 等价标识） |
+| `session` | `shared/pi_events.py` allowlist / 日志渲染 | `sessionId`（可用 `--name` 等价标识） |
 | `agent_start` / `agent_end` | 日志渲染 | `messages`、`error`；M3 起 `agent_end` 增加可选 `reason`（`budget_exceeded` / `cancelled`，正常结束与模型错误时缺省） |
 | `turn_start` / `turn_end` | 日志渲染 | `turnIndex`、`message`、`toolResults` |
 | `message_start` | 日志渲染 | `message` |
@@ -122,7 +122,7 @@ assistant `message` 上的可选 `timing` 字段（`src/events.rs` 的 `RequestT
 不变式：`ttfbMs ≤ totalMs`、`streamMs ≤ totalMs`。重试场景每次 attempt 独立计时，
 最终只挂在成功那次的 assistant message 上（`auto_retry_start` 失败对无时间字段）。
 TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计算。
-该字段为 additive 扩展，Host 现有消费方（`token_usage` / `pi_event_scan` /
+该字段为 additive 扩展，Host 现有消费方（`token_usage` / `shared/pi_events` /
 `job_log_renderer`）均为 `dict.get` 风格，对未知字段天然容忍。
 
 ### 明确不发
@@ -130,7 +130,7 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 - `message_update` / `tool_execution_update`（delta 类）——协议层删除，worker
   `event_filter.py` 的 delta 快路径随之成为死代码（后续清理，不在本期）。
 
-### 错误语义（与 `pi_model_error.py` 对齐）
+### 错误语义（与 `shared/pi_model_error.py` 对齐）
 
 - 模型调用失败先内部重试（指数退避，上限可配）；每个失败的 transient attempt 在
   退避 sleep 前发出一对 pi 兼容事件：assistant `message_end`（`stopReason=error` +

@@ -34,7 +34,7 @@ TIMING_KEYS = frozenset(
     {"timestamp", "duration", "durationMs", "duration_ms", "elapsed", "elapsedMs", "pid"}
 )
 
-# Fields Agent Legion consumers depend on (token_usage.py, pi_model_error.py).
+# Fields Agent Legion consumers depend on (token_usage.py, shared/pi_model_error.py).
 ASSISTANT_REQUIRED = [
     "message.usage.input",
     "message.usage.output",

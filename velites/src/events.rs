@@ -3,10 +3,10 @@
 //! The wire format mirrors the Pi `--mode json` events that Agent Legion
 //! consumes:
 //!
-//! - `server/app/services/pi_event_scan.py` — event allowlist for compression;
+//! - `shared/pi_events.py` — event allowlist for compression;
 //! - `server/app/services/token_usage.py` — `message_end.message.usage`
 //!   (`input`/`output`/`cacheRead`), `provider`, `model`;
-//! - `server/app/workflows/pi_model_error.py` — `stopReason` + `errorMessage`
+//! - `shared/pi_model_error.py` — `stopReason` + `errorMessage`
 //!   failure semantics;
 //! - `server/app/services/job_log_renderer.py` — UI preview over
 //!   `agent_start` / `turn_start` / `message_end` (roles `assistant` and
@@ -583,7 +583,7 @@ mod tests {
 
     #[test]
     fn event_type_tags_match_pi_allowlist() {
-        // Must match RELEVANT_EVENT_TYPES in server/app/services/pi_event_scan.py.
+        // Must match RELEVANT_EVENT_TYPES in shared/pi_events.py.
         let tags = [
             "session",
             "agent_start",
