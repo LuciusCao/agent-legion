@@ -2,8 +2,13 @@ import { Button } from '@mui/material'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../stores/authStore'
 
-// Dashboard header actions tied to the session: admin entries (user
-// management, global settings) plus logout.
+// Dashboard header: admin-only entries (含全局监控面板) plus logout.
+const ADMIN_LINKS = [
+  { label: '用户管理', to: '/admin/users' },
+  { label: '设置', to: '/admin/settings' },
+  { label: '监控面板', to: '/monitoring' }, // 全局监控仅 admin 可见
+]
+
 export function UserMenu() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
@@ -11,19 +16,16 @@ export function UserMenu() {
 
   return (
     <>
-      {user?.role === 'admin' && (
-        <>
-          <Button variant="outlined" onClick={() => navigate('/admin/users')}>
-            用户管理
-          </Button>
+      {user?.role === 'admin' &&
+        ADMIN_LINKS.map((link) => (
           <Button
+            key={link.to}
             variant="outlined"
-            onClick={() => navigate('/admin/settings')}
+            onClick={() => navigate(link.to)}
           >
-            设置
+            {link.label}
           </Button>
-        </>
-      )}
+        ))}
       <Button variant="text" onClick={() => void logout()}>
         退出登录
       </Button>

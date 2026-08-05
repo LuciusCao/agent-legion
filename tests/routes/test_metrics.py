@@ -166,10 +166,14 @@ def test_metrics_workspace_membership_guard() -> None:
         job_db = SimpleNamespace(get_workspace_role=lambda ws, uid: role)
         return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(job_db=job_db)))
 
-    # admin 直通；成员通过；非成员 404；不带 workspace_id 不校验。
+    # admin 直通；成员带 workspace_id 校验成员资格；非成员 404。
     enforce_workspace_membership(_request(None), "ops-ws", {"role": "admin", "id": "u1"})
+    enforce_workspace_membership(_request(None), None, {"role": "admin", "id": "u1"})
     enforce_workspace_membership(_request("viewer"), "ops-ws", {"role": "member", "id": "u1"})
-    enforce_workspace_membership(_request(None), None, {"role": "member", "id": "u1"})
     with pytest.raises(HTTPException) as exc_info:
         enforce_workspace_membership(_request(None), "ops-ws", {"role": "member", "id": "u1"})
     assert exc_info.value.status_code == 404
+    # 全局视图（无 workspace_id）对成员 403：只能看所属 workspace。
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_workspace_membership(_request("viewer"), None, {"role": "member", "id": "u1"})
+    assert exc_info.value.status_code == 403
