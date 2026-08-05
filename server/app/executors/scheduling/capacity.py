@@ -54,7 +54,7 @@ def load_capacity_snapshot(db_path: str, global_capacities: dict[str, int]) -> C
             """
             select executor_id, workspace_id, count(*) as cnt
             from executor_leases
-            where status='active' and expires_at>?
+            where status='active' and expires_at>%s
             group by executor_id, workspace_id
             """,
             (now_str,),

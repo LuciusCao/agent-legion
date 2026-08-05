@@ -77,7 +77,7 @@ class ExecutorLeaseRepository:
         """Return the lease's current status, or None when unknown."""
         with read_connection(self.path) as conn:
             row = conn.execute(
-                "select status from executor_leases where id=?", (lease_id,)
+                "select status from executor_leases where id=%s", (lease_id,)
             ).fetchone()
         return str(row["status"]) if row is not None else None
 
@@ -104,7 +104,7 @@ class ExecutorLeaseRepository:
     def has_active_for_job(self, job_id: str, now: datetime) -> bool:
         with read_connection(self.path) as conn:
             row = conn.execute(
-                "select 1 from executor_leases where job_id=? and status='active' and expires_at>? limit 1",
+                "select 1 from executor_leases where job_id=%s and status='active' and expires_at>%s limit 1",
                 (job_id, database_timestamp(now)),
             ).fetchone()
             return row is not None
@@ -112,7 +112,7 @@ class ExecutorLeaseRepository:
     def has_active_for_node(self, job_id: str, node_key: str, now: datetime) -> bool:
         with read_connection(self.path) as conn:
             row = conn.execute(
-                "select 1 from executor_leases where job_id=? and node_key=? and status='active' and expires_at>? limit 1",
+                "select 1 from executor_leases where job_id=%s and node_key=%s and status='active' and expires_at>%s limit 1",
                 (job_id, node_key, database_timestamp(now)),
             ).fetchone()
             return row is not None
