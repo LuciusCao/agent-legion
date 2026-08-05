@@ -1,5 +1,7 @@
+import { useQuery } from '@tanstack/react-query'
 import { fetchJobTokenUsage } from '../../api/jobApi'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { toErrorMessage } from '../../lib/queryError'
 import styles from './TokenUsageJobPanel.module.css'
 
 interface Props {
@@ -17,11 +19,14 @@ function money(currency: string, value: number | null | undefined) {
 }
 
 export function TokenUsageJobPanel({ jobId }: Props) {
-  const { data, loading, error } = useAsync(
-    () => fetchJobTokenUsage(jobId),
-    [jobId],
-    { resetOnRun: true }
-  )
+  // key 含 jobId：切换 job 自动回到 pending 态（同原 resetOnRun）。
+  const query = useQuery({
+    queryKey: extraQueryKeys.jobTokenUsage(jobId),
+    queryFn: () => fetchJobTokenUsage(jobId),
+  })
+  const data = query.data ?? null
+  const loading = query.isLoading
+  const error = toErrorMessage(query.error)
 
   if (loading) return <p className={styles.loading}>加载中…</p>
   if (error) return <p className={styles.error}>加载失败：{error}</p>

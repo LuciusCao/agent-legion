@@ -4,23 +4,11 @@ import type { SettingState } from './settingStore'
 import { useUiStore } from './uiStore'
 import { createMockUiState } from '../testing/fixtures'
 import { api } from '../api'
-import {
-  getExecutorCatalog,
-  getWorkspaceExecutorConfiguration,
-} from '../api/executorApi'
 import type { WorkspaceSettings } from '../types'
-import type {
-  ExecutorDefinition,
-  WorkspaceExecutorConfiguration,
-} from '../types/executorTypes'
+import type { WorkspaceExecutorConfiguration } from '../types/executorTypes'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
-}))
-
-vi.mock('../api/executorApi', () => ({
-  getExecutorCatalog: vi.fn(),
-  getWorkspaceExecutorConfiguration: vi.fn(),
 }))
 
 vi.mock('./uiStore', () => ({
@@ -31,10 +19,6 @@ vi.mock('./uiStore', () => ({
 }))
 
 const mockApi = vi.mocked(api)
-const mockGetExecutorCatalog = vi.mocked(getExecutorCatalog)
-const mockGetWorkspaceExecutorConfiguration = vi.mocked(
-  getWorkspaceExecutorConfiguration
-)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
 
@@ -43,13 +27,6 @@ const defaultSettings: WorkspaceSettings = {
   intakeModes: [],
   labelOverrides: {},
   workflowKey: '',
-}
-
-const catalogExecutor: ExecutorDefinition = {
-  id: 'code-default',
-  kind: 'code',
-  capabilities: ['execute_local'],
-  global_capacity: 4,
 }
 
 const initialExecutorConfiguration: WorkspaceExecutorConfiguration = {
@@ -82,11 +59,9 @@ const defaultState: Partial<SettingState> = {
   originalWorkspaceDescription: '',
   originalSettings: null,
   isDirty: false,
-  workflowDefinition: null,
   testStatus: { state: 'idle' as const },
   isSaving: false,
   saveError: null,
-  executorCatalog: [],
   executorConfiguration: initialExecutorConfiguration,
   originalExecutorConfiguration: null,
   pendingAllocationRemoval: null,
@@ -96,8 +71,6 @@ describe('settingStore', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     mockApi.mockReset()
-    mockGetExecutorCatalog.mockReset()
-    mockGetWorkspaceExecutorConfiguration.mockReset()
     mockShowToast.mockReset()
     mockGetState.mockReturnValue(
       createMockUiState({ showToast: mockShowToast })
@@ -113,13 +86,6 @@ describe('settingStore', () => {
 
   it('clears stale node configuration when the workflow changes', () => {
     useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_content',
-        label: 'Question Content',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [],
-      },
       executorConfiguration: initialExecutorConfiguration,
       originalSettings: defaultSettings,
       originalExecutorConfiguration: initialExecutorConfiguration,
@@ -128,7 +94,6 @@ describe('settingStore', () => {
     useSettingStore.getState().setSettings({ workflowKey: 'legacy_workflow' })
 
     const state = useSettingStore.getState()
-    expect(state.workflowDefinition).toBeNull()
     expect(state.executorConfiguration.allocations).toEqual(
       initialExecutorConfiguration.allocations
     )
@@ -233,96 +198,60 @@ describe('settingStore', () => {
     )
   })
 
-  it('fetchSettings loads workspace, settings, catalog, and executor configuration in parallel', async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1') {
-        return Promise.resolve({
-          workspace: { name: 'Test Workspace', description: 'A workspace' },
-        })
-      }
-      if (path === '/api/workspaces/ws1/settings') {
-        return Promise.resolve({
-          entityType: 'knowledge',
-          intakeModes: ['direct_ids'],
-          labelOverrides: { direct_ids: '输入 ID' },
-          workflowKey: 'knowledge_content',
-        })
-      }
-      return Promise.resolve({})
+  it('hydrateSettings writes draft and original snapshots and clears saveError', () => {
+    useSettingStore.setState({
+      saveError: 'HTTP 500: Internal Server Error',
+      workspaceName: '编辑中',
     })
-    mockGetExecutorCatalog.mockResolvedValue({
-      executors: [catalogExecutor],
-    })
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
-      allocations: [
-        {
-          executor_id: 'code-default',
-          workspace_id: 'ws1',
-          concurrency_limit: 3,
-        },
-      ],
-      bindings: [],
-      node_limits: [],
-      migration_warnings: ['legacy migration'],
-    })
-
-    await useSettingStore.getState().fetchSettings('ws1')
-    const state = useSettingStore.getState()
-    expect(state.settings.entityType).toBe('knowledge')
-    expect(state.settings.intakeModes).toEqual(['direct_ids'])
-    expect(state.settings.labelOverrides).toEqual({ direct_ids: '输入 ID' })
-    expect(state.settings.workflowKey).toBe('knowledge_content')
-    expect(state.workspaceName).toBe('Test Workspace')
-    expect(state.workspaceDescription).toBe('A workspace')
-    expect(state.originalWorkspaceName).toBe('Test Workspace')
-    expect(state.originalSettings).toEqual(state.settings)
-    expect(state.executorCatalog).toEqual([catalogExecutor])
-    expect(state.executorConfiguration.allocations).toEqual([
-      {
-        executor_id: 'code-default',
-        workspace_id: 'ws1',
-        concurrency_limit: 3,
+    const snapshot = {
+      workspaceName: 'Test Workspace',
+      workspaceDescription: 'A workspace',
+      settings: {
+        entityType: 'knowledge' as const,
+        intakeModes: ['direct_ids'],
+        labelOverrides: { direct_ids: '输入 ID' },
+        workflowKey: 'knowledge_content',
       },
-    ])
+      executorConfiguration: {
+        allocations: [
+          {
+            executor_id: 'code-default',
+            workspace_id: 'ws1',
+            concurrency_limit: 3,
+          },
+        ],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: 7,
+      },
+    }
+
+    useSettingStore.getState().hydrateSettings('ws2', snapshot)
+
+    const state = useSettingStore.getState()
+    expect(state.workspaceId).toBe('ws2')
+    expect(state.workspaceName).toBe('Test Workspace')
+    expect(state.originalWorkspaceName).toBe('Test Workspace')
+    expect(state.settings.workflowKey).toBe('knowledge_content')
+    expect(state.originalSettings).toEqual(state.settings)
+    expect(state.executorConfiguration.agent_capacity).toBe(7)
     expect(state.originalExecutorConfiguration).toEqual(
       state.executorConfiguration
     )
     expect(state.isDirty).toBe(false)
+    expect(state.saveError).toBeNull()
   })
 
-  it('fetchSettings keeps defaults on 404', async () => {
-    const err = Object.assign(new Error('Not Found'), { status: 404 })
-    mockApi.mockRejectedValueOnce(err)
-    mockApi.mockResolvedValue({})
-    await useSettingStore.getState().fetchSettings('ws1')
-    expect(useSettingStore.getState().settings).toEqual(defaultState.settings)
-    expect(useSettingStore.getState().saveError).toBeNull()
-  })
-
-  it('fetchSettings hydrates agent_capacity into executorConfiguration', async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1') {
-        return Promise.resolve({
-          workspace: { name: 'Test Workspace', description: '' },
-        })
-      }
-      return Promise.resolve({})
+  it('hydrateSettings recomputes isDirty from the hydrated baseline', () => {
+    useSettingStore.setState({ isDirty: true })
+    useSettingStore.getState().hydrateSettings('ws1', {
+      workspaceName: '',
+      workspaceDescription: '',
+      settings: defaultSettings,
+      executorConfiguration: initialExecutorConfiguration,
     })
-    mockGetExecutorCatalog.mockResolvedValue({ executors: [] })
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
-      allocations: [],
-      bindings: [],
-      node_limits: [],
-      migration_warnings: [],
-      agent_capacity: 7,
-    })
-
-    await useSettingStore.getState().fetchSettings('ws1')
-
-    const state = useSettingStore.getState()
-    expect(state.executorConfiguration.agent_capacity).toBe(7)
-    expect(state.originalExecutorConfiguration?.agent_capacity).toBe(7)
-    expect(state.isDirty).toBe(false)
+    expect(useSettingStore.getState().isDirty).toBe(false)
   })
 
   it('setAgentCapacity updates executorConfiguration and marks dirty', () => {
@@ -405,70 +334,6 @@ describe('settingStore', () => {
     await useSettingStore.getState().saveAll()
     body = JSON.parse(mockApi.mock.calls[0][1]?.body as string)
     expect('agent_capacity' in body).toBe(false)
-  })
-
-  it('fetchSettings clears stale saveError on success', async () => {
-    useSettingStore.setState({ saveError: 'HTTP 500: Internal Server Error' })
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1') {
-        return Promise.resolve({
-          workspace: { name: 'Test Workspace', description: 'A workspace' },
-        })
-      }
-      if (path === '/api/workspaces/ws1/settings') {
-        return Promise.resolve({
-          entityType: 'question',
-          intakeModes: [],
-          labelOverrides: {},
-          workflowKey: 'question_content',
-        })
-      }
-      return Promise.resolve({})
-    })
-    mockGetExecutorCatalog.mockResolvedValue({ executors: [catalogExecutor] })
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
-      allocations: [],
-      bindings: [],
-      node_limits: [],
-      migration_warnings: [],
-    })
-    await useSettingStore.getState().fetchSettings('ws1')
-    expect(useSettingStore.getState().saveError).toBeNull()
-  })
-
-  it('fetchSettings surfaces non-404 errors as saveError', async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1') {
-        return Promise.resolve({
-          workspace: { name: 'Test Workspace', description: 'A workspace' },
-        })
-      }
-      if (path === '/api/workspaces/ws1/settings') {
-        return Promise.reject(
-          Object.assign(new Error('HTTP 500: Internal Server Error'), {
-            status: 500,
-          })
-        )
-      }
-      return Promise.resolve({})
-    })
-    mockGetExecutorCatalog.mockResolvedValue({ executors: [catalogExecutor] })
-    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
-      allocations: [],
-      bindings: [],
-      node_limits: [],
-      migration_warnings: [],
-    })
-    await useSettingStore.getState().fetchSettings('ws1')
-    expect(useSettingStore.getState().saveError).toBe(
-      'HTTP 500: Internal Server Error'
-    )
-  })
-
-  it('fetchSettings keeps defaults on empty response', async () => {
-    mockApi.mockResolvedValue({})
-    await useSettingStore.getState().fetchSettings('ws1')
-    expect(useSettingStore.getState().settings).toEqual(defaultState.settings)
   })
 
   it('saveAll sends exactly one PUT body containing executor_allocations, node_bindings, node_limits', async () => {

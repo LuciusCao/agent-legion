@@ -1,13 +1,10 @@
 import { TextField } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
+import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 
 export function LocalNodeLimitSection() {
-  const {
-    workflowDefinition,
-    executorCatalog,
-    executorConfiguration,
-    setNodeLimit,
-  } = useSettingStore()
+  const { executorConfiguration, setNodeLimit } = useSettingStore()
+  const { workflowDefinition, executorCatalog } = useWorkspaceSettingsSnapshot()
 
   if (!workflowDefinition) return null
 

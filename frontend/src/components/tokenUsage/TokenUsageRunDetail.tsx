@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { fetchRunTokenUsage } from '../../api/jobApi'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import type { NodeRun } from '../../types/jobTypes'
 import type { RunUsage } from '../../types/tokenUsageTypes'
 import { MaterialIcon } from '../MaterialIcon'
@@ -15,10 +16,12 @@ function formatCost(value: number, currency: string): string {
 }
 
 export function TokenUsageRunDetail({ jobId, run }: TokenUsageRunDetailProps) {
-  const { data: response, loading } = useAsync(
-    () => fetchRunTokenUsage(jobId, run.id),
-    [jobId, run.id, run.status]
-  )
+  // run.status 进 key：状态翻转自动重取；重取期间保留旧数据（同原 useAsync）。
+  const { data: response, isLoading: loading } = useQuery({
+    queryKey: extraQueryKeys.runTokenUsage(jobId, run.id, run.status),
+    queryFn: () => fetchRunTokenUsage(jobId, run.id),
+    placeholderData: keepPreviousData,
+  })
   const [expanded, setExpanded] = useState(false)
 
   const usage = response?.usage ?? null

@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import { JobDetailActions } from './JobDetailActions'
 import { makeJob } from '../../testing/fixtures'
 import type { WorkflowDefinitionRecord } from '../../types'
@@ -32,7 +34,7 @@ const workflow: WorkflowDefinitionRecord = {
 function renderActions(
   props: Partial<React.ComponentProps<typeof JobDetailActions>> = {}
 ) {
-  return render(
+  return renderWithClient(
     <JobDetailActions
       jobs={[
         makeJob({ id: 'j1', status: 'failed', workflow_key: workflow.key }),
@@ -46,6 +48,10 @@ function renderActions(
       {...props}
     />
   )
+}
+
+function renderWithClient(ui: ReactElement) {
+  return render(ui, { wrapper: TestQueryProvider })
 }
 
 describe('JobDetailActions', () => {

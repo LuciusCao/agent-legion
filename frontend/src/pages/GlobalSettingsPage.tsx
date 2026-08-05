@@ -5,7 +5,9 @@ import { AppBar } from '../components/AppBar'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useUiStore } from '../stores/uiStore'
-import { useAsync } from '../hooks/useAsync'
+import { useQuery } from '@tanstack/react-query'
+import { extraQueryKeys } from '../lib/queryKeysExtra'
+import { toErrorMessage } from '../lib/queryError'
 import {
   getTokenUsagePricing,
   updateTokenUsagePricing,
@@ -301,11 +303,12 @@ export default function GlobalSettingsPage() {
   const currentUser = useAuthStore((s) => s.user)
   const isAdmin = currentUser?.role === 'admin'
 
-  const { data, error: loadError } = useAsync(
-    () => getTokenUsagePricing(),
-    [isAdmin],
-    { enabled: isAdmin }
-  )
+  const { data, error: loadQueryError } = useQuery({
+    queryKey: extraQueryKeys.tokenUsagePricing(),
+    queryFn: getTokenUsagePricing,
+    enabled: isAdmin,
+  })
+  const loadError = toErrorMessage(loadQueryError)
 
   if (!isAdmin) {
     return (

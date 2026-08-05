@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import { JobActionBar } from './JobActionBar'
 import { makeJob } from '../../testing/fixtures'
 import type { WorkflowDefinitionRecord } from '../../types'
@@ -65,13 +67,17 @@ const workflowNodesByKey: Record<string, WorkflowDefinitionRecord> = {
   },
 }
 
+function renderWithClient(ui: ReactElement) {
+  return render(ui, { wrapper: TestQueryProvider })
+}
+
 describe('JobActionBar', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it('enables rerun/delete and disables package for a queued job', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'queued' })]}
         workflowDefinition={workflow}
@@ -90,7 +96,7 @@ describe('JobActionBar', () => {
   })
 
   it('disables rerun and package for a running job', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'running' })]}
         workflowDefinition={workflow}
@@ -109,7 +115,7 @@ describe('JobActionBar', () => {
   })
 
   it('enables rerun, package and delete for a completed job', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'completed' })]}
         workflowDefinition={workflow}
@@ -125,7 +131,7 @@ describe('JobActionBar', () => {
   })
 
   it('enables rerun and delete but disables package for a failed job', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
         workflowDefinition={workflow}
@@ -141,7 +147,7 @@ describe('JobActionBar', () => {
   })
 
   it('enables rerun and delete but disables package for a paused job', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'paused' })]}
         workflowDefinition={workflow}
@@ -158,7 +164,7 @@ describe('JobActionBar', () => {
 
   it('calls onPackage for single-job package download', async () => {
     const onPackage = vi.fn()
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'completed' })]}
         workflowDefinition={workflow}
@@ -176,7 +182,7 @@ describe('JobActionBar', () => {
 
   it('clears packed status for selected packed jobs', async () => {
     const onClearPacked = vi.fn()
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'completed', packed: 1 })]}
         workflowDefinition={workflow}
@@ -197,7 +203,7 @@ describe('JobActionBar', () => {
 
   it('calls onDelete for delete navigation', async () => {
     const onDelete = vi.fn()
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
         workflowDefinition={workflow}
@@ -215,7 +221,7 @@ describe('JobActionBar', () => {
 
   it('opens rerun dialog and exposes node keys for batch selection', async () => {
     const onRerun = vi.fn()
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -250,7 +256,7 @@ describe('JobActionBar', () => {
   })
 
   it('disables actions when loading', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'completed' })]}
         workflowDefinition={workflow}
@@ -267,7 +273,7 @@ describe('JobActionBar', () => {
   })
 
   it('disables upgrade workflow button when loading', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -291,7 +297,7 @@ describe('JobActionBar', () => {
 
   it('opens run-to dialog when the run-to button is clicked', async () => {
     const onRunTo = vi.fn()
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -319,7 +325,7 @@ describe('JobActionBar', () => {
   })
 
   it('shows the continue button for a target-reached paused job', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -348,7 +354,7 @@ describe('JobActionBar', () => {
 
   it('calls onContinue when the continue button is clicked', async () => {
     const onContinue = vi.fn()
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -379,7 +385,7 @@ describe('JobActionBar', () => {
   })
 
   it('hides the continue button when the job is not paused for target_reached', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'paused' })]}
         workflowDefinition={workflow}
@@ -394,7 +400,7 @@ describe('JobActionBar', () => {
   })
 
   it('shows upgrade workflow button in batch mode', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -418,7 +424,7 @@ describe('JobActionBar', () => {
   })
 
   it('disables upgrade workflow button when handler is not provided', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -439,7 +445,7 @@ describe('JobActionBar', () => {
   })
 
   it('disables upgrade workflow button when no job is upgradeable', () => {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({ id: 'j1', status: 'running', is_workflow_outdated: true }),
@@ -462,7 +468,7 @@ describe('JobActionBar', () => {
 
   it('opens upgrade dialog and forwards upgradeable job ids', async () => {
     const onUpgradeWorkflow = vi.fn().mockResolvedValue(undefined)
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[
           makeJob({
@@ -494,7 +500,7 @@ describe('JobActionBar', () => {
 
 describe('JobActionBar in allMatching selection mode', () => {
   function renderAllMatching(onRerun = vi.fn()) {
-    render(
+    renderWithClient(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
         workflowDefinition={workflow}

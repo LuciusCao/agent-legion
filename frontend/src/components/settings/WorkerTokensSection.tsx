@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createRegisterToken,
   listAgentWorkers,
@@ -11,16 +12,13 @@ import type {
   AgentRegisterTokenSummary,
   AgentWorkerSummary,
 } from '../../api'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { toErrorMessage } from '../../lib/queryError'
 import styles from './WorkerTokensSection.module.css'
 
 function formatTime(iso: string): string {
   const date = new Date(iso)
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
 }
 
 function workerScope(worker: AgentWorkerSummary): string {
@@ -31,8 +29,7 @@ function workerScope(worker: AgentWorkerSummary): string {
 
 /**
  * Worker register token management (issue / list / revoke) plus revocation of
- * already-registered workers. Endpoints require login like the rest of the
- * authenticated Host API.
+ * already-registered workers (endpoints require login).
  */
 export function WorkerTokensSection() {
   const [label, setLabel] = useState('')
@@ -42,17 +39,20 @@ export function WorkerTokensSection() {
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [refreshKey, setRefreshKey] = useState(0)
+  const queryClient = useQueryClient()
 
-  const { data: lists, error: listError } = useAsync(
-    () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
-    [refreshKey]
-  )
+  const { data: lists, error: listQueryError } = useQuery({
+    queryKey: extraQueryKeys.workerTokens(),
+    queryFn: () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
+  })
+  const listError = toErrorMessage(listQueryError)
   const tokens = lists?.[0] ?? []
   const workers = lists?.[1] ?? []
 
   function refresh() {
-    setRefreshKey((key) => key + 1)
+    void queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.workerTokens(),
+    })
   }
 
   async function handleCreate() {
@@ -71,7 +71,7 @@ export function WorkerTokensSection() {
       setWorkspaceId('')
       refresh()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(toErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -94,7 +94,7 @@ export function WorkerTokensSection() {
       await revokeRegisterToken(token.token_id)
       refresh()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(toErrorMessage(err))
     }
   }
 
@@ -111,7 +111,7 @@ export function WorkerTokensSection() {
       await revokeAgentWorker(worker.worker_id)
       refresh()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(toErrorMessage(err))
     }
   }
 

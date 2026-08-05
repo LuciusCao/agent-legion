@@ -289,7 +289,6 @@ describe('WorkspaceMainPage', () => {
       testStatus: { state: 'idle' },
       isSaving: false,
       saveError: null,
-      executorCatalog: [],
       executorConfiguration: {
         allocations: [],
         bindings: [],
@@ -298,7 +297,6 @@ describe('WorkspaceMainPage', () => {
       },
       originalExecutorConfiguration: null,
       pendingAllocationRemoval: null,
-      workflowDefinition: null,
     })
   })
 

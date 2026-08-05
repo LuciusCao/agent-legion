@@ -1,7 +1,26 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { ExecutorBindingSection } from './ExecutorBindingSection'
 import { useSettingStore } from '../stores/settingStore'
+import type { WorkflowDefinitionRecord } from '../types'
+import type { ExecutorDefinition } from '../types/executorTypes'
+import type { WorkspaceAgentRouteEntry } from '../hooks/useWorkspaceSettingsQuery'
+
+// executorCatalog/agentRoutes/workflowDefinition 已迁入 react-query；
+// 这里 mock 两个 query hook，draft（executorConfiguration）仍写 store。
+const mockQueryData = vi.hoisted(() => ({
+  executorCatalog: { current: [] as ExecutorDefinition[] },
+  agentRoutes: { current: [] as WorkspaceAgentRouteEntry[] },
+  workflowDefinition: { current: null as WorkflowDefinitionRecord | null },
+}))
+
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useWorkspaceSettingsSnapshot: () => ({
+    workflowDefinition: mockQueryData.workflowDefinition.current,
+    executorCatalog: mockQueryData.executorCatalog.current,
+    agentRoutes: mockQueryData.agentRoutes.current,
+  }),
+}))
 
 const catalog = [
   {
@@ -82,11 +101,17 @@ function changeSelectValue(nodeKey: string, value: string) {
 
 describe('ExecutorBindingSection', () => {
   beforeEach(() => {
+    mockQueryData.executorCatalog.current = catalog
+    mockQueryData.agentRoutes.current = []
+    mockQueryData.workflowDefinition.current = workflowDefinition
     useSettingStore.setState({
       workspaceId: 'ws1',
-      executorCatalog: catalog,
-      workflowDefinition,
-      agentRoutes: [],
+      settings: {
+        entityType: 'question',
+        intakeModes: [],
+        labelOverrides: {},
+        workflowKey: 'sample_workflow',
+      },
       executorConfiguration: {
         allocations: [
           {
@@ -121,16 +146,16 @@ describe('ExecutorBindingSection', () => {
   })
 
   it('matches local nodes by capability, independent of executor implementation', () => {
+    mockQueryData.executorCatalog.current = [
+      ...catalog,
+      {
+        id: 'alternate-local',
+        kind: 'pi' as const,
+        capabilities: ['fetch_questions'],
+        global_capacity: 1,
+      },
+    ]
     useSettingStore.setState({
-      executorCatalog: [
-        ...catalog,
-        {
-          id: 'alternate-local',
-          kind: 'pi' as const,
-          capabilities: ['fetch_questions'],
-          global_capacity: 1,
-        },
-      ],
       executorConfiguration: {
         allocations: [
           {
@@ -169,18 +194,16 @@ describe('ExecutorBindingSection', () => {
   })
 
   it('excludes agent nodes, which are routed by Agent ID', () => {
-    useSettingStore.setState({
-      agentRoutes: [
-        {
-          workflow_key: 'sample_workflow',
-          node_key: 'review_keywords',
-          node_label: '审核关键词',
-          capability: 'review_keywords',
-          agent_id: 'keyword-reviewer',
-          agent_skill: 'review_key_info',
-        },
-      ],
-    })
+    mockQueryData.agentRoutes.current = [
+      {
+        workflow_key: 'sample_workflow',
+        node_key: 'review_keywords',
+        node_label: '审核关键词',
+        capability: 'review_keywords',
+        agent_id: 'keyword-reviewer',
+        agent_skill: 'review_key_info',
+      },
+    ]
 
     render(<ExecutorBindingSection />)
 

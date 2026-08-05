@@ -20,8 +20,8 @@ import {
 } from '../components/job/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
-import { fetchWorkflowDefinition } from '../api'
-import { useAsync } from '../hooks/useAsync'
+import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
+import { toErrorMessage } from '../lib/queryError'
 import styles from './WorkspaceMainPage.module.css'
 
 export default function WorkspaceMainPage() {
@@ -56,12 +56,10 @@ export default function WorkspaceMainPage() {
   useJobFilterRefetch(workspaceId)
 
   const workflowKey = workspaceStats?.workflow_key
-  const { data: workflowResult, error: workflowError } = useAsync(
-    () => fetchWorkflowDefinition(workflowKey ?? ''),
-    [workspaceId, workflowKey],
-    { enabled: !!workflowKey }
-  )
-  const workflowDefinition = workflowResult?.workflow ?? null
+  const { data: workflowDefinitionData, error: workflowQueryError } =
+    useWorkflowDefinitionQuery(workflowKey)
+  const workflowDefinition = workflowDefinitionData ?? null
+  const workflowError = toErrorMessage(workflowQueryError)
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 

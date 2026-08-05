@@ -5,9 +5,11 @@ import {
   fireEvent,
   within,
 } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { TokenUsagePanel } from './TokenUsagePanel'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 
 const mockFetchWorkspaceTokenUsage = vi.fn(
   (_workspaceId: string, params: URLSearchParams) => {
@@ -74,9 +76,13 @@ vi.mock('../../api/tokenUsage', () => ({
     mockFetchWorkspaceTokenUsage(...args),
 }))
 
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
+
 describe('TokenUsagePanel', () => {
   it('renders workspace usage summary and group rows', async () => {
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -92,7 +98,7 @@ describe('TokenUsagePanel', () => {
 
   it('switches group dimension', async () => {
     const user = userEvent.setup()
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -109,7 +115,7 @@ describe('TokenUsagePanel', () => {
   })
 
   it('expands a group to show token and cost breakdown', async () => {
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -128,7 +134,7 @@ describe('TokenUsagePanel', () => {
 
   it('applies node filter', async () => {
     const user = userEvent.setup()
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -176,7 +182,7 @@ describe('TokenUsagePanel', () => {
       groups: [],
     })
 
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     expect(await screen.findByText('暂无 token 统计')).toBeInTheDocument()
   })
@@ -228,7 +234,7 @@ describe('TokenUsagePanel', () => {
       ],
     })
 
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     expect(
       await screen.findByText('缺少定价：gateway/unpriced-model')
@@ -251,7 +257,7 @@ describe('TokenUsagePanel', () => {
       new Error('network error')
     )
 
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     expect(
       await screen.findByText('Token 统计加载失败：network error')

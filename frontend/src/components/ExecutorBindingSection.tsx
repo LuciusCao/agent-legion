@@ -6,15 +6,12 @@ import {
   type SelectChangeEvent,
 } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
+import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 
 export function ExecutorBindingSection() {
-  const {
-    workflowDefinition,
-    executorCatalog,
-    executorConfiguration,
-    agentRoutes,
-    setNodeBinding,
-  } = useSettingStore()
+  const { executorConfiguration, setNodeBinding } = useSettingStore()
+  const { workflowDefinition, executorCatalog, agentRoutes } =
+    useWorkspaceSettingsSnapshot()
 
   const allocatedIds = new Set(
     executorConfiguration.allocations.map((a) => a.executor_id)

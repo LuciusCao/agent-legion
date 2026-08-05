@@ -12,10 +12,41 @@ import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
-import type { WorkspaceSettings } from '../types'
+import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../types'
 import { useUiStore } from '../stores/uiStore'
 import { api, deleteWorkspace, fetchWorkflows } from '../api'
+import { useSettingStoreHydration } from '../hooks/useWorkspaceSettingsQuery'
+import type { WorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 import { expectConsoleWarning } from '../test-setup'
+
+// 服务端快照（executorCatalog/agentRoutes）与工作流定义已迁入 react-query；
+// 本测试 mock 两个 query hook，draft 状态仍直接写 store。
+const mockQueryData = vi.hoisted(() => ({
+  settingsSnapshot: { current: null as WorkspaceSettingsSnapshot | null },
+  workflowDefinition: { current: null as WorkflowDefinitionRecord | null },
+}))
+
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useSettingStoreHydration: vi.fn(() => ({
+    data: mockQueryData.settingsSnapshot.current,
+    error: null,
+  })),
+  useWorkspaceSettingsQuery: vi.fn(() => ({
+    data: mockQueryData.settingsSnapshot.current,
+  })),
+  useWorkspaceSettingsSnapshot: vi.fn(() => ({
+    workflowDefinition: mockQueryData.workflowDefinition.current,
+    executorCatalog:
+      mockQueryData.settingsSnapshot.current?.executorCatalog ?? [],
+    agentRoutes: mockQueryData.settingsSnapshot.current?.agentRoutes ?? [],
+  })),
+}))
+
+vi.mock('../hooks/useWorkflowDefinitionQuery', () => ({
+  useWorkflowDefinitionQuery: vi.fn(() => ({
+    data: mockQueryData.workflowDefinition.current,
+  })),
+}))
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -32,6 +63,34 @@ vi.mock('../api', () => ({
 const mockApi = vi.mocked(api)
 const mockFetchWorkflows = vi.mocked(fetchWorkflows)
 const mockDeleteWorkspace = vi.mocked(deleteWorkspace)
+const mockHydration = vi.mocked(useSettingStoreHydration)
+
+function setSnapshot(partial: Partial<WorkspaceSettingsSnapshot>) {
+  mockQueryData.settingsSnapshot.current = {
+    workspaceName: '',
+    workspaceDescription: '',
+    settings: {
+      entityType: 'question',
+      intakeModes: [],
+      labelOverrides: {},
+      workflowKey: '',
+    },
+    executorConfiguration: {
+      allocations: [],
+      bindings: [],
+      node_limits: [],
+      migration_warnings: [],
+      agent_capacity: null,
+    },
+    executorCatalog: [],
+    agentRoutes: [],
+    ...partial,
+  }
+}
+
+function setWorkflowDefinition(definition: WorkflowDefinitionRecord) {
+  mockQueryData.workflowDefinition.current = definition
+}
 
 // Capture the real store actions before beforeEach replaces them with mocks.
 const originalActions = { ...useSettingStore.getState() }
@@ -50,11 +109,9 @@ const defaultState: SettingState = {
   originalWorkspaceDescription: '测试描述',
   originalSettings: null,
   isDirty: false,
-  workflowDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
-  executorCatalog: [],
   executorConfiguration: {
     allocations: [],
     bindings: [],
@@ -63,7 +120,6 @@ const defaultState: SettingState = {
   },
   originalExecutorConfiguration: null,
   pendingAllocationRemoval: null,
-  agentRoutes: [],
   setWorkspaceId: vi.fn(),
   setWorkspaceName: vi.fn((name: string) => {
     useSettingStore.setState({ workspaceName: name, isDirty: true })
@@ -84,8 +140,7 @@ const defaultState: SettingState = {
   setNodeBinding: vi.fn(),
   setNodeLimit: vi.fn(),
   setAgentCapacity: vi.fn(),
-  fetchSettings: vi.fn().mockResolvedValue(undefined),
-  fetchWorkflowDefinition: vi.fn().mockResolvedValue(undefined),
+  hydrateSettings: vi.fn(),
   saveAll: vi.fn().mockResolvedValue(undefined),
   testConnection: vi.fn().mockResolvedValue(undefined),
   resetTestStatus: vi.fn(),
@@ -116,6 +171,9 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     useUiStore.setState({ toast: null })
+    mockQueryData.settingsSnapshot.current = null
+    mockQueryData.workflowDefinition.current = null
+    mockHydration.mockClear()
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
     mockFetchWorkflows.mockReset()
@@ -125,31 +183,31 @@ describe('SettingsPage', () => {
   })
 
   it('renders all sections in order', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        intake: {
-          modes: [
-            {
-              key: 'direct_ids',
-              label: '直接输入 ID',
-              input_field: 'question_ids',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [
+    setWorkflowDefinition({
+      key: 'question_content',
+      label: '题目内容生成',
+      intake: {
+        modes: [
           {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: [],
+            key: 'direct_ids',
+            label: '直接输入 ID',
+            input_field: 'question_ids',
           },
         ],
       },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: [],
+        },
+      ],
+    })
+    setSnapshot({
       executorCatalog: [
         {
           id: 'code-default',
@@ -158,6 +216,8 @@ describe('SettingsPage', () => {
           global_capacity: 4,
         },
       ],
+    })
+    useSettingStore.setState({
       executorConfiguration: {
         allocations: [
           {
@@ -250,12 +310,10 @@ describe('SettingsPage', () => {
     expect(screen.getByText('Workspace main')).toBeInTheDocument()
   })
 
-  it('calls fetchSettings on mount', async () => {
-    const fetchSettings = vi.fn().mockResolvedValue(undefined)
-    useSettingStore.setState({ fetchSettings })
+  it('hydrates the setting store through the settings query hook', async () => {
     renderPage()
     await waitFor(() => {
-      expect(fetchSettings).toHaveBeenCalledWith('ws1')
+      expect(mockHydration).toHaveBeenCalledWith('ws1')
     })
   })
 
@@ -328,27 +386,27 @@ describe('SettingsPage', () => {
   })
 
   it('renders checked checkbox for enabled intake modes', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_comprehension_info',
-        label: '题目审题信息生成',
-        intake: {
-          modes: [
-            {
-              key: 'batch_by_knowledge',
-              label: '按知识点批量',
-              input_field: 'knowledge_codes',
-            },
-            {
-              key: 'batch_by_ids',
-              label: '按题目ID批量',
-              input_field: 'question_ids',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [],
+    setWorkflowDefinition({
+      key: 'question_comprehension_info',
+      label: '题目审题信息生成',
+      intake: {
+        modes: [
+          {
+            key: 'batch_by_knowledge',
+            label: '按知识点批量',
+            input_field: 'knowledge_codes',
+          },
+          {
+            key: 'batch_by_ids',
+            label: '按题目ID批量',
+            input_field: 'question_ids',
+          },
+        ],
       },
+      edges: [],
+      nodes: [],
+    })
+    useSettingStore.setState({
       settings: {
         ...defaultState.settings,
         intakeModes: ['batch_by_ids'],
@@ -364,22 +422,22 @@ describe('SettingsPage', () => {
   })
 
   it('renders unchecked checkbox for disabled intake modes', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_comprehension_info',
-        label: '题目审题信息生成',
-        intake: {
-          modes: [
-            {
-              key: 'batch_by_ids',
-              label: '按题目ID批量',
-              input_field: 'question_ids',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [],
+    setWorkflowDefinition({
+      key: 'question_comprehension_info',
+      label: '题目审题信息生成',
+      intake: {
+        modes: [
+          {
+            key: 'batch_by_ids',
+            label: '按题目ID批量',
+            input_field: 'question_ids',
+          },
+        ],
       },
+      edges: [],
+      nodes: [],
+    })
+    useSettingStore.setState({
       settings: {
         ...defaultState.settings,
         intakeModes: [],
@@ -395,23 +453,23 @@ describe('SettingsPage', () => {
   })
 
   it('renders executor binding section between allocation and local limit sections', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: [],
-          },
-        ],
-      },
+    setWorkflowDefinition({
+      key: 'question_content',
+      label: '题目内容生成',
+      intake: { modes: [] },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: [],
+        },
+      ],
+    })
+    setSnapshot({
       executorCatalog: [
         {
           id: 'code-default',
@@ -420,6 +478,8 @@ describe('SettingsPage', () => {
           global_capacity: 4,
         },
       ],
+    })
+    useSettingStore.setState({
       executorConfiguration: {
         allocations: [
           {
@@ -459,14 +519,7 @@ describe('SettingsPage', () => {
       labelOverrides: {},
       workflowKey: 'sample_workflow',
     }
-    useSettingStore.setState({
-      ...defaultState,
-      workspaceName: 'Flow Workspace',
-      originalWorkspaceName: 'Flow Workspace',
-      workspaceDescription: '',
-      originalWorkspaceDescription: '',
-      settings,
-      originalSettings: settings,
+    setSnapshot({
       executorCatalog: [
         {
           id: 'code-default',
@@ -475,22 +528,31 @@ describe('SettingsPage', () => {
           global_capacity: 4,
         },
       ],
-      workflowDefinition: {
-        key: 'sample_workflow',
-        label: '示例工作流',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: ['questions.json'],
-          },
-        ],
-      },
+    })
+    setWorkflowDefinition({
+      key: 'sample_workflow',
+      label: '示例工作流',
+      intake: { modes: [] },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: ['questions.json'],
+        },
+      ],
+    })
+    useSettingStore.setState({
+      ...defaultState,
+      workspaceName: 'Flow Workspace',
+      originalWorkspaceName: 'Flow Workspace',
+      workspaceDescription: '',
+      originalWorkspaceDescription: '',
+      settings,
+      originalSettings: settings,
       executorConfiguration: {
         allocations: [],
         bindings: [],
@@ -641,8 +703,7 @@ describe('SettingsPage', () => {
   }, 30000)
 
   it('confirms executor allocation removal from SettingsPage', async () => {
-    useSettingStore.setState({
-      ...defaultState,
+    setSnapshot({
       executorCatalog: [
         {
           id: 'code-default',
@@ -651,22 +712,25 @@ describe('SettingsPage', () => {
           global_capacity: 4,
         },
       ],
-      workflowDefinition: {
-        key: 'sample_workflow',
-        label: '示例工作流',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: ['questions.json'],
-          },
-        ],
-      },
+    })
+    setWorkflowDefinition({
+      key: 'sample_workflow',
+      label: '示例工作流',
+      intake: { modes: [] },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: ['questions.json'],
+        },
+      ],
+    })
+    useSettingStore.setState({
+      ...defaultState,
       executorConfiguration: {
         allocations: [
           {

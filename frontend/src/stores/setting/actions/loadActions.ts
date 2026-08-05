@@ -1,110 +1,31 @@
-import { api } from '../../../api'
-import {
-  getExecutorCatalog,
-  getWorkspaceExecutorConfiguration,
-} from '../../../api/executorApi'
-import type { components } from '../../../generated/api'
-import type {
-  WorkspaceSettings,
-  WorkflowResponse,
-  WorkspaceResponse,
-} from '../../../types'
 import {
   computeDirty,
-  defaultSettings,
-  normalizeExecutorConfiguration,
-  type SettingState,
+  type HydrateSettingsInput,
   type SettingStoreSet,
 } from '../state'
 
-type WorkspaceAgentRoutesResponse =
-  components['schemas']['WorkspaceAgentRoutesResponse']
-
-export function loadActions(set: SettingStoreSet, get: () => SettingState) {
+export function loadActions(set: SettingStoreSet) {
   return {
-    async fetchSettings(workspaceId: string) {
-      set({ saveError: null })
-      try {
-        const [
-          workspaceResult,
-          settingsResult,
-          catalogResult,
-          executorConfigurationResult,
-          agentRoutesResult,
-        ] = await Promise.all([
-          api<WorkspaceResponse>(
-            `/api/workspaces/${encodeURIComponent(workspaceId)}`
-          ),
-          api<
-            | Partial<WorkspaceSettings>
-            | { settings: Partial<WorkspaceSettings> }
-          >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
-          getExecutorCatalog(),
-          getWorkspaceExecutorConfiguration(workspaceId),
-          api<WorkspaceAgentRoutesResponse>(
-            `/api/workspaces/${encodeURIComponent(workspaceId)}/agent-routes`
-          ).catch(() => null),
-        ])
-        const workspaceData = workspaceResult?.workspace
-        const data =
-          settingsResult &&
-          typeof settingsResult === 'object' &&
-          'settings' in settingsResult
-            ? (settingsResult.settings as Partial<WorkspaceSettings>)
-            : (settingsResult as Partial<WorkspaceSettings>)
-        const nextSettings = { ...defaultSettings, ...data }
-        const nextCatalog = catalogResult?.executors ?? []
-        const nextExecutorConfiguration = normalizeExecutorConfiguration(
-          executorConfigurationResult
-        )
-        set((state) => {
-          const nextState = {
-            ...state,
-            workspaceName: workspaceData?.name || '',
-            workspaceDescription: workspaceData?.description || '',
-            originalWorkspaceName: workspaceData?.name || '',
-            originalWorkspaceDescription: workspaceData?.description || '',
-            settings: nextSettings,
-            originalSettings: nextSettings,
-            executorCatalog: nextCatalog,
-            executorConfiguration: nextExecutorConfiguration,
-            originalExecutorConfiguration: nextExecutorConfiguration,
-            agentRoutes: agentRoutesResult?.routes ?? [],
-          }
-          return { ...nextState, isDirty: computeDirty(nextState) }
-        })
-      } catch (err) {
-        const status =
-          err && typeof err === 'object' && 'status' in err
-            ? Number((err as { status?: unknown }).status)
-            : undefined
-        if (status === 404) {
-          return
+    // 由 useSettingStoreHydration 在快照到达时调用：同时写 draft 与
+    // original* 基准并重算 isDirty（对齐原 fetchSettings 的 set 逻辑）。
+    // 调用方负责判断水合时机（切换工作区强制重置 / 非 dirty 才同步）。
+    hydrateSettings(workspaceId: string, snapshot: HydrateSettingsInput) {
+      set((state) => {
+        const nextState = {
+          ...state,
+          workspaceId,
+          saveError: null,
+          workspaceName: snapshot.workspaceName,
+          workspaceDescription: snapshot.workspaceDescription,
+          originalWorkspaceName: snapshot.workspaceName,
+          originalWorkspaceDescription: snapshot.workspaceDescription,
+          settings: snapshot.settings,
+          originalSettings: snapshot.settings,
+          executorConfiguration: snapshot.executorConfiguration,
+          originalExecutorConfiguration: snapshot.executorConfiguration,
         }
-        const message = err instanceof Error ? err.message : '加载设置失败'
-        set({ saveError: message })
-      }
-    },
-
-    async fetchWorkflowDefinition() {
-      const { settings } = get()
-      const workflowKey = settings.workflowKey
-      if (!workflowKey) return
-      try {
-        const result = await api<WorkflowResponse>(
-          `/api/workflows/${encodeURIComponent(workflowKey)}`
-        )
-        if (
-          result &&
-          typeof result === 'object' &&
-          'workflow' in result &&
-          get().settings.workflowKey === workflowKey
-        ) {
-          set({ workflowDefinition: result.workflow })
-        }
-      } catch {
-        // Silently fail
-      }
+        return { ...nextState, isDirty: computeDirty(nextState) }
+      })
     },
   }
 }

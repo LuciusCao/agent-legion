@@ -1,7 +1,13 @@
 import { render, screen } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { TokenUsageDialog } from './TokenUsageDialog'
 import { useUiStore } from '../../stores/uiStore'
+import { TestQueryProvider } from '../../testing/testQueryClient'
+
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
 
 vi.mock('../../api/tokenUsage', () => ({
   fetchWorkspaceTokenUsage: vi.fn(() =>
@@ -51,7 +57,7 @@ describe('TokenUsageDialog', () => {
   })
 
   it('does not render content when closed', () => {
-    render(<TokenUsageDialog scope="workspace" workspaceId="ws1" />)
+    renderWithClient(<TokenUsageDialog scope="workspace" workspaceId="ws1" />)
     expect(
       screen.queryByText('Workspace Token 使用分析')
     ).not.toBeInTheDocument()
@@ -59,7 +65,7 @@ describe('TokenUsageDialog', () => {
 
   it('renders workspace title when open', async () => {
     useUiStore.setState({ tokenUsageDialogOpen: true })
-    render(<TokenUsageDialog scope="workspace" workspaceId="ws1" />)
+    renderWithClient(<TokenUsageDialog scope="workspace" workspaceId="ws1" />)
     expect(
       await screen.findByText('Workspace Token 使用分析')
     ).toBeInTheDocument()
@@ -67,7 +73,7 @@ describe('TokenUsageDialog', () => {
 
   it('renders job title when open', async () => {
     useUiStore.setState({ tokenUsageDialogOpen: true })
-    render(<TokenUsageDialog scope="job" jobId="j1" />)
+    renderWithClient(<TokenUsageDialog scope="job" jobId="j1" />)
     expect(await screen.findByText('Job Token 使用分析')).toBeInTheDocument()
   })
 })

@@ -1,8 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { JobRerunDialog } from './JobRerunDialog'
 import { makeJob } from '../testing/fixtures'
 import type { WorkflowDefinitionRecord } from '../types'
+import { TestQueryProvider } from '../testing/testQueryClient'
 
 const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
@@ -65,13 +67,17 @@ const workflowNodesByKey: Record<string, WorkflowDefinitionRecord> = {
   },
 }
 
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
+
 describe('JobRerunDialog', () => {
   beforeEach(() => {
     vi.clearAllMocks()
   })
 
   it('renders nodes in workflow-definition order', () => {
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         jobs={[
@@ -94,7 +100,7 @@ describe('JobRerunDialog', () => {
   })
 
   it('shows common node intersection for batch selections across workflows', () => {
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         jobs={[
@@ -122,7 +128,7 @@ describe('JobRerunDialog', () => {
   })
 
   it('identifies jobs excluded by workflow mismatch for the selected node', () => {
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         jobs={[
@@ -158,7 +164,7 @@ describe('JobRerunDialog', () => {
   it('calls onConfirm with the backend-authoritative node key', async () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined)
     const onClose = vi.fn()
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         jobs={[
@@ -189,7 +195,7 @@ describe('JobRerunDialog', () => {
 
   it('counts and submits only jobs that have executed the selected node', async () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined)
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         allowFailedNodeMode
@@ -247,7 +253,7 @@ describe('JobRerunDialog', () => {
 
   it('calls onClose when cancel is clicked', () => {
     const onClose = vi.fn()
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
@@ -264,7 +270,7 @@ describe('JobRerunDialog', () => {
   })
 
   it('renders nothing when not open', () => {
-    const { container } = render(
+    const { container } = renderWithClient(
       <JobRerunDialog
         open={false}
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
@@ -279,7 +285,7 @@ describe('JobRerunDialog', () => {
   it('renders failed-node chip and calls onConfirm with fromFailedNode', async () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined)
     const onClose = vi.fn()
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         allowFailedNodeMode
@@ -321,7 +327,7 @@ describe('JobRerunDialog', () => {
   })
 
   it('disables confirm when no failed jobs in failed-node mode', () => {
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         allowFailedNodeMode
@@ -348,7 +354,7 @@ describe('JobRerunDialog', () => {
   it('keeps the dialog open and does not call onClose when onConfirm rejects', async () => {
     const onConfirm = vi.fn().mockRejectedValue(new Error('rerun failed'))
     const onClose = vi.fn()
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         allowFailedNodeMode
@@ -380,7 +386,7 @@ describe('JobRerunDialog', () => {
   })
 
   it('does not render failed-node chip when allowFailedNodeMode is false', () => {
-    render(
+    renderWithClient(
       <JobRerunDialog
         open
         jobs={[

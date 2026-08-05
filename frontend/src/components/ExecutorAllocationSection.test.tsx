@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ExecutorAllocationSection } from './ExecutorAllocationSection'
 import { useSettingStore } from '../stores/settingStore'
@@ -24,11 +24,19 @@ const catalog = [
   },
 ]
 
+// executorCatalog 已迁入 react-query；mock 快照 hook，draft 仍写 store。
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useWorkspaceSettingsSnapshot: () => ({
+    workflowDefinition: null,
+    executorCatalog: catalog,
+    agentRoutes: [],
+  }),
+}))
+
 describe('ExecutorAllocationSection', () => {
   beforeEach(() => {
     useSettingStore.setState({
       workspaceId: 'ws1',
-      executorCatalog: catalog,
       executorConfiguration: {
         allocations: [],
         bindings: [],
