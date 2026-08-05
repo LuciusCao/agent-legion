@@ -1,11 +1,14 @@
 """DB-backed custom workflow node codes (EXEC-CODE-002).
 
 Custom node code is user data, not a repo asset: versions live in the
-``workflow_node_codes`` table, are immutable, and take effect only through the
-publish flow (draft → published → archived). At most one published version
-exists per ``(workspace, workflow, node)`` (partial unique index); archiving
-every version falls the node back to the builtin repo-tracked implementation
-(EXEC-CODE-001).
+``versioned_entities`` table (entity_type ``node_code``, schema v26), are
+immutable, and take effect only through the publish flow
+(draft → published → archived). At most one published version exists per
+``(workspace, workflow, node)`` (partial unique index); archiving every
+version falls the node back to the builtin repo-tracked implementation
+(EXEC-CODE-001). The lifecycle engine is the shared ``VersionedEntityStore``;
+this module owns the node-code payload shape (``code`` + ``change_note``) and
+the ``workflow_key:node_key`` entity-key mapping.
 
 The feature is gated by ``workflows.custom_nodes_enabled`` (default on in this
 phase, design §7); every public entry point checks the gate before validating
@@ -17,30 +20,54 @@ from __future__ import annotations
 import ast
 import hashlib
 import logging
-import uuid
 from typing import Any
 
-from psycopg import IntegrityError
-
 from server.app.db.connection import DatabaseDsn
-from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import (
-    ConflictError,
     CustomNodesDisabledError,
     InvalidOperationError,
-    NotFoundError,
 )
+from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
 logger = logging.getLogger(__name__)
 
 # Custom nodes stay single-file and cohesive; oversized code is rejected.
 MAX_CODE_BYTES = 64 * 1024
 
-_COLUMNS = (
-    "id, workspace_id, workflow_key, node_key, version, status, code, code_hash,"
-    " created_by, change_note, created_at, published_at"
-)
-_NODE_FILTER = "workspace_id=%s and workflow_key=%s and node_key=%s"
+_ENTITY_TYPE: EntityType = "node_code"
+_ENTITY_KEY_SEPARATOR = ":"
+
+
+def _entity_key(workflow_key: str, node_key: str) -> str:
+    if _ENTITY_KEY_SEPARATOR in workflow_key:
+        raise InvalidOperationError(
+            f"workflow key must not contain {_ENTITY_KEY_SEPARATOR!r}: {workflow_key}"
+        )
+    return f"{workflow_key}{_ENTITY_KEY_SEPARATOR}{node_key}"
+
+
+def _split_entity_key(entity_key: str) -> tuple[str, str]:
+    workflow_key, _, node_key = entity_key.partition(_ENTITY_KEY_SEPARATOR)
+    return workflow_key, node_key
+
+
+def _to_row(entity: VersionedEntity) -> dict[str, Any]:
+    """Rebuild the historical node-code row shape from a versioned entity."""
+    workflow_key, node_key = _split_entity_key(entity.entity_key)
+    return {
+        "id": entity.id,
+        "workspace_id": entity.workspace_id,
+        "workflow_key": workflow_key,
+        "node_key": node_key,
+        "version": entity.version,
+        "status": entity.status,
+        "code": entity.definition["code"],
+        "code_hash": entity.definition_hash,
+        "created_by": entity.created_by,
+        "change_note": entity.definition.get("change_note"),
+        "created_at": entity.created_at,
+        "published_at": entity.published_at,
+    }
 
 
 def validate_node_code(code: str) -> None:
@@ -65,7 +92,7 @@ class NodeCodeService:
     """Versioned custom node code storage and publish flow."""
 
     def __init__(self, database_dsn: DatabaseDsn, custom_nodes_enabled: bool = True) -> None:
-        self._dsn = database_dsn
+        self._store = VersionedEntityStore(database_dsn, _ENTITY_TYPE)
         self._enabled = custom_nodes_enabled
 
     def _require_enabled(self) -> None:
@@ -77,37 +104,27 @@ class NodeCodeService:
     ) -> dict[str, Any] | None:
         """Return the published version row, or None when the node is builtin."""
         self._require_enabled()
-        with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                f"select {_COLUMNS} from workflow_node_codes"
-                f" where {_NODE_FILTER} and status='published'",
-                (workspace_id, workflow_key, node_key),
-            ).fetchone()
-        return dict(row) if row else None
+        entity = self._store.get_published(_entity_key(workflow_key, node_key), workspace_id)
+        return _to_row(entity) if entity else None
 
     def get_code_by_version(
         self, workspace_id: str, workflow_key: str, node_key: str, version: int
     ) -> dict[str, Any] | None:
         """Return any version row (including archived) — frozen jobs read these."""
         self._require_enabled()
-        with read_connection(self._dsn) as conn:
-            row = conn.execute(
-                f"select {_COLUMNS} from workflow_node_codes where {_NODE_FILTER} and version=%s",
-                (workspace_id, workflow_key, node_key, version),
-            ).fetchone()
-        return dict(row) if row else None
+        entity = self._store.get_version(_entity_key(workflow_key, node_key), version, workspace_id)
+        return _to_row(entity) if entity else None
 
     def list_versions(
         self, workspace_id: str, workflow_key: str, node_key: str
     ) -> list[dict[str, Any]]:
         self._require_enabled()
-        with read_connection(self._dsn) as conn:
-            rows = conn.execute(
-                f"select {_COLUMNS} from workflow_node_codes"
-                f" where {_NODE_FILTER} order by version desc",
-                (workspace_id, workflow_key, node_key),
-            ).fetchall()
-        return [dict(row) for row in rows]
+        return [
+            _to_row(entity)
+            for entity in self._store.list_versions(
+                _entity_key(workflow_key, node_key), workspace_id
+            )
+        ]
 
     def save_draft(
         self,
@@ -118,74 +135,22 @@ class NodeCodeService:
         created_by: str,
         change_note: str | None = None,
     ) -> dict[str, Any]:
-        """Create a draft version, overwriting the existing draft when present.
-
-        The next version is ``max(version) + 1`` inside the write transaction;
-        the ``(workspace, workflow, node, version)`` unique constraint
-        serializes concurrent writers.
-        """
+        """Create a draft version, overwriting the existing draft when present."""
         self._require_enabled()
         validate_node_code(code)
-        with write_transaction(self._dsn) as conn:
-            draft = _latest_with_status(conn, workspace_id, workflow_key, node_key, "draft")
-            if draft is not None:
-                # Guard the status transition: a concurrent publish between the
-                # select above and this update must not let the write land on
-                # an already-published (immutable) row.
-                cursor = conn.execute(
-                    "update workflow_node_codes set code=%s, code_hash=%s, created_by=%s,"
-                    " change_note=%s, created_at=current_timestamp"
-                    " where id=%s and status='draft'",
-                    (code, code_hash(code), created_by, change_note, draft["id"]),
-                )
-                if cursor.rowcount == 0:
-                    raise ConflictError("node code draft changed concurrently; reload and retry")
-                return _get_by_id(conn, draft["id"])
-            version = _next_version(conn, workspace_id, workflow_key, node_key)
-            row_id = uuid.uuid4().hex
-            try:
-                conn.execute(
-                    f"insert into workflow_node_codes({_COLUMNS})"
-                    " values (%s, %s, %s, %s, %s, 'draft', %s, %s, %s, %s,"
-                    " current_timestamp, null)",
-                    (
-                        row_id,
-                        workspace_id,
-                        workflow_key,
-                        node_key,
-                        version,
-                        code,
-                        code_hash(code),
-                        created_by,
-                        change_note,
-                    ),
-                )
-            except IntegrityError as exc:
-                raise ConflictError("node code version allocated concurrently; retry") from exc
-            return _get_by_id(conn, row_id)
+        entity = self._store.save_draft(
+            _entity_key(workflow_key, node_key),
+            {"code": code, "change_note": change_note},
+            code_hash(code),
+            workspace_id,
+            created_by,
+        )
+        return _to_row(entity)
 
     def publish(self, workspace_id: str, workflow_key: str, node_key: str) -> dict[str, Any]:
         """Publish the current draft; the previously published version archives."""
         self._require_enabled()
-        with write_transaction(self._dsn) as conn:
-            draft = _latest_with_status(conn, workspace_id, workflow_key, node_key, "draft")
-            if draft is None:
-                raise NotFoundError(f"no draft node code for {workflow_key}/{node_key}")
-            conn.execute(
-                "update workflow_node_codes set status='archived'"
-                f" where {_NODE_FILTER} and status='published'",
-                (workspace_id, workflow_key, node_key),
-            )
-            # Guard: a concurrent archive_all between select and update must
-            # not resurrect an archived row into published.
-            cursor = conn.execute(
-                "update workflow_node_codes set status='published',"
-                " published_at=current_timestamp where id=%s and status='draft'",
-                (draft["id"],),
-            )
-            if cursor.rowcount == 0:
-                raise ConflictError("node code draft changed concurrently; reload and retry")
-            return _get_by_id(conn, draft["id"])
+        return _to_row(self._store.publish(_entity_key(workflow_key, node_key), workspace_id))
 
     def rollback(
         self,
@@ -198,79 +163,21 @@ class NodeCodeService:
     ) -> dict[str, Any]:
         """Re-publish an old version as a new version (versions stay immutable)."""
         self._require_enabled()
-        with write_transaction(self._dsn) as conn:
-            source = conn.execute(
-                f"select {_COLUMNS} from workflow_node_codes where {_NODE_FILTER} and version=%s",
-                (workspace_id, workflow_key, node_key, version),
-            ).fetchone()
-            if source is None:
-                raise NotFoundError(f"no node code version {version} for {workflow_key}/{node_key}")
-            conn.execute(
-                "update workflow_node_codes set status='archived'"
-                f" where {_NODE_FILTER} and status='published'",
-                (workspace_id, workflow_key, node_key),
-            )
-            row_id = uuid.uuid4().hex
-            try:
-                conn.execute(
-                    f"insert into workflow_node_codes({_COLUMNS})"
-                    " values (%s, %s, %s, %s, %s, 'published', %s, %s, %s, %s,"
-                    " current_timestamp, current_timestamp)",
-                    (
-                        row_id,
-                        workspace_id,
-                        workflow_key,
-                        node_key,
-                        _next_version(conn, workspace_id, workflow_key, node_key),
-                        source["code"],
-                        source["code_hash"],
-                        created_by,
-                        change_note if change_note is not None else f"rollback to v{version}",
-                    ),
-                )
-            except IntegrityError as exc:
-                raise ConflictError("node code version allocated concurrently; retry") from exc
-            return _get_by_id(conn, row_id)
+        entity = self._store.rollback(
+            _entity_key(workflow_key, node_key),
+            version,
+            workspace_id,
+            created_by,
+            definition_patch={
+                "change_note": change_note if change_note is not None else f"rollback to v{version}"
+            },
+        )
+        return _to_row(entity)
 
     def archive_all(self, workspace_id: str, workflow_key: str, node_key: str) -> int:
         """Archive every version; the node falls back to the builtin implementation."""
         self._require_enabled()
-        with write_transaction(self._dsn) as conn:
-            cursor = conn.execute(
-                "update workflow_node_codes set status='archived'"
-                f" where {_NODE_FILTER} and status != 'archived'",
-                (workspace_id, workflow_key, node_key),
-            )
-            return cursor.rowcount
-
-
-def _latest_with_status(
-    conn: Any, workspace_id: str, workflow_key: str, node_key: str, status: str
-) -> dict[str, Any] | None:
-    row = conn.execute(
-        f"select {_COLUMNS} from workflow_node_codes"
-        f" where {_NODE_FILTER} and status=%s order by version desc limit 1",
-        (workspace_id, workflow_key, node_key, status),
-    ).fetchone()
-    return dict(row) if row else None
-
-
-def _next_version(conn: Any, workspace_id: str, workflow_key: str, node_key: str) -> int:
-    row = conn.execute(
-        "select coalesce(max(version), 0) + 1 as next_version from workflow_node_codes"
-        f" where {_NODE_FILTER}",
-        (workspace_id, workflow_key, node_key),
-    ).fetchone()
-    return int(row["next_version"]) if row is not None else 1
-
-
-def _get_by_id(conn: Any, row_id: str) -> dict[str, Any]:
-    row = conn.execute(
-        f"select {_COLUMNS} from workflow_node_codes where id=%s", (row_id,)
-    ).fetchone()
-    if row is None:  # pragma: no cover - defensive; the row was just written
-        raise NotFoundError(f"node code row vanished: {row_id}")
-    return dict(row)
+        return self._store.archive_all(_entity_key(workflow_key, node_key), workspace_id)
 
 
 def freeze_node_code_versions(
@@ -288,16 +195,16 @@ def freeze_node_code_versions(
     """
     if not custom_nodes_enabled or not node_keys:
         return {}
-    with read_connection(database_dsn) as conn:
-        rows = conn.execute(
-            "select node_key, version, code_hash from workflow_node_codes"
-            " where workspace_id=%s and workflow_key=%s"
-            " and node_key = any(%s) and status='published'",
-            (workspace_id, workflow_key, node_keys),
-        ).fetchall()
+    store = VersionedEntityStore(database_dsn, _ENTITY_TYPE)
+    entities = store.list_published_keys(
+        workspace_id, [_entity_key(workflow_key, node_key) for node_key in node_keys]
+    )
     return {
-        str(row["node_key"]): {"version": row["version"], "code_hash": row["code_hash"]}
-        for row in rows
+        _split_entity_key(entity.entity_key)[1]: {
+            "version": entity.version,
+            "code_hash": entity.definition_hash,
+        }
+        for entity in entities
     }
 
 

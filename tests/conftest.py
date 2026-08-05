@@ -122,6 +122,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_local_executor_removal_migration.py",
         "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",
+        "tests/db/test_versioned_entities_migration.py",
         "tests/db/test_workspace_cms_migration.py",
         "tests/db/test_workspace_secrets_migration.py",
         "tests/executors/leases/test_expire_race.py",
