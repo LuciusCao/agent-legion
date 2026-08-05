@@ -23,7 +23,7 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
                    d.capability, d.definition_json
             from workspace_node_routes r
             join agent_definitions d on d.agent_id = r.target_id
-            where r.workspace_id = ? and r.target_kind = 'agent'
+            where r.workspace_id = %s and r.target_kind = 'agent'
             order by r.workflow_key, r.node_key
             """,
             (workspace_id,),
@@ -32,7 +32,7 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
         revisions = conn.execute(
             """
             select workflow_key, definition_json from workflow_revisions
-            where workspace_id = ? and status = 'active'
+            where workspace_id = %s and status = 'active'
             """,
             (workspace_id,),
         ).fetchall()

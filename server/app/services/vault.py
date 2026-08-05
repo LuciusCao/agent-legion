@@ -123,7 +123,7 @@ class VaultService:
             conn.execute(
                 """
                 insert into workspace_secrets(workspace_id, name, ciphertext)
-                values (?, ?, ?)
+                values (%s, %s, %s)
                 on conflict(workspace_id, name)
                 do update set ciphertext=excluded.ciphertext, updated_at=current_timestamp
                 """,
@@ -142,7 +142,7 @@ class VaultService:
         """
         with read_connection(self._dsn) as conn:
             row = conn.execute(
-                "select ciphertext from workspace_secrets where workspace_id=? and name=?",
+                "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
                 (workspace_id, name),
             ).fetchone()
         if row is None:
@@ -161,7 +161,7 @@ class VaultService:
     def delete(self, workspace_id: str, name: str) -> None:
         with write_transaction(self._dsn) as conn:
             conn.execute(
-                "delete from workspace_secrets where workspace_id=? and name=?",
+                "delete from workspace_secrets where workspace_id=%s and name=%s",
                 (workspace_id, name),
             )
 
@@ -169,7 +169,7 @@ class VaultService:
         with read_connection(self._dsn) as conn:
             row = conn.execute(
                 "select name, created_at, updated_at from workspace_secrets"
-                " where workspace_id=? and name=?",
+                " where workspace_id=%s and name=%s",
                 (workspace_id, name),
             ).fetchone()
         if row is None:
@@ -185,7 +185,7 @@ class VaultService:
         with read_connection(self._dsn) as conn:
             rows = conn.execute(
                 "select name, created_at, updated_at from workspace_secrets"
-                " where workspace_id=? order by name",
+                " where workspace_id=%s order by name",
                 (workspace_id,),
             ).fetchall()
         return [

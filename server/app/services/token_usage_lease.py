@@ -26,12 +26,12 @@ def parse_token_usage_for_lease(
     the parse step outside of a database write transaction.
     """
     lease = conn.execute(
-        "select node_run_id, workspace_id from executor_leases where id=?", (lease_id,)
+        "select node_run_id, workspace_id from executor_leases where id=%s", (lease_id,)
     ).fetchone()
     if lease is None or not lease["node_run_id"]:
         return None
     node_run = conn.execute(
-        "select * from node_runs where id=?", (lease["node_run_id"],)
+        "select * from node_runs where id=%s", (lease["node_run_id"],)
     ).fetchone()
     if node_run is None or not node_run["run_dir"]:
         return None

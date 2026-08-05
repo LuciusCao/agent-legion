@@ -31,7 +31,7 @@ def query_summary(service: OpsMetricsService, worker_id: str | None = None) -> d
     with read_connection(service._database_dsn) as conn:
         gauges_row = conn.execute(
             "select online_workers, active_executions from ops_metric_samples"
-            " where worker_id = ? order by bucket_start desc limit 1",
+            " where worker_id = %s order by bucket_start desc limit 1",
             (worker_key,),
         ).fetchone()
         tokens = conn.execute(
@@ -41,7 +41,7 @@ def query_summary(service: OpsMetricsService, worker_id: str | None = None) -> d
                    coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
                    coalesce(sum(total_tokens), 0) as total_tokens
             from ops_metric_samples
-            where worker_id = ? and bucket_start >= ?
+            where worker_id = %s and bucket_start >= %s
             """,
             (worker_key, cutoff),
         ).fetchone()
@@ -57,7 +57,7 @@ def query_summary(service: OpsMetricsService, worker_id: str | None = None) -> d
                      order by extract(epoch from finished_at - started_at)
                    ) filter (where status = 'completed') as p95
             from node_runs
-            where status in ('completed', 'failed') and finished_at >= ?
+            where status in ('completed', 'failed') and finished_at >= %s
               and exists (
                 select 1 from agent_execution_requests r where r.node_run_id = node_runs.id
               )
