@@ -1,6 +1,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { MonitoringPanel } from './MonitoringPanel'
 
 // bucket_start 必须对齐到整分钟，否则在固定时间窗网格里匹配不上会被填零。
@@ -310,5 +311,35 @@ describe('MonitoringPanel', () => {
     expect(
       screen.getByRole('img', { name: 'Token 吞吐量趋势' })
     ).toBeInTheDocument()
+  })
+
+  it('scopes the panel to the workspace when workspaceId is given', async () => {
+    render(
+      <MemoryRouter>
+        <MonitoringPanel workspaceId="ops-ws" />
+      </MemoryRouter>
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId('queue-depth-summary')).toHaveTextContent('12')
+    )
+    // 主数据请求带 workspace 过滤
+    expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
+      granularity: '6h',
+      workspace_id: 'ops-ws',
+    })
+    // fleet-only 内容隐藏：在线 Worker 卡片与 Worker 过滤器
+    expect(
+      screen.queryByTestId('online-workers-summary')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: '选择 Worker' })
+    ).not.toBeInTheDocument()
+    // 副标题标注 workspace 并提供全局监控入口
+    expect(screen.getByText(/workspace「ops-ws」/)).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: '查看全局监控' })).toHaveAttribute(
+      'href',
+      '/monitoring'
+    )
   })
 })

@@ -4810,6 +4810,7 @@ export interface operations {
       query?: {
         granularity?: '6h' | '24h' | '30d'
         worker_id?: string | null
+        workspace_id?: string | null
       }
       header?: never
       path?: never

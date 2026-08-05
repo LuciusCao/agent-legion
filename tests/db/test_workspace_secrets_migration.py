@@ -20,14 +20,34 @@ def test_workspace_secrets_table_exists() -> None:
     assert columns == {"workspace_id", "name", "ciphertext", "created_at", "updated_at"}
 
 
-def test_schema_v22_recorded() -> None:
-    assert SCHEMA_VERSION == 22
+def test_schema_v23_recorded() -> None:
+    assert SCHEMA_VERSION == 23
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=?", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "ops_queued_and_agent_queue_signals"
+    assert row["name"] == "ops_metric_samples_workspace_scope"
+
+
+def test_schema_v23_workspace_scope_objects_exist() -> None:
+    """v23: ops_metric_samples.workspace_id 列与三列唯一索引。"""
+    with read_connection(TEST_DATABASE_URL) as conn:
+        columns = {
+            row["column_name"]
+            for row in conn.execute(
+                "select column_name from information_schema.columns"
+                " where table_schema=current_schema() and table_name='ops_metric_samples'"
+            ).fetchall()
+        }
+        index = conn.execute(
+            "select indexdef from pg_indexes"
+            " where schemaname=current_schema()"
+            " and indexname='uq_ops_metric_samples_bucket_worker'"
+        ).fetchone()
+    assert "workspace_id" in columns
+    assert index is not None
+    assert "workspace_id" in index["indexdef"]
 
 
 def test_schema_v22_queue_health_objects_exist() -> None:

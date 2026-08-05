@@ -28,18 +28,12 @@ export default function AppRoutes() {
           <Route index element={<WorkspaceMainPage />} />
           <Route path="jobs/:jobId" element={<JobDetailPage />} />
         </Route>
-        <Route
-          path="/workspaces/:workspaceId/settings"
-          element={<SettingsPage />}
-        />
-        <Route
-          path="/workspaces/:workspaceId/token-usage"
-          element={<TokenUsagePage />}
-        />
-        <Route
-          path="/workspaces/:workspaceId/workflow-studio"
-          element={<WorkflowStudioPage />}
-        />
+        <Route path="/workspaces/:workspaceId">
+          <Route path="settings" element={<SettingsPage />} />
+          <Route path="token-usage" element={<TokenUsagePage />} />
+          <Route path="monitoring" element={<MonitoringPage />} />
+          <Route path="workflow-studio" element={<WorkflowStudioPage />} />
+        </Route>
       </Routes>
     </AuthGate>
   )

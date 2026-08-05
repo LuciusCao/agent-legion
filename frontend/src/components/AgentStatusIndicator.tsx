@@ -28,6 +28,7 @@ export function AgentStatusIndicator({
     [allAgents, workspaceId]
   )
   const busy = agents.some((agent) => agent.busy)
+  const monitoringPath = `/workspaces/${workspaceId}/monitoring`
 
   useEffect(() => {
     fetchWorkerStatus(workspaceId).catch(() => {})
@@ -61,7 +62,7 @@ export function AgentStatusIndicator({
         <div className={styles.divider} />
         <AgentWorkerStatusList workspaceId={workspaceId} />
         <div className={styles.divider} />
-        <Link to="/monitoring" className={styles.monitorLink}>
+        <Link to={monitoringPath} className={styles.monitorLink}>
           查看监控
         </Link>
       </div>
