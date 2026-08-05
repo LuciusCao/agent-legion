@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import { fetchJobVideoDetail } from '../api/jobVideoApi'
 import type { VideoJobDetailResponse } from '../api/jobVideoApi'
 import type {
@@ -6,7 +7,9 @@ import type {
   InteractionOption,
   VideoArtifacts,
 } from '../types'
-import { useAsync } from '../hooks/useAsync'
+import { useJobDetailQuery } from '../hooks/useJobDetailQuery'
+import { queryKeys } from '../lib/queryKeys'
+import { toErrorMessage } from '../lib/queryError'
 import { VideoPlayer } from './VideoPlayer'
 import { TimelineStrip } from './TimelineStrip'
 import { SubtitlePanel } from './SubtitlePanel'
@@ -17,7 +20,6 @@ import styles from './VideoContentPanel.module.css'
 
 export interface VideoContentPanelProps {
   jobId: string
-  refreshKey?: string
 }
 
 function toChapters(
@@ -69,15 +71,20 @@ function buildArtifacts(data: VideoJobDetailResponse): VideoArtifacts {
   }
 }
 
-export function VideoContentPanel({
-  jobId,
-  refreshKey,
-}: VideoContentPanelProps) {
-  const { data, loading, error } = useAsync(
-    () => fetchJobVideoDetail(jobId),
-    [jobId, refreshKey],
-    { resetOnRun: true }
-  )
+export function VideoContentPanel({ jobId }: VideoContentPanelProps) {
+  // 订阅共享的 detail 查询，用 job.updated_at 作为版本编进 queryKey：
+  // 版本变 → 新 key → 自动重取且不留旧数据（等价旧的 refreshKey + resetOnRun）。
+  const { data: detail } = useJobDetailQuery(jobId)
+  const version = detail?.job.updated_at ?? ''
+  const {
+    data,
+    isPending: loading,
+    error: queryError,
+  } = useQuery({
+    queryKey: queryKeys.jobVideoDetail(jobId, version),
+    queryFn: () => fetchJobVideoDetail(jobId),
+  })
+  const error = toErrorMessage(queryError)
   const [currentTime, setCurrentTime] = useState(0)
   const [dismissedInteractionIndexes, setDismissedInteractionIndexes] =
     useState<Set<number>>(new Set())
@@ -223,7 +230,7 @@ export function VideoContentPanel({
           <SubtitlePanel
             currentTime={currentTime}
             onSeek={handleSeek}
-            subtitles={artifacts.subtitles}
+            artifacts={artifacts}
           />
         </CollapsiblePanel>
       )}

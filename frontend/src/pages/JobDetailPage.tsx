@@ -54,8 +54,6 @@ export default function JobDetailPage() {
     dagNodes,
     dagEdges,
     workflowDefinition,
-    questionArtifactRefreshKey,
-    comprehensionRefreshKey,
     keyInfoPreviewable,
     possibleErrorsPreviewable,
     keyInfoReviewAttempted,
@@ -137,8 +135,6 @@ export default function JobDetailPage() {
             <EntityPanel
               detail={detail}
               jobId={jobId}
-              questionArtifactRefreshKey={questionArtifactRefreshKey}
-              comprehensionRefreshKey={comprehensionRefreshKey}
               keyInfoPreviewable={keyInfoPreviewable}
               possibleErrorsPreviewable={possibleErrorsPreviewable}
               keyInfoReviewAttempted={keyInfoReviewAttempted}

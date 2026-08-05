@@ -1,5 +1,9 @@
-import { useAsync } from './useAsync'
+import { useQuery } from '@tanstack/react-query'
 import { fetchJobArtifactJson } from './jobArtifactJson'
+import { useJobDetailQuery } from './useJobDetailQuery'
+import { questionArtifactVersion } from '../lib/jobArtifactVersions'
+import { queryKeys } from '../lib/queryKeys'
+import { toErrorMessage } from '../lib/queryError'
 import type { QuestionArtifactNormalized } from '../types'
 
 export interface UseJobQuestionReturn {
@@ -29,21 +33,23 @@ function extractFirstQuestion(
   return normalized as QuestionArtifactNormalized
 }
 
-export function useJobQuestion(
-  jobId: string,
-  refreshKey = ''
-): UseJobQuestionReturn {
-  const {
-    data: question,
-    loading,
-    error,
-  } = useAsync(async () => {
-    const data = await fetchJobArtifactJson<QuestionsArtifact>(
+export function useJobQuestion(jobId: string): UseJobQuestionReturn {
+  // 订阅共享 detail 查询；产出节点状态作为版本编进 queryKey，版本变即重取。
+  const { data: detail } = useJobDetailQuery(jobId)
+  const query = useQuery({
+    queryKey: queryKeys.jobArtifact(
       jobId,
-      'questions.json'
-    )
-    return extractFirstQuestion(data)
-  }, [jobId, refreshKey])
-
-  return { question, loading, error }
+      'questions.json',
+      questionArtifactVersion(detail ?? null)
+    ),
+    queryFn: async () =>
+      extractFirstQuestion(
+        await fetchJobArtifactJson<QuestionsArtifact>(jobId, 'questions.json')
+      ),
+  })
+  return {
+    question: query.data ?? null,
+    loading: query.isPending,
+    error: toErrorMessage(query.error),
+  }
 }

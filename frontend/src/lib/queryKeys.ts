@@ -9,4 +9,11 @@ export const queryKeys = {
   opsMetrics: (params: OpsMetricsParams) => ['opsMetrics', params] as const,
   workspaces: () => ['workspaces'] as const,
   workspaceStats: (id: string) => ['workspaceStats', id] as const,
+  jobDetail: (jobId: string) => ['jobDetail', jobId] as const,
+  // version 反映产出该 artifact 的节点状态；版本变 → 新 key → 自动重取，
+  // 替代旧的 refreshKey props 管道。
+  jobArtifact: (jobId: string, name: string, version: string) =>
+    ['jobArtifact', jobId, name, version] as const,
+  jobVideoDetail: (jobId: string, version: string) =>
+    ['jobVideoDetail', jobId, version] as const,
 }
