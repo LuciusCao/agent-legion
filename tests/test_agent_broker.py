@@ -9,12 +9,13 @@ import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch import AgentDispatchService
-from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.events.agents import AgentStatusManager
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.workflows.schema import WorkflowNode
+from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -71,7 +72,7 @@ def _seed_request(
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    sync_agent_definitions(TEST_DATABASE_URL, definitions or {agent_id: definition})
+    replace_agent_catalog(definitions or {agent_id: definition})
     _insert_job_rows(
         job_db,
         job_id=job_id,
@@ -92,7 +93,7 @@ def _seed_request(
             manifest={
                 "job_id": job_id,
                 "log_path": f"logs/{job_id}.log",
-                "pi": {"provider": "gateway", "model": "test-model"},
+                "execution": {"provider": "gateway", "model": "test-model"},
             },
         )
     )
@@ -722,7 +723,7 @@ def test_reporting_blocks_duplicate_enqueue(job_db) -> None:
                 agent_definition_hash=_seeded_definition_hash(),
                 manifest={
                     "job_id": "job-1",
-                    "pi": {"provider": "gateway", "model": "test-model"},
+                    "execution": {"provider": "gateway", "model": "test-model"},
                 },
             )
         )
@@ -859,7 +860,7 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": velites_definition})
+    replace_agent_catalog({"generator-v1": velites_definition})
     _insert_job_rows(
         job_db,
         job_id="job-new",
@@ -880,7 +881,7 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
             manifest={
                 "job_id": "job-new",
                 "log_path": "logs/job-new.log",
-                "pi": {"provider": "gateway", "model": "test-model"},
+                "execution": {"provider": "gateway", "model": "test-model"},
             },
         )
     )

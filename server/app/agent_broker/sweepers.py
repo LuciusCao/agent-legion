@@ -123,10 +123,11 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             from agent_execution_requests r
             where r.state='queued'
               and not exists (
-                  select 1 from agent_definitions d
-                  where d.agent_id=r.agent_id
+                  select 1 from versioned_entities d
+                  where d.entity_type='agent' and d.workspace_id is null
+                    and d.entity_key=r.agent_id
                     and d.definition_hash=r.agent_definition_hash
-                    and d.enabled=1
+                    and d.status='published'
               )
             for update of r skip locked
             """

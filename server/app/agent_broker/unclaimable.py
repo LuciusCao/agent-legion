@@ -56,13 +56,15 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         # owns them. The revision join mirrors the claim candidate query.
         rows = conn.execute(
             """
-            select r.execution_id, r.job_id, r.node_key, r.manifest_json, d.capability,
-                   d.runtime,
+            select r.execution_id, r.job_id, r.node_key, r.manifest_json,
+                   d.definition_json::jsonb->>'capability' as capability,
+                   d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
-            join agent_definitions d
-              on d.agent_id=r.agent_id and d.definition_hash=r.agent_definition_hash
-             and d.enabled=1
+            join versioned_entities d
+              on d.entity_type='agent' and d.workspace_id is null
+             and d.entity_key=r.agent_id and d.definition_hash=r.agent_definition_hash
+             and d.status='published'
             join jobs j on j.id=r.job_id
             left join workflow_revisions wr on wr.id=j.workflow_revision_id
             where r.state='queued'

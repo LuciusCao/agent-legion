@@ -7,6 +7,7 @@ import pytest
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
+from tests.helpers import replace_agent_catalog
 
 DEFINITION_V1 = AgentDefinition(
     capability="review_keywords", runtime="velites", skill="question/review_key_info"
@@ -21,6 +22,9 @@ DEFINITION_V2 = AgentDefinition(
 
 @pytest.fixture
 def service(job_db):
+    # Isolate from the conftest-seeded catalog: capability-uniqueness checks
+    # must only see the Agents this test publishes.
+    replace_agent_catalog({})
     return AgentService(job_db.path)
 
 

@@ -235,7 +235,7 @@ def _write_split_config(root: Path) -> None:
         encoding="utf-8",
     )
     (config_dir / "workflow.yaml").write_text(
-        "workflows:\n  enabled: false\n  pi:\n    binary: yaml-pi\nexecutors: {}\n",
+        "workflows:\n  enabled: false\nexecutors: {}\n",
         encoding="utf-8",
     )
 
@@ -319,7 +319,8 @@ def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
     assert "global_capacity" in message
 
 
-def test_load_settings_builds_agent_catalog(tmp_path, monkeypatch):
+def test_load_settings_rejects_retired_agents_yaml(tmp_path, monkeypatch):
+    """yaml ``agents:`` 段已退役（agent 配置治理 phase 3）：启动 fail-fast。"""
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "database: {url: postgresql://configured/app}\n"
@@ -332,10 +333,20 @@ def test_load_settings_builds_agent_catalog(tmp_path, monkeypatch):
     )
     monkeypatch.delenv("AGENT_LEGION_DATABASE_URL", raising=False)
 
-    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    with pytest.raises(ValueError, match="agents"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert settings.agent_definitions["key-info-v1"].capability == "generate_key_info"
-    assert settings.agent_definitions["key-info-v1"].runtime == "pi"
+
+def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
+    """``workflows.pi`` 块已退役（agent 配置治理 phase 3）：启动 fail-fast。"""
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        'data_dir: data\nworkflows:\n  enabled: true\n  pi:\n    binary: pi\n    model: ""\n',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="workflows.pi"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
 
 def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
@@ -365,14 +376,6 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
         "data_dir: data\n"
         "workflows:\n"
         "  enabled: true\n"
-        "  pi:\n"
-        "    binary: pi\n"
-        '    provider: ""\n'
-        '    model: ""\n'
-        "    thinking: low\n"
-        "    timeout_seconds: 600\n"
-        "    environment:\n"
-        '      PI_SKIP_VERSION_CHECK: "1"\n'
         "openclaw:\n"
         "  cwd: .\n"
         "  timeout_seconds: 600\n"
@@ -389,8 +392,9 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert settings.executor_runtime.workflows.enabled is True
+    # workflows.pi 块已退役：PiRuntimeConfig 只剩硬编码默认（死路径 executors/pi.py 专用）。
+    assert settings.executor_runtime.workflows.pi.flavor == "pi"
     assert settings.executor_runtime.workflows.pi.binary == "pi"
-    assert settings.executor_runtime.workflows.pi.thinking == "low"
     assert settings.executor_runtime.openclaw.cwd == "."
     assert settings.executor_runtime.openclaw.timeout_seconds == 600
     assert settings.executor_runtime.openclaw.command_template == ("openclaw", "agent")
@@ -398,7 +402,6 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     assert [repo.path for repo in settings.executor_runtime.openclaw.skill_safety.repos] == [
         "~/.openclaw/workspace/skills/s1"
     ]
-    assert settings.config["workflows"]["pi"]["thinking"] == "low"
 
 
 def test_load_settings_rejects_skill_safety_ref(tmp_path, monkeypatch):
@@ -493,7 +496,6 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
             "/tmp/sensevoice",
             "/tmp/sensevoice",
         ),
-        ("legacy", "AGENT_LEGION_PI_BINARY", ["workflows", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
         ("legacy", "AGENT_LEGION_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
         (
             "split",
@@ -531,7 +533,6 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
             "/tmp/sensevoice",
             "/tmp/sensevoice",
         ),
-        ("split", "AGENT_LEGION_PI_BINARY", ["workflows", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
         ("split", "AGENT_LEGION_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
     ],
 )
@@ -555,8 +556,6 @@ def test_env_override_precedes_yaml(
             "    model_dir: yaml-dir\n"
             "workflows:\n"
             "  enabled: false\n"
-            "  pi:\n"
-            "    binary: yaml-pi\n"
             "openclaw:\n"
             "  cwd: yaml-cwd\n"
             "  command_template:\n"

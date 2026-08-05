@@ -86,10 +86,13 @@ def migrate_versioned_entities(conn: Any) -> None:
     """Create versioned_entities + workspace Agent defaults; copy rows (v26).
 
     Copies existing workflow_node_codes and enabled agent_definitions rows
-    into the unified table. The legacy tables stay readable during the
-    transition; readers switch over in the YAML-retirement phase.
+    into the unified table. The legacy agent_definitions copy is skipped when
+    the table is already gone (fresh v27+ databases never create it; the v27
+    cutover drops it everywhere else).
     """
     conn.execute(_VERSIONED_ENTITIES_DDL)
     conn.execute(_WORKSPACE_AGENT_DEFAULTS_DDL)
     conn.execute(_NODE_CODE_COPY)
-    conn.execute(_AGENT_COPY)
+    legacy = conn.execute("select to_regclass('agent_definitions') as t").fetchone()
+    if legacy is not None and legacy["t"] is not None:
+        conn.execute(_AGENT_COPY)

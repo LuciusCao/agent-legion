@@ -4,6 +4,7 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.node_codes import freeze_node_code_versions
 from server.app.services.workflow_revision_format import (
     definition_hash,
@@ -65,25 +66,21 @@ class WorkflowRevisionService:
         )
 
     def _agent_routes(self, definition: WorkflowDefinition) -> dict[str, str]:
-        """Route every node whose capability resolves to exactly one enabled Agent.
+        """Route every node whose capability resolves to exactly one published Agent.
 
         Agent capacity is workspace-level (workspace_agent_capacities), so no
         per-node capacities are materialized; nodes whose capability matches no
-        enabled Agent keep their handler/executor path."""
-        with self.job_db._connect_read() as conn:
-            rows = conn.execute(
-                "select agent_id, capability from agent_definitions where enabled=1"
-            ).fetchall()
+        published Agent keep their handler/executor path."""
         by_capability: dict[str, list[str]] = {}
-        for row in rows:
-            by_capability.setdefault(str(row["capability"]), []).append(str(row["agent_id"]))
+        for agent_id, agent_definition in published_agent_definitions(self.job_db.path).items():
+            by_capability.setdefault(agent_definition.capability, []).append(agent_id)
         routes: dict[str, str] = {}
         for node in definition.nodes.values():
             candidates = by_capability.get(node.capability, [])
             if len(candidates) > 1:
                 raise ValueError(
                     f"Agent node {node.key!r} capability {node.capability!r} must resolve to"
-                    f" exactly one enabled Agent; found {len(candidates)}"
+                    f" exactly one published Agent; found {len(candidates)}"
                 )
             if len(candidates) == 1:
                 routes[node.key] = candidates[0]
@@ -106,23 +103,17 @@ class WorkflowRevisionService:
 
         Every active revision is reconciled, not only each workspace's default
         workflow. A revision whose Agent nodes no longer resolve to exactly one
-        enabled Agent (catalog/DB desync) is skipped with a migration warning
+        published Agent (catalog/DB desync) is skipped with a migration warning
         instead of aborting startup, matching the "no auto-migration on
         ambiguous mapping" rule.
 
-        When the catalog has zero enabled definitions, skip entirely: routes
+        When the catalog has zero published definitions, skip entirely: routes
         derived from an empty catalog would be empty too, and materializing
-        them would prune every existing route (see the empty-catalog guard in
-        ``sync_agent_definitions``).
+        them would prune every existing route.
         """
-        with self.job_db._connect_read() as conn:
-            enabled_row = conn.execute(
-                "select count(*) as c from agent_definitions where enabled=1"
-            ).fetchone()
-        enabled_count = int(enabled_row["c"]) if enabled_row is not None else 0
-        if not enabled_count:
+        if not published_agent_definitions(self.job_db.path):
             logger.warning(
-                "Agent route reconcile skipped: no enabled Agent Definitions; "
+                "Agent route reconcile skipped: no published Agent Definitions; "
                 "keeping existing workspace_node_routes"
             )
             return

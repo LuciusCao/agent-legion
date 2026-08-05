@@ -14,6 +14,7 @@ MANIFEST = {
     "job_id": "job-1",
     "node_key": "gen",
     "capability": "generate",
+    "runtime": "pi",
     "inputs": ["a.txt"],
     "expected_outputs": ["out.json"],
     "additional_prompt": "be careful",
@@ -21,13 +22,13 @@ MANIFEST = {
     "skill": "video_knowledge/gen",
     "skill_version": "v1",
     "run_token": "tok123",
-    "pi": {
+    "execution": {
         "binary": "pi",
         "provider": "p",
         "model": "m",
         "thinking": "high",
         "timeout_seconds": 300,
-        "environment": {},
+        "no_sandbox": False,
     },
 }
 

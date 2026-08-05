@@ -51,9 +51,9 @@ def unmatched_reasons(
     if not can_run(candidate, manifest, union_capabilities, {("*", "*")}):
         reasons.append(f"capability {candidate['capability']!r} not declared by any Worker")
     if not can_run(candidate, manifest, {"*"}, union_models):
-        pi = manifest.get("pi") or {}
-        provider = str(pi.get("provider") or "")
-        model = str(pi.get("model") or "")
+        execution = manifest.get("execution") or {}
+        provider = str(execution.get("provider") or "")
+        model = str(execution.get("model") or "")
         reasons.append(f"model {provider}/{model} not declared by any Worker")
     if not reasons:
         reasons.append("no single Worker declares runtime, capability and model together")

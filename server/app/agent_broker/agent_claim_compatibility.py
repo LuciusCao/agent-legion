@@ -20,21 +20,23 @@ def worker_declarations(row: Mapping[str, Any]) -> tuple[set[str], set[tuple[str
 
 def live_claim_manifest(row: Mapping[str, Any]) -> dict[str, Any]:
     manifest: dict[str, Any] = json.loads(str(row["manifest_json"]))
-    execution: dict[str, Any] = {}
+    node_execution: dict[str, Any] = {}
     raw_revision = row.get("revision_definition_json")
     if raw_revision:
         definition = json.loads(str(raw_revision))
         node = (definition.get("nodes") or {}).get(str(row["node_key"])) or {}
-        execution = node.get("execution") or {}
-    defaults = manifest.get("pi_defaults") or manifest.get("pi") or {}
-    manifest["pi"] = {
-        **manifest.get("pi", {}),
+        node_execution = node.get("execution") or {}
+    frozen = manifest.get("execution") or {}
+    # Node-level edits re-resolve live at claim; values frozen at enqueue
+    # (already resolved against workspace defaults) are the fallback.
+    manifest["execution"] = {
+        **frozen,
         **{
-            key: execution.get(key) or defaults.get(key) or ""
+            key: node_execution.get(key) or frozen.get(key) or ""
             for key in ("provider", "model", "thinking")
         },
     }
-    manifest["additional_prompt"] = str(execution.get("prompt") or "")
+    manifest["additional_prompt"] = str(node_execution.get("prompt") or "")
     if all(key in manifest for key in ("tools", "inputs", "expected_outputs")):
         manifest["command_spec"] = render_command_spec(manifest)
     return manifest
@@ -47,8 +49,8 @@ def worker_can_run(
     worker_models: set[tuple[str, str]],
 ) -> bool:
     capability = str(candidate["capability"])
-    pi = manifest.get("pi") or {}
-    model = (str(pi.get("provider") or ""), str(pi.get("model") or ""))
+    execution = manifest.get("execution") or {}
+    model = (str(execution.get("provider") or ""), str(execution.get("model") or ""))
     capability_matches = capability in worker_capabilities or "*" in worker_capabilities
     model_matches = model in worker_models or ("*", "*") in worker_models
     return capability_matches and model_matches

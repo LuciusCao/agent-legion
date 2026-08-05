@@ -1,4 +1,4 @@
-"""Agent definition service: DB-backed Agent catalog (schema v26).
+"""Agent definition service: DB-backed Agent catalog (schema v27).
 
 Agent definitions are global (workspace_id NULL) versioned entities sharing
 the draft → published → archived lifecycle engine with custom node codes.
@@ -7,12 +7,14 @@ The definition payload is the pure ``AgentDefinition`` shape
 (provider/model/thinking) deliberately lives outside it, resolved per node
 with workspace defaults (see docs/architecture/agent-config-governance.md).
 
-During the transition the YAML-synced ``agent_definitions`` table remains the
-execution read path; this service becomes the source of truth when the YAML
-catalog retires (phase 3).
+The YAML-synced ``agent_definitions`` table was dropped in schema v27; this
+service is the only source of truth. Hot read paths go through the short-TTL
+module cache below instead of hitting the database per lookup.
 """
 
 from __future__ import annotations
+
+import time
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.db.connection import DatabaseDsn
@@ -20,6 +22,36 @@ from server.app.services.job_errors import ConflictError, InvalidOperationError
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
 _ENTITY_TYPE: EntityType = "agent"
+
+# Published catalog cache: agent definitions change rarely (operator publishes
+# in Studio), but the workflow worker's claim path reads them per candidate.
+# A stale entry at worst routes against a seconds-old definition; publishes
+# and archives through this service invalidate immediately.
+PUBLISHED_CACHE_TTL_SECONDS = 5.0
+_published_cache: dict[DatabaseDsn, tuple[float, dict[str, AgentDefinition]]] = {}
+
+
+def reset_published_agent_cache() -> None:
+    """Drop every cached catalog (tests: TRUNCATE isolation bypasses invalidation)."""
+    _published_cache.clear()
+
+
+def published_agent_definitions(database_dsn: DatabaseDsn) -> dict[str, AgentDefinition]:
+    """Published Agent definitions keyed by agent_id, cached ~5s per DSN."""
+    now = time.monotonic()
+    cached = _published_cache.get(database_dsn)
+    if cached is not None and now - cached[0] < PUBLISHED_CACHE_TTL_SECONDS:
+        return cached[1]
+    entities = VersionedEntityStore(database_dsn, _ENTITY_TYPE).list_published(None)
+    definitions = {
+        entity.entity_key: AgentDefinition.model_validate(entity.definition) for entity in entities
+    }
+    _published_cache[database_dsn] = (now, definitions)
+    return definitions
+
+
+def _invalidate_published_cache(database_dsn: DatabaseDsn) -> None:
+    _published_cache.pop(database_dsn, None)
 
 
 class AgentService:
@@ -60,13 +92,15 @@ class AgentService:
         """Create a draft version, overwriting the existing draft when present."""
         if not agent_id:
             raise InvalidOperationError("agent id must be a non-empty string")
-        return self._store.save_draft(
+        entity = self._store.save_draft(
             agent_id,
             definition.model_dump(mode="json"),
             definition.definition_hash(),
             None,
             created_by,
         )
+        _invalidate_published_cache(self._store._dsn)
+        return entity
 
     def publish(self, agent_id: str) -> VersionedEntity:
         """Publish the current draft; the previously published version archives.
@@ -79,7 +113,9 @@ class AgentService:
         draft = next((v for v in versions if v.status == "draft"), None)
         if draft is None:
             # Let the store raise the canonical NotFoundError.
-            return self._store.publish(agent_id, None)
+            entity = self._store.publish(agent_id, None)
+            _invalidate_published_cache(self._store._dsn)
+            return entity
         capability = draft.definition.get("capability")
         for other in self._store.list_published(None):
             if other.entity_key != agent_id and other.definition.get("capability") == capability:
@@ -87,18 +123,26 @@ class AgentService:
                     f"capability {capability!r} is already published by Agent"
                     f" {other.entity_key!r}; exactly one published Agent per capability"
                 )
-        return self._store.publish(agent_id, None)
+        entity = self._store.publish(agent_id, None)
+        _invalidate_published_cache(self._store._dsn)
+        return entity
 
     def rollback(self, agent_id: str, version: int, created_by: str) -> VersionedEntity:
         """Re-publish an old version as a new version (versions stay immutable)."""
-        return self._store.rollback(agent_id, version, None, created_by)
+        entity = self._store.rollback(agent_id, version, None, created_by)
+        _invalidate_published_cache(self._store._dsn)
+        return entity
 
     def archive_all(self, agent_id: str) -> int:
         """Archive every version; the Agent stops routing (no published row)."""
-        return self._store.archive_all(agent_id, None)
+        archived = self._store.archive_all(agent_id, None)
+        _invalidate_published_cache(self._store._dsn)
+        return archived
 
     def copy(self, source_agent_id: str, new_agent_id: str, created_by: str) -> VersionedEntity:
         """Copy the latest source definition into a new Agent as draft v1."""
         if not new_agent_id:
             raise InvalidOperationError("agent id must be a non-empty string")
-        return self._store.copy(source_agent_id, new_agent_id, None, created_by)
+        entity = self._store.copy(source_agent_id, new_agent_id, None, created_by)
+        _invalidate_published_cache(self._store._dsn)
+        return entity

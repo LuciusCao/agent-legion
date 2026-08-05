@@ -7,6 +7,7 @@ from typing import Any
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_enqueue import enqueue_intake_batch
@@ -82,7 +83,7 @@ class JobIntakeService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                self.settings.agent_definitions,
+                published_agent_definitions(self.settings.database_url),
                 workspace,
                 self.settings.executor_definitions,
             )

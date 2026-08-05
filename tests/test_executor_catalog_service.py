@@ -89,18 +89,19 @@ def test_executor_catalog_does_not_expose_agent_runtimes(
     assert set(executors_by_id) == {"code-default"}
 
 
-def test_catalog_exposes_agent_definitions_with_runtime_defaults(
+def test_catalog_exposes_published_agent_definitions(
     service: ExecutorCatalogService,
 ) -> None:
     result = service.catalog()
     agents_by_id = {agent["id"]: agent for agent in result["agents"]}
 
+    # conftest 播种的 published catalog（schema v27：video agent 已翻转 velites）。
     agent = agents_by_id["video-content-review-v1"]
-    assert agent["runtime"] == "pi"
+    assert agent["runtime"] == "velites"
     assert agent["capability"] == "review_video_content"
     assert agent["skill"] == "video_knowledge/review_video_content"
     assert agent["tools"] == ["read", "write", "bash"]
-    assert agent["provider"] == "gateway"
-    # yaml 默认 model 已清空（issue #13）：占位符 model 在 enqueue 被拒。
-    assert agent["model"] == ""
-    assert agent["thinking"] == "low"
+    # 全局 provider/model/thinking 投影已退役：执行默认走 workspace agentDefaults。
+    assert "provider" not in agent
+    assert "model" not in agent
+    assert "thinking" not in agent

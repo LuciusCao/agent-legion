@@ -137,16 +137,10 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             shutil.copy2(src_file, workflows_dst / src_file.name)
 
     from server.app import main as app_main
-    from server.app.agent_catalog import load_agent_definitions
-    from server.app.configuration import load_application_config
     from tests.postgres_support import TEST_DATABASE_URL
 
-    # The app boots against the isolated test schema with the real Agent
-    # catalog: the Settings defaults (public dev database_url, empty catalog)
-    # would otherwise make startup sync wipe the dev database's agent state.
-    real_config = load_application_config(real_root).config
-    agent_definitions = load_agent_definitions(real_config.get("agents", {}))
-
+    # The app boots against the isolated test schema; conftest already seeded
+    # the published Agent catalog there via AgentService.
     def fake_load_settings(
         data_dir: Path | None = None, config_path: Path | None = None
     ) -> Settings:
@@ -160,7 +154,6 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             jobs_dir=resolved / "jobs",
             config={},
             database_url=TEST_DATABASE_URL,
-            agent_definitions=agent_definitions,
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
@@ -180,3 +173,56 @@ def wait_for_predicate(
         if time.monotonic() > deadline:
             raise TimeoutError("Predicate was not satisfied in time")
         time.sleep(interval)
+
+
+def replace_agent_catalog(definitions: dict[str, Any]) -> None:
+    """Archive every live Agent version, then insert *definitions* as published.
+
+    Mirrors the retired ``sync_agent_definitions`` replace semantics for
+    tests: after the call exactly the given catalog is published. An empty
+    mapping leaves no published Agents (the old empty-catalog guard went away
+    with the YAML sync). Writes go straight to versioned_entities so tests
+    can stage catalogs the service-level publish guard would reject (e.g.
+    two published Agents sharing one capability for dual-runtime fleets).
+    """
+    import json as _json
+
+    from server.app.agent_catalog import AgentDefinition
+    from server.app.db.transaction import write_transaction
+    from server.app.services.agent_service import reset_published_agent_cache
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "update versioned_entities set status='archived'"
+            " where entity_type='agent' and status in ('draft', 'published')"
+        )
+        for agent_id, definition in definitions.items():
+            assert isinstance(definition, AgentDefinition)
+            latest = conn.execute(
+                "select max(version) as v from versioned_entities"
+                " where entity_type='agent' and workspace_id is null and entity_key=%s",
+                (agent_id,),
+            ).fetchone()
+            version = int(latest["v"]) + 1 if latest is not None and latest["v"] is not None else 1
+            canonical = _json.dumps(
+                definition.model_dump(mode="json"),
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            conn.execute(
+                "insert into versioned_entities("
+                "id, entity_type, workspace_id, entity_key, version, status,"
+                " definition_json, definition_hash, created_by, created_at, published_at)"
+                " values (%s, 'agent', null, %s, %s, 'published', %s, %s, 'test-seed',"
+                " current_timestamp, current_timestamp)",
+                (
+                    f"agent:{agent_id}:v{version}",
+                    agent_id,
+                    version,
+                    canonical,
+                    definition.definition_hash(),
+                ),
+            )
+    reset_published_agent_cache()

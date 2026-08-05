@@ -6,7 +6,6 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlencode
 
-from server.app.agent_catalog import AgentDefinition, load_agent_definitions
 from server.app.cms.env import resolve_cms_env, validate_cms_env_aliases
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
@@ -37,7 +36,6 @@ class Settings:
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
-    agent_definitions: dict[str, AgentDefinition] = field(default_factory=dict)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -93,7 +91,6 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
     "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
     "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
-    "AGENT_LEGION_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
     "AGENT_LEGION_CUSTOM_NODES_ENABLED": (
         ("workflows", "custom_nodes_enabled"),
         _bool_parser,
@@ -198,6 +195,34 @@ def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
     )
 
 
+def _reject_retired_agent_yaml_keys(config: dict[str, Any]) -> None:
+    """Fail fast when the yaml still carries the retired Agent catalog keys.
+
+    Agent config governance (phase 3, breaking): the yaml ``agents:`` catalog
+    and the ``workflows.pi`` runtime block are no longer read. Agent
+    definitions live in the DB (versioned_entities, managed in Studio →
+    Agents); provider/model/thinking resolve from workspace Settings defaults
+    or Studio node overrides. This check runs before env overrides so
+    env-injected in-memory values are not mistaken for yaml keys.
+    """
+    retired: list[str] = []
+    if "agents" in config:
+        retired.append("agents")
+    workflows = config.get("workflows")
+    if isinstance(workflows, dict) and "pi" in workflows:
+        retired.append("workflows.pi")
+    if not retired:
+        return
+    keys = ", ".join(retired)
+    raise ValueError(
+        f"Unsupported yaml keys: {keys}. The yaml agents catalog and "
+        "workflows.pi runtime block were retired (agent config governance). "
+        "Migrate: agent definitions -> Studio Agents manager (published into "
+        "versioned_entities); provider/model/thinking -> workspace Settings "
+        "'Agent 默认配置' or Studio node execution overrides."
+    )
+
+
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = PROJECT_ROOT
     if os.environ.get("AGENT_LEGION_SKIP_DOTENV") != "1":
@@ -205,6 +230,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     loaded = load_application_config(root_dir, config_path=config_path)
     config = loaded.config
     _reject_retired_cms_yaml_keys(config)
+    _reject_retired_agent_yaml_keys(config)
     _apply_database_url_env(config)
     _apply_env_overrides(config)
     _apply_cms_env_overrides(config)
@@ -225,7 +251,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
-    agent_definitions = load_agent_definitions(config.get("agents", {}))
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     token_file = executor_runtime.agent_workers.register_token_file
     if token_file and not executor_runtime.agent_workers.register_token:
@@ -243,7 +268,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         config=config,
         cors=load_cors_settings(config),
         executor_definitions=executor_definitions,
-        agent_definitions=agent_definitions,
         executor_runtime=executor_runtime,
     )
 

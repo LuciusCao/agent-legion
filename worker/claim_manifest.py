@@ -9,7 +9,7 @@ def apply_live_manifest(bundled: dict[str, Any], claimed: dict[str, Any]) -> dic
     live = claimed.get("manifest")
     if not isinstance(live, dict):
         return bundled
-    for key in ("pi", "additional_prompt", "command_spec"):
+    for key in ("execution", "additional_prompt", "command_spec"):
         if key in live:
             bundled[key] = live[key]
     return bundled

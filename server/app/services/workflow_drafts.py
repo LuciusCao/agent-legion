@@ -5,6 +5,7 @@ from typing import Any
 import yaml
 
 from server.app.jobs import JobQueries
+from server.app.services.agent_service import published_agent_definitions
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowDefinitionError,
@@ -45,17 +46,17 @@ def validate_workflow_for_publish(
         for binding in configuration.get("bindings", [])
     }
     allocated = {allocation["executor_id"] for allocation in configuration.get("allocations", [])}
+    capability_counts: dict[str, int] = {}
+    for agent_definition in published_agent_definitions(job_db.path).values():
+        capability_counts[agent_definition.capability] = (
+            capability_counts.get(agent_definition.capability, 0) + 1
+        )
     for node in definition.nodes.values():
-        with job_db._connect_read() as conn:
-            row = conn.execute(
-                "select count(*) as cnt from agent_definitions where enabled=1 and capability=%s",
-                (node.capability,),
-            ).fetchone()
-        count = int(row["cnt"]) if row is not None else 0
+        count = capability_counts.get(node.capability, 0)
         if count > 0:
             if count != 1:
                 errors.append(
-                    f"Agent capability {node.capability} must resolve to exactly one enabled Agent"
+                    f"Agent capability {node.capability} must resolve to exactly one published Agent"
                 )
             continue
         executor_id = bindings.get((definition.key, node.key))

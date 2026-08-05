@@ -42,16 +42,6 @@ create table if not exists workspace_node_limits (
   primary key(workspace_id, workflow_key, node_key)
 );
 
-create table if not exists agent_definitions (
-  agent_id text primary key,
-  capability text not null,
-  runtime text not null,
-  definition_json text not null,
-  definition_hash text not null,
-  enabled integer not null default 1 check(enabled in (0, 1)),
-  updated_at timestamptz not null default current_timestamp
-);
-
 create table if not exists workspace_node_routes (
   workspace_id text not null references workspaces(id) on delete cascade,
   workflow_key text not null,

@@ -94,14 +94,16 @@ exemptions:
     explicit environment override. Agent Worker secret-file configuration is
     resolved at the same trusted boundary. The retired yaml cms
     credential keys are rejected at this boundary with migration guidance
-    (config governance G2). The AGENT_LEGION_DATABASE_URL
+    (config governance G2), as are the retired yaml agents catalog and
+    workflows.pi block (agent config governance phase 3, schema v27). The
+    AGENT_LEGION_DATABASE_URL
     environment override lives here too (config
     governance G4), as does the CMS_* / BASECMS_* alias validation hook
     (de-identification D3). Extract database settings into the configuration
     package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 258
+  ceiling: 292
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router, the artifact
@@ -145,3 +147,39 @@ exemptions:
   owner: agent-worker
   remove_when: issues/open/033-P3-worker-supervisor-upload-aggregation-split.md
   ceiling: 245
+- check: architecture.file_budget
+  path: server/app/agent_broker/dispatch.py
+  reason: Agent config governance phase 3 moved the strict execution-block
+    resolution (node override -> workspace default -> fail fast, runtime-pinned
+    command builder) into the dispatch boundary; the manifest builder and the
+    resolver share the runtime binary constants, so splitting now would just
+    scatter one cohesive rule. Extract the resolver with the phase 4
+    pi cleanup.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 176
+- check: architecture.file_budget
+  path: server/app/services/agent_service.py
+  reason: Schema v27 made this service the only Agent catalog source of truth;
+    the short-TTL published-definition cache (hot claim-path reads) lives next
+    to the lifecycle methods so publish/archive can invalidate it in one
+    place. Split the cache into its own module if it gains more policy.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 158
+- check: architecture.file_budget
+  path: server/app/services/job_intake.py
+  reason: One added import line for the DB-backed published Agent catalog
+    (agent config governance phase 3); the intake flow itself is unchanged.
+    Revert the exemption when the intake service is next split.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 209
+- check: architecture.file_budget
+  path: server/app/workflows/pi_command_builder.py
+  reason: Agent config governance phase 3 (execution.* manifest) added one
+    line to the pi command builder; the whole module is phase 4 cleanup
+    material, so an exemption beats churning dead-path code.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 55

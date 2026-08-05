@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
-from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
+from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -15,7 +16,7 @@ def _seed_queued_request(job_db, *, job_id: str, workspace_id: str = "test-works
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
+    replace_agent_catalog({"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
@@ -45,7 +46,7 @@ def _seed_queued_request(job_db, *, job_id: str, workspace_id: str = "test-works
             manifest={
                 "job_id": job_id,
                 "log_path": f"logs/{job_id}.log",
-                "pi": {"provider": "gateway", "model": "test-model"},
+                "execution": {"provider": "gateway", "model": "test-model"},
             },
         )
     )

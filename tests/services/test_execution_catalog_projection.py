@@ -1,4 +1,9 @@
-"""execution_catalog：provider/model/thinking 按 runtime 投影。"""
+"""execution_catalog：Agent 列表来自传入 catalog，不再投影全局 provider/model/thinking。
+
+全局 ``workflows.pi`` 投影已随 YAML 退役（agent 配置治理 phase 3）：执行默认
+是 workspace 级配置，全局 catalog 无从投影，前端「继承默认」提示改读
+workspace settings payload 的 agentDefaults。
+"""
 
 from __future__ import annotations
 
@@ -8,7 +13,6 @@ from typing import Any
 import pytest
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.services.executor_catalog import execution_catalog
 from server.app.settings import Settings
 
@@ -27,33 +31,39 @@ def _settings(tmp_path: Path) -> Settings:
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={},
-        agent_definitions={
-            "agent-pi": AgentDefinition(capability="cap-pi", runtime="pi", skill="q/a"),
-            "agent-velites": AgentDefinition(capability="cap-v", runtime="velites", skill="q/b"),
-            "agent-openclaw": AgentDefinition(capability="cap-o", runtime="openclaw", skill="q/c"),
-        },
-        executor_runtime=ExecutorRuntimeConfig.model_validate(
-            {
-                "workflows": {
-                    "enabled": True,
-                    "pi": {"provider": "gateway", "model": "m1", "thinking": "high"},
-                },
-                "openclaw": {"command_template": ["openclaw"]},
-            }
-        ),
     )
 
 
+_AGENTS = {
+    "agent-pi": AgentDefinition(capability="cap-pi", runtime="pi", skill="q/a"),
+    "agent-velites": AgentDefinition(capability="cap-v", runtime="velites", skill="q/b"),
+    "agent-openclaw": AgentDefinition(capability="cap-o", runtime="openclaw", skill="q/c"),
+}
+
+
 @pytest.mark.no_db
-def test_projection_includes_pi_and_velites_but_not_openclaw(tmp_path: Path) -> None:
-    catalog = execution_catalog(_settings(tmp_path), _StubSkills())
+def test_catalog_lists_agents_without_execution_projection(tmp_path: Path) -> None:
+    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), _AGENTS)
 
     agents = {entry["id"]: entry for entry in catalog["agents"]}
-    # velites 同样需要 provider/model/thinking 投影（manifest 冻结同源）。
-    for agent_id in ("agent-pi", "agent-velites"):
-        assert agents[agent_id]["provider"] == "gateway"
-        assert agents[agent_id]["model"] == "m1"
-        assert agents[agent_id]["thinking"] == "high"
-    assert "provider" not in agents["agent-openclaw"]
-    assert "model" not in agents["agent-openclaw"]
-    assert "thinking" not in agents["agent-openclaw"]
+    assert set(agents) == set(_AGENTS)
+    for entry in agents.values():
+        # 执行配置（provider/model/thinking）由 workspace 默认 + 节点覆盖解析，
+        # 不属于全局 catalog 投影。
+        assert "provider" not in entry
+        assert "model" not in entry
+        assert "thinking" not in entry
+    assert agents["agent-velites"]["runtime"] == "velites"
+    assert agents["agent-velites"]["capability"] == "cap-v"
+    assert agents["agent-velites"]["skill"] == "q/b"
+
+
+@pytest.mark.no_db
+def test_executor_capability_details_have_no_runtime_projection(tmp_path: Path) -> None:
+    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), _AGENTS)
+
+    for executor in catalog["executors"]:
+        for detail in executor["capability_details"]:
+            assert "provider" not in detail
+            assert "model" not in detail
+            assert "thinking" not in detail

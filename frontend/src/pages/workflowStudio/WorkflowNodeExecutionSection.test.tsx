@@ -1,11 +1,21 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentDefinition,
   ExecutorDefinition,
 } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+
+// 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
+// 不再读 executor catalog 的 agent 条目。
+vi.mock('./useWorkspaceAgentDefaults', () => ({
+  useWorkspaceAgentDefaults: () => ({
+    provider: 'deepseek',
+    model: 'your-model-b',
+    thinking: 'low',
+  }),
+}))
 
 const node: WorkflowNodeRecord = {
   key: 'generate_key_info',

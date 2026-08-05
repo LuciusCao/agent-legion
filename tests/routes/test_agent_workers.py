@@ -229,7 +229,7 @@ def test_queued_claim_uses_latest_execution_config_from_same_revision(tmp_path: 
         )["worker_token"]
         claimed = _claim(client, token)
 
-    assert claimed["manifest"]["pi"]["model"] == "latest-model"
+    assert claimed["manifest"]["execution"]["model"] == "latest-model"
 
 
 def test_heartbeat_requires_and_validates_lease_id(tmp_path: Path) -> None:

@@ -8,6 +8,8 @@ from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.workflow_worker.agent_claim import cached_batch_payload
 from server.app.workflow_worker.agent_gate import AgentPassState
@@ -16,6 +18,16 @@ from server.app.workflow_worker.maintenance import WorkflowMaintenance
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflow_worker.schedule import try_claim_and_submit
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
+
+
+@pytest.fixture(autouse=True)
+def _agent_catalog():
+    """The claim path reads the published catalog from the DB now; stub it."""
+    with patch(
+        "server.app.workflow_worker.agent_claim.published_agent_definitions",
+        return_value={"agent-x": MagicMock(config_schema={})},
+    ):
+        yield
 
 
 def _node(key: str = "fetch") -> WorkflowNode:
@@ -91,7 +103,6 @@ def test_batch_payload_none_without_batch_id(tmp_path: Path) -> None:
 def test_agent_active_request_gate_skips_config_and_enqueue(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
-    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
     # The per-pass batched filter says this (job, node) already has a request.
     worker._agent_pass.active_nodes = {("job1", "fetch")}
 
@@ -115,7 +126,6 @@ def test_agent_active_request_gate_skips_config_and_enqueue(tmp_path: Path) -> N
 def test_agent_pool_full_flag_skips_rest_of_pass(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
-    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
     worker._agent_pass.pool_full = True
 
     claimed = try_claim_and_submit(
@@ -140,7 +150,6 @@ def test_agent_pool_full_flag_skips_rest_of_pass(tmp_path: Path) -> None:
 def test_agent_stock_gate_skips_when_stocked_to_target(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
-    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
     worker._agent_pass.stock_snapshot = StockSnapshot(
         config=AgentStockConfig(min_stock=2, max_stock=10),
         buckets={("ws1", "agent-x"): StockBucket(queued=2)},
@@ -167,7 +176,6 @@ def test_agent_stock_gate_skips_when_stocked_to_target(tmp_path: Path) -> None:
 def test_agent_enqueue_counts_pass_claim(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
-    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
     worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
 
@@ -197,7 +205,6 @@ def test_agent_enqueue_counts_pass_claim(tmp_path: Path) -> None:
 def test_agent_stock_gate_uses_enqueued_counter_within_window(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
-    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
     worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
     # Frozen snapshot: nothing stocked yet, target 1 (min_stock floor).
@@ -239,7 +246,6 @@ def test_agent_stock_gate_uses_enqueued_counter_within_window(tmp_path: Path) ->
 def test_agent_enqueue_skipped_when_pool_full(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
-    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
     worker.agent_dispatch.enqueue_pool.submit.return_value = False
     worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
 
@@ -265,7 +271,6 @@ def test_agent_enqueue_skipped_when_pool_full(tmp_path: Path) -> None:
 def test_agent_enqueue_config_error_fails_node(tmp_path: Path) -> None:
     node = _node()
     worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
-    worker.settings.agent_definitions = {"agent-x": MagicMock(config_schema={})}
     worker.agent_dispatch.enqueue_pool.submit.return_value = True
     worker.agent_dispatch.enqueue.side_effect = ValueError("bad route")
     worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}

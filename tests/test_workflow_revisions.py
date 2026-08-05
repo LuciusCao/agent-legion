@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
+from server.app.services.agent_service import reset_published_agent_cache
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
@@ -26,6 +27,7 @@ from server.app.workflows.definition import (
     workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
+from tests.helpers import replace_agent_catalog
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -206,13 +208,18 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    # Simulate catalog/DB desync: a second enabled definition for the same capability.
+    # Simulate catalog/DB desync: a second published definition for the same capability.
     with queries.connect() as conn:
         conn.execute(
-            "insert into agent_definitions("
-            " agent_id, capability, runtime, definition_json, definition_hash, enabled)"
-            " values ('question-key-info-v2', 'generate_key_info', 'pi', '{}', 'hash-v2', 1)"
+            "insert into versioned_entities("
+            " id, entity_type, workspace_id, entity_key, version, status,"
+            " definition_json, definition_hash, created_by)"
+            " values ('agent:question-key-info-v2:v1', 'agent', null,"
+            " 'question-key-info-v2', 1, 'published',"
+            ' \'{"capability": "generate_key_info", "runtime": "velites",'
+            " \"skill\": \"question/generate_key_info\"}', 'hash-v2', 'user:test')"
         )
+    reset_published_agent_cache()
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
         service.reconcile_active_agent_routes()
@@ -240,14 +247,13 @@ def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    # Simulate the empty-catalog regression: every definition disabled.
-    with queries.connect() as conn:
-        conn.execute("update agent_definitions set enabled=0")
+    # Simulate the empty-catalog regression: every published definition archived.
+    replace_agent_catalog({})
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
         service.reconcile_active_agent_routes()
 
-    assert any("no enabled Agent Definitions" in record.getMessage() for record in caplog.records)
+    assert any("no published Agent Definitions" in record.getMessage() for record in caplog.records)
     rows = _route_and_capacity_rows(queries, workspace["id"], "question_comprehension_info")
     assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
 

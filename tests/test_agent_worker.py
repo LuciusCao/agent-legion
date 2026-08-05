@@ -38,7 +38,7 @@ def _manifest(command: list[str], *, timeout_seconds: int = 60) -> dict:
         "command_spec": {"command": command, "prompt": "do the thing"},
         "input_artifacts": {},
         "expected_outputs": ["output.json"],
-        "pi": {"timeout_seconds": timeout_seconds},
+        "execution": {"timeout_seconds": timeout_seconds},
     }
 
 
