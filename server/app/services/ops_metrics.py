@@ -22,6 +22,10 @@ from server.app.services._ops_metrics_catchup import sample_catch_up as _sample_
 from server.app.services._ops_metrics_sampling import _EMPTY_TOKENS, _upsert_sample
 from server.app.services._ops_metrics_series import query_series as _query_series
 from server.app.services._ops_metrics_summary import query_summary as _query_summary
+from server.app.services._ops_metrics_workspace_sampling import (
+    collect_workspace_samples,
+    upsert_workspace_samples,
+)
 
 Granularity = Literal["6h", "24h", "30d"]
 
@@ -131,6 +135,7 @@ class OpsMetricsService:
                     (bucket_start, bucket_end),
                 ).fetchall()
             }
+            workspace_samples = collect_workspace_samples(conn, bucket_start, bucket_end)
         with write_transaction(self._database_dsn) as conn:
             _upsert_sample(
                 conn,
@@ -150,6 +155,7 @@ class OpsMetricsService:
                     active_executions=claimed_by_worker.get(worker_id, 0),
                     tokens=tokens_by_worker.get(worker_id, _EMPTY_TOKENS),
                 )
+            upsert_workspace_samples(conn, bucket_start, workspace_samples)
 
     def sample_catch_up(self, now: datetime | None = None) -> int:
         """Persist every missing minute bucket since the last written sample."""
@@ -163,12 +169,15 @@ class OpsMetricsService:
             )
             return result.rowcount
 
-    def query_summary(self, worker_id: str | None = None) -> dict[str, Any]:
-        return _query_summary(self, worker_id)
+    def query_summary(
+        self, worker_id: str | None = None, workspace_id: str | None = None
+    ) -> dict[str, Any]:
+        return _query_summary(self, worker_id, workspace_id)
 
     def query_series(
         self,
         granularity: Granularity,
         worker_id: str | None = None,
+        workspace_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        return _query_series(self, granularity, worker_id)
+        return _query_series(self, granularity, worker_id, workspace_id)

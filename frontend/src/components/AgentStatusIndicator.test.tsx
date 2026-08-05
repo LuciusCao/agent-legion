@@ -107,7 +107,7 @@ describe('AgentStatusIndicator', () => {
     renderIndicator()
     expect(screen.getByRole('link', { name: '查看监控' })).toHaveAttribute(
       'href',
-      '/monitoring'
+      '/workspaces/ws1/monitoring'
     )
   })
 

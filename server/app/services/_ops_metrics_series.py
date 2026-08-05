@@ -40,15 +40,18 @@ def query_series(
     service: OpsMetricsService,
     granularity: Granularity,
     worker_id: str | None = None,
+    workspace_id: str | None = None,
 ) -> list[dict[str, Any]]:
     """Read minute rows or epoch-floor rollups for one metric scope.
 
     ``granularity`` names the lookback window and implies the bin size
     (``6h``→60s raw rows, ``24h``→300s, ``30d``→14400s). ``worker_id=None``
     reads the global aggregate rows (``worker_id=''``); any other value
-    reads only that Worker's per-worker samples.
+    reads only that Worker's per-worker samples. ``workspace_id`` selects
+    per-workspace rows (schema v23); the two scopes are not combined.
     """
     worker_key = worker_id if worker_id is not None else ""
+    workspace_key = workspace_id if workspace_id is not None else ""
     window, bin_seconds = _WINDOWS[granularity]
     cutoff = datetime.now(UTC) - window
     if bin_seconds == 60:
@@ -59,7 +62,7 @@ def query_series(
                    queued, queued as queued_max,
                    input_tokens, output_tokens, cache_read_tokens, total_tokens
             from ops_metric_samples
-            where bucket_start >= %s and worker_id = %s
+            where bucket_start >= %s and worker_id = %s and workspace_id = %s
             order by bucket_start
             """
     else:
@@ -80,12 +83,12 @@ def query_series(
                    sum(cache_read_tokens) as cache_read_tokens,
                    sum(total_tokens) as total_tokens
             from ops_metric_samples
-            where bucket_start >= %s and worker_id = %s
+            where bucket_start >= %s and worker_id = %s and workspace_id = %s
             group by 1
             order by 1
             """
     with read_connection(service._database_dsn) as conn:
-        rows = conn.execute(sql, (cutoff, worker_key)).fetchall()
+        rows = conn.execute(sql, (cutoff, worker_key, workspace_key)).fetchall()
     return [
         {
             "bucket_start": _isoformat_utc(row["bucket_start"]),

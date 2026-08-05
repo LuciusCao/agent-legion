@@ -17,11 +17,14 @@ def _bucket_start(now: datetime) -> datetime:
     return now.replace(second=0, microsecond=0) - timedelta(minutes=1)
 
 
-def _fetch_sample(bucket_start: datetime, worker_id: str = "") -> dict | None:
+def _fetch_sample(
+    bucket_start: datetime, worker_id: str = "", workspace_id: str = ""
+) -> dict | None:
     with read_connection(TEST_DATABASE_URL) as conn:
         return conn.execute(
-            "select * from ops_metric_samples where bucket_start = ? and worker_id = ?",
-            (bucket_start, worker_id),
+            "select * from ops_metric_samples"
+            " where bucket_start = ? and worker_id = ? and workspace_id = ?",
+            (bucket_start, worker_id, workspace_id),
         ).fetchone()
 
 
@@ -266,10 +269,16 @@ def test_sample_once_upserts_per_worker_rows_idempotently() -> None:
     assert row["active_executions"] == 1
     with read_connection(TEST_DATABASE_URL) as conn:
         rows = conn.execute(
-            "select worker_id from ops_metric_samples where bucket_start = ? order by worker_id",
+            "select worker_id, workspace_id from ops_metric_samples"
+            " where bucket_start = ? order by worker_id, workspace_id",
             (bucket,),
         ).fetchall()
-    assert [r["worker_id"] for r in rows] == ["", "w-1"]
+    # 全局行 + per-worker 行之外，claimed 执行还产生 per-workspace 行（v23）。
+    assert [(r["worker_id"], r["workspace_id"]) for r in rows] == [
+        ("", ""),
+        ("", "ops-ws"),
+        ("w-1", ""),
+    ]
 
 
 def test_query_series_6h_returns_raw_minute_rows_in_order() -> None:
@@ -623,6 +632,8 @@ def test_query_summary_reports_queue_depth_oldest_and_sweeper_count() -> None:
 
 
 def test_queue_alert_blocked_from_fresh_signal() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-blocked", "queued")
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
@@ -690,3 +701,100 @@ def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
     assert row is not None
     assert row["kind"] == "blocked"
     assert _json.loads(row["reasons_json"]) == {"capability_or_model_mismatch": 3}
+
+
+def test_sample_writes_per_workspace_rows() -> None:
+    _seed_workspace_job()
+    _insert_execution("e-q1", "queued")
+    _insert_execution("e-c1", "claimed", worker_id="w-1")
+
+    _service().sample_once(_NOW)
+
+    row = _fetch_sample(_bucket_start(_NOW), workspace_id="ops-ws")
+    assert row is not None
+    assert row["queued"] == 1
+    assert row["active_executions"] == 1
+    assert row["online_workers"] == 0
+    assert row["total_tokens"] == 0
+
+
+def test_query_series_scopes_to_workspace_rows() -> None:
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    bucket = now - timedelta(minutes=1)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into ops_metric_samples(bucket_start, worker_id, workspace_id, queued)"
+            " values (?, '', 'ops-ws', 7), (?, '', '', 99)",
+            (bucket, bucket),
+        )
+
+    ws_rows = _service().query_series("6h", workspace_id="ops-ws")
+    global_rows = _service().query_series("6h")
+
+    assert [r["queued"] for r in ws_rows] == [7]
+    assert [r["queued"] for r in global_rows] == [99]
+
+
+def _insert_execution_ws(
+    execution_id: str, state: str, *, workspace_id: str, job_id: str, queued_at: datetime
+) -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            """
+            insert into agent_execution_requests(
+              execution_id, workspace_id, job_id, workflow_key, node_key,
+              agent_id, agent_definition_hash, node_concurrency_limit, state,
+              queued_at, manifest_json
+            ) values (?, ?, ?, 'questions', ?, 'agent-1', 'hash', 5, ?, ?, '{}')
+            """,
+            (execution_id, workspace_id, job_id, f"node-{execution_id}", state, queued_at),
+        )
+
+
+def test_query_summary_scopes_queue_to_workspace() -> None:
+    _seed_workspace_job()
+    _seed_workspace_job(job_id="job-2", workspace_id="ops-ws-2")
+    _insert_execution("e-a", "queued")
+    _insert_execution_ws("e-b", "queued", workspace_id="ops-ws-2", job_id="job-2", queued_at=_NOW)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
+            " values ('job-2', 'poison-b', 'failed', 'unclaimable_model', current_timestamp)"
+        )
+
+    summary = _service().query_summary(workspace_id="ops-ws-2")
+
+    assert summary["queue"]["queued"] == 1
+    assert summary["queue"]["recent_hour_unclaimable_failed"] == 1
+
+
+def test_queue_alert_stalled_scopes_to_workspace() -> None:
+    _seed_workspace_job()
+    _seed_workspace_job(job_id="job-2", workspace_id="ops-ws-2")
+    _insert_execution("e-a", "queued", queued_at=datetime.now(UTC) - timedelta(minutes=5))
+    # 全局有在线 worker；ops-ws-2 无 queued，不应报 stalled。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=1)
+        conn.execute(
+            "insert into ops_metric_samples(bucket_start, worker_id, workspace_id,"
+            " online_workers, active_executions) values (?, '', '', 2, 0),"
+            " (?, '', 'ops-ws', 0, 0)",
+            (bucket, bucket),
+        )
+
+    assert _service().query_summary(workspace_id="ops-ws")["queue_alert"]["kind"] == "stalled"
+    assert _service().query_summary(workspace_id="ops-ws-2")["queue_alert"] is None
+
+
+def test_queue_alert_blocked_requires_workspace_queue() -> None:
+    _seed_workspace_job()
+    _insert_execution("e-a", "queued")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
+            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 4}', current_timestamp)"
+        )
+
+    assert _service().query_summary(workspace_id="ops-ws")["queue_alert"]["kind"] == "blocked"
+    # 该 workspace 没有 queued 行：fleet 级 blocked 信号不外溢到其他 workspace。
+    assert _service().query_summary(workspace_id="ops-ws-2")["queue_alert"] is None

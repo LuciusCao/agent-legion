@@ -122,18 +122,24 @@ export function QueueSummaryCards({
   )
 }
 
-/** 队列深度趋势图；全局指标，数据自取自全局（不带 Worker 过滤）请求。 */
+/** 队列深度趋势图；自取自同粒度请求，可挂 workspace 作用域（v23）。 */
 export function QueueDepthChartSection({
   granularity,
   formatTime,
+  workspaceId,
 }: {
   granularity: OpsGranularity
   formatTime: (iso: string) => string
+  workspaceId?: string
 }) {
-  // 与监控面板同频（30s）刷新；队列是 workspace 维度，Worker 过滤器不适用。
+  // 与监控面板同频（30s）刷新；全局视图不带过滤，ws 视图按 workspace 过滤。
   const { data, loading } = useAsync(
-    () => fetchOpsMetrics({ granularity }),
-    [granularity],
+    () =>
+      fetchOpsMetrics({
+        granularity,
+        ...(workspaceId ? { workspace_id: workspaceId } : {}),
+      }),
+    [granularity, workspaceId],
     { refetchInterval: 30_000 }
   )
   const buckets = useMemo(
@@ -142,7 +148,10 @@ export function QueueDepthChartSection({
   )
   return (
     <div className={panelStyles.chartSection}>
-      <h3>队列深度（全局）{loading && !data ? '（加载中…）' : ''}</h3>
+      <h3>
+        队列深度{workspaceId ? '' : '（全局）'}
+        {loading && !data ? '（加载中…）' : ''}
+      </h3>
       <MetricsChart
         buckets={buckets}
         ariaLabel="Agent 执行队列深度趋势"
