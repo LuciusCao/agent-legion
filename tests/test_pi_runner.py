@@ -659,7 +659,7 @@ def test_run_cleans_up_old_run_dirs_on_retry(tmp_path, monkeypatch):
     with job_db.connect() as conn:
         conn.execute(
             "update job_nodes set status='ready', finished_at=null, error_message='' "
-            "where job_id=? and node_key=?",
+            "where job_id=%s and node_key=%s",
             (job["id"], "extract_keywords"),
         )
 

@@ -188,19 +188,19 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
     assert get_response.status_code == 404
     with job_db._connect_read() as conn:
         assert (
-            conn.execute("select 1 from job_batches where workspace_id = ?", (ws_id,)).fetchone()
+            conn.execute("select 1 from job_batches where workspace_id = %s", (ws_id,)).fetchone()
             is None
         )
         assert (
-            conn.execute("select 1 from jobs where workspace_id = ?", (ws_id,)).fetchone() is None
+            conn.execute("select 1 from jobs where workspace_id = %s", (ws_id,)).fetchone() is None
         )
         for job_id in job_ids:
             assert (
-                conn.execute("select 1 from job_nodes where job_id = ?", (job_id,)).fetchone()
+                conn.execute("select 1 from job_nodes where job_id = %s", (job_id,)).fetchone()
                 is None
             )
             assert (
-                conn.execute("select 1 from node_runs where job_id = ?", (job_id,)).fetchone()
+                conn.execute("select 1 from node_runs where job_id = %s", (job_id,)).fetchone()
                 is None
             )
 

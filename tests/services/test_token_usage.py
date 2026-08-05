@@ -212,22 +212,22 @@ def test_persist_node_run_usage_creates_row(tmp_path):
     with closing(connect_database(db_path)) as conn:
         # Insert required parent rows.
         conn.execute(
-            "insert into workspaces(id, name) values (?, ?) on conflict (id) do nothing",
+            "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
             ("ws-1", "Test"),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (?, ?, ?, ?, ?) on conflict (id) do nothing",
+            "values (%s, %s, %s, %s, %s) on conflict (id) do nothing",
             ("job-1", "ws-1", "wf", "source", "id"),
         )
         conn.execute(
-            "insert into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)"
+            "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)"
             " on conflict (id) do nothing",
             (1, "job-1", "node-a", "completed"),
         )
         persist_node_run_usage(conn, summary)
         row = conn.execute(
-            "select * from node_run_token_usage where node_run_id=?", (1,)
+            "select * from node_run_token_usage where node_run_id=%s", (1,)
         ).fetchone()
         assert row is not None
         assert row["input_tokens"] == 100

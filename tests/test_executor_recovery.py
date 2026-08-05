@@ -84,21 +84,21 @@ def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             """,
             (workspace_id, "local-default", 1),
         )
         conn.execute(
             """
             insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             """,
             (workspace_id, "recovery_test", "fetch", "local-default"),
         )
         conn.execute(
             """
             insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             """,
             (workspace_id, "recovery_test", "fetch", 1),
         )
@@ -127,7 +127,7 @@ def _set_expired(repo: ExecutorLeaseRepository, lease_id: str) -> None:
     conn = connect_database(repo.path)
     try:
         conn.execute(
-            "update executor_leases set expires_at=? where id=?",
+            "update executor_leases set expires_at=%s where id=%s",
             (past.strftime("%Y-%m-%d %H:%M:%S.%f"), lease_id),
         )
         conn.commit()
@@ -137,13 +137,13 @@ def _set_expired(repo: ExecutorLeaseRepository, lease_id: str) -> None:
 
 def _fetch_recovery_state(queries: JobQueries, job_id: str, lease_id: str, node_run_id: int):
     with queries.connect() as conn:
-        lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
-        run = conn.execute("select * from node_runs where id=?", (node_run_id,)).fetchone()
+        lease = conn.execute("select * from executor_leases where id=%s", (lease_id,)).fetchone()
+        run = conn.execute("select * from node_runs where id=%s", (node_run_id,)).fetchone()
         node = conn.execute(
-            "select * from job_nodes where job_id=? and node_key=?",
+            "select * from job_nodes where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
-        job = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+        job = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
     return lease, run, node, job
 
 
@@ -209,11 +209,11 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
 
     with queries.connect() as conn:
         lease_row = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=?",
+            "select * from executor_leases where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
         run_row = conn.execute(
-            "select * from node_runs where job_id=? and node_key=?",
+            "select * from node_runs where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
     lease_id = lease_row["id"]
@@ -245,7 +245,7 @@ def test_fresh_sweeper_start_expires_stale_leases(
 
     with queries.connect() as conn:
         lease_row = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=?",
+            "select * from executor_leases where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
     lease_id = lease_row["id"]
@@ -257,12 +257,12 @@ def test_fresh_sweeper_start_expires_stale_leases(
     sweeper.stop()
 
     with queries.connect() as conn:
-        lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
+        lease = conn.execute("select * from executor_leases where id=%s", (lease_id,)).fetchone()
         node = conn.execute(
-            "select * from job_nodes where job_id=? and node_key=?",
+            "select * from job_nodes where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
-        job = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+        job = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
     assert lease["status"] == "expired"
     assert node["status"] == "failed"
     assert job["status"] == "failed"
@@ -287,7 +287,7 @@ def test_recovery_frees_global_and_workspace_capacity(
 
     with queries.connect() as conn:
         lease_row = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=?",
+            "select * from executor_leases where job_id=%s and node_key=%s",
             (job_id_a, "fetch"),
         ).fetchone()
     lease_id = lease_row["id"]
@@ -326,7 +326,7 @@ def test_recovery_does_not_resubmit_failed_node(
 
     with queries.connect() as conn:
         lease_row = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=?",
+            "select * from executor_leases where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
     lease_id = lease_row["id"]
@@ -343,7 +343,7 @@ def test_recovery_does_not_resubmit_failed_node(
 
     with queries.connect() as conn:
         node = conn.execute(
-            "select * from job_nodes where job_id=? and node_key=?",
+            "select * from job_nodes where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
     assert node["status"] == "failed"
@@ -357,11 +357,11 @@ def test_recovery_is_idempotent(
 
     with queries.connect() as conn:
         lease_row = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=?",
+            "select * from executor_leases where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
         run_row = conn.execute(
-            "select * from node_runs where job_id=? and node_key=?",
+            "select * from node_runs where job_id=%s and node_key=%s",
             (job_id, "fetch"),
         ).fetchone()
     lease_id = lease_row["id"]

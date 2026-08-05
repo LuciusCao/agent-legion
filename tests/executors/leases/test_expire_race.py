@@ -24,7 +24,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 _STALE_SELECT = """
     select id, job_id, node_key, node_run_id, execution_id
     from executor_leases
-    where status='active' and expires_at<=?
+    where status='active' and expires_at<=%s
 """
 
 
@@ -37,7 +37,7 @@ def _claimed_stale_lease(job_db: JobQueries, repo: ExecutorLeaseRepository, name
     past = database_timestamp(datetime.now(UTC) - timedelta(seconds=10))
     with write_transaction(job_db.path) as conn:
         conn.execute(
-            "update executor_leases set expires_at=? where id=?",
+            "update executor_leases set expires_at=%s where id=%s",
             (past, claim.lease_id),
         )
     return workspace_id, job_id, claim
@@ -45,7 +45,7 @@ def _claimed_stale_lease(job_db: JobQueries, repo: ExecutorLeaseRepository, name
 
 def _lease_status(job_db: JobQueries, lease_id: str) -> str:
     with read_connection(job_db.path) as conn:
-        row = conn.execute("select status from executor_leases where id=?", (lease_id,)).fetchone()
+        row = conn.execute("select status from executor_leases where id=%s", (lease_id,)).fetchone()
     assert row is not None
     return str(row["status"])
 

@@ -44,12 +44,12 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     with queries._connect_read() as conn:
         route = conn.execute(
             "select target_kind, target_id from workspace_node_routes"
-            " where workspace_id=? and workflow_key=? and node_key='generate_key_info'",
+            " where workspace_id=%s and workflow_key=%s and node_key='generate_key_info'",
             (workspace["id"], definition.key),
         ).fetchone()
         capacity = conn.execute(
             "select max_concurrency, source_revision_id from workspace_node_capacities"
-            " where workspace_id=? and workflow_key=? and node_key='generate_key_info'",
+            " where workspace_id=%s and workflow_key=%s and node_key='generate_key_info'",
             (workspace["id"], definition.key),
         ).fetchone()
     assert route is not None
@@ -141,12 +141,12 @@ def _route_and_capacity_rows(queries: JobQueries, workspace_id: str, workflow_ke
     with queries._connect_read() as conn:
         routes = conn.execute(
             "select node_key, target_kind, target_id from workspace_node_routes"
-            " where workspace_id=? and workflow_key=?",
+            " where workspace_id=%s and workflow_key=%s",
             (workspace_id, workflow_key),
         ).fetchall()
         capacities = conn.execute(
             "select node_key, max_concurrency from workspace_node_capacities"
-            " where workspace_id=? and workflow_key=?",
+            " where workspace_id=%s and workflow_key=%s",
             (workspace_id, workflow_key),
         ).fetchall()
     return {
@@ -169,7 +169,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
     with queries.connect() as conn:
         conn.execute(
             "insert into workspace_node_capacities(workspace_id, workflow_key, node_key, max_concurrency)"
-            " values (?, 'question_comprehension_info', 'generate_key_info', 20)",
+            " values (%s, 'question_comprehension_info', 'generate_key_info', 20)",
             (workspace["id"],),
         )
 
@@ -259,11 +259,11 @@ def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Pat
     # Simulate a pre-cutover active revision: no materialized routes/capacities.
     with queries.connect() as conn:
         conn.execute(
-            "delete from workspace_node_routes where workspace_id=? and workflow_key=?",
+            "delete from workspace_node_routes where workspace_id=%s and workflow_key=%s",
             (workspace["id"], "video_knowledge"),
         )
         conn.execute(
-            "delete from workspace_node_capacities where workspace_id=? and workflow_key=?",
+            "delete from workspace_node_capacities where workspace_id=%s and workflow_key=%s",
             (workspace["id"], "video_knowledge"),
         )
 

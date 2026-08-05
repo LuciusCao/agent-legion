@@ -18,18 +18,18 @@ def _seed_queued_request(job_db, *, job_id: str, workspace_id: str = "test-works
     sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, 'Test') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, ?, 'questions', 'question', ?)",
+            " values (%s, %s, 'questions', 'question', %s)",
             (job_id, workspace_id, job_id),
         )
-        conn.execute("insert into job_nodes(job_id, node_key) values (?, 'generate')", (job_id,))
+        conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'generate')", (job_id,))
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (?, 'questions', 'generate', 'agent', 'generator-v1')"
+            " values (%s, 'questions', 'generate', 'agent', 'generator-v1')"
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
             (workspace_id,),
         )

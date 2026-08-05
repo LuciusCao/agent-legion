@@ -29,25 +29,25 @@ def _insert_job_rows(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, 'Test') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, ?, 'questions', 'question', ?)",
+            " values (%s, %s, 'questions', 'question', %s)",
             (job_id, workspace_id, job_id),
         )
-        conn.execute("insert into job_nodes(job_id, node_key) values (?, ?)", (job_id, node_key))
+        conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (?, 'questions', ?, 'agent', ?)"
+            " values (%s, 'questions', %s, 'agent', %s)"
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
             (workspace_id, node_key, agent_id),
         )
         # Capacity is workspace-level now: one row per workspace.
         conn.execute(
             "insert into workspace_agent_capacities(workspace_id, max_concurrency)"
-            " values (?, ?)"
+            " values (%s, %s)"
             " on conflict(workspace_id) do update"
             " set max_concurrency=excluded.max_concurrency",
             (workspace_id, limit),
@@ -234,7 +234,7 @@ def test_expired_worker_claim_is_requeued_for_another_worker(job_db) -> None:
     assert first is not None
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), first.execution_id),
         )
 
@@ -293,12 +293,12 @@ def test_sweep_closes_request_when_lease_already_finished(job_db) -> None:
     assert claim is not None
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), claim.execution_id),
         )
         # Simulate the result path having finished the lease already.
         conn.execute(
-            "update executor_leases set status='released' where id=?",
+            "update executor_leases set status='released' where id=%s",
             (claim.lease_id,),
         )
 
@@ -306,7 +306,7 @@ def test_sweep_closes_request_when_lease_already_finished(job_db) -> None:
 
     with job_db._connect_read() as conn:
         row = conn.execute(
-            "select state from agent_execution_requests where execution_id=?",
+            "select state from agent_execution_requests where execution_id=%s",
             (claim.execution_id,),
         ).fetchone()
     assert row is not None
@@ -333,7 +333,7 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
         # The seeded request stays queued (its bundle must survive); add a
         # terminal request pointing at done.tar.gz.
         conn.execute(
-            "update agent_execution_requests set manifest_json=? where job_id='job-1'",
+            "update agent_execution_requests set manifest_json=%s where job_id='job-1'",
             (json.dumps({"bundle_name": "live.tar.gz"}),),
         )
         conn.execute(
@@ -342,7 +342,7 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
             " agent_id, agent_definition_hash, node_concurrency_limit,"
             " state, queued_at, manifest_json)"
             " values ('exec-done', 'test-workspace', 'job-1', 'questions', 'review',"
-            " 'generator-v1', 'sha256:whatever', 1, 'done', current_timestamp, ?)",
+            " 'generator-v1', 'sha256:whatever', 1, 'done', current_timestamp, %s)",
             (json.dumps({"bundle_name": "done.tar.gz"}),),
         )
 
@@ -391,7 +391,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
 
     with job_db._connect_read() as conn:
         row = conn.execute(
-            "select token_hash from agent_register_tokens where id=?", (token_id,)
+            "select token_hash from agent_register_tokens where id=%s", (token_id,)
         ).fetchone()
     assert row is not None
     assert row["token_hash"] == hashlib.sha256(secret.encode()).hexdigest()
@@ -594,7 +594,7 @@ def test_swept_expired_claim_releases_worker_status_panel(job_db) -> None:
     assert claimed is not None
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), claimed.execution_id),
         )
 
@@ -693,7 +693,7 @@ def test_heartbeat_and_mark_done_accept_reporting_state(job_db) -> None:
     )
     with job_db.connect() as conn:
         row = conn.execute(
-            "select state from agent_execution_requests where execution_id=?",
+            "select state from agent_execution_requests where execution_id=%s",
             (claimed.execution_id,),
         ).fetchone()
     assert row["state"] == "done"
@@ -752,7 +752,7 @@ def test_sweep_requeues_reporting_with_expired_heartbeat(job_db) -> None:
     assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=200), claimed.execution_id),
         )
 
@@ -760,7 +760,7 @@ def test_sweep_requeues_reporting_with_expired_heartbeat(job_db) -> None:
 
     with job_db.connect() as conn:
         row = conn.execute(
-            "select state, worker_id, lease_id from agent_execution_requests where execution_id=?",
+            "select state, worker_id, lease_id from agent_execution_requests where execution_id=%s",
             (claimed.execution_id,),
         ).fetchone()
     assert row["state"] == "queued"

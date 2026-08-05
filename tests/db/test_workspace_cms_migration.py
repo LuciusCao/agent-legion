@@ -30,7 +30,7 @@ def _insert_workspace(
 ) -> None:
     conn.execute(
         "insert into workspaces(id, name, cms_config_json, resource_config_json)"
-        " values (?, ?, ?, ?)",
+        " values (%s, %s, %s, %s)",
         (
             workspace_id,
             workspace_id,
@@ -42,7 +42,7 @@ def _insert_workspace(
 
 def _resource_config(conn: Any, workspace_id: str) -> dict[str, Any]:
     row = conn.execute(
-        "select resource_config_json from workspaces where id=?", (workspace_id,)
+        "select resource_config_json from workspaces where id=%s", (workspace_id,)
     ).fetchone()
     return json.loads(row["resource_config_json"])
 

@@ -632,7 +632,7 @@ def _bind_agent(job_db, workspace_id: str, node_key: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (?, 'question_comprehension_info', ?, 'agent', 'question-key-info-v1')"
+            " values (%s, 'question_comprehension_info', %s, 'agent', 'question-key-info-v1')"
             " on conflict(workspace_id, workflow_key, node_key) do update set"
             " target_kind='agent', target_id=excluded.target_id",
             (workspace_id, node_key),
@@ -652,7 +652,7 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
                 id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 f"lease-{execution_id}",
@@ -678,7 +678,7 @@ def _insert_agent_request(job_db, execution_id: str, job, node_key: str) -> None
         conn.execute(
             "insert into agent_execution_requests(execution_id, workspace_id, job_id, workflow_key,"
             " node_key, agent_id, agent_definition_hash, node_concurrency_limit, queued_at, manifest_json)"
-            " values (?, ?, ?, ?, ?, 'question-key-info-v1', ?, 20, current_timestamp, '{}')",
+            " values (%s, %s, %s, %s, %s, 'question-key-info-v1', %s, 20, current_timestamp, '{}')",
             (
                 execution_id,
                 job["workspace_id"],
@@ -734,7 +734,7 @@ def test_job_detail_worker_id_none_after_agent_lease_released(query_service, job
             " where execution_id='exec-agent-3'"
         )
         conn.execute(
-            "update executor_leases set status='released' where execution_id=?",
+            "update executor_leases set status='released' where execution_id=%s",
             ("exec-agent-3",),
         )
 
