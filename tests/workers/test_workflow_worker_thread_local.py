@@ -53,11 +53,11 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
 
@@ -91,11 +91,11 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
 
@@ -128,11 +128,11 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
 
@@ -167,7 +167,7 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
 
@@ -201,11 +201,11 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
 
@@ -251,11 +251,11 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
     job_db.pause_job(job["id"], "awaiting_resources")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
 
@@ -297,23 +297,23 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     with job_db.connect() as conn:
         for node in definition.nodes.values():
             conn.execute(
-                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
                 (ws["id"], "test", node.key, "local-default"),
             )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
             (ws["id"], "test", "root", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
             (ws["id"], "test", "left", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
             (ws["id"], "test", "target", 1),
         )
 
@@ -367,11 +367,11 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
     )
     with queries.connect() as conn:
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (workspace["id"], "local-default", 2),
         )
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (workspace["id"], "question_comprehension_info", "fetch_questions", "local-default"),
         )
     job = queries.create_job(
@@ -465,11 +465,11 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     with job_db.connect() as conn:
         for node in v1_definition.nodes.values():
             conn.execute(
-                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
                 (ws["id"], "question_comprehension_info", node.key, "local-default"),
             )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "local-default", 2),
         )
 

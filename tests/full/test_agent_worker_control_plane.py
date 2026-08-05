@@ -53,7 +53,7 @@ def test_worker_token_is_hashed_and_revocable(job_db) -> None:
     worker_id, secret = token.split(".", 1)
     with job_db.connect() as conn:
         row = conn.execute(
-            "select token_hash from agent_workers where worker_id=?", (worker_id,)
+            "select token_hash from agent_workers where worker_id=%s", (worker_id,)
         ).fetchone()
 
     assert row is not None
@@ -136,7 +136,7 @@ def test_startup_syncs_catalog_and_materializes_routes(client, job_db) -> None:
         }
         routes = conn.execute(
             "select node_key, target_id from workspace_node_routes"
-            " where workspace_id=? and target_kind='agent'",
+            " where workspace_id=%s and target_kind='agent'",
             (workspace_id,),
         ).fetchall()
 
@@ -209,7 +209,7 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
 
     with app.state.job_db._connect_read() as conn:
         request = conn.execute(
-            "select state from agent_execution_requests where execution_id=?",
+            "select state from agent_execution_requests where execution_id=%s",
             (claimed["execution_id"],),
         ).fetchone()
         claimed_count = conn.execute(

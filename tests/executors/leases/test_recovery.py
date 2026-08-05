@@ -27,7 +27,7 @@ def test_sync_job_status_returns_queued_when_nodes_remain(
     )
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            "update job_nodes set status='completed' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute("commit")
@@ -49,11 +49,11 @@ def test_sync_job_status_keeps_running_when_another_node_is_running(
     )
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            "update job_nodes set status='completed' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update job_nodes set status='running' where job_id=? and node_key=?",
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
             (job_id, "node_b"),
         )
         conn.execute("commit")
@@ -75,11 +75,11 @@ def test_sync_job_status_keeps_paused_when_execution_paused(
     )
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            "update job_nodes set status='completed' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update jobs set execution_paused=1, status='paused' where id=?",
+            "update jobs set execution_paused=1, status='paused' where id=%s",
             (job_id,),
         )
         conn.execute("commit")
@@ -101,11 +101,11 @@ def test_sync_job_status_failed_when_any_node_failed(
     )
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='failed' where job_id=? and node_key=?",
+            "update job_nodes set status='failed' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            "update job_nodes set status='completed' where job_id=%s and node_key=%s",
             (job_id, "node_b"),
         )
         conn.execute("commit")
@@ -136,11 +136,11 @@ def test_claim_lease_transitions_queued_job_back_to_running(
     )
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            "update job_nodes set status='completed' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update jobs set status='queued' where id=?",
+            "update jobs set status='queued' where id=%s",
             (job_id,),
         )
         conn.execute("commit")
@@ -177,11 +177,11 @@ def test_recover_orphaned_running_jobs_returns_them_to_queued(
     # simulate a stuck state: job running, node_a running, but no active lease
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='running' where job_id=? and node_key=?",
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update jobs set status='running' where id=?",
+            "update jobs set status='running' where id=%s",
             (job_id,),
         )
         conn.execute("commit")
@@ -205,15 +205,15 @@ def test_recover_orphaned_running_jobs_preserves_failed_job_status(
     )
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='failed' where job_id=? and node_key=?",
+            "update job_nodes set status='failed' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update job_nodes set status='running' where job_id=? and node_key=?",
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
             (job_id, "node_b"),
         )
         conn.execute(
-            "update jobs set status='running' where id=?",
+            "update jobs set status='running' where id=%s",
             (job_id,),
         )
         conn.execute("commit")
@@ -238,17 +238,17 @@ def test_recover_skips_jobs_with_active_lease(
     # insert an active lease for the job
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='running' where job_id=? and node_key=?",
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update jobs set status='running' where id=?",
+            "update jobs set status='running' where id=%s",
             (job_id,),
         )
         cursor = conn.execute(
             """
             insert into node_runs(job_id, node_key, status, started_at, log_path)
-            values (?, ?, 'running', ?, ?)
+            values (%s, %s, 'running', %s, %s)
             returning id
             """,
             (job_id, "node_a", database_timestamp(datetime.now(UTC)), "/tmp/run.log"),
@@ -260,7 +260,7 @@ def test_recover_skips_jobs_with_active_lease(
                 id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 "lease-1",
@@ -296,17 +296,17 @@ def test_recover_orphaned_running_jobs_marks_running_node_runs_failed(
     now_str = database_timestamp(now)
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='running' where job_id=? and node_key=?",
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
         conn.execute(
-            "update jobs set status='running' where id=?",
+            "update jobs set status='running' where id=%s",
             (job_id,),
         )
         conn.execute(
             """
             insert into node_runs(job_id, node_key, status, started_at, log_path)
-            values (?, ?, 'running', ?, ?)
+            values (%s, %s, 'running', %s, %s)
             """,
             (job_id, "node_a", now_str, "/tmp/orphan.log"),
         )
@@ -317,7 +317,7 @@ def test_recover_orphaned_running_jobs_marks_running_node_runs_failed(
     assert recovered == [job_id]
     with queries.connect() as conn:
         run = conn.execute(
-            "select * from node_runs where job_id=? and node_key=?",
+            "select * from node_runs where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         ).fetchone()
     assert run is not None
@@ -356,10 +356,10 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
     # Orphaned state: job running, node_a running with no lease; node_b pending.
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='running' where job_id=? and node_key=?",
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
             (job_id, "node_a"),
         )
-        conn.execute("update jobs set status='running' where id=?", (job_id,))
+        conn.execute("update jobs set status='running' where id=%s", (job_id,))
         conn.execute("commit")
 
     now_str = database_timestamp(datetime.now(UTC))
@@ -395,7 +395,7 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
     assert node_b is not None and node_b["status"] == "running"
     with queries.connect() as conn:
         run = conn.execute(
-            "select status from node_runs where id=?", (claim.node_run_id,)
+            "select status from node_runs where id=%s", (claim.node_run_id,)
         ).fetchone()
     assert run is not None and run["status"] == "running"
 

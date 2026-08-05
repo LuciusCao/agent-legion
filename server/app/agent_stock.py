@@ -93,7 +93,7 @@ def load_stock_snapshot(dsn: DatabaseDsn, config: AgentStockConfig) -> StockSnap
         rows = conn.execute(
             "select workspace_id, agent_id, count(*) as n"
             " from agent_execution_requests"
-            " where state = 'done' and finished_at > now() - make_interval(secs => ?)"
+            " where state = 'done' and finished_at > now() - make_interval(secs => %s)"
             " group by 1, 2",
             (config.window_seconds,),
         ).fetchall()

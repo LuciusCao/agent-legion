@@ -33,7 +33,7 @@ def claim_lease(
     # that executor makes the count-and-insert decision correct across API
     # replicas without blocking unrelated executors.
     conn.execute(
-        "select pg_advisory_xact_lock(hashtext(?))",
+        "select pg_advisory_xact_lock(hashtext(%s))",
         (f"executor-claim:{request.executor_id}",),
     )
 
@@ -45,7 +45,7 @@ def claim_lease(
         """
         select concurrency_limit
         from workspace_executor_allocations
-        where workspace_id=? and executor_id=?
+        where workspace_id=%s and executor_id=%s
         """,
         (request.workspace_id, request.executor_id),
     ).fetchone()
@@ -63,7 +63,7 @@ def claim_lease(
         """
         select executor_id
         from workspace_node_bindings
-        where workspace_id=? and workflow_key=? and node_key=?
+        where workspace_id=%s and workflow_key=%s and node_key=%s
         """,
         (request.workspace_id, request.workflow_key, request.node_key),
     ).fetchone()
@@ -81,7 +81,7 @@ def claim_lease(
             """
             select concurrency_limit
             from workspace_node_limits
-            where workspace_id=? and workflow_key=? and node_key=?
+            where workspace_id=%s and workflow_key=%s and node_key=%s
             """,
             (request.workspace_id, request.workflow_key, request.node_key),
         ).fetchone()
@@ -100,7 +100,7 @@ def claim_lease(
         """
         select count(*) as cnt
         from executor_leases
-        where executor_id=? and status='active' and expires_at>?
+        where executor_id=%s and status='active' and expires_at>%s
         """,
         (request.executor_id, now_str),
     ).fetchone()
@@ -108,7 +108,7 @@ def claim_lease(
         """
         select count(*) as cnt
         from executor_leases
-        where workspace_id=? and executor_id=? and status='active' and expires_at>?
+        where workspace_id=%s and executor_id=%s and status='active' and expires_at>%s
         """,
         (request.workspace_id, request.executor_id, now_str),
     ).fetchone()
@@ -125,7 +125,7 @@ def claim_lease(
             """
             select count(*) as cnt
             from executor_leases
-            where workspace_id=? and workflow_key=? and node_key=? and status='active' and expires_at>?
+            where workspace_id=%s and workflow_key=%s and node_key=%s and status='active' and expires_at>%s
             """,
             (request.workspace_id, request.workflow_key, request.node_key, now_str),
         ).fetchone()
@@ -146,9 +146,9 @@ def claim_lease(
             set status='running',
                 stale_reason='',
                 error_message='',
-                started_at=?,
+                started_at=%s,
                 finished_at=null
-            where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+            where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
             """,
             (now_str, request.job_id, request.node_key),
         )
@@ -161,7 +161,7 @@ def claim_lease(
         insert into node_runs(
             job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at
         )
-        values (?, ?, 'running', ?, ?, '', '', ?)
+        values (%s, %s, 'running', %s, %s, '', '', %s)
         returning id
         """,
         (request.job_id, request.node_key, json.dumps([]), log_path, now_str),
@@ -177,7 +177,7 @@ def claim_lease(
             id, execution_id, executor_id, workspace_id, job_id, workflow_key,
             node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+        values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
         """,
         (
             lease_id,
@@ -195,7 +195,7 @@ def claim_lease(
     )
 
     conn.execute(
-        "update jobs set status='running', updated_at=? where id=? and status != 'running'",
+        "update jobs set status='running', updated_at=%s where id=%s and status != 'running'",
         (now_str, request.job_id),
     )
 

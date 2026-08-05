@@ -24,7 +24,7 @@ def _make_job(job_id: str) -> None:
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
-            " title, status, storage_dir) values (?, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
+            " title, status, storage_dir) values (%s, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
             (job_id,),
         )
 

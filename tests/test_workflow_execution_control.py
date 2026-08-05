@@ -191,7 +191,7 @@ def _setup_workspace(
             conn.execute(
                 """
                 insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
@@ -200,7 +200,7 @@ def _setup_workspace(
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set
               concurrency_limit=excluded.concurrency_limit
             """,
@@ -210,7 +210,7 @@ def _setup_workspace(
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
@@ -294,8 +294,8 @@ def test_stale_target_snapshot_rejected_and_no_state_persisted(
     assert claim is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
     assert len(runs) == 0
     assert len(leases) == 0
 
@@ -326,8 +326,8 @@ def test_paused_job_rejects_claim_and_creates_no_state(
     assert claim is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
     assert len(runs) == 0
     assert len(leases) == 0
 
@@ -536,7 +536,7 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
             conn.execute(
                 """
                 insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
@@ -545,7 +545,7 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set
               concurrency_limit=excluded.concurrency_limit
             """,
@@ -555,7 +555,7 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,

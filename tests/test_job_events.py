@@ -120,7 +120,7 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
     cursor = conn.execute(
         """
         insert into node_runs(job_id, node_key, status, started_at)
-        values ('j1', 'n1', 'running', ?)
+        values ('j1', 'n1', 'running', %s)
         returning id
         """,
         (now_str,),
@@ -131,7 +131,7 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
         insert into executor_leases(
             id, execution_id, executor_id, workspace_id, job_id, workflow_key,
             node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (?, ?, 'e1', 'ws1', 'j1', 'p1', 'n1', ?, ?, ?, ?, ?)
+        ) values (%s, %s, 'e1', 'ws1', 'j1', 'p1', 'n1', %s, %s, %s, %s, %s)
         """,
         (
             lease_id,
@@ -484,7 +484,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
                 id, workspace_id, workflow_key, source_type, source_id,
                 batch_id, title, storage_dir
             )
-            values ('j1', 'ws1', 'p1', 'test', 's1', 'b1', 'J1', ?)
+            values ('j1', 'ws1', 'p1', 'test', 's1', 'b1', 'J1', %s)
             """,
             (str(jobs_dir / "ws1" / "j1"),),
         )

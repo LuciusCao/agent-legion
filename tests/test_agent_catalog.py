@@ -169,7 +169,7 @@ def test_sync_agent_definitions_replaces_enabled_catalog(job_db) -> None:
     assert get_agent_definition(TEST_DATABASE_URL, "generator-v1") is None
     with job_db.connect() as conn:
         disabled = conn.execute(
-            "select enabled from agent_definitions where agent_id=?", ("generator-v1",)
+            "select enabled from agent_definitions where agent_id=%s", ("generator-v1",)
         ).fetchone()
     assert disabled is not None
     assert disabled["enabled"] == 0

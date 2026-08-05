@@ -26,7 +26,7 @@ from server.app.workflows.sharding import (
 def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -> bool:
     now = datetime.now(UTC)
     lease = conn.execute(
-        "select status from executor_leases where id=?",
+        "select status from executor_leases where id=%s",
         (lease_id,),
     ).fetchone()
     if lease is None or lease["status"] != "active":
@@ -35,8 +35,8 @@ def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -
     conn.execute(
         """
         update executor_leases
-        set heartbeat_at=?, expires_at=?
-        where id=? and status='active'
+        set heartbeat_at=%s, expires_at=%s
+        where id=%s and status='active'
         """,
         (database_timestamp(now), database_timestamp(expires_at), lease_id),
     )
@@ -48,14 +48,14 @@ def finish_lease(
 ) -> bool:
     now = datetime.now(UTC)
     now_str = database_timestamp(now)
-    lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
+    lease = conn.execute("select * from executor_leases where id=%s", (lease_id,)).fetchone()
     if lease is None or lease["status"] != "active":
         return False
 
-    conn.execute("update executor_leases set status='released' where id=?", (lease_id,))
+    conn.execute("update executor_leases set status='released' where id=%s", (lease_id,))
 
     node_run = conn.execute(
-        "select log_path from node_runs where id=?", (lease["node_run_id"],)
+        "select log_path from node_runs where id=%s", (lease["node_run_id"],)
     ).fetchone()
     effective_log_path, run_dir, session_dir = canonicalize_finish_paths(
         result,
@@ -68,10 +68,10 @@ def finish_lease(
     conn.execute(
         """
         update node_runs
-        set status=?, exit_code=?, error_message=?, failure_category=?, failure_detail=?,
-            command_json=?, log_path=?, run_dir=?, session_dir=?,
-            skill_version=?, finished_at=?, runner=?
-        where id=?
+        set status=%s, exit_code=%s, error_message=%s, failure_category=%s, failure_detail=%s,
+            command_json=%s, log_path=%s, run_dir=%s, session_dir=%s,
+            skill_version=%s, finished_at=%s, runner=%s
+        where id=%s
         """,
         (
             result.status,
@@ -99,8 +99,8 @@ def finish_lease(
     conn.execute(
         """
         update job_nodes
-        set status=?, error_message=?, finished_at=?, failure_category=?, failure_detail=?
-        where job_id=? and node_key=?
+        set status=%s, error_message=%s, finished_at=%s, failure_category=%s, failure_detail=%s
+        where job_id=%s and node_key=%s
         """,
         (
             "completed" if result.status == "completed" else "failed",
@@ -130,7 +130,7 @@ def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
         """
         select id, job_id, node_key, node_run_id, execution_id
         from executor_leases
-        where status='active' and expires_at<=? and not starts_with(executor_id, 'agent:')
+        where status='active' and expires_at<=%s and not starts_with(executor_id, 'agent:')
         """,
         (now_str,),
     ).fetchall()
@@ -152,7 +152,7 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
     cursor = conn.execute(
         """
         update executor_leases set status='expired'
-        where id=? and status='active' and expires_at<=?
+        where id=%s and status='active' and expires_at<=%s
         """,
         (row["id"], now_str),
     )
@@ -161,8 +161,8 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
     conn.execute(
         """
         update node_runs
-        set status='failed', error_message='lease expired', finished_at=?
-        where id=?
+        set status='failed', error_message='lease expired', finished_at=%s
+        where id=%s
         """,
         (now_str, row["node_run_id"]),
     )
@@ -190,8 +190,8 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
             conn.execute(
                 """
                 update job_nodes
-                set status=?, stale_reason='', error_message=?, finished_at=?
-                where job_id=? and node_key=?
+                set status=%s, stale_reason='', error_message=%s, finished_at=%s
+                where job_id=%s and node_key=%s
                 """,
                 (
                     aggregate,
@@ -206,8 +206,8 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
     conn.execute(
         """
         update job_nodes
-        set status='failed', stale_reason='', error_message='lease expired', finished_at=?
-        where job_id=? and node_key=?
+        set status='failed', stale_reason='', error_message='lease expired', finished_at=%s
+        where job_id=%s and node_key=%s
         """,
         (now_str, row["job_id"], row["node_key"]),
     )
@@ -215,8 +215,8 @@ def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: st
     conn.execute(
         """
         update jobs
-        set status='failed', updated_at=?
-        where id=? and status != 'failed'
+        set status='failed', updated_at=%s
+        where id=%s and status != 'failed'
         """,
         (now_str, row["job_id"]),
     )

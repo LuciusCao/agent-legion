@@ -99,7 +99,7 @@ def test_ciphertext_is_not_plaintext(vault, job_db):
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     with job_db.connect() as conn:
         row = conn.execute(
-            "select ciphertext from workspace_secrets where workspace_id=? and name=?",
+            "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
             (workspace["id"], "api-token"),
         ).fetchone()
     assert row["ciphertext"] != PLAINTEXT

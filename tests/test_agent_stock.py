@@ -54,15 +54,15 @@ def _insert_request(
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, 'ws1', 'questions', 'question', ?) on conflict(id) do nothing",
+            " values (%s, 'ws1', 'questions', 'question', %s) on conflict(id) do nothing",
             (job_id, job_id),
         )
         conn.execute(
             "insert into agent_execution_requests(execution_id, workspace_id, job_id,"
             " workflow_key, node_key, agent_id, agent_definition_hash,"
             " node_concurrency_limit, queued_at, manifest_json, state, finished_at)"
-            " values (?, 'ws1', ?, 'questions', 'n1', ?, 'hash', 1,"
-            " current_timestamp, '{}', ?,"
+            " values (%s, 'ws1', %s, 'questions', 'n1', %s, 'hash', 1,"
+            " current_timestamp, '{}', %s,"
             + (finished_at if finished_at is not None else "null")
             + ")",
             (execution_id, job_id, agent_id, state),

@@ -210,7 +210,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     # Each execution finalized exactly once.
     with job_db.connect() as conn:
         finished_runs = conn.execute(
-            "select count(*) from node_runs where job_id=? and status='failed'",
+            "select count(*) from node_runs where job_id=%s and status='failed'",
             (job["id"],),
         ).fetchone()[0]
     assert finished_runs == 3

@@ -25,13 +25,13 @@ def _execute(job_db, sql, params=()):
 
 
 def _set_status(job_db, job_id, status):
-    _execute(job_db, "update jobs set status = ? where id = ?", (status, job_id))
+    _execute(job_db, "update jobs set status = %s where id = %s", (status, job_id))
 
 
 def _set_node_status(job_db, job_id, node_key, status):
     _execute(
         job_db,
-        "update job_nodes set status = ? where job_id = ? and node_key = ?",
+        "update job_nodes set status = %s where job_id = %s and node_key = %s",
         (status, job_id, node_key),
     )
 
@@ -110,9 +110,9 @@ def test_workflow_version_filters(client_factory):
         v1 = _make_job(job_db, workspace["id"], "q-v1")
         v2 = _make_job(job_db, workspace["id"], "q-v2")
         none_v = _make_job(job_db, workspace["id"], "q-vnone")
-        _execute(job_db, "update jobs set workflow_version = 1 where id = ?", (v1["id"],))
-        _execute(job_db, "update jobs set workflow_version = 2 where id = ?", (v2["id"],))
-        _execute(job_db, "update jobs set workflow_version = null where id = ?", (none_v["id"],))
+        _execute(job_db, "update jobs set workflow_version = 1 where id = %s", (v1["id"],))
+        _execute(job_db, "update jobs set workflow_version = 2 where id = %s", (v2["id"],))
+        _execute(job_db, "update jobs set workflow_version = null where id = %s", (none_v["id"],))
 
         by_version = _snapshot(client, workspace["id"], "?workflow_version=1")
         assert [job["id"] for job in by_version["jobs"]] == [v1["id"]]
@@ -152,7 +152,7 @@ def test_packed_filter(client_factory):
         workspace = _make_workspace(job_db, "filter-packed-ws")
         packed = _make_job(job_db, workspace["id"], "q-packed")
         _make_job(job_db, workspace["id"], "q-unpacked")
-        _execute(job_db, "update jobs set packed = 1 where id = ?", (packed["id"],))
+        _execute(job_db, "update jobs set packed = 1 where id = %s", (packed["id"],))
 
         data = _snapshot(client, workspace["id"], "?packed=1")
         assert [job["id"] for job in data["jobs"]] == [packed["id"]]
@@ -201,7 +201,7 @@ def test_facets_exclude_own_dimension(client_factory):
         _set_status(job_db, job_b["id"], "running")
         _set_node_status(job_db, job_a["id"], "n1", "failed")
         _set_node_status(job_db, job_b["id"], "n2", "running")
-        _execute(job_db, "update jobs set workflow_version = 1 where id = ?", (job_a["id"],))
+        _execute(job_db, "update jobs set workflow_version = 1 where id = %s", (job_a["id"],))
 
         data = _facets(client, workspace["id"], "?search=alpha&status=pending")
         # total applies every filter.

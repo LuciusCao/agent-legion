@@ -24,7 +24,7 @@ def test_metrics_overview_returns_inserted_buckets(client) -> None:
             insert into ops_metric_samples(
               bucket_start, online_workers, active_executions,
               input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, 2, 1, 10, 5, 1, 16)
+            ) values (%s, 2, 1, 10, 5, 1, 16)
             """,
             (bucket,),
         )
@@ -57,7 +57,7 @@ def test_metrics_overview_passes_worker_id_filter(client) -> None:
             insert into ops_metric_samples(
               bucket_start, worker_id, online_workers, active_executions,
               input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, 'w-1', 1, 1, 10, 5, 1, 16)
+            ) values (%s, 'w-1', 1, 1, 10, 5, 1, 16)
             """,
             (bucket,),
         )
@@ -93,7 +93,7 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
         ):
             run = conn.execute(
                 "insert into node_runs(job_id, node_key, status, started_at, finished_at)"
-                " values ('job-1', ?, ?, ?, ?) returning id",
+                " values ('job-1', %s, %s, %s, %s) returning id",
                 (node_key, status, started, finished),
             ).fetchone()
             # Agent runs 口径：只有被 agent_execution_requests 引用的 run 才计入摘要。
@@ -104,8 +104,8 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
                     agent_id, agent_definition_hash, node_concurrency_limit,
                     state, queued_at, node_run_id, manifest_json
                 )
-                values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 1,
-                        'done', ?, ?, '{}')
+                values (%s, 'ops-ws', 'job-1', 'questions', %s, 'agent-1', 'hash', 1,
+                        'done', %s, %s, '{}')
                 """,
                 (f"exec-{node_key}", node_key, started, run["id"]),
             )
@@ -144,7 +144,7 @@ def test_metrics_overview_passes_workspace_id_filter(client) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into ops_metric_samples(bucket_start, workspace_id, queued)"
-            " values (?, 'ops-ws', 7), (?, '', 99)",
+            " values (%s, 'ops-ws', 7), (%s, '', 99)",
             (bucket, bucket),
         )
     response = client.get("/api/metrics/overview?granularity=6h&workspace_id=ops-ws")

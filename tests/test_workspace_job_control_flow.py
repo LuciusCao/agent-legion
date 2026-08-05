@@ -164,7 +164,7 @@ def _configure_workspace(job_db: Any, workspace_id: str, workflow_key: str) -> N
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set concurrency_limit=excluded.concurrency_limit
             """,
             (workspace_id, "local-test", 4),
@@ -173,7 +173,7 @@ def _configure_workspace(job_db: Any, workspace_id: str, workflow_key: str) -> N
             conn.execute(
                 """
                 insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
                 """,
                 (workspace_id, workflow_key, node_key, "local-test"),
@@ -181,7 +181,7 @@ def _configure_workspace(job_db: Any, workspace_id: str, workflow_key: str) -> N
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
                 """,
                 (workspace_id, workflow_key, node_key, 4),

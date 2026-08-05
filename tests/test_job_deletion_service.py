@@ -76,7 +76,7 @@ def _insert_active_lease(
         cursor = conn.execute(
             """
             insert into node_runs(job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at)
-            values (?, ?, 'running', ?, ?, '', '', ?)
+            values (%s, %s, 'running', %s, %s, '', '', %s)
             returning id
             """,
             (job_id, node_key, "[]", "", database_timestamp(now)),
@@ -88,7 +88,7 @@ def _insert_active_lease(
                 id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 f"lease-{job_id}",
@@ -369,7 +369,7 @@ def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Pa
 
     with job_db.connect() as conn:
         conn.execute(
-            "update jobs set storage_dir = ? where id = ?",
+            "update jobs set storage_dir = %s where id = %s",
             ("../escape", job["id"]),
         )
 

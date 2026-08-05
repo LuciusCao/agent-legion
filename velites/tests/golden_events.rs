@@ -147,16 +147,13 @@ fn golden_event_sequence_with_tool_round() {
     assert_eq!(tool_end["result"]["content"][0]["text"], "hello velites");
     assert!(tool_end["output_bytes"].as_u64().unwrap() > 0);
 
-    // turn_end carries the assistant message + toolResults (toolResult role).
+    // turn_end is a bare turn-boundary marker (schema v2): no redundant
+    // message/toolResults copies — content lives in message_end and
+    // tool_execution_end.
     let turn_end = &events[7];
     assert_eq!(turn_end["turnIndex"], 1);
-    assert_eq!(turn_end["message"]["stopReason"], "toolUse");
-    let tool_results = turn_end["toolResults"].as_array().unwrap();
-    assert_eq!(tool_results.len(), 1);
-    assert_eq!(tool_results[0]["role"], "toolResult");
-    assert_eq!(tool_results[0]["toolCallId"], tool_call_id);
-    assert_eq!(tool_results[0]["toolName"], "read");
-    assert_eq!(tool_results[0]["isError"], false);
+    assert!(turn_end.get("message").is_none());
+    assert!(turn_end.get("toolResults").is_none());
 
     // Second message_end: final stop.
     let msg2 = &events[10]["message"];
@@ -167,34 +164,32 @@ fn golden_event_sequence_with_tool_round() {
     assert_eq!(msg2["content"][0]["text"], "The file says: hello velites");
     assert!(msg2.get("timing").is_none());
 
-    // agent_end: full history, no error.
+    // agent_end (schema v2): terminal state only — no error, no reason, and
+    // no full message history (every message already appeared in its own
+    // message_end / tool_execution_end event).
     let agent_end = &events[12];
     assert!(agent_end.get("error").is_none());
-    let history = agent_end["messages"].as_array().unwrap();
-    assert_eq!(history.len(), 4); // user + assistant + toolResult + assistant
-    assert_eq!(history[0]["role"], "user");
-    assert!(history[0]["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("Read input.txt and report its content."));
-    assert!(history[0]["content"][0]["text"]
-        .as_str()
-        .unwrap()
-        .contains("Execute the attached node instructions."));
+    assert!(agent_end.get("reason").is_none());
+    assert!(agent_end.get("messages").is_none());
 
     // Session mirror: one line per message, append-only NDJSON.
     let session_log = std::fs::read_to_string(cwd.join("session/session.jsonl")).unwrap();
-    let session_roles: Vec<String> = session_log
+    let session_messages: Vec<serde_json::Value> = session_log
         .lines()
-        .map(|line| {
-            let v: serde_json::Value = serde_json::from_str(line).unwrap();
-            v["role"].as_str().unwrap().to_string()
-        })
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    let session_roles: Vec<&str> = session_messages
+        .iter()
+        .map(|v| v["role"].as_str().unwrap())
         .collect();
     assert_eq!(
         session_roles,
         vec!["user", "assistant", "toolResult", "assistant"]
     );
+    // The user instruction (with @file expansion) opens the history.
+    let user_text = session_messages[0]["content"][0]["text"].as_str().unwrap();
+    assert!(user_text.contains("Read input.txt and report its content."));
+    assert!(user_text.contains("Execute the attached node instructions."));
 }
 
 #[test]
@@ -279,10 +274,13 @@ fn max_turns_triggers_wrap_up_and_budget_exceeded() {
     assert_eq!(agent_end["type"], "agent_end");
     assert_eq!(agent_end["reason"], "budget_exceeded");
     assert!(agent_end.get("error").is_none());
-    // The wrap-up notice was injected as a user message.
-    let history = agent_end["messages"].as_array().unwrap();
-    let notice = history
-        .iter()
+    // Schema v2: agent_end carries no message history; the injected budget
+    // wrap-up notice (a user message) is verified via the session mirror.
+    assert!(agent_end.get("messages").is_none());
+    let session_log = std::fs::read_to_string(cwd.join("session/session.jsonl")).unwrap();
+    let notice = session_log
+        .lines()
+        .map(|line| serde_json::from_str::<serde_json::Value>(line).unwrap())
         .find(|m| {
             m["role"] == "user"
                 && m["content"][0]["text"]
@@ -290,7 +288,7 @@ fn max_turns_triggers_wrap_up_and_budget_exceeded() {
                     .unwrap()
                     .contains("FINAL turn")
         })
-        .expect("budget wrap-up notice missing from history");
+        .expect("budget wrap-up notice missing from session history");
     assert!(notice["content"][0]["text"]
         .as_str()
         .unwrap()

@@ -47,7 +47,7 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             """
         )
         applied = conn.execute(
-            "select version from schema_migrations where version = ?", (SCHEMA_VERSION,)
+            "select version from schema_migrations where version = %s", (SCHEMA_VERSION,)
         ).fetchone()
         if applied is None:
             conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
@@ -55,6 +55,6 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_workspace_secrets(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
-                "insert into schema_migrations(version, name) values (?, ?)",
+                "insert into schema_migrations(version, name) values (%s, %s)",
                 (SCHEMA_VERSION, "ops_metric_samples_workspace_scope"),
             )

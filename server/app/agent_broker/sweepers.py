@@ -30,7 +30,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
     with write_transaction(broker.database_dsn) as conn:
         rows = conn.execute(
             "select * from agent_execution_requests"
-            " where state in ('claimed', 'reporting') and heartbeat_at<?"
+            " where state in ('claimed', 'reporting') and heartbeat_at<%s"
             " for update skip locked",
             (cutoff,),
         ).fetchall()
@@ -38,7 +38,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
             lease_id = row["lease_id"]
             node_run_id = row["node_run_id"]
             lease = conn.execute(
-                "select status from executor_leases where id=?", (lease_id,)
+                "select status from executor_leases where id=%s", (lease_id,)
             ).fetchone()
             if lease is not None and lease["status"] != "active":
                 # The result path already released this lease (finish
@@ -50,17 +50,17 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 conn.execute(
                     "update agent_execution_requests set state='done',"
                     " finished_at=current_timestamp"
-                    " where execution_id=? and state in ('claimed', 'reporting')",
+                    " where execution_id=%s and state in ('claimed', 'reporting')",
                     (row["execution_id"],),
                 )
                 released.append((str(row["worker_id"]), str(row["workspace_id"])))
                 continue
             if lease is None:
                 continue
-            conn.execute("delete from executor_leases where id=?", (lease_id,))
+            conn.execute("delete from executor_leases where id=%s", (lease_id,))
             conn.execute(
                 "update node_runs set status='failed', finished_at=current_timestamp,"
-                " error_message='Agent Worker heartbeat expired' where id=?",
+                " error_message='Agent Worker heartbeat expired' where id=%s",
                 (node_run_id,),
             )
             released.append((str(row["worker_id"]), str(row["workspace_id"])))
@@ -68,7 +68,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 reset = conn.execute(
                     "update job_nodes set status='pending', started_at=null,"
                     " finished_at=null, error_message=''"
-                    " where job_id=? and node_key=? and status in ('running', 'failed')",
+                    " where job_id=%s and node_key=%s and status in ('running', 'failed')",
                     (row["job_id"], row["node_key"]),
                 )
                 if reset.rowcount == 0:
@@ -79,7 +79,7 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 conn.execute(
                     "update agent_execution_requests set state='queued', worker_id=null,"
                     " lease_id=null, node_run_id=null, claimed_at=null, heartbeat_at=null"
-                    " where execution_id=?",
+                    " where execution_id=%s",
                     (row["execution_id"],),
                 )
                 requeued.append(str(row["execution_id"]))
@@ -90,18 +90,18 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                     "error_message": "Agent Worker heartbeat expired; requeue limit exceeded",
                 }
                 conn.execute(
-                    "update agent_execution_requests set state='done', outcome_json=?,"
-                    " finished_at=current_timestamp where execution_id=?",
+                    "update agent_execution_requests set state='done', outcome_json=%s,"
+                    " finished_at=current_timestamp where execution_id=%s",
                     (json.dumps(outcome), row["execution_id"]),
                 )
                 conn.execute(
                     "update job_nodes set status='failed', finished_at=current_timestamp,"
-                    " error_message=? where job_id=? and node_key=?",
+                    " error_message=%s where job_id=%s and node_key=%s",
                     (outcome["error_message"], row["job_id"], row["node_key"]),
                 )
                 conn.execute(
-                    "update jobs set status='failed', error_message=?, updated_at=current_timestamp"
-                    " where id=?",
+                    "update jobs set status='failed', error_message=%s, updated_at=current_timestamp"
+                    " where id=%s",
                     (outcome["error_message"], row["job_id"]),
                 )
     for worker_id, workspace_id in released:
@@ -141,8 +141,8 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             )
             outcome = {"status": "failed", "exit_code": 1, "error_message": error}
             conn.execute(
-                "update agent_execution_requests set state='done', outcome_json=?,"
-                " finished_at=current_timestamp where execution_id=?",
+                "update agent_execution_requests set state='done', outcome_json=%s,"
+                " finished_at=current_timestamp where execution_id=%s",
                 (json.dumps(outcome), row["execution_id"]),
             )
             updated = record_failed_node_without_execution(
@@ -155,9 +155,9 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             )
             if updated is not None:
                 conn.execute(
-                    "update jobs set status='failed', error_message=?,"
+                    "update jobs set status='failed', error_message=%s,"
                     " updated_at=current_timestamp"
-                    " where id=? and status not in ('failed', 'completed')",
+                    " where id=%s and status not in ('failed', 'completed')",
                     (error, row["job_id"]),
                 )
             failed.append(str(row["execution_id"]))

@@ -85,17 +85,17 @@ def workspace_usage(client):
     job_id = "pricing_job_1"
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (?, ?, ?)"
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, %s)"
             " on conflict (id) do nothing",
             (workspace_id, "pricing_ws", "question_comprehension_info"),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (?, ?, ?, ?, ?) on conflict (id) do nothing",
+            "values (%s, %s, %s, %s, %s) on conflict (id) do nothing",
             (job_id, workspace_id, "question_comprehension_info", "batch_by_ids", "Q001"),
         )
         conn.execute(
-            "insert into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)",
+            "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)",
             (1, job_id, "node-a", "completed"),
         )
         conn.execute(
@@ -103,7 +103,7 @@ def workspace_usage(client):
             insert into node_run_token_usage(
               node_run_id, job_id, workspace_id, node_key, provider, model, skill_version,
               message_count, input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 1,
@@ -144,7 +144,7 @@ def test_unpriced_models_keep_known_cost_and_are_listed(client, workspace_usage)
     job_db = client.app.state.job_db
     with job_db.connect() as conn:
         conn.execute(
-            "insert into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)",
+            "insert into node_runs(id, job_id, node_key, status) values (%s, %s, %s, %s)",
             (2, "pricing_job_1", "node-b", "completed"),
         )
         conn.execute(
@@ -152,7 +152,7 @@ def test_unpriced_models_keep_known_cost_and_are_listed(client, workspace_usage)
             insert into node_run_token_usage(
               node_run_id, job_id, workspace_id, node_key, provider, model, skill_version,
               message_count, input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 2,

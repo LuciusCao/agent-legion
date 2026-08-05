@@ -17,13 +17,13 @@ _STATUS_BUCKET_SQL = (
 _ACTIVE_NODE_CLAUSE = """
 (exists (
   select 1 from job_nodes jn
-  where jn.job_id = jobs.id and jn.status = 'running' and jn.node_key = ?
+  where jn.job_id = jobs.id and jn.status = 'running' and jn.node_key = %s
 ) or (
   not exists (
     select 1 from job_nodes jn2
     where jn2.job_id = jobs.id and jn2.status = 'running'
   )
-  and ? = (
+  and %s = (
     select jn3.node_key from job_nodes jn3
     where jn3.job_id = jobs.id and jn3.status = 'failed'
     order by jn3.id limit 1
@@ -53,17 +53,17 @@ def filter_clauses(f: JobListFilter) -> tuple[list[str], list[Any]]:
         if f.status == "pending":
             clauses.append("status not in ('running', 'completed', 'failed', 'paused')")
         else:
-            clauses.append("status = ?")
+            clauses.append("status = %s")
             params.append(f.status)
     if f.search:
         term = f"%{_escape_like(f.search.strip())}%"
         clauses.append(
-            "(id ilike ? escape '\\' or source_id ilike ? escape '\\'"
-            " or batch_id ilike ? escape '\\' or title ilike ? escape '\\')"
+            "(id ilike %s escape '\\' or source_id ilike %s escape '\\'"
+            " or batch_id ilike %s escape '\\' or title ilike %s escape '\\')"
         )
         params.extend([term, term, term, term])
     if f.workflow_version is not None:
-        clauses.append("workflow_version = ?")
+        clauses.append("workflow_version = %s")
         params.append(f.workflow_version)
     elif f.workflow_version_none:
         clauses.append("workflow_version is null")
@@ -71,14 +71,14 @@ def filter_clauses(f: JobListFilter) -> tuple[list[str], list[Any]]:
         clauses.append(_ACTIVE_NODE_CLAUSE)
         params.extend([f.active_node_key, f.active_node_key])
     if f.packed is not None:
-        clauses.append("packed = ?")
+        clauses.append("packed = %s")
         params.append(f.packed)
     return clauses, params
 
 
 def _where(workspace_id: str, f: JobListFilter) -> tuple[str, list[Any]]:
     clauses, params = filter_clauses(f)
-    where = f" where workspace_id = ?{''.join(f' and {c}' for c in clauses)}"
+    where = f" where workspace_id = %s{''.join(f' and {c}' for c in clauses)}"
     return where, [workspace_id, *params]
 
 

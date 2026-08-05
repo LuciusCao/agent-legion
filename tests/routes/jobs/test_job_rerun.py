@@ -411,7 +411,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
         job_db = app.state.job_db
         with job_db.connect() as conn:
             conn.execute(
-                "delete from job_nodes where job_id=? and node_key=?",
+                "delete from job_nodes where job_id=%s and node_key=%s",
                 (job_id, "review_key_info"),
             )
         resp = c.post(
@@ -477,7 +477,7 @@ def test_batch_rerun_mixed_node_availability(tmp_path, monkeypatch):
         job_db = app.state.job_db
         with job_db.connect() as conn:
             conn.execute(
-                "delete from job_nodes where job_id=? and node_key=?",
+                "delete from job_nodes where job_id=%s and node_key=%s",
                 (r_job_id, "review_key_info"),
             )
         resp = c.post(
@@ -566,7 +566,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
                     id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                     node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
                 """,
                 (
                     "lease-1",
@@ -624,7 +624,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
                     id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                     node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
                 """,
                 (
                     "lease-1",
