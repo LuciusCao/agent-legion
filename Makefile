@@ -52,6 +52,10 @@ llm-gateway: ## 从 Pi models.json 读取凭据并启动远程 LLM 网关
 		--host "$(LLM_GATEWAY_HOST)" --port "$(LLM_GATEWAY_PORT)" \
 		--provider "$(LLM_GATEWAY_PROVIDER)" --models-json "$(PI_MODELS_JSON)"
 
+.PHONY: seed-from-prod
+seed-from-prod: ## 从本机 prod 的 Docker 生产库抽样灌数据到开发库
+	$(UV) run python scripts/seed_from_prod.py
+
 # 本机 compose 覆盖（如 deploy/compose.local.yaml，bind-mount 既有数据目录等
 # 机器特定配置）：存在即自动并入 stack 命令，不存在则只用基础编排。
 COMPOSE_HOST_FILES  := -f deploy/compose.host.yaml $(if $(wildcard deploy/compose.local.yaml),-f deploy/compose.local.yaml,)
