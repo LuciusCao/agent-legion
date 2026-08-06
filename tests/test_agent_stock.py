@@ -11,21 +11,34 @@ from server.app.workflow_worker.agent_stock import (
 from tests.postgres_support import TEST_DATABASE_URL
 
 
+def _snapshot(config: AgentStockConfig, bucket: StockBucket, capacity: int = 0) -> StockSnapshot:
+    return StockSnapshot(config=config, capacity=capacity, buckets={("ws1", "agent-x"): bucket})
+
+
+def _target(config: AgentStockConfig, bucket: StockBucket, capacity: int = 0) -> int:
+    return _snapshot(config, bucket, capacity).target(bucket)
+
+
 def test_target_from_completion_rate() -> None:
-    config = AgentStockConfig()  # window 1800s, horizon 300s
-    assert StockBucket(done_in_window=60).target(config) == 10
-    assert StockBucket(done_in_window=1).target(config) == 4  # ceil, then min_stock floor
+    config = AgentStockConfig()  # window 1800s, horizon 180s
+    assert _target(config, StockBucket(done_in_window=60)) == 6
+    assert _target(config, StockBucket(done_in_window=1)) == 4  # ceil, then min_stock floor
 
 
-def test_target_floored_by_claimed_plus_min_stock() -> None:
+def test_target_floored_by_worker_capacity() -> None:
     config = AgentStockConfig(min_stock=4)
-    assert StockBucket(claimed=3).target(config) == 7
+    # Cold start: no completions yet, but the live fleet must find stock.
+    assert _target(config, StockBucket(), capacity=128) == 128
+    # The rate amplifier raises the target beyond the floor for fast tasks.
+    assert _target(config, StockBucket(done_in_window=2400), capacity=128) == 240
+    # And sinks below it for slow ones.
+    assert _target(config, StockBucket(done_in_window=240), capacity=128) == 128
 
 
 def test_target_min_stock_floor_and_max_cap() -> None:
     config = AgentStockConfig(min_stock=4, max_stock=500)
-    assert StockBucket().target(config) == 4
-    assert StockBucket(done_in_window=999_999).target(config) == 500
+    assert _target(config, StockBucket()) == 4
+    assert _target(config, StockBucket(done_in_window=999_999)) == 500
 
 
 def test_allows_compares_queued_against_target() -> None:
@@ -72,8 +85,8 @@ def _insert_request(
 def test_load_stock_snapshot_counts_states_and_window(job_db) -> None:
     _insert_request(job_db, execution_id="q1", job_id="j1", agent_id="agent-x", state="queued")
     _insert_request(job_db, execution_id="q2", job_id="j2", agent_id="agent-x", state="queued")
+    # 'claimed' and 'reporting' are in-flight work, not stock.
     _insert_request(job_db, execution_id="c1", job_id="j3", agent_id="agent-x", state="claimed")
-    # 'reporting' is neither stock nor in-flight execution.
     _insert_request(job_db, execution_id="r1", job_id="j4", agent_id="agent-x", state="reporting")
     _insert_request(
         job_db,
@@ -105,9 +118,46 @@ def test_load_stock_snapshot_counts_states_and_window(job_db) -> None:
 
     bucket = snapshot.buckets[("ws1", "agent-x")]
     assert bucket.queued == 2
-    assert bucket.claimed == 1
     assert bucket.done_in_window == 1  # only the in-window done row
     assert snapshot.buckets[("ws1", "agent-y")].queued == 1
+    assert snapshot.capacity == 0  # no registered workers
+
+
+def _insert_worker(
+    job_db,
+    *,
+    worker_id: str,
+    max_concurrency: int,
+    last_seen_at: str = "current_timestamp",
+    revoked: bool = False,
+) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into agent_workers(worker_id, runtimes_json, max_concurrency,"
+            " protocol_version, token_hash, registered_at, last_seen_at, revoked_at)"
+            " values (%s, '[\"pi\"]', %s, 1, 'hash', current_timestamp, "
+            + last_seen_at
+            + ", "
+            + ("current_timestamp" if revoked else "null")
+            + ")",
+            (worker_id, max_concurrency),
+        )
+
+
+def test_load_stock_snapshot_capacity_counts_only_live_workers(job_db) -> None:
+    _insert_worker(job_db, worker_id="w-live", max_concurrency=128)
+    _insert_worker(
+        job_db,
+        worker_id="w-stale",
+        max_concurrency=64,
+        last_seen_at="current_timestamp - interval '1 hour'",
+    )
+    _insert_worker(job_db, worker_id="w-revoked", max_concurrency=32, revoked=True)
+
+    snapshot = load_stock_snapshot(TEST_DATABASE_URL, AgentStockConfig())
+
+    assert snapshot.capacity == 128
+    assert snapshot.target(StockBucket()) == 128  # capacity floor, no history needed
 
 
 def test_load_stock_snapshot_empty_allows_everything(job_db) -> None:
