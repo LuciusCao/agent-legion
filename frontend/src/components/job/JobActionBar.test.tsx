@@ -6,6 +6,17 @@ import { JobActionBar } from './JobActionBar'
 import { makeJob } from '../../testing/fixtures'
 import type { WorkflowDefinitionRecord } from '../../types'
 
+// The preview hook is exercised in useBatchRerunPreview.test.tsx; here we
+// stub it so the dialog tests control the returned count.
+const previewStub = vi.hoisted(() => ({
+  data: undefined as
+    | { total_count: number; eligible_count: number }
+    | undefined,
+}))
+vi.mock('./useBatchRerunPreview', () => ({
+  useBatchRerunPreview: () => ({ data: previewStub.data }),
+}))
+
 const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
@@ -499,6 +510,10 @@ describe('JobActionBar', () => {
 })
 
 describe('JobActionBar in allMatching selection mode', () => {
+  beforeEach(() => {
+    previewStub.data = undefined
+  })
+
   function renderAllMatching(onRerun = vi.fn()) {
     renderWithClient(
       <JobActionBar
@@ -611,5 +626,38 @@ describe('JobActionBar in allMatching selection mode', () => {
       screen.getByText('确认重跑').click()
     })
     expect(onRerun).toHaveBeenCalledWith(null, true, undefined, undefined)
+  })
+
+  it('shows the server-side eligible count in summary and confirm label', async () => {
+    previewStub.data = { total_count: 10, eligible_count: 4 }
+    const { onRerun } = renderAllMatching()
+
+    await act(async () => {
+      screen.getByText('重跑').click()
+    })
+    expect(screen.getByText(/将重跑 4 个任务/)).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByTestId('rerun-chip-generate').click()
+    })
+    expect(
+      screen.getByText('将重跑 4 个任务（重跑节点：生成）')
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认重跑（4）').click()
+    })
+    expect(onRerun).toHaveBeenCalledWith('generate', false)
+  })
+
+  it('disables confirm when the preview reports zero eligible jobs', async () => {
+    previewStub.data = { total_count: 10, eligible_count: 0 }
+    renderAllMatching()
+
+    await act(async () => {
+      screen.getByText('重跑').click()
+    })
+    expect(screen.getByText(/将重跑 0 个任务/)).toBeInTheDocument()
+    expect(screen.getByText('确认重跑（0）')).toBeDisabled()
   })
 })

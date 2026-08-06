@@ -1139,6 +1139,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/batch-rerun/preview': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Preview Batch Rerun Workspace Jobs */
+    post: operations['preview_batch_rerun_workspace_jobs_api_workspaces__workspace_id__jobs_batch_rerun_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/batch-run-to': {
     parameters: {
       query?: never
@@ -2032,6 +2049,13 @@ export interface components {
       /** Results */
       results: components['schemas']['JobMutationResultResponse'][]
     }
+    /** BatchRerunPreviewResponse */
+    BatchRerunPreviewResponse: {
+      /** Eligible Count */
+      eligible_count: number
+      /** Total Count */
+      total_count: number
+    }
     /** BatchRunToRequest */
     BatchRunToRequest: {
       /** Exclude Ids */
@@ -2253,6 +2277,29 @@ export interface components {
        * @default question_comprehension_info
        */
       workflow_key: string
+    }
+    /**
+     * JobBatchRerunPreviewRequest
+     * @description Read-only count for a batch rerun selection (no writes).
+     *
+     *     Exactly one mode: ``node_key`` (from-node rerun), ``from_failed_node``
+     *     (failed-node rerun), or ``failure_category`` (category rerun).
+     */
+    JobBatchRerunPreviewRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      /** Failure Category */
+      failure_category?: string | null
+      filter?: components['schemas']['JobFilterPayload'] | null
+      /**
+       * From Failed Node
+       * @default false
+       */
+      from_failed_node: boolean
+      /** Job Ids */
+      job_ids?: string[] | null
+      /** Node Key */
+      node_key?: string | null
     }
     /** JobBatchRerunRequest */
     JobBatchRerunRequest: {
@@ -6346,6 +6393,41 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  preview_batch_rerun_workspace_jobs_api_workspaces__workspace_id__jobs_batch_rerun_preview_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['JobBatchRerunPreviewRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchRerunPreviewResponse']
         }
       }
       /** @description Validation Error */

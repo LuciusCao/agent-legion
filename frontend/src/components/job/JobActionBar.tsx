@@ -22,6 +22,7 @@ export type JobActionBarFilter = {
 export type JobActionBarProps = {
   jobs: JobSummary[]
   selectedCount?: number
+  workspaceId?: string
   workflowDefinition?: WorkflowDefinitionRecord | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   mode?: 'batch' | 'single'
