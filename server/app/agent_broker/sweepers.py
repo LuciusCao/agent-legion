@@ -8,6 +8,7 @@ its own transaction and takes the broker instance as its first argument.
 from __future__ import annotations
 
 import json
+import logging
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,8 @@ from server.app.services import failure_classification
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
+
+logger = logging.getLogger(__name__)
 
 
 def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
@@ -57,6 +60,11 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 continue
             if lease is None:
                 continue
+            # Sole lease-deletion path in the repo: audit the Worker-loss sweep.
+            logger.warning(
+                f"deleting expired agent lease {lease_id} exec={row['execution_id']}"
+                f" job={row['job_id']} worker={row['worker_id']} attempt={row['attempt']}"
+            )
             conn.execute("delete from executor_leases where id=%s", (lease_id,))
             conn.execute(
                 "update node_runs set status='failed', finished_at=current_timestamp,"
@@ -84,11 +92,12 @@ def sweep_expired_claims(broker: AgentExecutionBroker) -> list[str]:
                 )
                 requeued.append(str(row["execution_id"]))
             else:
-                outcome = {
-                    "status": "failed",
-                    "exit_code": 1,
-                    "error_message": "Agent Worker heartbeat expired; requeue limit exceeded",
-                }
+                error_message = (
+                    "Agent Worker heartbeat expired; requeue limit exceeded"
+                    f" (execution={row['execution_id']} worker={row['worker_id']}"
+                    f" attempt={row['attempt']} limit={broker.requeue_limit})"
+                )
+                outcome = {"status": "failed", "exit_code": 1, "error_message": error_message}
                 conn.execute(
                     "update agent_execution_requests set state='done', outcome_json=%s,"
                     " finished_at=current_timestamp where execution_id=%s",
