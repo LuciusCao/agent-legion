@@ -58,6 +58,7 @@ jobs:
       backend: ${{ steps.filter.outputs.backend }}
       frontend: ${{ steps.filter.outputs.frontend }}
       rust: ${{ steps.filter.outputs.rust }}
+      docker: ${{ steps.filter.outputs.docker }}
     steps:
       - uses: actions/checkout@v4
         if: github.event_name == 'push' || github.event_name == 'pull_request'
@@ -71,7 +72,7 @@ jobs:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
-          backend=true; frontend=true; rust=true
+          backend=true; frontend=true; rust=true; docker=true
           base=""
           if [ "$EVENT_NAME" = "pull_request" ]; then
             base="$PR_BASE"
@@ -82,15 +83,18 @@ jobs:
           # only for the nightly-e2e / ci-extended jobs; the full gate
           # already ran on the push/PR that produced this code.
           if [ "$EVENT_NAME" = "schedule" ]; then
-            backend=false; frontend=false; rust=false
+            backend=false; frontend=false; rust=false; docker=false
           # No usable base (dispatch, brand-new branch): full gate.
           elif [ -n "$base" ] && git cat-file -e "$base^{commit}" 2>/dev/null; then
-            backend=false; frontend=false; rust=false
+            backend=false; frontend=false; rust=false; docker=false
             while IFS= read -r f; do
               case "$f" in
                 docs/*|*.md|LICENSE) ;;
                 frontend/*) frontend=true ;;
                 velites/*) rust=true ;;
+                # 镜像内容/打包相关：Dockerfile 年久失修只有真构建才能发现
+                #（2026-08 host 缺 g++、worker 缺 requests 两次实例）。
+                Dockerfile|.dockerignore|pyproject.toml|uv.lock|worker/*|shared/*|deploy/*) backend=true; frontend=true; docker=true ;;
                 *) backend=true; frontend=true ;;
               esac
             done < <(git diff --name-only "$base" HEAD)
@@ -98,6 +102,7 @@ jobs:
           echo "backend=$backend" >> "$GITHUB_OUTPUT"
           echo "frontend=$frontend" >> "$GITHUB_OUTPUT"
           echo "rust=$rust" >> "$GITHUB_OUTPUT"
+          echo "docker=$docker" >> "$GITHUB_OUTPUT"
 
   # Backend is sharded by database dependency (test architecture plan, Phase
   # 5C): backend-unit runs the static checks and the PostgreSQL-offline unit
@@ -880,6 +885,40 @@ jobs:
       - name: cargo test
         run: cargo test --locked
         working-directory: velites
+
+  # Image build lane: the Dockerfile is not exercised by any other job, and
+  # dependency growth has broken it twice (2026-08: host missing g++ for
+  # editdistance/funasr, worker missing requests). Triggered only by
+  # image-relevant path changes (see the changes job filter), so the minute
+  # cost stays low; GHA layer cache keeps incremental builds ~5-10 min.
+  docker-build:
+    name: docker-build
+    needs: changes
+    if: needs.changes.outputs.docker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Build host image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: host
+          push: false
+          cache-from: type=gha,scope=host
+          cache-to: type=gha,mode=max,scope=host
+
+      - name: Build worker image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: worker
+          push: false
+          cache-from: type=gha,scope=worker
+          cache-to: type=gha,mode=max,scope=worker
 
   ci-extended:
     name: ci-extended

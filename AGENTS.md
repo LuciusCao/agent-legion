@@ -34,7 +34,8 @@
 - 任何代码修改后先跑 `./scripts/check-quick.sh`。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
   的 backend-unit、backend-postgres-a/b/c、frontend-logic、frontend-component、
-  frontend-coverage、e2e-smoke、rust 等 job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
+  frontend-coverage、e2e-smoke、rust、docker-build 等 job）；CI 不可用时本地跑
+  `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
   默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
   裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
@@ -42,8 +43,9 @@
   （完整 quick 套件）或 `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次
   推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
   （与本地 pre-push 一致：纯前端改动跳过 backend pytest shards 但保留
-  api:check、纯 `velites/` 改动只跑 rust、docs-only 全跳过、共享文件
-  全量，检测逻辑见 workflow 的 `changes` job）；push 触发只留
+  api:check、纯 `velites/` 改动只跑 rust、`Dockerfile`/依赖锁/`worker/`/
+  `shared/`/`deploy/` 改动加跑 docker-build 镜像构建 lane（CI-only）、
+  docs-only 全跳过、共享文件全量，检测逻辑见 workflow 的 `changes` job）；push 触发只留
   main/master（develop 合并已由 PR gate 覆盖）；ci-extended 压力门与
   nightly-e2e 改为每周 schedule + 手动 dispatch，schedule 不重复跑
   普通 lane。
