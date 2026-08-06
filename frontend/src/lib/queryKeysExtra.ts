@@ -34,4 +34,6 @@ export const extraQueryKeys = {
     ['runTokenUsage', jobId, runId, runStatus] as const,
   workflowStudioData: (workspaceId: string) =>
     ['workflowStudioData', workspaceId] as const,
+  agentDefinitions: () => ['agentDefinitions'] as const,
+  agentVersions: (agentId: string) => ['agentVersions', agentId] as const,
 }

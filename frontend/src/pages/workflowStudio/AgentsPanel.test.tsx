@@ -10,6 +10,7 @@ import {
   validateSkillPath,
 } from '../../api'
 import type { AgentListItem, AgentVersion } from '../../types'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import { AgentsPanel } from './AgentsPanel'
 
 vi.mock('../../api', () => ({
@@ -62,6 +63,14 @@ const publishedVersion: AgentVersion = {
   published_at: '2026-08-01T01:00:00Z',
 }
 
+function renderPanel() {
+  return render(
+    <TestQueryProvider>
+      <AgentsPanel />
+    </TestQueryProvider>
+  )
+}
+
 describe('AgentsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -75,7 +84,7 @@ describe('AgentsPanel', () => {
   })
 
   it('lists agents with capability, runtime and status', async () => {
-    render(<AgentsPanel />)
+    renderPanel()
 
     expect(
       await screen.findByRole('button', { name: /key-info-v1/ })
@@ -86,7 +95,7 @@ describe('AgentsPanel', () => {
   })
 
   it('loads the selected agent into the editor', async () => {
-    render(<AgentsPanel />)
+    renderPanel()
 
     fireEvent.click(await screen.findByRole('button', { name: /key-info-v1/ }))
 
@@ -112,7 +121,7 @@ describe('AgentsPanel', () => {
       locked_ref: null,
     })
     mockCreate.mockResolvedValue(publishedVersion)
-    render(<AgentsPanel />)
+    renderPanel()
 
     fireEvent.click(await screen.findByRole('button', { name: '新建' }))
     fireEvent.change(screen.getByLabelText('Agent ID'), {
@@ -145,7 +154,7 @@ describe('AgentsPanel', () => {
 
   it('archives an agent after confirmation', async () => {
     mockArchive.mockResolvedValue({ archived: 2 })
-    render(<AgentsPanel />)
+    renderPanel()
 
     fireEvent.click(await screen.findByRole('button', { name: /key-info-v1/ }))
     fireEvent.click(await screen.findByRole('button', { name: '归档' }))
@@ -170,7 +179,7 @@ describe('AgentsPanel', () => {
       ],
     })
     mockRollback.mockResolvedValue(publishedVersion)
-    render(<AgentsPanel />)
+    renderPanel()
 
     fireEvent.click(await screen.findByRole('button', { name: /key-info-v1/ }))
     fireEvent.click(await screen.findByRole('button', { name: '版本历史' }))

@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   Button,
   Chip,
@@ -9,7 +10,8 @@ import {
 } from '@mui/material'
 import { fetchAgentVersions, rollbackAgent } from '../../api'
 import type { AgentVersionSummary } from '../../types'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { toErrorMessage } from '../../lib/queryError'
 import styles from './AgentsPanel.module.css'
 
 const statusLabels: Record<AgentVersionSummary['status'], string> = {
@@ -32,11 +34,16 @@ export function AgentVersionsDialog({
   onClose,
   onRolledBack,
 }: Props) {
-  const { data, loading, error } = useAsync(
-    () => fetchAgentVersions(agentId),
-    [agentId, open],
-    { enabled: open }
-  )
+  const {
+    data,
+    isLoading: loading,
+    error: queryError,
+  } = useQuery({
+    queryKey: extraQueryKeys.agentVersions(agentId),
+    queryFn: () => fetchAgentVersions(agentId),
+    enabled: open,
+  })
+  const error = toErrorMessage(queryError)
   const [busy, setBusy] = useState(false)
   const [actionError, setActionError] = useState('')
   const versions = data?.versions ?? []
