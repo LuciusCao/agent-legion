@@ -17,6 +17,14 @@ from server.app.workflows.workflow_branching import upstream_nodes
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
 
+# Hard-coded stage-1/2 defaults for strategy="auto"; workflow-declared
+# policies arrive with stage 3.
+AUTO_STRATEGIES = {
+    "technical": "rerun_self",
+    "business": "rerun_upstream",
+    "unknown": "rerun_self",
+}
+
 
 def check_rerun_eligibility(
     service: JobRerunService,
@@ -87,7 +95,10 @@ def failed_nodes_by_job(
     ``requested`` (empty = unrestricted). Shared by the real rerun and the
     preview count so both see the same matching set."""
     runs = service.job_db.list_failed_node_runs(
-        workspace_id, category=category, workflow_key=workflow_key
+        workspace_id,
+        category=category,
+        workflow_key=workflow_key,
+        job_ids=requested or None,
     )
     allowed = set(requested)
     failed_nodes_by_job: dict[str, list[str]] = {}

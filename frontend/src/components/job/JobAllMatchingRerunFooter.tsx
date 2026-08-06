@@ -1,4 +1,4 @@
-import { Button, DialogActions } from '@mui/material'
+import { Box, Button, DialogActions } from '@mui/material'
 import styles from '../JobRerunDialog/JobRerunDialog.module.css'
 
 export type JobAllMatchingRerunFooterProps = {
@@ -36,7 +36,11 @@ export function JobAllMatchingRerunFooter({
 
   return (
     <>
-      <div className={styles.summary}>{summaryText}</div>
+      {/* DialogContent 的兄弟节点：补上与其等效的内边距（24px 横向 /
+       *  16px 底部），与普通 JobRerunDialog 的摘要视觉一致。 */}
+      <Box className={styles.summary} sx={{ px: 3, pb: 2 }}>
+        {summaryText}
+      </Box>
       <DialogActions>
         <Button variant="text" onClick={onClose} disabled={loading}>
           取消
