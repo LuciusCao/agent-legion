@@ -65,6 +65,10 @@ COMPOSE_WORKER_FILES := -f deploy/compose.worker.yaml $(if $(wildcard deploy/com
 stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Worker
 	docker compose $(COMPOSE_HOST_FILES) up -d --build
 
+.PHONY: stack-prod-up
+stack-prod-up: ## 一键启动本地生产 stack（secrets 检查 + 模型预热 + 健康等待）
+	./scripts/stack-prod-up.sh
+
 .PHONY: stack-host-down
 stack-host-down: ## 停止部署机 Agent Legion stack
 	docker compose $(COMPOSE_HOST_FILES) down
