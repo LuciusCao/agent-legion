@@ -900,6 +900,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # 镜像含 torch/CUDA 依赖（funasr 链，单镜像层数 GB 级），ubuntu-latest
+      # 默认 ~14GB 磁盘会在构建中途耗尽（runner 直接死亡、step 无结论、日志
+      # 上传失败，2026-08-06 run 31108609762 实测）。先回收 runner 预装的
+      # Android/dotnet 等无关负载。
+      - uses: jlumbroso/free-disk-space@v1
+        with:
+          tool-cache: true
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: true
+          docker-images: true
+          swap-storage: true
+
       - uses: docker/setup-buildx-action@v3
 
       - name: Build host image
