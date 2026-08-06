@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -699,6 +700,62 @@ def test_heartbeat_and_mark_done_accept_reporting_state(job_db) -> None:
             (claimed.execution_id,),
         ).fetchone()
     assert row["state"] == "done"
+
+
+def test_heartbeat_returns_false_when_lease_no_longer_active(job_db) -> None:
+    """A finish-path release racing the heartbeat must not be reported as
+    success: the lease row is not active, so the Worker is told to stop
+    instead of keeping a zombie attempt alive."""
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update executor_leases set status='released' where id=%s",
+            (claimed.lease_id,),
+        )
+
+    assert broker.heartbeat(claimed.execution_id, "worker-1", claimed.lease_id) is False
+
+
+def test_sweep_requeue_limit_failure_message_carries_context(job_db, caplog) -> None:
+    """The terminal requeue-limit failure must name the execution, worker and
+    attempt numbers; the lease deletion (the repo's only DELETE path) must
+    leave an audit log record."""
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1, requeue_limit=0)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
+            (datetime.now(UTC) - timedelta(seconds=10), claimed.execution_id),
+        )
+
+    with caplog.at_level(logging.WARNING, logger="server.app.agent_broker.sweepers"):
+        assert broker.sweep_expired_claims() == []
+
+    node = job_db.get_job_node("job-1", "generate")
+    assert node["status"] == "failed"
+    message = node["error_message"]
+    assert "requeue limit exceeded" in message
+    assert claimed.execution_id in message
+    assert "worker-1" in message
+    assert "attempt=1" in message
+    assert "limit=0" in message
+    assert any(
+        "deleting expired agent lease" in record.message
+        and claimed.lease_id in record.message
+        and claimed.execution_id in record.message
+        and "job-1" in record.message
+        and "worker-1" in record.message
+        for record in caplog.records
+    )
 
 
 def test_reporting_blocks_duplicate_enqueue(job_db) -> None:
