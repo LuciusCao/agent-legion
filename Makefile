@@ -22,18 +22,22 @@ sync: ## 同步 Python 依赖 (uv sync)
 # 默认软限制 256 会在高并发下触发 EMFILE；开发进程统一抬高。
 DEV_NOFILE_LIMIT ?= 65535
 
+# 开发端口默认避开生产实例占用的 8000/5173/8787（prod worktree 常驻）。
+DEV_BACKEND_PORT  ?= 8001
+DEV_FRONTEND_PORT ?= 5174
+
 .PHONY: dev-backend
-dev-backend: ## 启动后端开发服务器 (127.0.0.1:8000)
-	ulimit -n $(DEV_NOFILE_LIMIT); $(UV) run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port 8000
+dev-backend: ## 启动后端开发服务器 (127.0.0.1:$(DEV_BACKEND_PORT))
+	ulimit -n $(DEV_NOFILE_LIMIT); $(UV) run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port $(DEV_BACKEND_PORT)
 
 .PHONY: dev-frontend
-dev-frontend: ## 启动前端开发服务器
-	cd $(FRONTEND_DIR) && $(NPM) run dev
+dev-frontend: ## 启动前端开发服务器（代理 /api 到 $(DEV_BACKEND_PORT)）
+	cd $(FRONTEND_DIR) && VITE_API_TARGET="http://127.0.0.1:$(DEV_BACKEND_PORT)" $(NPM) run dev -- --port $(DEV_FRONTEND_PORT)
 
 AGENT_WORKER_CONFIG ?= config/agent-worker.yaml
 AGENT_WORKER_STATE_DIR ?= data/agent-worker-service
 AGENT_WORKER_UI_HOST ?= 127.0.0.1
-AGENT_WORKER_UI_PORT ?= 8787
+AGENT_WORKER_UI_PORT ?= 8789
 # macOS 下批跑期间防止系统睡眠（lid close / idle）；非 macOS 环境为空。
 CAFFEINATE := $(shell command -v caffeinate 2>/dev/null)
 .PHONY: dev-worker
