@@ -329,6 +329,26 @@ def test_heartbeat_extends_lease_expiry(
     assert claim.lease_id not in expired
 
 
+def test_heartbeat_returns_false_after_lease_left_active_state(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    """A heartbeat racing a finish/expiry must not report success: the UPDATE
+    guard leaves the row untouched, and the caller must learn ownership is
+    gone instead of assuming the lease was renewed."""
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-heartbeat-stale", "code-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2, ttl=1)
+    )
+    assert claim is not None
+
+    now = datetime.now(UTC) + timedelta(seconds=2)
+    assert repo_a.expire_stale(now) == [claim.lease_id]
+
+    assert repo_a.heartbeat(claim.lease_id, ttl_seconds=3600) is False
+
+
 def test_expire_stale_releases_expired_leases(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
