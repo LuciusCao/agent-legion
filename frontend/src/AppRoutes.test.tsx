@@ -46,6 +46,7 @@ vi.mock('./routes/pages', () => {
     WorkspaceMainPage: stub('workspace-main'),
     TokenUsagePage: stub('token-usage'),
     MonitoringPage: stub('monitoring'),
+    QualityPage: stub('quality'),
   }
 })
 
