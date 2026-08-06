@@ -127,7 +127,11 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
                   where d.entity_type='agent' and d.workspace_id is null
                     and d.entity_key=r.agent_id
                     and d.definition_hash=r.agent_definition_hash
-                    and d.status='published'
+                    -- Quality replay pins stay valid while their immutable
+                    -- version row exists, whatever its lifecycle status.
+                    and ((r.pinned_agent_version is not null
+                          and d.version=r.pinned_agent_version)
+                         or (r.pinned_agent_version is null and d.status='published'))
               )
             for update of r skip locked
             """

@@ -11,7 +11,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.models import ConfigurationFailureRequest
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_version_pins import (
+    agent_version_pin,
+    resolve_dispatch_agent_definition,
+)
 from server.app.services.node_config import batch_source_payload, dispatch_effective_config
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
@@ -72,7 +75,24 @@ def claim_agent_node(
 ) -> bool:
     """Enqueue an agent-routed candidate; False when it already has a request."""
     workspace_id = workspace["id"]
-    definition_config = published_agent_definitions(worker.settings.database_url).get(agent_id)
+    if worker.agent_dispatch is None:
+        raise RuntimeError("Agent dispatch service is not configured")
+    dispatch = worker.agent_dispatch
+    # Per-pass in-memory gates (batched active filter + stock limit); the
+    # enqueue re-check on the pool thread stays authoritative. Gated
+    # candidates must stay cheap: no batch-payload or definition reads.
+    if not agent_claim_allowed(worker, str(workspace_id), str(job["id"]), node.key, agent_id):
+        return False
+    batch_payload = cached_batch_payload(worker, job)
+    # Quality replay (schema v29): a frozen per-run Agent version pin in the
+    # intake batch payload wins over the currently published definition.
+    pin = agent_version_pin(batch_payload, node.key)
+    try:
+        definition_config = resolve_dispatch_agent_definition(
+            worker.settings.database_url, agent_id, pin
+        )
+    except ValueError as exc:
+        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
     if definition_config is None:  # resolve_node_route already validated this
         return fail_node_config(
             worker,
@@ -83,20 +103,24 @@ def claim_agent_node(
             log_path,
             f"Invalid Agent route {agent_id!r}",
         )
-    if worker.agent_dispatch is None:
-        raise RuntimeError("Agent dispatch service is not configured")
-    dispatch = worker.agent_dispatch
-    # Per-pass in-memory gates (batched active filter + stock limit); the
-    # enqueue re-check on the pool thread stays authoritative.
-    if not agent_claim_allowed(worker, str(workspace_id), str(job["id"]), node.key, agent_id):
-        return False
+    if pin is not None and definition_config.capability != node.capability:
+        return fail_node_config(
+            worker,
+            workspace_id,
+            job,
+            workflow_key,
+            node,
+            log_path,
+            f"pinned Agent version capability {definition_config.capability!r}"
+            f" does not match node capability {node.capability!r}",
+        )
     try:
         node_config = dispatch_effective_config(
             definition_config.config_schema,
             node,
             workflow_key,
             workspace,
-            cached_batch_payload(worker, job),
+            batch_payload,
         )
     except ValueError as exc:
         # Route/definition/capacity drift must fail THIS node, not
@@ -116,6 +140,7 @@ def claim_agent_node(
                 log_path=log_path,
                 inputs=inputs,
                 node_config=node_config,
+                pinned_agent_version=int(pin["version"]) if pin is not None else None,
             )
         except ValueError as exc:
             fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
