@@ -32,7 +32,7 @@ def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -
     if lease is None or lease["status"] != "active":
         return False
     expires_at = now + timedelta(seconds=ttl_seconds)
-    conn.execute(
+    cursor = conn.execute(
         """
         update executor_leases
         set heartbeat_at=%s, expires_at=%s
@@ -40,7 +40,10 @@ def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -
         """,
         (database_timestamp(now), database_timestamp(expires_at), lease_id),
     )
-    return True
+    # Re-check the rowcount: a concurrent finish/expiry committed between the
+    # SELECT above and this UPDATE leaves the lease untouched, and reporting
+    # success would mask the loss of ownership.
+    return cursor.rowcount > 0
 
 
 def finish_lease(

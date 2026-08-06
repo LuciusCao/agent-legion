@@ -12,7 +12,7 @@ import json
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -31,6 +31,7 @@ from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
+from server.app.executors._lease_lifecycle import heartbeat_lease
 
 if TYPE_CHECKING:
     from server.app.events.agents import AgentStatusManager
@@ -228,7 +229,6 @@ class AgentExecutionBroker:
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Renew the lease, bound to the current lease_id so zombie attempts
         from a requeued execution cannot keep a re-claimed lease alive."""
-        expires_at = datetime.now(UTC) + timedelta(seconds=self.lease_ttl_seconds)
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id from agent_execution_requests"
@@ -244,11 +244,9 @@ class AgentExecutionBroker:
                 " where execution_id=%s",
                 (execution_id,),
             )
-            conn.execute(
-                "update executor_leases set heartbeat_at=current_timestamp, expires_at=%s"
-                " where id=%s and status='active'",
-                (expires_at, row["lease_id"]),
-            )
+            if not heartbeat_lease(conn, row["lease_id"], self.lease_ttl_seconds):
+                # Released concurrently: success would keep a zombie attempt alive.
+                return False
             touch_worker(conn, worker_id)
             return True
 
