@@ -69,6 +69,10 @@ stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Wor
 stack-prod-up: ## 一键启动本地生产 stack（secrets 检查 + 模型预热 + 健康等待）
 	./scripts/stack-prod-up.sh
 
+.PHONY: native-prod-up
+native-prod-up: ## 一键启动原生（非 Docker）生产环境（后端含 SPA + Worker）
+	./scripts/native-prod-up.sh
+
 .PHONY: stack-host-down
 stack-host-down: ## 停止部署机 Agent Legion stack
 	docker compose $(COMPOSE_HOST_FILES) down
