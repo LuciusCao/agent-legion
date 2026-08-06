@@ -6,6 +6,7 @@
 ## 1. Worktree & Isolation
 
 - 每次独立开发任务优先在新的 git worktree 中进行。
+- worktree 一律建为主仓库根的平级子目录：先 `cd` 到主仓库根（`git worktree list` 的第一个条目），再 `git worktree add .worktrees/<name> -b <branch> <base>`。禁止嵌套（在其他 worktree 里用相对路径 `git worktree add .worktrees/<name>` 会建进当前 worktree 内部）——嵌套会让 `data/`、测试库派生、端口隔离和清理路径全部混乱。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
 - 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`（缺这两个文件会导致 pytest/服务启动即失败）。手工初始化时必须自行补上这两个 secrets 文件。
