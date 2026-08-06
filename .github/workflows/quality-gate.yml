@@ -904,7 +904,7 @@ jobs:
       # 默认 ~14GB 磁盘会在构建中途耗尽（runner 直接死亡、step 无结论、日志
       # 上传失败，2026-08-06 run 31108609762 实测）。先回收 runner 预装的
       # Android/dotnet 等无关负载。
-      - uses: jlumbroso/free-disk-space@v1
+      - uses: jlumbroso/free-disk-space@v1.3.1
         with:
           tool-cache: true
           android: true
