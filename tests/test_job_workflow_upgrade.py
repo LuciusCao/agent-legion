@@ -213,7 +213,7 @@ def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
               id, execution_id, executor_id, workspace_id, job_id, workflow_key,
               node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             ) values (
-              'lease-1', 'exec-1', 'pi-1', ?, ?, ?, 'fetch_questions', ?,
+              'lease-1', 'exec-1', 'pi-1', %s, %s, %s, 'fetch_questions', %s,
               'active', current_timestamp, current_timestamp, '2999-01-01 00:00:00'
             )
             """,

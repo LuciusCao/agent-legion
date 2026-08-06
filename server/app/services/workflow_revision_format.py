@@ -106,8 +106,6 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
         }
         if node.terminal is not None:
             raw_node["terminal"] = {"outcome": node.terminal.outcome}
-        if node.resources:
-            raw_node["resources"] = node.resources
         execution = {key: value for key, value in asdict(node.execution).items() if value}
         if execution:
             raw_node["execution"] = execution

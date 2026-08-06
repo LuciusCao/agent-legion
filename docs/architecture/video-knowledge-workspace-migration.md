@@ -10,7 +10,7 @@ Knowledge videos (`content_type=knowledge`) are produced by a dedicated Workspac
 
 ### `video_knowledge` Workflow
 
-`config/workflows/video_knowledge.yaml` declares the Workspace DAG for knowledge videos. Nodes declare only business capabilities (for example, `download`, `transcribe`, `subtitle_review`, `chapter_generate`, `interaction_generate`, `content_review`, `assemble`) and do not name runners, agents, skills, or command templates.
+`config/workflows/video_knowledge.yaml` declares the Workspace DAG for knowledge videos. Nodes declare only business capabilities (`download_video`, `transcribe_video`, `review_subtitles`, `generate_chapters`, `generate_interactions`, `review_video_content`, `assemble_video_metadata`, plus a final `package_video_job` packaging node) and do not name runners, agents, skills, or command templates.
 
 ### `server/app/video_capabilities/` Layer
 
@@ -50,6 +50,5 @@ The Job Detail page renders video artifacts through `VideoContentPanel` (`fronte
 ## Quality Impact
 
 - The `video_capabilities` contract layer is covered by dedicated contract, adapter, and artifact-equivalence tests.
-- The migration CLI is verified with `--check` before `--apply` and always produces a timestamped SQLite backup.
 - Frontend Job Detail rendering is exercised through `VideoContentPanel` unit tests.
 - Documentation changes do not alter runtime behavior; they are validated by `scripts/verify_specs.py --check` and the normal quality gates.

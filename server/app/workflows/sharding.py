@@ -62,12 +62,12 @@ def materialize_shards(
     conn.executemany(
         """
         insert into node_shards(job_id, node_key, shard_index, input_json)
-        values (?, ?, ?, ?) on conflict(job_id, node_key, shard_index) do nothing
+        values (%s, %s, %s, %s) on conflict(job_id, node_key, shard_index) do nothing
         """,
         [(job_id, node_key, index, json.dumps(item)) for index, item in enumerate(inputs)],
     )
     row = conn.execute(
-        "select count(*) as cnt from node_shards where job_id=? and node_key=?",
+        "select count(*) as cnt from node_shards where job_id=%s and node_key=%s",
         (job_id, node_key),
     ).fetchone()
     return int(row["cnt"]) if row is not None else 0
@@ -82,7 +82,7 @@ def aggregate_shard_state(conn: DatabaseConnection, job_id: str, node_key: str) 
     ``running``; otherwise ``pending``.
     """
     rows = conn.execute(
-        "select status from node_shards where job_id=? and node_key=?",
+        "select status from node_shards where job_id=%s and node_key=%s",
         (job_id, node_key),
     ).fetchall()
     if not rows:
@@ -115,8 +115,8 @@ def on_shard_finished(
     conn.execute(
         """
         update node_shards
-        set status=?, output_json=?, error_message=?, finished_at=?
-        where job_id=? and node_key=? and shard_index=?
+        set status=%s, output_json=%s, error_message=%s, finished_at=%s
+        where job_id=%s and node_key=%s and shard_index=%s
         """,
         (status, output_json, error_message, _now(), job_id, node_key, shard_index),
     )
@@ -138,7 +138,7 @@ def try_start_shard(
     running on the first shard claim; later shard claims leave it running.
     """
     node = conn.execute(
-        "select status from job_nodes where job_id=? and node_key=?",
+        "select status from job_nodes where job_id=%s and node_key=%s",
         (job_id, node_key),
     ).fetchone()
     if node is None or node["status"] not in _RUNNABLE_NODE_STATUSES:
@@ -146,8 +146,8 @@ def try_start_shard(
     cursor = conn.execute(
         """
         update node_shards
-        set status='running', execution_id=?, started_at=?, error_message='', finished_at=null
-        where job_id=? and node_key=? and shard_index=? and status='pending'
+        set status='running', execution_id=%s, started_at=%s, error_message='', finished_at=null
+        where job_id=%s and node_key=%s and shard_index=%s and status='pending'
         """,
         (execution_id, started_at, job_id, node_key, shard_index),
     )
@@ -156,8 +156,8 @@ def try_start_shard(
     conn.execute(
         """
         update job_nodes
-        set status='running', stale_reason='', error_message='', started_at=?, finished_at=null
-        where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+        set status='running', stale_reason='', error_message='', started_at=%s, finished_at=null
+        where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
         """,
         (started_at, job_id, node_key),
     )
@@ -173,7 +173,7 @@ def has_pending_shards(conn: DatabaseConnection, job_id: str, node_key: str) -> 
     schedulable.
     """
     row = conn.execute(
-        "select 1 from node_shards where job_id=? and node_key=? and status='pending' limit 1",
+        "select 1 from node_shards where job_id=%s and node_key=%s and status='pending' limit 1",
         (job_id, node_key),
     ).fetchone()
     return row is not None
@@ -184,7 +184,7 @@ def shard_index_for_execution(
 ) -> int | None:
     """Return the shard index claimed under ``execution_id``, or None."""
     row = conn.execute(
-        "select shard_index from node_shards where job_id=? and node_key=? and execution_id=?",
+        "select shard_index from node_shards where job_id=%s and node_key=%s and execution_id=%s",
         (job_id, node_key, execution_id),
     ).fetchone()
     return int(row["shard_index"]) if row is not None else None
@@ -195,7 +195,7 @@ def failed_shard_error(conn: DatabaseConnection, job_id: str, node_key: str) -> 
     row = conn.execute(
         """
         select error_message from node_shards
-        where job_id=? and node_key=? and status='failed'
+        where job_id=%s and node_key=%s and status='failed'
         order by shard_index limit 1
         """,
         (job_id, node_key),
@@ -206,7 +206,7 @@ def failed_shard_error(conn: DatabaseConnection, job_id: str, node_key: str) -> 
 def read_shard_outputs(conn: DatabaseConnection, job_id: str, node_key: str) -> list[str]:
     """Return shard ``output_json`` payloads ordered by shard_index."""
     rows = conn.execute(
-        "select output_json from node_shards where job_id=? and node_key=? order by shard_index",
+        "select output_json from node_shards where job_id=%s and node_key=%s order by shard_index",
         (job_id, node_key),
     ).fetchall()
     return [str(row["output_json"]) for row in rows]
@@ -221,9 +221,9 @@ def delete_shards(
     keys = sorted(set(node_keys))
     if not keys:
         return 0
-    placeholders = ",".join("?" for _ in keys)
+    placeholders = ",".join("%s" for _ in keys)
     cursor = conn.execute(
-        f"delete from node_shards where job_id=? and node_key in ({placeholders})",
+        f"delete from node_shards where job_id=%s and node_key in ({placeholders})",
         (job_id, *keys),
     )
     return cursor.rowcount

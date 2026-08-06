@@ -6,7 +6,7 @@ host_url: http://agent-legion-host:8000
 worker_id: home-mac-mini-1
 name: Home Mac mini
 # 可选值：pi / openclaw / velites。声明 velites 需先在 PATH 提供 velites 二进制。
-runtimes: [pi]
+runtimes: [velites]
 max_concurrency: 10
 # Worker 执行进程每次启动/重启都先关闭 claim；需通过控制台或 workerctl 主动开启。
 # 关闭后不再 claim 新任务，但不会中断已领取的任务。

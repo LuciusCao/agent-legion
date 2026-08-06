@@ -7,15 +7,6 @@
 # this registry or when a non-recurring entry outlives its deadline.
 # Field style follows config/architecture/architecture-exemptions.yaml.
 entries:
-- id: FLAKY-001
-  nodeid: tests/executors/test_local_executor.py::test_local_executor_cancel_during_run
-  owner: workspace-executor
-  reason: Timing-sensitive cancel-during-run assertion; reproduces under host
-    load since Phase 0 of the test architecture plan. Needs a deterministic
-    synchronization point instead of wall-clock waits.
-  observed: Multiple local reproductions under load since 2026-07 (Phase 0
-    evidence, docs/plans/2026-08-01-test-architecture-optimization.md).
-  deadline: 2026-09-01
 - id: FLAKY-002
   scope: frontend:component-jsdom-timeout
   owner: test-infra

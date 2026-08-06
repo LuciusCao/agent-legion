@@ -44,27 +44,10 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     assert traversal.status_code == 400
 
 
-def test_job_detail_includes_pi_run_trace(tmp_path, monkeypatch):
+def test_job_detail_includes_pi_run_trace(tmp_path):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Reading {question_id}",
-            normalized={},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -154,13 +137,13 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
         job_db.replace_workspace_executor_configuration(
             ws_id,
             allocations=[
-                {"executor_id": "local-default", "concurrency_limit": 1},
+                {"executor_id": "code-default", "concurrency_limit": 1},
             ],
             bindings=[
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "assemble_comprehension_info",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 },
             ],
             node_limits=[],
@@ -172,8 +155,8 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
     assert nodes["review_key_info"]["executor_id"] is None
     assert nodes["review_key_info"]["executor_kind"] is None
     assert nodes["review_key_info"]["agent_id"] == "question-key-info-review-v1"
-    assert nodes["assemble_comprehension_info"]["executor_id"] == "local-default"
-    assert nodes["assemble_comprehension_info"]["executor_kind"] == "local"
+    assert nodes["assemble_comprehension_info"]["executor_id"] == "code-default"
+    assert nodes["assemble_comprehension_info"]["executor_kind"] == "code"
 
 
 def test_delete_job_returns_404_for_unknown_job(tmp_path):
@@ -297,7 +280,7 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
     assert len(body["runs"]) == 1
     assert body["runs"][0]["workspace_id"] == ws_id
     assert body["runs"][0]["job_id"] == job_id
-    assert body["runs"][0]["job_title"] == "Q001"
+    assert body["runs"][0]["job_title"] == "Question Q001"
     assert body["runs"][0]["source_id"] == "Q001"
     assert body["runs"][0]["source_type"] == "question"
     assert body["runs"][0]["node_key"] == "fetch_questions"
@@ -342,27 +325,10 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
     assert runs[0]["error_message"] == "boom"
 
 
-def test_get_workspace_dag_returns_node_status_counts(tmp_path, monkeypatch):
+def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Reading {question_id}",
-            normalized={},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True

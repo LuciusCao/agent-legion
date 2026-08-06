@@ -16,7 +16,7 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
@@ -72,8 +72,8 @@ def _write_test_workflow(tmp_path: Path) -> Path:
 
 
 class _RecordingExecutor:
-    kind = "local"
-    id = "local-test"
+    kind = "code"
+    id = "code-test"
 
     def __init__(self) -> None:
         self.runs: list[dict[str, Any]] = []
@@ -110,10 +110,10 @@ class _RecordingExecutor:
 
 def _make_registry() -> ExecutorRegistry:
     executor = _RecordingExecutor()
-    definition = LocalExecutorConfig(
-        kind="local",
+    definition = CodeExecutorConfig(
+        kind="code",
         global_capacity=4,
-        capabilities={"any": LocalCapabilityConfig(handler="fake.fake")},
+        capabilities={"any": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
     )
     return ExecutorRegistry(
         executors={executor.id: executor},
@@ -164,24 +164,24 @@ def _configure_workspace(job_db: Any, workspace_id: str, workflow_key: str) -> N
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set concurrency_limit=excluded.concurrency_limit
             """,
-            (workspace_id, "local-test", 4),
+            (workspace_id, "code-test", 4),
         )
         for node_key in node_keys:
             conn.execute(
                 """
                 insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
                 """,
-                (workspace_id, workflow_key, node_key, "local-test"),
+                (workspace_id, workflow_key, node_key, "code-test"),
             )
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
                 """,
                 (workspace_id, workflow_key, node_key, 4),

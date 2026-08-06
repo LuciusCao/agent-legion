@@ -1,0 +1,276 @@
+"""Custom node code service: validation, draft/publish flow, rollback, gate."""
+
+from __future__ import annotations
+
+import logging
+
+import pytest
+
+from server.app.services.job_errors import (
+    ConflictError,
+    CustomNodesDisabledError,
+    InvalidOperationError,
+    NotFoundError,
+)
+from server.app.services.node_codes import (
+    MAX_CODE_BYTES,
+    NodeCodeService,
+    code_hash,
+    freeze_node_code_versions,
+    resolve_dispatch_node_code,
+)
+
+VALID_CODE = "def run(job, job_dir, runtime):\n    return None\n"
+UPDATED_CODE = "async def run(job, job_dir, runtime):\n    return 1\n"
+WF = "question_comprehension_info"
+NODE = "fetch_questions"
+
+
+@pytest.fixture
+def service(job_db):
+    return NodeCodeService(job_db.path)
+
+
+@pytest.fixture
+def workspace_id(job_db):
+    return job_db.create_workspace("node-codes")["id"]
+
+
+def test_save_draft_creates_version_one_with_hash(service, workspace_id) -> None:
+    row = service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1", "first pass")
+
+    assert row["version"] == 1
+    assert row["status"] == "draft"
+    assert row["created_by"] == "user:u1"
+    assert row["change_note"] == "first pass"
+    assert len(row["code_hash"]) == 64
+    # A draft is not the effective code yet: the node stays builtin.
+    assert service.get_effective_code(workspace_id, WF, NODE) is None
+
+
+def test_save_draft_rejects_invalid_code(service, workspace_id) -> None:
+    with pytest.raises(InvalidOperationError, match="not valid Python"):
+        service.save_draft(workspace_id, WF, NODE, "def run(:\n", "user:u1")
+    with pytest.raises(InvalidOperationError, match="module-level 'run'"):
+        service.save_draft(workspace_id, WF, NODE, "X = 1\n", "user:u1")
+    oversized = VALID_CODE + "#" * MAX_CODE_BYTES
+    with pytest.raises(InvalidOperationError, match="size limit"):
+        service.save_draft(workspace_id, WF, NODE, oversized, "user:u1")
+    assert service.list_versions(workspace_id, WF, NODE) == []
+
+
+def test_save_draft_overwrites_existing_draft(service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    row = service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u2")
+
+    assert row["version"] == 1
+    assert row["code"] == UPDATED_CODE
+    assert row["created_by"] == "user:u2"
+    assert len(service.list_versions(workspace_id, WF, NODE)) == 1
+
+
+def test_publish_flow_archives_previous_published(service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    published = service.publish(workspace_id, WF, NODE)
+
+    assert published["status"] == "published"
+    assert published["published_at"] is not None
+    assert service.get_effective_code(workspace_id, WF, NODE)["code"] == VALID_CODE
+
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+    republished = service.publish(workspace_id, WF, NODE)
+
+    assert republished["version"] == 2
+    versions = {
+        row["version"]: row["status"] for row in service.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "archived", 2: "published"}
+    assert service.get_effective_code(workspace_id, WF, NODE)["code"] == UPDATED_CODE
+
+
+def test_publish_without_draft_raises(service, workspace_id) -> None:
+    with pytest.raises(NotFoundError):
+        service.publish(workspace_id, WF, NODE)
+
+
+def test_rollback_republishes_old_version_as_new(service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    rolled = service.rollback(workspace_id, WF, NODE, 1, "user:ops")
+
+    assert rolled["version"] == 3
+    assert rolled["status"] == "published"
+    assert rolled["code"] == VALID_CODE
+    assert rolled["change_note"] == "rollback to v1"
+    versions = {
+        row["version"]: row["status"] for row in service.list_versions(workspace_id, WF, NODE)
+    }
+    assert versions == {1: "archived", 2: "archived", 3: "published"}
+    # The source version stays immutable.
+    assert service.list_versions(workspace_id, WF, NODE)[-1]["code"] == VALID_CODE
+
+
+def test_rollback_unknown_version_raises(service, workspace_id) -> None:
+    with pytest.raises(NotFoundError):
+        service.rollback(workspace_id, WF, NODE, 99, "user:ops")
+
+
+def test_archive_all_falls_back_to_builtin(service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    archived = service.archive_all(workspace_id, WF, NODE)
+
+    assert archived == 1
+    assert service.get_effective_code(workspace_id, WF, NODE) is None
+    assert service.list_versions(workspace_id, WF, NODE)[0]["status"] == "archived"
+    # Idempotent: nothing left to archive.
+    assert service.archive_all(workspace_id, WF, NODE) == 0
+
+
+def test_versions_number_by_max_plus_one(service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.archive_all(workspace_id, WF, NODE)
+    row = service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+
+    assert row["version"] == 2
+
+
+def test_gate_disabled_rejects_every_entry(job_db, workspace_id) -> None:
+    gated = NodeCodeService(job_db.path, custom_nodes_enabled=False)
+
+    with pytest.raises(CustomNodesDisabledError):
+        gated.get_effective_code(workspace_id, WF, NODE)
+    with pytest.raises(CustomNodesDisabledError):
+        gated.list_versions(workspace_id, WF, NODE)
+    with pytest.raises(CustomNodesDisabledError):
+        gated.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    with pytest.raises(CustomNodesDisabledError):
+        gated.publish(workspace_id, WF, NODE)
+    with pytest.raises(CustomNodesDisabledError):
+        gated.rollback(workspace_id, WF, NODE, 1, "user:u1")
+    with pytest.raises(CustomNodesDisabledError):
+        gated.archive_all(workspace_id, WF, NODE)
+
+
+def test_get_code_by_version_reads_archived_rows(service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    row = service.get_code_by_version(workspace_id, WF, NODE, 1)
+
+    assert row is not None
+    assert row["status"] == "archived"
+    assert row["code"] == VALID_CODE
+    assert service.get_code_by_version(workspace_id, WF, NODE, 99) is None
+
+
+def test_freeze_node_code_versions_pins_only_published(job_db, service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    # A draft without publish is not pinned.
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+
+    pins = freeze_node_code_versions(job_db.path, True, workspace_id, WF, [NODE, "download_video"])
+
+    assert list(pins) == [NODE]
+    assert pins[NODE]["version"] == 1
+    published = service.get_code_by_version(workspace_id, WF, NODE, 1)
+    assert pins[NODE]["code_hash"] == published["code_hash"]
+    # Gate off: intake never touches the table.
+    assert freeze_node_code_versions(job_db.path, False, workspace_id, WF, [NODE]) == {}
+
+
+def test_resolve_dispatch_node_code_priority(job_db, service, workspace_id) -> None:
+    # Builtin: no custom code at all.
+    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) is None
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) == VALID_CODE
+    # A frozen job keeps v1 even after v2 is published.
+    service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+    frozen = {"version": 1, "code_hash": code_hash(VALID_CODE)}
+    assert (
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen) == VALID_CODE
+    )
+    # Archived frozen versions stay readable.
+    service.archive_all(workspace_id, WF, NODE)
+    assert (
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen) == VALID_CODE
+    )
+    assert resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, None) is None
+    # Gate off: builtin, no error.
+    assert resolve_dispatch_node_code(job_db.path, False, workspace_id, WF, NODE, frozen) is None
+
+
+def test_resolve_dispatch_node_code_rejects_hash_mismatch(job_db, service, workspace_id) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 1, "code_hash": "tampered"}
+    with pytest.raises(ValueError, match="hash mismatch"):
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+
+
+def test_resolve_dispatch_node_code_warns_and_falls_back_on_missing_version(
+    job_db, service, workspace_id, caplog
+) -> None:
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 99, "code_hash": "whatever"}
+    with caplog.at_level(logging.WARNING, logger="server.app.services.node_codes"):
+        resolved = resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+
+    assert resolved == VALID_CODE  # published fallback
+    assert "frozen node code version missing" in caplog.text
+    assert "version=99" in caplog.text
+
+
+def test_save_draft_guard_rejects_concurrently_published_row(
+    service, workspace_id, monkeypatch
+) -> None:
+    """A stale draft view must not overwrite a row published in between."""
+    import server.app.services.versioned_entities as versioned_entities
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    published = service.publish(workspace_id, WF, NODE)
+    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(published))
+    with pytest.raises(ConflictError):
+        service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u2")
+    # The published row is untouched.
+    assert service.get_effective_code(workspace_id, WF, NODE)["code"] == VALID_CODE
+
+
+def test_publish_guard_rejects_concurrently_archived_draft(
+    service, workspace_id, monkeypatch
+) -> None:
+    """A stale draft view must not resurrect an archived row into published."""
+    import server.app.services.versioned_entities as versioned_entities
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    stale_draft = service.list_versions(workspace_id, WF, NODE)[0]
+    service.archive_all(workspace_id, WF, NODE)
+    monkeypatch.setattr(versioned_entities, "_latest_with_status", lambda *args: dict(stale_draft))
+    with pytest.raises(ConflictError):
+        service.publish(workspace_id, WF, NODE)
+    assert service.get_effective_code(workspace_id, WF, NODE) is None
+
+
+def test_insert_version_collision_maps_to_conflict_error(
+    service, workspace_id, monkeypatch
+) -> None:
+    """A unique-constraint race surfaces as ConflictError (409), not a 500."""
+    import server.app.services.versioned_entities as versioned_entities
+
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.archive_all(workspace_id, WF, NODE)
+    monkeypatch.setattr(versioned_entities, "_next_version", lambda *args: 1)
+    with pytest.raises(ConflictError):
+        service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")

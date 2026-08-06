@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import threading
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from server.app.jobs import JobQueries
@@ -21,13 +20,13 @@ from tests.workers.helpers import (
 
 def test_worker_creates_shared_pool_per_executor_id(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
 
     worker._poll()
 
-    assert "local-default" in worker._pools
-    assert worker._pools["local-default"]._max_workers == 2
+    assert "code-default" in worker._pools
+    assert worker._pools["code-default"]._max_workers == 2
     # No per-workspace pools should exist
     assert not hasattr(worker, "_ws_local_executors") or not worker._ws_local_executors
     assert not hasattr(worker, "_ws_agent_executors") or not worker._ws_agent_executors
@@ -39,7 +38,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
@@ -53,19 +52,19 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (ws["id"], "test", "fetch", "local-default"),
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+            (ws["id"], "test", "fetch", "code-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     processed = worker._poll()
 
     assert processed is True
-    assert worker.leases.active_counts("local-default").get("global", 0) == 1
+    assert worker.leases.active_counts("code-default").get("global", 0) == 1
     assert len(worker._futures) == 1
 
     executor.block_event.set()
@@ -77,7 +76,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     block_event = threading.Event()
-    executor = RecordingExecutor("local-default", block_event=block_event)
+    executor = RecordingExecutor("code-default", block_event=block_event)
     definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
@@ -91,20 +90,20 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (ws["id"], "test", "fetch", "local-default"),
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+            (ws["id"], "test", "fetch", "code-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     worker._poll()
-    assert worker.leases.active_counts("local-default").get("global", 0) == 1
+    assert worker.leases.active_counts("code-default").get("global", 0) == 1
 
     worker._poll()
-    assert worker.leases.active_counts("local-default").get("global", 0) == 1
+    assert worker.leases.active_counts("code-default").get("global", 0) == 1
 
     block_event.set()
     worker.stop()
@@ -114,7 +113,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
@@ -128,12 +127,12 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (ws["id"], "test", "fetch", "local-default"),
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+            (ws["id"], "test", "fetch", "code-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
@@ -144,7 +143,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     processed = worker._poll()
 
     assert processed is False
-    assert worker.leases.active_counts("local-default").get("global", 0) == 0
+    assert worker.leases.active_counts("code-default").get("global", 0) == 0
 
     worker.stop()
 
@@ -153,7 +152,7 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
@@ -167,8 +166,8 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
@@ -186,7 +185,7 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     executor.supports = lambda capability: capability == "other"  # type: ignore[method-assign]
     definition = _make_definition([_local_node("fetch")])
 
@@ -201,12 +200,12 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (ws["id"], "test", "fetch", "local-default"),
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+            (ws["id"], "test", "fetch", "code-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
@@ -222,11 +221,11 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
 
 def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
 
     worker._poll()
-    pool = worker._pools["local-default"]
+    pool = worker._pools["code-default"]
     worker.stop()
 
     assert pool._shutdown is True
@@ -236,7 +235,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
@@ -251,19 +250,19 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
     job_db.pause_job(job["id"], "awaiting_resources")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (ws["id"], "test", "fetch", "local-default"),
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+            (ws["id"], "test", "fetch", "code-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     processed = worker._poll()
 
     assert processed is False
-    assert worker.leases.active_counts("local-default").get("global", 0) == 0
+    assert worker.leases.active_counts("code-default").get("global", 0) == 0
     assert len(worker._futures) == 0
 
     worker.stop()
@@ -274,7 +273,7 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     definition = _make_definition(
         [
             _local_node("root"),
@@ -297,23 +296,23 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     with job_db.connect() as conn:
         for node in definition.nodes.values():
             conn.execute(
-                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-                (ws["id"], "test", node.key, "local-default"),
+                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+                (ws["id"], "test", node.key, "code-default"),
             )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
             (ws["id"], "test", "root", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
             (ws["id"], "test", "left", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
             (ws["id"], "test", "target", 1),
         )
 
@@ -345,21 +344,12 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
 
 def test_make_workflow_worker_runs_question_comprehension_info_local_node(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path,
 ) -> None:
-    monkeypatch.setattr(
-        "server.app.workflows.question_comprehension_info.get_token",
-        lambda env, config: "test-token",
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.question_comprehension_info.fetch_question_detail",
-        lambda question_id, api_url, token: SimpleNamespace(
-            question_id=question_id,
-            title="Question Q100",
-            normalized={},
-            payload={"uuid": question_id},
-        ),
-    )
+    # fetch_questions runs on the code-default executor in an isolated child
+    # process, which does not inherit parent monkeypatches. make_workflow_worker
+    # blanks the global cms: config, so the node resolves no CMS api_url and
+    # writes the base payload without any network call.
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
     workspace = queries.create_workspace(
@@ -367,12 +357,12 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
     )
     with queries.connect() as conn:
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (workspace["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (workspace["id"], "code-default", 2),
         )
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (workspace["id"], "question_comprehension_info", "fetch_questions", "local-default"),
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+            (workspace["id"], "question_comprehension_info", "fetch_questions", "code-default"),
         )
     job = queries.create_job(
         workflow_key="question_comprehension_info",
@@ -405,7 +395,7 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
 
     v1_nodes = [
         _local_node("fetch_questions", outputs=["questions.json"]),
@@ -465,12 +455,12 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     with job_db.connect() as conn:
         for node in v1_definition.nodes.values():
             conn.execute(
-                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-                (ws["id"], "question_comprehension_info", node.key, "local-default"),
+                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+                (ws["id"], "question_comprehension_info", node.key, "code-default"),
             )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [v2_definition])

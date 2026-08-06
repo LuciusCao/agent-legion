@@ -25,14 +25,15 @@ def build_pi_command(
             "tools": tools,
             "expected_outputs": list(expected_outputs),
             "config": dict(node_config or {}),
-            "pi": {
+            # Legacy local-runner adapter: PiConfig.flavor is the runtime here.
+            "runtime": config.flavor,
+            "execution": {
                 "binary": config.binary,
                 "provider": config.provider,
                 "model": config.model,
                 "thinking": config.thinking,
-                "flavor": config.flavor,
                 "timeout_seconds": config.timeout_seconds,
-                "velites_no_sandbox": config.velites_no_sandbox,
+                "no_sandbox": config.velites_no_sandbox,
             },
         },
         skill_dir=skill_dir,

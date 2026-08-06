@@ -27,6 +27,7 @@ class TokenUsageTotal(BaseModel):
     total_tokens: int
     cost: TokenUsageCostBreakdown | None
     pricing_missing: bool
+    pricing_missing_models: list[str] = []
 
 
 class TokenUsageSummary(TokenUsageTotal):

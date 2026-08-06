@@ -1,8 +1,9 @@
 """Full-gate evidence for VAULT-SECRET-001 over a real database.
 
-End-to-end chain: a resource binding secret is diverted to the vault, the
-stored config and the intake freeze carry only the ``secret_ref`` marker, and
-the runtime resolve chain turns the marker back into the plaintext in memory.
+End-to-end chain: a node config secret is diverted to the vault, the stored
+config and the intake freeze carry only the ``secret_ref`` marker, and the
+dispatch-time resolve chain turns the marker back into the plaintext in
+memory.
 """
 
 from __future__ import annotations
@@ -12,11 +13,13 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_intake import JobIntakeService
-from server.app.services.vault import VaultService, resource_secret_name
+from server.app.services.node_secrets import node_secret_name
+from server.app.services.vault import VaultService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.workflows.cms_helpers import _effective_cms_config
+from server.app.services.workspace_node_config import update_workspace_node_config
 
 PLAINTEXT = "full-gate-secret-token"
 
@@ -35,38 +38,43 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
         "vault-full", default_workflow_key="question_comprehension_info"
     )
     workspace_id = str(workspace["id"])
-    definition = WorkflowCatalogService(settings).definition("question_comprehension_info")
+    catalog = WorkflowCatalogService(settings)
+    definition = catalog.definition("question_comprehension_info")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
-    name = resource_secret_name("question_detail", "token")
+    name = node_secret_name("question_comprehension_info", "fetch_questions", "token")
     vault = VaultService(job_db.path, settings.config)
-    vault.set(workspace_id, name, PLAINTEXT)
-    job_db.update_workspace(
-        workspace_id,
-        resource_config={
-            "resources": {
-                "question_detail": {
-                    "enabled": True,
-                    "config": {
-                        "api_url": "http://cms.example.com/question/detail",
-                        "token": {"secret_ref": name},
-                    },
+    update_workspace_node_config(
+        job_db,
+        catalog,
+        published_agent_definitions(settings.database_url),
+        job_db.get_workspace(workspace_id),
+        {
+            "nodeConfig": {
+                "fetch_questions": {
+                    "api_url": "http://cms.example.com/question/detail",
+                    "token": PLAINTEXT,
                 }
             }
         },
+        settings.executor_definitions,
     )
 
-    # Persistence: only ciphertext at rest, no plaintext anywhere in the DB row.
+    # Persistence: only ciphertext at rest, no plaintext anywhere in the DB rows.
     with job_db.connect() as conn:
         row = conn.execute(
-            "select ciphertext from workspace_secrets where workspace_id=? and name=?",
+            "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
             (workspace_id, name),
         ).fetchone()
     assert row["ciphertext"] != PLAINTEXT
     assert PLAINTEXT not in row["ciphertext"]
+    stored = job_db.get_workspace(workspace_id)["node_config"]
+    stored_node = stored["question_comprehension_info"]["fetch_questions"]
+    assert stored_node["token"] == {"secret_ref": name}
+    assert PLAINTEXT not in json.dumps(stored)
 
     # Intake freeze: the batch payload carries the ref, never the plaintext.
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings, catalog)
     result = service.create_batch(
         workspace_id,
         {
@@ -80,11 +88,10 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     batch = job_db.get_batch(str(result["batch"]["id"]))
     payload_text = str(batch["source_payload_json"])
     assert PLAINTEXT not in payload_text
-    frozen = json.loads(payload_text)["resource_config"]["resources"]["question_detail"]["config"]
+    frozen = json.loads(payload_text)["node_config"]["fetch_questions"]
     assert frozen["token"] == {"secret_ref": name}
 
-    # Runtime resolve: the handler-facing chain sees the plaintext in memory.
-    job = {"workspace_id": workspace_id, "batch_id": str(result["batch"]["id"])}
-    context = {"settings_config": settings.config, "job_db": job_db}
-    resolved = _effective_cms_config(job, context)
+    # Runtime resolve: the dispatch chain sees the plaintext in memory.
+    resolved = vault.resolve_secret_refs(frozen, workspace_id)
     assert resolved["token"] == PLAINTEXT
+    assert resolved["api_url"] == "http://cms.example.com/question/detail"

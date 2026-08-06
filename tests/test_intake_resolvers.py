@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 
 from server.app.services.job_errors import InvalidOperationError, UnsupportedOperationError
-from server.app.services.job_intake_registry import RESOLVERS, ResolverSpec
-from server.app.services.job_intake_resolver import resolve_candidates
+from server.app.services.job_intake_registry import RESOLVERS, ResolverSpec, resolve_candidates
+from server.app.services.job_intake_resolution import resolve_cms_question_opaque_candidates
 from server.app.services.job_intake_video import resolve_cms_video_candidates
 
 
@@ -21,9 +21,11 @@ def test_video_knowledge_resolver_is_node_phase() -> None:
     assert spec.resource_key == "knowledge_video"
 
 
-def test_question_cms_resolvers_resolve_at_intake() -> None:
+def test_question_cms_resolvers_resolve_at_node() -> None:
     for mode_key in ("by_knowledge", "batch_by_ids", "batch_by_knowledge"):
-        assert RESOLVERS[("question", mode_key)].phase == "intake"
+        spec = RESOLVERS[("question", mode_key)]
+        assert spec.phase == "node"
+        assert spec.handler is resolve_cms_question_opaque_candidates
 
 
 def test_direct_resolvers_have_no_phase() -> None:

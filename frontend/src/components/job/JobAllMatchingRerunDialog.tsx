@@ -1,59 +1,73 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
+import { Dialog, DialogContent, DialogTitle } from '@mui/material'
+import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
 import {
-  Box,
-  Button,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-} from '@mui/material'
-import type { FailureCategory } from '../../types/failureTypes'
-import {
-  FAILURE_CATEGORY_HINTS,
-  FAILURE_CATEGORY_LABELS,
-  FAILURE_CATEGORY_ORDER,
-  type FailureCategorySelection,
-} from '../JobRerunDialog/failureCategoryCounts'
+  computeOrderedNodes,
+  type WorkflowNodesByKey,
+} from '../../lib/workflowNodes'
+import type { JobRerunConfirmArgs } from '../JobRerunDialog/useFailureCategories'
+import { type FailureCategorySelection } from '../JobRerunDialog/failureCategoryCounts'
+import { JobAllMatchingNodeRow } from './JobAllMatchingNodeRow'
+import { JobAllMatchingFailureCategoryRow } from './JobAllMatchingFailureCategoryRow'
+import { JobAllMatchingRerunFooter } from './JobAllMatchingRerunFooter'
+import { useBatchRerunPreview } from './useBatchRerunPreview'
 
 export type JobAllMatchingRerunDialogProps = {
   open: boolean
   count: number
+  jobs: JobSummary[]
+  workspaceId?: string
+  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowNodesByKey?: WorkflowNodesByKey | null
   onClose: () => void
-  onConfirm: (
-    nodeKey: string | null,
-    fromFailedNode?: boolean,
-    jobIds?: string[],
-    failureCategory?: FailureCategory
-  ) => void | Promise<void>
+  onConfirm: (...args: JobRerunConfirmArgs) => void | Promise<void>
 }
 
 /**
- * Rerun dialog for filter-based ('allMatching') selections. Node-specific
- * rerun needs per-job client-side eligibility and is unavailable here, so
- * only the failure-category flow is offered; the payload is resolved
- * server-side from the selection filter.
+ * Rerun dialog for 'allMatching' selections: from-node or failure-category
+ * rerun, both resolved server-side from the selection filter. The footer
+ * shows the server-computed 「将重跑 N 个任务」 once the preview answers.
  */
 export function JobAllMatchingRerunDialog({
   open,
   count,
+  jobs,
+  workspaceId,
+  workflowDefinition,
+  workflowNodesByKey,
   onClose,
   onConfirm,
 }: JobAllMatchingRerunDialogProps) {
   const [selection, setSelection] = useState<FailureCategorySelection>('all')
+  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const orderedNodes = useMemo(
+    () => computeOrderedNodes(jobs, workflowDefinition, workflowNodesByKey),
+    [jobs, workflowDefinition, workflowNodesByKey]
+  )
+
+  const preview = useBatchRerunPreview(
+    workspaceId,
+    open,
+    selectedNodeKey
+      ? { kind: 'node', nodeKey: selectedNodeKey }
+      : selection === 'all'
+        ? { kind: 'failedNode' }
+        : { kind: 'category', category: selection }
+  )
+
   if (!open) return null
+
+  const confirmArgs = (): JobRerunConfirmArgs =>
+    selectedNodeKey
+      ? [selectedNodeKey, false]
+      : [null, true, undefined, selection === 'all' ? undefined : selection]
 
   const handleConfirm = async () => {
     setLoading(true)
     try {
-      await onConfirm(
-        null,
-        true,
-        undefined,
-        selection === 'all' ? undefined : selection
-      )
+      await onConfirm(...confirmArgs())
     } catch {
       // Keep the dialog open on failure; the store already surfaced a toast.
       return
@@ -65,41 +79,36 @@ export function JobAllMatchingRerunDialog({
 
   return (
     <Dialog open onClose={onClose}>
-      <DialogTitle>按失败类别重跑</DialogTitle>
+      <DialogTitle>批量重跑</DialogTitle>
       <DialogContent>
-        <p>将对符合筛选条件的 {count} 个 job 执行</p>
-        <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-          <Chip
-            data-testid="rerun-chip-all-failed"
-            label="全部失败"
-            color="error"
-            variant={selection === 'all' ? 'filled' : 'outlined'}
-            onClick={() => setSelection('all')}
-          />
-          {FAILURE_CATEGORY_ORDER.map((category) => (
-            <Chip
-              key={category}
-              data-testid={`rerun-chip-${category}`}
-              label={FAILURE_CATEGORY_LABELS[category]}
-              title={FAILURE_CATEGORY_HINTS[category]}
-              variant={selection === category ? 'filled' : 'outlined'}
-              onClick={() => setSelection(category)}
-            />
-          ))}
-        </Box>
+        <p>将对符合筛选条件的 {count} 个 job 执行（按筛选条件由服务端解析）</p>
+        <JobAllMatchingNodeRow
+          nodes={orderedNodes}
+          selectedNodeKey={selectedNodeKey}
+          onSelectNode={setSelectedNodeKey}
+        />
+        <JobAllMatchingFailureCategoryRow
+          active={selectedNodeKey === null}
+          selection={selection}
+          onSelect={(value) => {
+            setSelectedNodeKey(null)
+            setSelection(value)
+          }}
+        />
       </DialogContent>
-      <DialogActions>
-        <Button variant="text" onClick={onClose} disabled={loading}>
-          取消
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleConfirm}
-          disabled={loading || count === 0}
-        >
-          确认重跑
-        </Button>
-      </DialogActions>
+      <JobAllMatchingRerunFooter
+        eligibleCount={preview.data?.eligible_count}
+        selectedNodeLabel={
+          selectedNodeKey
+            ? (orderedNodes.find((node) => node.key === selectedNodeKey)
+                ?.label ?? selectedNodeKey)
+            : null
+        }
+        loading={loading}
+        count={count}
+        onClose={onClose}
+        onConfirm={handleConfirm}
+      />
     </Dialog>
   )
 }

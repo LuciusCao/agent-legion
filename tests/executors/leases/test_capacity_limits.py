@@ -12,7 +12,7 @@ from tests.executors.leases.helpers import (
 def test_workspace_a_can_starve_workspace_b_at_global_capacity(
     queries: JobQueries, repo_a: ExecutorLeaseRepository, repo_b: ExecutorLeaseRepository
 ) -> None:
-    executor_id = "local-default"
+    executor_id = "code-default"
     global_capacity = 2
     workspace_a, job_a1 = _setup_workspace(
         queries, "Workspace A", executor_id, workspace_limit=2, local_limit=None
@@ -58,7 +58,7 @@ def test_workspace_a_can_starve_workspace_b_at_global_capacity(
 def test_local_node_limit_blocks_same_node_but_allows_other_local_node(
     queries: JobQueries, repo_a: ExecutorLeaseRepository, repo_b: ExecutorLeaseRepository
 ) -> None:
-    executor_id = "local-default"
+    executor_id = "code-default"
     workspace_id, job_id = _setup_workspace(
         queries,
         "ws-local",
@@ -72,15 +72,15 @@ def test_local_node_limit_blocks_same_node_but_allows_other_local_node(
     other_node_key = "extract_entities"
     with queries.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
             (workspace_id, "question_comprehension_info", other_node_key, executor_id),
         )
         conn.execute(
-            "insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
             (workspace_id, "question_comprehension_info", other_node_key, 1),
         )
         conn.execute(
-            "insert into job_nodes(job_id, node_key, status) values (?, ?, 'pending')"
+            "insert into job_nodes(job_id, node_key, status) values (%s, %s, 'pending')"
             " on conflict (job_id, node_key) do nothing",
             (job_id, other_node_key),
         )
@@ -163,9 +163,7 @@ def test_agent_claim_with_no_local_node_limit_uses_global_and_workspace_only(
 def test_claim_rejected_when_job_paused(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
-    workspace_id, job_id = _setup_workspace(
-        queries, "ws-paused", "local-default", workspace_limit=2
-    )
+    workspace_id, job_id = _setup_workspace(queries, "ws-paused", "code-default", workspace_limit=2)
     queries.pause_job(job_id, "awaiting_resources")
 
     claim = repo_a.try_claim(
@@ -180,8 +178,8 @@ def test_claim_rejected_when_job_paused(
     assert claim is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
     assert len(runs) == 0
     assert len(leases) == 0
 
@@ -192,7 +190,7 @@ def test_claim_rejected_when_target_snapshot_stale(
     workspace_id, job_id = _setup_workspace(
         queries,
         "ws-stale",
-        "local-default",
+        "code-default",
         workspace_limit=2,
         node_keys=["review_keywords", "clean_and_parse"],
     )
@@ -213,8 +211,8 @@ def test_claim_rejected_when_target_snapshot_stale(
     assert claim is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
     assert len(runs) == 0
     assert len(leases) == 0
 
@@ -223,7 +221,7 @@ def test_claim_with_stale_full_snapshot_is_rejected_when_job_is_run_to(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
-        queries, "ws-full-ignore", "local-default", workspace_limit=2
+        queries, "ws-full-ignore", "code-default", workspace_limit=2
     )
     queries.set_job_execution_target(job_id, "review_keywords")
 
@@ -240,7 +238,7 @@ def test_claim_with_stale_full_snapshot_is_rejected_when_job_is_run_to(
     assert claim is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
     assert len(runs) == 0
     assert len(leases) == 0

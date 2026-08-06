@@ -77,12 +77,12 @@ def _create_active_lease(
                 id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 f"lease-{node_key}",
                 f"exec-{node_key}",
-                "local-default",
+                "code-default",
                 job["workspace_id"],
                 job["id"],
                 job["workflow_key"],
@@ -100,7 +100,7 @@ def test_continue_to_target(execution_service: JobExecutionService, job_db: JobQ
     job_db.set_job_execution_target(job["id"], "clean_and_parse")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
-        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+        conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
 
     result = execution_service.continue_job(workspace["id"], job["id"])
 
@@ -129,7 +129,7 @@ def test_run_to_without_start_unpauses_target_reached_job(
     job_db.set_job_execution_target(job["id"], "clean_and_parse")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
-        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+        conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
 
     result = execution_service.run_to(workspace["id"], job["id"], "generate_key_info")
 
@@ -159,7 +159,7 @@ def test_run_to_with_start_unpauses_target_reached_job(
     job_db.set_job_execution_target(job["id"], "clean_and_parse")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
-        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+        conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
 
     result = execution_service.run_to(
         workspace["id"],
@@ -348,9 +348,9 @@ def test_continue_full_dag_after_target_reached(
     job_db.set_job_execution_target(job["id"], "clean_and_parse")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
-        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+        conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
         conn.execute(
-            "update job_nodes set status='completed' where job_id=? and node_key in ('fetch_questions', 'clean_and_parse')",
+            "update job_nodes set status='completed' where job_id=%s and node_key in ('fetch_questions', 'clean_and_parse')",
             (job["id"],),
         )
 

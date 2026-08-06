@@ -23,9 +23,9 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 
 class BlockingExecutor:
-    """Fake local executor that blocks until released."""
+    """Fake code executor that blocks until released."""
 
-    kind = "local"
+    kind = "code"
 
     def __init__(self, executor_id: str, block_event: threading.Event) -> None:
         self.id = executor_id
@@ -55,10 +55,10 @@ def _setup(
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     block_event = threading.Event()
-    executor = BlockingExecutor("local-default", block_event)
+    executor = BlockingExecutor("code-default", block_event)
     registry = make_registry(
-        {"local-default": executor},
-        {"local-default": local_def(capacity, set(node_keys))},
+        {"code-default": executor},
+        {"code-default": local_def(capacity, set(node_keys))},
     )
     definition = make_definition([local_node(key) for key in node_keys])
     snapshot_json = serialize_definition(definition)
@@ -76,8 +76,8 @@ def _setup(
             workflow_definition_snapshot_json=snapshot_json,
         )
     for key in node_keys:
-        bind(job_db, ws["id"], "test", key, "local-default")
-    allocate(job_db, ws["id"], "local-default", workspace_limit)
+        bind(job_db, ws["id"], "test", key, "code-default")
+    allocate(job_db, ws["id"], "code-default", workspace_limit)
     worker = make_worker(tmp_path, db_path, registry, [definition])
     return worker, ws, block_event
 
@@ -110,7 +110,7 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
     )
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("local-default")["global"] == 3
+    assert worker.leases.active_counts("code-default")["global"] == 3
     assert len(worker._futures) == 3
     assert loader_calls["count"] == 1
     assert snapshot_calls["count"] == 1
@@ -127,7 +127,7 @@ def test_no_per_job_node_status_queries(tmp_path: Path, monkeypatch: pytest.Monk
     node_calls = _count_calls(monkeypatch, worker.job_db, "list_job_nodes")
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("local-default")["global"] == 2
+    assert worker.leases.active_counts("code-default")["global"] == 2
     assert node_calls["count"] == 0
 
     block_event.set()
@@ -141,10 +141,10 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
     ws_a = job_db.create_workspace("WS A", default_workflow_key="question_comprehension_info")
     ws_b = job_db.create_workspace("WS B", default_workflow_key="question_comprehension_info")
     block_event = threading.Event()
-    executor = BlockingExecutor("local-default", block_event)
+    executor = BlockingExecutor("code-default", block_event)
     registry = make_registry(
-        {"local-default": executor},
-        {"local-default": local_def(4, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": local_def(4, {"fetch"})},
     )
     definition = make_definition([local_node("fetch")])
     for ws, prefix in ((ws_a, "A"), (ws_b, "B")):
@@ -157,8 +157,8 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
             node_keys=["fetch"],
             workspace_id=ws["id"],
         )
-        bind(job_db, ws["id"], "test", "fetch", "local-default")
-        allocate(job_db, ws["id"], "local-default", 2)
+        bind(job_db, ws["id"], "test", "fetch", "code-default")
+        allocate(job_db, ws["id"], "code-default", 2)
     worker = make_worker(tmp_path, db_path, registry, [definition])
     control = WorkspaceWorkerControl()
     control.pause(ws_a["id"])
@@ -170,7 +170,7 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
     assert [job["source_id"] for _, job in jobs_by_workspace[ws_b["id"]]] == ["B0"]
 
     assert worker._poll() is True
-    counts = worker.leases.active_counts("local-default")
+    counts = worker.leases.active_counts("code-default")
     assert counts.get(ws_a["id"], 0) == 0
     assert counts.get(ws_b["id"], 0) == 1
 
@@ -185,7 +185,7 @@ def test_multi_ready_node_job_claimed_within_one_pass(tmp_path: Path) -> None:
     )
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("local-default")["global"] == 2
+    assert worker.leases.active_counts("code-default")["global"] == 2
     assert len(worker._futures) == 2
     job = worker.job_db.list_jobs(workspace_id=ws["id"], workflow_key="test")[0]
     statuses = {

@@ -34,6 +34,7 @@ function allMatchingDisabled(
 export function JobActionBarActions(props: JobActionBarActionsProps) {
   const {
     jobs,
+    workspaceId,
     workflowDefinition,
     workflowNodesByKey,
     isBatch,
@@ -147,6 +148,10 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
         <JobAllMatchingRerunDialog
           open={rerunOpen}
           count={allMatchingCount}
+          jobs={jobs}
+          workspaceId={workspaceId}
+          workflowDefinition={workflowDefinition}
+          workflowNodesByKey={workflowNodesByKey}
           onClose={() => setRerunOpen(false)}
           onConfirm={onRerun}
         />

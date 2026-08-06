@@ -42,14 +42,14 @@ def test_expired_shard_lease_fails_shard_and_aggregates(tmp_path: Path) -> None:
     past = datetime.now(UTC) - timedelta(seconds=10)
     with write_transaction(job_db.path) as conn:
         conn.execute(
-            "update executor_leases set expires_at=? where id=?",
+            "update executor_leases set expires_at=%s where id=%s",
             (past.strftime("%Y-%m-%d %H:%M:%S.%f"), claim.lease_id),
         )
 
     assert repo.expire_stale(datetime.now(UTC)) == [claim.lease_id]
     with read_connection(job_db.path) as conn:
         shards = conn.execute(
-            "select * from node_shards where job_id=? and node_key=? order by shard_index",
+            "select * from node_shards where job_id=%s and node_key=%s order by shard_index",
             (job_id, "review_keywords"),
         ).fetchall()
     assert shards[0]["status"] == "failed"

@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent, act } from '@testing-library/react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
+import type { ReactNode } from 'react'
 import { VideoContentPanel } from './VideoContentPanel'
+import { createTestQueryClient } from '../testing/testQueryClient'
+import { queryKeys } from '../lib/queryKeys'
+import type { JobDetail } from '../types/jobTypes'
 
 const mockFetchJobVideoDetail = vi.fn()
 
@@ -12,6 +17,23 @@ vi.mock('../api/jobVideoApi', async (importOriginal) => {
       mockFetchJobVideoDetail(...args),
   }
 })
+
+let queryClient: QueryClient
+
+function wrapper({ children }: { children: ReactNode }) {
+  return (
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  )
+}
+
+function makeDetail(updatedAt: string): JobDetail {
+  return {
+    job: { id: 'job1', status: 'completed', updated_at: updatedAt },
+    nodes: [],
+    runs: [],
+    artifacts: [],
+  } as unknown as JobDetail
+}
 
 const mockVideoDetail = {
   input: {
@@ -51,12 +73,13 @@ const mockVideoDetail = {
 describe('VideoContentPanel', () => {
   beforeEach(() => {
     mockFetchJobVideoDetail.mockReset()
+    queryClient = createTestQueryClient()
   })
 
   it('shows loading state then renders video player and timeline', async () => {
     mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
 
-    render(<VideoContentPanel jobId="job1" />)
+    render(<VideoContentPanel jobId="job1" />, { wrapper })
 
     expect(screen.getByText('加载视频内容中...')).toBeInTheDocument()
 
@@ -68,7 +91,7 @@ describe('VideoContentPanel', () => {
   it('renders collapsible subtitle and interaction panels', async () => {
     mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
 
-    render(<VideoContentPanel jobId="job1" />)
+    render(<VideoContentPanel jobId="job1" />, { wrapper })
 
     await waitFor(() => {
       expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
@@ -83,7 +106,7 @@ describe('VideoContentPanel', () => {
   it('expands and collapses the subtitle panel', async () => {
     mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
 
-    render(<VideoContentPanel jobId="job1" />)
+    render(<VideoContentPanel jobId="job1" />, { wrapper })
 
     await waitFor(() => {
       expect(screen.getByText('字幕')).toBeInTheDocument()
@@ -107,26 +130,27 @@ describe('VideoContentPanel', () => {
   it('renders an error message when the endpoint fails', async () => {
     mockFetchJobVideoDetail.mockRejectedValue(new Error('network error'))
 
-    render(<VideoContentPanel jobId="job1" />)
+    render(<VideoContentPanel jobId="job1" />, { wrapper })
 
     await waitFor(() => {
       expect(screen.getByText('network error')).toBeInTheDocument()
     })
   })
 
-  it('refetches when refreshKey changes', async () => {
+  it('refetches when the job updated_at version changes in the shared detail query', async () => {
     mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
+    queryClient.setQueryData(queryKeys.jobDetail('job1'), makeDetail('t1'))
 
-    const { rerender } = render(
-      <VideoContentPanel jobId="job1" refreshKey="t1" />
-    )
+    render(<VideoContentPanel jobId="job1" />, { wrapper })
 
     await waitFor(() => {
       expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
     })
     expect(mockFetchJobVideoDetail).toHaveBeenCalledTimes(1)
 
-    rerender(<VideoContentPanel jobId="job1" refreshKey="t2" />)
+    act(() => {
+      queryClient.setQueryData(queryKeys.jobDetail('job1'), makeDetail('t2'))
+    })
 
     await waitFor(() => {
       expect(mockFetchJobVideoDetail).toHaveBeenCalledTimes(2)
@@ -136,7 +160,7 @@ describe('VideoContentPanel', () => {
   it('pauses and renders an interaction overlay at the trigger time', async () => {
     mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
 
-    render(<VideoContentPanel jobId="job1" />)
+    render(<VideoContentPanel jobId="job1" />, { wrapper })
 
     await waitFor(() => {
       expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()

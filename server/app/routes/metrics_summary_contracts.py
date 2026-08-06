@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel
 
+from server.app.routes.metrics_queue_contracts import QueueAlert, QueueSummary
+
 
 class RecentHourTokenSummary(BaseModel):
     input_tokens: int
@@ -30,3 +32,5 @@ class OpsMetricsSummary(BaseModel):
     active_executions: int | None
     recent_hour_tokens: RecentHourTokenSummary
     recent_hour_runs: RecentHourRunSummary
+    queue: QueueSummary
+    queue_alert: QueueAlert | None

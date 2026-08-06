@@ -5,7 +5,7 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from server.app.agent_bundle import build_agent_bundle
+from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker.execution_prepare import prepare_execution
 
 
@@ -35,7 +35,7 @@ def test_prepare_execution_substitutes_prompt_placeholders(tmp_path: Path) -> No
         },
         "input_artifacts": {},
         "expected_outputs": ["output.json"],
-        "pi": {"timeout_seconds": 60},
+        "execution": {"timeout_seconds": 60},
     }
     bundle = _make_bundle(tmp_path, manifest)
     claim = {

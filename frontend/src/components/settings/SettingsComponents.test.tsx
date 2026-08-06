@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { IntakeConfigSection } from './IntakeConfigSection'
 import { WorkflowSection } from './WorkflowSection'
-import { ResourceProviderCard } from './ResourceProviderCard'
 import { ConnectionTestStatus } from './ConnectionTestStatus'
 import { fetchWorkflows } from '../../api'
 import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../../types'
@@ -23,9 +22,6 @@ const baseSettings: WorkspaceSettings = {
   intakeModes: ['manual'],
   labelOverrides: {},
   workflowKey: 'question_content',
-  resources: {
-    cms: { enabled: true, config: { url: 'http://cms.test' } },
-  },
 }
 
 const workflowDefinition: WorkflowDefinitionRecord = {
@@ -61,7 +57,6 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError={null}
         isTesting={false}
@@ -92,7 +87,6 @@ describe('IntakeConfigSection', () => {
             modes: [{ key: 'none', label: 'None', input_field: 'x' }],
           },
         }}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError={null}
         isTesting={false}
@@ -110,12 +104,11 @@ describe('IntakeConfigSection', () => {
     expect(mockSetSettings).toHaveBeenCalledWith({ intakeModes: ['none'] })
   })
 
-  it('toggles an intake mode without touching resource bindings', () => {
+  it('toggles an intake mode and only sends intakeModes', () => {
     render(
       <IntakeConfigSection
-        settings={{ ...baseSettings, intakeModes: [], resources: {} }}
+        settings={{ ...baseSettings, intakeModes: [] }}
         workflowDefinition={workflowDefinition}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError={null}
         isTesting={false}
@@ -135,12 +128,11 @@ describe('IntakeConfigSection', () => {
     })
   })
 
-  it('unchecks an intake mode without touching resource bindings', () => {
+  it('unchecks an intake mode and only sends intakeModes', () => {
     render(
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError={null}
         isTesting={false}
@@ -160,140 +152,11 @@ describe('IntakeConfigSection', () => {
     })
   })
 
-  it('shows resource provider cards for active resources', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        resourceProviders={[
-          {
-            key: 'cms',
-            provider: 'CMS',
-            path: '/api/cms',
-            defaultParams: { url: 'http://default' },
-            paramKeys: ['url', 'token'],
-          },
-        ]}
-        testStatus={idleStatus}
-        saveError={null}
-        isTesting={false}
-        isSaving={false}
-        setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
-      />
-    )
-
-    expect(screen.getByText('CMS')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'url' })).toHaveValue(
-      'http://cms.test'
-    )
-  })
-
-  it('renders resource provider cards even when no intake mode is selected (issue 024)', () => {
-    render(
-      <IntakeConfigSection
-        settings={{ ...baseSettings, intakeModes: [] }}
-        workflowDefinition={workflowDefinition}
-        resourceProviders={[
-          {
-            key: 'cms',
-            provider: 'CMS',
-            path: '/api/cms',
-            defaultParams: {},
-            paramKeys: ['url'],
-          },
-        ]}
-        testStatus={idleStatus}
-        saveError={null}
-        isTesting={false}
-        isSaving={false}
-        setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
-      />
-    )
-
-    expect(screen.getByText('CMS')).toBeInTheDocument()
-    expect(screen.getByRole('textbox', { name: 'url' })).toBeInTheDocument()
-  })
-
-  it('updates resource config when provider card input changes', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        resourceProviders={[
-          {
-            key: 'cms',
-            provider: 'CMS',
-            path: '/api/cms',
-            defaultParams: {},
-            paramKeys: ['url', 'token'],
-          },
-        ]}
-        testStatus={idleStatus}
-        saveError={null}
-        isTesting={false}
-        isSaving={false}
-        setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
-      />
-    )
-
-    const tokenInput = screen.getByRole('textbox', { name: 'token' })
-    fireEvent.change(tokenInput, { target: { value: 'secret' } })
-
-    expect(mockSetSettings).toHaveBeenCalledWith({
-      resources: {
-        cms: {
-          enabled: true,
-          config: { url: 'http://cms.test', token: 'secret' },
-        },
-      },
-    })
-  })
-
-  it('removes resource config value when input is cleared', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        resourceProviders={[
-          {
-            key: 'cms',
-            provider: 'CMS',
-            path: '/api/cms',
-            defaultParams: {},
-            paramKeys: ['url'],
-          },
-        ]}
-        testStatus={idleStatus}
-        saveError={null}
-        isTesting={false}
-        isSaving={false}
-        setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
-      />
-    )
-
-    const urlInput = screen.getByRole('textbox', { name: 'url' })
-    fireEvent.change(urlInput, { target: { value: '' } })
-
-    expect(mockSetSettings).toHaveBeenCalledWith({
-      resources: {
-        cms: {
-          enabled: true,
-          config: {},
-        },
-      },
-    })
-  })
-
   it('triggers connection test and disables button while testing', () => {
     render(
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError={null}
         isTesting={true}
@@ -311,7 +174,6 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError={null}
         isTesting={false}
@@ -329,7 +191,6 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError="保存失败"
         isTesting={false}
@@ -347,7 +208,6 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={{ ...workflowDefinition, intake: { modes: [] } }}
-        resourceProviders={[]}
         testStatus={idleStatus}
         saveError={null}
         isTesting={false}
@@ -426,66 +286,5 @@ describe('ConnectionTestStatus', () => {
   it('renders failed state without message', () => {
     render(<ConnectionTestStatus state="failed" />)
     expect(screen.getByText('连接失败')).toHaveClass('failed')
-  })
-})
-
-describe('ResourceProviderCard', () => {
-  it('renders paramKeys inputs and fires whole-config change events', () => {
-    const onConfigChange = vi.fn()
-    render(
-      <ResourceProviderCard
-        provider={{
-          key: 'cms',
-          provider: 'CMS',
-          path: '/api/cms',
-          defaultParams: { url: 'http://default' },
-          paramKeys: ['url', 'token'],
-        }}
-        binding={{ enabled: true, config: { url: 'http://cms.test' } }}
-        onConfigChange={onConfigChange}
-      />
-    )
-
-    expect(screen.getByText('CMS')).toBeInTheDocument()
-    expect(screen.getByText('Path: /api/cms')).toBeInTheDocument()
-
-    const urlInput = screen.getByRole('textbox', { name: 'url' })
-    expect(urlInput).toHaveValue('http://cms.test')
-
-    fireEvent.change(urlInput, { target: { value: 'http://new.test' } })
-    expect(onConfigChange).toHaveBeenCalledWith({ url: 'http://new.test' })
-  })
-
-  it('prefers config_schema and emits schema-typed values', () => {
-    const onConfigChange = vi.fn()
-    render(
-      <ResourceProviderCard
-        provider={{
-          key: 'by_knowledge',
-          provider: 'By Knowledge',
-          path: '/api/by_knowledge',
-          defaultParams: {},
-          paramKeys: ['page_size'],
-          config_schema: {
-            type: 'object',
-            properties: {
-              page_size: { type: 'integer', default: 100 },
-            },
-          },
-        }}
-        binding={{ enabled: true, config: { page_size: 20 } }}
-        onConfigChange={onConfigChange}
-      />
-    )
-
-    const pageSizeInput = screen.getByRole('spinbutton', { name: 'page_size' })
-    expect(pageSizeInput).toHaveValue(20)
-
-    fireEvent.change(pageSizeInput, { target: { value: '50' } })
-    expect(onConfigChange).toHaveBeenCalledWith({ page_size: 50 })
-    expect(
-      typeof (onConfigChange.mock.calls[0][0] as Record<string, unknown>)
-        .page_size
-    ).toBe('number')
   })
 })

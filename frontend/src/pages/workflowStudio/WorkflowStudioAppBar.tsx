@@ -10,6 +10,7 @@ type Props = {
   scrolled?: boolean
   onOpenChanges: () => void
   onOpenYaml: () => void
+  onOpenAgents: () => void
   onValidate: () => void
 }
 
@@ -19,6 +20,7 @@ export function WorkflowStudioAppBar({
   scrolled,
   onOpenChanges,
   onOpenYaml,
+  onOpenAgents,
   onValidate,
 }: Props) {
   const title = useWorkflowStudioAppTitle(workspaceId)
@@ -32,6 +34,7 @@ export function WorkflowStudioAppBar({
           studio={studio}
           onOpenChanges={onOpenChanges}
           onOpenYaml={onOpenYaml}
+          onOpenAgents={onOpenAgents}
           onValidate={onValidate}
         />
       }

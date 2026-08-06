@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 CONFIG_FILE_KEYS: dict[str, frozenset[str]] = {
-    "app.yaml": frozenset(
-        {"database", "data_dir", "server", "cleanup", "token_usage", "monitoring"}
-    ),
-    "agent_legion.yaml": frozenset({"asr", "cms", "resource_providers", "openclaw"}),
+    "app.yaml": frozenset({"database", "data_dir", "server", "cleanup", "monitoring"}),
+    "agent_legion.yaml": frozenset({"asr", "cms", "openclaw"}),
     "workflow.yaml": frozenset(
         {
             "executors",

@@ -34,11 +34,22 @@ def save_revision_runtime_or_publish(
     if _structural_payload(current) != _structural_payload(definition):
         return publish(workspace_id, definition)
     definition_json = serialize_definition(definition)
+    # Runtime-only updates must not drop the publish-time node_code_pins
+    # snapshot (EXEC-CODE-002): carry it over from the stored payload. The
+    # hash still covers the pure definition only (same rule as publish).
+    new_hash = definition_hash(definition_json)
+    current_pins = json.loads(str(active["definition_json"])).get("node_code_pins")
+    if current_pins is not None:
+        payload = json.loads(definition_json)
+        payload["node_code_pins"] = current_pins
+        definition_json = json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
     with job_db.connect() as conn:
         row = conn.execute(
-            "update workflow_revisions set definition_json=?, definition_hash=?"
-            " where id=? returning *",
-            (definition_json, definition_hash(definition_json), active["id"]),
+            "update workflow_revisions set definition_json=%s, definition_hash=%s"
+            " where id=%s returning *",
+            (definition_json, new_hash, active["id"]),
         ).fetchone()
     if row is None:
         raise ValueError("workflow revision not found")

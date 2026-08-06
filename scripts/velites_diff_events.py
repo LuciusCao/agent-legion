@@ -12,6 +12,11 @@ is the expected difference, not an error.
 Exit code: 0 when the streams are structurally equivalent, 1 on substantive
 differences, 2 on usage errors (argparse).
 
+velites schema v2 note: ``turn_end`` carries only ``turnIndex`` and
+``agent_end`` no longer carries ``messages`` (Pi re-serializes both); the
+per-event field diff therefore reports Pi's extra payloads as informational
+pi-only fields, not as missing velites data.
+
 Usage:
     uv run python scripts/velites_diff_events.py PI_EVENTS.jsonl VELITES_EVENTS.jsonl
 """
@@ -34,7 +39,7 @@ TIMING_KEYS = frozenset(
     {"timestamp", "duration", "durationMs", "duration_ms", "elapsed", "elapsedMs", "pid"}
 )
 
-# Fields Agent Legion consumers depend on (token_usage.py, pi_model_error.py).
+# Fields Agent Legion consumers depend on (token_usage.py, shared/pi_model_error.py).
 ASSISTANT_REQUIRED = [
     "message.usage.input",
     "message.usage.output",
@@ -177,7 +182,7 @@ def main(argv: list[str] | None = None) -> int:
     ok = True
     event_types = (set(key_seq(pi)) | set(key_seq(velites))) - DELTA_EVENT_TYPES
     for etype in sorted(event_types):
-        if etype in ("message_start", "message_end", "turn_end"):
+        if etype in ("message_start", "message_end"):
             required = MESSAGE_START_REQUIRED if etype == "message_start" else ASSISTANT_REQUIRED
             ok &= diff_fields(
                 f"{etype}/assistant",

@@ -1,7 +1,18 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
+import { TestQueryProvider } from '../testing/testQueryClient'
 import { MonitoringPanel } from './MonitoringPanel'
+
+// react-query 需要 QueryClientProvider；每个用例独立 client（retry 关闭）。
+function renderPanel(props: { workspaceId?: string } = {}) {
+  return render(
+    <TestQueryProvider>
+      <MonitoringPanel {...props} />
+    </TestQueryProvider>
+  )
+}
 
 // bucket_start 必须对齐到整分钟，否则在固定时间窗网格里匹配不上会被填零。
 function bucket(offsetMinutes: number, overrides = {}) {
@@ -13,6 +24,8 @@ function bucket(offsetMinutes: number, overrides = {}) {
     online_workers_max: 5,
     active_executions: 2,
     active_executions_max: 4,
+    queued: 12,
+    queued_max: 20,
     input_tokens: 100,
     output_tokens: 50,
     cache_read_tokens: 10,
@@ -38,17 +51,32 @@ function summary(overrides = {}) {
       duration_p50_seconds: 42,
       duration_p95_seconds: 185,
     },
+    queue: {
+      queued: 12,
+      oldest_queued_at: null,
+      recent_hour_unclaimable_failed: 0,
+    },
+    queue_alert: null,
     ...overrides,
   }
 }
 
-const mockFetchOpsMetrics = vi.fn((params: { granularity: string }) =>
-  Promise.resolve({
+// 主数据与队列深度图同参数时共享 queryKey（合并为一次请求），切换 Worker 过滤
+// 或 30s 轮询都会再次拉取；自定义响应必须用持久实现并在 afterEach 复原，不能
+// 用 Once 系列。
+function defaultMetricsResponse(params: { granularity: string }) {
+  return Promise.resolve({
     granularity: params.granularity,
     buckets: [bucket(4), bucket(3), bucket(2), bucket(1)],
     summary: summary(),
   })
-)
+}
+
+const mockFetchOpsMetrics = vi.fn(defaultMetricsResponse)
+
+afterEach(() => {
+  mockFetchOpsMetrics.mockImplementation(defaultMetricsResponse)
+})
 
 vi.mock('../api/metrics', () => ({
   fetchOpsMetrics: (...args: [{ granularity: string }]) =>
@@ -68,7 +96,7 @@ vi.mock('../api/workerTokens', () => ({
 
 describe('MonitoringPanel', () => {
   it('renders stat cards and charts from fetched buckets', async () => {
-    render(<MonitoringPanel />)
+    renderPanel()
 
     // 摘要元素首帧就以占位符 '-' 渲染，必须等内容到位而不是等元素出现，
     // 否则并行高负载下断言会抢在 fetch resolve 之前执行。
@@ -99,14 +127,66 @@ describe('MonitoringPanel', () => {
     expect(
       screen.getByRole('img', { name: 'Token 吞吐量趋势' })
     ).toBeInTheDocument()
+    // 队列摘要卡与队列深度图（全局指标）
+    expect(screen.getByTestId('queue-depth-summary')).toHaveTextContent('12')
+    expect(screen.getByTestId('queue-sweeper-summary')).toHaveTextContent('0')
+    expect(
+      screen.getByRole('img', { name: 'Agent 执行队列深度趋势' })
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument()
     expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
       granularity: '6h',
     })
   })
 
+  it('renders the blocked queue alert with the skip-reason histogram', async () => {
+    mockFetchOpsMetrics.mockResolvedValue({
+      granularity: '6h',
+      buckets: [bucket(1)],
+      summary: summary({
+        queue: {
+          queued: 33412,
+          oldest_queued_at: new Date(Date.now() - 18 * 3600_000).toISOString(),
+          recent_hour_unclaimable_failed: 136,
+        },
+        queue_alert: {
+          kind: 'blocked',
+          at: new Date().toISOString(),
+          reasons: { capability_or_model_mismatch: 8 },
+        },
+      }),
+    })
+
+    renderPanel()
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('队列堵塞')
+    expect(alert).toHaveTextContent('33,412 条请求排队中')
+    expect(alert).toHaveTextContent('model/capability 不匹配 ×8')
+    // 队首最老超过 1 小时标红（18h）
+    expect(screen.getByText('18.0h')).toBeInTheDocument()
+    expect(screen.getByTestId('queue-sweeper-summary')).toHaveTextContent('136')
+  })
+
+  it('renders the stalled queue alert without claim skip reasons', async () => {
+    mockFetchOpsMetrics.mockResolvedValue({
+      granularity: '6h',
+      buckets: [bucket(1)],
+      summary: summary({
+        queue_alert: { kind: 'stalled', at: null, reasons: {} },
+      }),
+    })
+
+    renderPanel()
+
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('队列停滞')
+    expect(alert).toHaveTextContent('领取开关关闭')
+  })
+
   it('refetches with the new window when granularity changes', async () => {
     const user = userEvent.setup()
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await screen.findByTestId('online-workers-summary')
     await user.click(screen.getByRole('button', { name: '近 30 天' }))
@@ -125,7 +205,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('refetches with worker_id when a worker is selected', async () => {
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await screen.findByTestId('online-workers-summary')
 
@@ -156,9 +236,9 @@ describe('MonitoringPanel', () => {
   })
 
   it('renders error message on fetch failure', async () => {
-    mockFetchOpsMetrics.mockRejectedValueOnce(new Error('network error'))
+    mockFetchOpsMetrics.mockRejectedValue(new Error('network error'))
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     expect(
       await screen.findByText('监控数据加载失败：network error')
@@ -167,7 +247,7 @@ describe('MonitoringPanel', () => {
 
   it('keeps summary cards stable when granularity changes', async () => {
     const user = userEvent.setup()
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await waitFor(() =>
       expect(screen.getByTestId('hourly-tokens-summary')).toHaveTextContent(
@@ -193,7 +273,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('renders placeholder when no runs completed in the recent hour', async () => {
-    mockFetchOpsMetrics.mockResolvedValueOnce({
+    mockFetchOpsMetrics.mockResolvedValue({
       granularity: '6h',
       buckets: [],
       summary: summary({
@@ -206,7 +286,7 @@ describe('MonitoringPanel', () => {
       }),
     })
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     await waitFor(() =>
       expect(screen.getByTestId('hourly-runs-summary')).toHaveTextContent(
@@ -217,7 +297,7 @@ describe('MonitoringPanel', () => {
   })
 
   it('renders a zero-filled fixed window when no buckets', async () => {
-    mockFetchOpsMetrics.mockResolvedValueOnce({
+    mockFetchOpsMetrics.mockResolvedValue({
       granularity: '6h',
       buckets: [],
       summary: summary({
@@ -232,7 +312,7 @@ describe('MonitoringPanel', () => {
       }),
     })
 
-    render(<MonitoringPanel />)
+    renderPanel()
 
     // 固定时间窗下空数据渲染为零值折线，而不是“暂无数据”占位
     await waitFor(() =>
@@ -242,5 +322,34 @@ describe('MonitoringPanel', () => {
     expect(
       screen.getByRole('img', { name: 'Token 吞吐量趋势' })
     ).toBeInTheDocument()
+  })
+
+  it('scopes the panel to the workspace when workspaceId is given', async () => {
+    render(
+      <MemoryRouter>
+        <MonitoringPanel workspaceId="ops-ws" />
+      </MemoryRouter>
+    )
+
+    await waitFor(() =>
+      expect(screen.getByTestId('queue-depth-summary')).toHaveTextContent('12')
+    )
+    // 主数据请求带 workspace 过滤
+    expect(mockFetchOpsMetrics).toHaveBeenCalledWith({
+      granularity: '6h',
+      workspace_id: 'ops-ws',
+    })
+    // fleet-only 内容隐藏：在线 Worker 卡片与 Worker 过滤器
+    expect(
+      screen.queryByTestId('online-workers-summary')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('combobox', { name: '选择 Worker' })
+    ).not.toBeInTheDocument()
+    // 副标题标注 workspace；全局监控入口不在 ws 视图（挪到首页 admin 菜单）
+    expect(screen.getByText(/workspace「ops-ws」/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole('link', { name: '查看全局监控' })
+    ).not.toBeInTheDocument()
   })
 })

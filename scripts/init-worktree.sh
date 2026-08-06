@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # 初始化新 git worktree 的开发环境（幂等，可重复执行）：
+#   0. 嵌套防护：worktree 必须是主仓库根的平级子目录，嵌套直接报错
 #   1. 从基准 worktree 复制 .env（若本 worktree 缺失）
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
 #   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
@@ -9,9 +10,18 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+# 0. 嵌套防护（AGENTS.md §1）：worktree 一律是主仓库根的平级子目录，
+#    嵌套会让 data/、测试库派生与清理路径全部混乱，直接拒绝。
+MAIN="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+if [[ "$ROOT" != "$MAIN" && "$(dirname "$ROOT")" != "$MAIN/.worktrees" ]]; then
+    echo "错误: worktree 禁止嵌套（当前: $ROOT）。" >&2
+    echo "请先 cd 到主仓库根（$MAIN），再 git worktree add .worktrees/<name> -b <branch> <base>。" >&2
+    exit 1
+fi
+
 BASE="${1:-}"
 if [[ -z "$BASE" ]]; then
-    BASE="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
+    BASE="$MAIN"
 fi
 if [[ "$BASE" == "$ROOT" ]]; then
     echo "当前就是基准 worktree，无需初始化。" >&2

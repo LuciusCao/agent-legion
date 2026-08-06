@@ -120,3 +120,34 @@ pub fn expand_instruction(parts: &[String]) -> anyhow::Result<String> {
     }
     Ok(expanded.join("\n\n"))
 }
+
+/// `velites sandbox wrap` arguments: run one command inside the OS sandbox.
+/// Kept separate from [`Cli`] so the agent-run CLI stays untouched; main
+/// dispatches on the leading `sandbox wrap` tokens before clap sees them.
+#[derive(Debug, Parser)]
+#[command(
+    name = "velites-sandbox-wrap",
+    about = "Run a command inside the velites OS sandbox (fail-closed)."
+)]
+pub struct SandboxWrapCli {
+    /// Working directory, read-write inside the sandbox (also the process cwd).
+    #[arg(long)]
+    pub cwd: PathBuf,
+
+    /// Additional read-only root (repeatable; Linux covers reads via the
+    /// read-only `/` bind).
+    #[arg(long = "allow-read")]
+    pub allow_read: Vec<PathBuf>,
+
+    /// Additional read-write root (repeatable).
+    #[arg(long = "allow-write")]
+    pub allow_write: Vec<PathBuf>,
+
+    /// Allow outbound+inbound network (denied by default).
+    #[arg(long)]
+    pub allow_network: bool,
+
+    /// Command to run inside the sandbox (everything after `--`).
+    #[arg(required = true, trailing_var_arg = true, allow_hyphen_values = true)]
+    pub command: Vec<String>,
+}

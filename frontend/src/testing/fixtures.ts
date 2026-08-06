@@ -26,6 +26,9 @@ export function createMockUiState(partial: Partial<UiState> = {}): UiState {
     workspacePackageDialogOpen: false,
     tokenUsageDialogOpen: false,
     toast: null,
+    pageTitle: null,
+    pageSubtitle: null,
+    detailPageActions: null,
     openAddDialog: vi.fn(),
     closeAddDialog: vi.fn(),
     setAddContentType: vi.fn(),
@@ -33,6 +36,9 @@ export function createMockUiState(partial: Partial<UiState> = {}): UiState {
     setTokenUsageDialogOpen: vi.fn(),
     showToast: vi.fn(),
     clearToast: vi.fn(),
+    setPageTitle: vi.fn(),
+    setPageSubtitle: vi.fn(),
+    setDetailPageActions: vi.fn(),
     ...partial,
   }
 }

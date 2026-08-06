@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   createRegisterToken,
   listAgentWorkers,
@@ -11,7 +12,8 @@ import type {
   AgentRegisterTokenSummary,
   AgentWorkerSummary,
 } from '../../api'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { toErrorMessage } from '../../lib/queryError'
 import styles from './WorkerTokensSection.module.css'
 
 function formatTime(iso: string): string {
@@ -19,15 +21,15 @@ function formatTime(iso: string): string {
   return Number.isNaN(date.getTime()) ? iso : date.toLocaleString()
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
+function workerScope(worker: AgentWorkerSummary): string {
+  return worker.allowed_workspaces.length === 0
+    ? '全部 workspace'
+    : worker.allowed_workspaces.join(', ')
 }
 
 /**
  * Worker register token management (issue / list / revoke) plus revocation of
- * already-registered workers. Management endpoints are currently open
- * (trusted-network deployment, same as the rest of the Host API); access
- * control arrives with the login/permission system.
+ * already-registered workers (endpoints require login).
  */
 export function WorkerTokensSection() {
   const [label, setLabel] = useState('')
@@ -37,17 +39,20 @@ export function WorkerTokensSection() {
   const [copied, setCopied] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [refreshKey, setRefreshKey] = useState(0)
+  const queryClient = useQueryClient()
 
-  const { data: lists, error: listError } = useAsync(
-    () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
-    [refreshKey]
-  )
+  const { data: lists, error: listQueryError } = useQuery({
+    queryKey: extraQueryKeys.workerTokens(),
+    queryFn: () => Promise.all([listRegisterTokens(), listAgentWorkers()]),
+  })
+  const listError = toErrorMessage(listQueryError)
   const tokens = lists?.[0] ?? []
   const workers = lists?.[1] ?? []
 
   function refresh() {
-    setRefreshKey((key) => key + 1)
+    void queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.workerTokens(),
+    })
   }
 
   async function handleCreate() {
@@ -66,7 +71,7 @@ export function WorkerTokensSection() {
       setWorkspaceId('')
       refresh()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(toErrorMessage(err))
     } finally {
       setLoading(false)
     }
@@ -89,7 +94,7 @@ export function WorkerTokensSection() {
       await revokeRegisterToken(token.token_id)
       refresh()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(toErrorMessage(err))
     }
   }
 
@@ -106,7 +111,7 @@ export function WorkerTokensSection() {
       await revokeAgentWorker(worker.worker_id)
       refresh()
     } catch (err) {
-      setError(errorMessage(err))
+      setError(toErrorMessage(err))
     }
   }
 
@@ -239,6 +244,11 @@ export function WorkerTokensSection() {
               >
                 {worker.online ? '在线' : '离线'}
               </span>
+              <span className={styles.chip}>{worker.runtimes.join(', ')}</span>
+              <span className={styles.chip}>
+                并发上限 {worker.max_concurrency}
+              </span>
+              <span className={styles.chip}>{workerScope(worker)}</span>
               {worker.revoked && (
                 <span className={`${styles.chip} ${styles.chipRevoked}`}>
                   已吊销

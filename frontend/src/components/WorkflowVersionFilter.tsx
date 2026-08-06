@@ -1,6 +1,8 @@
 import { Select, MenuItem, FormControl, InputLabel } from '@mui/material'
-import type { JobFilterConfig } from '../stores/job/state'
-import type { WorkflowVersionOptions } from '../stores/job/filterLogic/types'
+import type {
+  JobFilterConfig,
+  WorkflowVersionOptions,
+} from '../stores/jobStore'
 import filterStyles from './FilterControls.module.css'
 
 export interface WorkflowVersionFilterProps {

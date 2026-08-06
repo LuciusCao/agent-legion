@@ -30,7 +30,7 @@ def _insert_workspace(
 ) -> None:
     conn.execute(
         "insert into workspaces(id, name, cms_config_json, resource_config_json)"
-        " values (?, ?, ?, ?)",
+        " values (%s, %s, %s, %s)",
         (
             workspace_id,
             workspace_id,
@@ -42,7 +42,7 @@ def _insert_workspace(
 
 def _resource_config(conn: Any, workspace_id: str) -> dict[str, Any]:
     row = conn.execute(
-        "select resource_config_json from workspaces where id=?", (workspace_id,)
+        "select resource_config_json from workspaces where id=%s", (workspace_id,)
     ).fetchone()
     return json.loads(row["resource_config_json"])
 
@@ -135,7 +135,7 @@ def test_migration_skips_empty_legacy_config() -> None:
 
 
 def test_schema_v15_drops_legacy_column() -> None:
-    # The autouse fixture already ran init_db at SCHEMA_VERSION 15.
+    # The autouse fixture already ran init_db at the current SCHEMA_VERSION.
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = {
             row["column_name"]

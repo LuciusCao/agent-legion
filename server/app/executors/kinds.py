@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
 from server.app.skills.manager import SkillManager
-from server.app.workflows.resource_providers import ResourceProviderDeclarations
 
 if TYPE_CHECKING:
     from server.app.services.artifact_store import ArtifactStore
@@ -36,7 +35,6 @@ class ExecutorKind(Generic[ConfigModelT]):
 
 @dataclass(frozen=True)
 class RuntimeDependencies:
-    local_handlers: Mapping[str, Any] = field(default_factory=dict)
     pi_runtime: PiRuntimeConfig = field(default_factory=PiRuntimeConfig)
     skill_manager: SkillManager = field(
         default_factory=lambda: SkillManager(
@@ -49,12 +47,10 @@ class RuntimeDependencies:
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
     settings_config: Mapping[str, Any] | None = None
-    resource_providers: ResourceProviderDeclarations = field(
-        default_factory=ResourceProviderDeclarations
-    )
     job_db: Any | None = None
     cancellation_grace_seconds: int = 5
     artifact_store: ArtifactStore | None = None
+    repo_root: Path = field(default_factory=lambda: Path(__file__).resolve().parents[3])
 
 
 _KIND_REGISTRY: dict[str, ExecutorKind[Any]] = {}
@@ -89,6 +85,6 @@ def build_executor(executor_id: str, config: BaseModel, deps: RuntimeDependencie
     kind = _KIND_REGISTRY.get(getattr(config, "kind", ""))
     if kind is None:
         raise UnknownExecutorKindError(
-            f"Executor {executor_id!r}: unknown kind {getattr(config, 'kind', '?')!r}"
+            f"Executor {executor_id!r}: unknown kind {getattr(config, 'kind', '%s')!r}"
         )
     return kind.factory(executor_id, config, deps)

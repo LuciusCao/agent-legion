@@ -21,9 +21,9 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 
 class BlockingExecutor:
-    """Fake local executor that blocks on a single event."""
+    """Fake code executor that blocks on a single event."""
 
-    kind = "local"
+    kind = "code"
 
     def __init__(self, executor_id: str, block_event: threading.Event) -> None:
         self.id = executor_id
@@ -68,10 +68,10 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
     )
 
     block_event = threading.Event()
-    executor = BlockingExecutor("local-default", block_event=block_event)
+    executor = BlockingExecutor("code-default", block_event=block_event)
     registry = make_registry(
-        {"local-default": executor},
-        {"local-default": local_def(10, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": local_def(10, {"fetch"})},
     )
     definition = make_definition([local_node("fetch")])
 
@@ -86,8 +86,8 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
         ws_c["id"]: 2,
     }
     for ws in workspaces.values():
-        allocate(job_db, ws["id"], "local-default", limits[ws["id"]])
-        bind(job_db, ws["id"], "test", "fetch", "local-default")
+        allocate(job_db, ws["id"], "code-default", limits[ws["id"]])
+        bind(job_db, ws["id"], "test", "fetch", "code-default")
 
     jobs_per_workspace = 4
     jobs: list[tuple[str, str]] = []
@@ -111,14 +111,14 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
 
     for _ in range(30):
         worker._poll()
-        counts = worker.leases.active_counts("local-default")
+        counts = worker.leases.active_counts("code-default")
         assert counts.get("global", 0) <= 10
         for ws in workspaces.values():
             assert counts.get(ws["id"], 0) <= limits[ws["id"]]
         if counts.get("global", 0) == 10:
             break
 
-    counts = worker.leases.active_counts("local-default")
+    counts = worker.leases.active_counts("code-default")
     assert counts.get("global", 0) <= 10
     for ws in workspaces.values():
         assert counts.get(ws["id"], 0) <= limits[ws["id"]]

@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { renderHook, waitFor } from '@testing-library/react'
 import { useJobListLoadMore } from './useJobListLoadMore'
-import { useJobStore } from '../stores/jobStore'
+import { createJobSummary, useJobStore } from '../stores/jobStore'
 import * as api from '../api'
-import { createJobSummary } from '../stores/job/actions/testHelpers'
 
 vi.mock('../api')
 

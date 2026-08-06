@@ -20,7 +20,6 @@ vi.mock('../uiStore', () => ({
   },
 }))
 
-const mockFetchJobs = vi.mocked(api.fetchJobs)
 const mockFetchJobsSnapshot = vi.mocked(api.fetchJobsSnapshot)
 const mockFetchJobFacets = vi.mocked(api.fetchJobFacets)
 const mockBatchDeleteJobs = vi.mocked(batchDeleteJobs)
@@ -131,32 +130,6 @@ describe('job derived state invariants', () => {
         .getState()
         .applyJobPatchBatch('ws1', 2, [makeWsJob('j9')], ['j1'])
       expect(useJobStore.getState().jobIds).toEqual(['j1', 'j2'])
-      expectConsistentDerivedState(useJobStore.getState())
-    })
-  })
-
-  describe('fetchJobs', () => {
-    it('keeps consistency after a successful fetch', async () => {
-      const jobs = seedJobs(3)
-      mockFetchJobs.mockResolvedValueOnce({ jobs })
-      await useJobStore.getState().fetchJobs('ws1')
-      expectConsistentDerivedState(useJobStore.getState())
-    })
-
-    it('clears the list consistently after a failed fetch', async () => {
-      useJobStore.getState().setJobsSnapshot('ws1', 1, seedJobs(2))
-      mockFetchJobs.mockRejectedValueOnce(new Error('network down'))
-      await useJobStore.getState().fetchJobs('ws1')
-      expect(useJobStore.getState().jobs).toEqual([])
-      expectConsistentDerivedState(useJobStore.getState())
-    })
-  })
-
-  describe('setJobsAndFinishLoading', () => {
-    it('replaces the list consistently', () => {
-      useJobStore.getState().setJobsSnapshot('ws1', 1, seedJobs(2))
-      useJobStore.getState().setJobsAndFinishLoading([makeWsJob('j7')])
-      expect(useJobStore.getState().jobIds).toEqual(['j7'])
       expectConsistentDerivedState(useJobStore.getState())
     })
   })

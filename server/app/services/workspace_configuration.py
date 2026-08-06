@@ -1,22 +1,23 @@
 from typing import Any
 
-from server.app.agents import AgentStatusManager
+from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.vault import VaultService, apply_resources_patch
+from server.app.services.vault import VaultService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.services.workspace_connection_test import test_workspace_connection
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
-from server.app.services.workspace_node_config import (
-    update_workspace_node_config,
+from server.app.services.workspace_node_config import update_workspace_node_config
+from server.app.services.workspace_settings_payload import workspace_settings_payload
+from server.app.services.workspace_settings_schemas import (
     workspace_settings_payload_with_schemas,
 )
-from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
-from server.app.workflows.resources import resolve_cms_resource
 
 
 def _build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -49,25 +50,13 @@ class WorkspaceConfigurationService:
             raise NotFoundError("Workspace not found")
         return workspace
 
-    def _apply_resources_patch(
-        self, workspace_id: str, workspace: dict[str, Any], resources_patch: Any
-    ) -> dict[str, Any]:
-        """Validate a resources patch and persist secret fields via the vault."""
-        return apply_resources_patch(
-            self._vault(),
-            workspace_id,
-            workspace,
-            resources_patch,
-            self.settings.resource_providers.schemas,
-        )
-
     def _vault(self) -> VaultService:
         return VaultService(self.job_db.path, self.settings.config)
 
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
             self.workflows,
-            self.settings.agent_definitions,
+            published_agent_definitions(self.settings.database_url),
             workspace,
             self.settings.executor_definitions,
         )
@@ -87,7 +76,9 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(self.job_db).ensure_active_revision(workspace["id"], definition)
+        WorkflowRevisionService(
+            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+        ).ensure_active_revision(workspace["id"], definition)
         return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:
@@ -133,9 +124,7 @@ class WorkspaceConfigurationService:
         agent_capacity: int | None = None,
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        current = workspace_settings_payload(
-            workspace, declarations=self.settings.resource_providers
-        )
+        current = workspace_settings_payload(workspace)
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
@@ -148,7 +137,8 @@ class WorkspaceConfigurationService:
             bindings=node_bindings,
             node_limits=node_limits,
             agent_capabilities={
-                definition.capability for definition in self.settings.agent_definitions.values()
+                definition.capability
+                for definition in published_agent_definitions(self.settings.database_url).values()
             },
         )
         name_value = workspace_patch.get("name")
@@ -159,17 +149,10 @@ class WorkspaceConfigurationService:
             if description_value is not None
             else str(workspace.get("description") or "")
         )
-        if settings_patch.get("resources") is not None:
-            resource_config = self._apply_resources_patch(
-                workspace_id, workspace, settings_patch["resources"]
-            )
-        else:
-            # Reuse the stored raw config so secret_ref dicts survive a save
-            # that does not touch resources (the settings payload masks them).
-            raw_resource_config = workspace.get("resource_config")
-            resource_config = (
-                dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
-            )
+        # Resource bindings are retired (v19); the stored column is left
+        # untouched so legacy rows keep whatever the migration left behind.
+        raw_resource_config = workspace.get("resource_config")
+        resource_config = dict(raw_resource_config) if isinstance(raw_resource_config, dict) else {}
         intake_config = _build_intake_config(current, settings_patch)
         if agent_capacity is not None and agent_capacity <= 0:
             raise InvalidOperationError("Agent capacity must be a positive integer")
@@ -192,7 +175,9 @@ class WorkspaceConfigurationService:
                 self.job_db.set_workspace_agent_capacity(workspace_id, agent_capacity)
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(self.job_db).ensure_active_revision(workspace_id, workflow)
+        WorkflowRevisionService(
+            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+        ).ensure_active_revision(workspace_id, workflow)
         executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,
@@ -205,18 +190,7 @@ class WorkspaceConfigurationService:
         self, workspace_id: str, section: str, patch: dict[str, Any]
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        if section == "connection" or section == "resources":
-            resource_config = workspace.get("resource_config")
-            next_resource_config = (
-                dict(resource_config) if isinstance(resource_config, dict) else {}
-            )
-            if patch.get("resources") is not None:
-                applied = self._apply_resources_patch(workspace_id, workspace, patch["resources"])
-                next_resource_config["resources"] = applied["resources"]
-            workspace = self.job_db.update_workspace(
-                workspace_id, resource_config=next_resource_config
-            )
-        elif section == "intake":
+        if section == "intake":
             intake_config = workspace.get("intake_config")
             next_intake_config = dict(intake_config) if isinstance(intake_config, dict) else {}
             if patch.get("intakeModes") is not None:
@@ -236,17 +210,33 @@ class WorkspaceConfigurationService:
                 default_workflow_key=patch.get("workflowKey"),
             )
             if patch.get("workflowKey") is not None:
-                WorkflowRevisionService(self.job_db).ensure_active_revision(
-                    workspace_id, definition
-                )
+                WorkflowRevisionService(
+                    self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+                ).ensure_active_revision(workspace_id, definition)
         elif section == "nodes":
             workspace = update_workspace_node_config(
                 self.job_db,
                 self.workflows,
-                self.settings.agent_definitions,
+                published_agent_definitions(self.settings.database_url),
                 workspace,
                 patch,
                 self.settings.executor_definitions,
+            )
+        elif section == "agent-defaults":
+            defaults = patch.get("agentDefaults")
+            if not isinstance(defaults, dict):
+                raise InvalidOperationError("agentDefaults payload is required")
+            values: dict[str, Any] = {}
+            for key in ("provider", "model", "thinking"):
+                value = defaults.get(key)
+                if value is not None and not isinstance(value, str):
+                    raise InvalidOperationError(f"agentDefaults.{key} must be a string")
+                values[key] = value
+            workspace = self.job_db.update_workspace(
+                workspace_id,
+                default_agent_provider=values["provider"],
+                default_agent_model=values["model"],
+                default_agent_thinking=values["thinking"],
             )
 
         else:
@@ -254,17 +244,12 @@ class WorkspaceConfigurationService:
         return self._payload(workspace)
 
     def test_connection(self, workspace_id: str) -> dict[str, Any]:
-        workspace = self._workspace(workspace_id)
-        cms_resource = resolve_cms_resource(
-            self.settings.config,
-            workspace,
-            None,
-            "question_detail",
-            declarations=self.settings.resource_providers,
+        return test_workspace_connection(
+            workspace_id,
+            self._workspace(workspace_id),
+            self.settings,
+            self._vault(),
         )
-        if not cms_resource.get("api_url"):
-            raise InvalidOperationError("Global CMS URL is not configured")
-        return {"ok": True, "message": "全局配置已就绪"}
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         return build_workspace_stats(

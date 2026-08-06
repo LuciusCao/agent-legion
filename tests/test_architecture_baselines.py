@@ -196,8 +196,8 @@ def test_workflow_yaml_capability_node_is_allowed(tmp_path):
 
 def test_executor_module_config_subscript_not_named_executors_is_allowed(tmp_path):
     write(
-        tmp_path / "server/app/executors/local.py",
-        "class LocalExecutor:\n"
+        tmp_path / "server/app/executors/code.py",
+        "class CodeExecutor:\n"
         "    def __init__(self, settings):\n"
         "        self.value = settings.config['other']\n",
     )

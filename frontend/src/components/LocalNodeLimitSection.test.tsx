@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { LocalNodeLimitSection } from './LocalNodeLimitSection'
 import { useSettingStore } from '../stores/settingStore'
 
 const catalog = [
   {
-    id: 'local-default',
-    kind: 'local' as const,
+    id: 'code-default',
+    kind: 'code' as const,
     capabilities: ['fetch_questions', 'clean_and_parse', 'mark_question'],
     global_capacity: 4,
   },
@@ -21,7 +21,6 @@ const catalog = [
 const workflowDefinition = {
   key: 'sample_workflow',
   label: '示例工作流',
-  concurrency: { local: 8, agent: 2, nodes: {} },
   intake: { modes: [] },
   edges: [],
   nodes: [
@@ -29,7 +28,6 @@ const workflowDefinition = {
       key: 'fetch_questions',
       label: '获取题目',
       capability: 'fetch_questions',
-      runner: 'local' as const,
       after: [],
       inputs: [],
       outputs: ['questions.json'],
@@ -38,7 +36,6 @@ const workflowDefinition = {
       key: 'clean_and_parse',
       label: '清洗与解析',
       capability: 'clean_and_parse',
-      runner: 'local' as const,
       after: ['fetch_questions'],
       inputs: ['questions.json'],
       outputs: ['parsed.json'],
@@ -47,7 +44,6 @@ const workflowDefinition = {
       key: 'review_keywords',
       label: '审核关键词',
       capability: 'review_keywords',
-      runner: 'agent' as const,
       after: ['extract_keywords'],
       inputs: ['keywords.json'],
       outputs: ['keywords_review.json'],
@@ -56,7 +52,6 @@ const workflowDefinition = {
       key: 'unbound_node',
       label: '未绑定节点',
       capability: 'mark_question',
-      runner: 'local' as const,
       after: [],
       inputs: [],
       outputs: [],
@@ -64,16 +59,30 @@ const workflowDefinition = {
   ],
 }
 
+// executorCatalog/workflowDefinition 已迁入 react-query；mock 快照 hook，
+// draft（executorConfiguration）仍写 store。
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useWorkspaceSettingsSnapshot: () => ({
+    workflowDefinition,
+    executorCatalog: catalog,
+    agentRoutes: [],
+  }),
+}))
+
 describe('LocalNodeLimitSection', () => {
   beforeEach(() => {
     useSettingStore.setState({
       workspaceId: 'ws1',
-      executorCatalog: catalog,
-      workflowDefinition,
+      settings: {
+        entityType: 'question',
+        intakeModes: [],
+        labelOverrides: {},
+        workflowKey: 'sample_workflow',
+      },
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -87,7 +96,7 @@ describe('LocalNodeLimitSection', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
           {
             workflow_key: 'sample_workflow',
@@ -107,7 +116,7 @@ describe('LocalNodeLimitSection', () => {
     })
   })
 
-  it('only renders nodes currently bound to a local executor', () => {
+  it('only renders nodes currently bound to a code executor', () => {
     render(<LocalNodeLimitSection />)
 
     expect(screen.getByText('获取题目')).toBeInTheDocument()
@@ -163,12 +172,12 @@ describe('LocalNodeLimitSection', () => {
     })
   })
 
-  it('adds a limit row when a new local-bound node appears', async () => {
+  it('adds a limit row when a new code-bound node appears', async () => {
     useSettingStore.setState({
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -177,7 +186,7 @@ describe('LocalNodeLimitSection', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'clean_and_parse',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],

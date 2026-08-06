@@ -80,29 +80,8 @@ def _create_workspace_with_revision(job_db, settings):
     return workspace
 
 
-def _mock_cms_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
-    from server.app.cms.question import CmsQuestionDetail
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Title {question_id}",
-            normalized={"stem": f"Stem {question_id}"},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
-
-
 def test_job_intake_create_batch_notifies(job_db, settings, monkeypatch) -> None:
     _create_workspace_with_revision(job_db, settings)
-    _mock_cms_resolution(monkeypatch)
     calls: list[int] = []
     monkeypatch.setattr(
         "server.app.services.job_intake.notify_schedulable_work", lambda: calls.append(1)
@@ -125,7 +104,6 @@ def test_job_intake_create_batch_notifies(job_db, settings, monkeypatch) -> None
 
 def test_intake_queue_chunk_jobs_notify(job_db, settings, monkeypatch) -> None:
     _create_workspace_with_revision(job_db, settings)
-    _mock_cms_resolution(monkeypatch)
     calls: list[int] = []
     monkeypatch.setattr(
         "server.app.services.job_intake_queue.notify_schedulable_work", lambda: calls.append(1)

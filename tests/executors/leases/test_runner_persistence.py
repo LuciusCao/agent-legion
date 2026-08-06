@@ -10,7 +10,7 @@ def _finish_and_read_runner(repo, queries, request, result) -> str:
     assert repo.finish(claim.lease_id, result) is True
     with queries.connect() as conn:
         row = conn.execute(
-            "select runner from node_runs where id=?", (claim.node_run_id,)
+            "select runner from node_runs where id=%s", (claim.node_run_id,)
         ).fetchone()
     return row["runner"]
 

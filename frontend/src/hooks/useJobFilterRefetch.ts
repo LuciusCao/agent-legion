@@ -1,6 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { useJobStore } from '../stores/jobStore'
-import type { JobFilterConfig } from '../stores/job/state'
+import { useJobStore, type JobFilterConfig } from '../stores/jobStore'
 
 const SEARCH_DEBOUNCE_MS = 400
 

@@ -3,10 +3,18 @@ from __future__ import annotations
 from pathlib import Path
 
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
-from server.app.db.migrations import migrate_workspace_cms_config
+from server.app.db.migrations import (
+    migrate_agent_catalog_cutover,
+    migrate_code_executor_bindings,
+    migrate_custom_node_codes,
+    migrate_local_executor_removal,
+    migrate_node_cms_config,
+    migrate_versioned_entities,
+    migrate_workspace_cms_config,
+)
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 20
+SCHEMA_VERSION = 27
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 # Vault (schema v16): idempotent DDL lives here because the architecture gate
@@ -47,14 +55,20 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             """
         )
         applied = conn.execute(
-            "select version from schema_migrations where version = ?", (SCHEMA_VERSION,)
+            "select version from schema_migrations where version = %s", (SCHEMA_VERSION,)
         ).fetchone()
         if applied is None:
             conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
             migrate_workspace_cms_config(conn)
             migrate_workspace_secrets(conn)
+            migrate_code_executor_bindings(conn)
+            migrate_local_executor_removal(conn)
+            migrate_node_cms_config(conn)
+            migrate_custom_node_codes(conn)
+            migrate_versioned_entities(conn)
+            migrate_agent_catalog_cutover(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
-                "insert into schema_migrations(version, name) values (?, ?)",
-                (SCHEMA_VERSION, "agent_requests_done_recent_index"),
+                "insert into schema_migrations(version, name) values (%s, %s)",
+                (SCHEMA_VERSION, "agent_catalog_cutover"),
             )

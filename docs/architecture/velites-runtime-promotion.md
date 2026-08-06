@@ -1,6 +1,6 @@
 # velites 升格为一级 Runtime 实施计划
 
-状态：**已落地**（Phase 1：PR #20；Phase 2：PR #21 + 审题链路迁移 2026-08-03；金丝雀关闭 `14ec130f` 2026-08-04；Phase 3 阶段 B 文档收口随本状态更新提交）。**阶段 C 已取消**：2026-08-04 用户决策 pi 作为可选 runtime 长期保留（不退役），flavor 相应长期保留。
+状态：**已落地**（Phase 1：PR #20；Phase 2：PR #21 + 审题链路迁移 2026-08-03；金丝雀关闭 `14ec130f` 2026-08-04；Phase 3 阶段 B 文档收口随本状态更新提交）。**阶段 C 已取消**：2026-08-04 用户决策 pi 作为可选 runtime 长期保留（不退役）。**后续（2026-08-05，agent 配置治理 phase 3）**：flavor 层已随 `workflows.pi` yaml 块一并退役——`AgentDefinition.runtime` 直接钉死命令构建器，4 个 video agent 经 schema v27 翻转为 `runtime: velites`；本文 flavor 相关描述均为历史记录。
 范围：`server/app/agent_broker/`、`server/app/agent_catalog.py`、`server/app/routes/`、`worker/`、`config/`、`frontend/src/generated/`
 关联文档：[velites-harness.md](velites-harness.md)（harness 设计）、[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)（证据矩阵）、`config/architecture/architecture-invariants.yaml`（invariant registry）
 
@@ -40,13 +40,13 @@ velites（`velites/` Rust agent harness）已通过金丝雀验证：一天 4.3 
 - `server/app/agent_broker/dispatch.py:54-55` — `definition.runtime != "pi"` 直接 `raise ValueError("... not implemented yet")`。
 - `dispatch.py:59` 读全局 `PiConfig.from_runtime(settings.executor_runtime.workflows.pi)`；`dispatch.py:79-87` 把 `binary/flavor/provider/model/thinking/timeout_seconds/velites_no_sandbox` 冻结进 `manifest["pi"]`；`dispatch.py:68` 写 `manifest["runtime"] = definition.runtime`；`dispatch.py:113` `render_command_spec(manifest)`。
 - 命令链：`server/app/workflows/pi_protocol.py:108-129` `render_command_spec` → `server/app/workflows/velites_command.py:38-64` `build_command_for_flavor` 按 `manifest["pi"]["flavor"]` 分发到 `build_velites_command`（velites_command.py:67-112）或 `pi_fallback`（pi_protocol.py:73-105 `build_command`）；未知 flavor fail-fast（velites_command.py:64）。
-- claim 时重渲染：`server/app/agent_claim_compatibility.py:21-40` `live_claim_manifest` 用 manifest 内冻结的 `pi` 块叠加 revision 的 provider/model/thinking 覆盖后再次 `render_command_spec`（:38-39）。**manifest 冻结的 flavor 即权威，重渲染自动一致。**
-- `server/app/services/execution_catalog_projection.py:46` — `if definition.runtime == "pi"` 才把 provider/model/thinking 投影进执行目录。
+- claim 时重渲染：`server/app/agent_broker/agent_claim_compatibility.py:21-40` `live_claim_manifest` 用 manifest 内冻结的 `pi` 块叠加 revision 的 provider/model/thinking 覆盖后再次 `render_command_spec`（:38-39）。**manifest 冻结的 flavor 即权威，重渲染自动一致。**
+- `server/app/services/executor_catalog.py:80` — `if definition.runtime in ("pi", "velites")` 才把 provider/model/thinking 投影进执行目录。
 
 ### 2.3 claim 匹配
 
 - `server/app/agent_broker/claim.py:59` Worker `runtimes_json` 解析为集合；候选查询 join `agent_definitions d` 取 `d.runtime`（claim.py:96）；`claim.py:127` `selected["runtime"] not in runtimes` 跳过。**runtime 匹配逻辑本身已通用，扩枚举即生效，claim 路径零代码改动。**
-- `server/app/agent_claim_compatibility.py:43-54` `worker_can_run` 只看 capability 与 (provider, model)，无 runtime 维度——保持如此，runtime 在 claim.py 单点判断。
+- `server/app/agent_broker/agent_claim_compatibility.py:43-54` `worker_can_run` 只看 capability 与 (provider, model)，无 runtime 维度——保持如此，runtime 在 claim.py 单点判断。
 
 ### 2.4 unclaimable sweeper（现有缺口）
 
@@ -75,7 +75,7 @@ velites（`velites/` Rust agent harness）已通过金丝雀验证：一天 4.3 
 
 ### 2.8 事件契约（不变量）
 
-velites 事件流保持 pi 消费子集 wire 兼容：Host 消费方 `server/app/services/pi_event_scan.py`、`token_usage.py`、`pi_model_error.py`、`job_log_renderer.py`；additive 扩展（message.timing）已存在。升格 runtime 不改事件 schema；`velites/schema/events.schema.json` 改动纪律（`cargo run --bin velites-schema -- schema/events.schema.json` + `velites/tests/schema_current.rs`、`golden_events.rs`）不变，EXEC-EVENT-SCHEMA-001 继续作护栏。
+velites 事件流保持 pi 消费子集 wire 兼容：Host 消费方 `shared/pi_events.py`、`token_usage.py`、`shared/pi_model_error.py`、`job_log_renderer.py`；additive 扩展（message.timing）已存在。升格 runtime 不改事件 schema；`velites/schema/events.schema.json` 改动纪律（`cargo run --bin velites-schema -- schema/events.schema.json` + `velites/tests/schema_current.rs`、`golden_events.rs`）不变，EXEC-EVENT-SCHEMA-001 继续作护栏。
 
 ## 3. 目标模型
 
@@ -108,7 +108,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
   - `runtime == "velites"`：在构建 `manifest["pi"]` 处（dispatch.py:79-87）强制 `flavor = "velites"`，`binary` 未显式配置时归一化为 `velites`（与 `runtime_config.py:31-32` `_flavor_binary` 同一规则），随后走原链——`render_command_spec` 经 `build_command_for_flavor` 产出 velites argv；`live_claim_manifest` 重渲染自动一致。
   - `runtime == "pi"`：现状逐比特不变（flavor 决定实现）。
   - 其他（openclaw）：保留 fail-fast，报错文案列出已支持集合。
-- `server/app/services/execution_catalog_projection.py:46` — 条件放宽为 `runtime in ("pi", "velites")`（velites 同样需要 provider/model/thinking 投影）。
+- `server/app/services/executor_catalog.py:80` — 条件放宽为 `runtime in ("pi", "velites")`（velites 同样需要 provider/model/thinking 投影）。**已落地**（executor_catalog 四文件合并时一并完成）。
 - manifest 的 `"pi"` 块暂不改名（改名是破坏性变更，留 Phase 3 与 command_spec version 升级一起做）。
 
 ### 4.3 claim 匹配与 unclaimable sweeper
@@ -171,7 +171,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 
 - **Phase 1 — 枚举与链路放开**（纯代码，无生产行为变化）：
   1. §4.1 全部枚举点 + OpenAPI 重新生成；
-  2. §4.2 dispatch 分派 + execution_catalog_projection 放宽；
+  2. §4.2 dispatch 分派 + executor_catalog 投影放宽（`services/executor_catalog.py`，已落地）；
   3. §4.3 sweeper runtime 维度；
   4. §6 测试；
   5. invariant registry 与证据矩阵加 §4.8 条目。

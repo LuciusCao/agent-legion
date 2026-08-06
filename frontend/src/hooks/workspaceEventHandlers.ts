@@ -1,3 +1,4 @@
+import type { QueryClient } from '@tanstack/react-query'
 import { useJobStore } from '../stores/jobStore'
 import type { JobSummary } from '../types'
 import { mergeWorkspaceEventStats } from './workspaceEventRefresh'
@@ -19,6 +20,7 @@ export interface JobPatchBatchPayload {
 }
 
 export function handleWorkspaceEvent(
+  queryClient: QueryClient,
   event: MessageEvent,
   workspaceId: string,
   statsOnly: boolean,
@@ -31,7 +33,7 @@ export function handleWorkspaceEvent(
     const payload = JSON.parse(event.data) as BaseEventPayload
     if (payload.workspace_id !== workspaceId) return
     if (payload.stats) {
-      mergeWorkspaceEventStats(workspaceId, payload.stats)
+      mergeWorkspaceEventStats(queryClient, workspaceId, payload.stats)
     }
     if (payload.type === 'job_patch_batch') {
       if (statsOnly) return

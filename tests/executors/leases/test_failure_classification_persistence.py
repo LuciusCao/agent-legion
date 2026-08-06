@@ -109,14 +109,14 @@ def test_orphan_recovery_assigns_worker_orphaned(
     del workspace_id
     with queries.connect() as conn:
         conn.execute(
-            "update job_nodes set status='running' where job_id=? and node_key=?",
+            "update job_nodes set status='running' where job_id=%s and node_key=%s",
             (job_id, "review_keywords"),
         )
-        conn.execute("update jobs set status='running' where id=?", (job_id,))
+        conn.execute("update jobs set status='running' where id=%s", (job_id,))
         conn.execute(
             """
             insert into node_runs(job_id, node_key, status, started_at, log_path)
-            values (?, ?, 'running', ?, ?)
+            values (%s, %s, 'running', %s, %s)
             """,
             (job_id, "review_keywords", datetime.now(UTC), "logs/orphan.log"),
         )

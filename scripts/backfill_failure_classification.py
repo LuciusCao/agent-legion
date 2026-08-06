@@ -53,8 +53,8 @@ def backfill_failure_classification(
             cursor = conn.execute(
                 f"""
                 update node_runs
-                set failure_category=?, failure_detail=?
-                where id=? and status='failed' and ({predicate})
+                set failure_category=%s, failure_detail=%s
+                where id=%s and status='failed' and ({predicate})
                 """,
                 (category, detail, run_id),
             )

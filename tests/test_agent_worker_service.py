@@ -142,7 +142,7 @@ def test_malformed_bootstrap_keeps_control_service_configurable(tmp_path: Path) 
 
     assert store.configured() is False
     assert store.bootstrap_error
-    assert store.read(require_identity=False)["runtimes"] == ["pi"]
+    assert store.read(require_identity=False)["runtimes"] == ["velites"]
 
 
 def test_unconfigured_worker_defaults_to_claim_disabled(tmp_path: Path) -> None:
@@ -285,10 +285,11 @@ def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:
 
 
 @pytest.mark.no_db
-def test_validate_config_accepts_velites_and_defaults_to_pi() -> None:
+def test_validate_config_accepts_pi_and_preserves_explicit_runtimes() -> None:
     config = validate_config({**_config(), "runtimes": ["pi", "velites"]})
     assert config["runtimes"] == ["pi", "velites"]
-    # 默认值保持 ["pi"]：声明 velites 是显式运维动作。
+    # 显式声明 ["pi"] 保持原样：pi 仍是合法 runtime，只是不再是默认值
+    # （默认值见 test_malformed_bootstrap_keeps_control_service_configurable）。
     assert validate_config(_config())["runtimes"] == ["pi"]
 
 
@@ -639,7 +640,8 @@ def test_compose_keeps_control_api_local_and_state_separate_from_executions() ->
         assert "${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787:8787" in compose
         assert "worker-control:/var/lib/agent-legion-worker-control" in compose
         assert "worker-data:/var/lib/agent-legion-worker" in compose
-    assert "server/app/workflows/pi_protocol.py" in dockerfile
+    assert "COPY shared /app/shared" in dockerfile
+    assert 'python3 -c "import worker.service' in dockerfile
     assert "worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py" in dockerfile
 
 

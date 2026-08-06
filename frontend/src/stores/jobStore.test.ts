@@ -1,10 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { useJobStore } from './jobStore'
+import { normalizeJobs, useJobStore } from './jobStore'
 import { createMockUiState, makeJob } from '../testing/fixtures'
-import { normalizeJobs } from './job/actions/fetchStateHelpers'
 
 vi.mock('../api', () => ({
-  fetchJobs: vi.fn(),
   api: vi.fn(),
 }))
 
@@ -25,7 +23,6 @@ vi.mock('./uiStore', () => ({
   },
 }))
 
-import { fetchJobs } from '../api'
 import {
   batchRerunJobs,
   batchDeleteJobs,
@@ -37,7 +34,6 @@ import {
 } from '../api/jobApi'
 import { useUiStore } from './uiStore'
 
-const mockFetchJobs = vi.mocked(fetchJobs)
 const mockBatchRerunJobs = vi.mocked(batchRerunJobs)
 const mockBatchDeleteJobs = vi.mocked(batchDeleteJobs)
 const mockClearJobsPackedStatus = vi.mocked(clearJobsPackedStatus)
@@ -71,7 +67,6 @@ describe('jobStore', () => {
       continueLoading: false,
       refreshFirstPage: mockRefreshFirstPage,
     })
-    mockFetchJobs.mockReset()
     mockRefreshFirstPage.mockReset()
     mockRefreshFirstPage.mockResolvedValue(undefined)
     mockBatchRerunJobs.mockReset()
@@ -132,71 +127,6 @@ describe('jobStore', () => {
     expect(filtered[0].id).toBe('j1')
   })
 
-  it('fetches jobs and sets state on success', async () => {
-    const jobs = [makeJob({ id: 'j1', title: 'One' })]
-    mockFetchJobs.mockResolvedValueOnce({ jobs })
-
-    await useJobStore.getState().fetchJobs('ws1')
-
-    expect(useJobStore.getState().jobs).toEqual(jobs)
-    expect(useJobStore.getState().isLoading).toBe(false)
-    expect(useJobStore.getState().error).toBeNull()
-    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
-  })
-
-  it('sets error on fetch failure', async () => {
-    mockFetchJobs.mockRejectedValueOnce(new Error('network down'))
-
-    await useJobStore.getState().fetchJobs('ws1')
-
-    expect(useJobStore.getState().error).toBe('network down')
-    expect(useJobStore.getState().isLoading).toBe(false)
-  })
-
-  it('clears stale jobs while fetching and after fetch failure', async () => {
-    useJobStore.setState(
-      normalizeJobs([
-        makeJob({ id: 'video-job', workspace_id: 'video_knowledge' }),
-      ])
-    )
-    mockFetchJobs.mockRejectedValueOnce(new Error('network down'))
-
-    const promise = useJobStore.getState().fetchJobs('question_comprehension')
-
-    expect(useJobStore.getState().jobs).toEqual([])
-    await promise
-    expect(useJobStore.getState().jobs).toEqual([])
-  })
-
-  it('ignores stale fetch responses from a previous workspace', async () => {
-    let resolveVideo: (value: { jobs: ReturnType<typeof makeJob>[] }) => void
-    mockFetchJobs
-      .mockReturnValueOnce(
-        new Promise((resolve) => {
-          resolveVideo = resolve
-        })
-      )
-      .mockResolvedValueOnce({
-        jobs: [
-          makeJob({
-            id: 'question-job',
-            workspace_id: 'question_comprehension',
-          }),
-        ],
-      })
-
-    const videoPromise = useJobStore.getState().fetchJobs('video_knowledge')
-    await useJobStore.getState().fetchJobs('question_comprehension')
-    resolveVideo!({
-      jobs: [makeJob({ id: 'video-job', workspace_id: 'video_knowledge' })],
-    })
-    await videoPromise
-
-    expect(useJobStore.getState().jobs.map((job) => job.id)).toEqual([
-      'question-job',
-    ])
-  })
-
   it('clears selection when filter changes', () => {
     useJobStore.setState({ selectedIds: new Set(['j1', 'j2']) })
     useJobStore.getState().setFilterConfig({ status: 'completed' })
@@ -243,7 +173,6 @@ describe('jobStore', () => {
     expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(true)
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
-    expect(mockFetchJobs).not.toHaveBeenCalled()
     expect(mockShowToast).toHaveBeenCalledWith(
       '重跑完成：成功 1 项，跳过 1 项',
       'success'
@@ -418,7 +347,6 @@ describe('jobStore', () => {
       jobIds: ['j1', 'j2'],
     })
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
-    expect(mockFetchJobs).not.toHaveBeenCalled()
     expect(useJobStore.getState().selectedIds).toEqual(new Set())
     expect(mockShowToast).toHaveBeenCalledWith(
       '已清空打包状态：成功 2 项，失败 0 项',
@@ -568,7 +496,6 @@ describe('jobStore', () => {
     await useJobStore.getState().batchRunTo('ws1', 'review')
 
     expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('does nothing when batch run-to is invoked with empty selection', async () => {

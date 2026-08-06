@@ -43,32 +43,32 @@ class AuthQueriesMixin(JobQueriesBase):
         user_id = uuid.uuid4().hex
         with self.connect() as conn:
             exists = conn.execute(
-                "select 1 from users where username=?", (clean_username,)
+                "select 1 from users where username=%s", (clean_username,)
             ).fetchone()
             if exists is not None:
                 raise ValueError("Username already exists")
             conn.execute(
                 """
                 insert into users(id, username, display_name, password_hash, role)
-                values (?, ?, ?, ?, ?)
+                values (%s, %s, %s, %s, %s)
                 """,
                 (user_id, clean_username, display_name.strip(), password_hash, role),
             )
-            row = conn.execute("select * from users where id=?", (user_id,)).fetchone()
+            row = conn.execute("select * from users where id=%s", (user_id,)).fetchone()
         if row is None:
             raise RuntimeError("user insert did not return a row")
         return _public_user(row)
 
     def get_user(self, user_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
-            row = conn.execute("select * from users where id=?", (user_id,)).fetchone()
+            row = conn.execute("select * from users where id=%s", (user_id,)).fetchone()
         return _public_user(row) if row else None
 
     def get_user_credentials(self, username: str) -> dict[str, Any] | None:
         """Internal record including password_hash; auth service use only."""
         with self._connect_read() as conn:
             row = conn.execute(
-                "select * from users where username=?", (username.strip(),)
+                "select * from users where username=%s", (username.strip(),)
             ).fetchone()
         return dict(row) if row else None
 
@@ -99,10 +99,10 @@ class AuthQueriesMixin(JobQueriesBase):
             fields["disabled_at"] = datetime.now(UTC) if disabled else None
         with self.connect() as conn:
             if fields:
-                assignments = ", ".join(f"{key}=?" for key in fields)
+                assignments = ", ".join(f"{key}=%s" for key in fields)
                 params = list(fields.values()) + [user_id]
                 cursor = conn.execute(
-                    f"update users set {assignments}, updated_at=current_timestamp where id=?",
+                    f"update users set {assignments}, updated_at=current_timestamp where id=%s",
                     params,
                 )
                 if cursor.rowcount == 0:
@@ -110,10 +110,10 @@ class AuthQueriesMixin(JobQueriesBase):
                 if "disabled_at" in fields or "password_hash" in fields:
                     conn.execute(
                         "update sessions set revoked_at=current_timestamp"
-                        " where user_id=? and revoked_at is null",
+                        " where user_id=%s and revoked_at is null",
                         (user_id,),
                     )
-            row = conn.execute("select * from users where id=?", (user_id,)).fetchone()
+            row = conn.execute("select * from users where id=%s", (user_id,)).fetchone()
         if row is None:
             raise ValueError("User not found")
         return _public_user(row)
@@ -123,7 +123,7 @@ class AuthQueriesMixin(JobQueriesBase):
     def create_session(self, token_hash: str, user_id: str) -> None:
         with self.connect() as conn:
             conn.execute(
-                "insert into sessions(token_hash, user_id, expires_at) values (?, ?, ?)",
+                "insert into sessions(token_hash, user_id, expires_at) values (%s, %s, %s)",
                 (token_hash, user_id, session_expiry()),
             )
 
@@ -138,7 +138,7 @@ class AuthQueriesMixin(JobQueriesBase):
                 """
                 select u.* from sessions s
                 join users u on u.id = s.user_id
-                where s.token_hash=? and s.revoked_at is null
+                where s.token_hash=%s and s.revoked_at is null
                   and s.expires_at > current_timestamp
                   and u.disabled_at is null
                 """,
@@ -147,7 +147,7 @@ class AuthQueriesMixin(JobQueriesBase):
             if row is None:
                 return None
             conn.execute(
-                "update sessions set expires_at=? where token_hash=?",
+                "update sessions set expires_at=%s where token_hash=%s",
                 (session_expiry(), token_hash),
             )
         return _public_user(row)
@@ -156,7 +156,7 @@ class AuthQueriesMixin(JobQueriesBase):
         with self.connect() as conn:
             conn.execute(
                 "update sessions set revoked_at=current_timestamp"
-                " where token_hash=? and revoked_at is null",
+                " where token_hash=%s and revoked_at is null",
                 (token_hash,),
             )
 
@@ -165,7 +165,7 @@ class AuthQueriesMixin(JobQueriesBase):
     def get_workspace_role(self, workspace_id: str, user_id: str) -> str | None:
         with self._connect_read() as conn:
             row = conn.execute(
-                "select role from workspace_members where workspace_id=? and user_id=?",
+                "select role from workspace_members where workspace_id=%s and user_id=%s",
                 (workspace_id, user_id),
             ).fetchone()
         return str(row["role"]) if row else None
@@ -178,7 +178,7 @@ class AuthQueriesMixin(JobQueriesBase):
                        u.disabled_at, m.role as member_role, m.created_at as member_since
                 from workspace_members m
                 join users u on u.id = m.user_id
-                where m.workspace_id=?
+                where m.workspace_id=%s
                 order by m.created_at, u.id
                 """,
                 (workspace_id,),
@@ -188,7 +188,7 @@ class AuthQueriesMixin(JobQueriesBase):
     def list_user_workspace_ids(self, user_id: str) -> list[str]:
         with self._connect_read() as conn:
             rows = conn.execute(
-                "select workspace_id from workspace_members where user_id=?",
+                "select workspace_id from workspace_members where user_id=%s",
                 (user_id,),
             )
             return [str(row["workspace_id"]) for row in rows]
@@ -198,13 +198,13 @@ class AuthQueriesMixin(JobQueriesBase):
             raise ValueError(f"Unknown workspace member role: {role}")
         with self.connect() as conn:
             for table, value in (("workspaces", workspace_id), ("users", user_id)):
-                exists = conn.execute(f"select 1 from {table} where id=?", (value,)).fetchone()
+                exists = conn.execute(f"select 1 from {table} where id=%s", (value,)).fetchone()
                 if exists is None:
                     raise ValueError(f"{table[:-1].capitalize()} not found")
             conn.execute(
                 """
                 insert into workspace_members(workspace_id, user_id, role)
-                values (?, ?, ?)
+                values (%s, %s, %s)
                 on conflict(workspace_id, user_id) do update set role=excluded.role
                 """,
                 (workspace_id, user_id, role),
@@ -213,7 +213,7 @@ class AuthQueriesMixin(JobQueriesBase):
     def delete_workspace_member(self, workspace_id: str, user_id: str) -> None:
         with self.connect() as conn:
             cursor = conn.execute(
-                "delete from workspace_members where workspace_id=? and user_id=?",
+                "delete from workspace_members where workspace_id=%s and user_id=%s",
                 (workspace_id, user_id),
             )
             if cursor.rowcount == 0:

@@ -125,7 +125,7 @@ def test_expired_session_is_invalid(job_db) -> None:
     job_db.create_session(token_hash, user["id"])
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "update sessions set expires_at=? where token_hash=?",
+            "update sessions set expires_at=%s where token_hash=%s",
             (datetime.now(UTC) - timedelta(seconds=1), token_hash),
         )
     assert job_db.get_session_user(token_hash) is None

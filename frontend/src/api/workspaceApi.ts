@@ -1,7 +1,9 @@
 import { api } from './core'
 import type {
+  AgentDefaults,
   WorkspaceRecord,
   WorkspaceResponse,
+  WorkspaceSettingsResponse,
   WorkspacesResponse,
 } from '../types'
 import type { WorkspaceStats } from '../types/workspaceTypes'
@@ -61,4 +63,17 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   await api(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
     method: 'DELETE',
   })
+}
+
+export async function updateAgentDefaults(
+  workspaceId: string,
+  agentDefaults: AgentDefaults
+): Promise<WorkspaceSettingsResponse> {
+  return api(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/settings/agent-defaults`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify({ agentDefaults }),
+    }
+  )
 }

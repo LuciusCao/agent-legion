@@ -6,7 +6,7 @@ from typing import Any
 import pytest
 
 from server.app.db.schema import init_db
-from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import (
     ClaimedExecution,
@@ -140,7 +140,7 @@ def _claim_request(
     execution_mode: str = "full",
     target_node_key: str | None = None,
     allowed_node_keys: tuple[str, ...] = (),
-    executor_id: str = "local-default",
+    executor_id: str = "code-default",
     global_capacity: int = 2,
     local_node_limit: int | None = 1,
     ttl: int = 60,
@@ -169,7 +169,7 @@ def _setup_workspace(
     queries: JobQueries,
     definition: WorkflowDefinition,
     target_node_key: str | None = None,
-    executor_id: str = "local-default",
+    executor_id: str = "code-default",
 ) -> tuple[str, str]:
     workspace = queries.create_workspace(name="control-ws", default_workflow_key=definition.key)
     workspace_id = workspace["id"]
@@ -191,7 +191,7 @@ def _setup_workspace(
             conn.execute(
                 """
                 insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
@@ -200,7 +200,7 @@ def _setup_workspace(
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set
               concurrency_limit=excluded.concurrency_limit
             """,
@@ -210,7 +210,7 @@ def _setup_workspace(
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
@@ -294,8 +294,8 @@ def test_stale_target_snapshot_rejected_and_no_state_persisted(
     assert claim is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
     assert len(runs) == 0
     assert len(leases) == 0
 
@@ -326,8 +326,8 @@ def test_paused_job_rejects_claim_and_creates_no_state(
     assert claim is None
 
     with queries.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
-        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=%s", (job_id,)).fetchall()
     assert len(runs) == 0
     assert len(leases) == 0
 
@@ -447,19 +447,19 @@ def _make_worker(
     queries: JobQueries,
     definitions: list[WorkflowDefinition],
 ) -> WorkflowWorkerThread:
-    executor_def = LocalExecutorConfig(
-        kind="local",
+    executor_def = CodeExecutorConfig(
+        kind="code",
         global_capacity=2,
         capabilities={
-            node.capability: LocalCapabilityConfig(handler="dummy.handler")
+            node.capability: CodeCapabilityConfig(path="workflow_nodes/question_intake.py")
             for definition in definitions
             for node in definition.nodes.values()
         },
     )
     registry = ExecutorRegistry(
-        executors={"local-default": _FakeExecutor("local-default")},
-        global_capacities={"local-default": 2},
-        definitions={"local-default": executor_def},
+        executors={"code-default": _FakeExecutor("code-default")},
+        global_capacities={"code-default": 2},
+        definitions={"code-default": executor_def},
     )
     leases = ExecutorLeaseRepository(queries.path)
     runtime = ExecutionRuntime(
@@ -476,6 +476,7 @@ def _make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={},
+        database_url=str(queries.path),
         executor_definitions=registry.definitions(),
     )
     return WorkflowWorkerThread(
@@ -488,11 +489,11 @@ def _make_worker(
 
 
 class _FakeExecutor:
-    kind = "local"
+    kind = "code"
 
     def __init__(self, executor_id: str) -> None:
         self.id = executor_id
-        self.kind = "local"
+        self.kind = "code"
 
     def supports(self, capability: str) -> bool:
         return True
@@ -536,26 +537,26 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
             conn.execute(
                 """
                 insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
-                (workspace_id, "branched", node.key, "local-default"),
+                (workspace_id, "branched", node.key, "code-default"),
             )
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set
               concurrency_limit=excluded.concurrency_limit
             """,
-            (workspace_id, "local-default", 10),
+            (workspace_id, "code-default", 10),
         )
         for node in definition.nodes.values():
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,

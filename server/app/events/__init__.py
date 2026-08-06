@@ -3,6 +3,11 @@
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from server.app.events.agent_broadcast import (
+        AgentBroadcastController as AgentBroadcastController,
+    )
+    from server.app.events.agents import AgentStatus as AgentStatus
+    from server.app.events.agents import AgentStatusManager as AgentStatusManager
     from server.app.events.aggregator import (
         WorkspaceJobEventAggregator as WorkspaceJobEventAggregator,
     )
@@ -18,6 +23,9 @@ if TYPE_CHECKING:
     from server.app.events.sse import JobEventManager as JobEventManager
 
 _EXPORTS = {
+    "AgentBroadcastController": "agent_broadcast",
+    "AgentStatus": "agents",
+    "AgentStatusManager": "agents",
     "EventBus": "bus",
     "InProcessEventBus": "bus",
     "JobEventBuffer": "buffer",

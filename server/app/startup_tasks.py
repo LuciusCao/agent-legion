@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import FastAPI
 
-    from server.app.agent_broadcast import AgentBroadcastController
+    from server.app.events.agent_broadcast import AgentBroadcastController
     from server.app.events.aggregator import WorkspaceJobEventAggregator
     from server.app.services.ops_metrics import OpsMetricsService
 

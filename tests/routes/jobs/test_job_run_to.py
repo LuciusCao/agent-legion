@@ -118,7 +118,7 @@ def test_continue_job_resumes_after_target_reached(tmp_path):
         job_db.set_job_execution_target(job_id, "review_key_info")
         job_db.pause_job(job_id, "target_reached")
         with job_db.connect() as conn:
-            conn.execute("update jobs set status='paused' where id=?", (job_id,))
+            conn.execute("update jobs set status='paused' where id=%s", (job_id,))
 
         response = c.post(f"/api/jobs/{job_id}/continue", json={})
         detail = c.get(f"/api/jobs/{job_id}").json()

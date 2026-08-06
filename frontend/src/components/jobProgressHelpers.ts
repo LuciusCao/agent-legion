@@ -2,13 +2,13 @@ import { formatDuration } from '../lib/formatters'
 import type { JobNode } from '../types/jobTypes'
 
 export const EXECUTOR_KIND_LABELS: Record<string, string> = {
-  local: '本地',
+  code: '代码',
   pi: 'Pi Agent',
   openclaw: 'OpenClaw Agent',
 }
 
 export const EXECUTOR_KIND_ICONS: Record<string, string> = {
-  local: 'build_circle',
+  code: 'code',
   pi: 'smart_toy',
   openclaw: 'smart_toy',
 }

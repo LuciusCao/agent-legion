@@ -3,10 +3,10 @@
 //! The wire format mirrors the Pi `--mode json` events that Agent Legion
 //! consumes:
 //!
-//! - `server/app/services/pi_event_scan.py` — event allowlist for compression;
+//! - `shared/pi_events.py` — event allowlist for compression;
 //! - `server/app/services/token_usage.py` — `message_end.message.usage`
 //!   (`input`/`output`/`cacheRead`), `provider`, `model`;
-//! - `server/app/workflows/pi_model_error.py` — `stopReason` + `errorMessage`
+//! - `shared/pi_model_error.py` — `stopReason` + `errorMessage`
 //!   failure semantics;
 //! - `server/app/services/job_log_renderer.py` — UI preview over
 //!   `agent_start` / `turn_start` / `message_end` (roles `assistant` and
@@ -15,6 +15,12 @@
 //! Delta events (`message_update`, `tool_execution_update`) intentionally do
 //! NOT exist here — removing them is the core motivation of velites (they are
 //! 99%+ of Pi's stdout volume and are always discarded downstream).
+//!
+//! Schema v2: `turn_end` and `agent_end` no longer re-serialize the full
+//! message payloads Pi carries (`turn_end.message`/`toolResults`,
+//! `agent_end.messages`). Every Host consumer reads the same content from
+//! `message_end` / `tool_execution_end`, so the redundant copies only
+//! inflated events.jsonl (2-3x on long runs).
 
 use std::io::Write;
 
@@ -198,9 +204,12 @@ pub enum EndReason {
 /// Pi; the Host judges failure from the event stream). `reason` is present
 /// only on budget exhaustion or cancellation (exit code also stays 0 — see
 /// `cancel.rs`).
+///
+/// Schema v2: unlike Pi, this event does NOT carry the full `messages`
+/// history — no Host consumer reads it, and every message already appeared
+/// in its own `message_end` / `tool_execution_end` event.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct AgentEndEvent {
-    pub messages: Vec<Message>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -215,13 +224,14 @@ pub struct TurnStartEvent {
     pub turn_index: u32,
 }
 
-/// `turn_end` event: assistant message plus the tool results it triggered.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// `turn_end` event: turn boundary marker only (schema v2). Pi re-serializes
+/// the assistant `message` and its `toolResults` here; velites does not — the
+/// assistant message is already carried by this turn's `message_end`, and the
+/// tool results by the `tool_execution_end.result.content` events.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TurnEndEvent {
     pub turn_index: u32,
-    pub message: Message,
-    pub tool_results: Vec<Message>,
 }
 
 /// `message_start` event: assistant message skeleton (role/provider/model
@@ -544,9 +554,19 @@ mod tests {
     }
 
     #[test]
+    fn turn_end_carries_only_turn_index() {
+        // Schema v2: no redundant message/toolResults re-serialization.
+        let event = Event::TurnEnd(TurnEndEvent { turn_index: 3 });
+        let value = serde_json::to_value(&event).unwrap();
+        assert_eq!(value["type"], "turn_end");
+        assert_eq!(value["turnIndex"], 3);
+        assert!(value.get("message").is_none());
+        assert!(value.get("toolResults").is_none());
+    }
+
+    #[test]
     fn agent_end_reason_and_outputs_validation_wire_shape() {
         let event = Event::AgentEnd(AgentEndEvent {
-            messages: Vec::new(),
             error: None,
             reason: Some(EndReason::BudgetExceeded),
         });
@@ -554,9 +574,10 @@ mod tests {
         assert_eq!(value["type"], "agent_end");
         assert_eq!(value["reason"], "budget_exceeded");
         assert!(value.get("error").is_none());
+        // Schema v2: agent_end carries no message history.
+        assert!(value.get("messages").is_none());
 
         let event = Event::AgentEnd(AgentEndEvent {
-            messages: Vec::new(),
             error: None,
             reason: Some(EndReason::Cancelled),
         });
@@ -564,7 +585,6 @@ mod tests {
 
         // Normal end: reason is skipped, not null.
         let event = Event::AgentEnd(AgentEndEvent {
-            messages: Vec::new(),
             error: None,
             reason: None,
         });
@@ -583,7 +603,7 @@ mod tests {
 
     #[test]
     fn event_type_tags_match_pi_allowlist() {
-        // Must match RELEVANT_EVENT_TYPES in server/app/services/pi_event_scan.py.
+        // Must match RELEVANT_EVENT_TYPES in shared/pi_events.py.
         let tags = [
             "session",
             "agent_start",

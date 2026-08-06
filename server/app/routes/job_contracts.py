@@ -2,11 +2,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from server.app.routes.workspace_contracts import (
-    CmsServiceStatus,
-    ResourceProviderDefinition,
-    WorkspaceRecord,
-)
+from server.app.routes.workspace_contracts import WorkspaceRecord
 
 
 class JobBatchRequest(BaseModel):
@@ -56,8 +52,8 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
     workflowKey: str | None = None
-    resources: dict[str, Any] | None = None
     nodeConfig: dict[str, dict[str, Any]] | None = None
+    agentDefaults: dict[str, str] | None = None
 
 
 class WorkspaceSettingsTestResponse(BaseModel):
@@ -117,11 +113,3 @@ class WorkspaceStatsResponse(BaseModel):
 
 class DeleteWorkspaceResponse(BaseModel):
     deleted: str
-
-
-class ResourceProvidersResponse(BaseModel):
-    providers: list[ResourceProviderDefinition]
-
-
-class GlobalServicesResponse(BaseModel):
-    cms: CmsServiceStatus

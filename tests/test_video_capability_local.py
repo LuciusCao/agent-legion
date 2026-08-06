@@ -1,7 +1,8 @@
 import json
 from pathlib import Path
 
-from server.app.workflows import video_knowledge
+from workflow_nodes.video_assemble import run as assemble_video_metadata
+from workflow_nodes.video_package import run as package_video_job
 
 
 def write_video_input(job_dir: Path) -> None:
@@ -37,7 +38,7 @@ def test_assemble_video_metadata_writes_workspace_outputs(tmp_path: Path) -> Non
     (tmp_path / "checklist.json").write_text("{}", encoding="utf-8")
     (tmp_path / "review_result.json").write_text("{}", encoding="utf-8")
 
-    video_knowledge.assemble_video_metadata({}, tmp_path, {"settings_config": {}})
+    assemble_video_metadata({}, tmp_path, {"settings_config": {}})
 
     assert (tmp_path / "metadata.json").is_file()
     assert (tmp_path / "report.md").is_file()
@@ -50,7 +51,7 @@ def test_package_video_job_writes_manifest(tmp_path: Path) -> None:
     (tmp_path / "report.md").write_text("# Report\n", encoding="utf-8")
     (tmp_path / "upload_params.json").write_text("{}", encoding="utf-8")
 
-    video_knowledge.package_video_job({}, tmp_path, {"settings_config": {}})
+    package_video_job({}, tmp_path, {"settings_config": {}})
 
     manifest = json.loads((tmp_path / "package_manifest.json").read_text(encoding="utf-8"))
     assert manifest["workflow_key"] == "video_knowledge"

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -9,7 +10,6 @@ import pytest
 from server.app.agent_broker import dispatch as agent_dispatch
 from server.app.agent_broker.dispatch import AgentDispatchService
 from server.app.agent_catalog import AgentDefinition
-from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.schema import WorkflowNode, WorkflowNodeExecution
 
 _EXECUTION_ID = "00000000-0000-0000-0000-000000000123"
@@ -39,6 +39,7 @@ def _node() -> WorkflowNode:
         outputs=["answer.json"],
         execution=WorkflowNodeExecution(
             provider="node-provider",
+            model="node-model",
             thinking="high",
             prompt="Answer carefully",
         ),
@@ -49,6 +50,7 @@ def _node() -> WorkflowNode:
 def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     manager = MagicMock()
     pool = MagicMock()
+    pool_kwargs: dict[str, Any] = {}
     broker = MagicMock()
     broker.bundle_dir = tmp_path / "bundles"
     broker.has_active_request.return_value = False
@@ -68,33 +70,25 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
 
     build_agent_bundle = MagicMock(side_effect=build_bundle)
 
+    def _pool(**kwargs: Any) -> MagicMock:
+        pool_kwargs.update(kwargs)
+        return pool
+
     monkeypatch.setattr(agent_dispatch, "build_skill_manager", lambda _root: manager)
-    monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", lambda: pool)
+    monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", _pool)
     monkeypatch.setattr(agent_dispatch, "resolve_skill_dir", resolve_skill_dir)
     monkeypatch.setattr(agent_dispatch, "get_skill_version", get_skill_version)
     monkeypatch.setattr(agent_dispatch, "stage_agent_inputs", stage_agent_inputs)
     monkeypatch.setattr(agent_dispatch, "render_command_spec", render_command_spec)
     monkeypatch.setattr(agent_dispatch, "build_agent_bundle", build_agent_bundle)
     monkeypatch.setattr(agent_dispatch.uuid, "uuid4", lambda: _EXECUTION_ID)
-    monkeypatch.setattr(
-        agent_dispatch.PiConfig,
-        "from_runtime",
-        lambda _runtime: PiConfig(
-            binary="pi-bin",
-            flavor="pi",
-            provider="default-provider",
-            model="default-model",
-            thinking="low",
-            timeout_seconds=42,
-            velites_no_sandbox=True,
-        ),
-    )
 
     service = AgentDispatchService(settings, broker, artifact_store)
     return SimpleNamespace(
         service=service,
         manager=manager,
         pool=pool,
+        pool_kwargs=pool_kwargs,
         broker=broker,
         artifact_store=artifact_store,
         skill_dir=skill_dir,
@@ -120,6 +114,12 @@ def _enqueue(harness: SimpleNamespace, *, definition: AgentDefinition | None = N
         inputs=("question.json",),
         node_config={"page_size": 25, "api_key": "must-not-leak", "unknown": "drop"},
     )
+
+
+def test_enqueue_pool_sized_from_settings(harness: SimpleNamespace) -> None:
+    # Defaults come from executor_runtime.agent_enqueue (AgentEnqueueConfig).
+    assert harness.pool_kwargs == {"workers": 16, "max_pending": 1024}
+    assert harness.service.enqueue_pool is harness.pool
 
 
 def test_enqueue_skips_an_existing_active_request(harness: SimpleNamespace) -> None:
@@ -154,14 +154,13 @@ def test_enqueue_builds_an_immutable_manifest_and_bundle(harness: SimpleNamespac
     assert manifest["skill_version"] == "skill-v1"
     assert manifest["command_spec"] == {"command": ["pi", "--print"]}
     assert manifest["bundle_name"] == f"{_EXECUTION_ID}.tar.gz"
-    assert manifest["pi"] == {
-        "binary": "pi-bin",
-        "flavor": "pi",
+    assert manifest["execution"] == {
+        "binary": "pi",
         "provider": "node-provider",
-        "model": "default-model",
+        "model": "node-model",
         "thinking": "high",
-        "timeout_seconds": 42,
-        "velites_no_sandbox": True,
+        "timeout_seconds": 1800,
+        "no_sandbox": False,
     }
 
     context = harness.stage_agent_inputs.call_args.args[1]

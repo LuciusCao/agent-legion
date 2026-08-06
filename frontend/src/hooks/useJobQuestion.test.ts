@@ -1,6 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { renderHook, waitFor } from '@testing-library/react'
+import { renderHook, waitFor, act } from '@testing-library/react'
+import { createElement, type ReactNode } from 'react'
+import { QueryClientProvider, type QueryClient } from '@tanstack/react-query'
 import { useJobQuestion } from './useJobQuestion'
+import { createTestQueryClient } from '../testing/testQueryClient'
+import { queryKeys } from '../lib/queryKeys'
+import type { JobDetail } from '../types/jobTypes'
 
 const mockFetchJobArtifact = vi.fn()
 
@@ -12,9 +17,25 @@ vi.mock('../api', async (importOriginal) => {
   }
 })
 
+let queryClient: QueryClient
+
+function wrapper({ children }: { children: ReactNode }) {
+  return createElement(QueryClientProvider, { client: queryClient }, children)
+}
+
+function makeDetail(nodes: Record<string, unknown>[]): JobDetail {
+  return {
+    job: { id: 'job1', status: 'running', updated_at: 't0' },
+    nodes,
+    runs: [],
+    artifacts: [],
+  } as unknown as JobDetail
+}
+
 describe('useJobQuestion', () => {
   beforeEach(() => {
     mockFetchJobArtifact.mockReset()
+    queryClient = createTestQueryClient()
   })
 
   it('returns normalized question from questions.json', async () => {
@@ -36,7 +57,7 @@ describe('useJobQuestion', () => {
       }),
     })
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.error).toBe('')
@@ -55,7 +76,7 @@ describe('useJobQuestion', () => {
       content: JSON.stringify({ questions: [] }),
     })
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.question).toBeNull()
@@ -65,7 +86,7 @@ describe('useJobQuestion', () => {
   it('sets error when artifact fetch fails', async () => {
     mockFetchJobArtifact.mockRejectedValue(new Error('not found'))
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.error).toBe('not found')
@@ -75,7 +96,7 @@ describe('useJobQuestion', () => {
   it('sets error when content is invalid json', async () => {
     mockFetchJobArtifact.mockResolvedValue({ content: 'not-json' })
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.error).toContain('JSON')
@@ -87,7 +108,7 @@ describe('useJobQuestion', () => {
       content: JSON.stringify({ questions: 'bad' }),
     })
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.question).toBeNull()
@@ -99,7 +120,7 @@ describe('useJobQuestion', () => {
       content: JSON.stringify({ questions: [] }),
     })
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.question).toBeNull()
@@ -111,7 +132,7 @@ describe('useJobQuestion', () => {
       content: JSON.stringify({ questions: ['string'] }),
     })
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.question).toBeNull()
@@ -123,14 +144,14 @@ describe('useJobQuestion', () => {
       content: JSON.stringify({ questions: [{ question_id: 'Q1' }] }),
     })
 
-    const { result } = renderHook(() => useJobQuestion('job1'))
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.loading).toBe(false))
     expect(result.current.question).toBeNull()
     expect(result.current.error).toBe('')
   })
 
-  it('refetches when the question artifact refresh key changes', async () => {
+  it('refetches when the producer node version changes in the shared detail query', async () => {
     mockFetchJobArtifact
       .mockRejectedValueOnce(new Error('not found'))
       .mockResolvedValueOnce({
@@ -144,18 +165,33 @@ describe('useJobQuestion', () => {
         }),
       })
 
-    const hookWithRefreshKey = useJobQuestion as unknown as (
-      jobId: string,
-      refreshKey: string
-    ) => ReturnType<typeof useJobQuestion>
-    const { result, rerender } = renderHook(
-      ({ refreshKey }) => hookWithRefreshKey('job1', refreshKey),
-      { initialProps: { refreshKey: 'running' } }
+    const producerNode = {
+      node_key: 'fetch_questions',
+      outputs: ['questions.json'],
+      status: 'running',
+      started_at: '2026-06-18T09:00:00Z',
+    }
+    queryClient.setQueryData(
+      queryKeys.jobDetail('job1'),
+      makeDetail([producerNode])
     )
+
+    const { result } = renderHook(() => useJobQuestion('job1'), { wrapper })
 
     await waitFor(() => expect(result.current.error).toBe('not found'))
 
-    rerender({ refreshKey: 'completed:2026-06-18T10:00:00Z' })
+    act(() => {
+      queryClient.setQueryData(
+        queryKeys.jobDetail('job1'),
+        makeDetail([
+          {
+            ...producerNode,
+            status: 'completed',
+            finished_at: '2026-06-18T10:00:00Z',
+          },
+        ])
+      )
+    })
 
     await waitFor(() =>
       expect(result.current.question?.stem).toBe('<p>Generated later</p>')

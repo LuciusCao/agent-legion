@@ -32,9 +32,9 @@ def record_failed_node_without_execution(
     cursor = conn.execute(
         """
         update job_nodes
-        set status='failed', stale_reason='', error_message=?, finished_at=?,
-            failure_category=?, failure_detail=?
-        where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+        set status='failed', stale_reason='', error_message=%s, finished_at=%s,
+            failure_category=%s, failure_detail=%s
+        where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
         """,
         (error_message, now_str, failure_category, failure_detail, job_id, node_key),
     )
@@ -47,7 +47,7 @@ def record_failed_node_without_execution(
             run_dir, session_dir, started_at, finished_at, error_message,
             failure_category, failure_detail
         )
-        values (?, ?, 'failed', '[]', ?, '', '', ?, ?, ?, ?, ?)
+        values (%s, %s, 'failed', '[]', %s, '', '', %s, %s, %s, %s, %s)
         returning id
         """,
         (

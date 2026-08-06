@@ -29,12 +29,12 @@ LOG_CLEANUP_CHUNK_SIZE = 500
 _EXPIRED_NODE_RUNS_SQL = """
 select id, job_id, node_key, log_path, run_dir, finished_at
 from node_runs
-where status = ?
+where status = %s
   and finished_at is not null
-  and finished_at < ?
-  and (finished_at > ? or (finished_at = ? and id > ?))
+  and finished_at < %s
+  and (finished_at > %s or (finished_at = %s and id > %s))
 order by finished_at, id
-limit ?
+limit %s
 """
 
 
@@ -44,7 +44,7 @@ def _flush_run_dir_updates(db: JobQueries, pending: list[str]) -> None:
         return
     with db.connect() as conn:
         conn.executemany(
-            "update node_runs set run_dir = '', session_dir = '' where run_dir = ?",
+            "update node_runs set run_dir = '', session_dir = '' where run_dir = %s",
             [(old_rel,) for old_rel in pending],
         )
     pending.clear()

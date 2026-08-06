@@ -10,25 +10,7 @@ def test_workspace_stats_hidden_when_workflows_disabled(client_factory):
     assert response.status_code == 404
 
 
-def test_workspace_stats_returns_counts_and_executor_status(client_factory, monkeypatch):
-    from server.app.cms.question import CmsQuestionDetail
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Question {question_id}",
-            normalized={},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
-
+def test_workspace_stats_returns_counts_and_executor_status(client_factory):
     with client_factory(workflows_enabled=True) as c:
         ws = c.post(
             "/api/workspaces",
@@ -58,27 +40,7 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory, monk
     assert body["latest_run"] is None
 
 
-def test_workspace_stats_executor_status_reflects_allocations_and_leases(
-    client_factory, monkeypatch
-):
-    from server.app.cms.question import CmsQuestionDetail
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Reading {question_id}",
-            normalized={},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
-
+def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_factory):
     with client_factory(workflows_enabled=True) as c:
         job_db = c.app.state.job_db
         ws = c.post(
@@ -88,12 +50,12 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(
         ws_id = ws["workspace"]["id"]
         job_db.replace_workspace_executor_configuration(
             ws_id,
-            allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+            allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
             bindings=[
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "review_keywords",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 }
             ],
             node_limits=[],
@@ -113,9 +75,9 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(
     body = stats.json()
     executors = body["executor_status"]["executors"]
     assert len(executors) == 1
-    assert executors[0]["executor_id"] == "local-default"
-    assert executors[0]["kind"] == "local"
-    assert executors[0]["global_capacity"] == 128
+    assert executors[0]["executor_id"] == "code-default"
+    assert executors[0]["kind"] == "code"
+    assert executors[0]["global_capacity"] == 16
     assert executors[0]["workspace_limit"] == 4
     assert executors[0]["running"] == 0
     assert executors[0]["available"] == 4

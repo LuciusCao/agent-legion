@@ -32,7 +32,7 @@ def try_return_node_to_pending(
     ):
         return False
     row = conn.execute(
-        "select count(*) as c from node_runs where job_id=? and node_key=? and status='failed'",
+        "select count(*) as c from node_runs where job_id=%s and node_key=%s and status='failed'",
         (lease["job_id"], lease["node_key"]),
     ).fetchone()
     if row is None or int(row["c"]) >= _MAX_TRANSIENT_ATTEMPTS:
@@ -40,9 +40,9 @@ def try_return_node_to_pending(
     conn.execute(
         """
         update job_nodes
-        set status='pending', error_message=?, finished_at=null,
-            failure_category=?, failure_detail=?
-        where job_id=? and node_key=?
+        set status='pending', error_message=%s, finished_at=null,
+            failure_category=%s, failure_detail=%s
+        where job_id=%s and node_key=%s
         """,
         (
             result.error_message,

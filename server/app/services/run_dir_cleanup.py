@@ -60,7 +60,7 @@ def cleanup_extra_runs_for_node(
         try:
             remove_path(old)
             conn.execute(
-                "update node_runs set run_dir = '', session_dir = '' where run_dir = ?",
+                "update node_runs set run_dir = '', session_dir = '' where run_dir = %s",
                 (old_rel,),
             )
             removed += 1

@@ -17,6 +17,8 @@ export function nullBucket(startMs: number): WindowBucket {
     online_workers_max: null,
     active_executions: null,
     active_executions_max: null,
+    queued: null,
+    queued_max: null,
     input_tokens: null,
     output_tokens: null,
     cache_read_tokens: null,

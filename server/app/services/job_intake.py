@@ -7,6 +7,7 @@ from typing import Any
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_enqueue import enqueue_intake_batch
@@ -18,6 +19,7 @@ from server.app.services.job_intake_workspace import (
     get_workspace,
     singular_field_name,
 )
+from server.app.services.node_codes import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
@@ -54,9 +56,6 @@ class JobIntakeService:
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        resource_config = workspace.get("resource_config")
-        if not isinstance(resource_config, dict):
-            resource_config = {}
         enabled_modes = enabled_intake_modes(workspace)
         if enabled_modes is not None and payload["source_kind"] not in enabled_modes:
             raise InvalidOperationError(
@@ -84,12 +83,23 @@ class JobIntakeService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                self.settings.agent_definitions,
+                published_agent_definitions(self.settings.database_url),
                 workspace,
                 self.settings.executor_definitions,
             )
         except ValueError as exc:
             raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc
+
+        # Freeze the published custom code versions into the batch snapshot so
+        # running jobs are immune to later edits (EXEC-CODE-002); empty when
+        # every node is builtin or the feature gate is off.
+        node_code_versions = freeze_node_code_versions(
+            self.job_db.path,
+            self.settings.executor_runtime.workflows.custom_nodes_enabled,
+            workspace_id,
+            workflow_key,
+            [node.key for node in definition.nodes.values()],
+        )
 
         if payload.get("async_processing"):
             return enqueue_intake_batch(
@@ -98,10 +108,10 @@ class JobIntakeService:
                 payload,
                 entity,
                 input_values,
-                resource_config,
                 mode,
                 active_revision,
                 node_config,
+                node_code_versions,
             )
 
         # Filter candidates that already exist in the workspace so duplicates are
@@ -146,8 +156,8 @@ class JobIntakeService:
         source_payload["entity"] = entity
         source_payload["question_ids"] = resolved_ids
         source_payload["knowledge_codes"] = knowledge_codes
-        source_payload["resource_config"] = resource_config
         source_payload["node_config"] = node_config
+        source_payload["node_code_versions"] = node_code_versions
         source_payload["intake_mode"] = {
             "key": mode.key,
             "label": mode.label,

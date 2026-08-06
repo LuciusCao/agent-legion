@@ -1,6 +1,7 @@
 import { useState } from 'react'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import { fetchRunTokenUsage } from '../../api/jobApi'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import type { NodeRun } from '../../types/jobTypes'
 import type { RunUsage } from '../../types/tokenUsageTypes'
 import { MaterialIcon } from '../MaterialIcon'
@@ -15,10 +16,12 @@ function formatCost(value: number, currency: string): string {
 }
 
 export function TokenUsageRunDetail({ jobId, run }: TokenUsageRunDetailProps) {
-  const { data: response, loading } = useAsync(
-    () => fetchRunTokenUsage(jobId, run.id),
-    [jobId, run.id, run.status]
-  )
+  // run.status 进 key：状态翻转自动重取；重取期间保留旧数据（同原 useAsync）。
+  const { data: response, isLoading: loading } = useQuery({
+    queryKey: extraQueryKeys.runTokenUsage(jobId, run.id, run.status),
+    queryFn: () => fetchRunTokenUsage(jobId, run.id),
+    placeholderData: keepPreviousData,
+  })
   const [expanded, setExpanded] = useState(false)
 
   const usage = response?.usage ?? null
@@ -123,36 +126,38 @@ function TokenUsageBreakdown({ usage }: { usage: RunUsage | null }) {
         <TokenMetric label="Cache read" value={cache_read_tokens} />
         <TokenMetric label="Total" value={total_tokens} highlight />
       </div>
-      <div className={styles.sectionTitle}>费用明细</div>
-      {cost ? (
-        <div className={styles.grid}>
-          <CostMetric
-            label="Input"
-            value={cost.input}
-            currency={cost.currency}
-          />
-          <CostMetric
-            label="Output"
-            value={cost.output}
-            currency={cost.currency}
-          />
-          <CostMetric
-            label="Cache read"
-            value={cost.cache_read}
-            currency={cost.currency}
-          />
-          <CostMetric
-            label="Total"
-            value={cost.total}
-            currency={cost.currency}
-            highlight
-          />
-        </div>
-      ) : (
-        <p className={styles.empty}>未配置价格</p>
+      {cost && (
+        <>
+          <div className={styles.sectionTitle}>费用明细</div>
+          <div className={styles.grid}>
+            <CostMetric
+              label="Input"
+              value={cost.input}
+              currency={cost.currency}
+            />
+            <CostMetric
+              label="Output"
+              value={cost.output}
+              currency={cost.currency}
+            />
+            <CostMetric
+              label="Cache read"
+              value={cost.cache_read}
+              currency={cost.currency}
+            />
+            <CostMetric
+              label="Total"
+              value={cost.total}
+              currency={cost.currency}
+              highlight
+            />
+          </div>
+        </>
       )}
       {usage.pricing_missing && (
-        <div className={styles.pricingMissing}>缺少定价配置</div>
+        <p className={styles.empty}>
+          {provider || '未知'} / {model || '未知'} 缺少定价配置
+        </p>
       )}
     </div>
   )

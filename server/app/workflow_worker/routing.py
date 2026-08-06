@@ -19,6 +19,7 @@ from server.app.jobs.queries.workspace_node_bindings import (
     get_local_node_limit,
     has_local_node_limit,
 )
+from server.app.services.agent_service import published_agent_definitions
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -65,7 +66,7 @@ def _resolve_uncached(
         route = conn.execute(
             """
             select target_kind, target_id from workspace_node_routes
-            where workspace_id=? and workflow_key=? and node_key=?
+            where workspace_id=%s and workflow_key=%s and node_key=%s
             """,
             (workspace_id, workflow_key, node_key),
         ).fetchone()
@@ -73,7 +74,9 @@ def _resolve_uncached(
         # projection, not by any node-level declaration.
         if route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
-            definition_config = worker.settings.agent_definitions.get(agent_id)
+            definition_config = published_agent_definitions(worker.settings.database_url).get(
+                agent_id
+            )
             if definition_config is None or definition_config.capability != capability:
                 return NodeRoute("error", error_message=f"Invalid Agent route {agent_id!r}")
             if worker.agent_dispatch is None:
@@ -88,7 +91,7 @@ def _resolve_uncached(
             executor = worker.registry.require(executor_id, capability)
         except Exception as exc:
             return NodeRoute("error", error_message=str(exc))
-        if executor.kind == "local":
+        if executor.kind == "code":
             return NodeRoute(
                 "executor",
                 target_id=executor_id,

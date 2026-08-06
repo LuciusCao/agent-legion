@@ -1,6 +1,5 @@
 import pytest
 
-from server.app.cms.question import CmsQuestionSummary
 from server.app.services import job_intake_chunks
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
@@ -159,19 +158,27 @@ def test_list_job_dedup_keys_returns_only_key_columns(job_db, settings):
 
 
 def test_job_intake_dedups_candidates_across_chunk_boundaries(job_db, settings, monkeypatch):
+    from dataclasses import replace
+
+    from server.app.services.job_intake_registry import RESOLVERS
+    from server.app.services.job_intake_resolution import candidate
+
     _create_workspace_with_revision(job_db, settings)
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
     monkeypatch.setattr(job_intake_chunks, "INTAKE_RESOLUTION_CHUNK_SIZE", 2)
 
-    def fake_list_by_knowledge(code, api_url=None, token=None):
+    def fake_expand(entity, input_values, source_kind):
+        # Node-phase intake keeps question candidates opaque, so cross-chunk
+        # dedup is exercised through a resolver that expands codes into
+        # overlapping question ids (one shared id per chunk).
         return [
-            CmsQuestionSummary(question_id=f"Q-{code}", title=f"Question {code}", payload={}),
-            CmsQuestionSummary(question_id="Q-shared", title="Shared", payload={}),
-        ]
+            candidate(entity, f"Q-{code}", f"Question {code}", source_kind, code)
+            for code in input_values
+        ] + [candidate(entity, "Q-shared", "Shared", source_kind, input_values[0])]
 
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.list_questions_by_knowledge",
-        fake_list_by_knowledge,
+    spec = RESOLVERS[("question", "batch_by_knowledge")]
+    monkeypatch.setitem(
+        RESOLVERS, ("question", "batch_by_knowledge"), replace(spec, handler=fake_expand)
     )
 
     result = service.create_batch(
@@ -208,3 +215,63 @@ def test_job_intake_handles_large_batch_across_default_chunks(job_db, settings):
 
     assert result["created_count"] == 1200
     assert len({job["id"] for job in result["jobs"]}) == 1200
+
+
+def test_job_intake_freezes_node_code_versions(job_db, settings):
+    """Intake snapshots published custom code versions into the batch payload."""
+    from server.app.services.node_codes import NodeCodeService
+
+    workspace = _create_workspace_with_revision(job_db, settings)
+    codes = NodeCodeService(job_db.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+
+    result = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": ["Q1"],
+            "knowledge_codes": [],
+        },
+    )
+
+    batch = job_db.get_batch(str(result["jobs"][0]["batch_id"]))
+    import json
+
+    payload = json.loads(batch["source_payload_json"])
+    pins = payload["node_code_versions"]
+    assert pins["fetch_questions"]["version"] == 1
+    assert len(pins["fetch_questions"]["code_hash"]) == 64
+    # Nodes without published custom code are not pinned.
+    assert "clean_and_parse" not in pins
+
+
+def test_job_intake_freezes_empty_when_no_custom_codes(job_db, settings):
+    _create_workspace_with_revision(job_db, settings)
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+
+    result = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": ["Q1"],
+            "knowledge_codes": [],
+        },
+    )
+
+    batch = job_db.get_batch(str(result["jobs"][0]["batch_id"]))
+    import json
+
+    payload = json.loads(batch["source_payload_json"])
+    assert payload["node_code_versions"] == {}

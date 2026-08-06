@@ -1,20 +1,30 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import type { MockInstance } from 'vitest'
+import { createElement, type ReactNode } from 'react'
 import { renderHook, waitFor, act } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { useWorkspaceEvents } from './useWorkspaceEvents'
-import { useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
+import { createJobSummary, useJobStore } from '../stores/jobStore'
 import { EventSourceMock } from '../testing/eventSourceMock'
+import { createTestQueryClient } from '../testing/testQueryClient'
+import { queryKeys } from '../lib/queryKeys'
 import * as api from '../api'
-import type { WorkspaceStats } from '../types/workspaceTypes'
-import { createJobSummary } from '../stores/job/actions/testHelpers'
 
 vi.mock('../api')
 
-const mockFetchJobs = vi.mocked(api.fetchJobs)
 const mockFetchJobsSnapshot = vi.mocked(api.fetchJobsSnapshot)
 const mockFetchJobFacets = vi.mocked(api.fetchJobFacets)
-const mockFetchWorkspaceStats = vi.mocked(api.fetchWorkspaceStats)
 const makeJob = createJobSummary
+
+// refreshWorkspaceEvents / invalidateAgentWorkers 都走 queryClient
+// .invalidateQueries，这里按 key 前缀过滤出目标查询的失效调用。
+function invalidateCallsFor(spy: MockInstance, keyPrefix: string) {
+  return spy.mock.calls.filter(
+    ([filters]) =>
+      (filters as { queryKey?: readonly unknown[] } | undefined)
+        ?.queryKey?.[0] === keyPrefix
+  )
+}
 
 const emptyFacets = {
   workspace_id: 'ws1',
@@ -34,8 +44,16 @@ const emptyFilterParams = {
 
 describe('useWorkspaceEvents', () => {
   const originalEventSource = globalThis.EventSource
+  let testClient = createTestQueryClient()
+
+  // Hook 内的 workers invalidate 走 useQueryClient，每个用例给独立 client。
+  const wrapper = ({ children }: { children: ReactNode }) =>
+    createElement(QueryClientProvider, { client: testClient }, children)
+  const renderEvents = (...args: Parameters<typeof useWorkspaceEvents>) =>
+    renderHook(() => useWorkspaceEvents(...args), { wrapper })
 
   beforeEach(() => {
+    testClient = createTestQueryClient()
     EventSourceMock.reset()
     globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
     useJobStore.setState({
@@ -46,9 +64,7 @@ describe('useWorkspaceEvents', () => {
       isLoading: false,
       error: null,
     })
-    useWorkspaceStore.setState({ workspaceStats: {} })
     vi.clearAllMocks()
-    mockFetchJobs.mockResolvedValue({ jobs: [] })
     mockFetchJobsSnapshot.mockResolvedValue({
       workspace_id: 'ws1',
       revision: 0,
@@ -57,9 +73,6 @@ describe('useWorkspaceEvents', () => {
       next_cursor: null,
     })
     mockFetchJobFacets.mockResolvedValue(emptyFacets)
-    mockFetchWorkspaceStats.mockResolvedValue({
-      job_stats: {},
-    } as WorkspaceStats)
   })
 
   afterEach(() => {
@@ -68,7 +81,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('connects to workspace SSE endpoint', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     await waitFor(() => {
       expect(EventSourceMock.instances.length).toBe(1)
     })
@@ -86,7 +99,7 @@ describe('useWorkspaceEvents', () => {
       next_cursor: null,
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -102,12 +115,12 @@ describe('useWorkspaceEvents', () => {
       )
       expect(useJobStore.getState().jobsById.j1?.status).toBe('running')
     })
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
-  it('receiving a non-heartbeat message triggers refresh', async () => {
+  it('receiving a non-heartbeat message invalidates workspace stats', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -133,13 +146,16 @@ describe('useWorkspaceEvents', () => {
 
     // Job list changes arrive via job_patch_batch; legacy job_updated only
     // triggers a stats refresh, never a full jobs refetch.
-    expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
-    expect(mockFetchJobs).not.toHaveBeenCalled()
+    expect(invalidateSpy).toHaveBeenCalledWith(
+      { queryKey: queryKeys.workspaceStats('ws1') },
+      { throwOnError: true }
+    )
   })
 
-  it('coalesces rapid job update messages into one stats refresh', async () => {
+  it('coalesces rapid job update messages into one stats invalidation', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -161,18 +177,17 @@ describe('useWorkspaceEvents', () => {
       }
     })
 
-    expect(mockFetchWorkspaceStats).not.toHaveBeenCalled()
+    expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(0)
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(750)
     })
 
-    expect(mockFetchWorkspaceStats).toHaveBeenCalledTimes(1)
-    expect(mockFetchJobs).not.toHaveBeenCalled()
+    expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(1)
   })
 
   it('closes the EventSource on cleanup', () => {
-    const { unmount } = renderHook(() => useWorkspaceEvents('ws1'))
+    const { unmount } = renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     unmount()
@@ -189,7 +204,7 @@ describe('useWorkspaceEvents', () => {
       jobsWorkspaceId: 'ws1',
     })
 
-    renderHook(() => useWorkspaceEvents('ws2'))
+    renderEvents('ws2')
 
     expect(useJobStore.getState().jobs).toEqual([])
     expect(useJobStore.getState().isLoading).toBe(true)
@@ -205,7 +220,7 @@ describe('useWorkspaceEvents', () => {
       next_cursor: null,
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -221,7 +236,7 @@ describe('useWorkspaceEvents', () => {
   it('clears a previous error after successful refresh', async () => {
     useJobStore.setState({ error: 'previous error' })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -234,18 +249,19 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('does not connect when enabled is false', () => {
-    renderHook(() => useWorkspaceEvents('ws1', false))
+    renderEvents('ws1', false)
     expect(EventSourceMock.instances.length).toBe(0)
   })
 
   it('does not connect when workspaceId is undefined', () => {
-    renderHook(() => useWorkspaceEvents(undefined))
+    renderEvents(undefined)
     expect(EventSourceMock.instances.length).toBe(0)
   })
 
-  it('statsOnly fetches workspace stats but not jobs on refresh', async () => {
+  it('statsOnly invalidates workspace stats but not jobs on refresh', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1', true, true))
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1', true, true)
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -264,15 +280,11 @@ describe('useWorkspaceEvents', () => {
       await vi.advanceTimersByTimeAsync(750)
     })
 
-    expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
-    expect(mockFetchJobs).not.toHaveBeenCalled()
+    expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(1)
   })
 
   it('updates workspace stats from payload stats', async () => {
-    mockFetchWorkspaceStats.mockResolvedValue({
-      job_stats: { running: 2, completed: 5 },
-    } as unknown as WorkspaceStats)
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -295,14 +307,15 @@ describe('useWorkspaceEvents', () => {
     })
 
     await waitFor(() => {
-      expect(useWorkspaceStore.getState().workspaceStats.ws1).toEqual({
+      expect(testClient.getQueryData(queryKeys.workspaceStats('ws1'))).toEqual({
         job_stats: { running: 2, completed: 5 },
       })
     })
   })
 
   it('ignores messages for other workspaces', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -325,11 +338,12 @@ describe('useWorkspaceEvents', () => {
     })
 
     await act(async () => new Promise((resolve) => setTimeout(resolve, 50)))
-    expect(mockFetchWorkspaceStats).not.toHaveBeenCalled()
+    expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(0)
   })
 
   it('ignores heartbeat messages', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -348,12 +362,12 @@ describe('useWorkspaceEvents', () => {
     })
 
     await act(async () => new Promise((resolve) => setTimeout(resolve, 50)))
-    expect(mockFetchWorkspaceStats).not.toHaveBeenCalled()
+    expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(0)
   })
 
   it('reconnects after an error', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -369,7 +383,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('applies job patch batch without fetching all jobs', async () => {
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -391,7 +405,6 @@ describe('useWorkspaceEvents', () => {
     await waitFor(() => {
       expect(useJobStore.getState().jobsById.j1.status).toBe('running')
     })
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('resyncs instead of dropping events when the pending queue overflows', async () => {
@@ -411,7 +424,7 @@ describe('useWorkspaceEvents', () => {
       })
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -448,7 +461,7 @@ describe('useWorkspaceEvents', () => {
       jobs: [makeJob({ id: 'j2', workspace_id: 'ws1', status: 'completed' })],
       next_cursor: null,
     })
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -480,7 +493,7 @@ describe('useWorkspaceEvents', () => {
       next_cursor: 'cursor-page-2',
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -501,7 +514,7 @@ describe('useWorkspaceEvents', () => {
 
   it('debounces a facet refresh after a job patch batch', async () => {
     vi.useFakeTimers()
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderEvents('ws1')
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
@@ -529,5 +542,44 @@ describe('useWorkspaceEvents', () => {
       await vi.advanceTimersByTimeAsync(750)
     })
     expect(mockFetchJobFacets).toHaveBeenCalledTimes(2)
+  })
+
+  it('invalidates the agent workers query after the debounce tiers', async () => {
+    vi.useFakeTimers()
+    const invalidateSpy = vi.spyOn(testClient, 'invalidateQueries')
+    renderEvents('ws1')
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+      await vi.advanceTimersByTimeAsync(0)
+    })
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'job_updated',
+            workspace_id: 'ws1',
+            job_id: 'job1',
+          }),
+        })
+      )
+    })
+
+    // 事件先进 750ms 的 job 刷新防抖（失效 workspaceStats），再进 750ms 的
+    // workers invalidate 防抖。
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(invalidateCallsFor(invalidateSpy, 'workspaceStats')).toHaveLength(1)
+    expect(invalidateCallsFor(invalidateSpy, 'agentWorkers')).toHaveLength(0)
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.agentWorkers(),
+    })
   })
 })

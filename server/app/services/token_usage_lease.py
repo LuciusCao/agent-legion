@@ -5,11 +5,8 @@ from pathlib import Path
 
 from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import write_transaction
-from server.app.services.token_usage import (
-    TokenUsageSummary,
-    parse_run_usage,
-    persist_node_run_usage,
-)
+from server.app.services.token_usage import persist_node_run_usage
+from server.app.services.token_usage_parse import TokenUsageSummary, parse_run_usage
 from server.app.storage_paths import ManagedPathError, resolve_data_path
 
 logger = logging.getLogger(__name__)
@@ -26,12 +23,12 @@ def parse_token_usage_for_lease(
     the parse step outside of a database write transaction.
     """
     lease = conn.execute(
-        "select node_run_id, workspace_id from executor_leases where id=?", (lease_id,)
+        "select node_run_id, workspace_id from executor_leases where id=%s", (lease_id,)
     ).fetchone()
     if lease is None or not lease["node_run_id"]:
         return None
     node_run = conn.execute(
-        "select * from node_runs where id=?", (lease["node_run_id"],)
+        "select * from node_runs where id=%s", (lease["node_run_id"],)
     ).fetchone()
     if node_run is None or not node_run["run_dir"]:
         return None

@@ -9,13 +9,11 @@ from server.app.executors import registration as _registration  # noqa: F401  # 
 from server.app.executors.definitions import load_executor_definitions
 from server.app.jobs.queries import JobQueries
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflows.question_comprehension_info import (
-    assemble_comprehension_info,
-    classify_comprehension_eligibility,
-    clean_and_parse,
-    finalize_non_uploadable,
-)
 from tests.postgres_support import TEST_DATABASE_URL
+from workflow_nodes.comprehension_assemble import run as assemble_comprehension_info
+from workflow_nodes.comprehension_classify import run as classify_comprehension_eligibility
+from workflow_nodes.comprehension_finalize import run as finalize_non_uploadable
+from workflow_nodes.question_clean_parse import run as clean_and_parse
 
 _TOOL_DIR = Path(__file__).parents[1] / "tools" / "comprehension-uploader"
 sys.path.insert(0, str(_TOOL_DIR))
@@ -315,9 +313,7 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
         job["id"], "generate_key_info", ["pi"], "", skill_version="v1.2.2@abc123"
     )
     queries.finish_node_run(run["id"], "completed", 0, "")
-    empty_run = queries.start_node_run(
-        job["id"], "clean_and_parse", ["local"], "", skill_version=""
-    )
+    empty_run = queries.start_node_run(job["id"], "clean_and_parse", ["code"], "", skill_version="")
     queries.finish_node_run(empty_run["id"], "completed", 0, "")
 
     assemble_comprehension_info(job, artifact_dir, {"job_db": queries})
@@ -434,22 +430,22 @@ def test_clean_and_parse_missing_fingerprint_when_no_content(tmp_path):
     assert question["fingerprint_missing"] is True
 
 
-def test_local_executor_config_binds_question_comprehension_info_handlers():
+def test_code_executor_config_binds_question_comprehension_info_nodes():
     raw = yaml.safe_load(Path("config/workflow.yaml").read_text(encoding="utf-8"))
     config = load_executor_definitions(raw["executors"])
-    local = config["local-default"]
-    assert local.kind == "local"
+    code = config["code-default"]
+    assert code.kind == "code"
 
-    for capability in (
-        "fetch_questions",
-        "clean_and_parse",
-        "classify_comprehension_eligibility",
-        "finalize_non_uploadable",
-        "assemble_comprehension_info",
+    for capability, node_path in (
+        ("clean_and_parse", "workflow_nodes/question_clean_parse.py"),
+        ("classify_comprehension_eligibility", "workflow_nodes/comprehension_classify.py"),
+        ("finalize_non_uploadable", "workflow_nodes/comprehension_finalize.py"),
+        ("assemble_comprehension_info", "workflow_nodes/comprehension_assemble.py"),
+        ("fetch_questions", "workflow_nodes/question_intake.py"),
     ):
-        handler = local.capabilities[capability].handler
-        assert handler.startswith("question_comprehension_info."), (
-            f"capability {capability!r} must bind to question_comprehension_info, got {handler!r}"
+        assert code.capabilities[capability].path == node_path, (
+            f"capability {capability!r} must bind to {node_path}, "
+            f"got {code.capabilities[capability].path!r}"
         )
 
 

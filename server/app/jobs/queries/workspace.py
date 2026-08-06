@@ -72,7 +72,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         with self.connect() as conn:
             workspace_id = base_id
             suffix = 2
-            while conn.execute("select 1 from workspaces where id=?", (workspace_id,)).fetchone():
+            while conn.execute("select 1 from workspaces where id=%s", (workspace_id,)).fetchone():
                 workspace_id = f"{base_id}_{suffix}"
                 suffix += 1
 
@@ -82,7 +82,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                   id, name, description, default_workflow_key, resource_config_json,
                   default_entity, intake_config_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?)
+                values (%s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     workspace_id,
@@ -94,7 +94,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                     intake_config_json,
                 ),
             )
-            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+            row = conn.execute("select * from workspaces where id=%s", (workspace_id,)).fetchone()
         if row is None:
             raise RuntimeError("workspace insert did not return a row")
         return _workspace_record(row)
@@ -106,7 +106,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
 
     def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
-            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+            row = conn.execute("select * from workspaces where id=%s", (workspace_id,)).fetchone()
         return _workspace_record(row) if row else None
 
     def update_workspace(
@@ -120,6 +120,9 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         default_entity: str | None = None,
         intake_config: dict[str, Any] | None = None,
         node_config: dict[str, Any] | None = None,
+        default_agent_provider: str | None = None,
+        default_agent_model: str | None = None,
+        default_agent_thinking: str | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -152,26 +155,32 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 ensure_ascii=False,
                 sort_keys=True,
             )
+        if default_agent_provider is not None:
+            fields["default_agent_provider"] = default_agent_provider.strip()
+        if default_agent_model is not None:
+            fields["default_agent_model"] = default_agent_model.strip()
+        if default_agent_thinking is not None:
+            fields["default_agent_thinking"] = default_agent_thinking.strip()
         if not fields:
             workspace = self.get_workspace(workspace_id)
             if workspace is None:
                 raise ValueError("Workspace not found")
             return workspace
 
-        assignments = ", ".join(f"{key}=?" for key in fields)
+        assignments = ", ".join(f"{key}=%s" for key in fields)
         params = list(fields.values()) + [workspace_id]
         with self.connect() as conn:
             cursor = conn.execute(
                 f"""
                 update workspaces
                 set {assignments}, updated_at=current_timestamp
-                where id=?
+                where id=%s
                 """,
                 params,
             )
             if cursor.rowcount == 0:
                 raise ValueError("Workspace not found")
-            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+            row = conn.execute("select * from workspaces where id=%s", (workspace_id,)).fetchone()
         if row is None:
             raise RuntimeError("workspace update did not return a row")
         return _workspace_record(row)
@@ -194,16 +203,18 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         if not clean_name:
             raise ValueError("Workspace name is required")
         with self.connect() as conn:
-            exists = conn.execute("select 1 from workspaces where id=?", (workspace_id,)).fetchone()
+            exists = conn.execute(
+                "select 1 from workspaces where id=%s", (workspace_id,)
+            ).fetchone()
             if exists is None:
                 raise ValueError("Workspace not found")
             conn.execute(
                 """
                 update workspaces
-                set name=?, description=?, default_workflow_key=?, default_entity=?,
-                    resource_config_json=?, intake_config_json=?,
+                set name=%s, description=%s, default_workflow_key=%s, default_entity=%s,
+                    resource_config_json=%s, intake_config_json=%s,
                     updated_at=current_timestamp
-                where id=?
+                where id=%s
                 """,
                 (
                     clean_name,
@@ -222,7 +233,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 node_bindings or [],
                 node_limits or [],
             )
-            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+            row = conn.execute("select * from workspaces where id=%s", (workspace_id,)).fetchone()
         if row is None:
             raise RuntimeError("workspace configuration update did not return a row")
         return _workspace_record(row)
@@ -230,29 +241,29 @@ class WorkspaceQueriesMixin(JobQueriesBase):
     def delete_workspace(self, workspace_id: str) -> None:
         with self.connect() as conn:
             running = conn.execute(
-                "select 1 from jobs where workspace_id = ? and status = ?",
+                "select 1 from jobs where workspace_id = %s and status = %s",
                 (workspace_id, "running"),
             ).fetchone()
             if running is not None:
                 raise ValueError("Cannot delete workspace with running jobs")
             conn.execute(
-                "delete from job_nodes where job_id in (select id from jobs where workspace_id = ?)",
+                "delete from job_nodes where job_id in (select id from jobs where workspace_id = %s)",
                 (workspace_id,),
             )
             conn.execute(
-                "delete from node_runs where job_id in (select id from jobs where workspace_id = ?)",
+                "delete from node_runs where job_id in (select id from jobs where workspace_id = %s)",
                 (workspace_id,),
             )
             conn.execute(
-                "delete from job_batches where workspace_id = ?",
+                "delete from job_batches where workspace_id = %s",
                 (workspace_id,),
             )
             conn.execute(
-                "delete from jobs where workspace_id = ?",
+                "delete from jobs where workspace_id = %s",
                 (workspace_id,),
             )
             cursor = conn.execute(
-                "delete from workspaces where id = ?",
+                "delete from workspaces where id = %s",
                 (workspace_id,),
             )
             if cursor.rowcount == 0:
@@ -268,7 +279,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         """Current workspace-level Agent concurrency limit; None when unset."""
         with self._connect_read() as conn:
             row = conn.execute(
-                "select max_concurrency from workspace_agent_capacities where workspace_id=?",
+                "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
                 (workspace_id,),
             ).fetchone()
         return int(row["max_concurrency"]) if row is not None else None
@@ -280,7 +291,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
             conn.execute(
                 """
                 insert into workspace_agent_capacities(workspace_id, max_concurrency, updated_at)
-                values (?, ?, current_timestamp)
+                values (%s, %s, current_timestamp)
                 on conflict(workspace_id) do update set
                   max_concurrency=excluded.max_concurrency,
                   updated_at=current_timestamp

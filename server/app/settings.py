@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlencode
 
-from server.app.agent_catalog import AgentDefinition, load_agent_definitions
+from dotenv import load_dotenv
+
 from server.app.cms.env import resolve_cms_env, validate_cms_env_aliases
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
@@ -18,10 +19,6 @@ from server.app.executors.runtime_config import (
     OpenClawRuntimeConfig,
     WorkflowsRuntimeConfig,
     validate_runtime,
-)
-from server.app.workflows.resource_providers import (
-    ResourceProviderDeclarations,
-    load_resource_provider_declarations,
 )
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -41,10 +38,6 @@ class Settings:
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
-    agent_definitions: dict[str, AgentDefinition] = field(default_factory=dict)
-    resource_providers: ResourceProviderDeclarations = field(
-        default_factory=ResourceProviderDeclarations
-    )
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -56,19 +49,8 @@ class Settings:
 def load_env_file(path: Path) -> None:
     if not path.exists():
         return
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        key = key.strip()
-        value = value.strip()
-        if not key:
-            continue
-        if len(value) >= 2 and value[0] == value[-1] and value[0] in {'"', "'"}:
-            value = value[1:-1]
-        if key not in os.environ:
-            os.environ[key] = value
+    # override=False：已存在的环境变量优先于 .env 文件（与原手写实现一致）。
+    load_dotenv(path, override=False)
 
 
 def _str_parser(value: str) -> str:
@@ -78,6 +60,15 @@ def _str_parser(value: str) -> str:
 def _path_parser(value: str) -> str:
     """Expand ``~`` in path overrides while preserving command names unchanged."""
     return os.path.expanduser(value)
+
+
+def _bool_parser(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in ("1", "true", "yes", "on"):
+        return True
+    if normalized in ("0", "false", "no", "off"):
+        return False
+    raise ValueError(f"invalid boolean env value: {value!r}")
 
 
 # Reviewed mapping from environment variable to config path and parser.
@@ -91,7 +82,10 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
     "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
     "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
-    "AGENT_LEGION_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
+    "AGENT_LEGION_CUSTOM_NODES_ENABLED": (
+        ("workflows", "custom_nodes_enabled"),
+        _bool_parser,
+    ),
     "AGENT_LEGION_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
     "AGENT_LEGION_WORKER_REGISTER_TOKEN": (("agent_workers", "register_token"), _str_parser),
     "AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE": (
@@ -149,9 +143,9 @@ def _apply_cms_env_overrides(config: dict[str, Any]) -> None:
 def _normalize_cms_config(config: dict[str, Any]) -> None:
     """Derive the legacy knowledge URL from base_url when present.
 
-    Resource URLs resolve through ``resource_providers`` (see
-    ``workflows.resources.resolve_cms_resource``); ``knowledge_url`` stays as
-    the legacy fallback for ``cms.knowledge.video``'s ``url_key`` (D14).
+    Node code derives endpoint URLs from ``cms.base_url`` (see
+    ``server.app.cms.urls``); ``knowledge_url`` stays as the legacy fallback
+    consumed by the video download node (D14).
     """
     cms = config.get("cms")
     if not isinstance(cms, dict):
@@ -192,6 +186,34 @@ def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
     )
 
 
+def _reject_retired_agent_yaml_keys(config: dict[str, Any]) -> None:
+    """Fail fast when the yaml still carries the retired Agent catalog keys.
+
+    Agent config governance (phase 3, breaking): the yaml ``agents:`` catalog
+    and the ``workflows.pi`` runtime block are no longer read. Agent
+    definitions live in the DB (versioned_entities, managed in Studio →
+    Agents); provider/model/thinking resolve from workspace Settings defaults
+    or Studio node overrides. This check runs before env overrides so
+    env-injected in-memory values are not mistaken for yaml keys.
+    """
+    retired: list[str] = []
+    if "agents" in config:
+        retired.append("agents")
+    workflows = config.get("workflows")
+    if isinstance(workflows, dict) and "pi" in workflows:
+        retired.append("workflows.pi")
+    if not retired:
+        return
+    keys = ", ".join(retired)
+    raise ValueError(
+        f"Unsupported yaml keys: {keys}. The yaml agents catalog and "
+        "workflows.pi runtime block were retired (agent config governance). "
+        "Migrate: agent definitions -> Studio Agents manager (published into "
+        "versioned_entities); provider/model/thinking -> workspace Settings "
+        "'Agent 默认配置' or Studio node execution overrides."
+    )
+
+
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = PROJECT_ROOT
     if os.environ.get("AGENT_LEGION_SKIP_DOTENV") != "1":
@@ -199,6 +221,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     loaded = load_application_config(root_dir, config_path=config_path)
     config = loaded.config
     _reject_retired_cms_yaml_keys(config)
+    _reject_retired_agent_yaml_keys(config)
     _apply_database_url_env(config)
     _apply_env_overrides(config)
     _apply_cms_env_overrides(config)
@@ -219,9 +242,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
-    agent_definitions = load_agent_definitions(config.get("agents", {}))
-    # Fail fast on invalid resource provider declarations (spec D11).
-    resource_providers = load_resource_provider_declarations(config.get("resource_providers"))
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     token_file = executor_runtime.agent_workers.register_token_file
     if token_file and not executor_runtime.agent_workers.register_token:
@@ -239,12 +259,15 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         config=config,
         cors=load_cors_settings(config),
         executor_definitions=executor_definitions,
-        agent_definitions=agent_definitions,
-        resource_providers=resource_providers,
         executor_runtime=executor_runtime,
     )
 
 
 def validate_settings(settings: Settings) -> None:
     """Validate runtime dependencies after settings are constructed."""
-    validate_runtime(settings.executor_runtime, settings.config, settings.executor_definitions)
+    validate_runtime(
+        settings.executor_runtime,
+        settings.config,
+        settings.executor_definitions,
+        repo_root=settings.root_dir,
+    )

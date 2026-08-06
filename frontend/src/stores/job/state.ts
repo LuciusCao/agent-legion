@@ -7,7 +7,15 @@ import type { ClearPackedActions } from './actions/clearPackedActions'
 import type { ContinueJobResult, RerunByFailureActions } from './stateTypes'
 import type { JobPaginationState } from './paginationTypes'
 import type { JobSelectionModeState } from './selectionModeTypes'
-export * from './stateReexports'
+export {
+  countMutationResults,
+  makeMutationToast,
+  normalizeJobStatus,
+  type MutationCounts,
+} from './mutationHelpers'
+export type { JobFilterConfig, JobStatus } from './filterConfig'
+export type { JobFilterOptionAccumulator } from './filterLogic/optionAccumulator'
+export type { FilterCounts } from './filterLogic/types'
 export interface JobState
   extends
     ClearPackedActions,
@@ -36,9 +44,7 @@ export interface JobState
   batchRunToLoading: boolean
   continueLoading: boolean
   batchUpgradeWorkflowLoading: boolean
-  fetchJobs: (workspaceId: string) => Promise<void>
   resetForWorkspace: (workspaceId: string) => void
-  setJobsAndFinishLoading: (jobs: JobSummary[]) => void
   failJobFetch: (workspaceId: string, message: string) => void
   setJobsSnapshot: (
     workspaceId: string,

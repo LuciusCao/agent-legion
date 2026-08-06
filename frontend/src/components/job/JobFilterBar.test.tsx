@@ -1,9 +1,11 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { JobFilterBar } from './JobFilterBar'
-import { createJobSummary } from '../../stores/job/actions/testHelpers'
-import { useJobStore } from '../../stores/jobStore'
-import { createOptionAccumulator } from '../../stores/job/filterLogic/optionAccumulator'
+import {
+  createJobSummary,
+  createOptionAccumulator,
+  useJobStore,
+} from '../../stores/jobStore'
 import type { WorkflowDefinitionRecord } from '../../types'
 import type { JobSummary } from '../../types/jobTypes'
 

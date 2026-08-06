@@ -4,6 +4,7 @@ import { Button } from '@mui/material'
 import { useState } from 'react'
 import type { WorkflowNodeRecord } from '../../types'
 import type { AgentDefinition } from '../../types/executorTypes'
+import { useWorkspaceAgentDefaults } from './useWorkspaceAgentDefaults'
 import { WorkflowNodeRuntimeSettings } from './WorkflowNodeRuntimeSettings'
 import { WorkflowPromptPreviewDialog } from './WorkflowPromptPreviewDialog'
 import { WorkflowSkillPreviewDialog } from './WorkflowSkillPreviewDialog'
@@ -19,6 +20,7 @@ export function WorkflowAgentExecutionDetails(props: {
   readOnly?: boolean
 }) {
   const [dialog, setDialog] = useState<'prompt' | 'skill' | null>(null)
+  const agentDefaults = useWorkspaceAgentDefaults()
   const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
   const additionalPrompt = draft
     ? (draft.execution?.prompt ?? '')
@@ -44,7 +46,7 @@ export function WorkflowAgentExecutionDetails(props: {
       </div>
       <WorkflowNodeRuntimeSettings
         node={props.node}
-        defaults={props.definition}
+        defaults={agentDefaults ?? {}}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
         readOnly={props.readOnly}

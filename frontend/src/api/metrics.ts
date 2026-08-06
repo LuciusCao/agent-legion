@@ -10,6 +10,7 @@ export type OpsGranularity = OpsMetricsResponse['granularity']
 export interface OpsMetricsParams {
   granularity: OpsGranularity
   worker_id?: string
+  workspace_id?: string
 }
 
 export async function fetchOpsMetrics(
@@ -17,5 +18,6 @@ export async function fetchOpsMetrics(
 ): Promise<OpsMetricsResponse> {
   const query = new URLSearchParams({ granularity: params.granularity })
   if (params.worker_id) query.set('worker_id', params.worker_id)
+  if (params.workspace_id) query.set('workspace_id', params.workspace_id)
   return api<OpsMetricsResponse>(`/api/metrics/overview?${query.toString()}`)
 }

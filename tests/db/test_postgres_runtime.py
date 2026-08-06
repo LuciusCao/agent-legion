@@ -29,7 +29,7 @@ def test_schema_initialization_is_idempotent() -> None:
         "jobs",
         "executor_leases",
         "node_shards",
-        "agent_definitions",
+        "versioned_entities",
         "agent_workers",
         "agent_execution_requests",
         "workspace_node_routes",
@@ -39,6 +39,8 @@ def test_schema_initialization_is_idempotent() -> None:
         "sessions",
         "workspace_members",
     } <= names
+    # schema v27 cutover dropped the YAML-synced catalog table.
+    assert "agent_definitions" not in names
     with read_connection(TEST_DATABASE_URL) as conn:
         columns = {
             row["column_name"]
@@ -56,21 +58,21 @@ def test_write_transaction_rolls_back() -> None:
         write_transaction(TEST_DATABASE_URL) as conn,
     ):
         conn.execute(
-            "insert into workspaces(id, name) values (?, ?)",
+            "insert into workspaces(id, name) values (%s, %s)",
             ("rolled-back", "Rolled back"),
         )
         raise RuntimeError("rollback")
     with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute("select 1 from workspaces where id=?", ("rolled-back",)).fetchone()
+        row = conn.execute("select 1 from workspaces where id=%s", ("rolled-back",)).fetchone()
     assert row is None
 
 
 def test_connection_pool_reuses_short_lived_connections(tmp_path: Path) -> None:
     del tmp_path
     with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute("insert into workspaces(id, name) values (?, ?)", ("pool", "Pool"))
+        conn.execute("insert into workspaces(id, name) values (%s, %s)", ("pool", "Pool"))
     with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute("select name from workspaces where id=?", ("pool",)).fetchone()
+        row = conn.execute("select name from workspaces where id=%s", ("pool",)).fetchone()
     assert row == {"name": "Pool"}
 
 

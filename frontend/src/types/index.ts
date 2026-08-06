@@ -39,13 +39,6 @@ export type AgentStatus = ApiSchemas['AgentStatusResponse'] & {
   max_tasks: number
 }
 
-export type GlobalServiceStatus = ApiSchemas['GlobalServicesResponse']
-
-export type ResourceProviderDefinition =
-  ApiSchemas['ResourceProviderDefinition']
-
-export type ResourceBinding = ApiSchemas['ResourceBinding']
-
 export type Chapter = {
   id?: string
   start: number
@@ -88,14 +81,13 @@ export type WorkspaceSettingsTestResponse =
   ApiSchemas['WorkspaceSettingsTestResponse']
 export type WorkflowDraftValidationResponse =
   ApiSchemas['WorkflowDraftValidationResponse']
-export type ResourceProvidersResponse = ApiSchemas['ResourceProvidersResponse']
 export type WorkerStatusResponse = ApiSchemas['WorkerStatusResponse']
 
 /**
- * JSON-Schema subset the backend uses to declare configurable node/resource
+ * JSON-Schema subset the backend uses to declare configurable node
  * parameters. The generated OpenAPI types expose these blobs as
- * `{[key: string]: unknown}` (e.g. ResourceProviderDefinition.config_schema);
- * these types are the client-side interpretation of that contract.
+ * `{[key: string]: unknown}` (e.g. node config schemas on the settings
+ * payload); these types are the client-side interpretation of that contract.
  */
 export type ConfigSchemaProperty = {
   type: 'string' | 'integer' | 'number' | 'boolean'
@@ -114,16 +106,37 @@ export type ConfigSchema = {
   required?: string[]
 }
 
-export type ResourceSchemaEntry = {
-  provider: string
-  schema: ConfigSchema
+/**
+ * Default execution config for Agent nodes (provider/model/thinking).
+ * The generated WorkspaceSettingsPayload does not spell this key out yet;
+ * it arrives inside the settings blob of GET /api/workspaces/{id}/settings.
+ */
+export type AgentDefaults = {
+  provider?: string
+  model?: string
+  thinking?: string
 }
 
 export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload'] & {
   nodeConfig?: Record<string, Record<string, unknown>>
   nodeConfigSchemas?: Record<string, ConfigSchema>
-  resourceSchemas?: Record<string, ResourceSchemaEntry>
+  agentDefaults?: AgentDefaults
 }
+
+export type WorkspaceSettingsResponse = ApiSchemas['WorkspaceSettingsResponse']
+
+export type AgentListItem = ApiSchemas['AgentListItem']
+export type AgentListResponse = ApiSchemas['AgentListResponse']
+export type AgentDetailResponse = ApiSchemas['AgentDetailResponse']
+export type AgentVersion = ApiSchemas['AgentVersionResponse']
+export type AgentVersionSummary = ApiSchemas['AgentVersionSummary']
+export type AgentVersionsResponse = ApiSchemas['AgentVersionsResponse']
+export type AgentDefinitionPayload = ApiSchemas['AgentDefinitionPayload']
+export type AgentCreateRequest = ApiSchemas['AgentCreateRequest']
+export type AgentRuntime = AgentDefinitionPayload['runtime']
+
+export type SkillValidateResponse = ApiSchemas['SkillValidateResponse']
+export type SkillTagsResponse = ApiSchemas['SkillTagsResponse']
 
 export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
 export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']

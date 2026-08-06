@@ -270,7 +270,7 @@ def test_executor_runtime_config_rejects_wrong_timeout_scalar_type():
 
 def test_executor_runtime_config_ignores_unknown_top_level_keys():
     raw = {
-        "executors": {"local-default": {"kind": "unknown"}},
+        "executors": {"legacy-default": {"kind": "unknown"}},
         "workflows": {"enabled": False},
         "openclaw": {"command_template": ["openclaw"]},
     }

@@ -45,7 +45,7 @@ def test_resolve_node_executors_maps_node_keys_to_executor_id_and_kind():
                     {
                         "workflow_key": "question_comprehension_info",
                         "node_key": "node_a",
-                        "executor_id": "local-default",
+                        "executor_id": "code-default",
                     },
                     {
                         "workflow_key": "question_comprehension_info",
@@ -63,7 +63,7 @@ def test_resolve_node_executors_maps_node_keys_to_executor_id_and_kind():
     )
     settings = FakeSettings(
         executor_definitions={
-            "local-default": FakeExecutorConfig("local"),
+            "code-default": FakeExecutorConfig("code"),
             "pi-default": FakeExecutorConfig("pi"),
         }
     )
@@ -71,7 +71,7 @@ def test_resolve_node_executors_maps_node_keys_to_executor_id_and_kind():
     result = resolve_node_executors("ws1", "question_comprehension_info", service, settings)
 
     assert result == {
-        "node_a": ("local-default", "local"),
+        "node_a": ("code-default", "code"),
         "node_b": ("pi-default", "pi"),
     }
 
@@ -105,30 +105,30 @@ def test_resolve_node_executors_skips_bindings_without_node_key():
                     {
                         "workflow_key": "question_comprehension_info",
                         "node_key": "node_a",
-                        "executor_id": "local-default",
+                        "executor_id": "code-default",
                     },
                     {"workflow_key": "question_comprehension_info", "executor_id": "pi-default"},
                 ]
             }
         }
     )
-    settings = FakeSettings(executor_definitions={"local-default": FakeExecutorConfig("local")})
+    settings = FakeSettings(executor_definitions={"code-default": FakeExecutorConfig("code")})
 
     result = resolve_node_executors("ws1", "question_comprehension_info", service, settings)
 
-    assert result == {"node_a": ("local-default", "local")}
+    assert result == {"node_a": ("code-default", "code")}
 
 
 def test_resolve_node_executors_with_real_service(job_db, settings):
     workspace = job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
     job_db.replace_workspace_executor_configuration(
         workspace["id"],
-        allocations=[{"executor_id": "local-default", "concurrency_limit": 1}],
+        allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_comprehension_info",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             }
         ],
         node_limits=[],
@@ -140,4 +140,4 @@ def test_resolve_node_executors_with_real_service(job_db, settings):
         workspace["id"], "question_comprehension_info", config_service, settings
     )
 
-    assert result == {"assemble_comprehension_info": ("local-default", "local")}
+    assert result == {"assemble_comprehension_info": ("code-default", "code")}

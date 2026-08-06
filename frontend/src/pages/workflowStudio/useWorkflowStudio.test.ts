@@ -1,5 +1,15 @@
 import { renderHook, waitFor } from '@testing-library/react'
-import { act } from 'react'
+import { act, createElement, type ReactNode } from 'react'
+import { QueryClientProvider } from '@tanstack/react-query'
+import { createTestQueryClient } from '../../testing/testQueryClient'
+
+function queryClientWrapper({ children }: { children: ReactNode }) {
+  return createElement(
+    QueryClientProvider,
+    { client: createTestQueryClient() },
+    children
+  )
+}
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { useWorkflowStudio } from './useWorkflowStudio'
 
@@ -89,7 +99,9 @@ describe('useWorkflowStudio', () => {
       errors: [],
     })
 
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
     await waitFor(() =>
       expect(result.current.definitionYaml).toBe(
@@ -128,7 +140,9 @@ describe('useWorkflowStudio', () => {
       errors: [],
     })
 
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
     act(() => {
@@ -162,7 +176,9 @@ describe('useWorkflowStudio', () => {
       ],
     })
 
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
     act(() => {
@@ -200,7 +216,9 @@ describe('useWorkflowStudio', () => {
       errors: [],
     })
 
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
     act(() => {
@@ -242,7 +260,9 @@ describe('useWorkflowStudio', () => {
       definition_yaml:
         'key: wf\nlabel: Old Workflow\nschema_version: 2\nnodes: {}\nedges: []\n',
     })
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
     act(() =>
@@ -282,7 +302,9 @@ describe('useWorkflowStudio', () => {
       definition_yaml:
         'key: wf\nlabel: Restored\nschema_version: 2\nnodes: {}\nedges: []\n',
     })
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
     await act(async () => {
@@ -342,7 +364,9 @@ describe('useWorkflowStudio', () => {
       }
     )
 
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
     act(() => {
@@ -363,7 +387,9 @@ describe('useWorkflowStudio', () => {
     mocks.fetchWorkflowRevisionDetail.mockRejectedValue(
       new Error('network error')
     )
-    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
     const previousDefinitionYaml = result.current.definitionYaml
 

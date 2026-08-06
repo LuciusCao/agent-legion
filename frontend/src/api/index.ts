@@ -4,15 +4,18 @@ export {
   deleteJob,
   fetchJobArtifact,
   fetchJobDetail,
-  fetchJobs,
 } from './jobsApi'
 export {
   createWorkspace,
   deleteWorkspace,
   fetchWorkspaces,
   fetchWorkspaceStats,
+  updateAgentDefaults,
   updateWorkspace,
 } from './workspaceApi'
+// prettier-ignore
+export { archiveAgent, copyAgent, createAgentDefinition, fetchAgentDefinition, fetchAgentDefinitions, fetchAgentVersions, publishAgent, rollbackAgent, saveAgentDraft } from './agentDefinitions'
+export { fetchSkillTags, validateSkillPath } from './skills'
 export { fetchJobsSnapshot } from './jobSnapshot'
 export { fetchJobFacets } from './jobFacets'
 export { fetchFailedNodeRuns, rerunJobsByFailure } from './failureApi'

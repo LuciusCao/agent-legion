@@ -549,7 +549,7 @@ def test_job_log_service_falls_back_to_events_jsonl_when_log_file_is_missing(
     missing_log = settings.logs_dir / "jobs" / "missing-pi.log"
     with job_db.connect() as conn:
         conn.execute(
-            "update node_runs set log_path=? where id=?",
+            "update node_runs set log_path=%s where id=%s",
             (make_data_relative(missing_log, settings.data_dir), run["id"]),
         )
     _write_events(
@@ -635,7 +635,7 @@ def test_read_raw_log_rejects_oversized_file(log_service):
     # Point the existing run record at the oversized log file.
     with job_db.connect() as conn:
         conn.execute(
-            "update node_runs set log_path=? where id=?",
+            "update node_runs set log_path=%s where id=%s",
             (str(make_data_relative(log_file, settings.data_dir)), run["id"]),
         )
 

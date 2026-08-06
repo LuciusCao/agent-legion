@@ -14,7 +14,7 @@ class JobKeyQueriesMixin(JobQueriesBase):
         """
         with self._connect_read() as conn:
             rows = conn.execute(
-                "select source_type, source_id from jobs where workspace_id=?",
+                "select source_type, source_id from jobs where workspace_id=%s",
                 (workspace_id,),
             )
             return {(str(row["source_type"]), str(row["source_id"])) for row in rows}

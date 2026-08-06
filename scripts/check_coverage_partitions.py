@@ -35,7 +35,7 @@ class Partition:
     min_lines: float
 
 
-# Floors follow docs/plans/2026-08-01-test-architecture-optimization.md Phase 3:
+# Floors follow Phase 3 of the 2026-08 test architecture plan:
 # key modules at >=80% lines with behavior assertions, former <60% modules at >=70%.
 PARTITIONS: tuple[Partition, ...] = (
     Partition(
@@ -56,13 +56,13 @@ PARTITIONS: tuple[Partition, ...] = (
     Partition(
         "backend transcription providers",
         "backend",
-        ("server/app/services/transcription_providers.py",),
+        ("server/app/workflows/video_knowledge_transcription.py",),
         70.0,
     ),
     Partition(
         "backend agent artifacts",
         "backend",
-        ("server/app/agent_artifacts.py",),
+        ("server/app/agent_broker/agent_artifacts.py",),
         70.0,
     ),
     Partition(

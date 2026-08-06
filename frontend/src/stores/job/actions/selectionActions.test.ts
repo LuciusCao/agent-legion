@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useJobStore } from '../index'
-import { useWorkspaceStore } from '../../workspaceStore'
 import { fetchJobFacets } from '../../../api'
+import { queryClient } from '../../../lib/queryClient'
+import { queryKeys } from '../../../lib/queryKeys'
 import type { JobFacetsResponse } from '../../../types/jobTypes'
 import type { WorkspaceStats } from '../../../types/workspaceTypes'
 import { createJobSummary } from './testHelpers'
-import { normalizeJobs } from './fetchStateHelpers'
+import { normalizeJobs } from './fetch'
 
 vi.mock('../../../api', () => ({
   fetchJobFacets: vi.fn(),
@@ -44,7 +45,7 @@ function resetSelection() {
 describe('selectionModeActions', () => {
   beforeEach(() => {
     resetSelection()
-    useWorkspaceStore.setState({ workspaceStats: {} })
+    queryClient.clear()
     mockFetchJobFacets.mockReset()
     mockFetchJobFacets.mockResolvedValue(emptyFacets)
   })
@@ -94,11 +95,9 @@ describe('selectionModeActions', () => {
   })
 
   it('selectFailed enters allMatching mode with a failed-only filter', () => {
-    useWorkspaceStore.setState({
-      workspaceStats: {
-        ws1: { job_stats: { failed: 7 } } as unknown as WorkspaceStats,
-      },
-    })
+    queryClient.setQueryData(queryKeys.workspaceStats('ws1'), {
+      job_stats: { failed: 7 },
+    } as unknown as WorkspaceStats)
 
     useJobStore.getState().selectFailed()
 

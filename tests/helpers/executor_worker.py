@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.executors.config import ExecutorConfig, LocalExecutorConfig, PiExecutorConfig
+from server.app.executors.config import CodeExecutorConfig, ExecutorConfig, PiExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
@@ -34,9 +34,11 @@ def make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
 
 def local_def(capacity: int, capabilities: set[str]) -> Any:
     return {
-        "kind": "local",
+        "kind": "code",
         "global_capacity": capacity,
-        "capabilities": {cap: {"handler": "dummy.handler"} for cap in capabilities},
+        "capabilities": {
+            cap: {"path": "workflow_nodes/question_intake.py"} for cap in capabilities
+        },
     }
 
 
@@ -65,13 +67,13 @@ def make_registry(
     executors: dict[str, Any],
     definitions: dict[str, Any],
 ) -> ExecutorRegistry:
-    """Build an ExecutorRegistry from local and/or pi executor definitions."""
+    """Build an ExecutorRegistry from code and/or pi executor definitions."""
 
     def _build_config(eid: str) -> ExecutorConfig:
         kind = definitions[eid]["kind"]
         if kind == "pi":
             return PiExecutorConfig(**definitions[eid])
-        return LocalExecutorConfig(**definitions[eid])
+        return CodeExecutorConfig(**definitions[eid])
 
     return ExecutorRegistry(
         executors=executors,
@@ -90,7 +92,7 @@ def allocate(
         conn.execute(
             """
             insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set concurrency_limit=excluded.concurrency_limit
             """,
             (workspace_id, executor_id, concurrency_limit),
@@ -108,7 +110,7 @@ def bind(
         conn.execute(
             """
             insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
             """,
             (workspace_id, workflow_key, node_key, executor_id),
@@ -143,6 +145,7 @@ def make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={"workflows": {"enabled": True}},
+        database_url=str(db_path),
         executor_definitions=registry.definitions(),
         executor_runtime=executor_runtime
         or ExecutorRuntimeConfig.model_validate(

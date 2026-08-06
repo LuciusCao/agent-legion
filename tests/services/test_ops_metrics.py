@@ -17,23 +17,26 @@ def _bucket_start(now: datetime) -> datetime:
     return now.replace(second=0, microsecond=0) - timedelta(minutes=1)
 
 
-def _fetch_sample(bucket_start: datetime, worker_id: str = "") -> dict | None:
+def _fetch_sample(
+    bucket_start: datetime, worker_id: str = "", workspace_id: str = ""
+) -> dict | None:
     with read_connection(TEST_DATABASE_URL) as conn:
         return conn.execute(
-            "select * from ops_metric_samples where bucket_start = ? and worker_id = ?",
-            (bucket_start, worker_id),
+            "select * from ops_metric_samples"
+            " where bucket_start = %s and worker_id = %s and workspace_id = %s",
+            (bucket_start, worker_id, workspace_id),
         ).fetchone()
 
 
 def _seed_workspace_job(job_id: str = "job-1", workspace_id: str = "ops-ws") -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, 'Ops') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Ops') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, ?, 'questions', 'question', ?) on conflict(id) do nothing",
+            " values (%s, %s, 'questions', 'question', %s) on conflict(id) do nothing",
             (job_id, workspace_id, job_id),
         )
 
@@ -52,7 +55,7 @@ def _insert_token_usage(
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status)"
-            " values (?, ?, 'generate', 'completed')",
+            " values (%s, %s, 'generate', 'completed')",
             (run_id, job_id),
         )
         conn.execute(
@@ -60,7 +63,7 @@ def _insert_token_usage(
             insert into node_run_token_usage(
               node_run_id, job_id, workspace_id, node_key, provider, model,
               input_tokens, output_tokens, cache_read_tokens, total_tokens, created_at
-            ) values (?, ?, ?, 'generate', 'p', 'm', ?, ?, ?, ?, ?)
+            ) values (%s, %s, %s, 'generate', 'p', 'm', %s, %s, %s, %s, %s)
             """,
             (
                 run_id,
@@ -82,7 +85,7 @@ def _insert_worker(worker_id: str, last_seen_at: datetime, *, revoked: bool = Fa
             insert into agent_workers(
               worker_id, name, runtimes_json, max_concurrency, protocol_version,
               token_hash, registered_at, last_seen_at, revoked_at
-            ) values (?, 'w', '["pi"]', 1, 1, 'hash', ?, ?, ?)
+            ) values (%s, 'w', '["pi"]', 1, 1, 'hash', %s, %s, %s)
             """,
             (worker_id, last_seen_at, last_seen_at, last_seen_at if revoked else None),
         )
@@ -94,6 +97,7 @@ def _insert_execution(
     *,
     worker_id: str | None = None,
     node_run_id: int | None = None,
+    queued_at: datetime = _NOW,
 ) -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
@@ -102,9 +106,9 @@ def _insert_execution(
               execution_id, workspace_id, job_id, workflow_key, node_key,
               agent_id, agent_definition_hash, node_concurrency_limit, state,
               worker_id, node_run_id, queued_at, manifest_json
-            ) values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 5, ?, ?, ?, ?, '{}')
+            ) values (%s, 'ops-ws', 'job-1', 'questions', %s, 'agent-1', 'hash', 5, %s, %s, %s, %s, '{}')
             """,
-            (execution_id, f"node-{execution_id}", state, worker_id, node_run_id, _NOW),
+            (execution_id, f"node-{execution_id}", state, worker_id, node_run_id, queued_at),
         )
 
 
@@ -114,6 +118,7 @@ def _insert_sample(
     worker_id: str = "",
     online_workers: int = 0,
     active_executions: int = 0,
+    queued: int = 0,
     input_tokens: int = 0,
     output_tokens: int = 0,
     cache_read_tokens: int = 0,
@@ -124,14 +129,15 @@ def _insert_sample(
             """
             insert into ops_metric_samples(
               bucket_start, worker_id, online_workers, active_executions,
-              input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, ?, ?, ?, ?, ?, ?, ?)
+              queued, input_tokens, output_tokens, cache_read_tokens, total_tokens
+            ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             """,
             (
                 bucket_start,
                 worker_id,
                 online_workers,
                 active_executions,
+                queued,
                 input_tokens,
                 output_tokens,
                 cache_read_tokens,
@@ -160,7 +166,7 @@ def test_sample_once_upserts_existing_bucket() -> None:
     with read_connection(TEST_DATABASE_URL) as conn:
         count = conn.execute(
             "select count(*) as c from ops_metric_samples"
-            " where bucket_start = ? and worker_id = ''",
+            " where bucket_start = %s and worker_id = ''",
             (_bucket_start(_NOW),),
         ).fetchone()["c"]
     assert count == 1
@@ -263,10 +269,16 @@ def test_sample_once_upserts_per_worker_rows_idempotently() -> None:
     assert row["active_executions"] == 1
     with read_connection(TEST_DATABASE_URL) as conn:
         rows = conn.execute(
-            "select worker_id from ops_metric_samples where bucket_start = ? order by worker_id",
+            "select worker_id, workspace_id from ops_metric_samples"
+            " where bucket_start = %s order by worker_id, workspace_id",
             (bucket,),
         ).fetchall()
-    assert [r["worker_id"] for r in rows] == ["", "w-1"]
+    # 全局行 + per-worker 行之外，claimed 执行还产生 per-workspace 行（v23）。
+    assert [(r["worker_id"], r["workspace_id"]) for r in rows] == [
+        ("", ""),
+        ("", "ops-ws"),
+        ("w-1", ""),
+    ]
 
 
 def test_query_series_6h_returns_raw_minute_rows_in_order() -> None:
@@ -454,7 +466,7 @@ def _insert_node_run(
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
             "insert into node_runs(id, job_id, node_key, status, started_at, finished_at)"
-            " values (?, ?, 'generate', ?, ?, ?)",
+            " values (%s, %s, 'generate', %s, %s, %s)",
             (run_id, job_id, status, started_at, finished_at),
         )
         if agent_run:
@@ -465,8 +477,8 @@ def _insert_node_run(
                     agent_id, agent_definition_hash, node_concurrency_limit,
                     state, queued_at, node_run_id, manifest_json
                 )
-                values (?, 'ops-ws', ?, 'questions', 'generate', 'agent-1', 'hash', 1,
-                        'done', ?, ?, '{}')
+                values (%s, 'ops-ws', %s, 'questions', 'generate', 'agent-1', 'hash', 1,
+                        'done', %s, %s, '{}')
                 """,
                 (f"exec-{run_id}", job_id, started_at, run_id),
             )
@@ -566,3 +578,223 @@ def test_query_summary_excludes_host_local_handler_runs() -> None:
     assert runs["failed"] == 0
     assert runs["duration_p50_seconds"] == 60.0
     assert runs["duration_p95_seconds"] == 60.0
+
+
+def test_sample_once_records_queue_depth_on_global_row() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-q1", "queued")
+    _insert_execution("ex-q2", "queued")
+    _insert_execution("ex-c1", "claimed")
+
+    _service().sample_once(_NOW)
+
+    row = _fetch_sample(_bucket_start(_NOW))
+    assert row is not None
+    assert row["queued"] == 2
+    assert row["active_executions"] == 1
+
+
+def test_query_series_includes_queued_fields() -> None:
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    _insert_sample(now - timedelta(minutes=1), queued=123, online_workers=1)
+
+    rows = _service().query_series("6h")
+
+    assert len(rows) == 1
+    assert rows[0]["queued"] == 123
+    assert rows[0]["queued_max"] == 123
+
+
+def test_query_summary_reports_queue_depth_oldest_and_sweeper_count() -> None:
+    _seed_workspace_job()
+    oldest = datetime.now(UTC) - timedelta(hours=3)
+    _insert_execution("ex-old", "queued", queued_at=oldest)
+    _insert_execution("ex-new", "queued", queued_at=datetime.now(UTC))
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for index in range(2):
+            conn.execute(
+                "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
+                " values ('job-1', %s, 'failed', 'unclaimable_model', current_timestamp)",
+                (f"poison-{index}",),
+            )
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
+            " values ('job-1', 'old-poison', 'failed', 'unclaimable_model', %s)",
+            (datetime.now(UTC) - timedelta(hours=2),),
+        )
+
+    summary = _service().query_summary()
+
+    assert summary["queue"]["queued"] == 2
+    assert summary["queue"]["oldest_queued_at"] is not None
+    assert summary["queue"]["recent_hour_unclaimable_failed"] == 2
+    assert summary["queue_alert"] is None or summary["queue_alert"]["kind"] == "stalled"
+
+
+def test_queue_alert_blocked_from_fresh_signal() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-blocked", "queued")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
+            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 8}', current_timestamp)"
+        )
+
+    alert = _service().query_summary()["queue_alert"]
+
+    assert alert is not None
+    assert alert["kind"] == "blocked"
+    assert alert["reasons"] == {"capability_or_model_mismatch": 8}
+    assert alert["at"] is not None
+
+
+def test_queue_alert_ignores_stale_signal() -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
+            " values (1, 'blocked', '{}', %s)",
+            (datetime.now(UTC) - timedelta(minutes=30),),
+        )
+
+    assert _service().query_summary()["queue_alert"] is None
+
+
+def test_queue_alert_stalled_when_queue_idle_with_online_workers() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-stuck", "queued", queued_at=datetime.now(UTC) - timedelta(minutes=5))
+    _insert_sample(_bucket_start(datetime.now(UTC)), online_workers=2, active_executions=0)
+
+    alert = _service().query_summary()["queue_alert"]
+
+    assert alert is not None
+    assert alert["kind"] == "stalled"
+
+
+def test_queue_alert_none_when_executions_running_or_no_workers() -> None:
+    _seed_workspace_job()
+    _insert_execution("ex-waiting", "queued", queued_at=datetime.now(UTC) - timedelta(minutes=5))
+    # Worker 忙满（有执行在跑）不算停滞。
+    _insert_sample(_bucket_start(datetime.now(UTC)), online_workers=2, active_executions=3)
+    assert _service().query_summary()["queue_alert"] is None
+
+    # 没有在线 worker 时不误报（部署缺口由在线 Worker 卡片呈现）。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from ops_metric_samples")
+    _insert_sample(_bucket_start(datetime.now(UTC)), online_workers=0, active_executions=0)
+    assert _service().query_summary()["queue_alert"] is None
+
+
+def test_blocked_signal_written_by_empty_claim_diagnostics() -> None:
+    import json as _json
+
+    from server.app.agent_broker.empty_diagnostics import log_blocked_queue
+
+    _seed_workspace_job()
+    _insert_execution("ex-head", "queued")
+    with read_connection(TEST_DATABASE_URL) as conn:
+        log_blocked_queue(TEST_DATABASE_URL, conn, {"capability_or_model_mismatch": 3})
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select kind, reasons_json from agent_queue_signals where id=1"
+        ).fetchone()
+    assert row is not None
+    assert row["kind"] == "blocked"
+    assert _json.loads(row["reasons_json"]) == {"capability_or_model_mismatch": 3}
+
+
+def test_sample_writes_per_workspace_rows() -> None:
+    _seed_workspace_job()
+    _insert_execution("e-q1", "queued")
+    _insert_execution("e-c1", "claimed", worker_id="w-1")
+
+    _service().sample_once(_NOW)
+
+    row = _fetch_sample(_bucket_start(_NOW), workspace_id="ops-ws")
+    assert row is not None
+    assert row["queued"] == 1
+    assert row["active_executions"] == 1
+    assert row["online_workers"] == 0
+    assert row["total_tokens"] == 0
+
+
+def test_query_series_scopes_to_workspace_rows() -> None:
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    bucket = now - timedelta(minutes=1)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into ops_metric_samples(bucket_start, worker_id, workspace_id, queued)"
+            " values (%s, '', 'ops-ws', 7), (%s, '', '', 99)",
+            (bucket, bucket),
+        )
+
+    ws_rows = _service().query_series("6h", workspace_id="ops-ws")
+    global_rows = _service().query_series("6h")
+
+    assert [r["queued"] for r in ws_rows] == [7]
+    assert [r["queued"] for r in global_rows] == [99]
+
+
+def _insert_execution_ws(
+    execution_id: str, state: str, *, workspace_id: str, job_id: str, queued_at: datetime
+) -> None:
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            """
+            insert into agent_execution_requests(
+              execution_id, workspace_id, job_id, workflow_key, node_key,
+              agent_id, agent_definition_hash, node_concurrency_limit, state,
+              queued_at, manifest_json
+            ) values (%s, %s, %s, 'questions', %s, 'agent-1', 'hash', 5, %s, %s, '{}')
+            """,
+            (execution_id, workspace_id, job_id, f"node-{execution_id}", state, queued_at),
+        )
+
+
+def test_query_summary_scopes_queue_to_workspace() -> None:
+    _seed_workspace_job()
+    _seed_workspace_job(job_id="job-2", workspace_id="ops-ws-2")
+    _insert_execution("e-a", "queued")
+    _insert_execution_ws("e-b", "queued", workspace_id="ops-ws-2", job_id="job-2", queued_at=_NOW)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status, failure_detail, finished_at)"
+            " values ('job-2', 'poison-b', 'failed', 'unclaimable_model', current_timestamp)"
+        )
+
+    summary = _service().query_summary(workspace_id="ops-ws-2")
+
+    assert summary["queue"]["queued"] == 1
+    assert summary["queue"]["recent_hour_unclaimable_failed"] == 1
+
+
+def test_queue_alert_stalled_scopes_to_workspace() -> None:
+    _seed_workspace_job()
+    _seed_workspace_job(job_id="job-2", workspace_id="ops-ws-2")
+    _insert_execution("e-a", "queued", queued_at=datetime.now(UTC) - timedelta(minutes=5))
+    # 全局有在线 worker；ops-ws-2 无 queued，不应报 stalled。
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=1)
+        conn.execute(
+            "insert into ops_metric_samples(bucket_start, worker_id, workspace_id,"
+            " online_workers, active_executions) values (%s, '', '', 2, 0),"
+            " (%s, '', 'ops-ws', 0, 0)",
+            (bucket, bucket),
+        )
+
+    assert _service().query_summary(workspace_id="ops-ws")["queue_alert"]["kind"] == "stalled"
+    assert _service().query_summary(workspace_id="ops-ws-2")["queue_alert"] is None
+
+
+def test_queue_alert_blocked_requires_workspace_queue() -> None:
+    _seed_workspace_job()
+    _insert_execution("e-a", "queued")
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into agent_queue_signals(id, kind, reasons_json, updated_at)"
+            " values (1, 'blocked', '{\"capability_or_model_mismatch\": 4}', current_timestamp)"
+        )
+
+    assert _service().query_summary(workspace_id="ops-ws")["queue_alert"]["kind"] == "blocked"
+    # 该 workspace 没有 queued 行：fleet 级 blocked 信号不外溢到其他 workspace。
+    assert _service().query_summary(workspace_id="ops-ws-2")["queue_alert"] is None

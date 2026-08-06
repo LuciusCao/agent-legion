@@ -39,10 +39,12 @@ def _token_gen_config(config: Mapping[str, Any]) -> dict[str, str]:
 def cms_token_available(cms_config: Mapping[str, Any] | None) -> bool:
     """Return True when CMS credentials resolve from any supported source.
 
-    Priority: env ``CMS_TOKEN`` (deprecated alias ``BASECMS_TOKEN``) >
-    binding/config ``token`` (vault secret_refs must be resolved by the
-    caller beforehand) > the four token_gen keys (env first, then in-memory
-    config).
+    Availability is source-agnostic; the call-time priority in
+    :func:`server.app.cms.client.get_token` is: workspace-bound ``token``
+    (marked ``token_from_binding`` by ``resolve_cms_resource``; vault
+    secret_refs must be resolved by the caller beforehand) > env ``CMS_TOKEN``
+    (deprecated alias ``BASECMS_TOKEN``) > settings/binding ``token`` > the
+    four token_gen keys (env first, then in-memory config).
     """
     if cms_config is None:
         cms_config = {}

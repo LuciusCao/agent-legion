@@ -35,15 +35,15 @@ def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
     assert run is not None
 
     with db.connect() as conn:
-        conn.execute("delete from workspaces where id=?", (workspace["id"],))
+        conn.execute("delete from workspaces where id=%s", (workspace["id"],))
 
     with db._connect_read() as conn:
-        assert conn.execute("select 1 from jobs where id=?", (job["id"],)).fetchone() is None
+        assert conn.execute("select 1 from jobs where id=%s", (job["id"],)).fetchone() is None
         assert (
-            conn.execute("select 1 from job_nodes where job_id=?", (job["id"],)).fetchone() is None
+            conn.execute("select 1 from job_nodes where job_id=%s", (job["id"],)).fetchone() is None
         )
         assert (
-            conn.execute("select 1 from node_runs where job_id=?", (job["id"],)).fetchone() is None
+            conn.execute("select 1 from node_runs where job_id=%s", (job["id"],)).fetchone() is None
         )
 
 
@@ -106,7 +106,7 @@ def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
     old_created_at = "2026-06-09T00:00:00Z"
     with db.connect() as conn:
         conn.execute(
-            "update job_nodes set created_at=? where job_id=? and node_key=?",
+            "update job_nodes set created_at=%s where job_id=%s and node_key=%s",
             (old_created_at, job["id"], "fetch_question_context"),
         )
 
@@ -177,7 +177,7 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
 
     db.pause_job(job["id"], "awaiting_resources")
     with db.connect() as conn:
-        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+        conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
     control = db.get_job_execution_control(job["id"])
     assert control is not None
     assert control["execution_paused"] is True
@@ -209,7 +209,7 @@ def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
     db.pause_job(job["id"], "target_reached")
     with db.connect() as conn:
         conn.execute(
-            "update jobs set status='paused' where id=?",
+            "update jobs set status='paused' where id=%s",
             (job["id"],),
         )
 
@@ -255,7 +255,7 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
 
     # paused is stored as an integer but exposed as a boolean.
     with db.connect() as conn, pytest.raises(IntegrityError):
-        conn.execute("update jobs set execution_paused = 2 where id=?", (job["id"],))
+        conn.execute("update jobs set execution_paused = 2 where id=%s", (job["id"],))
 
 
 def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
@@ -277,7 +277,7 @@ def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
     def reset_updated_at_to_past() -> None:
         with db.connect() as conn:
             conn.execute(
-                "update jobs set updated_at=? where id=?",
+                "update jobs set updated_at=%s where id=%s",
                 (past_updated_at, job["id"]),
             )
 
@@ -296,7 +296,7 @@ def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
     reset_updated_at_to_past()
     db.pause_job(job["id"], "testing")
     with db.connect() as conn:
-        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+        conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
     updated_job = db.get_job(job["id"])
     assert updated_job is not None
     assert updated_job["updated_at"] > past_updated_at
