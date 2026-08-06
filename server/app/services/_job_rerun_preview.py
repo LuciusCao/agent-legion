@@ -14,16 +14,17 @@ from collections.abc import Collection, Sequence
 from typing import TYPE_CHECKING, Any
 
 from server.app.jobs.queries.job_filtering import JobListFilter
-from server.app.services._job_rerun_by_failure import _AUTO_STRATEGIES
 from server.app.services._job_rerun_eligibility import (
+    AUTO_STRATEGIES,
     failed_nodes_by_job,
     resolve_failure_rerun_targets,
 )
 from server.app.services._job_rerun_preview_checks import (
     PreviewDefinitions,
-    rerun_eligible_from_nodes,
-    resolve_node_key_from_nodes,
+    rerun_ineligible_from_nodes,
+    resolve_rerun_node_from_nodes,
 )
+from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_selection_resolver import resolve_batch_selection
 
 if TYPE_CHECKING:
@@ -76,14 +77,20 @@ def batch_rerun_preview(
         eligible = 0
         for job_id in ids:
             job = jobs.get(job_id)
-            if job is None:
+            if job is None or job["workspace_id"] != workspace_id:
                 continue
             nodes = nodes_by_job.get(job_id, [])
-            actual_node_key = resolve_node_key_from_nodes(job, nodes, node_key, from_failed_node)
-            if actual_node_key is None:
+            try:
+                actual_node_key = resolve_rerun_node_from_nodes(
+                    job_id, job, nodes, node_key, from_failed_node
+                )
+            except JobOperationError:
                 continue
-            if rerun_eligible_from_nodes(
-                definitions.for_job(job), nodes, busy_pairs, job_id, actual_node_key
+            if (
+                rerun_ineligible_from_nodes(
+                    definitions.for_job(job), nodes, busy_pairs, job_id, actual_node_key
+                )
+                is None
             ):
                 eligible += 1
     return {"total_count": len(ids), "eligible_count": eligible}
@@ -105,18 +112,19 @@ def _failure_category_eligible_count(
     not modelled here.
     """
     grouped = failed_nodes_by_job(service, workspace_id, category, ids)
-    strategy = _AUTO_STRATEGIES.get(category, "rerun_self")
+    strategy = AUTO_STRATEGIES.get(category, "rerun_self")
     count = 0
     for job_id, failed_nodes in grouped.items():
         job = jobs.get(job_id)
-        if job is None:
+        if job is None or job["workspace_id"] != workspace_id:
             continue
         definition = definitions.for_job(job)
         targets = resolve_failure_rerun_targets(definition, failed_nodes, strategy)
         if any(
-            rerun_eligible_from_nodes(
+            rerun_ineligible_from_nodes(
                 definition, nodes_by_job.get(job_id, []), busy_pairs, job_id, target
             )
+            is None
             for target in targets
         ):
             count += 1

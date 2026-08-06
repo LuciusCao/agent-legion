@@ -1,14 +1,17 @@
-"""Pure bulk-data predicates for the batch-rerun preview.
+"""Pure bulk-data predicates for the batch-rerun preview and batch execution.
 
 Each function is the in-memory equivalent of one per-job check on the write
 path (``resolve_rerun_node`` / ``check_rerun_eligibility``), evaluated against
-bulk-fetched rows so the preview never re-implements an eligibility rule.
+bulk-fetched rows so batch paths never re-implement an eligibility rule. The
+error-returning variants carry the exact ``JobOperationError`` the per-job
+path would raise, keeping batch results identical to per-job ``rerun()``.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from server.app.services.job_operation_error import JobOperationError
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 
 if TYPE_CHECKING:
@@ -40,35 +43,75 @@ class PreviewDefinitions:
         return self._cache[key]
 
 
-def resolve_node_key_from_nodes(
+def resolve_rerun_node_from_nodes(
+    job_id: str,
     job: dict[str, Any],
     nodes: list[dict[str, Any]],
     node_key: str | None,
     from_failed_node: bool,
-) -> str | None:
-    """Bulk-data equivalent of ``resolve_rerun_node`` (None == its skip errors)."""
+) -> str:
+    """Bulk-data equivalent of ``resolve_rerun_node``: same errors, no queries."""
     if from_failed_node:
         if job.get("status") != "failed":
-            return None
+            raise JobOperationError(
+                job_id, "rerun", "skipped", None, "not_failed", "Job is not failed"
+            )
         for node in nodes:
             if node["status"] == "failed":
                 return str(node["node_key"])
-        return None
+        raise JobOperationError(
+            job_id, "rerun", "skipped", None, "no_failed_node", "No failed node found"
+        )
+    if node_key is None:
+        raise JobOperationError(
+            job_id, "rerun", "failed", None, "node_key_required", "node_key is required"
+        )
     return node_key
 
 
-def rerun_eligible_from_nodes(
+def rerun_ineligible_from_nodes(
     definition: Any,
     nodes: list[dict[str, Any]],
     busy_pairs: set[tuple[str, str]],
     job_id: str,
     actual_node_key: str,
-) -> bool:
-    """Bulk-data equivalent of ``check_rerun_eligibility`` (same four rules)."""
+) -> JobOperationError | None:
+    """Bulk-data equivalent of ``check_rerun_eligibility``: same four rules,
+    same errors, no queries."""
     if actual_node_key not in definition.nodes:
-        return False
+        return JobOperationError(
+            job_id,
+            "rerun",
+            "failed",
+            actual_node_key,
+            "node_not_found",
+            f"Node {actual_node_key} not found in workflow",
+        )
     if not any(node["node_key"] == actual_node_key for node in nodes):
-        return False
+        return JobOperationError(
+            job_id,
+            "rerun",
+            "failed",
+            actual_node_key,
+            "node_not_found",
+            f"Node {actual_node_key} not found for job",
+        )
     if (job_id, actual_node_key) in busy_pairs:
-        return False
-    return not any(node["status"] == "running" for node in nodes)
+        return JobOperationError(
+            job_id,
+            "rerun",
+            "skipped",
+            actual_node_key,
+            "busy",
+            "Node has an active executor lease",
+        )
+    if any(node["status"] == "running" for node in nodes):
+        return JobOperationError(
+            job_id,
+            "rerun",
+            "skipped",
+            actual_node_key,
+            "busy",
+            "Job has running nodes",
+        )
+    return None

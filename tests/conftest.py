@@ -236,6 +236,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_agent_artifacts.py",
         "tests/services/test_agent_broker_claim_scan.py",
         "tests/services/test_artifact_store.py",
+        "tests/services/test_job_rerun_batch.py",
         "tests/services/test_job_rerun_preview.py",
         "tests/services/test_ops_metrics.py",
         "tests/services/test_token_usage.py",

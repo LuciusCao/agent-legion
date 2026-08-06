@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.services._job_rerun_single import execute_rerun_result
+from server.app.services.job_operation_error import JobOperationResult
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -34,6 +35,11 @@ def execute_rerun_targets(
     targets: list[str],
 ) -> dict[str, Any]:
     node_results = [execute_rerun_result(service, job, job_id, target) for target in targets]
+    return assemble_rerun_targets(job_id, node_results)
+
+
+def assemble_rerun_targets(job_id: str, node_results: list[JobOperationResult]) -> dict[str, Any]:
+    """Fold per-node rerun results into the per-job category result."""
     rerun_nodes = [str(r["node_key"]) for r in node_results if r["status"] == "succeeded"]
     failures = [r for r in node_results if r["status"] == "failed"]
     skips = [r for r in node_results if r["status"] == "skipped"]
