@@ -11,8 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.services.job_intake_registry import ResolverSpec
-from server.app.services.job_intake_resolver import resolve_candidates
+from server.app.services.job_intake_registry import ResolverSpec, resolve_candidates
 from server.app.services.job_intake_video import exclude_existing_candidates
 from server.app.settings import Settings
 

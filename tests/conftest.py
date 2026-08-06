@@ -20,13 +20,122 @@ os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"
 import psycopg
 from psycopg import sql
 
-from server.app.agent_catalog import load_agent_definitions, sync_agent_definitions
-from server.app.agents import AgentStatusManager
-from server.app.configuration import load_application_config
+from server.app.agent_catalog import AgentDefinition
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
+from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
-from server.app.settings import PROJECT_ROOT, load_settings
+from server.app.services.agent_service import AgentService, reset_published_agent_cache
+from server.app.settings import load_settings
+
+# Test Agent catalog: mirrors the retired config/workflow.yaml `agents:`
+# section, with the 4 video agents already flipped to velites (schema v27
+# cutover). Seeded via AgentService after every TRUNCATE so published
+# definitions exist for route resolution and dispatch.
+_TEST_AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
+    agent_id: AgentDefinition(capability=capability, runtime=runtime, skill=skill)
+    for agent_id, capability, runtime, skill in [
+        (
+            "question-key-info-v1",
+            "generate_key_info",
+            "velites",
+            "question_comprehension_info/generate_key_info",
+        ),
+        (
+            "question-key-info-review-v1",
+            "review_key_info",
+            "velites",
+            "question_comprehension_info/review_key_info",
+        ),
+        (
+            "question-possible-errors-v1",
+            "generate_possible_errors",
+            "velites",
+            "question_comprehension_info/generate_possible_errors",
+        ),
+        (
+            "question-possible-errors-review-v1",
+            "review_possible_errors",
+            "velites",
+            "question_comprehension_info/review_possible_errors",
+        ),
+        (
+            "question-difficulty-v1",
+            "assess_comprehension_difficulty",
+            "velites",
+            "question_comprehension_info/assess_comprehension_difficulty",
+        ),
+        (
+            "video-subtitle-review-v1",
+            "review_subtitles",
+            "velites",
+            "video_knowledge/review_subtitles",
+        ),
+        (
+            "video-chapter-generation-v1",
+            "generate_chapters",
+            "velites",
+            "video_knowledge/generate_chapters",
+        ),
+        (
+            "video-interaction-generation-v1",
+            "generate_interactions",
+            "velites",
+            "video_knowledge/generate_interactions",
+        ),
+        (
+            "video-content-review-v1",
+            "review_video_content",
+            "velites",
+            "video_knowledge/review_video_content",
+        ),
+    ]
+}
+
+
+def _seed_agent_definitions() -> None:
+    service = AgentService(TEST_DATABASE_URL)
+    for agent_id, definition in _TEST_AGENT_DEFINITIONS.items():
+        service.save_draft(agent_id, definition, created_by="test-seed")
+        service.publish(agent_id)
+
+
+# Deterministic pricing seeded into global_settings after every TRUNCATE (see
+# _reset_schema_data); rates mirror the retired yaml defaults so historical
+# cost assertions stay valid.
+_TEST_PRICING_DOCUMENT = {
+    "currency": "CNY",
+    "pricing": [
+        {
+            "provider": "gateway",
+            "model": "your-model-a",
+            "input_per_1m": 3.0,
+            "output_per_1m": 15.0,
+            "cache_read_per_1m": 0.6,
+        },
+        {
+            "provider": "doubao",
+            "model": "Doubao-Seed-2.1-turbo",
+            "input_per_1m": 3.0,
+            "output_per_1m": 15.0,
+            "cache_read_per_1m": 0.6,
+        },
+        {
+            "provider": "gateway",
+            "model": "your-model-b",
+            "input_per_1m": 1.0,
+            "output_per_1m": 2.0,
+            "cache_read_per_1m": 0.2,
+        },
+        {
+            "provider": "deepseek",
+            "model": "your-model-b",
+            "input_per_1m": 1.0,
+            "output_per_1m": 2.0,
+            "cache_read_per_1m": 0.2,
+        },
+    ],
+}
 
 _CMS_ENV_KEYS = (
     "CMS_BASE_URL",
@@ -80,13 +189,18 @@ _SMOKE_TEST_FILES = frozenset(
 _POSTGRES_TEST_FILES = frozenset(
     {
         "tests/ci/test_executor_worker_stress.py",
+        "tests/db/test_agent_catalog_cutover_migration.py",
+        "tests/db/test_code_executor_migration.py",
+        "tests/db/test_custom_node_codes_migration.py",
+        "tests/db/test_local_executor_removal_migration.py",
+        "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",
+        "tests/db/test_versioned_entities_migration.py",
         "tests/db/test_workspace_cms_migration.py",
         "tests/db/test_workspace_secrets_migration.py",
         "tests/executors/leases/test_expire_race.py",
         "tests/executors/leases/test_shard_expiry.py",
         "tests/executors/test_leases.py",
-        "tests/executors/test_local_executor.py",
         "tests/full/test_agent_worker_control_plane.py",
         "tests/full/test_executor_cancellation_recovery.py",
         "tests/full/test_executor_worker_fairness.py",
@@ -120,7 +234,11 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/test_metrics.py",
         "tests/routes/test_workspace_agent_routes.py",
         "tests/services/test_agent_artifacts.py",
+        "tests/services/test_agent_broker_claim_scan.py",
+        "tests/services/test_artifact_orphan_gc.py",
         "tests/services/test_artifact_store.py",
+        "tests/services/test_job_rerun_batch.py",
+        "tests/services/test_job_rerun_preview.py",
         "tests/services/test_ops_metrics.py",
         "tests/services/test_token_usage.py",
         "tests/test_export_openapi.py",
@@ -156,6 +274,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_workspace_executor_queries.py",
         "tests/workers/test_scheduler_wakeup.py",
         "tests/workers/test_workflow_worker_capacity.py",
+        "tests/workers/test_workflow_worker_node_code.py",
         "tests/workers/test_workflow_worker_node_config.py",
         "tests/workers/test_workflow_worker_ready_queue.py",
         "tests/workers/test_workflow_worker_thread_local.py",
@@ -222,6 +341,8 @@ def _reset_schema_data() -> None:
     that re-run init_db rely on it for idempotency. DDL-seeded rows must be
     restored after the truncate: job_event_seq carries a singleton counter
     row (postgres_schema.sql) that job intake bumps on every batch.
+    global_settings is re-seeded with a fixed token_usage pricing document so
+    cost-calculation tests have deterministic rates to assert against.
     """
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
@@ -243,6 +364,13 @@ def _reset_schema_data() -> None:
                     "insert into {}(id, value) values (1, 0) on conflict(id) do nothing"
                 ).format(sql.Identifier(TEST_SCHEMA, "job_event_seq"))
             )
+            conn.execute(
+                sql.SQL(
+                    "insert into {}(key, value) values ('token_usage', %s)"
+                    " on conflict(key) do update set value=excluded.value"
+                ).format(sql.Identifier(TEST_SCHEMA, "global_settings")),
+                (json.dumps(_TEST_PRICING_DOCUMENT),),
+            )
     except psycopg.Error as exc:
         pytest.fail(
             "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
@@ -252,7 +380,7 @@ def _reset_schema_data() -> None:
 
 @pytest.fixture(scope="session")
 def _session_test_schema():
-    """Build the per-worker schema once per session and cache agent definitions.
+    """Build the per-worker schema once per session.
 
     Per-test isolation is TRUNCATE-based (see _isolate_postgres_database); a
     full rebuild per test cost ~2.3s and buried the shared Postgres under DDL
@@ -261,8 +389,7 @@ def _session_test_schema():
     """
     ensure_test_database()
     _rebuild_schema()
-    configured = load_application_config(PROJECT_ROOT).config
-    yield load_agent_definitions(configured.get("agents", {}))
+    yield
     close_database_pools()
 
 
@@ -277,14 +404,15 @@ def _isolate_postgres_database(request):
         yield
         return
 
-    agent_definitions = request.getfixturevalue("_session_test_schema")
+    request.getfixturevalue("_session_test_schema")
     fresh = request.node.get_closest_marker("fresh_schema") is not None
     if fresh:
         _rebuild_schema()
     else:
         close_database_pools()
         _reset_schema_data()
-    sync_agent_definitions(TEST_DATABASE_URL, agent_definitions)
+    reset_published_agent_cache()
+    _seed_agent_definitions()
     yield
     if fresh:
         # Erase any DDL drift the test left behind so later TRUNCATE-isolated

@@ -9,8 +9,10 @@ import {
   TextField,
 } from '@mui/material'
 import { useUiStore } from '../stores/uiStore'
-import { api, fetchWorkflowDefinition } from '../api'
-import { useAsync } from '../hooks/useAsync'
+import { api } from '../api'
+import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
+import { useQuery } from '@tanstack/react-query'
+import { extraQueryKeys } from '../lib/queryKeysExtra'
 import type {
   WorkflowIntakeModeRecord,
   JobBatchResponse,
@@ -38,24 +40,23 @@ export function AddDialog({
   )
   const [inputValue, setInputValue] = useState('')
 
-  const { data: intakeData, loading: loadingModes } = useAsync(
-    async () => {
-      const { workspace: ws } = await api<WorkspaceResponse>(
+  const intakeEnabled = open && context === 'workspace' && Boolean(workspaceId)
+  const workspaceQuery = useQuery({
+    queryKey: extraQueryKeys.workspace(workspaceId ?? ''),
+    queryFn: () =>
+      api<WorkspaceResponse>(
         `/api/workspaces/${encodeURIComponent(workspaceId ?? '')}`
-      )
-      const workflowKey = ws.default_workflow_key
-      if (!workflowKey) return { workspace: ws, workflow: null }
-      const result = await fetchWorkflowDefinition(workflowKey)
-      return { workspace: ws, workflow: result.workflow }
-    },
-    [open, context, workspaceId],
-    {
-      enabled: open && context === 'workspace' && Boolean(workspaceId),
-      resetOnRun: true,
-    }
+      ),
+    enabled: intakeEnabled,
+  })
+  const workspace = workspaceQuery.data?.workspace ?? null
+  // 第二段依赖第一段的 default_workflow_key（enabled 链）。
+  const workflowQuery = useWorkflowDefinitionQuery(
+    intakeEnabled ? workspace?.default_workflow_key : undefined
   )
-  const workspace = intakeData?.workspace ?? null
-  const workflow = intakeData?.workflow ?? null
+  const workflow = workflowQuery.data ?? null
+  const loadingModes =
+    intakeEnabled && (workspaceQuery.isLoading || workflowQuery.isLoading)
 
   const hasInput = inputValue.trim().length > 0
 

@@ -14,6 +14,12 @@ _REVIEW_REJECTED_MARKERS = (
     "content review rejected by skill",
     "Output validation failed: Review rejected",
 )
+_SOURCE_MISSING_MARKERS = (
+    "HTTPError: 404",
+    "knowledge video not found",
+    "knowledge video has no source url",
+    "no questions found for knowledge code",
+)
 _PI_MODEL_CALL_PREFIX = "Pi model call failed:"
 # velites provider errors (ProviderError::Call / ::Transient) share this prefix;
 # "(transient):" variants are infra-side, plain ones are deterministic.

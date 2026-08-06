@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import shutil
 from collections.abc import Mapping
@@ -8,9 +9,13 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
-from server.app.agent_stock import AgentStockConfig
+from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
 from server.app.cms.auth import cms_token_available
+from server.app.executors.code_config import validate_code_config_paths
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
+from server.app.workflow_worker.agent_stock import AgentStockConfig
+
+logger = logging.getLogger(__name__)
 
 
 class PiRuntimeConfig(BaseModel):
@@ -69,6 +74,11 @@ class WorkflowsRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
+    # Feature gate for DB-backed custom workflow node codes (EXEC-CODE-002).
+    # Default on in this phase: self-hosted, workspace editors are all team
+    # members (design §7 trust assumption). Disable via
+    # AGENT_LEGION_CUSTOM_NODES_ENABLED=0.
+    custom_nodes_enabled: bool = True
     pi: PiRuntimeConfig = Field(default_factory=PiRuntimeConfig)
 
 
@@ -96,6 +106,7 @@ class ExecutorRuntimeConfig(BaseModel):
     )
     agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
     agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
+    agent_enqueue: AgentEnqueueConfig = Field(default_factory=AgentEnqueueConfig)
 
 
 class StartupValidationError(Exception):
@@ -129,36 +140,25 @@ def _resolve_executable(value: str) -> Path | None:
     return Path(found) if found else None
 
 
-def _cms_resource_enabled(config: dict[str, Any]) -> bool:
-    """Return True when a CMS-backed resource provider is enabled."""
-    providers = config.get("resource_providers")
-    if not isinstance(providers, dict):
-        return False
-    for entry in providers.values():
-        if not isinstance(entry, dict):
-            continue
-        provider = str(entry.get("provider", ""))
-        if provider.startswith("cms.") and entry.get("enabled") is not False:
-            return True
-    return any(
-        str(key).startswith("cms.")
-        and isinstance(entry, dict)
-        and entry.get("enabled") is not False
-        for key, entry in providers.items()
-    )
+def _cms_configured(config: dict[str, Any]) -> bool:
+    """Return True when a global CMS endpoint is configured."""
+    cms = config.get("cms")
+    return isinstance(cms, dict) and bool(str(cms.get("base_url") or "").strip())
 
 
 def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
     executor_definitions: Mapping[str, ExecutorConfig] | None = None,
+    repo_root: Path | None = None,
 ) -> None:
     """Validate enabled runtime dependencies at startup.
 
     Disabled runtimes require nothing. Enabled executors require their executable
     or working directory to exist. Selected ASR providers require their files;
-    ``auto`` needs at least one usable provider. CMS credentials are required only
-    when a CMS-backed resource provider is enabled.
+    ``auto`` needs at least one usable provider. Missing env-level CMS
+    credentials only log a warning when a CMS-backed resource provider is
+    enabled (workspace vault bindings cannot be pre-checked at startup).
     """
     errors: list[tuple[str, str]] = []
 
@@ -221,28 +221,33 @@ def validate_runtime(
         isinstance(definition, PiExecutorConfig)
         for definition in (executor_definitions or {}).values()
     ):
+        # The workflows.pi yaml block is retired: the binary comes from the
+        # hardcoded PiRuntimeConfig default (kept for this retained pi path).
         pi_binary = str(runtime.workflows.pi.binary or "")
         if not pi_binary:
-            errors.append(("workflows.pi.binary", "missing pi binary"))
+            errors.append(("pi executor binary", "missing pi binary"))
         else:
             if _resolve_executable(pi_binary) is None:
-                errors.append(("workflows.pi.binary", "pi binary is not executable or on PATH"))
+                errors.append(("pi executor binary", "pi binary is not executable or on PATH"))
 
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
 
-    if _cms_resource_enabled(config) and not cms_token_available(config.get("cms")):
-        errors.append(
-            (
-                "cms.token",
-                "missing CMS credentials: set env CMS_TOKEN (or "
-                "AGENT_LEGION_CMS_TOKEN; BASECMS_TOKEN is a deprecated alias), "
-                "set all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / "
-                "CMS_TOKEN_URL, or bind a token in the workspace resource "
-                "config (vault)",
-            )
+    if _cms_configured(config) and not cms_token_available(config.get("cms")):
+        # Workspace node config tokens live in the vault and cannot be
+        # pre-checked at startup, so missing env-level credentials are a
+        # warning, not a startup failure: vault-only deployments are valid as
+        # long as every workspace running CMS jobs sets its own token.
+        logger.warning(
+            "cms.token: no env-level CMS credentials (set env CMS_TOKEN, or "
+            "all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL); "
+            "each workspace must set a token in its node config (vault) "
+            "or its CMS jobs will fail"
         )
+
+    if repo_root is not None:
+        errors.extend(validate_code_config_paths(executor_definitions or {}, repo_root))
 
     if errors:
         raise StartupValidationError(errors)

@@ -69,7 +69,7 @@ def _bind_executor_to_node(
         conn.execute(
             """
             insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set
               concurrency_limit=excluded.concurrency_limit
             """,
@@ -78,7 +78,7 @@ def _bind_executor_to_node(
         conn.execute(
             """
             insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             on conflict(workspace_id, workflow_key, node_key) do update set
               executor_id=excluded.executor_id
             """,
@@ -88,7 +88,7 @@ def _bind_executor_to_node(
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (?, ?, ?, ?)
+                values (%s, %s, %s, %s)
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
@@ -100,7 +100,7 @@ def _claim_request(
     workspace_id: str,
     job_id: str,
     node_key: str = "review_keywords",
-    executor_id: str = "local-default",
+    executor_id: str = "code-default",
     global_capacity: int = 2,
     local_node_limit: int | None = 1,
     ttl: int = 60,

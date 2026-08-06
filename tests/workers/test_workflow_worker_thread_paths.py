@@ -16,7 +16,7 @@ def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Pa
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
@@ -30,12 +30,12 @@ def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Pa
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (ws["id"], "test", "fetch", "local-default"),
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
+            (ws["id"], "test", "fetch", "code-default"),
         )
         conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
-            (ws["id"], "local-default", 2),
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])

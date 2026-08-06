@@ -1,8 +1,6 @@
-from typing import Any
-
 from pydantic import BaseModel, ConfigDict, Field
 
-from server.app.routes.workspace_contracts import ResourceBinding, WorkspaceRecord
+from server.app.routes.workspace_contracts import WorkspaceRecord
 
 
 class ExecutorAllocationRequest(BaseModel):
@@ -52,7 +50,6 @@ class WorkspaceSettingsPayload(BaseModel):
     intakeModes: list[str]
     labelOverrides: dict[str, str]
     workflowKey: str
-    resources: dict[str, ResourceBinding]
 
 
 class WorkspaceConfigurationSettingsRequest(BaseModel):
@@ -62,7 +59,6 @@ class WorkspaceConfigurationSettingsRequest(BaseModel):
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
     workflowKey: str | None = None
-    resources: dict[str, Any] | None = None
 
 
 class WorkspaceConfigurationRequest(BaseModel):

@@ -41,7 +41,7 @@ def _expired_job_ids(db: JobQueries, cutoff: datetime) -> set[str]:
             """
             select distinct job_id from node_runs
             where status in ('completed', 'failed') and finished_at is not null
-              and finished_at < ?
+              and finished_at < %s
             """,
             (cutoff,),
         )

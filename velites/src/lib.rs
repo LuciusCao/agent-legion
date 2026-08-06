@@ -186,3 +186,25 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
 /// errors (`base * 2^attempt`). Not a CLI flag on purpose: only the retry
 /// COUNT is an operator concern (`--max-retries`).
 const DEFAULT_RETRY_BASE_DELAY_MS: u64 = 1_000;
+
+/// `velites sandbox wrap` implementation: build the sandbox policy for one
+/// command and run it inside, forwarding the exit code. Fail-closed like the
+/// harness itself: an unavailable backend (or an unreadable allowlist root)
+/// is an error, never an unsandboxed run.
+pub fn run_sandbox_wrap(cli: cli::SandboxWrapCli) -> anyhow::Result<u8> {
+    let options = sandbox::WrapOptions {
+        read_write: cli.allow_write.clone(),
+        read_only: cli.allow_read.clone(),
+        allow_network: cli.allow_network,
+        ..sandbox::WrapOptions::default()
+    };
+    let sandbox = sandbox::Sandbox::for_wrap(&cli.cwd, &options)
+        .context("filesystem sandbox unavailable (fail-closed)")?;
+    let (program, argv) = sandbox.wrap(&cli.command);
+    let status = std::process::Command::new(&program)
+        .args(&argv)
+        .current_dir(&cli.cwd)
+        .status()
+        .with_context(|| format!("failed to spawn sandboxed command `{program}`"))?;
+    Ok(u8::try_from(status.code().unwrap_or(1)).unwrap_or(1))
+}

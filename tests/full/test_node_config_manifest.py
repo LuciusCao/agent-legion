@@ -67,7 +67,6 @@ def test_intake_freeze_and_manifest_whitelist(job_db) -> None:
         {"workflow_key": "wf", "source_kind": "batch_by_ids"},
         "question",
         ["q1"],
-        {},
         mode,
         {"id": "rev-1"},
         resolved,
@@ -110,7 +109,7 @@ def _executor_definition() -> WorkflowDefinition:
 @pytest.mark.full_gate
 def test_executor_node_config_freeze_and_manifest(job_db) -> None:
     """Executor capability schemas join the same freeze chain (spec D15)."""
-    from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+    from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 
     workspace = job_db.create_workspace("cfg-exec-ws")
     job_db.update_workspace(
@@ -119,11 +118,13 @@ def test_executor_node_config_freeze_and_manifest(job_db) -> None:
     )
     workspace = job_db.get_workspace(workspace["id"])
     executors = {
-        "local-default": LocalExecutorConfig(
-            kind="local",
+        "code-default": CodeExecutorConfig(
+            kind="code",
             global_capacity=2,
             capabilities={
-                "fetch": LocalCapabilityConfig(handler="mod.fetch", config_schema=EXECUTOR_SCHEMA),
+                "fetch": CodeCapabilityConfig(
+                    path="workflow_nodes/question_intake.py", config_schema=EXECUTOR_SCHEMA
+                ),
             },
         )
     }
@@ -139,7 +140,6 @@ def test_executor_node_config_freeze_and_manifest(job_db) -> None:
         {"workflow_key": "wf", "source_kind": "batch_by_ids"},
         "question",
         ["q1"],
-        {},
         mode,
         {"id": "rev-1"},
         resolved,

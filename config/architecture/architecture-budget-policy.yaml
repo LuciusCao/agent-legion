@@ -9,6 +9,8 @@ production:
       extensions: [.py]
     - path: worker
       extensions: [.py]
+    - path: shared
+      extensions: [.py]
   exclude:
     - frontend/src/generated/**
   buffer_lines: 10

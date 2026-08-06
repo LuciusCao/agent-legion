@@ -3,14 +3,6 @@ from fastapi.testclient import TestClient
 from tests.helpers import setup_spa_app
 
 
-def test_global_services_returns_200(client: TestClient):
-    response = client.get("/api/global-services")
-    assert response.status_code == 200
-    data = response.json()
-    assert "cms" in data
-    assert "baseUrl" in data["cms"]
-
-
 def test_app_ignores_partial_frontend_dist(tmp_path, monkeypatch):
     from server.app import main
 

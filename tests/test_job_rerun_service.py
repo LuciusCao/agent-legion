@@ -104,12 +104,12 @@ def _create_lease(
                 id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
             """,
             (
                 "lease-1",
                 "exec-1",
-                "local-default",
+                "code-default",
                 job["workspace_id"],
                 job["id"],
                 job["workflow_key"],
@@ -146,7 +146,7 @@ def test_rerun_resets_node_created_at(rerun_service, job):
     old_created_at = "2026-06-09T00:00:00Z"
     with rerun_service.job_db.connect() as conn:
         conn.execute(
-            "update job_nodes set created_at=? where job_id=? and node_key=?",
+            "update job_nodes set created_at=%s where job_id=%s and node_key=%s",
             (old_created_at, job["id"], "clean_and_parse"),
         )
 
@@ -294,7 +294,7 @@ def test_rerun_removes_affected_run_history_and_clears_database_paths(rerun_serv
             conn.execute(
                 """
                 insert into node_runs(job_id, node_key, status, run_dir, session_dir)
-                values (?, ?, 'completed', ?, ?)
+                values (%s, %s, 'completed', %s, %s)
                 """,
                 (job["id"], node_key, relative, f"{relative}/session"),
             )

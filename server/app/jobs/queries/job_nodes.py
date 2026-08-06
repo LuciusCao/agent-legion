@@ -38,7 +38,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         storage_dir.mkdir(parents=True, exist_ok=True)
 
         with self.connect() as conn:
-            existing = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+            existing = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
             if existing is not None and (
                 existing["workspace_id"] != workspace_id
                 or existing["workflow_key"] != workflow_key
@@ -52,7 +52,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                   id, workspace_id, workflow_key, source_type, source_id, batch_id, title, storage_dir, stem,
                   workflow_revision_id, workflow_version, workflow_definition_hash, workflow_definition_snapshot_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 on conflict(id) do update set
                   title=excluded.title,
                   stem=excluded.stem,
@@ -79,12 +79,12 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                 conn.execute(
                     """
                     insert into job_nodes(job_id, node_key, status, created_at)
-                    values (?, ?, 'pending', current_timestamp)
+                    values (%s, %s, 'pending', current_timestamp)
                     on conflict(job_id, node_key) do nothing
                     """,
                     (job_id, node_key),
                 )
-            row = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+            row = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
         if row is None:
             raise RuntimeError("job upsert did not return a row")
         return dict(row)
@@ -105,10 +105,10 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             ("source_id", source_id),
         ):
             if val:
-                clauses.append(f"{col}=?")
+                clauses.append(f"{col}=%s")
                 params.append(val)
         if status_not_in:
-            clauses.append(f"status not in ({','.join('?' * len(status_not_in))})")
+            clauses.append(f"status not in ({','.join('%s' for _ in status_not_in)})")
             params.extend(status_not_in)
         where = f" where {' and '.join(clauses)}" if clauses else ""
         with self._connect_read() as conn:
@@ -117,16 +117,14 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
 
     def get_job(self, job_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
-            row = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+            row = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
         return dict(row) if row else None
 
     def list_jobs_by_ids(self, workspace_id: str, job_ids: Sequence[str]) -> list[dict[str, Any]]:
         if not job_ids:
             return []
         params = [workspace_id, *(str(job_id) for job_id in job_ids)]
-        sql = (
-            f"select * from jobs where workspace_id=? and id in ({','.join('?' for _ in job_ids)})"
-        )
+        sql = f"select * from jobs where workspace_id=%s and id in ({','.join('%s' for _ in job_ids)})"
         with self._connect_read() as conn:
             return [dict(row) for row in conn.execute(sql, params).fetchall()]
 
@@ -135,25 +133,25 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             conn.execute(
                 """
                 update jobs
-                set status=?, error_message=?, updated_at=current_timestamp
-                where id=?
+                set status=%s, error_message=%s, updated_at=current_timestamp
+                where id=%s
                 """,
                 (status, error_message, job_id),
             )
 
     def update_job_outcome(self, job_id: str, outcome: str) -> None:
         with self.connect() as conn:
-            conn.execute("update jobs set outcome=? where id=?", (outcome, job_id))
+            conn.execute("update jobs set outcome=%s where id=%s", (outcome, job_id))
 
     def list_job_nodes(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
-            rows = conn.execute("select * from job_nodes where job_id=? order by id", (job_id,))
+            rows = conn.execute("select * from job_nodes where job_id=%s order by id", (job_id,))
             return [dict(row) for row in rows]
 
     def list_job_nodes_for_jobs(self, job_ids: Sequence[str]) -> dict[str, list[dict[str, Any]]]:
         if not job_ids:
             return {}
-        placeholders = ",".join("?" for _ in job_ids)
+        placeholders = ",".join("%s" for _ in job_ids)
         grouped: dict[str, list[dict[str, Any]]] = {job_id: [] for job_id in job_ids}
         with self._connect_read() as conn:
             rows = conn.execute(
@@ -167,7 +165,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
     def get_job_node(self, job_id: str, node_key: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
             row = conn.execute(
-                "select * from job_nodes where job_id=? and node_key=?",
+                "select * from job_nodes where job_id=%s and node_key=%s",
                 (job_id, node_key),
             ).fetchone()
         return dict(row) if row else None
@@ -178,11 +176,11 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         if not keys:
             return
 
-        assignments = ", ".join(f"{key}=?" for key in keys)
+        assignments = ", ".join(f"{key}=%s" for key in keys)
         params = [fields[key] for key in keys] + [job_id, node_key]
         with self.connect() as conn:
             conn.execute(
-                f"update job_nodes set {assignments} where job_id=? and node_key=?",
+                f"update job_nodes set {assignments} where job_id=%s and node_key=%s",
                 params,
             )
 
@@ -207,13 +205,13 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                     started_at=current_timestamp,
                     finished_at=null,
                     error_message=''
-                where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+                where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')
                 """,
                 (job_id, node_key),
             )
             if cursor.rowcount == 0:
                 exists = conn.execute(
-                    "select 1 from job_nodes where job_id=? and node_key=?",
+                    "select 1 from job_nodes where job_id=%s and node_key=%s",
                     (job_id, node_key),
                 ).fetchone()
                 if exists is None:
@@ -223,7 +221,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                 """
                 update jobs
                 set status='running', updated_at=current_timestamp
-                where id=? and status != 'running'
+                where id=%s and status != 'running'
                 """,
                 (job_id,),
             )
@@ -232,7 +230,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                 insert into node_runs(
                   job_id, node_key, status, command_json, log_path, run_dir, session_dir, skill_version
                 )
-                values (?, ?, 'running', ?, ?, ?, ?, ?)
+                values (%s, %s, 'running', %s, %s, %s, %s, %s)
                 returning *
                 """,
                 (job_id, node_key, command_json, log_path, run_dir, session_dir, skill_version),
@@ -244,15 +242,15 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
 
     def finish_node_run(self, run_id: int, status: str, exit_code: int, error_message: str) -> None:
         with self.connect() as conn:
-            run = conn.execute("select * from node_runs where id=?", (run_id,)).fetchone()
+            run = conn.execute("select * from node_runs where id=%s", (run_id,)).fetchone()
             if run is None:
                 return
 
             conn.execute(
                 """
                 update node_runs
-                set status=?, exit_code=?, error_message=?, finished_at=current_timestamp
-                where id=?
+                set status=%s, exit_code=%s, error_message=%s, finished_at=current_timestamp
+                where id=%s
                 """,
                 (status, exit_code, error_message, run_id),
             )
@@ -260,26 +258,26 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             conn.execute(
                 """
                 update job_nodes
-                set status=?,
-                    error_message=?,
+                set status=%s,
+                    error_message=%s,
                     finished_at=current_timestamp
-                where job_id=? and node_key=?
+                where job_id=%s and node_key=%s
                 """,
                 (node_status, error_message, run["job_id"], run["node_key"]),
             )
-            job = conn.execute("select * from jobs where id=?", (run["job_id"],)).fetchone()
+            job = conn.execute("select * from jobs where id=%s", (run["job_id"],)).fetchone()
             definition = definition_from_job_snapshot(dict(job)) if job is not None else None
             self._sync_job_status_after_node_run(conn, run, status, definition)
 
     def list_node_runs(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
-            rows = conn.execute("select * from node_runs where job_id=? order by id", (job_id,))
+            rows = conn.execute("select * from node_runs where job_id=%s order by id", (job_id,))
             return [dict(row) for row in rows]
 
     def get_node_run(self, job_id: str, run_id: int) -> dict[str, Any] | None:
         with self._connect_read() as conn:
             row = conn.execute(
-                "select * from node_runs where job_id=? and id=?",
+                "select * from node_runs where job_id=%s and id=%s",
                 (job_id, run_id),
             ).fetchone()
         return dict(row) if row else None
@@ -293,16 +291,16 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         job_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        clauses = ["jobs.workspace_id = ?"]
+        clauses = ["jobs.workspace_id = %s"]
         params: list[Any] = [workspace_id]
         if status:
-            clauses.append("node_runs.status = ?")
+            clauses.append("node_runs.status = %s")
             params.append(status)
         if node_key:
-            clauses.append("node_runs.node_key = ?")
+            clauses.append("node_runs.node_key = %s")
             params.append(node_key)
         if job_id:
-            clauses.append("node_runs.job_id = ?")
+            clauses.append("node_runs.job_id = %s")
             params.append(job_id)
         params.append(max(1, min(limit, 500)))
         where = " and ".join(clauses)
@@ -320,7 +318,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                 join jobs on jobs.id = node_runs.job_id
                 where {where}
                 order by node_runs.started_at desc, node_runs.id desc
-                limit ?
+                limit %s
                 """,
                 params,
             )
@@ -333,7 +331,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                 select node_runs.*
                 from node_runs
                 join jobs on jobs.id = node_runs.job_id
-                where jobs.workspace_id = ?
+                where jobs.workspace_id = %s
                 order by node_runs.started_at desc
                 limit 1
                 """,
@@ -343,11 +341,11 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
 
     def delete_job(self, job_id: str) -> None:
         with self.connect() as conn:
-            job = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+            job = conn.execute("select * from jobs where id=%s", (job_id,)).fetchone()
             if job is None:
                 raise ValueError("Job not found")
             if job["status"] == "running":
                 raise ValueError("Cannot delete a running job")
-            conn.execute("delete from job_nodes where job_id=?", (job_id,))
-            conn.execute("delete from node_runs where job_id=?", (job_id,))
-            conn.execute("delete from jobs where id=?", (job_id,))
+            conn.execute("delete from job_nodes where job_id=%s", (job_id,))
+            conn.execute("delete from node_runs where job_id=%s", (job_id,))
+            conn.execute("delete from jobs where id=%s", (job_id,))

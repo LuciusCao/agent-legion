@@ -1,3 +1,4 @@
+import json
 import logging
 from pathlib import Path
 
@@ -6,21 +7,26 @@ from fastapi.testclient import TestClient
 
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
+from server.app.services.node_codes import NodeCodeService
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
     validate_workflow_for_publish,
     workflow_definition_from_yaml_string,
 )
 from server.app.services.workflow_revision_format import (
+    definition_hash,
     definition_to_yaml,
+    serialize_definition,
     workflow_definition_to_response_payload,
 )
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import (
     WorkflowDefinition,
     load_workflow_definition,
+    workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
+from tests.helpers import replace_agent_catalog
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -44,12 +50,12 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     with queries._connect_read() as conn:
         route = conn.execute(
             "select target_kind, target_id from workspace_node_routes"
-            " where workspace_id=? and workflow_key=? and node_key='generate_key_info'",
+            " where workspace_id=%s and workflow_key=%s and node_key='generate_key_info'",
             (workspace["id"], definition.key),
         ).fetchone()
         capacity = conn.execute(
             "select max_concurrency, source_revision_id from workspace_node_capacities"
-            " where workspace_id=? and workflow_key=? and node_key='generate_key_info'",
+            " where workspace_id=%s and workflow_key=%s and node_key='generate_key_info'",
             (workspace["id"], definition.key),
         ).fetchone()
     assert route is not None
@@ -141,12 +147,12 @@ def _route_and_capacity_rows(queries: JobQueries, workspace_id: str, workflow_ke
     with queries._connect_read() as conn:
         routes = conn.execute(
             "select node_key, target_kind, target_id from workspace_node_routes"
-            " where workspace_id=? and workflow_key=?",
+            " where workspace_id=%s and workflow_key=%s",
             (workspace_id, workflow_key),
         ).fetchall()
         capacities = conn.execute(
             "select node_key, max_concurrency from workspace_node_capacities"
-            " where workspace_id=? and workflow_key=?",
+            " where workspace_id=%s and workflow_key=%s",
             (workspace_id, workflow_key),
         ).fetchall()
     return {
@@ -169,7 +175,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
     with queries.connect() as conn:
         conn.execute(
             "insert into workspace_node_capacities(workspace_id, workflow_key, node_key, max_concurrency)"
-            " values (?, 'question_comprehension_info', 'generate_key_info', 20)",
+            " values (%s, 'question_comprehension_info', 'generate_key_info', 20)",
             (workspace["id"],),
         )
 
@@ -193,7 +199,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
 
 
 def test_reconcile_warns_and_skips_on_ambiguous_capability(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
@@ -201,13 +207,28 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    # Simulate catalog/DB desync: a second enabled definition for the same capability.
-    with queries.connect() as conn:
-        conn.execute(
-            "insert into agent_definitions("
-            " agent_id, capability, runtime, definition_json, definition_hash, enabled)"
-            " values ('question-key-info-v2', 'generate_key_info', 'pi', '{}', 'hash-v2', 1)"
-        )
+    # Simulate catalog/DB desync: a second published definition for the same
+    # capability. The DB partial unique index makes this unrepresentable via
+    # real rows, so stub the catalog read (the reconcile guard is defense in
+    # depth for catalogs produced before the index existed).
+    from server.app.agent_catalog import AgentDefinition
+
+    ambiguous = {
+        "question-key-info-v1": AgentDefinition(
+            capability="generate_key_info",
+            runtime="velites",
+            skill="question/generate_key_info",
+        ),
+        "question-key-info-v2": AgentDefinition(
+            capability="generate_key_info",
+            runtime="velites",
+            skill="question/generate_key_info_v2",
+        ),
+    }
+    monkeypatch.setattr(
+        "server.app.services.workflow_revisions.published_agent_definitions",
+        lambda _dsn: ambiguous,
+    )
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
         service.reconcile_active_agent_routes()
@@ -235,14 +256,13 @@ def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    # Simulate the empty-catalog regression: every definition disabled.
-    with queries.connect() as conn:
-        conn.execute("update agent_definitions set enabled=0")
+    # Simulate the empty-catalog regression: every published definition archived.
+    replace_agent_catalog({})
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
         service.reconcile_active_agent_routes()
 
-    assert any("no enabled Agent Definitions" in record.getMessage() for record in caplog.records)
+    assert any("no published Agent Definitions" in record.getMessage() for record in caplog.records)
     rows = _route_and_capacity_rows(queries, workspace["id"], "question_comprehension_info")
     assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
 
@@ -259,11 +279,11 @@ def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Pat
     # Simulate a pre-cutover active revision: no materialized routes/capacities.
     with queries.connect() as conn:
         conn.execute(
-            "delete from workspace_node_routes where workspace_id=? and workflow_key=?",
+            "delete from workspace_node_routes where workspace_id=%s and workflow_key=%s",
             (workspace["id"], "video_knowledge"),
         )
         conn.execute(
-            "delete from workspace_node_capacities where workspace_id=? and workflow_key=?",
+            "delete from workspace_node_capacities where workspace_id=%s and workflow_key=%s",
             (workspace["id"], "video_knowledge"),
         )
 
@@ -490,3 +510,117 @@ def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:
     terminal_nodes = [node for node in payload["nodes"] if node.get("terminal")]
     assert terminal_nodes
     assert all(node["terminal"]["outcome"] for node in terminal_nodes)
+
+
+def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
+    """Publish snapshots published custom code versions as node_code_pins."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-pins", default_workflow_key="question_comprehension_info"
+    )
+    codes = NodeCodeService(queries.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries)
+
+    service.publish_workspace_revision(workspace["id"], definition)
+    active = service.get_active(workspace["id"], definition.key)
+
+    payload = json.loads(active["definition_json"])
+    pins = payload["node_code_pins"]
+    assert pins["fetch_questions"]["version"] == 1
+    assert len(pins["fetch_questions"]["code_hash"]) == 64
+    assert "clean_and_parse" not in pins
+    # Pins are publish-moment state, not part of the definition: the hash
+    # covers the pure definition only.
+    assert active["definition_hash"] == definition_hash(serialize_definition(definition))
+    # The definition round-trip ignores the sibling pins key.
+    workflow_definition_from_dict(payload)
+
+
+def test_publish_revision_without_custom_codes_has_no_pins(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-no-pins", default_workflow_key="question_comprehension_info"
+    )
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries)
+
+    service.publish_workspace_revision(workspace["id"], definition)
+    active = service.get_active(workspace["id"], definition.key)
+
+    assert "node_code_pins" not in json.loads(active["definition_json"])
+
+
+def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-gated-pins", default_workflow_key="question_comprehension_info"
+    )
+    codes = NodeCodeService(queries.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries, custom_nodes_enabled=False)
+
+    service.publish_workspace_revision(workspace["id"], definition)
+    active = service.get_active(workspace["id"], definition.key)
+
+    assert "node_code_pins" not in json.loads(active["definition_json"])
+
+
+def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
+    """In-place (runtime settings only) revision updates keep node_code_pins."""
+    from dataclasses import replace as dc_replace
+
+    from server.app.workflows.schema import WorkflowNodeExecution
+
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws-pins-keep", default_workflow_key="question_comprehension_info"
+    )
+    codes = NodeCodeService(queries.path)
+    codes.save_draft(
+        workspace["id"],
+        "question_comprehension_info",
+        "fetch_questions",
+        "def run(job, job_dir, runtime):\n    return None\n",
+        "user:u1",
+    )
+    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(workspace["id"], definition)
+
+    # Runtime-only change: same structure, different execution settings.
+    node = definition.nodes["generate_key_info"]
+    updated = dc_replace(
+        definition,
+        nodes={
+            **definition.nodes,
+            "generate_key_info": dc_replace(
+                node, execution=WorkflowNodeExecution(provider="deepseek", model="m2")
+            ),
+        },
+    )
+    service.save_workspace_revision(workspace["id"], updated)
+
+    active = service.get_active(workspace["id"], definition.key)
+    payload = json.loads(active["definition_json"])
+    assert payload["node_code_pins"]["fetch_questions"]["version"] == 1
+    # The runtime change did land, and no new revision was created.
+    assert payload["nodes"]["generate_key_info"]["execution"]["model"] == "m2"
+    assert active["version"] == 1

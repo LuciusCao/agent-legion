@@ -5,9 +5,11 @@ import {
   fireEvent,
   within,
 } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { TokenUsagePanel } from './TokenUsagePanel'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 
 const mockFetchWorkspaceTokenUsage = vi.fn(
   (_workspaceId: string, params: URLSearchParams) => {
@@ -32,6 +34,7 @@ const mockFetchWorkspaceTokenUsage = vi.fn(
           currency: 'CNY',
         },
         pricing_missing: false,
+        pricing_missing_models: [] as string[],
       },
       runs_with_usage: 2,
       runs_without_usage: 2,
@@ -60,6 +63,7 @@ const mockFetchWorkspaceTokenUsage = vi.fn(
           total_cost: 0.31,
           avg_cost: 0.155,
           pricing_missing: false,
+          pricing_missing_models: [] as string[],
           coverage: 0.5,
         },
       ],
@@ -72,9 +76,13 @@ vi.mock('../../api/tokenUsage', () => ({
     mockFetchWorkspaceTokenUsage(...args),
 }))
 
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
+
 describe('TokenUsagePanel', () => {
   it('renders workspace usage summary and group rows', async () => {
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -90,7 +98,7 @@ describe('TokenUsagePanel', () => {
 
   it('switches group dimension', async () => {
     const user = userEvent.setup()
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -107,7 +115,7 @@ describe('TokenUsagePanel', () => {
   })
 
   it('expands a group to show token and cost breakdown', async () => {
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -126,7 +134,7 @@ describe('TokenUsagePanel', () => {
 
   it('applies node filter', async () => {
     const user = userEvent.setup()
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
     expect(
@@ -167,15 +175,81 @@ describe('TokenUsagePanel', () => {
           currency: 'CNY',
         },
         pricing_missing: false,
+        pricing_missing_models: [] as string[],
       },
       runs_with_usage: 0,
       runs_without_usage: 0,
       groups: [],
     })
 
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     expect(await screen.findByText('暂无 token 统计')).toBeInTheDocument()
+  })
+
+  it('shows missing pricing models next to the known cost', async () => {
+    mockFetchWorkspaceTokenUsage.mockResolvedValueOnce({
+      workspace_id: 'ws1',
+      currency: 'CNY',
+      summary: {
+        message_count: 2,
+        input_tokens: 150,
+        output_tokens: 75,
+        cache_read_tokens: 25,
+        total_tokens: 250,
+        cost: {
+          input: 0.1,
+          output: 0.2,
+          cache_read: 0.01,
+          total: 0.31,
+          currency: 'CNY',
+        },
+        pricing_missing: true,
+        pricing_missing_models: ['gateway/unpriced-model'],
+      },
+      runs_with_usage: 2,
+      runs_without_usage: 0,
+      groups: [
+        {
+          group_key: 'generate_key_info',
+          node_key: 'generate_key_info',
+          provider: 'gateway',
+          model: 'unpriced-model',
+          skill_version: 'v1.2.3',
+          runs: 2,
+          avg_input_tokens: 75,
+          avg_output_tokens: 37.5,
+          avg_cache_read_tokens: 12.5,
+          avg_total_tokens: 125,
+          total_input_tokens: 150,
+          total_output_tokens: 75,
+          total_cache_read_tokens: 25,
+          total_tokens: 250,
+          total_cost: 0.31,
+          avg_cost: 0.155,
+          pricing_missing: true,
+          pricing_missing_models: ['gateway/unpriced-model'],
+          coverage: 1,
+        },
+      ],
+    })
+
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
+
+    expect(
+      await screen.findByText('缺少定价：gateway/unpriced-model')
+    ).toBeInTheDocument()
+    // Known cost is still displayed.
+    expect(screen.getByTestId('total-cost-summary')).toHaveTextContent(
+      '¥ 0.3100'
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '展开' }))
+    await waitFor(() => {
+      expect(
+        screen.getAllByText('缺少定价：gateway/unpriced-model').length
+      ).toBeGreaterThan(1)
+    })
   })
 
   it('renders error message on fetch failure', async () => {
@@ -183,7 +257,7 @@ describe('TokenUsagePanel', () => {
       new Error('network error')
     )
 
-    render(<TokenUsagePanel workspaceId="ws1" />)
+    renderWithClient(<TokenUsagePanel workspaceId="ws1" />)
 
     expect(
       await screen.findByText('Token 统计加载失败：network error')

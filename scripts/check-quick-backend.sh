@@ -22,7 +22,7 @@ run_static_checks() {
   fi
 
   echo "=== MyPy Type Check ==="
-  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app scripts/architecture scripts/quality
+  UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app scripts/architecture scripts/quality workflow_nodes
 
   echo "=== Architecture Contracts ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_architecture

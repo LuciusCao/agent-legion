@@ -16,9 +16,8 @@ server/app/pipeline/
 ├── upload_params.py        # upload_params.json 生成
 ├── package.py              # 单视频 ZIP 打包
 ├── workspace_package.py    # Workspace 批量打包
-├── runners.py              # OpenClaw runner 发现与构造
-├── common.py               # 共享工具（SRT 解析、ID 生成等）
-└── references/             # Agent 阶段参考文档
+├── runners.py              # OpenClaw agent 发现
+└── common.py               # 共享工具（SRT 解析、ID 生成等）
 ```
 
 Agent Legion 流水线（与视频流水线独立）：
@@ -50,7 +49,7 @@ server/app/workflows/
 
 - ASR 使用 `auto` 模式：先尝试 whisper.cpp，失败则回退 SenseVoice。
 - 每个阶段失败都会将视频标记为 `failed`，支持从任意阶段重跑。
-- Agent 阶段通过 OpenClaw 调用外部命令，模板化配置在 `config/agent_legion.yaml` 中。
+- Agent 阶段由 `config/workflow.yaml` 的 `agents:` 段按 runtime（pi / velites）声明驱动；`config/agent_legion.yaml` 的 `openclaw` 段服务于 OpenClaw executor runtime 与 `skill_safety` 白名单。
 
 ## API Surface / Interface
 

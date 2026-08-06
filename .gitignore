@@ -32,4 +32,8 @@ htmlcov_backend/
 
 # Internal design docs, not published
 /docs/superpowers/
+/docs/plans/
 /issues/
+
+# Quick-gate same-worktree serialization lock (scripts/check-quick.sh)
+.quick-gate.lock/

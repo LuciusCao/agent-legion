@@ -1,7 +1,8 @@
 import { useEffect, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useJobStore } from '../stores/jobStore'
-import { useExecutorsStore } from '../stores/executorsStore'
 import { createRealtimeChannel } from '../lib/realtime'
+import { invalidateAgentWorkers } from '../lib/agentWorkersInvalidation'
 import { handleWorkspaceEvent } from './workspaceEventHandlers'
 import { refreshWorkspaceEvents } from './workspaceEventRefresh'
 import { refreshJobFacets } from './workspaceFacetsRefresh'
@@ -14,6 +15,7 @@ export function useWorkspaceEvents(
   enabled = true,
   statsOnly = false
 ) {
+  const queryClient = useQueryClient()
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const snapshotLoadingRef = useRef(!statsOnly)
   const pendingEventsRef = useRef<MessageEvent[]>([])
@@ -28,7 +30,7 @@ export function useWorkspaceEvents(
     let closed = false
     let stale = false
     const refresh = () =>
-      refreshWorkspaceEvents(workspaceId, () => stale || closed)
+      refreshWorkspaceEvents(queryClient, workspaceId, () => stale || closed)
 
     const scheduleJobRefresh = () => {
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
@@ -38,12 +40,13 @@ export function useWorkspaceEvents(
         void refresh()
         void refreshJobFacets(workspaceId, statsOnly, () => stale || closed)
         // Worker assignment may change with job updates (same debounce tier).
-        void useExecutorsStore.getState().refreshWorkers()
+        invalidateAgentWorkers(queryClient)
       }, jobUpdateRefreshDelay)
     }
 
     const processEvent = (event: MessageEvent) => {
       handleWorkspaceEvent(
+        queryClient,
         event,
         workspaceId,
         statsOnly,
@@ -54,6 +57,7 @@ export function useWorkspaceEvents(
     }
 
     const loadSnapshot = createLoadSnapshot(
+      queryClient,
       workspaceId,
       snapshotLoadingRef,
       pendingEventsRef,
@@ -93,5 +97,5 @@ export function useWorkspaceEvents(
       if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
       channel.close()
     }
-  }, [enabled, workspaceId, statsOnly])
+  }, [enabled, workspaceId, statsOnly, queryClient])
 }

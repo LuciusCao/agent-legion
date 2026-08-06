@@ -4,12 +4,11 @@
 即失败，任务在 Host 侧空转重试——与"注册失败"相比更难发现。注册前 fail
 loudly，把部署缺口变成明确的启动错误。
 
-探测规则（Worker 本地无法获知 Host 的 workflows.pi.flavor / 自定义
-binary，按可知信息尽力判定）：velites 严格要求 velites 二进制
-（runtime: velites 钉死 velites 实现）；pi 接受 pi 或 velites 任一
-（flavor 二选一决定 argv[0]）；openclaw 不探测（Host dispatch 对其本就
-fail-fast，不存在 claim 后 spawn 的路径）。Host 配置自定义
-workflows.pi.binary 时，运维需自行保证该二进制在 PATH 上。
+探测规则：runtime 钉死命令构建器与二进制（agent 配置治理 phase 3 起，
+manifest 的 execution.binary 由 Agent 定义的 runtime 决定：pi → pi、
+velites → velites），Worker 本地按同一映射要求对应二进制在 PATH 上；
+openclaw 不探测（Host dispatch 对其本就 fail-fast，不存在 claim 后
+spawn 的路径）。
 """
 
 from __future__ import annotations
@@ -18,7 +17,7 @@ import shutil
 from collections.abc import Iterable
 
 # runtime -> 可接受的 argv[0] 候选（任一在 PATH 上即通过探测）。
-RUNTIME_BINARY_CANDIDATES = {"pi": ("pi", "velites"), "velites": ("velites",)}
+RUNTIME_BINARY_CANDIDATES = {"pi": ("pi",), "velites": ("velites",)}
 
 
 def missing_runtime_binaries(runtimes: Iterable[str]) -> dict[str, tuple[str, ...]]:

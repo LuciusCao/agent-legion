@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.executors.config import (
-    LocalExecutorConfig,
+    CodeExecutorConfig,
     PiExecutorConfig,
 )
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -29,7 +29,7 @@ class FakeExecutor:
     def __init__(
         self,
         executor_id: str,
-        kind: str = "local",
+        kind: str = "code",
         *,
         block_event: threading.Event | None = None,
         supports: set[str] | None = None,
@@ -63,9 +63,11 @@ class FakeExecutor:
 
 def _local_def(capacity: int, capabilities: set[str]) -> Any:
     return {
-        "kind": "local",
+        "kind": "code",
         "global_capacity": capacity,
-        "capabilities": {cap: {"handler": "dummy.handler"} for cap in capabilities},
+        "capabilities": {
+            cap: {"path": "workflow_nodes/question_intake.py"} for cap in capabilities
+        },
     }
 
 
@@ -86,8 +88,8 @@ def _make_registry(
         global_capacities={eid: definitions[eid]["global_capacity"] for eid in definitions},
         definitions={
             eid: (
-                LocalExecutorConfig(**definitions[eid])
-                if definitions[eid]["kind"] == "local"
+                CodeExecutorConfig(**definitions[eid])
+                if definitions[eid]["kind"] == "code"
                 else PiExecutorConfig(**definitions[eid])
             )
             for eid in definitions
@@ -132,7 +134,7 @@ def _allocate(
         conn.execute(
             """
             insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             on conflict(workspace_id, executor_id) do update set concurrency_limit=excluded.concurrency_limit
             """,
             (workspace_id, executor_id, concurrency_limit),
@@ -150,7 +152,7 @@ def _set_node_limit(
         conn.execute(
             """
             insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             on conflict(workspace_id, workflow_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
             """,
             (workspace_id, workflow_key, node_key, concurrency_limit),
@@ -168,7 +170,7 @@ def _bind(
         conn.execute(
             """
             insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
             """,
             (workspace_id, workflow_key, node_key, executor_id),
@@ -197,6 +199,7 @@ def _make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={"workflows": {"enabled": True}},
+        database_url=str(db_path),
         executor_definitions=registry.definitions(),
     )
     worker = WorkflowWorkerThread(
@@ -216,10 +219,10 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
-    executor = FakeExecutor("local-default", block_event=block_event)
+    executor = FakeExecutor("code-default", block_event=block_event)
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(2, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(2, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -232,17 +235,17 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
         node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-    _bind(job_db, ws["id"], "test", "fetch", "local-default")
-    _allocate(job_db, ws["id"], "local-default", 2)
+    _bind(job_db, ws["id"], "test", "fetch", "code-default")
+    _allocate(job_db, ws["id"], "code-default", 2)
 
     worker = _make_worker(tmp_path, db_path, registry, [definition])
     worker._poll()
 
-    assert worker.leases.active_counts("local-default").get("global", 0) == 1
+    assert worker.leases.active_counts("code-default").get("global", 0) == 1
     assert len(worker._futures) == 1
 
     worker._poll()
-    assert worker.leases.active_counts("local-default").get("global", 0) == 1
+    assert worker.leases.active_counts("code-default").get("global", 0) == 1
     assert len(worker._futures) == 1
 
     block_event.set()
@@ -255,10 +258,10 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
-    executor = FakeExecutor("local-default", block_event=block_event)
+    executor = FakeExecutor("code-default", block_event=block_event)
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(1, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(1, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -272,8 +275,8 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
             node_keys=["fetch"],
             workspace_id=ws["id"],
         )
-    _bind(job_db, ws["id"], "test", "fetch", "local-default")
-    _allocate(job_db, ws["id"], "local-default", 2)
+    _bind(job_db, ws["id"], "test", "fetch", "code-default")
+    _allocate(job_db, ws["id"], "code-default", 2)
 
     worker1 = _make_worker(tmp_path, db_path, registry, [definition])
     worker2 = _make_worker(tmp_path, db_path, registry, [definition])
@@ -281,7 +284,7 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
     worker1._poll()
     worker2._poll()
 
-    total = worker1.leases.active_counts("local-default").get("global", 0)
+    total = worker1.leases.active_counts("code-default").get("global", 0)
     assert total == 1
 
     block_event.set()
@@ -300,10 +303,10 @@ def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path)
     )
 
     block_event = threading.Event()
-    executor = FakeExecutor("local-default", block_event=block_event)
+    executor = FakeExecutor("code-default", block_event=block_event)
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(2, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(2, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -317,14 +320,14 @@ def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path)
             node_keys=["fetch"],
             workspace_id=ws_b["id"],
         )
-    _bind(job_db, ws_b["id"], "test", "fetch", "local-default")
-    _allocate(job_db, ws_a["id"], "local-default", 1)
-    _allocate(job_db, ws_b["id"], "local-default", 2)
+    _bind(job_db, ws_b["id"], "test", "fetch", "code-default")
+    _allocate(job_db, ws_a["id"], "code-default", 1)
+    _allocate(job_db, ws_b["id"], "code-default", 2)
 
     worker = _make_worker(tmp_path, db_path, registry, [definition])
     worker._poll()
 
-    counts = worker.leases.active_counts("local-default")
+    counts = worker.leases.active_counts("code-default")
     assert counts.get("global", 0) == 2
     assert counts.get(ws_a["id"], 0) == 0
     assert counts.get(ws_b["id"], 0) == 2
@@ -381,10 +384,10 @@ def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
     )
 
     block_event = threading.Event()
-    executor = FakeExecutor("local-default", block_event=block_event)
+    executor = FakeExecutor("code-default", block_event=block_event)
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(4, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(4, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -399,15 +402,15 @@ def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
                 node_keys=["fetch"],
                 workspace_id=workspace["id"],
             )
-        _bind(job_db, workspace["id"], "test", "fetch", "local-default")
-        _allocate(job_db, workspace["id"], "local-default", 2)
+        _bind(job_db, workspace["id"], "test", "fetch", "code-default")
+        _allocate(job_db, workspace["id"], "code-default", 2)
     _set_node_limit(job_db, ws_a["id"], "test", "fetch", 1)
     _set_node_limit(job_db, ws_b["id"], "test", "fetch", 2)
 
     worker = _make_worker(tmp_path, db_path, registry, [definition])
     worker._poll()
 
-    counts = worker.leases.active_counts("local-default")
+    counts = worker.leases.active_counts("code-default")
     assert counts.get("global", 0) == 3
     assert counts.get(ws_a["id"], 0) == 1
     assert counts.get(ws_b["id"], 0) == 2
@@ -427,10 +430,10 @@ def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
     )
 
     block_event = threading.Event()
-    executor = FakeExecutor("local-default", block_event=block_event)
+    executor = FakeExecutor("code-default", block_event=block_event)
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(2, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(2, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -454,14 +457,14 @@ def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
         workspace_id=ws_b["id"],
     )
     for ws in [ws_a, ws_b]:
-        _bind(job_db, ws["id"], "test", "fetch", "local-default")
-    _allocate(job_db, ws_a["id"], "local-default", 2)
-    _allocate(job_db, ws_b["id"], "local-default", 1)
+        _bind(job_db, ws["id"], "test", "fetch", "code-default")
+    _allocate(job_db, ws_a["id"], "code-default", 2)
+    _allocate(job_db, ws_b["id"], "code-default", 1)
 
     worker = _make_worker(tmp_path, db_path, registry, [definition])
     worker._poll()
 
-    counts = worker.leases.active_counts("local-default")
+    counts = worker.leases.active_counts("code-default")
     assert counts.get("global", 0) == 2
     assert counts.get(ws_a["id"], 0) == 1
     assert counts.get(ws_b["id"], 0) == 1
@@ -475,10 +478,10 @@ def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
-    executor = FakeExecutor("local-default")
+    executor = FakeExecutor("code-default")
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(2, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(2, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -491,7 +494,7 @@ def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
         node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-    _allocate(job_db, ws["id"], "local-default", 2)
+    _allocate(job_db, ws["id"], "code-default", 2)
 
     worker = _make_worker(tmp_path, db_path, registry, [definition])
     worker._poll()
@@ -509,10 +512,10 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
-    executor = FakeExecutor("local-default", block_event=block_event)
+    executor = FakeExecutor("code-default", block_event=block_event)
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(4, {"root", "left", "target", "right"})},
+        {"code-default": executor},
+        {"code-default": _local_def(4, {"root", "left", "target", "right"})},
     )
     definition = _make_definition(
         [
@@ -534,8 +537,8 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
     )
     job_db.set_job_execution_target(job["id"], "target")
     for node in definition.nodes.values():
-        _bind(job_db, ws["id"], "test", node.key, "local-default")
-    _allocate(job_db, ws["id"], "local-default", 4)
+        _bind(job_db, ws["id"], "test", node.key, "code-default")
+    _allocate(job_db, ws["id"], "code-default", 4)
     for node_key in ["root", "left", "target"]:
         _set_node_limit(job_db, ws["id"], "test", node_key, 1)
 
@@ -578,8 +581,8 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
         workspace_id=ws["id"],
     )
     job_db.set_job_execution_target(job["id"], "root")
-    _bind(job_db, ws["id"], "test", "root", "local-default")
-    _allocate(job_db, ws["id"], "local-default", 2)
+    _bind(job_db, ws["id"], "test", "root", "code-default")
+    _allocate(job_db, ws["id"], "code-default", 2)
 
     # Simulate a worker with a stale snapshot by calling try_claim directly.
     leases = ExecutorLeaseRepository(db_path)
@@ -587,7 +590,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
     job_db.set_job_execution_target(job["id"], "left")
     claim = leases.try_claim(
         LeaseClaimRequest(
-            executor_id="local-default",
+            executor_id="code-default",
             global_capacity=2,
             workspace_id=ws["id"],
             job_id=job["id"],
@@ -605,9 +608,9 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
     assert claim is None
 
     with job_db.connect() as conn:
-        runs = conn.execute("select * from node_runs where job_id=?", (job["id"],)).fetchall()
+        runs = conn.execute("select * from node_runs where job_id=%s", (job["id"],)).fetchall()
         leases_rows = conn.execute(
-            "select * from executor_leases where job_id=?", (job["id"],)
+            "select * from executor_leases where job_id=%s", (job["id"],)
         ).fetchall()
     assert len(runs) == 0
     assert len(leases_rows) == 0
@@ -618,10 +621,10 @@ def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Pat
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
-    executor = FakeExecutor("local-default", supports={"other"})
+    executor = FakeExecutor("code-default", supports={"other"})
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(2, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(2, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -634,8 +637,8 @@ def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Pat
         node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-    _bind(job_db, ws["id"], "test", "fetch", "local-default")
-    _allocate(job_db, ws["id"], "local-default", 2)
+    _bind(job_db, ws["id"], "test", "fetch", "code-default")
+    _allocate(job_db, ws["id"], "code-default", 2)
 
     worker = _make_worker(tmp_path, db_path, registry, [definition])
     worker._poll()
@@ -653,10 +656,10 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
-    executor = FakeExecutor("local-default")
+    executor = FakeExecutor("code-default")
     registry = _make_registry(
-        {"local-default": executor},
-        {"local-default": _local_def(1, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": _local_def(1, {"fetch"})},
     )
     definition = _make_definition([_local_node("fetch")])
 
@@ -678,12 +681,12 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
         node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-    _bind(job_db, ws["id"], "test", "fetch", "local-default")
-    _allocate(job_db, ws["id"], "local-default", 2)
+    _bind(job_db, ws["id"], "test", "fetch", "code-default")
+    _allocate(job_db, ws["id"], "code-default", 2)
 
     worker = _make_worker(tmp_path, db_path, registry, [definition])
     base_request = LeaseClaimRequest(
-        executor_id="local-default",
+        executor_id="code-default",
         global_capacity=1,
         workspace_id=ws["id"],
         job_id=job1["id"],
@@ -700,7 +703,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
 
     claim2 = worker.leases.try_claim(
         LeaseClaimRequest(
-            executor_id="local-default",
+            executor_id="code-default",
             global_capacity=1,
             workspace_id=ws["id"],
             job_id=job2["id"],
@@ -714,7 +717,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
     )
     assert claim2 is None
 
-    counts = worker.leases.active_counts("local-default")
+    counts = worker.leases.active_counts("code-default")
     assert counts.get("global", 0) == 1
 
     worker.stop()

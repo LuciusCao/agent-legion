@@ -69,7 +69,7 @@ def validate_workspace_executor_configuration(
         if bound is None:
             raise InvalidOperationError(f"Node limit requires binding for {key[0]}.{key[1]}")
         executor_id = str(bound["executor_id"])
-        if executor_definitions[executor_id].kind != "local":
+        if executor_definitions[executor_id].kind != "code":
             raise InvalidOperationError(
                 f"Agent-bound Node {key[0]}.{key[1]} cannot have a Node limit"
             )

@@ -9,8 +9,8 @@ from fastapi.responses import FileResponse
 from starlette import concurrency
 
 from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker.agent_result_commit import commit_agent_result
 from server.app.agent_completion import AgentCompletionHandler
-from server.app.agent_result_commit import commit_agent_result
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router

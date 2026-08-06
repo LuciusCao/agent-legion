@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
-import { useJobStore } from '../stores/jobStore'
-import { matchesFilterPayload } from '../stores/job/filterLogic/matchesFilterPayload'
+import { matchesFilterPayload, useJobStore } from '../stores/jobStore'
 import type { JobSummary } from '../types'
 
 export type WorkspaceSelection = {

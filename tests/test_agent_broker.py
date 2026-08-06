@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import os
 from datetime import UTC, datetime, timedelta
 
@@ -9,12 +10,13 @@ import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.dispatch import AgentDispatchService
-from server.app.agent_catalog import AgentDefinition, sync_agent_definitions
+from server.app.agent_catalog import AgentDefinition
 from server.app.agent_workers import AgentWorkerRegistry
-from server.app.agents import AgentStatusManager
+from server.app.events.agents import AgentStatusManager
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
 from server.app.workflows.schema import WorkflowNode
+from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -29,25 +31,25 @@ def _insert_job_rows(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (?, 'Test') on conflict(id) do nothing",
+            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-            " values (?, ?, 'questions', 'question', ?)",
+            " values (%s, %s, 'questions', 'question', %s)",
             (job_id, workspace_id, job_id),
         )
-        conn.execute("insert into job_nodes(job_id, node_key) values (?, ?)", (job_id, node_key))
+        conn.execute("insert into job_nodes(job_id, node_key) values (%s, %s)", (job_id, node_key))
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (?, 'questions', ?, 'agent', ?)"
+            " values (%s, 'questions', %s, 'agent', %s)"
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
             (workspace_id, node_key, agent_id),
         )
         # Capacity is workspace-level now: one row per workspace.
         conn.execute(
             "insert into workspace_agent_capacities(workspace_id, max_concurrency)"
-            " values (?, ?)"
+            " values (%s, %s)"
             " on conflict(workspace_id) do update"
             " set max_concurrency=excluded.max_concurrency",
             (workspace_id, limit),
@@ -71,7 +73,8 @@ def _seed_request(
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    sync_agent_definitions(TEST_DATABASE_URL, definitions or {agent_id: definition})
+    catalog = definitions or {agent_id: definition}
+    replace_agent_catalog(catalog)
     _insert_job_rows(
         job_db,
         job_id=job_id,
@@ -88,11 +91,11 @@ def _seed_request(
             workflow_key="questions",
             node_key=node_key,
             agent_id=agent_id,
-            agent_definition_hash=definition.definition_hash(),
+            agent_definition_hash=catalog[agent_id].definition_hash(),
             manifest={
                 "job_id": job_id,
                 "log_path": f"logs/{job_id}.log",
-                "pi": {"provider": "gateway", "model": "test-model"},
+                "execution": {"provider": "gateway", "model": "test-model"},
             },
         )
     )
@@ -234,7 +237,7 @@ def test_expired_worker_claim_is_requeued_for_another_worker(job_db) -> None:
     assert first is not None
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), first.execution_id),
         )
 
@@ -293,12 +296,12 @@ def test_sweep_closes_request_when_lease_already_finished(job_db) -> None:
     assert claim is not None
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), claim.execution_id),
         )
         # Simulate the result path having finished the lease already.
         conn.execute(
-            "update executor_leases set status='released' where id=?",
+            "update executor_leases set status='released' where id=%s",
             (claim.lease_id,),
         )
 
@@ -306,7 +309,7 @@ def test_sweep_closes_request_when_lease_already_finished(job_db) -> None:
 
     with job_db._connect_read() as conn:
         row = conn.execute(
-            "select state from agent_execution_requests where execution_id=?",
+            "select state from agent_execution_requests where execution_id=%s",
             (claim.execution_id,),
         ).fetchone()
     assert row is not None
@@ -333,7 +336,7 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
         # The seeded request stays queued (its bundle must survive); add a
         # terminal request pointing at done.tar.gz.
         conn.execute(
-            "update agent_execution_requests set manifest_json=? where job_id='job-1'",
+            "update agent_execution_requests set manifest_json=%s where job_id='job-1'",
             (json.dumps({"bundle_name": "live.tar.gz"}),),
         )
         conn.execute(
@@ -342,7 +345,7 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
             " agent_id, agent_definition_hash, node_concurrency_limit,"
             " state, queued_at, manifest_json)"
             " values ('exec-done', 'test-workspace', 'job-1', 'questions', 'review',"
-            " 'generator-v1', 'sha256:whatever', 1, 'done', current_timestamp, ?)",
+            " 'generator-v1', 'sha256:whatever', 1, 'done', current_timestamp, %s)",
             (json.dumps({"bundle_name": "done.tar.gz"}),),
         )
 
@@ -391,7 +394,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
 
     with job_db._connect_read() as conn:
         row = conn.execute(
-            "select token_hash from agent_register_tokens where id=?", (token_id,)
+            "select token_hash from agent_register_tokens where id=%s", (token_id,)
         ).fetchone()
     assert row is not None
     assert row["token_hash"] == hashlib.sha256(secret.encode()).hexdigest()
@@ -594,7 +597,7 @@ def test_swept_expired_claim_releases_worker_status_panel(job_db) -> None:
     assert claimed is not None
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=10), claimed.execution_id),
         )
 
@@ -693,10 +696,66 @@ def test_heartbeat_and_mark_done_accept_reporting_state(job_db) -> None:
     )
     with job_db.connect() as conn:
         row = conn.execute(
-            "select state from agent_execution_requests where execution_id=?",
+            "select state from agent_execution_requests where execution_id=%s",
             (claimed.execution_id,),
         ).fetchone()
     assert row["state"] == "done"
+
+
+def test_heartbeat_returns_false_when_lease_no_longer_active(job_db) -> None:
+    """A finish-path release racing the heartbeat must not be reported as
+    success: the lease row is not active, so the Worker is told to stop
+    instead of keeping a zombie attempt alive."""
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update executor_leases set status='released' where id=%s",
+            (claimed.lease_id,),
+        )
+
+    assert broker.heartbeat(claimed.execution_id, "worker-1", claimed.lease_id) is False
+
+
+def test_sweep_requeue_limit_failure_message_carries_context(job_db, caplog) -> None:
+    """The terminal requeue-limit failure must name the execution, worker and
+    attempt numbers; the lease deletion (the repo's only DELETE path) must
+    leave an audit log record."""
+    _seed_request(job_db, job_id="job-1", limit=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1, requeue_limit=0)
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
+            (datetime.now(UTC) - timedelta(seconds=10), claimed.execution_id),
+        )
+
+    with caplog.at_level(logging.WARNING, logger="server.app.agent_broker.sweepers"):
+        assert broker.sweep_expired_claims() == []
+
+    node = job_db.get_job_node("job-1", "generate")
+    assert node["status"] == "failed"
+    message = node["error_message"]
+    assert "requeue limit exceeded" in message
+    assert claimed.execution_id in message
+    assert "worker-1" in message
+    assert "attempt=1" in message
+    assert "limit=0" in message
+    assert any(
+        "deleting expired agent lease" in record.message
+        and claimed.lease_id in record.message
+        and claimed.execution_id in record.message
+        and "job-1" in record.message
+        and "worker-1" in record.message
+        for record in caplog.records
+    )
 
 
 def test_reporting_blocks_duplicate_enqueue(job_db) -> None:
@@ -720,7 +779,10 @@ def test_reporting_blocks_duplicate_enqueue(job_db) -> None:
                 node_key="generate",
                 agent_id="generator-v1",
                 agent_definition_hash=_seeded_definition_hash(),
-                manifest={"job_id": "job-1"},
+                manifest={
+                    "job_id": "job-1",
+                    "execution": {"provider": "gateway", "model": "test-model"},
+                },
             )
         )
         is None
@@ -749,7 +811,7 @@ def test_sweep_requeues_reporting_with_expired_heartbeat(job_db) -> None:
     assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
     with job_db.connect() as conn:
         conn.execute(
-            "update agent_execution_requests set heartbeat_at=? where execution_id=?",
+            "update agent_execution_requests set heartbeat_at=%s where execution_id=%s",
             (datetime.now(UTC) - timedelta(seconds=200), claimed.execution_id),
         )
 
@@ -757,7 +819,7 @@ def test_sweep_requeues_reporting_with_expired_heartbeat(job_db) -> None:
 
     with job_db.connect() as conn:
         row = conn.execute(
-            "select state, worker_id, lease_id from agent_execution_requests where execution_id=?",
+            "select state, worker_id, lease_id from agent_execution_requests where execution_id=%s",
             (claimed.execution_id,),
         ).fetchone()
     assert row["state"] == "queued"
@@ -797,15 +859,20 @@ def test_pi_only_worker_cannot_claim_velites_request(job_db) -> None:
 
 def test_mixed_runtime_fleet_claims_matching_requests(job_db) -> None:
     """Dual-runtime coexistence: pi and velites definitions side by side, each
-    Worker claims exactly the requests of its declared runtime."""
+    Worker claims exactly the requests of its declared runtime.
+
+    Capabilities differ per definition: one published Agent per capability is
+    enforced by the DB partial unique index, so a same-capability dual-runtime
+    catalog is no longer representable.
+    """
     pi_definition = AgentDefinition(
-        capability="generate",
+        capability="generate_pi",
         runtime="pi",
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
     velites_definition = AgentDefinition(
-        capability="generate",
+        capability="generate_velites",
         runtime="velites",
         skill="question/generate",
         requires_labels={"arch": "arm64"},
@@ -856,7 +923,7 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": velites_definition})
+    replace_agent_catalog({"generator-v1": velites_definition})
     _insert_job_rows(
         job_db,
         job_id="job-new",
@@ -877,7 +944,7 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
             manifest={
                 "job_id": "job-new",
                 "log_path": "logs/job-new.log",
-                "pi": {"provider": "gateway", "model": "test-model"},
+                "execution": {"provider": "gateway", "model": "test-model"},
             },
         )
     )

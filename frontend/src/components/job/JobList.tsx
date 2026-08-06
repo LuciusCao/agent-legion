@@ -1,5 +1,4 @@
-import { useJobStore } from '../../stores/jobStore'
-import { selectFilteredJobIds } from '../../stores/job/selectors'
+import { selectFilteredJobIds, useJobStore } from '../../stores/jobStore'
 import { MaterialIcon } from '../MaterialIcon'
 import { JobListVirtualized } from './JobListVirtualized'
 import { JobListSkeleton } from './JobListSkeleton'

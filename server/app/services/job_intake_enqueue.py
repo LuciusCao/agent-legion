@@ -9,10 +9,10 @@ def enqueue_intake_batch(
     payload: dict[str, Any],
     entity: str,
     input_values: list[str],
-    resource_config: dict[str, Any],
     mode: Any,
     revision: dict[str, Any],
     node_config: dict[str, Any] | None = None,
+    node_code_versions: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     workflow_key = str(payload["workflow_key"])
     source_kind = str(payload["source_kind"])
@@ -23,8 +23,8 @@ def enqueue_intake_batch(
             "entity": entity,
             "question_ids": input_values if input_field == "question_ids" else [],
             "knowledge_codes": input_values if input_field == "knowledge_codes" else [],
-            "resource_config": resource_config,
             "node_config": node_config or {},
+            "node_code_versions": node_code_versions or {},
             "intake_mode": {
                 "key": mode.key,
                 "label": mode.label,

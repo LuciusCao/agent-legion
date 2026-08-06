@@ -1,9 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchJobDetail, deleteJob } from '../../api'
 import { rerunJob, runToJob } from '../../api/jobApi'
-import { usePageHeaderStore } from '../../stores/pageHeaderStore'
-import { useExecutorsStore } from '../../stores/executorsStore'
+import { useUiStore } from '../../stores/uiStore'
+import { invalidateAgentWorkers } from '../../lib/agentWorkersInvalidation'
+import { queryKeys } from '../../lib/queryKeys'
 import type { JobDetail } from '../../types/jobTypes'
 import { useContinueJobAction } from './useContinueJobAction'
 import { pageSubtitle } from './jobDetailTitle'
@@ -16,71 +18,52 @@ export function useJobDetail(
   jobId: string | undefined
 ) {
   const navigate = useNavigate()
-  const { setPageTitle, setPageSubtitle } = usePageHeaderStore()
-  const [detail, setDetail] = useState<JobDetail | null>(null)
-  const [error, setError] = useState('')
+  const queryClient = useQueryClient()
+  const { setPageTitle, setPageSubtitle } = useUiStore()
+  const [actionError, setActionError] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
-  const detailRef = useRef(detail)
 
-  useEffect(() => {
-    detailRef.current = detail
-  }, [detail])
+  const detailQuery = useQuery({
+    queryKey: queryKeys.jobDetail(jobId ?? ''),
+    queryFn: () => fetchJobDetail(jobId as string),
+    enabled: Boolean(jobId),
+    refetchInterval: (query) =>
+      POLLING_STATUSES.has(query.state.data?.job.status ?? '') ? 5000 : false,
+  })
+  const detail = detailQuery.data ?? null
+  const detailRefetch = detailQuery.refetch
+  const queryError = detailQuery.error
+    ? detailQuery.error instanceof Error
+      ? detailQuery.error.message
+      : String(detailQuery.error)
+    : ''
+  const error = actionError || queryError
 
-  const refreshDetail = useCallback(
-    async (options?: { signal?: AbortSignal }): Promise<JobDetail | null> => {
-      if (!jobId) return null
-      try {
-        const data = await fetchJobDetail(jobId)
-        if (options?.signal?.aborted) return null
-        setDetail(data)
-        setError('')
-        return data
-      } catch (err) {
-        if (options?.signal?.aborted) return null
-        setError(err instanceof Error ? err.message : String(err))
-        return null
-      }
-    },
-    [jobId]
-  )
+  // 子 hook 契约：() => Promise<JobDetail | null>，action 成功后手动触发。
+  const refreshDetail = useCallback(async (): Promise<JobDetail | null> => {
+    if (!jobId) return null
+    const result = await detailRefetch()
+    if (result.data) setActionError('')
+    return result.data ?? null
+  }, [jobId, detailRefetch])
 
   useEffect(() => {
     // Refresh executor visibility once on job detail mount.
-    void useExecutorsStore.getState().refreshWorkers()
-  }, [])
+    invalidateAgentWorkers(queryClient)
+  }, [queryClient])
 
   useEffect(() => {
-    if (!jobId) return
-    const controller = new AbortController()
-    const timer = window.setInterval(() => {
-      const status = detailRef.current?.job.status
-      if (status && POLLING_STATUSES.has(status)) {
-        void refreshDetail({ signal: controller.signal })
-      }
-    }, 5000)
-    return () => {
-      controller.abort()
-      window.clearInterval(timer)
-    }
-  }, [jobId, refreshDetail])
+    if (!detail) return
+    setPageTitle(detail.job.title || detail.job.source_id || '任务详情')
+    setPageSubtitle(pageSubtitle(detail.job))
+  }, [detail, setPageTitle, setPageSubtitle])
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDetail(null)
-    setError('')
-    if (!jobId) return
-    const controller = new AbortController()
-    refreshDetail({ signal: controller.signal }).then((data) => {
-      if (controller.signal.aborted || !data) return
-      setPageTitle(data.job.title || data.job.source_id || '任务详情')
-      setPageSubtitle(pageSubtitle(data.job))
-    })
     return () => {
-      controller.abort()
       setPageTitle(null)
       setPageSubtitle(null)
     }
-  }, [jobId, setPageTitle, setPageSubtitle, refreshDetail])
+  }, [jobId, setPageTitle, setPageSubtitle])
 
   const handleRerun = useCallback(
     async (nodeKey: string | null, fromFailedNode?: boolean) => {
@@ -90,7 +73,7 @@ export function useJobDetail(
         await rerunJob(jobId, nodeKey)
         await refreshDetail()
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setActionError(err instanceof Error ? err.message : String(err))
       } finally {
         setActionLoading(false)
       }
@@ -106,7 +89,7 @@ export function useJobDetail(
         await runToJob(jobId, targetKey, startKey)
         await refreshDetail()
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
+        setActionError(err instanceof Error ? err.message : String(err))
       } finally {
         setActionLoading(false)
       }
@@ -118,14 +101,14 @@ export function useJobDetail(
     jobId,
     refreshDetail,
     setActionLoading,
-    setError
+    setActionError
   )
 
   const handleUpgradeWorkflow = useUpgradeWorkflowAction(
     jobId,
     refreshDetail,
     setActionLoading,
-    setError
+    setActionError
   )
 
   const handlePackage = usePackageAction(
@@ -133,7 +116,7 @@ export function useJobDetail(
     jobId,
     refreshDetail,
     setActionLoading,
-    setError
+    setActionError
   )
 
   const handleClearPacked = useClearPackedAction(
@@ -141,7 +124,7 @@ export function useJobDetail(
     jobId,
     refreshDetail,
     setActionLoading,
-    setError
+    setActionError
   )
 
   const handleDelete = useCallback(async () => {
@@ -151,7 +134,7 @@ export function useJobDetail(
       await deleteJob(jobId)
       navigate(`/workspaces/${encodeURIComponent(workspaceId)}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
+      setActionError(err instanceof Error ? err.message : String(err))
       setActionLoading(false)
     }
   }, [jobId, workspaceId, navigate])
@@ -159,7 +142,7 @@ export function useJobDetail(
   return {
     detail,
     error,
-    setError,
+    setError: setActionError,
     actionLoading,
     refreshDetail,
     handleRerun,

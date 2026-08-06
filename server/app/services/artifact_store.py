@@ -70,7 +70,7 @@ class ArtifactStore:
         # artifact_refs.hash has an FK to artifacts(hash).
         with write_transaction(self.db_path) as conn:
             conn.execute(
-                "insert into artifacts(hash, size) values (?, ?) on conflict(hash) do nothing",
+                "insert into artifacts(hash, size) values (%s, %s) on conflict(hash) do nothing",
                 (digest, len(data)),
             )
         return digest
@@ -92,7 +92,7 @@ class ArtifactStore:
     def add_ref(self, job_id: str, node_key: str, name: str, hash: str) -> None:
         with write_transaction(self.db_path) as conn:
             conn.execute(
-                "insert into artifact_refs(job_id, node_key, name, hash) values (?, ?, ?, ?)"
+                "insert into artifact_refs(job_id, node_key, name, hash) values (%s, %s, %s, %s)"
                 " on conflict(job_id, node_key, name) do update set hash=excluded.hash",
                 (job_id, node_key, name, hash),
             )
@@ -100,7 +100,7 @@ class ArtifactStore:
     def refs_for_job(self, job_id: str) -> list[dict]:
         with read_connection(self.db_path) as conn:
             rows = conn.execute(
-                "select job_id, node_key, name, hash from artifact_refs where job_id = ?"
+                "select job_id, node_key, name, hash from artifact_refs where job_id = %s"
                 " order by node_key, name",
                 (job_id,),
             ).fetchall()
@@ -112,16 +112,16 @@ class ArtifactStore:
             hashes = [
                 row["hash"]
                 for row in conn.execute(
-                    "select hash from artifact_refs where job_id = ?", (job_id,)
+                    "select hash from artifact_refs where job_id = %s", (job_id,)
                 )
             ]
-            conn.execute("delete from artifact_refs where job_id = ?", (job_id,))
+            conn.execute("delete from artifact_refs where job_id = %s", (job_id,))
             orphaned = [
                 h
                 for h in hashes
                 if (
                     conn.execute(
-                        "select count(*) as cnt from artifact_refs where hash = ?", (h,)
+                        "select count(*) as cnt from artifact_refs where hash = %s", (h,)
                     ).fetchone()
                     or {"cnt": 0}
                 )["cnt"]
@@ -138,13 +138,13 @@ class ArtifactStore:
         with write_transaction(self.db_path) as conn:
             for h in hashes:
                 refs_row = conn.execute(
-                    "select count(*) as cnt from artifact_refs where hash = ?", (h,)
+                    "select count(*) as cnt from artifact_refs where hash = %s", (h,)
                 ).fetchone()
                 refs = int(refs_row["cnt"]) if refs_row is not None else 0
                 if refs:
                     continue
                 created_row = conn.execute(
-                    "select created_at from artifacts where hash = ?", (h,)
+                    "select created_at from artifacts where hash = %s", (h,)
                 ).fetchone()
                 if created_row is None:
                     continue
@@ -153,7 +153,7 @@ class ArtifactStore:
                     # Too young: an upload may still be in flight between
                     # put() and add_ref(); leave it for a later sweep.
                     continue
-                conn.execute("delete from artifacts where hash = ?", (h,))
+                conn.execute("delete from artifacts where hash = %s", (h,))
                 deleted_paths.append(self.root / h[:2] / h)
         for path in deleted_paths:
             try:

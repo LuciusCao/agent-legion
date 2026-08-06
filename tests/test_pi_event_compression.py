@@ -1,7 +1,7 @@
 import json
 
 from server.app.services.job_log_renderer import _parse_pi_events
-from server.app.services.pi_event_compression import compress_pi_events
+from shared.pi_events import compress_pi_events
 
 
 def test_compress_pi_events_keeps_renderable_events(tmp_path):
@@ -51,8 +51,8 @@ def test_compress_pi_events_handles_invalid_json(tmp_path):
 
 
 def test_scan_and_compress_matches_separate_calls(tmp_path):
-    from server.app.services.pi_event_compression import scan_and_compress_pi_events
     from server.app.workflows.pi_protocol import detect_model_error
+    from shared.pi_events import scan_and_compress_pi_events
 
     payload = "\n".join(
         [
@@ -82,7 +82,7 @@ def test_scan_and_compress_matches_separate_calls(tmp_path):
 
 
 def test_scan_and_compress_reports_unrecovered_error(tmp_path):
-    from server.app.services.pi_event_compression import scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
 
     events = tmp_path / "events.jsonl"
     events.write_text(
@@ -94,7 +94,7 @@ def test_scan_and_compress_reports_unrecovered_error(tmp_path):
 
 
 def test_scan_and_compress_skips_missing_file(tmp_path):
-    from server.app.services.pi_event_compression import scan_and_compress_pi_events
+    from shared.pi_events import scan_and_compress_pi_events
 
     assert scan_and_compress_pi_events(tmp_path / "missing.jsonl") == (None, 0, 0)
 
@@ -103,8 +103,8 @@ def test_scan_and_compress_velites_retry_stream_judged_recovered(tmp_path):
     # velites retry pattern (same as Node Pi): each failed transient attempt
     # emits an error message_end + auto_retry_start; the later successful
     # message_end clears the error, so the run is judged recovered — and
-    # auto_retry_start must survive compression (pi_event_scan allowlist).
-    from server.app.services.pi_event_compression import scan_and_compress_pi_events
+    # auto_retry_start must survive compression (pi_events allowlist).
+    from shared.pi_events import scan_and_compress_pi_events
 
     events = tmp_path / "events.jsonl"
     events.write_text(

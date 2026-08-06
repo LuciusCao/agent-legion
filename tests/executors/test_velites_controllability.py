@@ -71,6 +71,8 @@ def _base_args(workdir: Path, fixture: Path) -> list[str]:
         "stub",
         "--stub-fixture",
         str(fixture),
+        "--session-dir",
+        str(workdir / "session"),
         # These tests cover controllability, not filesystem confinement.
         # CI runs on Linux without bubblewrap, where the default-on OS
         # sandbox fails closed at startup; confinement itself is covered by
@@ -132,13 +134,18 @@ def test_budget_exhaustion_marks_agent_end(tmp_path: Path, velites_binary: Path)
     agent_end = events[-1]
     assert agent_end["type"] == "agent_end"
     assert agent_end["reason"] == "budget_exceeded"
-    # The wrap-up notice was injected as a user message.
+    # Schema v2: agent_end carries no message history.
+    assert "messages" not in agent_end
+    # The wrap-up notice was injected as a user message (session mirror).
+    session_lines = (
+        (tmp_path / "session" / "session.jsonl").read_text(encoding="utf-8").splitlines()
+    )
     notices = [
         m
-        for m in agent_end["messages"]
+        for m in (json.loads(line) for line in session_lines if line.strip())
         if m["role"] == "user" and "--max-turns" in m["content"][0].get("text", "")
     ]
-    assert notices, "budget wrap-up notice missing from agent_end messages"
+    assert notices, "budget wrap-up notice missing from session history"
 
 
 def test_sigterm_cancel_emits_agent_end_cancelled(tmp_path: Path, velites_binary: Path) -> None:

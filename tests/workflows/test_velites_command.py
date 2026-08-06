@@ -1,4 +1,4 @@
-"""velites flavor：配置解析、命令构建、render_command_spec 占位符（M4）。"""
+"""velites runtime：命令构建、render_command_spec 占位符、runtime 分发。"""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from server.app.agent_broker.runtime_dispatch import pi_config_for_runtime
+from server.app.agent_broker.dispatch import resolve_execution_block
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.workflows.pi_command_builder import build_pi_command
 from server.app.workflows.pi_config import PiConfig
@@ -16,23 +16,25 @@ from server.app.workflows.pi_protocol import (
     build_command,
     render_command_spec,
 )
+from server.app.workflows.schema import WorkflowNode
 from server.app.workflows.velites_command import build_command_for_flavor
 
 MANIFEST = {
     "job_id": "job-1",
     "node_key": "gen",
     "capability": "generate",
+    "runtime": "velites",
     "inputs": ["a.txt"],
     "expected_outputs": ["out.json", "report.json"],
     "tools": ["read", "write"],
     "config": {},
-    "pi": {
+    "execution": {
         "binary": "velites",
-        "flavor": "velites",
         "provider": "gateway",
         "model": "kimi-k2.6",
         "thinking": "low",
         "timeout_seconds": 300,
+        "no_sandbox": False,
     },
 }
 
@@ -61,6 +63,10 @@ def _dispatch(manifest: dict) -> list[str]:
     )
 
 
+def _execution(manifest: dict, **patch: object) -> dict:
+    return {**manifest, "execution": {**MANIFEST["execution"], **patch}}
+
+
 def test_runtime_config_flavor_defaults_to_pi() -> None:
     config = PiRuntimeConfig()
     assert config.flavor == "pi"
@@ -73,29 +79,9 @@ def test_runtime_config_velites_defaults_binary() -> None:
     assert config.binary == "velites"
 
 
-def test_runtime_config_velites_keeps_explicit_binary() -> None:
-    config = PiRuntimeConfig.model_validate({"flavor": "velites", "binary": "/opt/v"})
-    assert config.binary == "/opt/v"
-
-
 def test_runtime_config_rejects_unknown_flavor() -> None:
     with pytest.raises(ValidationError):
         PiRuntimeConfig.model_validate({"flavor": "rust"})
-
-
-def test_piconfig_from_runtime_propagates_flavor() -> None:
-    config = PiConfig.from_runtime(PiRuntimeConfig.model_validate({"flavor": "velites"}))
-    assert config.flavor == "velites"
-    assert config.binary == "velites"
-
-
-def test_piconfig_from_config_flavor_parsing() -> None:
-    assert PiConfig.from_config({"binary": "pi"}).flavor == "pi"
-    velites = PiConfig.from_config({"binary": "pi", "flavor": "velites"})
-    assert velites.flavor == "velites"
-    assert velites.binary == "velites"
-    with pytest.raises(ValueError, match="flavor"):
-        PiConfig.from_config({"binary": "pi", "flavor": "rust"})
 
 
 def test_velites_command_exact_argv() -> None:
@@ -132,13 +118,13 @@ def test_velites_command_exact_argv() -> None:
 
 
 def test_velites_command_maps_named_provider_to_gateway() -> None:
-    # pi 命名 provider（gateway 等，定义在 pi 自己的 models.json）在 velites 侧
-    # 收敛为 gateway 单出口；协议名原样透传。
-    named = {**MANIFEST, "pi": {**MANIFEST["pi"], "provider": "gateway"}}
+    # pi 命名 provider（deepseek 等）在 velites 侧收敛为 gateway 单出口；
+    # 协议名原样透传。
+    named = _execution(MANIFEST, provider="deepseek")
     cmd = _dispatch(named)
     assert cmd[cmd.index("--provider") + 1] == "gateway"
     for native in ("gateway", "openai_compat", "stub"):
-        passthrough = {**MANIFEST, "pi": {**MANIFEST["pi"], "provider": native}}
+        passthrough = _execution(MANIFEST, provider=native)
         assert _dispatch(passthrough)[cmd.index("--provider") + 1] == native
 
 
@@ -154,10 +140,7 @@ def test_velites_command_budget_flags_from_node_config() -> None:
 
 
 def test_velites_command_omits_empty_optional_flags() -> None:
-    manifest = {
-        **MANIFEST,
-        "pi": {"binary": "velites", "flavor": "velites", "timeout_seconds": 0},
-    }
+    manifest = _execution(MANIFEST, provider="", model="", thinking="", timeout_seconds=0)
     cmd = _dispatch(manifest)
     assert "--provider" not in cmd
     assert "--model" not in cmd
@@ -165,29 +148,115 @@ def test_velites_command_omits_empty_optional_flags() -> None:
     assert "--timeout-seconds" not in cmd
 
 
-def test_flavor_dispatch_defaults_to_pi() -> None:
-    manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "flavor": "pi"}}
-    assert _dispatch(manifest) == build_command(manifest, **KW)
-    no_flavor = {**MANIFEST, "pi": {k: v for k, v in MANIFEST["pi"].items() if k != "flavor"}}
-    assert _dispatch(no_flavor) == build_command(no_flavor, **KW)
+def test_runtime_dispatch_defaults_fail_fast_without_runtime() -> None:
+    manifest = {k: v for k, v in MANIFEST.items() if k != "runtime"}
+    with pytest.raises(ValueError, match="unknown agent runtime"):
+        _dispatch(manifest)
 
 
-def test_flavor_dispatch_rejects_unknown_flavor() -> None:
-    manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "flavor": "rust"}}
-    with pytest.raises(ValueError, match="unknown pi flavor"):
+def test_runtime_dispatch_rejects_unknown_runtime() -> None:
+    manifest = {**MANIFEST, "runtime": "rust"}
+    with pytest.raises(ValueError, match="unknown agent runtime"):
         _dispatch(manifest)
 
 
 def test_velites_no_sandbox_escape_hatch() -> None:
     # 默认不发 --no-sandbox（沙箱开启）。
     assert "--no-sandbox" not in _dispatch(MANIFEST)
-    # 配置逃生门：runtime → PiConfig → manifest → argv 全链路透传。
-    manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "velites_no_sandbox": True}}
+    manifest = _execution(MANIFEST, no_sandbox=True)
     assert "--no-sandbox" in _dispatch(manifest)
-    config = PiConfig.from_runtime(PiRuntimeConfig(flavor="velites", velites_no_sandbox=True))
-    assert config.velites_no_sandbox is True
-    cmd = build_pi_command(config, tools=["read"], **KW)
-    assert "--no-sandbox" in cmd
+
+
+def test_render_command_spec_velites_uses_placeholders() -> None:
+    spec = render_command_spec(MANIFEST)
+    assert spec["version"] == 1
+    command = spec["command"]
+    assert command[0] == "velites"
+    assert "{session_dir}" in command
+    assert "{session_name}" in command
+    assert any("{skill_dir}" in part for part in command)
+    assert "@{prompt_file}" in command
+    for flag in PI_ONLY_FLAGS:
+        assert flag not in command
+    assert command[command.index("--require-output") + 1] == "out.json"
+
+
+def test_render_command_spec_pi_runtime_uses_pi_argv() -> None:
+    manifest = _execution({**MANIFEST, "runtime": "pi"}, binary="pi")
+    command = render_command_spec(manifest)["command"]
+    assert command[0] == "pi"
+    assert "--approve" in command
+
+
+# --- execution 解析（EXEC-RUNTIME-DISPATCH-001）：runtime 钉死命令构建器 ---
+
+
+def _node(provider: str = "", model: str = "", thinking: str = "") -> WorkflowNode:
+    from server.app.workflows.schema import WorkflowNodeExecution
+
+    return WorkflowNode(
+        key="gen",
+        label="gen",
+        capability="generate",
+        execution=WorkflowNodeExecution(provider=provider, model=model, thinking=thinking),
+    )
+
+
+@pytest.mark.no_db
+def test_resolve_execution_node_override_wins() -> None:
+    workspace = {
+        "default_agent_provider": "ws-provider",
+        "default_agent_model": "ws-model",
+        "default_agent_thinking": "high",
+    }
+    block = resolve_execution_block(
+        _node("node-provider", "node-model", "low"), workspace, "velites"
+    )
+    assert block == {
+        "binary": "velites",
+        "provider": "node-provider",
+        "model": "node-model",
+        "thinking": "low",
+        "timeout_seconds": 1800,
+        "no_sandbox": False,
+    }
+
+
+@pytest.mark.no_db
+def test_resolve_execution_falls_back_to_workspace_defaults() -> None:
+    workspace = {"default_agent_provider": "ws-provider", "default_agent_model": "ws-model"}
+    block = resolve_execution_block(_node(), workspace, "pi")
+    assert block["binary"] == "pi"
+    assert block["provider"] == "ws-provider"
+    assert block["model"] == "ws-model"
+    assert block["thinking"] == ""
+
+
+@pytest.mark.no_db
+def test_resolve_execution_requires_provider_and_model() -> None:
+    with pytest.raises(ValueError, match="requires a provider"):
+        resolve_execution_block(_node(model="m"), {}, "velites")
+    with pytest.raises(ValueError, match="requires a model"):
+        resolve_execution_block(_node(provider="p"), {}, "velites")
+
+
+@pytest.mark.no_db
+def test_resolve_execution_fails_fast_on_unknown_runtime() -> None:
+    workspace = {"default_agent_provider": "p", "default_agent_model": "m"}
+    with pytest.raises(ValueError, match=r"supported runtimes: pi, velites"):
+        resolve_execution_block(_node(), workspace, "openclaw")
+
+
+# --- 保留的本地 pi runner 链（PiConfig flavor 解析，不经 broker manifest） ---
+
+
+def test_piconfig_from_config_flavor_parsing() -> None:
+    assert PiConfig.from_config({"binary": "pi"}).flavor == "pi"
+    velites = PiConfig.from_config({"binary": "pi", "flavor": "velites"})
+    assert velites.flavor == "velites"
+    assert velites.binary == "velites"
+    with pytest.raises(ValueError, match="flavor"):
+        PiConfig.from_config({"binary": "pi", "flavor": "rust"})
 
 
 def test_build_pi_command_velites_flavor() -> None:
@@ -212,64 +281,3 @@ def test_build_pi_command_velites_flavor() -> None:
     assert cmd[cmd.index("--max-turns") + 1] == "4"
     for flag in PI_ONLY_FLAGS:
         assert flag not in cmd
-
-
-def test_render_command_spec_velites_uses_placeholders() -> None:
-    spec = render_command_spec(MANIFEST)
-    assert spec["version"] == 1
-    command = spec["command"]
-    assert command[0] == "velites"
-    assert "{session_dir}" in command
-    assert "{session_name}" in command
-    assert any("{skill_dir}" in part for part in command)
-    assert "@{prompt_file}" in command
-    for flag in PI_ONLY_FLAGS:
-        assert flag not in command
-    assert command[command.index("--require-output") + 1] == "out.json"
-
-
-# --- runtime 分派（EXEC-RUNTIME-DISPATCH-001）：AgentDefinition.runtime 选择命令构建器 ---
-
-
-@pytest.mark.no_db
-def test_runtime_velites_pins_velites_builder_regardless_of_flavor() -> None:
-    # 全局 flavor=pi 时 runtime=velites 仍产出 velites argv，binary 默认归一化。
-    pi = pi_config_for_runtime(PiConfig(binary="pi", flavor="pi"), "velites")
-    assert pi.flavor == "velites"
-    assert pi.binary == "velites"
-    manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": pi.binary, "flavor": pi.flavor}}
-    command = render_command_spec(manifest)["command"]
-    assert command[0] == "velites"
-    for flag in PI_ONLY_FLAGS:
-        assert flag not in command
-
-
-@pytest.mark.no_db
-def test_runtime_velites_keeps_explicit_binary() -> None:
-    pi = pi_config_for_runtime(PiConfig(binary="/opt/velites-bin", flavor="pi"), "velites")
-    assert pi.flavor == "velites"
-    assert pi.binary == "/opt/velites-bin"
-
-
-@pytest.mark.no_db
-def test_runtime_pi_delegates_implementation_to_flavor() -> None:
-    # runtime=pi 逐比特不变：flavor=pi 走 pi argv，flavor=velites 走 velites argv。
-    pi_flavor = pi_config_for_runtime(PiConfig(binary="pi", flavor="pi"), "pi")
-    assert (pi_flavor.flavor, pi_flavor.binary) == ("pi", "pi")
-    pi_manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": "pi", "flavor": "pi"}}
-    pi_command = render_command_spec(pi_manifest)["command"]
-    assert pi_command[0] == "pi"
-    assert "--approve" in pi_command
-
-    velites_flavor = pi_config_for_runtime(PiConfig(binary="velites", flavor="velites"), "pi")
-    assert (velites_flavor.flavor, velites_flavor.binary) == ("velites", "velites")
-    velites_command = render_command_spec(MANIFEST)["command"]
-    assert velites_command[0] == "velites"
-    for flag in PI_ONLY_FLAGS:
-        assert flag not in velites_command
-
-
-@pytest.mark.no_db
-def test_runtime_dispatch_fails_fast_on_unknown_runtime() -> None:
-    with pytest.raises(ValueError, match=r"supported runtimes: pi, velites"):
-        pi_config_for_runtime(PiConfig(), "openclaw")

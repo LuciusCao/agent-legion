@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import urllib.error
-import urllib.request
 from typing import Any
+
+import requests
 
 READ_TIMEOUT = 5
 # restart 会阻塞等待旧进程退出（服务端停止预算约 25s），变更操作给足 60s。
@@ -18,6 +17,8 @@ class LocalClient:
     def __init__(self, url: str, token: str) -> None:
         self.url = url.rstrip("/")
         self.token = token
+        self.session = requests.Session()
+        self.session.headers["Authorization"] = f"Bearer {self.token}"
 
     def request(
         self,
@@ -26,28 +27,24 @@ class LocalClient:
         payload: dict[str, Any] | None = None,
         timeout: int = READ_TIMEOUT,
     ) -> Any:
-        data = json.dumps(payload).encode() if payload is not None else None
-        headers = {"Authorization": f"Bearer {self.token}"}
-        if data:
-            headers["Content-Type"] = "application/json"
-        request = urllib.request.Request(
-            f"{self.url}{path}", method=method, data=data, headers=headers
-        )
         try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                return json.loads(response.read())
-        except urllib.error.HTTPError as exc:
-            try:
-                detail = json.loads(exc.read()).get("detail", exc.reason)
-            except (ValueError, AttributeError):
-                detail = exc.reason
-            raise RuntimeError(f"Worker Service 返回 HTTP {exc.code}: {detail}") from exc
-        except TimeoutError as exc:
+            response = self.session.request(
+                method,
+                f"{self.url}{path}",
+                json=payload if payload is not None else None,
+                timeout=timeout,
+            )
+        except requests.Timeout as exc:
             raise RuntimeError(_timeout_message(timeout)) from exc
-        except urllib.error.URLError as exc:
-            if isinstance(exc.reason, TimeoutError):
-                raise RuntimeError(_timeout_message(timeout)) from exc
-            raise RuntimeError(f"无法连接本地 Worker Service: {exc.reason}") from exc
+        except requests.RequestException as exc:
+            raise RuntimeError(f"无法连接本地 Worker Service: {exc}") from exc
+        if response.status_code >= 400:
+            try:
+                detail = response.json().get("detail", response.reason)
+            except ValueError:
+                detail = response.reason
+            raise RuntimeError(f"Worker Service 返回 HTTP {response.status_code}: {detail}")
+        return response.json()
 
 
 def _timeout_message(timeout: int) -> str:

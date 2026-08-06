@@ -12,15 +12,14 @@
 //! harness failures (bad args, internal errors). SIGKILL remains the outer
 //! backstop and is unchanged.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use tokio_util::sync::CancellationToken;
 
-/// Shared cancellation flag. Cloning is cheap; all clones observe the same
+/// Shared cancellation flag, a thin wrapper over tokio-util's
+/// [`CancellationToken`]. Cloning is cheap; all clones observe the same
 /// flag. A default-constructed token is never cancelled (library/test use).
 #[derive(Debug, Clone, Default)]
 pub struct CancelToken {
-    flag: Arc<AtomicBool>,
-    notify: Arc<tokio::sync::Notify>,
+    inner: CancellationToken,
 }
 
 impl CancelToken {
@@ -49,21 +48,16 @@ impl CancelToken {
     }
 
     pub fn cancel(&self) {
-        self.flag.store(true, Ordering::SeqCst);
-        self.notify.notify_waiters();
+        self.inner.cancel();
     }
 
     pub fn is_cancelled(&self) -> bool {
-        self.flag.load(Ordering::SeqCst)
+        self.inner.is_cancelled()
     }
 
     /// Resolves once cancellation is requested; pends forever otherwise.
     pub async fn wait(&self) {
-        // Check-then-await loop closes the race between the flag check and
-        // registering as a waiter.
-        while !self.is_cancelled() {
-            self.notify.notified().await;
-        }
+        self.inner.cancelled().await;
     }
 }
 
@@ -82,6 +76,8 @@ mod tests {
         );
     }
 
+    /// Thin-wrapper check: cancel() must propagate to clones and wake wait().
+    /// (Deeper cancellation semantics are tokio-util's own concern.)
     #[tokio::test]
     async fn cancel_wakes_waiters() {
         let token = CancelToken::new();
@@ -95,6 +91,27 @@ mod tests {
             .await
             .expect("waiter must wake promptly")
             .unwrap();
+        assert!(token.is_cancelled());
+    }
+
+    /// install_sigterm_handler returns a live token and its armed handler
+    /// trips that token when the process receives SIGTERM.
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn sigterm_trips_installed_token() {
+        let token = CancelToken::install_sigterm_handler();
+        assert!(!token.is_cancelled());
+        // Give the spawned handler task a chance to register its listener.
+        tokio::task::yield_now().await;
+        // SAFETY: sending SIGTERM to our own process; tokio's signal
+        // machinery installs a catch-all handler, so the process is not
+        // terminated and the armed token is cancelled instead.
+        unsafe {
+            libc::kill(libc::getpid(), libc::SIGTERM);
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), token.wait())
+            .await
+            .expect("SIGTERM must trip the installed token");
         assert!(token.is_cancelled());
     }
 }

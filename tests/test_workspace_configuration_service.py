@@ -1,8 +1,8 @@
 import pytest
 
 from server.app.executors.config import (
-    LocalCapabilityConfig,
-    LocalExecutorConfig,
+    CodeCapabilityConfig,
+    CodeExecutorConfig,
     OpenClawCapabilityConfig,
     OpenClawExecutorConfig,
 )
@@ -45,18 +45,25 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
         workspace["id"],
         workspace_patch={"name": "Reading"},
         settings_patch={"workflowKey": "question_comprehension_info"},
-        executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+        executor_allocations=[
+            {"executor_id": "code-default", "concurrency_limit": 4},
+        ],
         node_bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
-                "executor_id": "local-default",
-            }
+                "executor_id": "code-default",
+            },
+            {
+                "workflow_key": "question_comprehension_info",
+                "node_key": "clean_and_parse",
+                "executor_id": "code-default",
+            },
         ],
         node_limits=[
             {
                 "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "node_key": "clean_and_parse",
                 "concurrency_limit": 2,
             }
         ],
@@ -64,7 +71,10 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
     assert result["workspace"]["name"] == "Reading"
     assert result["settings"]["workflowKey"] == "question_comprehension_info"
     assert result["executor_configuration"]["allocations"][0]["concurrency_limit"] == 4
-    assert result["executor_configuration"]["bindings"][0]["node_key"] == "fetch_questions"
+    assert {b["node_key"] for b in result["executor_configuration"]["bindings"]} == {
+        "fetch_questions",
+        "clean_and_parse",
+    }
     assert result["executor_configuration"]["node_limits"][0]["concurrency_limit"] == 2
 
 
@@ -78,12 +88,12 @@ def test_replace_configuration_rolls_back_workspace_on_invalid_binding(
             workspace["id"],
             workspace_patch={"name": "Must Roll Back"},
             settings_patch={"workflowKey": "question_comprehension_info"},
-            executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+            executor_allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
             node_bindings=[
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "unknown_node",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 }
             ],
             node_limits=[],
@@ -121,14 +131,14 @@ def test_executor_stats_report_configured_capacity_and_leases(
     job_db.replace_workspace_executor_configuration(
         workspace["id"],
         allocations=[
-            {"executor_id": "local-default", "concurrency_limit": 4},
+            {"executor_id": "code-default", "concurrency_limit": 4},
             {"executor_id": "openclaw-main", "concurrency_limit": 2},
         ],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "fetch",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             },
             {
                 "workflow_key": "question_comprehension_info",
@@ -154,7 +164,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
 
     repo = ExecutorLeaseRepository(job_db.path)
     claim_specs = [
-        ("local-default", "fetch", "fetch_questions", 16, None),
+        ("code-default", "fetch", "fetch_questions", 16, None),
         ("openclaw-main", "review", "review", 8, None),
     ]
     for i, (executor_id, node_key, capability, global_capacity, local_limit) in enumerate(
@@ -180,11 +190,11 @@ def test_executor_stats_report_configured_capacity_and_leases(
     executor_status = stats["executor_status"]
     executors = {e["executor_id"]: e for e in executor_status["executors"]}
 
-    assert executors["local-default"]["kind"] == "local"
-    assert executors["local-default"]["global_capacity"] == 128
-    assert executors["local-default"]["workspace_limit"] == 4
-    assert executors["local-default"]["running"] == 1
-    assert executors["local-default"]["available"] == 3
+    assert executors["code-default"]["kind"] == "code"
+    assert executors["code-default"]["global_capacity"] == 16
+    assert executors["code-default"]["workspace_limit"] == 4
+    assert executors["code-default"]["running"] == 1
+    assert executors["code-default"]["available"] == 3
 
     assert executors["openclaw-main"]["kind"] == "openclaw"
     assert executors["openclaw-main"]["global_capacity"] == 8
@@ -197,21 +207,21 @@ def test_executor_stats_does_not_consult_agent_status_manager(
     workspace_service, workspace, job_db, settings, monkeypatch
 ):
     executor_definitions = dict(settings.executor_definitions)
-    executor_definitions["local-default"] = LocalExecutorConfig(
-        kind="local",
+    executor_definitions["code-default"] = CodeExecutorConfig(
+        kind="code",
         global_capacity=4,
-        capabilities={"fetch": LocalCapabilityConfig(handler="x")},
+        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
     )
     monkeypatch.setattr(settings, "executor_definitions", executor_definitions)
 
     job_db.replace_workspace_executor_configuration(
         workspace["id"],
-        allocations=[{"executor_id": "local-default", "concurrency_limit": 2}],
+        allocations=[{"executor_id": "code-default", "concurrency_limit": 2}],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "fetch",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             }
         ],
         node_limits=[],
@@ -240,12 +250,12 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     for workspace_id, limit in ((workspace["id"], 8), (other["id"], 128)):
         job_db.replace_workspace_executor_configuration(
             workspace_id,
-            allocations=[{"executor_id": "local-default", "concurrency_limit": limit}],
+            allocations=[{"executor_id": "code-default", "concurrency_limit": limit}],
             bindings=[
                 {
                     "workflow_key": "question_comprehension_info",
                     "node_key": "fetch",
-                    "executor_id": "local-default",
+                    "executor_id": "code-default",
                 }
             ],
             node_limits=[],
@@ -265,7 +275,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
         )
         claim = repo.try_claim(
             LeaseClaimRequest(
-                executor_id="local-default",
+                executor_id="code-default",
                 global_capacity=128,
                 workspace_id=owner["id"],
                 job_id=job["id"],

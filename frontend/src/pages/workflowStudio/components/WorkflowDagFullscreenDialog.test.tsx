@@ -24,8 +24,8 @@ const workflow: WorkflowDefinitionRecord = {
 
 const executorCatalog = [
   {
-    id: 'local-default',
-    kind: 'local' as const,
+    id: 'code-default',
+    kind: 'code' as const,
     global_capacity: 4,
     capabilities: ['cap_a'],
   },
@@ -61,7 +61,7 @@ describe('WorkflowDagFullscreenDialog', () => {
     expect(
       screen.getByRole('button', { name: 'close fullscreen DAG' })
     ).toBeInTheDocument()
-    expect(screen.getByText('local')).toBeInTheDocument()
+    expect(screen.getByText('code')).toBeInTheDocument()
   })
 
   it('closes dialog and preserves selected node state', async () => {

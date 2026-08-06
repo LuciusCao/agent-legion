@@ -556,7 +556,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--execute", action="store_true", help="actually replay (default dry-run)")
     parser.add_argument("--model", default=DEFAULT_MODEL)
-    parser.add_argument("--pi-provider", default="gateway")
+    parser.add_argument("--pi-provider", default="deepseek")
     parser.add_argument("--velites-provider", default="gateway")
     parser.add_argument("--thinking", default="low")
     parser.add_argument("--pi-binary", default="pi")

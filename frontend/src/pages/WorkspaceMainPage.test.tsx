@@ -4,16 +4,10 @@ import { Link, Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceMainPage from './WorkspaceMainPage'
 import { useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
-import {
-  api,
-  fetchJobs,
-  fetchWorkflowDefinition,
-  fetchWorkspacePackages,
-} from '../api'
+import { api, fetchWorkflowDefinition, fetchWorkspacePackages } from '../api'
 import {
   batchRerunJobs,
   batchDeleteJobs,
@@ -28,7 +22,6 @@ import { makeJob } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 
 const mockApi = vi.fn()
-const mockFetchJobs = vi.fn()
 const mockFetchJobsSnapshot = vi.fn()
 const mockFetchJobFacets = vi.fn()
 const mockFetchWorkspaceStats = vi.fn()
@@ -42,7 +35,6 @@ const mockUpgradeJobWorkflow = vi.fn()
 
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
-  fetchJobs: (...args: Parameters<typeof fetchJobs>) => mockFetchJobs(...args),
   fetchJobsSnapshot: (
     ...args: Parameters<typeof import('../api').fetchJobsSnapshot>
   ) => mockFetchJobsSnapshot(...args),
@@ -132,8 +124,8 @@ const baseStats: WorkspaceStats = {
   executor_status: {
     executors: [
       {
-        executor_id: 'local-default',
-        kind: 'local',
+        executor_id: 'code-default',
+        kind: 'code',
         global_capacity: 16,
         workspace_limit: 4,
         running: 1,
@@ -184,7 +176,6 @@ describe('WorkspaceMainPage', () => {
     globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
 
     mockApi.mockReset()
-    mockFetchJobs.mockReset()
     mockFetchJobsSnapshot.mockReset()
     mockFetchJobFacets.mockReset()
     mockFetchWorkspaceStats.mockReset()
@@ -196,7 +187,6 @@ describe('WorkspaceMainPage', () => {
     mockBatchRunToJobs.mockReset()
     mockUpgradeJobWorkflow.mockReset()
 
-    mockFetchJobs.mockResolvedValue({ jobs: [] })
     mockFetchJobsSnapshot.mockImplementation(() =>
       Promise.resolve({
         workspace_id: 'ws1',
@@ -251,13 +241,6 @@ describe('WorkspaceMainPage', () => {
       batchRunToLoading: false,
       batchUpgradeWorkflowLoading: false,
     })
-    useWorkspaceStore.setState({
-      workspaces: [],
-      currentWorkspace: null,
-      workspaceStats: { ws1: baseStats },
-      loading: false,
-      error: null,
-    })
     useAgentsStore.setState({
       agents: [
         makeAgentStatus({
@@ -284,7 +267,6 @@ describe('WorkspaceMainPage', () => {
         intakeModes: [],
         labelOverrides: {},
         workflowKey: '',
-        resources: {},
       },
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
@@ -293,13 +275,11 @@ describe('WorkspaceMainPage', () => {
         intakeModes: [],
         labelOverrides: {},
         workflowKey: '',
-        resources: {},
       },
       isDirty: false,
       testStatus: { state: 'idle' },
       isSaving: false,
       saveError: null,
-      executorCatalog: [],
       executorConfiguration: {
         allocations: [],
         bindings: [],
@@ -308,7 +288,6 @@ describe('WorkspaceMainPage', () => {
       },
       originalExecutorConfiguration: null,
       pendingAllocationRemoval: null,
-      workflowDefinition: null,
     })
   })
 
@@ -344,11 +323,6 @@ describe('WorkspaceMainPage', () => {
       ...baseStats,
       job_stats: { pending: 0, running: 0, completed: 0, failed: 0 },
     }
-    useWorkspaceStore.setState({
-      workspaceStats: {
-        ws1: emptyStats,
-      },
-    })
     mockFetchWorkspaceStats.mockResolvedValue(emptyStats)
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/workspaces/ws1/stats') {
@@ -523,7 +497,6 @@ describe('WorkspaceMainPage', () => {
         ],
       }),
     ]
-    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
       selectedIds: new Set(['j1', 'j2']),
@@ -576,7 +549,6 @@ describe('WorkspaceMainPage', () => {
     })
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
     const seed = [makeJob({ id: 'j1', status: 'completed' })]
-    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
       selectedIds: new Set(['j1']),
@@ -607,7 +579,6 @@ describe('WorkspaceMainPage', () => {
       results: [{ job_id: 'j1', operation: 'delete', status: 'succeeded' }],
     })
     const seed = [makeJob({ id: 'j1', status: 'failed' })]
-    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
       selectedIds: new Set(['j1']),
@@ -646,7 +617,6 @@ describe('WorkspaceMainPage', () => {
         workflow_key: 'question_content',
       }),
     ]
-    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
       selectedIds: new Set(['j1']),
@@ -711,7 +681,6 @@ describe('WorkspaceMainPage', () => {
         workflow_key: 'question_content',
       }),
     ]
-    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
       selectedIds: new Set(['j1', 'j2']),
@@ -756,7 +725,6 @@ describe('WorkspaceMainPage', () => {
         workflow_key: 'question_content',
       }),
     ]
-    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
       selectedIds: new Set(['j1']),
@@ -788,7 +756,6 @@ describe('WorkspaceMainPage', () => {
     await waitFor(() => {
       expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(2)
     })
-    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
   it('submits batch workflow upgrade for outdated jobs', async () => {
@@ -804,7 +771,6 @@ describe('WorkspaceMainPage', () => {
         is_workflow_outdated: true,
       }),
     ]
-    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
       selectedIds: new Set(['j1']),

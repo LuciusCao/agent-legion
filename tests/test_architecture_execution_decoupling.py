@@ -1,6 +1,6 @@
 """Contract tests for execution-decoupling invariants.
 
-EXEC-KIND-001: local executor kinds resolve through the kinds registry
+EXEC-KIND-001: executor kinds resolve through the kinds registry
 (``register_kind``/``build_executor``); ``isinstance`` dispatch chains over
 executor config types are forbidden in ``registry.py``.
 """
@@ -29,7 +29,8 @@ def test_registry_has_no_isinstance_kind_dispatch() -> None:
     )
 
 
-def test_builtin_kinds_exclude_removed_remote_executor() -> None:
+def test_builtin_kinds_exclude_removed_executors() -> None:
     kinds = set(registered_kind_names())
-    assert {"local", "pi", "openclaw"} <= kinds
+    assert {"code", "pi", "openclaw"} <= kinds
+    assert "local" not in kinds
     assert "remote" not in kinds

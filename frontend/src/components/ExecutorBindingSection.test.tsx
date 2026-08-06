@@ -1,12 +1,31 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { ExecutorBindingSection } from './ExecutorBindingSection'
 import { useSettingStore } from '../stores/settingStore'
+import type { WorkflowDefinitionRecord } from '../types'
+import type { ExecutorDefinition } from '../types/executorTypes'
+import type { WorkspaceAgentRouteEntry } from '../hooks/useWorkspaceSettingsQuery'
+
+// executorCatalog/agentRoutes/workflowDefinition 已迁入 react-query；
+// 这里 mock 两个 query hook，draft（executorConfiguration）仍写 store。
+const mockQueryData = vi.hoisted(() => ({
+  executorCatalog: { current: [] as ExecutorDefinition[] },
+  agentRoutes: { current: [] as WorkspaceAgentRouteEntry[] },
+  workflowDefinition: { current: null as WorkflowDefinitionRecord | null },
+}))
+
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useWorkspaceSettingsSnapshot: () => ({
+    workflowDefinition: mockQueryData.workflowDefinition.current,
+    executorCatalog: mockQueryData.executorCatalog.current,
+    agentRoutes: mockQueryData.agentRoutes.current,
+  }),
+}))
 
 const catalog = [
   {
-    id: 'local-default',
-    kind: 'local' as const,
+    id: 'code-default',
+    kind: 'code' as const,
     capabilities: ['fetch_questions', 'clean_and_parse', 'mark_question'],
     global_capacity: 4,
   },
@@ -15,7 +34,6 @@ const catalog = [
 const workflowDefinition = {
   key: 'sample_workflow',
   label: '示例工作流',
-  concurrency: { local: 8, agent: 2, nodes: {} },
   intake: { modes: [] },
   edges: [],
   nodes: [
@@ -83,14 +101,21 @@ function changeSelectValue(nodeKey: string, value: string) {
 
 describe('ExecutorBindingSection', () => {
   beforeEach(() => {
+    mockQueryData.executorCatalog.current = catalog
+    mockQueryData.agentRoutes.current = []
+    mockQueryData.workflowDefinition.current = workflowDefinition
     useSettingStore.setState({
       workspaceId: 'ws1',
-      executorCatalog: catalog,
-      workflowDefinition,
+      settings: {
+        entityType: 'question',
+        intakeModes: [],
+        labelOverrides: {},
+        workflowKey: 'sample_workflow',
+      },
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -116,25 +141,25 @@ describe('ExecutorBindingSection', () => {
 
     // The rendered input values reflect the available options.
     expect(getSelectInput('fetch_questions').value).toBe('')
-    changeSelectValue('fetch_questions', 'local-default')
-    expect(getSelectInput('fetch_questions').value).toBe('local-default')
+    changeSelectValue('fetch_questions', 'code-default')
+    expect(getSelectInput('fetch_questions').value).toBe('code-default')
   })
 
   it('matches local nodes by capability, independent of executor implementation', () => {
+    mockQueryData.executorCatalog.current = [
+      ...catalog,
+      {
+        id: 'alternate-local',
+        kind: 'pi' as const,
+        capabilities: ['fetch_questions'],
+        global_capacity: 1,
+      },
+    ]
     useSettingStore.setState({
-      executorCatalog: [
-        ...catalog,
-        {
-          id: 'alternate-local',
-          kind: 'pi' as const,
-          capabilities: ['fetch_questions'],
-          global_capacity: 1,
-        },
-      ],
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -153,8 +178,8 @@ describe('ExecutorBindingSection', () => {
     render(<ExecutorBindingSection />)
 
     // Both compatible executors are selectable.
-    changeSelectValue('fetch_questions', 'local-default')
-    expect(getSelectInput('fetch_questions').value).toBe('local-default')
+    changeSelectValue('fetch_questions', 'code-default')
+    expect(getSelectInput('fetch_questions').value).toBe('code-default')
 
     changeSelectValue('fetch_questions', 'alternate-local')
     expect(getSelectInput('fetch_questions').value).toBe('alternate-local')
@@ -166,5 +191,26 @@ describe('ExecutorBindingSection', () => {
     expect(
       screen.getByText('没有已分配的执行器支持能力 unsupported_capability')
     ).toBeInTheDocument()
+  })
+
+  it('excludes agent nodes, which are routed by Agent ID', () => {
+    mockQueryData.agentRoutes.current = [
+      {
+        workflow_key: 'sample_workflow',
+        node_key: 'review_keywords',
+        node_label: '审核关键词',
+        capability: 'review_keywords',
+        agent_id: 'keyword-reviewer',
+        agent_skill: 'review_key_info',
+      },
+    ]
+
+    render(<ExecutorBindingSection />)
+
+    expect(
+      screen.queryByTestId('binding-select-review_keywords')
+    ).not.toBeInTheDocument()
+    expect(getSelectInput('fetch_questions')).toBeInTheDocument()
+    expect(getSelectInput('generate_distractors')).toBeInTheDocument()
   })
 })

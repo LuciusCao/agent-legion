@@ -7,6 +7,7 @@ import pytest
 
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
+from tests.helpers import replace_agent_catalog
 from tests.helpers.executor_worker import (
     allocate,
     bind,
@@ -20,9 +21,9 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 
 class BlockingExecutor:
-    """Fake local executor that blocks until released."""
+    """Fake code executor that blocks until released."""
 
-    kind = "local"
+    kind = "code"
 
     def __init__(self, executor_id: str, block_event: threading.Event) -> None:
         self.id = executor_id
@@ -51,10 +52,10 @@ def _setup(
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     block_event = threading.Event()
-    executor = BlockingExecutor("local-default", block_event)
+    executor = BlockingExecutor("code-default", block_event)
     registry = make_registry(
-        {"local-default": executor},
-        {"local-default": local_def(capacity, {"fetch"})},
+        {"code-default": executor},
+        {"code-default": local_def(capacity, {"fetch"})},
     )
     definition = make_definition([local_node("fetch")])
     for i in range(job_count):
@@ -67,8 +68,8 @@ def _setup(
             node_keys=["fetch"],
             workspace_id=ws["id"],
         )
-    bind(job_db, ws["id"], "test", "fetch", "local-default")
-    allocate(job_db, ws["id"], "local-default", workspace_limit)
+    bind(job_db, ws["id"], "test", "fetch", "code-default")
+    allocate(job_db, ws["id"], "code-default", workspace_limit)
     worker = make_worker(tmp_path, db_path, registry, [definition])
     return worker, ws, block_event
 
@@ -88,10 +89,14 @@ def _count_calls(monkeypatch: pytest.MonkeyPatch, obj: object, attr: str) -> dic
 def test_saturated_executor_skips_scan_and_claims(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    # The saturated fast path requires zero agent work: with the catalog now
+    # DB-global (conftest seeds 9 published Agents), archive it so the
+    # no-capacity/no-agents early exit applies.
+    replace_agent_catalog({})
     worker, _ws, block_event = _setup(tmp_path, capacity=1, workspace_limit=1, job_count=2)
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("local-default")["global"] == 1
+    assert worker.leases.active_counts("code-default")["global"] == 1
 
     scan_calls = _count_calls(monkeypatch, worker, "_runnable_workspaces")
     claim_calls = _count_calls(monkeypatch, worker.leases, "try_claim_many")
@@ -99,7 +104,7 @@ def test_saturated_executor_skips_scan_and_claims(
     assert worker._poll() is False
     assert scan_calls["count"] == 0
     assert claim_calls["count"] == 0
-    assert worker.leases.active_counts("local-default")["global"] == 1
+    assert worker.leases.active_counts("code-default")["global"] == 1
 
     block_event.set()
     worker.stop()
@@ -114,7 +119,7 @@ def test_multi_claim_uses_single_scan_per_pass(
 
     assert worker._poll() is True
     assert scan_calls["count"] == 1
-    assert worker.leases.active_counts("local-default")["global"] == 2
+    assert worker.leases.active_counts("code-default")["global"] == 2
     assert len(worker._futures) == 2
 
     block_event.set()
@@ -152,7 +157,7 @@ def test_workspace_allocation_precheck_allows_exactly_one_claim(
 
 
 def _assert_one_running_two_pending(worker, workspace_id: str) -> None:
-    assert worker.leases.active_counts("local-default")["global"] == 1
+    assert worker.leases.active_counts("code-default")["global"] == 1
     statuses = [
         node["status"]
         for job in worker.job_db.list_jobs(workspace_id=workspace_id, workflow_key="test")

@@ -152,7 +152,7 @@ def test_worker_metrics_require_token_and_are_forced_to_own_worker(tmp_path: Pat
                 insert into ops_metric_samples(
                   bucket_start, worker_id, online_workers, active_executions,
                   input_tokens, output_tokens, cache_read_tokens, total_tokens
-                ) values (?, ?, 1, 0, 10, 5, 1, ?)
+                ) values (%s, %s, 1, 0, 10, 5, 1, %s)
                 """,
                 (bucket, worker_id, total_tokens),
             )
@@ -219,7 +219,7 @@ def test_queued_claim_uses_latest_execution_config_from_same_revision(tmp_path: 
         "test-workspace", definition
     )
     with app.state.job_db.connect() as conn:
-        conn.execute("update jobs set workflow_revision_id=? where id='job-1'", (revision["id"],))
+        conn.execute("update jobs set workflow_revision_id=%s where id='job-1'", (revision["id"],))
 
     with TestClient(app) as client:
         token = _register(
@@ -229,7 +229,7 @@ def test_queued_claim_uses_latest_execution_config_from_same_revision(tmp_path: 
         )["worker_token"]
         claimed = _claim(client, token)
 
-    assert claimed["manifest"]["pi"]["model"] == "latest-model"
+    assert claimed["manifest"]["execution"]["model"] == "latest-model"
 
 
 def test_heartbeat_requires_and_validates_lease_id(tmp_path: Path) -> None:
@@ -642,7 +642,7 @@ def test_result_run_dir_promotes_events_for_logs_and_token_usage(tmp_path: Path)
     with app.state.job_db._connect_read() as conn:
         node_run = conn.execute("select id, run_dir from node_runs where job_id='job-1'").fetchone()
         usage = conn.execute(
-            "select input_tokens, output_tokens from node_run_token_usage where node_run_id=?",
+            "select input_tokens, output_tokens from node_run_token_usage where node_run_id=%s",
             (node_run["id"],),
         ).fetchone()
     assert node_run["run_dir"] == "jobs/job-1/runs/generate/worker"

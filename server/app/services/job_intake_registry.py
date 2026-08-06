@@ -12,13 +12,16 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from server.app.services.job_errors import UnsupportedOperationError
+from server.app.services.job_errors import InvalidOperationError, UnsupportedOperationError
 from server.app.services.job_intake_resolution import (
-    resolve_cms_question_candidates,
+    resolve_cms_question_opaque_candidates,
     resolve_direct_candidates,
 )
+
+if TYPE_CHECKING:
+    from server.app.settings import Settings
 
 
 @dataclass(frozen=True)
@@ -63,19 +66,23 @@ RESOLVERS: dict[tuple[str, str], ResolverSpec] = {
     ("question", "by_knowledge"): ResolverSpec(
         "cms.questions_by_knowledge",
         "question",
-        "intake",
+        "node",
         "by_knowledge",
-        resolve_cms_question_candidates,
+        resolve_cms_question_opaque_candidates,
     ),
     ("question", "batch_by_ids"): ResolverSpec(
-        "cms.question_ids", "question", "intake", "question_detail", resolve_cms_question_candidates
+        "cms.question_ids",
+        "question",
+        "node",
+        "question_detail",
+        resolve_cms_question_opaque_candidates,
     ),
     ("question", "batch_by_knowledge"): ResolverSpec(
         "cms.questions_by_knowledge",
         "question",
-        "intake",
+        "node",
         "by_knowledge",
-        resolve_cms_question_candidates,
+        resolve_cms_question_opaque_candidates,
     ),
     ("video", "direct_ids"): ResolverSpec(
         "direct.video_ids", "video", None, None, resolve_direct_candidates
@@ -94,3 +101,28 @@ RESOLVERS: dict[tuple[str, str], ResolverSpec] = {
         _resolve_cms_knowledge_video_candidates,
     ),
 }
+
+
+def resolve_candidates(
+    spec: ResolverSpec,
+    entity: str,
+    input_values: list[str],
+    source_kind: str,
+    mode: Any,
+    settings: Settings,
+    workspace: dict[str, Any],
+    workspace_id: str,
+) -> list[dict[str, Any]]:
+    """Dispatch candidate resolution by the resolver's declared phase.
+
+    ``phase="intake"`` handlers resolve via CMS during fan-out;
+    ``phase="node"`` and direct (``phase=None``) handlers only build
+    candidates — node-phase resolution happens at DAG execution time.
+    """
+    if spec.phase == "intake":
+        return spec.handler(
+            entity, input_values, source_kind, spec.key, mode, settings, workspace, workspace_id
+        )
+    if spec.phase in (None, "node"):
+        return spec.handler(entity, input_values, source_kind)
+    raise InvalidOperationError(f"Unsupported resolver: {spec.key}")

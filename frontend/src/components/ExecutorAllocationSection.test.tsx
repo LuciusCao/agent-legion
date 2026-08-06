@@ -1,12 +1,12 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ExecutorAllocationSection } from './ExecutorAllocationSection'
 import { useSettingStore } from '../stores/settingStore'
 
 const catalog = [
   {
-    id: 'local-default',
-    kind: 'local' as const,
+    id: 'code-default',
+    kind: 'code' as const,
     capabilities: ['ingest'],
     global_capacity: 4,
   },
@@ -24,11 +24,19 @@ const catalog = [
   },
 ]
 
+// executorCatalog 已迁入 react-query；mock 快照 hook，draft 仍写 store。
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useWorkspaceSettingsSnapshot: () => ({
+    workflowDefinition: null,
+    executorCatalog: catalog,
+    agentRoutes: [],
+  }),
+}))
+
 describe('ExecutorAllocationSection', () => {
   beforeEach(() => {
     useSettingStore.setState({
       workspaceId: 'ws1',
-      executorCatalog: catalog,
       executorConfiguration: {
         allocations: [],
         bindings: [],
@@ -42,10 +50,10 @@ describe('ExecutorAllocationSection', () => {
   it('lists every YAML executor with kind, capabilities, and global capacity', () => {
     render(<ExecutorAllocationSection />)
 
-    expect(screen.getByText('local-default')).toBeInTheDocument()
+    expect(screen.getByText('code-default')).toBeInTheDocument()
     expect(screen.getByLabelText('分配 pi')).toBeInTheDocument()
     expect(screen.getByText('openclaw-main')).toBeInTheDocument()
-    expect(screen.getAllByText('local').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('code').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('pi').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('openclaw').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('全局容量: 4')).toBeInTheDocument()
@@ -71,7 +79,7 @@ describe('ExecutorAllocationSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -94,7 +102,7 @@ describe('ExecutorAllocationSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -117,7 +125,7 @@ describe('ExecutorAllocationSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -131,7 +139,7 @@ describe('ExecutorAllocationSection', () => {
     render(<ExecutorAllocationSection />)
 
     const switchEl = screen.getByRole('checkbox', {
-      name: /分配 local-default/,
+      name: /分配 code-default/,
     })
     fireEvent.click(switchEl)
 
@@ -148,7 +156,7 @@ describe('ExecutorAllocationSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -157,7 +165,7 @@ describe('ExecutorAllocationSection', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -168,7 +176,7 @@ describe('ExecutorAllocationSection', () => {
     render(<ExecutorAllocationSection />)
 
     const switchEl = screen.getByRole('checkbox', {
-      name: /分配 local-default/,
+      name: /分配 code-default/,
     })
     fireEvent.click(switchEl)
 
@@ -185,7 +193,7 @@ describe('ExecutorAllocationSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -194,7 +202,7 @@ describe('ExecutorAllocationSection', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -205,7 +213,7 @@ describe('ExecutorAllocationSection', () => {
     render(<ExecutorAllocationSection />)
 
     const switchEl = screen.getByRole('checkbox', {
-      name: /分配 local-default/,
+      name: /分配 code-default/,
     })
     fireEvent.click(switchEl)
 
@@ -231,7 +239,7 @@ describe('ExecutorAllocationSection', () => {
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -240,7 +248,7 @@ describe('ExecutorAllocationSection', () => {
           {
             workflow_key: 'question_content',
             node_key: 'ingest',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [
@@ -257,7 +265,7 @@ describe('ExecutorAllocationSection', () => {
     render(<ExecutorAllocationSection />)
 
     const switchEl = screen.getByRole('checkbox', {
-      name: /分配 local-default/,
+      name: /分配 code-default/,
     })
     fireEvent.click(switchEl)
 

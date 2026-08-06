@@ -11,7 +11,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from server.app import agent_claim_compatibility
+from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.unclaimable_reasons import WorkerDeclarations, unmatched_reasons
 from server.app.db.transaction import write_transaction
 from server.app.executors._failed_node_recording import record_failed_node_without_execution
@@ -56,18 +56,20 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
         # owns them. The revision join mirrors the claim candidate query.
         rows = conn.execute(
             """
-            select r.execution_id, r.job_id, r.node_key, r.manifest_json, d.capability,
-                   d.runtime,
+            select r.execution_id, r.job_id, r.node_key, r.manifest_json,
+                   d.definition_json::jsonb->>'capability' as capability,
+                   d.definition_json::jsonb->>'runtime' as runtime,
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
-            join agent_definitions d
-              on d.agent_id=r.agent_id and d.definition_hash=r.agent_definition_hash
-             and d.enabled=1
+            join versioned_entities d
+              on d.entity_type='agent' and d.workspace_id is null
+             and d.entity_key=r.agent_id and d.definition_hash=r.agent_definition_hash
+             and d.status='published'
             join jobs j on j.id=r.job_id
             left join workflow_revisions wr on wr.id=j.workflow_revision_id
             where r.state='queued'
             order by r.queued_at, r.execution_id
-            limit ?
+            limit %s
             for update of r skip locked
             """,
             (_SWEEP_LIMIT,),
@@ -88,8 +90,8 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             )
             outcome = {"status": "failed", "exit_code": 1, "error_message": error}
             conn.execute(
-                "update agent_execution_requests set state='done', outcome_json=?,"
-                " finished_at=current_timestamp where execution_id=?",
+                "update agent_execution_requests set state='done', outcome_json=%s,"
+                " finished_at=current_timestamp where execution_id=%s",
                 (json.dumps(outcome), row["execution_id"]),
             )
             updated = record_failed_node_without_execution(
@@ -102,9 +104,9 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             )
             if updated is not None:
                 conn.execute(
-                    "update jobs set status='failed', error_message=?,"
+                    "update jobs set status='failed', error_message=%s,"
                     " updated_at=current_timestamp"
-                    " where id=? and status not in ('failed', 'completed')",
+                    " where id=%s and status not in ('failed', 'completed')",
                     (error, row["job_id"]),
                 )
             failed.append(str(row["execution_id"]))

@@ -1,10 +1,3 @@
-.dangerZone {
-  padding: 20px 24px;
-  background: #ffebee;
-  border-radius: 16px;
-  margin-bottom: 16px;
-  border: 1px solid #ffcdd2;
-}
 .dangerRow {
   display: flex;
   justify-content: space-between;
@@ -20,15 +13,4 @@
   font-size: 14px;
   color: #c62828;
   margin-top: 4px;
-}
-.sectionTitle {
-  font-size: 18px;
-  font-weight: 500;
-  margin: 0 0 20px 0;
-  color: #1a1c1e;
-}
-.sectionDivider {
-  border: 0;
-  border-top: 1px solid #ffcdd2;
-  margin: 0 0 20px 0;
 }

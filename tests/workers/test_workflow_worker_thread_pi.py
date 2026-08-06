@@ -40,7 +40,7 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
             """
             insert into workspace_node_bindings
             (workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             """,
             (ws["id"], "test", "fetch", "pi-default"),
         )
@@ -48,7 +48,7 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
             """
             insert into workspace_executor_allocations
             (workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             """,
             (ws["id"], "pi-default", 2),
         )
@@ -80,7 +80,7 @@ def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) ->
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
-    executor = RecordingExecutor("local-default")
+    executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
     agent_manager = MagicMock()
 
@@ -98,17 +98,17 @@ def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) ->
             """
             insert into workspace_node_bindings
             (workspace_id, workflow_key, node_key, executor_id)
-            values (?, ?, ?, ?)
+            values (%s, %s, %s, %s)
             """,
-            (ws["id"], "test", "fetch", "local-default"),
+            (ws["id"], "test", "fetch", "code-default"),
         )
         conn.execute(
             """
             insert into workspace_executor_allocations
             (workspace_id, executor_id, concurrency_limit)
-            values (?, ?, ?)
+            values (%s, %s, %s)
             """,
-            (ws["id"], "local-default", 2),
+            (ws["id"], "code-default", 2),
         )
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])

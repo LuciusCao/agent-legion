@@ -4,7 +4,7 @@ import pytest
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.config_schema import ConfigSchemaError
-from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.services.node_config import (
     capability_config_schemas,
     dispatch_effective_config,
@@ -129,13 +129,15 @@ EXECUTOR_SCHEMA = {
 }
 
 
-def _executors(schema: dict | None = None) -> dict[str, LocalExecutorConfig]:
+def _executors(schema: dict | None = None) -> dict[str, CodeExecutorConfig]:
     return {
-        "local-default": LocalExecutorConfig(
-            kind="local",
+        "code-default": CodeExecutorConfig(
+            kind="code",
             global_capacity=2,
             capabilities={
-                "fetch": LocalCapabilityConfig(handler="mod.fetch", config_schema=schema or {}),
+                "fetch": CodeCapabilityConfig(
+                    path="workflow_nodes/question_intake.py", config_schema=schema or {}
+                ),
             },
         )
     }
@@ -175,10 +177,10 @@ def test_capability_schemas_agent_wins_executor_fallback() -> None:
 
 def test_executor_definition_capability_schema_targets_one_executor() -> None:
     executors = _executors(EXECUTOR_SCHEMA)
-    assert executor_definition_capability_schema(executors, "local-default", "fetch") == (
+    assert executor_definition_capability_schema(executors, "code-default", "fetch") == (
         EXECUTOR_SCHEMA
     )
-    assert executor_definition_capability_schema(executors, "local-default", "other") == {}
+    assert executor_definition_capability_schema(executors, "code-default", "other") == {}
     assert executor_definition_capability_schema(executors, "missing", "fetch") == {}
 
 

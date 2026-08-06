@@ -1,53 +1,32 @@
 import { useMemo, useState } from 'react'
-import {
-  FormControl,
-  MenuItem,
-  Select,
-  ToggleButton,
-  ToggleButtonGroup,
-} from '@mui/material'
-import { fetchOpsMetrics } from '../api/metrics'
+import { useQuery } from '@tanstack/react-query'
 import type { OpsGranularity } from '../api/metrics'
 import { listAgentWorkers } from '../api/workerTokens'
+import { queryKeys } from '../lib/queryKeys'
+import { useOpsMetrics } from '../hooks/useOpsMetrics'
 import { fillWindowBuckets } from '../lib/opsMetricsWindow'
 import { lastNonNullBucket } from '../lib/opsMetricsBuckets'
+import { fmt, fmtDuration, makeTimeFormatter } from '../lib/monitoringFormat'
 import { MetricsChart } from './MetricsChart'
+import { MonitoringHeader } from './MonitoringHeader'
+import {
+  QueueAlertBanner,
+  QueueDepthChartSection,
+  QueueSummaryCards,
+} from './MonitoringQueueSection'
 import type { ChartSeries } from '../lib/metricsChartOptions'
-import { useAsync } from '../hooks/useAsync'
 import styles from './MonitoringPanel.module.css'
 
 const REFRESH_MS = 30_000
 
-function fmt(value: number | null | undefined) {
-  return typeof value === 'number' ? value.toLocaleString('zh-CN') : '-'
-}
-
-// 耗时展示：不足 1 分钟按秒，否则「Xm YYs」；无数据（窗口内无完成 run）显示占位符。
-function fmtDuration(seconds: number | null | undefined) {
-  if (typeof seconds !== 'number') return '-'
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const minutes = Math.floor(seconds / 60)
-  const rest = Math.round(seconds % 60)
-  return `${minutes}m ${pad(rest)}s`
-}
-
-function pad(n: number) {
-  return String(n).padStart(2, '0')
-}
-
-function makeTimeFormatter(granularity: OpsGranularity) {
-  return (iso: string) => {
-    const d = new Date(iso)
-    // 30d 的 4 小时桶需要「日期 + 小时」才能区分同一天内的多个桶
-    if (granularity === '30d')
-      return `${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:00`
-    return `${pad(d.getHours())}:${pad(d.getMinutes())}`
-  }
-}
-
 // 图表 series 为静态常量，保证引用稳定（MetricsChart 依赖引用相等性决定重建时机）
 const CONCURRENCY_SERIES: ChartSeries[] = [
   { key: 'online_workers', label: '在线 Worker', color: '#16a34a' },
+  { key: 'active_executions', label: '活跃执行', color: '#2563eb' },
+]
+
+// workspace 视图的并发图只画活跃执行（在线 Worker 是 fleet 级指标）。
+const ACTIVE_SERIES: ChartSeries[] = [
   { key: 'active_executions', label: '活跃执行', color: '#2563eb' },
 ]
 
@@ -57,22 +36,26 @@ const TOKEN_SERIES: ChartSeries[] = [
   { key: 'cache_read_tokens', label: '缓存读', color: '#0891b2' },
 ]
 
-export function MonitoringPanel() {
+export function MonitoringPanel({ workspaceId }: { workspaceId?: string }) {
   const [granularity, setGranularity] = useState<OpsGranularity>('6h')
   const [workerId, setWorkerId] = useState('')
 
   // Worker 列表拉取失败不阻塞监控数据，仅不提供过滤选项（error 不消费）。
-  const { data: workerList } = useAsync(() => listAgentWorkers(), [])
+  const { data: workerList } = useQuery({
+    queryKey: queryKeys.agentWorkers(),
+    queryFn: listAgentWorkers,
+  })
   const workers = workerList ?? []
 
-  const { data, loading, error } = useAsync(
-    () =>
-      fetchOpsMetrics({
-        granularity,
-        ...(workerId ? { worker_id: workerId } : {}),
-      }),
-    [granularity, workerId],
-    { refetchInterval: REFRESH_MS }
+  // workspace 与 worker 两种过滤不可叠加（采样行各属其类）；ws 视图隐藏过滤器。
+  // 与 QueueDepthChartSection 同参数时共享同一 queryKey，自动合并为一次请求。
+  const { data, isPending, error } = useOpsMetrics(
+    {
+      granularity,
+      ...(workerId && !workspaceId ? { worker_id: workerId } : {}),
+      ...(workspaceId ? { workspace_id: workspaceId } : {}),
+    },
+    REFRESH_MS
   )
 
   const formatTime = useMemo(
@@ -92,62 +75,37 @@ export function MonitoringPanel() {
   const hourlyRuns = summary?.recent_hour_runs
 
   if (error) {
-    return <p className={styles.error}>监控数据加载失败：{error}</p>
+    return <p className={styles.error}>监控数据加载失败：{error.message}</p>
   }
 
   return (
     <section className={styles.panel} aria-label="运维监控">
-      <header className={styles.header}>
-        <div className={styles.titleGroup}>
-          <h2>运维监控</h2>
-          <p>在线 Worker、执行并发与 token 吞吐趋势，每 30 秒自动刷新。</p>
-        </div>
-        <div className={styles.controls}>
-          <FormControl size="small">
-            <Select
-              value={workerId}
-              onChange={(e) => setWorkerId(e.target.value)}
-              displayEmpty
-              inputProps={{ 'aria-label': '选择 Worker' }}
-            >
-              <MenuItem value="">全部 Worker</MenuItem>
-              {workers.map((w) => (
-                <MenuItem key={w.worker_id} value={w.worker_id}>
-                  {w.name || w.worker_id}
-                  {w.online ? '（在线）' : '（离线）'}
-                </MenuItem>
-              ))}
-            </Select>
-          </FormControl>
-          <ToggleButtonGroup
-            size="small"
-            exclusive
-            value={granularity}
-            onChange={(_e, value: OpsGranularity | null) => {
-              if (value) setGranularity(value)
-            }}
-            aria-label="时间粒度"
-          >
-            <ToggleButton value="6h">近 6 小时</ToggleButton>
-            <ToggleButton value="24h">近 24 小时</ToggleButton>
-            <ToggleButton value="30d">近 30 天</ToggleButton>
-          </ToggleButtonGroup>
-        </div>
-      </header>
+      <MonitoringHeader
+        workspaceId={workspaceId}
+        granularity={granularity}
+        onGranularityChange={setGranularity}
+        workerId={workerId}
+        onWorkerChange={setWorkerId}
+        workers={workers}
+      />
+
+      <QueueAlertBanner summary={summary} />
 
       <div className={styles.summaryGrid}>
-        <div className={styles.metric}>
-          <div className={styles.metricLabel}>当前在线 Worker</div>
-          <div
-            className={styles.metricValue}
-            data-testid="online-workers-summary"
-          >
-            {fmt(summary?.online_workers)}
+        {!workspaceId && (
+          <div className={styles.metric}>
+            <div className={styles.metricLabel}>当前在线 Worker</div>
+            <div
+              className={styles.metricValue}
+              data-testid="online-workers-summary"
+            >
+              {fmt(summary?.online_workers)}
+            </div>
+            <div className={styles.metricMeta}>
+              窗口峰值 {fmt(latest?.online_workers_max)}
+            </div>
           </div>
-          <div className={styles.metricMeta}>
-            窗口峰值 {fmt(latest?.online_workers_max)}
-          </div>
-        </div>
+        )}
         <div className={styles.metric}>
           <div className={styles.metricLabel}>当前活跃执行</div>
           <div
@@ -185,15 +143,25 @@ export function MonitoringPanel() {
             {fmtDuration(hourlyRuns?.duration_p95_seconds)}
           </div>
         </div>
+        <QueueSummaryCards queue={summary?.queue} />
       </div>
 
+      <QueueDepthChartSection
+        granularity={granularity}
+        formatTime={formatTime}
+        workspaceId={workspaceId}
+      />
+
       <div className={styles.chartSection}>
-        <h3>Worker 与执行并发{loading && !data ? '（加载中…）' : ''}</h3>
+        <h3>
+          {workspaceId ? '执行并发' : 'Worker 与执行并发'}
+          {isPending ? '（加载中…）' : ''}
+        </h3>
         <MetricsChart
           buckets={buckets}
           ariaLabel="在线 Worker 与活跃执行趋势"
           formatTime={formatTime}
-          series={CONCURRENCY_SERIES}
+          series={workspaceId ? ACTIVE_SERIES : CONCURRENCY_SERIES}
         />
       </div>
 

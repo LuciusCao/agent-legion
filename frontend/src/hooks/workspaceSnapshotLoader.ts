@@ -1,4 +1,5 @@
 import type { MutableRefObject } from 'react'
+import type { QueryClient } from '@tanstack/react-query'
 import { useJobStore } from '../stores/jobStore'
 import { loadWorkspaceJobsSnapshot } from './workspaceEventHandlers'
 
@@ -10,6 +11,7 @@ import { loadWorkspaceJobsSnapshot } from './workspaceEventHandlers'
  * and leaves the pending queue untouched for the newer load to replay.
  */
 export function createLoadSnapshot(
+  queryClient: QueryClient,
   workspaceId: string,
   snapshotLoadingRef: MutableRefObject<boolean>,
   pendingEventsRef: MutableRefObject<MessageEvent[]>,
@@ -23,7 +25,7 @@ export function createLoadSnapshot(
     const isAborted = () => isStale() || !isCurrent()
     snapshotLoadingRef.current = true
     try {
-      await loadWorkspaceJobsSnapshot(workspaceId, isAborted)
+      await loadWorkspaceJobsSnapshot(queryClient, workspaceId, isAborted)
       if (isAborted()) return
       pendingEventsRef.current.forEach(processEvent)
       pendingEventsRef.current = []

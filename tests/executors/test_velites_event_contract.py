@@ -8,10 +8,16 @@ the authoritative schema exported from the Rust code
 drift fails here instead of at runtime.
 
 Consumer surface (re-verify against the code when updating this file):
-- ``server/app/services/pi_event_scan.py:27-43`` — event-type allowlist
+- ``shared/pi_events.py:30-46`` — event-type allowlist
 - ``server/app/services/token_usage.py:57-76,134-142`` — usage/provider/model
-- ``server/app/workflows/pi_model_error.py:15-44`` — errorMessage/stopReason
+- ``shared/pi_model_error.py:16-45`` — errorMessage/stopReason
 - ``server/app/services/job_log_renderer.py:86,120-182`` — render fields
+
+Schema v2: ``turn_end`` carries only ``turnIndex`` and ``agent_end`` no
+longer carries the full ``messages`` history — the redundant payload copies
+were never read by any Host consumer and inflated events.jsonl 2-3x on long
+runs. ``message_end`` / ``tool_execution_end`` remain the sole content
+carriers.
 """
 
 from __future__ import annotations
@@ -22,7 +28,7 @@ from typing import Any
 
 import pytest
 
-from server.app.services.pi_event_scan import RELEVANT_EVENT_TYPES
+from shared.pi_events import RELEVANT_EVENT_TYPES
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = REPO_ROOT / "velites" / "schema" / "events.schema.json"
@@ -91,7 +97,7 @@ def _message_schema(schema: dict[str, Any], event_def: str) -> dict[str, Any]:
 
 
 def test_event_types_cover_host_allowlist(schema: dict[str, Any]) -> None:
-    """pi_event_scan.py:27-43 — every allowlisted type must exist in the schema."""
+    """shared/pi_events.py:30-46 — every allowlisted type must exist in the schema."""
     consts = _event_type_consts(schema)
     assert consts == VELITES_EVENT_TYPES
     assert consts >= set(RELEVANT_EVENT_TYPES)
@@ -125,7 +131,7 @@ def _ref_branch(schema: dict[str, Any], node: dict[str, Any]) -> dict[str, Any]:
 
 
 def test_message_end_assistant_metadata(schema: dict[str, Any]) -> None:
-    """token_usage.py:134-142 / pi_model_error.py:39-44 — provider/model/stopReason."""
+    """token_usage.py:134-142 / shared/pi_model_error.py:40-45 — provider/model/stopReason."""
     message = _message_schema(schema, "MessageEndEvent")
     properties = message["properties"]
     for field in ("provider", "model", "stopReason", "content"):
@@ -136,17 +142,26 @@ def test_message_end_assistant_metadata(schema: dict[str, Any]) -> None:
 
 
 def test_error_message_field_optional(schema: dict[str, Any]) -> None:
-    """pi_model_error.py:40-41 — errorMessage present on messages, may be absent."""
-    for event_def in ("MessageStartEvent", "MessageEndEvent", "TurnEndEvent"):
+    """shared/pi_model_error.py:40-42 — errorMessage present on messages, may be absent."""
+    for event_def in ("MessageStartEvent", "MessageEndEvent"):
         message = _message_schema(schema, event_def)
         assert "errorMessage" in message["properties"], f"{event_def} message.errorMessage"
         assert "errorMessage" not in message.get("required", [])
 
 
+def test_turn_end_carries_only_turn_index(schema: dict[str, Any]) -> None:
+    """Schema v2: turn_end is a bare boundary marker (no message/toolResults copies)."""
+    event = schema["$defs"]["TurnEndEvent"]
+    assert "turnIndex" in event["properties"], "turn_end.turnIndex missing"
+    assert "turnIndex" in event["required"]
+    assert "message" not in event["properties"], "turn_end.message must stay trimmed"
+    assert "toolResults" not in event["properties"], "turn_end.toolResults must stay trimmed"
+
+
 def test_auto_retry_start_contract(schema: dict[str, Any]) -> None:
     """Pi-compatible retry observability: auto_retry_start carries the attempt counter."""
     assert "auto_retry_start" in RELEVANT_EVENT_TYPES, (
-        "pi_event_scan.py allowlist must keep auto_retry_start in compressed events.jsonl"
+        "shared/pi_events.py allowlist must keep auto_retry_start in compressed events.jsonl"
     )
     event = schema["$defs"]["AutoRetryStartEvent"]
     properties = event["properties"]
@@ -177,7 +192,7 @@ def test_tool_execution_start_contract(schema: dict[str, Any]) -> None:
 def test_outputs_validation_contract(schema: dict[str, Any]) -> None:
     """velites output self-check (M3): outputs_validation carries `missing`."""
     assert "outputs_validation" in RELEVANT_EVENT_TYPES, (
-        "pi_event_scan.py allowlist must keep outputs_validation in compressed events.jsonl"
+        "shared/pi_events.py allowlist must keep outputs_validation in compressed events.jsonl"
     )
     event = schema["$defs"]["OutputsValidationEvent"]
     missing = event["properties"]["missing"]
@@ -191,6 +206,8 @@ def test_agent_end_reason_contract(schema: dict[str, Any]) -> None:
     event = schema["$defs"]["AgentEndEvent"]
     assert "reason" in event["properties"], "agent_end.reason missing"
     assert "reason" not in event.get("required", []), "reason must stay optional"
+    # Schema v2: the full message history copy is gone for good.
+    assert "messages" not in event["properties"], "agent_end.messages must stay trimmed"
     reason = _deref(schema, _ref_branch(schema, event["properties"]["reason"]))
     # schemars renders documented unit variants as oneOf+const, otherwise enum.
     values = set(reason.get("enum", []))

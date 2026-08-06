@@ -1,0 +1,27 @@
+.alert {
+  padding: 10px 16px;
+  font-size: 13px;
+  line-height: 1.6;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.alert b {
+  font-weight: 650;
+}
+
+.alertBlocked {
+  background: #fef2f2;
+  color: #b91c1c;
+  border-bottom-color: #fecaca;
+}
+
+.alertStalled {
+  background: #fffbeb;
+  color: #b45309;
+  border-bottom-color: #fde68a;
+}
+
+.metricStale {
+  color: #dc2626;
+  font-weight: 600;
+}

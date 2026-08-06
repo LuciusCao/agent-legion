@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel
 
 
 class WorkspaceRecord(BaseModel):
@@ -19,32 +19,3 @@ class WorkspaceRecord(BaseModel):
     resource_config: dict[str, Any]
     intake_config: dict[str, Any]
     node_config: dict[str, Any]
-
-
-class ResourceProviderDefinition(BaseModel):
-    key: str
-    provider: str
-    path: str
-    defaultParams: dict[str, str]
-    paramKeys: list[str]
-    config_schema: dict[str, Any] = Field(default_factory=dict)
-
-
-class CmsServiceStatus(BaseModel):
-    baseUrl: str
-    tokenConfigured: bool
-    env: str
-    healthy: bool | None
-    lastCheckedAt: str | None
-
-
-class ResourceBinding(BaseModel):
-    """Per-provider binding stored under resource_config["resources"].
-
-    Extra keys (e.g. provider) are preserved as-is.
-    """
-
-    model_config = ConfigDict(extra="allow")
-
-    enabled: bool = False
-    config: dict[str, Any] = Field(default_factory=dict)

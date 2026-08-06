@@ -411,7 +411,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
         job_db = app.state.job_db
         with job_db.connect() as conn:
             conn.execute(
-                "delete from job_nodes where job_id=? and node_key=?",
+                "delete from job_nodes where job_id=%s and node_key=%s",
                 (job_id, "review_key_info"),
             )
         resp = c.post(
@@ -426,27 +426,10 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     assert results[0]["reason_code"] == "node_not_found"
 
 
-def test_batch_rerun_mixed_node_availability(tmp_path, monkeypatch):
+def test_batch_rerun_mixed_node_availability(tmp_path):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Reading {question_id}",
-            normalized={},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -477,7 +460,7 @@ def test_batch_rerun_mixed_node_availability(tmp_path, monkeypatch):
         job_db = app.state.job_db
         with job_db.connect() as conn:
             conn.execute(
-                "delete from job_nodes where job_id=? and node_key=?",
+                "delete from job_nodes where job_id=%s and node_key=%s",
                 (r_job_id, "review_key_info"),
             )
         resp = c.post(
@@ -566,12 +549,12 @@ def test_rerun_node_rejects_active_lease(tmp_path):
                     id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                     node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
                 """,
                 (
                     "lease-1",
                     "exec-1",
-                    "local-default",
+                    "code-default",
                     "test",
                     job_id,
                     "question_comprehension_info",
@@ -624,12 +607,12 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
                     id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                     node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+                values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s)
                 """,
                 (
                     "lease-1",
                     "exec-1",
-                    "local-default",
+                    "code-default",
                     "test",
                     job_id,
                     "question_comprehension_info",
@@ -687,3 +670,148 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
 
     assert resp.status_code == 400
     assert (storage / "review_key_info.json").read_text() == "understanding"
+
+
+def _create_failed_job(client, app, ws_id: str, question_id: str) -> str:
+    created = client.post(
+        f"/api/workspaces/{ws_id}/job-batches",
+        json={
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "question_ids": [question_id],
+            "knowledge_codes": [],
+        },
+    ).json()
+    job_id = created["jobs"][0]["id"]
+    app.state.job_db.update_job_status(job_id, "failed", "boom")
+    return job_id
+
+
+def _fail_node_run(app, job_id: str, node_key: str, category: str, detail: str) -> None:
+    job_db = app.state.job_db
+    run = job_db.start_node_run(job_id, node_key, ["cmd"], f"logs/jobs/{job_id}-{node_key}.log")
+    assert run is not None
+    with job_db.connect() as conn:
+        conn.execute(
+            "update node_runs set status='failed', error_message='boom',"
+            " failure_category=%s, failure_detail=%s, finished_at=current_timestamp"
+            " where id=%s",
+            (category, detail, run["id"]),
+        )
+        conn.execute(
+            "update job_nodes set status='failed', error_message='boom'"
+            " where job_id=%s and node_key=%s",
+            (job_id, node_key),
+        )
+        conn.execute("update jobs set status='failed' where id=%s", (job_id,))
+        conn.execute("commit")
+
+
+def test_batch_rerun_preview_node_mode_counts_eligible(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_a = _create_failed_job(c, app, ws_id, "Q801")
+        job_b = _create_failed_job(c, app, ws_id, "Q802")
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun/preview",
+            json={"filter": {"status": "failed"}, "node_key": "fetch_questions"},
+        )
+        missing = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun/preview",
+            json={"filter": {"status": "failed"}, "node_key": "no_such_node"},
+        )
+        after = c.get(f"/api/jobs/{job_a}").json()
+
+    assert response.status_code == 200
+    assert response.json() == {"total_count": 2, "eligible_count": 2}
+    assert missing.json() == {"total_count": 2, "eligible_count": 0}
+    # 只读端点：job 状态不被改动。
+    assert after["job"]["status"] == "failed"
+    assert job_b != job_a
+
+
+def test_batch_rerun_preview_from_failed_node_skips_non_failed(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        failed_job = _create_failed_job(c, app, ws_id, "Q803")
+        app.state.job_db.update_job_node(failed_job, "clean_and_parse", status="failed")
+        created = c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q804"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        pending_job = created["jobs"][0]["id"]
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun/preview",
+            json={"job_ids": [failed_job, pending_job], "from_failed_node": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"total_count": 2, "eligible_count": 1}
+
+
+def test_batch_rerun_preview_failure_category_counts_matching(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        technical_job = _create_failed_job(c, app, ws_id, "Q805")
+        _fail_node_run(app, technical_job, "generate_key_info", "technical", "model_error")
+        business_job = _create_failed_job(c, app, ws_id, "Q806")
+        _fail_node_run(app, business_job, "clean_and_parse", "business", "empty_content")
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun/preview",
+            json={"filter": {"status": "failed"}, "failure_category": "technical"},
+        )
+
+    assert response.status_code == 200
+    assert response.json() == {"total_count": 2, "eligible_count": 1}
+
+
+def test_batch_rerun_preview_validates_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        no_mode = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun/preview",
+            json={"job_ids": ["any"]},
+        )
+        combined = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun/preview",
+            json={
+                "job_ids": ["any"],
+                "node_key": "fetch_questions",
+                "failure_category": "technical",
+            },
+        )
+
+    assert no_mode.status_code == 422
+    assert combined.status_code == 422

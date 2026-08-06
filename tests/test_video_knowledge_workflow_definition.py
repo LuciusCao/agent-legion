@@ -36,10 +36,10 @@ def test_video_knowledge_workflow_declares_capabilities_only() -> None:
     assert definition.nodes["package"].capability == "package_video_job"
 
 
-def test_video_knowledge_download_node_declares_knowledge_video_resource() -> None:
+def test_video_knowledge_download_node_outputs_video_input() -> None:
     definition = load_workflow_definition(ROOT / "config/workflows/video_knowledge.yaml")
     download = definition.nodes["download"]
-    assert download.resources == ["knowledge_video"]
-    # The node resolves knowledge source_refs at execution time and writes the
+    # The node resolves knowledge source_refs at execution time (CMS access is
+    # configured on the node config, not a DAG resource) and writes the
     # resolved fields back to video_input.json.
     assert "video_input.json" in download.outputs

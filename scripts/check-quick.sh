@@ -4,6 +4,32 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Serialize same-worktree gates: concurrent invocations (multiple agent
+# sessions, or a manual run next to an agent loop) share the per-worktree
+# test database, and their xdist workers use the same gw0..gwN schemas —
+# TRUNCATE isolation then wipes each other's tables mid-run, surfacing as
+# "flaky" failures at random tests/lanes. Cross-worktree runs are already
+# isolated by per-worktree databases and do not take this lock.
+lock_dir="$ROOT_DIR/.quick-gate.lock"
+waited=0
+while ! mkdir "$lock_dir" 2>/dev/null; do
+  holder="$(cat "$lock_dir/pid" 2>/dev/null || true)"
+  if [[ -n "$holder" ]] && ! kill -0 "$holder" 2>/dev/null; then
+    # Stale lock from a crashed/killed gate: reclaim it.
+    rm -rf "$lock_dir"
+    continue
+  fi
+  if [[ "$waited" -eq 0 ]]; then
+    echo "Another quick gate holds this worktree (pid ${holder:-unknown}); waiting for it to finish..."
+  fi
+  sleep 5
+  waited=$((waited + 5))
+done
+echo $$ >"$lock_dir/pid"
+cleanup_lock() {
+  rm -rf "$lock_dir"
+}
+
 COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
 export COVERAGE_FILE
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
@@ -18,9 +44,9 @@ cleanup_logs() {
   rm -rf "$log_dir"
 }
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
-  trap 'cleanup_logs; cleanup_coverage' EXIT
+  trap 'cleanup_lock; cleanup_logs; cleanup_coverage' EXIT
 else
-  trap cleanup_logs EXIT
+  trap 'cleanup_lock; cleanup_logs' EXIT
 fi
 
 echo "=== Parallel Quick Gate ==="

@@ -4,11 +4,9 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from server.app.executors.cancellation import CancellationToken, CancelledError
-from server.app.workflows.question_comprehension_info import (
-    assemble_comprehension_info,
-    clean_and_parse,
-    fetch_questions,
-)
+from workflow_nodes import question_intake
+from workflow_nodes.comprehension_assemble import run as assemble_comprehension_info
+from workflow_nodes.question_clean_parse import run as clean_and_parse
 
 
 def _write_questions_json(artifact_dir: Path, questions: list) -> None:
@@ -22,7 +20,7 @@ def _write_questions_json(artifact_dir: Path, questions: list) -> None:
 def test_fetch_questions_without_cms(tmp_path):
     job = {"source_id": "q1", "title": "Title", "source_type": "question"}
     artifact_dir = tmp_path / "artifacts"
-    fetch_questions(job, artifact_dir, context={})
+    question_intake.run(job, artifact_dir, {})
 
     out_path = artifact_dir / "questions.json"
     assert out_path.is_file()
@@ -40,25 +38,23 @@ def test_fetch_questions_with_cms(tmp_path):
     detail.normalized = {"stem": "stem"}
     detail.payload = {"raw": "data"}
 
-    settings_config = {
-        "resource_providers": {
-            "cms.question.detail": {
-                "resource_key": "question_detail",
-                "api_url": "https://cms.example.com",
-            }
-        }
-    }
+    settings_config = {"cms": {"base_url": "https://cms.example.com"}}
+    node_config = {"api_url": "https://cms.example.com/question/detail"}
 
     with (
-        patch("server.app.workflows.question_comprehension_info.get_token", return_value="token"),
+        patch("workflow_nodes.question_intake.get_token", return_value="token"),
         patch(
-            "server.app.workflows.question_comprehension_info.fetch_question_detail",
+            "workflow_nodes.question_intake.fetch_question_detail",
             return_value=detail,
         ) as mock_fetch,
     ):
-        fetch_questions(job, artifact_dir, context={"settings_config": settings_config})
+        question_intake.run(
+            job,
+            artifact_dir,
+            {"settings_config": settings_config, "node_config": node_config},
+        )
 
-    mock_fetch.assert_called_once_with("q1", "https://cms.example.com", "token")
+    mock_fetch.assert_called_once_with("q1", "https://cms.example.com/question/detail", "token")
     data = __import__("json").loads((artifact_dir / "questions.json").read_text(encoding="utf-8"))
     assert data["questions"][0]["title"] == "CMS Title"
 
@@ -180,7 +176,7 @@ def test_clean_and_parse_respects_cancellation(tmp_path):
     token = CancellationToken()
     token.cancel()
     with pytest.raises(CancelledError):
-        clean_and_parse({"source_id": "q1"}, artifact_dir, context={"cancellation": token})
+        clean_and_parse({"source_id": "q1"}, artifact_dir, {"cancellation": token})
 
 
 def _write_comprehension_inputs(artifact_dir: Path) -> None:
@@ -255,7 +251,7 @@ def test_load_json_object_rejects_non_dict(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
     (artifact_dir / "bad.json").write_text("[1, 2, 3]", encoding="utf-8")
-    from server.app.workflows.question_comprehension_info import _load_json_object
+    from server.app.workflows.comprehension_common import _load_json_object
 
     with pytest.raises(ValueError, match="Invalid content"):
         _load_json_object(artifact_dir / "bad.json")
@@ -271,7 +267,7 @@ def _write_parsed_json(artifact_dir: Path, questions: list) -> None:
 
 def test_single_parsed_question_rejects_multiple_questions(tmp_path):
     artifact_dir = tmp_path / "artifacts"
-    from server.app.workflows.question_comprehension_info import _single_parsed_question
+    from server.app.workflows.comprehension_common import _single_parsed_question
 
     _write_parsed_json(artifact_dir, [{"question_id": "q1"}, {"question_id": "q2"}])
     with pytest.raises(ValueError, match="exactly one question"):
@@ -280,7 +276,7 @@ def test_single_parsed_question_rejects_multiple_questions(tmp_path):
 
 def test_single_parsed_question_rejects_non_dict_question(tmp_path):
     artifact_dir = tmp_path / "artifacts"
-    from server.app.workflows.question_comprehension_info import _single_parsed_question
+    from server.app.workflows.comprehension_common import _single_parsed_question
 
     _write_parsed_json(artifact_dir, ["not-a-dict"])
     with pytest.raises(ValueError, match="invalid question"):
@@ -353,4 +349,4 @@ def test_assemble_comprehension_info_respects_cancellation(tmp_path):
     token.cancel()
     job = {"source_id": "q1"}
     with pytest.raises(CancelledError):
-        assemble_comprehension_info(job, artifact_dir, context={"cancellation": token})
+        assemble_comprehension_info(job, artifact_dir, {"cancellation": token})

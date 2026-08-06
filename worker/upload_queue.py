@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from server.app.services.pi_event_compression import (
+from shared.pi_events import (
     compress_pi_events,
     scan_and_compress_pi_events,
 )

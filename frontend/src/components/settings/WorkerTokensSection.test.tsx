@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { WorkerTokensSection } from './WorkerTokensSection'
 import {
   createRegisterToken,
@@ -8,6 +9,7 @@ import {
   revokeAgentWorker,
   revokeRegisterToken,
 } from '../../api'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 
 vi.mock('../../api', () => ({
   createRegisterToken: vi.fn(),
@@ -44,7 +46,7 @@ const sampleWorker = {
   models: [],
   protocol_version: 1,
   registered_at: '2026-07-01T00:00:00Z',
-  runtimes: ['local'],
+  runtimes: ['pi'],
 }
 
 beforeEach(() => {
@@ -54,9 +56,13 @@ beforeEach(() => {
   mockListAgentWorkers.mockResolvedValue([sampleWorker])
 })
 
+function renderWithClient(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
+
 describe('WorkerTokensSection', () => {
   it('loads token and worker lists on mount without any credential', async () => {
-    render(<WorkerTokensSection />)
+    renderWithClient(<WorkerTokensSection />)
 
     await waitFor(() => {
       expect(screen.getByText('home-mac-mini')).toBeTruthy()
@@ -67,9 +73,38 @@ describe('WorkerTokensSection', () => {
     expect(screen.getByText('video_knowledge')).toBeTruthy()
   })
 
+  it('shows runtime, concurrency and workspace scope chips for workers', async () => {
+    mockListAgentWorkers.mockResolvedValue([
+      sampleWorker,
+      {
+        ...sampleWorker,
+        worker_id: 'w2',
+        name: 'scoped-mac',
+        online: false,
+        allowed_workspaces: ['video_knowledge', 'question_comprehension'],
+      },
+    ])
+    renderWithClient(<WorkerTokensSection />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('worker-w1')).toBeTruthy()
+    })
+    const globalItem = screen.getByTestId('worker-w1')
+    expect(globalItem.textContent).toContain('在线')
+    expect(globalItem.textContent).toContain('pi')
+    expect(globalItem.textContent).toContain('并发上限 2')
+    expect(globalItem.textContent).toContain('全部 workspace')
+
+    const scopedItem = screen.getByTestId('worker-w2')
+    expect(scopedItem.textContent).toContain('离线')
+    expect(scopedItem.textContent).toContain(
+      'video_knowledge, question_comprehension'
+    )
+  })
+
   it('shows an error when loading fails', async () => {
     mockListRegisterTokens.mockRejectedValue(new Error('HTTP 500'))
-    render(<WorkerTokensSection />)
+    renderWithClient(<WorkerTokensSection />)
 
     await waitFor(() => {
       expect(screen.getByRole('alert').textContent).toContain('HTTP 500')
@@ -88,7 +123,7 @@ describe('WorkerTokensSection', () => {
       value: { writeText },
       configurable: true,
     })
-    render(<WorkerTokensSection />)
+    renderWithClient(<WorkerTokensSection />)
     await waitFor(() => screen.getByText('home-mac-mini'))
 
     fireEvent.change(screen.getByLabelText('Token 标签'), {
@@ -114,7 +149,7 @@ describe('WorkerTokensSection', () => {
 
   it('revokes a register token after confirmation', async () => {
     mockRevokeRegisterToken.mockResolvedValue({ revoked: true })
-    render(<WorkerTokensSection />)
+    renderWithClient(<WorkerTokensSection />)
     await waitFor(() => screen.getByText('home-mac-mini'))
 
     const item = screen.getByTestId('register-token-t1')
@@ -128,7 +163,7 @@ describe('WorkerTokensSection', () => {
 
   it('revokes a worker after confirmation', async () => {
     mockRevokeAgentWorker.mockResolvedValue({ worker_id: 'w1', revoked: true })
-    render(<WorkerTokensSection />)
+    renderWithClient(<WorkerTokensSection />)
     await waitFor(() => screen.getByText('mac-mini'))
 
     const item = screen.getByTestId('worker-w1')

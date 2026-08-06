@@ -3,8 +3,8 @@ import logging
 from fastapi import APIRouter, Depends, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
-from ..agents import AgentStatusManager
 from ..auth.dependencies import SESSION_COOKIE, require_user
+from ..events.agents import AgentStatusManager
 
 logger = logging.getLogger(__name__)
 

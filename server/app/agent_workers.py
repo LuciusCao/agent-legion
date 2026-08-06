@@ -10,7 +10,6 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from server.app.agent_worker_declarations import normalize_labels, normalize_worker_declarations
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 
@@ -79,7 +78,7 @@ class AgentWorkerRegistry:
         with write_transaction(self.database_dsn) as conn:
             for workspace in scope:
                 exists = conn.execute(
-                    "select 1 from workspaces where id=?", (workspace,)
+                    "select 1 from workspaces where id=%s", (workspace,)
                 ).fetchone()
                 if exists is None:
                     raise ValueError(f"workspace {workspace!r} does not exist")
@@ -90,7 +89,7 @@ class AgentWorkerRegistry:
                   max_concurrency, labels_json,
                   protocol_version, token_hash, allowed_workspaces_json,
                   registered_at, last_seen_at, revoked_at
-                ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, null)
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, null)
                 on conflict(worker_id) do update set
                   name=excluded.name,
                   runtimes_json=excluded.runtimes_json,
@@ -135,13 +134,13 @@ class AgentWorkerRegistry:
         with write_transaction(self.database_dsn) as conn:
             if workspace_id is not None:
                 exists = conn.execute(
-                    "select 1 from workspaces where id=?", (workspace_id,)
+                    "select 1 from workspaces where id=%s", (workspace_id,)
                 ).fetchone()
                 if exists is None:
                     raise ValueError(f"workspace {workspace_id!r} does not exist")
             conn.execute(
                 "insert into agent_register_tokens(id, token_hash, workspace_id, label)"
-                " values (?, ?, ?, ?)",
+                " values (%s, %s, %s, %s)",
                 (token_id, token_hash, workspace_id, label),
             )
         return token_id, f"{token_id}.{secret}"
@@ -156,7 +155,7 @@ class AgentWorkerRegistry:
             return None
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
-                "select * from agent_register_tokens where id=?", (token_id,)
+                "select * from agent_register_tokens where id=%s", (token_id,)
             ).fetchone()
         if row is None or row["revoked_at"] is not None:
             return None
@@ -187,7 +186,7 @@ class AgentWorkerRegistry:
     def revoke_register_token(self, token_id: str) -> bool:
         with write_transaction(self.database_dsn) as conn:
             result = conn.execute(
-                "update agent_register_tokens set revoked_at=current_timestamp where id=?",
+                "update agent_register_tokens set revoked_at=current_timestamp where id=%s",
                 (token_id,),
             )
             return result.rowcount > 0
@@ -198,7 +197,7 @@ class AgentWorkerRegistry:
             return None
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
-                "select * from agent_workers where worker_id=?", (worker_id,)
+                "select * from agent_workers where worker_id=%s", (worker_id,)
             ).fetchone()
         if row is None or row["revoked_at"] is not None:
             return None
@@ -209,7 +208,7 @@ class AgentWorkerRegistry:
         # every few seconds, so this is the liveness signal behind `online`.
         with write_transaction(self.database_dsn) as conn:
             conn.execute(
-                "update agent_workers set last_seen_at=current_timestamp where worker_id=?",
+                "update agent_workers set last_seen_at=current_timestamp where worker_id=%s",
                 (worker_id,),
             )
         # Reflect the just-written timestamp so this call already reads online.
@@ -223,7 +222,7 @@ class AgentWorkerRegistry:
     def revoke(self, worker_id: str) -> bool:
         with write_transaction(self.database_dsn) as conn:
             result = conn.execute(
-                "update agent_workers set revoked_at=current_timestamp where worker_id=?",
+                "update agent_workers set revoked_at=current_timestamp where worker_id=%s",
                 (worker_id,),
             )
             return result.rowcount > 0
@@ -259,3 +258,60 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "online": online,
         "revoked": row["revoked_at"] is not None,
     }
+
+
+# Bounded normalization for Worker capability and model declarations.
+def normalize_labels(labels: Mapping[str, Any]) -> dict[str, str]:
+    if len(labels) > 32:
+        raise ValueError("worker labels are capped at 32 entries")
+    normalized: dict[str, str] = {}
+    for key, value in labels.items():
+        if not isinstance(key, str) or not key or len(key) > 64:
+            raise ValueError("worker label keys must be non-empty strings up to 64 chars")
+        if not isinstance(value, (str, int, float, bool)) or len(str(value)) > 256:
+            raise ValueError(f"worker label {key!r} must have a bounded scalar value")
+        normalized[key] = str(value)
+    return normalized
+
+
+def normalize_capabilities(values: Sequence[Any]) -> list[str]:
+    if len(values) > 128:
+        raise ValueError("worker capabilities are capped at 128 entries")
+    normalized = sorted({str(value).strip() for value in values})
+    if any(not value or value == "*" or len(value) > 128 for value in normalized):
+        raise ValueError("worker capabilities must be non-empty strings up to 128 chars")
+    return normalized
+
+
+def normalize_models(values: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    if len(values) > 256:
+        raise ValueError("worker models are capped at 256 entries")
+    normalized: set[tuple[str, str]] = set()
+    for item in values:
+        provider = str(item.get("provider", "")).strip()
+        model = str(item.get("model", "")).strip()
+        if (
+            not provider
+            or not model
+            or provider == "*"
+            or model == "*"
+            or len(provider) > 128
+            or len(model) > 256
+        ):
+            raise ValueError("worker models require bounded provider and model strings")
+        normalized.add((provider, model))
+    return [{"provider": provider, "model": model} for provider, model in sorted(normalized)]
+
+
+def normalize_worker_declarations(
+    capabilities: Sequence[str] | None,
+    models: Sequence[Mapping[str, Any]] | None,
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Normalize HTTP declarations, retaining wildcard only for legacy direct callers."""
+    normalized_capabilities = (
+        ["*"] if capabilities is None else normalize_capabilities(capabilities)
+    )
+    normalized_models = (
+        [{"provider": "*", "model": "*"}] if models is None else normalize_models(models)
+    )
+    return normalized_capabilities, normalized_models

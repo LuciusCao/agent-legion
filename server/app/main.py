@@ -6,16 +6,15 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
-from server.app.agent_catalog import sync_agent_definitions
 from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
-from server.app.agents import AgentStatusManager
 from server.app.auth.service import build_auth_service
 from server.app.db.connection import close_database_pools
 from server.app.events import JobEventManager
+from server.app.events.agents import AgentStatusManager
 from server.app.events.aggregator import build_workspace_event_aggregator
 from server.app.events.bus import InProcessEventBus
-from server.app.executor_registry_factory import build_executor_registry
+from server.app.executors.executor_registry_factory import build_executor_registry
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.pi import build_skill_manager
 from server.app.executors.sweeper import SweeperThread
@@ -25,6 +24,7 @@ from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
 from server.app.scheduler_wakeup import unregister_wakeup
+from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
@@ -56,7 +56,6 @@ def create_app(
     )
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
-    sync_agent_definitions(settings.database_url, settings.agent_definitions)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
     # Resume state must not survive a restart: dispatch stays off until an
@@ -99,6 +98,7 @@ def create_app(
     )
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
+    artifact_gc_thread: ArtifactOrphanGcThread | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -108,7 +108,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, sweeper_thread
+        nonlocal workflow_worker_thread, sweeper_thread, artifact_gc_thread
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         if start_worker:
             validate_settings(settings)
@@ -124,6 +124,11 @@ def create_app(
                 agent_dispatch=agent_dispatch,
             )
             app.state.worker_startup = worker_status
+            # Orphan GC shares the sweeper ownership rule: exactly one
+            # replica (sweeper_enabled) reclaims, the rest stay idle.
+            if settings.executor_runtime.sweeper_enabled:
+                artifact_gc_thread = ArtifactOrphanGcThread(artifact_store)
+                artifact_gc_thread.start()
         background_tasks.start(app)
         try:
             yield
@@ -131,6 +136,8 @@ def create_app(
             await background_tasks.stop(app)
             if sweeper_thread is not None:
                 sweeper_thread.stop()
+            if artifact_gc_thread is not None:
+                artifact_gc_thread.stop()
             if workflow_worker_thread is not None:
                 unregister_wakeup(workflow_worker_thread.wake)
                 workflow_worker_thread.stop()

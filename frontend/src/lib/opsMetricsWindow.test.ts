@@ -12,6 +12,8 @@ function bucket(startIso: string, totalTokens: number): MetricBucket {
     online_workers_max: 1,
     active_executions: 1,
     active_executions_max: 1,
+    queued: 0,
+    queued_max: 0,
     input_tokens: totalTokens,
     output_tokens: 0,
     cache_read_tokens: 0,

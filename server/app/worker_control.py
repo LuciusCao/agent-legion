@@ -15,7 +15,7 @@ def _persist_pause(db_path: str, scope: str, paused: bool, process_id: str) -> N
     with write_transaction(db_path) as conn:
         conn.execute(
             "insert into worker_control_state (scope, paused, updated_by, updated_at)"
-            " values (?, ?, ?, ?) on conflict(scope) do update set paused = excluded.paused,"
+            " values (%s, %s, %s, %s) on conflict(scope) do update set paused = excluded.paused,"
             " updated_by = excluded.updated_by, updated_at = excluded.updated_at",
             (scope, int(paused), process_id, now),
         )
@@ -47,7 +47,7 @@ class WorkspaceWorkerControl:
                 return self._paused.get(workspace_id, True)
         with read_connection(self._db_path) as conn:
             row = conn.execute(
-                "select paused from worker_control_state where scope = ?",
+                "select paused from worker_control_state where scope = %s",
                 (f"workspace:{workspace_id}",),
             ).fetchone()
         return True if row is None else bool(row["paused"])

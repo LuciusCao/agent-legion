@@ -1,5 +1,13 @@
 # 架构 Review（基准：develop，2026-07-18）
 
+> **时点快照声明（2026-08-04 补注）**：本文是 2026-07-18 时点的历史记录，结论与
+> `path:line` 证据均反映当时代码，未随后续演进更新。多条结论此后已失效，包括：
+> SQLite 已迁移至 PostgreSQL；远程执行已从 `executors/remote_broker.py` 的内存队列
+> 重构为 `server/app/agent_broker/` 体系；进程内事件机制已收敛到 EventBus
+> （`server/app/events/bus.py`）；调度轮询已补 wakeup 机制
+> （`server/app/scheduler_wakeup.py`）；文中引用的 `executors/remote_broker.py` 等
+> 文件已删除。当前状态请以现行代码与 `docs/architecture/` 现行文档为准。
+
 目标：评估扩展性与可维护性，并明确向"分布式 Agent 协作系统"演进的路线。
 
 审查方式：4 路并行只读审查（后端分层与模块边界 / 执行器与 capability 体系 / 持久化并发与状态一致性 / 前端与全栈契约），所有结论均有 `path:line` 级证据。

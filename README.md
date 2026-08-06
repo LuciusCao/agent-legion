@@ -29,7 +29,11 @@ It ships with two production workflows:
 - **Pluggable agent runtimes.** Agent nodes run headlessly through the Pi CLI
   or **velites** — Agent Legion's own Rust harness (&lt;50 ms cold start vs
   Pi's ~1.6 s, a fraction of the memory, same pi-compatible event stream).
-  Switch per deployment with `workflows.pi.flavor`.
+  Switch per agent with the `runtime` field (`pi` / `openclaw` / `velites`) in
+  the Agent definition, managed in Studio「Agent 管理」(published into the
+  `versioned_entities` table; yaml agent config is retired). Execution
+  provider/model/thinking resolve from per-node Studio overrides, then the
+  workspace Settings「Agent 默认配置」.
 - **Versioned external skills.** Each capability maps to a skill in a
   standalone git repository, declared in `config/skills.yaml` and pinned by
   `config/skills.lock`. Every run restores the locked ref, so workflow output
@@ -132,8 +136,8 @@ top-level keys and anything else fails startup:
 
 | File | Owns |
 |------|------|
-| `config/app.yaml` | database URL, paths, HTTP, cleanup, monitoring, token pricing |
-| `config/agent_legion.yaml` | ASR, CMS, resource providers, OpenClaw |
+| `config/app.yaml` | database URL, paths, HTTP, cleanup, monitoring |
+| `config/agent_legion.yaml` | ASR, CMS, OpenClaw |
 | `config/workflow.yaml` | agent catalog, agent workers, executors, Pi/velites runtime |
 | `config/workflows/*.yaml` | workflow DAG definitions |
 | `config/skills.yaml` + `skills.lock` | skill sources and pinned refs |
@@ -152,15 +156,19 @@ containing `SKILL.md`, an output contract, and a validator — typically checked
 out under `~/.agents/skills/agent-legion/<workflow>/<capability>/` and pinned
 by `config/skills.lock`.
 
-Two harness flavors run them:
+Two harness runtimes run them:
 
-- **Pi CLI** (default): `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`,
-  then `pi` to authenticate and `./scripts/check-pi.sh` to verify. Configure
-  provider/model/timeout under `workflows.pi` in `config/workflow.yaml`.
-- **velites** (rolling out): a single static Rust binary built from `velites/`
-  (`cargo build --release`), emitting the same event stream the host consumes.
-  Enable with `workflows.pi.flavor: velites`; rolling back to `pi` needs no
-  data migration. See
+- **Pi CLI**: `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`,
+  then `pi` to authenticate and `./scripts/check-pi.sh` to verify. Enable per
+  agent with `runtime: pi` in the Agent definition (Studio「Agent 管理」). Pi
+  is an optional runtime; the production default is velites.
+- **velites** (production default): a single static Rust binary built from
+  `velites/` (`cargo build --release`), emitting the same event stream the host
+  consumes. Enable per agent with `runtime: velites` in the Agent definition.
+  The retired `workflows.pi` yaml block (provider/model/timeout/flavor) no
+  longer exists: execution provider/model/thinking come from the workspace
+  Settings「Agent 默认配置」or per-node Studio overrides, and the manifest
+  carries them under `execution.*`. See
   [docs/architecture/velites-harness.md](docs/architecture/velites-harness.md).
 
 Every node execution leaves a full trace under

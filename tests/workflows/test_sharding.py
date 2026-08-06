@@ -126,8 +126,8 @@ def _finish(db_path: Path, index: int, status: str, **kwargs) -> str:
 def _start(db_path: Path, index: int) -> None:
     with write_transaction(db_path) as conn:
         conn.execute(
-            "update node_shards set status='running', execution_id=?, started_at=current_timestamp"
-            " where job_id='j1' and node_key='review' and shard_index=?",
+            "update node_shards set status='running', execution_id=%s, started_at=current_timestamp"
+            " where job_id='j1' and node_key='review' and shard_index=%s",
             (f"exec-{index}", index),
         )
 
@@ -217,11 +217,11 @@ def test_aggregate_completed_running_mix_is_running(tmp_path):
 class FakeShardExecutor:
     """Records contexts; writes parse inputs; returns per-shard output_json."""
 
-    kind = "local"
+    kind = "code"
 
     def __init__(
         self,
-        executor_id: str = "local-default",
+        executor_id: str = "code-default",
         gate: threading.Event | None = None,
         fail_shards: set[int] | None = None,
         parse_items: list | None = None,
@@ -301,12 +301,12 @@ def _make_e2e(tmp_path: Path, definition, executor, *, capacity: int = 10):
     workspace = job_db.create_workspace("ws", default_workflow_key="test")
     capabilities = {node.capability for node in definition.nodes.values()}
     registry = make_registry(
-        {"local-default": executor},
-        {"local-default": local_def(capacity, capabilities)},
+        {"code-default": executor},
+        {"code-default": local_def(capacity, capabilities)},
     )
-    allocate(job_db, workspace["id"], "local-default", capacity)
+    allocate(job_db, workspace["id"], "code-default", capacity)
     for node in definition.nodes.values():
-        bind(job_db, workspace["id"], "test", node.key, "local-default")
+        bind(job_db, workspace["id"], "test", node.key, "code-default")
     job = job_db.create_job(
         workflow_key="test",
         source_type="question",
@@ -339,7 +339,7 @@ def _node_status(job_db: JobQueries, job_id: str, node_key: str) -> str | None:
 def _lease_rows(db_path: Path, job_id: str, node_key: str) -> list[dict]:
     with read_connection(db_path) as conn:
         rows = conn.execute(
-            "select * from executor_leases where job_id=? and node_key=? order by acquired_at",
+            "select * from executor_leases where job_id=%s and node_key=%s order by acquired_at",
             (job_id, node_key),
         ).fetchall()
     return [dict(row) for row in rows]
@@ -349,7 +349,7 @@ def _active_lease_count(db_path: Path, job_id: str, node_key: str) -> int:
     with read_connection(db_path) as conn:
         return conn.execute(
             "select count(*) as cnt from executor_leases"
-            " where job_id=? and node_key=? and status='active'",
+            " where job_id=%s and node_key=%s and status='active'",
             (job_id, node_key),
         ).fetchone()["cnt"]
 
@@ -357,7 +357,7 @@ def _active_lease_count(db_path: Path, job_id: str, node_key: str) -> int:
 def _node_shards(db_path: Path, job_id: str, node_key: str) -> list[dict]:
     with read_connection(db_path) as conn:
         rows = conn.execute(
-            "select * from node_shards where job_id=? and node_key=? order by shard_index",
+            "select * from node_shards where job_id=%s and node_key=%s order by shard_index",
             (job_id, node_key),
         ).fetchall()
     return [dict(row) for row in rows]

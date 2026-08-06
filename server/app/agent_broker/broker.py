@@ -12,27 +12,29 @@ import json
 import uuid
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from psycopg import IntegrityError
 
 from server.app.agent_broker import reaper, release, sweepers
+from server.app.agent_broker.agent_worker_capacity import touch_worker
 from server.app.agent_broker.claim import (
     AgentClaim,
     ClaimRacedError,
     claim_in_transaction,
 )
 from server.app.agent_broker.empty import EmptyClaimTrigger
+from server.app.agent_broker.manifest_guard import require_routable_execution
 from server.app.agent_broker.reaper import _SAFE_BUNDLE_NAME
-from server.app.agent_worker_capacity import touch_worker
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events.aggregator import record_job_update
+from server.app.executors._lease_lifecycle import heartbeat_lease
 
 if TYPE_CHECKING:
-    from server.app.agents import AgentStatusManager
+    from server.app.events.agents import AgentStatusManager
     from server.app.jobs import JobQueries
 
 _ACTIVE_LEASE_CONSTRAINT = "idx_agent_requests_one_active_node"
@@ -95,19 +97,22 @@ class AgentExecutionBroker:
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select 1 from agent_execution_requests"
-                " where job_id=? and node_key=? and state in ('queued', 'claimed', 'reporting') limit 1",
+                " where job_id=%s and node_key=%s and state in ('queued', 'claimed', 'reporting') limit 1",
                 (job_id, node_key),
             ).fetchone()
         return row is not None
 
     def enqueue(self, request: AgentExecutionRequest) -> str | None:
+        # Fail fast on unroutable manifests (placeholder/empty model): they
+        # would otherwise poison the queue head forever (issue #13).
+        require_routable_execution(request.manifest)
         execution_id = request.execution_id or str(uuid.uuid4())
         try:
             with write_transaction(self.database_dsn) as conn:
                 route = conn.execute(
                     """
                     select target_kind, target_id from workspace_node_routes
-                    where workspace_id=? and workflow_key=? and node_key=?
+                    where workspace_id=%s and workflow_key=%s and node_key=%s
                     """,
                     (request.workspace_id, request.workflow_key, request.node_key),
                 ).fetchone()
@@ -116,7 +121,9 @@ class AgentExecutionBroker:
                 if route["target_id"] != request.agent_id:
                     raise ValueError("workspace node Agent route changed before enqueue")
                 definition = conn.execute(
-                    "select definition_hash from agent_definitions where agent_id=? and enabled=1",
+                    "select definition_hash from versioned_entities"
+                    " where entity_type='agent' and workspace_id is null"
+                    " and entity_key=%s and status='published'",
                     (request.agent_id,),
                 ).fetchone()
                 if (
@@ -125,7 +132,7 @@ class AgentExecutionBroker:
                 ):
                     raise ValueError("Agent definition is unavailable or changed before enqueue")
                 capacity = conn.execute(
-                    "select max_concurrency from workspace_agent_capacities where workspace_id=?",
+                    "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
                     (request.workspace_id,),
                 ).fetchone()
                 # Audit-only snapshot of the governing workspace-level limit
@@ -138,7 +145,7 @@ class AgentExecutionBroker:
                       execution_id, workspace_id, job_id, workflow_key, node_key,
                       agent_id, agent_definition_hash, node_concurrency_limit,
                       queued_at, manifest_json
-                    ) values (?, ?, ?, ?, ?, ?, ?, ?, current_timestamp, ?)
+                    ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s)
                     """,
                     (
                         execution_id,
@@ -168,13 +175,16 @@ class AgentExecutionBroker:
     ) -> AgentClaim | None:
         try:
             with write_transaction(self.database_dsn) as conn:
-                claimed = claim_in_transaction(self, conn, worker_id, declared_max_concurrency)
+                claimed, skip_reasons = claim_in_transaction(
+                    self, conn, worker_id, declared_max_concurrency
+                )
         except ClaimRacedError:
             return None
         if claimed is None:
             # Demand signal: a Worker found no work; restock immediately when
-            # the queue is truly empty (debounced, see empty).
-            self.empty_claim.note_empty_claim(self.database_dsn)
+            # the queue is truly empty, or surface the skip-reason histogram
+            # when unclaimable stock blocked the claim (debounced, see empty).
+            self.empty_claim.note_empty_claim(self.database_dsn, skip_reasons=skip_reasons)
         # Record only after the commit has succeeded, never inside the tx.
         if claimed is not None:
             record_job_update(self.job_db, self.job_event_buffer, claimed.job_id)
@@ -190,7 +200,7 @@ class AgentExecutionBroker:
         with read_connection(self.database_dsn) as conn:
             worker = conn.execute(
                 "select name, max_concurrency, allowed_workspaces_json from agent_workers"
-                " where worker_id=?",
+                " where worker_id=%s",
                 (worker_id,),
             ).fetchone()
             if worker is None:
@@ -219,11 +229,10 @@ class AgentExecutionBroker:
     def heartbeat(self, execution_id: str, worker_id: str, lease_id: str) -> bool:
         """Renew the lease, bound to the current lease_id so zombie attempts
         from a requeued execution cannot keep a re-claimed lease alive."""
-        expires_at = datetime.now(UTC) + timedelta(seconds=self.lease_ttl_seconds)
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id from agent_execution_requests"
-                " where execution_id=? and worker_id=? and lease_id=?"
+                " where execution_id=%s and worker_id=%s and lease_id=%s"
                 " and state in ('claimed', 'reporting')"
                 " for update",
                 (execution_id, worker_id, lease_id),
@@ -232,14 +241,12 @@ class AgentExecutionBroker:
                 return False
             conn.execute(
                 "update agent_execution_requests set heartbeat_at=current_timestamp"
-                " where execution_id=?",
+                " where execution_id=%s",
                 (execution_id,),
             )
-            conn.execute(
-                "update executor_leases set heartbeat_at=current_timestamp, expires_at=?"
-                " where id=? and status='active'",
-                (expires_at, row["lease_id"]),
-            )
+            if not heartbeat_lease(conn, row["lease_id"], self.lease_ttl_seconds):
+                # Released concurrently: success would keep a zombie attempt alive.
+                return False
             touch_worker(conn, worker_id)
             return True
 
@@ -247,7 +254,7 @@ class AgentExecutionBroker:
         with read_connection(self.database_dsn) as conn:
             row = conn.execute(
                 "select manifest_json, lease_id, job_id, node_key from agent_execution_requests"
-                " where execution_id=? and worker_id=? and state in ('claimed', 'reporting')",
+                " where execution_id=%s and worker_id=%s and state in ('claimed', 'reporting')",
                 (execution_id, worker_id),
             ).fetchone()
         if row is None:
@@ -267,7 +274,7 @@ class AgentExecutionBroker:
         with write_transaction(self.database_dsn) as conn:
             row = conn.execute(
                 "select lease_id, agent_id, workspace_id from agent_execution_requests"
-                " where execution_id=? and worker_id=? and lease_id=?"
+                " where execution_id=%s and worker_id=%s and lease_id=%s"
                 " and state in ('claimed', 'reporting')"
                 " for update",
                 (execution_id, worker_id, lease_id),
@@ -275,8 +282,8 @@ class AgentExecutionBroker:
             if row is None:
                 return None
             conn.execute(
-                "update agent_execution_requests set state='done', outcome_json=?,"
-                " finished_at=current_timestamp where execution_id=?",
+                "update agent_execution_requests set state='done', outcome_json=%s,"
+                " finished_at=current_timestamp where execution_id=%s",
                 (json.dumps(dict(outcome), ensure_ascii=False), execution_id),
             )
             touch_worker(conn, worker_id)

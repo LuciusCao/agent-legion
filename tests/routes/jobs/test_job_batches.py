@@ -40,27 +40,18 @@ def test_create_question_jobs_when_enabled(tmp_path):
 def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
     from server.app.services.job_intake_queue import JobIntakeQueue
 
     calls: list[str] = []
 
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+    def spy_fetch_question_detail(question_id, api_url=None, token=None):
         calls.append(question_id)
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Title {question_id}",
-            normalized={"stem": f"Stem {question_id}"},
-            payload={"uuid": question_id},
-        )
+        raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+        "server.app.cms.question.fetch_question_detail",
+        spy_fetch_question_detail,
     )
     monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 2)
 
@@ -110,7 +101,7 @@ def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path
         assert completed is not None
         assert completed["status"] == "completed"
         assert completed["created_count"] == 3
-        assert calls == ["Q001", "Q002", "Q003"]
+        assert calls == []
 
 
 def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
@@ -174,32 +165,21 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
 def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionSummary
     from server.app.main import create_app
 
     calls = []
 
-    def fake_list_questions_by_knowledge(code, api_url=None, token=None):
-        calls.append({"code": code, "api_url": api_url, "token": token})
-        return [
-            CmsQuestionSummary("Q001", "题目一", {"uuid": "Q001"}),
-            CmsQuestionSummary("Q002", "题目二", {"uuid": "Q002"}),
-        ]
+    def spy_list_questions_by_knowledge(code, api_url=None, token=None):
+        calls.append(code)
+        raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.list_questions_by_knowledge",
-        fake_list_questions_by_knowledge,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+        "server.app.cms.question.list_questions_by_knowledge",
+        spy_list_questions_by_knowledge,
     )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    app.state.settings.config["cms"] = {
-        "env": "prod",
-        "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
-    }
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -215,47 +195,33 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     payload = json.loads(body["batch"]["source_payload_json"])
-    assert [call["code"] for call in calls] == ["K001", "K002"]
-    assert calls[0]["api_url"] == "https://cms.example/question/list?bank_version=v5&page_size=50"
-    assert calls[0]["token"] == "token"
+    assert calls == []
     assert payload["knowledge_codes"] == ["K001", "K002"]
-    assert payload["question_ids"] == ["Q001", "Q002"]
+    assert payload["question_ids"] == ["K001", "K002"]
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
-    assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
+    assert [job["source_id"] for job in body["jobs"]] == ["K001", "K002"]
+    assert [job["title"] for job in body["jobs"]] == ["Question K001", "Question K002"]
 
 
-def test_create_workspace_job_batch_from_question_ids_uses_cms_title(tmp_path, monkeypatch):
+def test_create_workspace_job_batch_from_question_ids_uses_opaque_title(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
 
     calls = []
 
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        calls.append({"question_id": question_id, "api_url": api_url, "token": token})
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"知识点名称-{question_id}",
-            normalized={"stem": f"stem-{question_id}"},
-            payload={"uuid": question_id},
-        )
+    def spy_fetch_question_detail(question_id, api_url=None, token=None):
+        calls.append(question_id)
+        raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+        "server.app.cms.question.fetch_question_detail",
+        spy_fetch_question_detail,
     )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    app.state.settings.config["cms"] = {
-        "env": "prod",
-        "question_detail_url": "https://cms.example/question/detail",
-    }
     with authenticate_client(TestClient(app)) as c:
         workspace = c.post(
             "/api/workspaces",
@@ -278,14 +244,15 @@ def test_create_workspace_job_batch_from_question_ids_uses_cms_title(tmp_path, m
     assert response.status_code == 200
     body = response.json()
     payload = json.loads(body["batch"]["source_payload_json"])
+    assert calls == []
     assert payload["question_ids"] == ["Q001", "Q002"]
     assert payload["knowledge_codes"] == []
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
-    assert [job["title"] for job in body["jobs"]] == ["知识点名称-Q001", "知识点名称-Q002"]
+    assert [job["title"] for job in body["jobs"]] == ["Question Q001", "Question Q002"]
     assert [c["title"] for c in payload["task_candidates"]] == [
-        "知识点名称-Q001",
-        "知识点名称-Q002",
+        "Question Q001",
+        "Question Q002",
     ]
     assert all(c["source"]["kind"] == "batch_by_ids" for c in payload["task_candidates"])
 
@@ -313,25 +280,7 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
     assert response.json()["detail"] == "At least one question_id is required"
 
 
-def test_question_comprehension_info_batch_by_ids_creates_one_job_per_question(client, monkeypatch):
-    from server.app.cms.question import CmsQuestionDetail
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Reading {question_id}",
-            normalized={},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
-    )
-
+def test_question_comprehension_info_batch_by_ids_creates_one_job_per_question(client):
     ws_id = _create_workspace(client)
     response = client.post(
         f"/api/workspaces/{ws_id}/job-batches",
@@ -349,35 +298,26 @@ def test_question_comprehension_info_batch_by_ids_creates_one_job_per_question(c
     assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
 
 
-def test_question_comprehension_info_batch_by_knowledge_resolves_questions(tmp_path, monkeypatch):
+def test_question_comprehension_info_batch_by_knowledge_creates_one_job_per_code(
+    tmp_path, monkeypatch
+):
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionSummary
     from server.app.main import create_app
 
     calls = []
 
-    def fake_list_questions_by_knowledge(code, api_url=None, token=None):
-        calls.append({"code": code, "api_url": api_url, "token": token})
-        return [
-            CmsQuestionSummary("Q1", "题目一", {"uuid": "Q1"}),
-            CmsQuestionSummary("Q2", "题目二", {"uuid": "Q2"}),
-        ]
+    def spy_list_questions_by_knowledge(code, api_url=None, token=None):
+        calls.append(code)
+        raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.list_questions_by_knowledge",
-        fake_list_questions_by_knowledge,
-    )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+        "server.app.cms.question.list_questions_by_knowledge",
+        spy_list_questions_by_knowledge,
     )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    app.state.settings.config["cms"] = {
-        "env": "prod",
-        "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
-    }
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         response = c.post(
@@ -393,12 +333,13 @@ def test_question_comprehension_info_batch_by_knowledge_resolves_questions(tmp_p
     assert response.status_code == 200
     body = response.json()
     payload = json.loads(body["batch"]["source_payload_json"])
-    assert [call["code"] for call in calls] == ["K001", "K002"]
+    assert calls == []
     assert payload["knowledge_codes"] == ["K001", "K002"]
-    assert payload["question_ids"] == ["Q1", "Q2"]
+    assert payload["question_ids"] == ["K001", "K002"]
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
-    assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
+    assert [job["source_id"] for job in body["jobs"]] == ["K001", "K002"]
+    assert [job["title"] for job in body["jobs"]] == ["Question K001", "Question K002"]
     assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
 
 
@@ -406,28 +347,25 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
     """Regression: one failing chunk must not terminally fail the whole async
     batch — the error is recorded, remaining values are still processed, and
     no jobs are duplicated."""
+    from dataclasses import replace
+
     from fastapi.testclient import TestClient
 
-    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
     from server.app.services.job_intake_queue import JobIntakeQueue
-
-    def fake_fetch_question_detail(question_id, api_url=None, token=None):
-        if question_id == "Q002":
-            raise RuntimeError("cms boom")
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title=f"Title {question_id}",
-            normalized={"stem": f"Stem {question_id}"},
-            payload={"uuid": question_id},
-        )
-
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.fetch_question_detail",
-        fake_fetch_question_detail,
+    from server.app.services.job_intake_registry import RESOLVERS
+    from server.app.services.job_intake_resolution import (
+        resolve_cms_question_opaque_candidates,
     )
-    monkeypatch.setattr(
-        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+
+    def flaky_resolver(entity, input_values, source_kind):
+        if "Q002" in input_values:
+            raise RuntimeError("cms boom")
+        return resolve_cms_question_opaque_candidates(entity, input_values, source_kind)
+
+    spec = RESOLVERS[("question", "batch_by_ids")]
+    monkeypatch.setitem(
+        RESOLVERS, ("question", "batch_by_ids"), replace(spec, handler=flaky_resolver)
     )
     monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 1)
 

@@ -56,15 +56,15 @@ def _list_job_ids_page(
 ) -> tuple[list[tuple[str, str]], str | None]:
     """Narrow keyset page of (id, created_at) pairs ordered newest first."""
     clauses, filter_params = filter_clauses(f)
-    where = f" where workspace_id = ?{''.join(f' and {c}' for c in clauses)}"
+    where = f" where workspace_id = %s{''.join(f' and {c}' for c in clauses)}"
     params: list[Any] = [workspace_id, *filter_params]
     if cursor:
         created_at, job_id = cursor.split("|", 1)
-        where += " and (created_at < ? or (created_at = ? and id < ?))"
+        where += " and (created_at < %s or (created_at = %s and id < %s))"
         params.extend([created_at, created_at, job_id])
     with job_db._connect_read() as conn:
         rows = conn.execute(
-            f"select id, created_at from jobs{where} order by created_at desc, id desc limit ?",
+            f"select id, created_at from jobs{where} order by created_at desc, id desc limit %s",
             (*params, limit + 1),
         ).fetchall()
     page = [(str(row["id"]), str(row["created_at"])) for row in rows]

@@ -1,3 +1,7 @@
+import requests
+from cryptography.fernet import Fernet
+
+
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
@@ -52,44 +56,6 @@ def test_workspace_rejects_legacy_cms_config(client_factory):
         assert updated.status_code == 422
 
 
-def test_update_workspace_resource_config(client_factory):
-    with client_factory(workflows_enabled=True) as c:
-        created = c.post(
-            "/api/workspaces",
-            json={"name": "Math Resources", "default_workflow_key": "question_comprehension_info"},
-        ).json()
-        workspace_id = created["workspace"]["id"]
-        response = c.patch(
-            f"/api/workspaces/{workspace_id}",
-            json={
-                "resource_config": {
-                    "resources": {
-                        "question_detail": {
-                            "provider": "cms.question.detail",
-                            "config": {
-                                "api_url": "https://cms.example/question/detail",
-                                "subject_id": "5",
-                            },
-                        },
-                        "by_knowledge": {
-                            "provider": "cms.question.list_by_knowledge",
-                            "config": {
-                                "api_url": "https://cms.example/question/list",
-                                "page_size": 50,
-                            },
-                        },
-                    }
-                }
-            },
-        )
-
-    assert response.status_code == 200
-    resources = response.json()["workspace"]["resource_config"]["resources"]
-    assert resources["question_detail"]["provider"] == "cms.question.detail"
-    assert resources["question_detail"]["config"]["subject_id"] == "5"
-    assert resources["by_knowledge"]["config"]["page_size"] == 50
-
-
 def test_workspace_settings_without_cms_fields(client_factory):
     with client_factory(workflows_enabled=True) as c:
         ws_id = _create_workspace(c)
@@ -99,51 +65,46 @@ def test_workspace_settings_without_cms_fields(client_factory):
     settings = response.json()["settings"]
     assert "cmsUrl" not in settings
     assert "cmsToken" not in settings
-    assert "resources" in settings
+    assert "resources" not in settings
+    assert "resourceSchemas" not in settings
+    assert "nodeConfig" in settings
+    assert "nodeConfigSchemas" in settings
 
 
-def test_workspace_settings_returns_resource_config(client_factory):
+def test_workspace_settings_returns_node_config(client_factory):
     with client_factory(workflows_enabled=True) as c:
         ws_id = _create_workspace(c)
-        c.patch(
-            f"/api/workspaces/{ws_id}",
-            json={
-                "resource_config": {
-                    "resources": {
-                        "question_detail": {
-                            "enabled": True,
-                            "config": {"bank_version": "v6"},
-                        }
-                    }
-                }
-            },
+        saved = c.patch(
+            f"/api/workspaces/{ws_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"bank_version": "v6"}}},
         )
+        assert saved.status_code == 200, saved.text
         response = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
     settings = response.json()["settings"]
-    assert settings["resources"]["question_detail"]["enabled"] is True
-    assert settings["resources"]["question_detail"]["config"]["bank_version"] == "v6"
+    assert settings["nodeConfig"]["fetch_questions"]["bank_version"] == "v6"
 
 
-def test_patch_settings_connection_saves_resource_config(client_factory):
+def test_patch_settings_nodes_saves_node_config(client_factory):
     with client_factory(workflows_enabled=True) as c:
         ws_id = _create_workspace(c)
         response = c.patch(
-            f"/api/workspaces/{ws_id}/settings/connection",
-            json={"resources": {"question_detail": {"enabled": False, "config": {}}}},
+            f"/api/workspaces/{ws_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"subject_id": "7"}}},
         )
         fetched = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
-    assert fetched.json()["settings"]["resources"]["question_detail"]["enabled"] is False
+    assert fetched.json()["settings"]["nodeConfig"]["fetch_questions"]["subject_id"] == "7"
 
 
-def test_test_connection_uses_global_cms_url(client_factory):
+def test_test_connection_uses_global_cms_url(client_factory, monkeypatch):
+    monkeypatch.setenv("CMS_TOKEN", "env-token")
+
     def configure(app):
         app.state.settings.config["cms"] = {
-            "question_detail_url": "http://cms.example/detail",
-            "token": "global_token",
+            "question_detail_url": "http://cms.example.com/question/detail",
         }
 
     with client_factory(workflows_enabled=True, configure=configure) as c:
@@ -152,9 +113,10 @@ def test_test_connection_uses_global_cms_url(client_factory):
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
+    assert "全局 env" in response.json()["message"]
 
 
-def test_test_connection_fails_when_global_url_missing(client_factory):
+def test_test_connection_fails_when_cms_url_missing(client_factory):
     def configure(app):
         app.state.settings.config["cms"] = {}
 
@@ -163,4 +125,48 @@ def test_test_connection_fails_when_global_url_missing(client_factory):
         response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
 
     assert response.status_code == 400
-    assert "Global CMS URL" in response.json()["detail"]
+    assert "CMS URL 未配置" in response.json()["detail"]
+
+
+def test_test_connection_node_config_token_overrides_env(client_factory, monkeypatch):
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    monkeypatch.setenv("CMS_TOKEN", "env-token")
+
+    def configure(app):
+        app.state.settings.config["cms"] = {
+            "question_detail_url": "http://cms.example.com/question/detail",
+        }
+
+    with client_factory(workflows_enabled=True, configure=configure) as c:
+        ws_id = _create_workspace(c)
+        patch = c.patch(
+            f"/api/workspaces/{ws_id}/settings/nodes",
+            json={"nodeConfig": {"fetch_questions": {"token": "node-token"}}},
+        )
+        assert patch.status_code == 200, patch.text
+        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert "workspace node config" in response.json()["message"]
+
+
+def test_test_connection_reports_auth_failure(client_factory, monkeypatch):
+    class _Unauthorized:
+        status_code = 401
+
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: _Unauthorized())
+
+    def configure(app):
+        app.state.settings.config["cms"] = {
+            "question_detail_url": "http://cms.internal/question/detail",
+            "token": "global_token",
+        }
+
+    with client_factory(workflows_enabled=True, configure=configure) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
+
+    assert response.status_code == 400
+    assert "鉴权失败" in response.json()["detail"]

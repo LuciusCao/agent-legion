@@ -43,8 +43,8 @@ describe('buildDagNodes', () => {
   it('puts outline and executor information directly on graph nodes', () => {
     const nodes = buildDagNodes(workflow, [
       {
-        id: 'local-default',
-        kind: 'local',
+        id: 'code-default',
+        kind: 'code',
         capabilities: ['fetch', 'classify', 'finish'],
         global_capacity: 4,
       },
@@ -53,7 +53,7 @@ describe('buildDagNodes', () => {
     expect(nodes[0]).toMatchObject({
       key: 'start',
       capability: 'fetch',
-      executorKind: 'local',
+      executorKind: 'code',
     })
     expect(nodes[1].topologyBadges).toContain('branch')
     expect(nodes[2]).toMatchObject({

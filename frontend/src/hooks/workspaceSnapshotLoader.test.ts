@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
+import type { QueryClient } from '@tanstack/react-query'
 import {
   createLoadSnapshot,
   enqueuePendingEvent,
@@ -8,6 +9,9 @@ const { failJobFetch, loadWorkspaceJobsSnapshot } = vi.hoisted(() => ({
   failJobFetch: vi.fn(),
   loadWorkspaceJobsSnapshot: vi.fn(),
 }))
+
+// loadWorkspaceJobsSnapshot 已被 mock，queryClient 只是透传参数。
+const queryClient = {} as QueryClient
 
 vi.mock('../stores/jobStore', () => ({
   useJobStore: {
@@ -28,6 +32,7 @@ describe('createLoadSnapshot', () => {
     const snapshotLoadingRef = { current: true }
     const pendingEventsRef = { current: [{ data: 'ev1' } as MessageEvent] }
     const loadSnapshot = createLoadSnapshot(
+      queryClient,
       'ws1',
       snapshotLoadingRef,
       pendingEventsRef,
@@ -40,6 +45,7 @@ describe('createLoadSnapshot', () => {
     expect(snapshotLoadingRef.current).toBe(false)
     expect(pendingEventsRef.current).toEqual([])
     expect(loadWorkspaceJobsSnapshot).toHaveBeenCalledWith(
+      queryClient,
       'ws1',
       expect.any(Function)
     )
@@ -53,6 +59,7 @@ describe('createLoadSnapshot', () => {
     const pendingEventsRef = { current: [{ data: 'ev' } as MessageEvent] }
 
     const loadSnapshot = createLoadSnapshot(
+      queryClient,
       'ws1',
       snapshotLoadingRef,
       pendingEventsRef,
@@ -72,7 +79,11 @@ describe('createLoadSnapshot', () => {
     let firstIsAborted!: () => boolean
     loadWorkspaceJobsSnapshot
       .mockImplementationOnce(
-        (_workspaceId: string, isStale: () => boolean) => {
+        (
+          _queryClient: QueryClient,
+          _workspaceId: string,
+          isStale: () => boolean
+        ) => {
           firstIsAborted = isStale
           return new Promise<void>((resolve) => {
             resolveFirst = resolve
@@ -85,6 +96,7 @@ describe('createLoadSnapshot', () => {
     const pendingEventsRef = { current: [] as MessageEvent[] }
     const processEvent = vi.fn()
     const loadSnapshot = createLoadSnapshot(
+      queryClient,
       'ws1',
       snapshotLoadingRef,
       pendingEventsRef,

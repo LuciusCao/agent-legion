@@ -8,7 +8,7 @@ const baseData: DagNodeData = {
   label: 'generate_summary',
   status: 'running',
   duration: 4.2,
-  executorKind: 'local',
+  executorKind: 'code',
   inputs: ['keywords.json'],
   outputs: ['summary.json', 'report.md'],
 }
@@ -39,7 +39,7 @@ describe('NodeDetailsPanel', () => {
       />
     )
     expect(screen.getByText('generate_summary')).toBeInTheDocument()
-    expect(screen.getByText('local')).toBeInTheDocument()
+    expect(screen.getByText('code')).toBeInTheDocument()
     expect(screen.getByText('keywords.json')).toBeInTheDocument()
     expect(screen.getByText('summary.json')).toBeInTheDocument()
     expect(screen.getByText('查看日志')).toBeInTheDocument()

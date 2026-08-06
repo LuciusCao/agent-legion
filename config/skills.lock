@@ -1,5 +1,5 @@
 version: '1'
-resolved_at: '2026-07-31T22:48:29Z'
+resolved_at: '2026-08-06T02:46:29Z'
 skills:
   question_comprehension_info/assess_comprehension_difficulty:
     repo: ~/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
@@ -7,12 +7,12 @@ skills:
     commit: 1b8d202149b11967c7379d5dfa43ee5c2e8ecbea
   question_comprehension_info/generate_key_info:
     repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
-    ref: v1.3.9
-    commit: 54cf56021dc3d9020bb48dee03bd65720f448c18
+    ref: v1.4.0
+    commit: f7f39cc8dcf1cadc6c38c772fe218373071d20f5
   question_comprehension_info/generate_possible_errors:
     repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
-    ref: v1.3.5
-    commit: ec91989afe774765d5dbc342855f93f8d73c1e6a
+    ref: v1.4.0
+    commit: 304d776f279ffe2107ac593f48e9e83a60c3cc08
   question_comprehension_info/review_key_info:
     repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_key_info
     ref: v1.1.12

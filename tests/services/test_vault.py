@@ -7,18 +7,17 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
+from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_intake import JobIntakeService
+from server.app.services.node_secrets import node_secret_name
 from server.app.services.vault import (
     VaultError,
     VaultMasterKeyMissingError,
     VaultService,
-    apply_resource_secret_fields,
-    resource_secret_name,
-    strip_resource_secret_fields,
 )
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.workflows.cms_helpers import _effective_cms_config
+from server.app.services.workspace_node_config import update_workspace_node_config
 
 PLAINTEXT = "s3cr3t-cms-token"
 
@@ -34,20 +33,6 @@ def vault_key(monkeypatch):
 @pytest.fixture
 def vault(job_db, settings, vault_key):
     return VaultService(job_db.path, settings.config)
-
-
-def _resource_config(token_value: object) -> dict:
-    return {
-        "resources": {
-            "question_detail": {
-                "enabled": True,
-                "config": {
-                    "api_url": "http://cms.example.com/question/detail",
-                    "token": token_value,
-                },
-            }
-        }
-    }
 
 
 def test_set_get_round_trip(vault, job_db):
@@ -99,7 +84,7 @@ def test_ciphertext_is_not_plaintext(vault, job_db):
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     with job_db.connect() as conn:
         row = conn.execute(
-            "select ciphertext from workspace_secrets where workspace_id=? and name=?",
+            "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
             (workspace["id"], "api-token"),
         ).fetchone()
     assert row["ciphertext"] != PLAINTEXT
@@ -126,7 +111,7 @@ def test_invalid_master_key_rejected(job_db, monkeypatch):
 
 def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
     workspace = job_db.create_workspace("vault-resolve")
-    name = resource_secret_name("question_detail", "token")
+    name = node_secret_name("question_comprehension_info", "fetch_questions", "token")
     vault.set(workspace["id"], name, PLAINTEXT)
 
     resolved = vault.resolve_secret_refs(
@@ -145,114 +130,18 @@ def test_resolve_secret_refs_missing_entry_raises(vault, job_db):
         vault.resolve_secret_refs({"token": {"secret_ref": "gone"}}, workspace["id"])
 
 
-def test_apply_resource_secret_fields_diverts_to_vault(vault, job_db, settings):
-    workspace = job_db.create_workspace("vault-apply")
-    resources = {
-        "question_detail": {
-            "enabled": True,
-            "config": {"api_url": "http://cms.example.com/q", "token": PLAINTEXT},
-        }
-    }
-
-    applied = apply_resource_secret_fields(
-        vault, workspace["id"], resources, {}, settings.resource_providers.schemas
-    )
-
-    token = applied["question_detail"]["config"]["token"]
-    assert token == {"secret_ref": "resource:question_detail:token"}
-    assert vault.get(workspace["id"], "resource:question_detail:token") == PLAINTEXT
-
-
-def test_apply_resource_secret_fields_empty_value_clears(vault, job_db, settings):
-    workspace = job_db.create_workspace("vault-clear")
-    current = _resource_config({"secret_ref": "resource:question_detail:token"})["resources"]
-    vault.set(workspace["id"], "resource:question_detail:token", PLAINTEXT)
-    patch = {"question_detail": {"enabled": True, "config": {"token": ""}}}
-
-    applied = apply_resource_secret_fields(
-        vault, workspace["id"], patch, current, settings.resource_providers.schemas
-    )
-
-    assert "token" not in applied["question_detail"]["config"]
-    assert vault.get(workspace["id"], "resource:question_detail:token") is None
-
-
-def test_apply_resource_secret_fields_absent_key_inherits_stored(vault, job_db, settings):
-    workspace = job_db.create_workspace("vault-inherit")
-    current = _resource_config({"secret_ref": "resource:question_detail:token"})["resources"]
-    patch = {"question_detail": {"enabled": True, "config": {"api_url": "http://new.example"}}}
-
-    applied = apply_resource_secret_fields(
-        vault, workspace["id"], patch, current, settings.resource_providers.schemas
-    )
-
-    assert applied["question_detail"]["config"]["token"] == {
-        "secret_ref": "resource:question_detail:token"
-    }
-
-
-def test_apply_resource_secret_fields_masked_echo_keeps_stored(vault, job_db, settings):
-    workspace = job_db.create_workspace("vault-echo")
-    current = _resource_config({"secret_ref": "resource:question_detail:token"})["resources"]
-    patch = {"question_detail": {"enabled": True, "config": {"token": {"secret_set": True}}}}
-
-    applied = apply_resource_secret_fields(
-        vault, workspace["id"], patch, current, settings.resource_providers.schemas
-    )
-
-    assert applied["question_detail"]["config"]["token"] == {
-        "secret_ref": "resource:question_detail:token"
-    }
-
-
-def test_strip_resource_secret_fields_removes_secret_values(settings):
-    resources = _resource_config(PLAINTEXT)["resources"]
-    stripped = strip_resource_secret_fields(resources, settings.resource_providers.schemas)
-    assert "token" not in stripped["question_detail"]["config"]
-    assert stripped["question_detail"]["config"]["api_url"] == (
-        "http://cms.example.com/question/detail"
-    )
-
-
-def test_effective_cms_config_resolves_ref(vault, job_db, settings):
-    workspace = job_db.create_workspace("vault-effective")
-    vault.set(workspace["id"], "resource:question_detail:token", PLAINTEXT)
-    job_db.update_workspace(
-        workspace["id"],
-        resource_config=_resource_config({"secret_ref": "resource:question_detail:token"}),
-    )
-    context = {"settings_config": settings.config, "job_db": job_db}
-
-    resolved = _effective_cms_config({"workspace_id": workspace["id"], "batch_id": ""}, context)
-
-    assert resolved["token"] == PLAINTEXT
-
-
-def test_effective_cms_config_passes_legacy_plaintext_through(job_db, settings, vault_key):
-    workspace = job_db.create_workspace("vault-legacy")
-    job_db.update_workspace(workspace["id"], resource_config=_resource_config("legacy-plain-text"))
-    context = {"settings_config": settings.config, "job_db": job_db}
-
-    resolved = _effective_cms_config({"workspace_id": workspace["id"], "batch_id": ""}, context)
-
-    assert resolved["token"] == "legacy-plain-text"
-
-
-def test_effective_cms_config_ref_without_key_raises(job_db, settings, monkeypatch):
-    workspace = job_db.create_workspace("vault-no-key-resolve")
+def test_resolve_secret_refs_without_master_key_raises(job_db, monkeypatch):
+    # Key removed after the secret was written: resolution must fail loudly.
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    VaultService(job_db.path, {}).set(workspace["id"], "resource:question_detail:token", PLAINTEXT)
-    job_db.update_workspace(
-        workspace["id"],
-        resource_config=_resource_config({"secret_ref": "resource:question_detail:token"}),
-    )
-    # Key removed after the secret was written: resolution must fail loudly.
+    workspace = job_db.create_workspace("vault-no-key-resolve")
+    VaultService(job_db.path, {}).set(workspace["id"], "api-token", PLAINTEXT)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
-    context = {"settings_config": {}, "job_db": job_db}
 
     with pytest.raises(VaultMasterKeyMissingError):
-        _effective_cms_config({"workspace_id": workspace["id"], "batch_id": ""}, context)
+        VaultService(job_db.path, {}).resolve_secret_refs(
+            {"token": {"secret_ref": "api-token"}}, workspace["id"]
+        )
 
 
 def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
@@ -261,10 +150,13 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     )
     definition = WorkflowCatalogService(settings).definition("question_comprehension_info")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
-    vault.set(workspace["id"], "resource:question_detail:token", PLAINTEXT)
-    job_db.update_workspace(
-        workspace["id"],
-        resource_config=_resource_config({"secret_ref": "resource:question_detail:token"}),
+    update_workspace_node_config(
+        job_db,
+        WorkflowCatalogService(settings),
+        published_agent_definitions(settings.database_url),
+        job_db.get_workspace(workspace["id"]),
+        {"nodeConfig": {"fetch_questions": {"token": PLAINTEXT, "bank_version": "v9"}}},
+        settings.executor_definitions,
     )
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
@@ -282,6 +174,9 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     batch = job_db.get_batch(str(result["batch"]["id"]))
     payload_text = str(batch["source_payload_json"])
     payload = json.loads(payload_text)
-    frozen = payload["resource_config"]["resources"]["question_detail"]["config"]
-    assert frozen["token"] == {"secret_ref": "resource:question_detail:token"}
+    frozen = payload["node_config"]["fetch_questions"]
+    name = node_secret_name("question_comprehension_info", "fetch_questions", "token")
+    assert frozen["token"] == {"secret_ref": name}
+    assert frozen["bank_version"] == "v9"
     assert PLAINTEXT not in payload_text
+    assert vault.get(workspace["id"], name) == PLAINTEXT

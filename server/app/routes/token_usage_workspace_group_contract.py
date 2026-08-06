@@ -21,4 +21,5 @@ class TokenUsageWorkspaceGroup(BaseModel):
     total_cost: float | None
     avg_cost: float | None
     pricing_missing: bool
+    pricing_missing_models: list[str] = []
     coverage: float

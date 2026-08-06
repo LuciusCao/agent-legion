@@ -1,8 +1,11 @@
 """video_knowledge download node: execution-time CMS resolution.
 
 Knowledge-mode intake writes an opaque ``source_ref``; the download node
-resolves it against the CMS through the resource binding + vault chain and
-writes the resolved fields back to video_input.json before downloading.
+(``workflow_nodes/video_download.py``) resolves it against the CMS through
+the node config chain (global ``cms:`` defaults overridden by
+``runtime["node_config"]``; the dispatch layer already resolved any vault
+secret_ref into a plaintext token) and writes the resolved fields back to
+video_input.json before downloading.
 """
 
 from __future__ import annotations
@@ -11,11 +14,9 @@ import json
 from pathlib import Path
 
 import pytest
-from cryptography.fernet import Fernet
 
 from server.app.cms.client import CmsVideoLookup
-from server.app.services.vault import VaultService, resource_secret_name
-from server.app.workflows.video_knowledge import download_video
+from workflow_nodes.video_download import run as download_video
 
 PLAINTEXT = "knowledge-video-cms-token"
 
@@ -55,7 +56,7 @@ def test_download_urls_mode_downloads_source_url_directly(tmp_path, monkeypatch)
     monkeypatch.setattr("server.app.cms.knowledge.lookup_knowledge_video", fail_on_cms)
     downloaded = []
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge.legacy_download_video",
+        "workflow_nodes.video_download.legacy_download_video",
         lambda source_url, output_path: downloaded.append((source_url, output_path)),
     )
 
@@ -67,14 +68,7 @@ def test_download_urls_mode_downloads_source_url_directly(tmp_path, monkeypatch)
 def test_download_knowledge_mode_resolves_via_cms(tmp_path, monkeypatch) -> None:
     job_dir = tmp_path / "job"
     _write_video_input(job_dir)
-    settings_config = {
-        "resource_providers": {
-            "cms.knowledge.video": {
-                "resource_key": "knowledge_video",
-                "api_url": "http://cms.example/knowledge/detail",
-            }
-        }
-    }
+    node_config = {"api_url": "http://cms.example/knowledge/detail"}
     lookup = CmsVideoLookup(
         status="found",
         url="https://example.invalid/resolved.mp4",
@@ -87,19 +81,15 @@ def test_download_knowledge_mode_resolves_via_cms(tmp_path, monkeypatch) -> None
         calls.append((code, api_url, token))
         return lookup
 
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.get_token", lambda env, config: "token"
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.lookup_knowledge_video", fake_lookup
-    )
+    monkeypatch.setattr("workflow_nodes.video_download.get_token", lambda env, config: "token")
+    monkeypatch.setattr("workflow_nodes.video_download.lookup_knowledge_video", fake_lookup)
     downloaded = []
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge.legacy_download_video",
+        "workflow_nodes.video_download.legacy_download_video",
         lambda source_url, output_path: downloaded.append(source_url),
     )
 
-    download_video({"id": "j1"}, job_dir, runtime={"settings_config": settings_config})
+    download_video({"id": "j1"}, job_dir, runtime={"node_config": node_config})
 
     assert calls == [("K001", "http://cms.example/knowledge/detail", "token")]
     assert downloaded == ["https://example.invalid/resolved.mp4"]
@@ -113,24 +103,15 @@ def test_download_knowledge_mode_resolves_via_cms(tmp_path, monkeypatch) -> None
 def test_download_knowledge_mode_not_found_fails_with_code(tmp_path, monkeypatch) -> None:
     job_dir = tmp_path / "job"
     _write_video_input(job_dir, source_ref="K404")
-    settings_config = {
-        "resource_providers": {
-            "cms.knowledge.video": {
-                "resource_key": "knowledge_video",
-                "api_url": "http://cms.example/knowledge/detail",
-            }
-        }
-    }
+    node_config = {"api_url": "http://cms.example/knowledge/detail"}
+    monkeypatch.setattr("workflow_nodes.video_download.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.get_token", lambda env, config: "token"
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.lookup_knowledge_video",
+        "workflow_nodes.video_download.lookup_knowledge_video",
         lambda code, api_url=None, token=None: CmsVideoLookup(status="not_found"),
     )
 
     with pytest.raises(RuntimeError, match="K404"):
-        download_video({"id": "j1"}, job_dir, runtime={"settings_config": settings_config})
+        download_video({"id": "j1"}, job_dir, runtime={"node_config": node_config})
 
 
 def test_download_knowledge_mode_empty_source_ref_fails(tmp_path) -> None:
@@ -141,38 +122,16 @@ def test_download_knowledge_mode_empty_source_ref_fails(tmp_path) -> None:
         download_video({"id": "j1"}, job_dir, runtime=None)
 
 
-@pytest.fixture
-def vault_key(monkeypatch):
-    key = Fernet.generate_key().decode()
-    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", key)
-    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    return key
-
-
-def test_download_knowledge_mode_resolves_vault_secret_ref(
-    tmp_path, monkeypatch, job_db, settings, vault_key
-) -> None:
-    """The binding stores only a secret_ref; the node resolves the plaintext
-    token in memory and passes it to the CMS lookup."""
+def test_download_knowledge_mode_uses_node_config_token(tmp_path, monkeypatch) -> None:
+    """The dispatch layer resolves the vault secret_ref in memory and injects
+    the plaintext token via runtime["node_config"]; the node passes it to the
+    CMS lookup without persisting it."""
     job_dir = tmp_path / "job"
     _write_video_input(job_dir)
-    workspace = job_db.create_workspace("vault-knowledge-video")
-    name = resource_secret_name("knowledge_video", "token")
-    VaultService(job_db.path, settings.config).set(workspace["id"], name, PLAINTEXT)
-    job_db.update_workspace(
-        workspace["id"],
-        resource_config={
-            "resources": {
-                "knowledge_video": {
-                    "enabled": True,
-                    "config": {
-                        "api_url": "http://cms.example/knowledge/detail",
-                        "token": {"secret_ref": name},
-                    },
-                }
-            }
-        },
-    )
+    node_config = {
+        "api_url": "http://cms.example/knowledge/detail",
+        "token": PLAINTEXT,
+    }
     calls = []
 
     def fake_lookup(code, api_url=None, token=None):
@@ -184,22 +143,20 @@ def test_download_knowledge_mode_resolves_vault_secret_ref(
             source_uuid="uuid-1",
         )
 
+    monkeypatch.setattr("workflow_nodes.video_download.lookup_knowledge_video", fake_lookup)
     monkeypatch.setattr(
-        "server.app.workflows.video_knowledge_source.lookup_knowledge_video", fake_lookup
-    )
-    monkeypatch.setattr(
-        "server.app.workflows.video_knowledge.legacy_download_video",
+        "workflow_nodes.video_download.legacy_download_video",
         lambda source_url, output_path: None,
     )
 
-    job = {"id": "j1", "workspace_id": str(workspace["id"]), "batch_id": ""}
-    context = {"settings_config": settings.config, "job_db": job_db}
-    download_video(job, job_dir, runtime=context)
+    download_video(
+        {"id": "j1", "workspace_id": "ws-a"}, job_dir, runtime={"node_config": node_config}
+    )
 
     assert len(calls) == 1
     code, api_url, token = calls[0]
     assert code == "K001"
     assert api_url.startswith("http://cms.example/knowledge/detail")
     assert token == PLAINTEXT
-    # Only the secret_ref may touch disk; the plaintext stays in memory.
+    # The plaintext stays in memory; it is never written to the job dir.
     assert PLAINTEXT not in (job_dir / "video_input.json").read_text(encoding="utf-8")

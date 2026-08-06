@@ -1,17 +1,18 @@
 import { useEffect, useMemo } from 'react'
 import { FormControlLabel, Switch, TextField } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
+import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 import { ExecutorAllocationRemovalDialog } from './ExecutorAllocationRemovalDialog'
 
 export function ExecutorAllocationSection() {
   const {
-    executorCatalog,
     executorConfiguration,
     setExecutorAllocation,
     requestExecutorRemoval,
     pendingAllocationRemoval,
     confirmExecutorRemoval,
   } = useSettingStore()
+  const { executorCatalog } = useWorkspaceSettingsSnapshot()
 
   const { allocations, bindings } = executorConfiguration
 

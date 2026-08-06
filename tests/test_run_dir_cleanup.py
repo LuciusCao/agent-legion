@@ -30,13 +30,13 @@ def _make_db(tmp_path):
 
 def _seed_job(conn, job_id, workspace_id="ws1"):
     conn.execute(
-        "insert into workspaces(id, name) values (?, ?) on conflict (id) do nothing",
+        "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(
         """
         insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
-        values (?, ?, 'wf', 'question', ?)
+        values (%s, %s, 'wf', 'question', %s)
         """,
         (job_id, workspace_id, job_id),
     )
@@ -46,7 +46,7 @@ def _insert_node_run(conn, job_id, node_key, *, run_dir=""):
     conn.execute(
         """
         insert into node_runs(job_id, node_key, status, run_dir, finished_at)
-        values (?, ?, 'completed', ?, current_timestamp)
+        values (%s, %s, 'completed', %s, current_timestamp)
         """,
         (job_id, node_key, run_dir),
     )
@@ -65,7 +65,7 @@ def test_cleanup_extra_runs_for_node_keeps_newest(tmp_path):
     with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
-            "insert into node_runs(job_id, node_key, status, run_dir) values (?, ?, 'completed', ?)",
+            "insert into node_runs(job_id, node_key, status, run_dir) values (%s, %s, 'completed', %s)",
             ("job-1", "node-a", make_data_relative(old_dir, data_dir)),
         )
         conn.commit()

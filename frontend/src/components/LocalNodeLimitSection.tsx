@@ -1,13 +1,10 @@
 import { TextField } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
+import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 
 export function LocalNodeLimitSection() {
-  const {
-    workflowDefinition,
-    executorCatalog,
-    executorConfiguration,
-    setNodeLimit,
-  } = useSettingStore()
+  const { executorConfiguration, setNodeLimit } = useSettingStore()
+  const { workflowDefinition, executorCatalog } = useWorkspaceSettingsSnapshot()
 
   if (!workflowDefinition) return null
 
@@ -25,7 +22,7 @@ export function LocalNodeLimitSection() {
     )
     if (!binding) return false
     const executor = executorCatalog.find((e) => e.id === binding.executor_id)
-    return executor?.kind === 'local'
+    return executor?.kind === 'code'
   })
 
   if (localBoundNodes.length === 0) return null
@@ -40,7 +37,7 @@ export function LocalNodeLimitSection() {
           color: '#43474e',
         }}
       >
-        本地节点并发
+        代码节点并发
       </h3>
 
       <div

@@ -7,18 +7,15 @@ import {
   Chip,
   Button,
 } from '@mui/material'
-import { fetchWorkspaceTokenUsage } from '../../api/tokenUsage'
-import { useAsync } from '../../hooks/useAsync'
+import { toErrorMessage } from '../../lib/queryError'
 import { MaterialIcon } from '../MaterialIcon'
+import {
+  useWorkspaceTokenUsage,
+  type TokenUsageFilters,
+} from './useWorkspaceTokenUsage'
 import styles from './TokenUsagePanel.module.css'
 
 type GroupBy = 'node' | 'model' | 'skill_version' | 'node_skill_version'
-
-interface FilterState {
-  nodeKey: string
-  model: string
-  skillVersion: string
-}
 
 const GROUPS: { key: GroupBy; label: string }[] = [
   { key: 'node', label: '按节点' },
@@ -32,7 +29,7 @@ function fmt(value: number | null | undefined) {
 }
 
 function money(currency: string, value: number | null | undefined) {
-  if (typeof value !== 'number') return '未配置价格'
+  if (typeof value !== 'number') return '-'
   const symbol = currency === 'CNY' ? '¥' : currency
   return `${symbol} ${value.toFixed(4)}`
 }
@@ -44,7 +41,7 @@ function formatCoverage(value: number | null | undefined) {
 
 export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
   const [groupBy, setGroupBy] = useState<GroupBy>('node')
-  const [filters, setFilters] = useState<FilterState>({
+  const [filters, setFilters] = useState<TokenUsageFilters>({
     nodeKey: '',
     model: '',
     skillVersion: '',
@@ -56,13 +53,10 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
     setExpanded(new Set())
   }, [workspaceId, groupBy, filters])
 
-  const { data, loading, error } = useAsync(() => {
-    const params = new URLSearchParams({ group_by: groupBy })
-    if (filters.nodeKey) params.set('node_key', filters.nodeKey)
-    if (filters.model) params.set('model', filters.model)
-    if (filters.skillVersion) params.set('skill_version', filters.skillVersion)
-    return fetchWorkspaceTokenUsage(workspaceId, params)
-  }, [workspaceId, groupBy, filters])
+  const query = useWorkspaceTokenUsage(workspaceId, groupBy, filters)
+  const data = query.data ?? null
+  const loading = query.isLoading
+  const error = toErrorMessage(query.error)
 
   const summary = data?.summary
 
@@ -186,7 +180,9 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
             {money(data?.currency ?? 'CNY', summary?.cost?.total ?? undefined)}
           </div>
           <div className={styles.metricMeta}>
-            {summary?.pricing_missing ? '缺少定价配置' : '按配置单价计算'}
+            {summary?.pricing_missing_models?.length
+              ? `缺少定价：${summary.pricing_missing_models.join('、')}`
+              : '按配置单价计算'}
           </div>
         </div>
         <div className={styles.metric}>
@@ -449,9 +445,10 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                                   )}
                                 </span>
                               </div>
-                              {group.pricing_missing && (
+                              {group.pricing_missing_models.length > 0 && (
                                 <div className={styles.pricingMissing}>
-                                  缺少定价配置
+                                  缺少定价：
+                                  {group.pricing_missing_models.join('、')}
                                 </div>
                               )}
                             </div>

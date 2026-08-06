@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.services.job_errors import JobServiceError
-from server.app.services.vault import WorkspaceSecretsService
+from server.app.services.workspace_secrets import WorkspaceSecretsService
 from server.app.settings import Settings
 
 

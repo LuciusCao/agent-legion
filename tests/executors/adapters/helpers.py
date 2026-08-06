@@ -1,61 +1,10 @@
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 from pathlib import Path
-from typing import Any
 
 from server.app.skills.manager import SkillManager
-
-
-def noop_local_handler(
-    _job: dict[str, Any], _job_dir: Path, _runtime: dict[str, Any] | None
-) -> None:
-    return None
-
-
-def write_output_handler(
-    _job: dict[str, Any], job_dir: Path, _runtime: dict[str, Any] | None
-) -> None:
-    (job_dir / "out.json").write_text("{}", encoding="utf-8")
-
-
-def raising_local_handler(
-    _job: dict[str, Any], _job_dir: Path, _runtime: dict[str, Any] | None
-) -> None:
-    raise ValueError("boom")
-
-
-def logging_local_handler(
-    _job: dict[str, Any], job_dir: Path, _runtime: dict[str, Any] | None
-) -> None:
-    print("local handler log line")
-    (job_dir / "out.json").write_text("{}", encoding="utf-8")
-
-
-def record_runtime_handler(
-    _job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None
-) -> None:
-    runtime = runtime or {}
-    payload = {
-        key: str(value) if isinstance(value, Path) else value
-        for key, value in runtime.items()
-        if key
-        in {
-            "job_dir",
-            "log_path",
-            "inputs",
-            "expected_outputs",
-            "capability",
-            "node_key",
-            "workflow_key",
-            "execution_id",
-            "workspace_id",
-        }
-    }
-    (job_dir / "runtime.json").write_text(json.dumps(payload), encoding="utf-8")
-    (job_dir / "out.json").write_text("{}", encoding="utf-8")
 
 
 def _git_env() -> dict[str, str]:

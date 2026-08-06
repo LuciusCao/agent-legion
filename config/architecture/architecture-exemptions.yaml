@@ -33,19 +33,6 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-18-phase2-state-externalization.md#task-8
   ceiling: 83
 - check: architecture.file_budget
-  path: server/app/agents.py
-  reason: Task 9 of the phase1 event-bus plan (complete) routes agent WS broadcasts
-    through the EventBus (subscribe/forward in connect, bus publish in _broadcast,
-    public broadcast_controller); the WS forwarding block will be extracted into
-    its own module. Task 9 of the phase4 agent-collaboration plan envelopes WS
-    messages (snapshot/agent_busy/agent_idle) and buffers per-agent incremental
-    events between flushes. The dormant workspace assignment functions were
-    removed per issues/closed/050-P3-agents-py-assignment-functions-deferral.md
-    and the ceiling was tightened to actual + buffer.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 302
-- check: architecture.file_budget
   path: server/app/jobs/queries/workflow_revisions.py
   reason: Task 1 of the workflow-studio-ux-refinement plan adds the get_workflow_revision
     query; Agent Legion atomically materializes Agent routes with revision publication
@@ -105,23 +92,27 @@ exemptions:
   path: server/app/settings.py
   reason: PostgreSQL-only configuration adds a validated database URL and its
     explicit environment override. Agent Worker secret-file configuration is
-    resolved at the same trusted boundary. Resource provider declarations are
-    parsed once here and injected through Settings. The retired yaml cms
+    resolved at the same trusted boundary. The retired yaml cms
     credential keys are rejected at this boundary with migration guidance
-    (config governance G2). The AGENT_LEGION_DATABASE_URL
+    (config governance G2), as are the retired yaml agents catalog and
+    workflows.pi block (agent config governance phase 3, schema v27). The
+    AGENT_LEGION_DATABASE_URL
     environment override lives here too (config
     governance G4), as does the CMS_* / BASECMS_* alias validation hook
     (de-identification D3). Extract database settings into the configuration
     package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 260
+  ceiling: 283
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
-  reason: Composition adds the Agent Worker control-plane router and artifact authentication dependency.
+  reason: Composition adds the Agent Worker control-plane router, the artifact
+    authentication dependency, the workspace-scoped custom node code
+    router (EXEC-CODE-002), and the DB-backed Agent definition catalog +
+    skill validation routers (agent config governance, schema v26).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 110
+  ceiling: 127
 - check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
@@ -141,10 +132,11 @@ exemptions:
     workspace-level via workspace_agent_capacities), warning and skipping revisions
     whose capability mapping is ambiguous, and skipping the reconcile entirely
     when the catalog has zero enabled definitions so routes are never pruned by
-    an empty-catalog regression.
+    an empty-catalog regression. Publish also snapshots node_code_pins (the
+    published custom code versions, EXEC-CODE-002) alongside the definition.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 132
+  ceiling: 150
 - check: architecture.file_budget
   path: worker/supervisor.py
   reason: The develop merge stacked two intentional, individually in-budget
@@ -155,3 +147,74 @@ exemptions:
   owner: agent-worker
   remove_when: issues/open/033-P3-worker-supervisor-upload-aggregation-split.md
   ceiling: 245
+- check: architecture.file_budget
+  path: server/app/agent_broker/dispatch.py
+  reason: Agent config governance phase 3 moved the strict execution-block
+    resolution (node override -> workspace default -> fail fast, runtime-pinned
+    command builder) into the dispatch boundary; the manifest builder and the
+    resolver share the runtime binary constants, so splitting now would just
+    scatter one cohesive rule. Extract the resolver with the phase 4
+    pi cleanup.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 176
+- check: architecture.file_budget
+  path: server/app/services/agent_service.py
+  reason: Schema v27 made this service the only Agent catalog source of truth;
+    the short-TTL published-definition cache (hot claim-path reads) lives next
+    to the lifecycle methods so publish/archive can invalidate it in one
+    place. Split the cache into its own module if it gains more policy.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 158
+- check: architecture.file_budget
+  path: server/app/services/job_intake.py
+  reason: One added import line for the DB-backed published Agent catalog
+    (agent config governance phase 3); the intake flow itself is unchanged.
+    Revert the exemption when the intake service is next split.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 209
+- check: architecture.file_budget
+  path: server/app/workflows/pi_command_builder.py
+  reason: Agent config governance phase 3 (execution.* manifest) added one
+    line to the pi command builder; the whole module is phase 4 cleanup
+    material, so an exemption beats churning dead-path code.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 55
+- check: architecture.file_budget
+  path: server/app/db/migrations/versioned_entities.py
+  reason: The published-capability partial unique index (agent config
+    governance, one published Agent per capability) lives with the table DDL
+    it constrains; the migration file is append-only by design and shrinks
+    only when old migrations are collapsed.
+  owner: database
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 117
+- check: architecture.file_budget
+  path: server/app/executors/runtime_config.py
+  reason: Startup validation for the retained pi executor path gained a
+    three-line comment explaining the hardcoded binary default after the
+    workflows.pi yaml retirement; the file is otherwise unchanged and the pi
+    path is scheduled dead-path code.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 259
+- check: architecture.file_budget
+  path: server/app/services/versioned_entities.py
+  reason: The capability-conflict IntegrityError mapping (agent config
+    governance, DB-level one-published-Agent-per-capability guard) added a
+    small helper shared by publish and rollback; splitting the lifecycle
+    engine for nine lines would scatter one cohesive rule.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 378
+- check: architecture.file_budget
+  path: worker/executor.py
+  reason: The manifest timeout fallback alignment comment (600 -> 1800,
+    matching the Host EXECUTION_TIMEOUT_SECONDS product constant) added
+    three comment lines to the claim execution path; no logic grew.
+  owner: agent-worker
+  remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
+  ceiling: 371

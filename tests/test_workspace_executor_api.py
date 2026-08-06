@@ -4,13 +4,16 @@ def test_list_executors_endpoint(client):
     data = response.json()
     agent = next(item for item in data["agents"] if item["id"] == "video-content-review-v1")
     assert agent["capability"] == "review_video_content"
-    assert agent["provider"] == "gateway"
-    assert agent["model"] == "your-model"
-    executor = data["executors"][0]
-    assert executor["id"] == "local-default"
-    assert executor["kind"] == "local"
-    assert executor["global_capacity"] == 128
-    assert executor["capabilities"] == [
+    # 全局 provider/model/thinking 投影已退役（agent 配置治理 phase 3）：
+    # 执行默认走 workspace agentDefaults，catalog 不再携带这些键。
+    assert agent["runtime"] == "velites"
+    assert agent["provider"] is None
+    assert agent["model"] is None
+    executors = {item["id"]: item for item in data["executors"]}
+    code_executor = executors["code-default"]
+    assert code_executor["kind"] == "code"
+    assert code_executor["global_capacity"] == 16
+    assert code_executor["capabilities"] == [
         "assemble_comprehension_info",
         "assemble_video_metadata",
         "classify_comprehension_eligibility",
@@ -23,7 +26,8 @@ def test_list_executors_endpoint(client):
     ]
     assert {
         "name": "fetch_questions",
-        "handler": "question_comprehension_info.fetch_questions",
+        "path": "workflow_nodes/question_intake.py",
+        "timeout_seconds": 600,
         "skill": None,
         "tools": [],
         "provider": None,
@@ -31,7 +35,7 @@ def test_list_executors_endpoint(client):
         "thinking": None,
         "skill_ref": None,
         "skill_commit": None,
-    } in executor["capability_details"]
+    } in code_executor["capability_details"]
 
 
 def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
@@ -57,8 +61,8 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
 
     assert response.status_code == 200
     data = response.json()
-    assert data["ref"] == "v1.3.9"
-    assert data["commit"].startswith("54cf560")
+    assert data["ref"] == "v1.4.0"
+    assert data["commit"].startswith("f7f39cc")
     assert data["available"] is True
     assert any(item["path"] == "SKILL.md" for item in data["files"])
 

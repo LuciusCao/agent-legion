@@ -1,11 +1,21 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type {
   AgentDefinition,
   ExecutorDefinition,
 } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+
+// 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
+// 不再读 executor catalog 的 agent 条目。
+vi.mock('./useWorkspaceAgentDefaults', () => ({
+  useWorkspaceAgentDefaults: () => ({
+    provider: 'deepseek',
+    model: 'your-model-b',
+    thinking: 'low',
+  }),
+}))
 
 const node: WorkflowNodeRecord = {
   key: 'generate_key_info',
@@ -19,14 +29,14 @@ const node: WorkflowNodeRecord = {
 
 const executorCatalog: ExecutorDefinition[] = [
   {
-    id: 'local-default',
-    kind: 'local',
+    id: 'code-default',
+    kind: 'code',
     global_capacity: 16,
     capabilities: ['fetch_questions'],
     capability_details: [
       {
         name: 'fetch_questions',
-        handler: 'question_comprehension_info.fetch_questions',
+        path: 'workflow_nodes/fetch_questions.py',
       },
     ],
   },
@@ -78,7 +88,7 @@ describe('WorkflowNodeExecutionSection', () => {
       screen.getByRole('button', { name: '浏览技能文件' })
     ).toBeInTheDocument()
     expect(screen.getByText(/your-model-b/)).toBeInTheDocument()
-    expect(screen.queryByText('local-default')).not.toBeInTheDocument()
+    expect(screen.queryByText('code-default')).not.toBeInTheDocument()
   })
 
   it('writes a node model override to workflow YAML', () => {

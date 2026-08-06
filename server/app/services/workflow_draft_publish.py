@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.workflow_drafts import (
@@ -19,12 +18,12 @@ def publish_workflow_draft(
     workspace_id: str,
     definition_yaml: str,
     settings_executor_definitions: dict[str, Any],
-    resource_providers: Mapping[str, Any] | None = None,
+    custom_nodes_enabled: bool = True,
 ) -> tuple[bool, list[str]]:
-    errors = validate_workflow_definition(definition_yaml, resource_providers)
+    errors = validate_workflow_definition(definition_yaml)
     if errors:
         return False, errors
-    definition = workflow_definition_from_yaml_string(definition_yaml, resource_providers)
+    definition = workflow_definition_from_yaml_string(definition_yaml)
     errors = validate_workflow_for_publish(
         definition=definition,
         workspace_id=workspace_id,
@@ -33,5 +32,7 @@ def publish_workflow_draft(
     )
     if errors:
         return False, errors
-    WorkflowRevisionService(job_db).save_workspace_revision(workspace_id, definition)
+    WorkflowRevisionService(job_db, custom_nodes_enabled).save_workspace_revision(
+        workspace_id, definition
+    )
     return True, []

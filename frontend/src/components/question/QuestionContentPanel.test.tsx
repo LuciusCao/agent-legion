@@ -6,7 +6,13 @@ import {
   fireEvent,
   within,
 } from '@testing-library/react'
+import type { ReactElement } from 'react'
 import { QuestionContentPanel } from './QuestionContentPanel'
+import { TestQueryProvider } from '../../testing/testQueryClient'
+
+function renderPanel(ui: ReactElement) {
+  return render(ui, { wrapper: TestQueryProvider })
+}
 
 const mockFetchJobArtifact = vi.fn()
 
@@ -192,7 +198,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => {
       const img = document.querySelector(
         'img[src="https://example.com/diagram.png"]'
@@ -213,7 +219,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText('B')).toBeInTheDocument()
   })
@@ -226,7 +232,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(document.querySelector('.katex')).toBeInTheDocument()
   })
@@ -243,7 +249,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
     const listItems = screen.getAllByRole('listitem')
     expect(listItems).toHaveLength(2)
@@ -258,7 +264,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText('无答案')).toBeInTheDocument()
   })
@@ -275,7 +281,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
     const listItems = screen.getAllByRole('listitem')
     expect(within(listItems[1]).getByTestId('CheckIcon')).toBeInTheDocument()
@@ -292,7 +298,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText(/第1空/)).toBeInTheDocument()
     expect(screen.getByText(/第2空/)).toBeInTheDocument()
@@ -310,7 +316,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText(/第1空/)).toBeInTheDocument()
     expect(screen.queryByText('<p>')).not.toBeInTheDocument()
@@ -326,7 +332,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
     expect(screen.queryByText('<p>')).not.toBeInTheDocument()
     expect(document.querySelector('.katex')).toBeInTheDocument()
@@ -340,7 +346,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText('B')).toBeInTheDocument()
   })
@@ -358,7 +364,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('解析')).toBeInTheDocument())
     expect(screen.getByText('Hint')).toBeInTheDocument()
     expect(screen.getByText('First step')).toBeInTheDocument()
@@ -373,7 +379,7 @@ describe('QuestionContentPanel', () => {
       })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    renderPanel(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('解析')).toBeInTheDocument())
     expect(screen.getByText('Plain text analysis.')).toBeInTheDocument()
   })
@@ -383,7 +389,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
+    renderPanel(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.getByText('审题信息')).toBeInTheDocument()
     expect(screen.getByText('2 个信息点')).toBeInTheDocument()
@@ -398,7 +404,9 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable={false} />)
+    renderPanel(
+      <QuestionContentPanel jobId="job1" keyInfoPreviewable={false} />
+    )
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.queryByText('审题信息')).not.toBeInTheDocument()
   })
@@ -408,7 +416,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" possibleErrorsPreviewable />)
+    renderPanel(<QuestionContentPanel jobId="job1" possibleErrorsPreviewable />)
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.getByText('常见审题错误')).toBeInTheDocument()
     expect(screen.getByText('1 个易错点')).toBeInTheDocument()
@@ -424,7 +432,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(
+    renderPanel(
       <QuestionContentPanel jobId="job1" possibleErrorsPreviewable={false} />
     )
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
@@ -436,7 +444,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(
+    renderPanel(
       <QuestionContentPanel
         jobId="job1"
         keyInfoPreviewable
@@ -453,7 +461,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(
+    renderPanel(
       <QuestionContentPanel
         jobId="job1"
         keyInfoPreviewable={false}
@@ -470,7 +478,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(
+    renderPanel(
       <QuestionContentPanel
         jobId="job1"
         keyInfoPreviewable
@@ -522,7 +530,7 @@ describe('QuestionContentPanel', () => {
         })
       )
 
-      render(
+      renderPanel(
         <QuestionContentPanel
           jobId="job1"
           keyInfoPreviewable
@@ -579,7 +587,7 @@ describe('QuestionContentPanel', () => {
         })
       )
 
-      render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
+      renderPanel(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
       await waitFor(() =>
         expect(screen.getByText('审题信息')).toBeInTheDocument()
       )
@@ -610,7 +618,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
+    renderPanel(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )
@@ -632,7 +640,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
+    renderPanel(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )
@@ -661,7 +669,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(
+    renderPanel(
       <QuestionContentPanel
         jobId="job1"
         keyInfoPreviewable
@@ -679,7 +687,7 @@ describe('QuestionContentPanel', () => {
         makeQuestionsJson({ stem: '<p>What is x?</p>' })
       )
 
-      render(
+      renderPanel(
         <QuestionContentPanel
           jobId="job1"
           keyInfoPreviewable={true}
@@ -717,7 +725,7 @@ describe('QuestionContentPanel', () => {
           makeQuestionsJson({ stem: '<p>What is x?</p>' })
         )
 
-        render(
+        renderPanel(
           <QuestionContentPanel
             jobId="job1"
             keyInfoPreviewable={true}
@@ -750,7 +758,7 @@ describe('QuestionContentPanel', () => {
         makeQuestionsJson({ stem: '<p>What is x?</p>' })
       )
 
-      render(
+      renderPanel(
         <QuestionContentPanel
           jobId="job1"
           keyInfoPreviewable
@@ -775,7 +783,7 @@ describe('QuestionContentPanel', () => {
         makeQuestionsJson({ stem: '<p>What is x?</p>' })
       )
 
-      render(
+      renderPanel(
         <QuestionContentPanel
           jobId="job1"
           keyInfoPreviewable
@@ -798,7 +806,7 @@ describe('QuestionContentPanel', () => {
         makeQuestionsJson({ stem: '<p>What is x?</p>' })
       )
 
-      render(
+      renderPanel(
         <QuestionContentPanel
           jobId="job1"
           possibleErrorsPreviewable

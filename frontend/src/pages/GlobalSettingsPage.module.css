@@ -1,0 +1,103 @@
+.main {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 24px;
+}
+.card {
+  border: 1px solid #c3c6cf;
+  border-radius: 12px;
+  padding: 16px;
+  margin-bottom: 16px;
+}
+.heading {
+  font-size: 14px;
+  font-weight: 500;
+  margin: 0 0 8px;
+  color: #43474e;
+}
+.hint {
+  font-size: 13px;
+  color: #74777f;
+  margin: 0 0 16px;
+}
+.error {
+  font-size: 13px;
+  color: #c62828;
+  margin: 8px 0;
+}
+.row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.label {
+  font-size: 13px;
+  color: #43474e;
+}
+.currencyInput {
+  width: 120px;
+  padding: 8px 10px;
+  border: 1px solid #c3c6cf;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 16px;
+}
+.table th {
+  text-align: left;
+  font-size: 12px;
+  font-weight: 500;
+  color: #74777f;
+  padding: 4px 8px 4px 0;
+}
+.table td {
+  padding: 4px 8px 4px 0;
+}
+.input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid #c3c6cf;
+  border-radius: 8px;
+  font-size: 14px;
+}
+.textButton {
+  padding: 8px 14px;
+  border: 1px solid #c3c6cf;
+  border-radius: 8px;
+  background: #fff;
+  color: #43474e;
+  font-size: 14px;
+  cursor: pointer;
+}
+.dangerButton {
+  padding: 6px 12px;
+  border: 1px solid #c62828;
+  border-radius: 8px;
+  background: #fff;
+  color: #c62828;
+  font-size: 13px;
+  cursor: pointer;
+}
+.empty {
+  font-size: 13px;
+  color: #74777f;
+  margin: 0;
+}
+.saveButtonWrap {
+  position: relative;
+  display: inline-flex;
+}
+.saveBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #ba1a1a;
+}

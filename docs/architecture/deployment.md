@@ -8,7 +8,7 @@ Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生�
 
 ```
 config/
-├── app.yaml                  # PostgreSQL、应用路径、HTTP 设置、清理、监控、token 定价
+├── app.yaml                  # PostgreSQL、应用路径、HTTP 设置、清理、监控
 ├── agent_legion.yaml         # ASR、CMS、资源提供方、OpenClaw 配置
 ├── workflow.yaml             # Workspace 执行器与工作流运行时开关
 ├── skills.yaml               # 外部 Pi skill 源声明
@@ -42,8 +42,8 @@ scripts/
 ## Key Decisions
 
 - 使用 `uv` 而非 `pip`/`poetry`，依赖锁定在 `uv.lock`。
-- PostgreSQL 是唯一运行时数据库；SQLite 只由一次性离线导入器读取。
-- 质量门分为 `check-quick.sh`（日常/本地 pre-push）和 `check.sh`（完整门禁，由 GitHub Actions CI 执行，见 `.github/workflows/quality-gate.yml`）。
+- PostgreSQL 是唯一运行时数据库；`server/` 与 `scripts/` 已无任何 SQLite 使用，仅 `tools/content-uploader` 用 SQLite 记录自身上传状态。
+- 质量门分三层：本地 pre-push 默认 smoke 级（`scripts/run-local-gate.sh`，由 `.githooks/pre-push` 调用）；本地完整门 `check.sh`（`AGENT_LEGION_GATE_LEVEL=full` 触发）；CI（`.github/workflows/quality-gate.yml`）分阶段调用 `scripts/check-quick-backend.sh` / `check-quick-frontend.sh`，不调用 `check.sh`。
 - 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录。
 
 ## API Surface / Interface
@@ -53,7 +53,6 @@ scripts/
 ### 顶层配置项
 
 - `agent_workers`
-- `agents`
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
 - `cleanup`
 - `cms` — CMS 集成配置
@@ -65,9 +64,7 @@ scripts/
 - `lease_ttl_seconds`
 - `monitoring`
 - `openclaw` — OpenClaw 命令模板与工作目录
-- `resource_providers` — 资源提供方声明（path/url_key 及各自可调参数的 config_schema，含 secret 标记）
 - `server` — HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）
-- `token_usage`
 - `workflows` — Agent Legion DAG 工作流开关
 
 <!-- END AUTO-GENERATED -->

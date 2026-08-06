@@ -162,13 +162,16 @@ raising `max_concurrency`, and keep OS headroom:
 
 ## 6. Migrating an Agent between runtimes (pi ↔ velites)
 
-`pi`, `openclaw` and `velites` are peer runtimes declared per Agent definition
-(the `agents:` section of `config/workflow.yaml`, field `runtime`). Migrating
-one agent to velites — or rolling it back — is a single-field YAML change plus
-a Host restart (`sync_agent_definitions` republishes the catalog at startup).
-`workflows.pi.flavor` selects the implementation only for `runtime: pi`
-agents; a `runtime: velites` definition pins the velites builder and ignores
-the flavor switch. Facts to know before flipping the field:
+`pi`, `openclaw` and `velites` are peer runtimes declared per Agent definition.
+Definitions live in the `versioned_entities` table and are managed in Studio
+(「Agent 管理」) or via `/api/agent-definitions` — the yaml `agents:` section
+and the `workflows.pi` block are retired (their presence in yaml fails Host
+startup), and `workflows.pi.flavor` no longer exists: `AgentDefinition.runtime`
+pins the command builder directly (pi → pi argv, velites → velites argv).
+Migrating one agent to velites — or rolling it back — is a single-field edit
+plus publish; no Host restart is required (the published-catalog cache has a
+~5s TTL, and the claim path re-resolves per request). Facts to know before
+flipping the field:
 
 - **Worker declarations first, definition migration second.** A queued request
   whose runtime no non-revoked Worker declares is failed by the unclaimable
@@ -183,19 +186,21 @@ the flavor switch. Facts to know before flipping the field:
   stale semantics.
 - **In-flight executions are unaffected.** Manifests are frozen at enqueue;
   claimed/running executions finish on the frozen command spec.
-- **Rollback** is the same single-field operation: set the definition back to
-  `runtime: pi` and restart. Note the flavor interplay — while
-  `workflows.pi.flavor: velites` is in effect, an agent rolled back to
-  `runtime: pi` still runs the velites binary; returning to the pi binary
-  requires `flavor: pi` as well. A fleet-wide velites incident mirrors the
-  canary-era playbook: `flavor: pi` plus migrating every definition back to
-  `runtime: pi` in one config change.
-- **Sandbox escape hatch:** `workflows.pi.velites_no_sandbox: true` applies to
-  `runtime: velites` manifests too (adds `--no-sandbox`), no redeploy needed.
-- **Suggested canary order:** migrate a low-risk, low-traffic agent first
-  (e.g. `video-subtitle-review-v1`), observe ≥ 3 days, then the question-chain
-  mains (`question-key-info-v1` etc.), then the rest. Each step is an
-  independent single-field change with its own rollback.
+- **Rollback** is the same single-field operation: publish the definition back
+  with `runtime: pi`. A fleet-wide velites incident means migrating every
+  definition back to `runtime: pi`.
+- **Sandbox:** the `workflows.pi.velites_no_sandbox` escape hatch is retired
+  with the yaml block; `execution.no_sandbox` is always false in manifests, so
+  a sandbox incident currently requires a code change, not a config flip.
+- **Execution defaults:** provider/model/thinking come from the workspace
+  Settings「Agent 默认配置」or per-node Studio overrides (strict chain, no
+  global fallback) — runtime migration never touches them.
+
+  > **Status note:** the runtime migration is complete. The 5 question-chain
+  > agents were migrated first; the 4 video-chain agents followed with the
+  > schema v27 cutover (2026-08-05), which re-published every published
+  > `runtime: pi` definition as `runtime: velites` and archived the old
+  > versions. The canary playbook above is kept as historical context.
 
 ## 7. Troubleshooting
 

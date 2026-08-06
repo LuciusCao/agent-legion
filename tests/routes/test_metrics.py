@@ -24,7 +24,7 @@ def test_metrics_overview_returns_inserted_buckets(client) -> None:
             insert into ops_metric_samples(
               bucket_start, online_workers, active_executions,
               input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, 2, 1, 10, 5, 1, 16)
+            ) values (%s, 2, 1, 10, 5, 1, 16)
             """,
             (bucket,),
         )
@@ -57,7 +57,7 @@ def test_metrics_overview_passes_worker_id_filter(client) -> None:
             insert into ops_metric_samples(
               bucket_start, worker_id, online_workers, active_executions,
               input_tokens, output_tokens, cache_read_tokens, total_tokens
-            ) values (?, 'w-1', 1, 1, 10, 5, 1, 16)
+            ) values (%s, 'w-1', 1, 1, 10, 5, 1, 16)
             """,
             (bucket,),
         )
@@ -93,7 +93,7 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
         ):
             run = conn.execute(
                 "insert into node_runs(job_id, node_key, status, started_at, finished_at)"
-                " values ('job-1', ?, ?, ?, ?) returning id",
+                " values ('job-1', %s, %s, %s, %s) returning id",
                 (node_key, status, started, finished),
             ).fetchone()
             # Agent runs 口径：只有被 agent_execution_requests 引用的 run 才计入摘要。
@@ -104,8 +104,8 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
                     agent_id, agent_definition_hash, node_concurrency_limit,
                     state, queued_at, node_run_id, manifest_json
                 )
-                values (?, 'ops-ws', 'job-1', 'questions', ?, 'agent-1', 'hash', 1,
-                        'done', ?, ?, '{}')
+                values (%s, 'ops-ws', 'job-1', 'questions', %s, 'agent-1', 'hash', 1,
+                        'done', %s, %s, '{}')
                 """,
                 (f"exec-{node_key}", node_key, started, run["id"]),
             )
@@ -120,6 +120,13 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
             "active_executions",
             "recent_hour_tokens",
             "recent_hour_runs",
+            "queue",
+            "queue_alert",
+        }
+        assert set(summary["queue"]) == {
+            "queued",
+            "oldest_queued_at",
+            "recent_hour_unclaimable_failed",
         }
         runs = summary["recent_hour_runs"]
         assert runs["completed"] == 1
@@ -129,3 +136,44 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
         summaries.append(summary)
     # 采样器只写 ops_metric_samples，不动 node_runs：runs 摘要跨窗口严格一致。
     assert [s["recent_hour_runs"] for s in summaries] == [summaries[0]["recent_hour_runs"]] * 3
+
+
+def test_metrics_overview_passes_workspace_id_filter(client) -> None:
+    # 与 worker_id 过滤同一思路：旧桶 + ws 过滤避开后台采样器的行。
+    bucket = datetime.now(UTC).replace(second=0, microsecond=0) - timedelta(minutes=5)
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute(
+            "insert into ops_metric_samples(bucket_start, workspace_id, queued)"
+            " values (%s, 'ops-ws', 7), (%s, '', 99)",
+            (bucket, bucket),
+        )
+    response = client.get("/api/metrics/overview?granularity=6h&workspace_id=ops-ws")
+    assert response.status_code == 200
+    rows = [r for r in response.json()["buckets"] if r["bucket_start"] == bucket.isoformat()]
+    assert len(rows) == 1
+    assert rows[0]["queued"] == 7
+
+
+def test_metrics_workspace_membership_guard() -> None:
+    from types import SimpleNamespace
+
+    import pytest
+    from fastapi import HTTPException
+
+    from server.app.routes.metrics_access import enforce_workspace_membership
+
+    def _request(role):
+        job_db = SimpleNamespace(get_workspace_role=lambda ws, uid: role)
+        return SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(job_db=job_db)))
+
+    # admin 直通；成员带 workspace_id 校验成员资格；非成员 404。
+    enforce_workspace_membership(_request(None), "ops-ws", {"role": "admin", "id": "u1"})
+    enforce_workspace_membership(_request(None), None, {"role": "admin", "id": "u1"})
+    enforce_workspace_membership(_request("viewer"), "ops-ws", {"role": "member", "id": "u1"})
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_workspace_membership(_request(None), "ops-ws", {"role": "member", "id": "u1"})
+    assert exc_info.value.status_code == 404
+    # 全局视图（无 workspace_id）对成员 403：只能看所属 workspace。
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_workspace_membership(_request("viewer"), None, {"role": "member", "id": "u1"})
+    assert exc_info.value.status_code == 403

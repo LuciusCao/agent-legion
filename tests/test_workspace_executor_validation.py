@@ -5,8 +5,8 @@ from dataclasses import dataclass
 import pytest
 
 from server.app.executors.config import (
-    LocalCapabilityConfig,
-    LocalExecutorConfig,
+    CodeCapabilityConfig,
+    CodeExecutorConfig,
     PiCapabilityConfig,
     PiExecutorConfig,
 )
@@ -21,7 +21,7 @@ from server.app.workflows.definition import (
 @dataclass
 class ValidationContext:
     workflow: WorkflowDefinition
-    executors: dict[str, LocalExecutorConfig | PiExecutorConfig]
+    executors: dict[str, CodeExecutorConfig | PiExecutorConfig]
 
 
 @pytest.fixture
@@ -43,12 +43,12 @@ def context() -> ValidationContext:
             ),
         },
     )
-    executors: dict[str, LocalExecutorConfig | PiExecutorConfig] = {
-        "local-default": LocalExecutorConfig(
-            kind="local",
+    executors: dict[str, CodeExecutorConfig | PiExecutorConfig] = {
+        "code-default": CodeExecutorConfig(
+            kind="code",
             global_capacity=4,
             capabilities={
-                "fetch_questions": LocalCapabilityConfig(handler="fetch_questions_handler"),
+                "fetch_questions": CodeCapabilityConfig(path="workflow_nodes/question_intake.py"),
             },
         ),
         "pi-default": PiExecutorConfig(
@@ -89,11 +89,11 @@ def test_duplicate_allocation_ids_are_rejected(context: ValidationContext) -> No
         validate_workspace_executor_configuration,
     )
 
-    with pytest.raises(InvalidOperationError, match="Duplicate Executor allocation local-default"):
+    with pytest.raises(InvalidOperationError, match="Duplicate Executor allocation code-default"):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 2), allocation("local-default", 3)],
+            allocations=[allocation("code-default", 2), allocation("code-default", 3)],
             bindings=[],
             node_limits=[],
         )
@@ -120,12 +120,12 @@ def test_workspace_limit_must_not_exceed_global_capacity(context: ValidationCont
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Workspace limit 5 exceeds local-default global capacity 4"
+        InvalidOperationError, match="Workspace limit 5 exceeds code-default global capacity 4"
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 5)],
+            allocations=[allocation("code-default", 5)],
             bindings=[],
             node_limits=[],
         )
@@ -143,10 +143,10 @@ def test_duplicate_node_bindings_are_rejected(context: ValidationContext) -> Non
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 4)],
+            allocations=[allocation("code-default", 4)],
             bindings=[
-                binding("fetch_questions", "local-default"),
-                binding("fetch_questions", "local-default"),
+                binding("fetch_questions", "code-default"),
+                binding("fetch_questions", "code-default"),
             ],
             node_limits=[],
         )
@@ -163,8 +163,8 @@ def test_binding_workflow_must_equal_workspace_workflow(context: ValidationConte
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 4)],
-            bindings=[binding("fetch_questions", "local-default", workflow_key="other_workflow")],
+            allocations=[allocation("code-default", 4)],
+            bindings=[binding("fetch_questions", "code-default", workflow_key="other_workflow")],
             node_limits=[],
         )
 
@@ -181,8 +181,8 @@ def test_binding_node_must_exist_in_workflow(context: ValidationContext) -> None
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 4)],
-            bindings=[binding("unknown_node", "local-default")],
+            allocations=[allocation("code-default", 4)],
+            bindings=[binding("unknown_node", "code-default")],
             node_limits=[],
         )
 
@@ -193,13 +193,13 @@ def test_binding_executor_must_be_allocated(context: ValidationContext) -> None:
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Executor local-default is not allocated to this Workspace"
+        InvalidOperationError, match="Executor code-default is not allocated to this Workspace"
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[],
-            bindings=[binding("fetch_questions", "local-default")],
+            bindings=[binding("fetch_questions", "code-default")],
             node_limits=[],
         )
 
@@ -213,8 +213,8 @@ def test_binding_rejects_executor_without_capability(context: ValidationContext)
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 4)],
-            bindings=[binding("review_keywords", "local-default")],
+            allocations=[allocation("code-default", 4)],
+            bindings=[binding("review_keywords", "code-default")],
             node_limits=[],
         )
 
@@ -231,8 +231,8 @@ def test_duplicate_node_limits_are_rejected(context: ValidationContext) -> None:
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 4)],
-            bindings=[binding("fetch_questions", "local-default")],
+            allocations=[allocation("code-default", 4)],
+            bindings=[binding("fetch_questions", "code-default")],
             node_limits=[
                 node_limit("fetch_questions", 1),
                 node_limit("fetch_questions", 2),
@@ -252,7 +252,7 @@ def test_node_limit_requires_existing_binding(context: ValidationContext) -> Non
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 4)],
+            allocations=[allocation("code-default", 4)],
             bindings=[],
             node_limits=[node_limit("fetch_questions", 1)],
         )
@@ -283,13 +283,13 @@ def test_node_limit_must_not_exceed_workspace_allocation(context: ValidationCont
 
     with pytest.raises(
         InvalidOperationError,
-        match="Node limit for question_comprehension_info\\.fetch_questions exceeds Workspace allocation for local-default",
+        match="Node limit for question_comprehension_info\\.fetch_questions exceeds Workspace allocation for code-default",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
-            allocations=[allocation("local-default", 2)],
-            bindings=[binding("fetch_questions", "local-default")],
+            allocations=[allocation("code-default", 2)],
+            bindings=[binding("fetch_questions", "code-default")],
             node_limits=[node_limit("fetch_questions", 3)],
         )
 
@@ -302,7 +302,7 @@ def test_unbound_node_is_valid(context: ValidationContext) -> None:
     validate_workspace_executor_configuration(
         workflow=context.workflow,
         executor_definitions=context.executors,
-        allocations=[allocation("local-default", 4)],
-        bindings=[binding("fetch_questions", "local-default")],
+        allocations=[allocation("code-default", 4)],
+        bindings=[binding("fetch_questions", "code-default")],
         node_limits=[],
     )

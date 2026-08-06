@@ -80,12 +80,12 @@
 
 ## 6. 错误语义验证
 
-用必失败模型名 `gateway/no-such-model-xyz` 各跑一次（`poc/errtest/`）：
+用必失败模型名 `deepseek/no-such-model-xyz` 各跑一次（`poc/errtest/`）：
 
 | | Node pi | pi-rust |
 |---|---|---|
 | exit code | **0** | **1** |
-| events.jsonl | 31 行，含 `auto_retry_*` + `errorMessage`；`detect_model_error` 返回 `"Stream ended without finish_reason"` | **0 行**（启动期模型解析即失败，stderr: `Model gateway/no-such-model-xyz not found`） |
+| events.jsonl | 31 行，含 `auto_retry_*` + `errorMessage`；`detect_model_error` 返回 `"Stream ended without finish_reason"` | **0 行**（启动期模型解析即失败，stderr: `Model deepseek/no-such-model-xyz not found`） |
 | pi_runner 判定 | exit 0 → 事件流扫描出 error → failed ✓ | exit 1 → 直接 failed ✓ |
 
 另一个数据点：rust 对 `doubao-seed-2.1-turbo-2` 的运行时协议错误（gateway 返回非流式 `application/json`，rust 严格要求 SSE）表现为**事件流内 errorMessage + exit 1**。
@@ -142,6 +142,9 @@
 **给 velites harness 的建议**：rust 版是可行的 executor 候选——单作者/早期项目（v0.1.x）带来的维护风险可用 vendored fork 对冲，patch 面很小（P0 约 5 行）。若 velites harness 的目标场景是高并发 headless 执行，内存与 CPU 收益（6.5× / 25×+）直接转化为单机 worker 密度上限，值得投入一个 fork；决策前先确认上游对 `--no-context-files` PR 的接受意愿，能接受就贡献上游而非长期维护 fork。
 
 ## 附：产物清单（均在本 worktree）
+
+> **状态标注（2026-08-04 补注）**：以下产物所指 worktree `.worktrees/poc-rust-pi`
+> 已删除，上述产物均不可得，本清单仅作历史记录。
 
 - `bin/pi-rust`、`poc/pi-rust-help.txt`、`poc/dl/`（安装包+校验）
 - `poc/diff_events.py`、`poc/skillrun/{node,rust}/events.jsonl`、`poc/skillrun/diff_result.txt`

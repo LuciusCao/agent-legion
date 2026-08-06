@@ -9,7 +9,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-from server.app import agent_claim_compatibility
+from server.app.agent_broker import agent_claim_compatibility
 
 # Per-worker declarations: (runtimes, capabilities, models). Claimability is
 # judged per Worker — claim.py requires a single Worker to satisfy runtime,
@@ -51,9 +51,9 @@ def unmatched_reasons(
     if not can_run(candidate, manifest, union_capabilities, {("*", "*")}):
         reasons.append(f"capability {candidate['capability']!r} not declared by any Worker")
     if not can_run(candidate, manifest, {"*"}, union_models):
-        pi = manifest.get("pi") or {}
-        provider = str(pi.get("provider") or "")
-        model = str(pi.get("model") or "")
+        execution = manifest.get("execution") or {}
+        provider = str(execution.get("provider") or "")
+        model = str(execution.get("model") or "")
         reasons.append(f"model {provider}/{model} not declared by any Worker")
     if not reasons:
         reasons.append("no single Worker declares runtime, capability and model together")

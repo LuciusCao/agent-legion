@@ -12,18 +12,47 @@ import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
-import type { WorkspaceSettings } from '../types'
+import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../types'
 import { useUiStore } from '../stores/uiStore'
-import { useExecutorsStore } from '../stores/executorsStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
-import { makeWorkspace } from '../testing/workspaceFixtures'
-import { api, fetchWorkflows } from '../api'
+import { api, deleteWorkspace, fetchWorkflows } from '../api'
+import { useSettingStoreHydration } from '../hooks/useWorkspaceSettingsQuery'
+import type { WorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
 import { expectConsoleWarning } from '../test-setup'
+
+// 服务端快照（executorCatalog/agentRoutes）与工作流定义已迁入 react-query；
+// 本测试 mock 两个 query hook，draft 状态仍直接写 store。
+const mockQueryData = vi.hoisted(() => ({
+  settingsSnapshot: { current: null as WorkspaceSettingsSnapshot | null },
+  workflowDefinition: { current: null as WorkflowDefinitionRecord | null },
+}))
+
+vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
+  useSettingStoreHydration: vi.fn(() => ({
+    data: mockQueryData.settingsSnapshot.current,
+    error: null,
+  })),
+  useWorkspaceSettingsQuery: vi.fn(() => ({
+    data: mockQueryData.settingsSnapshot.current,
+  })),
+  useWorkspaceSettingsSnapshot: vi.fn(() => ({
+    workflowDefinition: mockQueryData.workflowDefinition.current,
+    executorCatalog:
+      mockQueryData.settingsSnapshot.current?.executorCatalog ?? [],
+    agentRoutes: mockQueryData.settingsSnapshot.current?.agentRoutes ?? [],
+  })),
+}))
+
+vi.mock('../hooks/useWorkflowDefinitionQuery', () => ({
+  useWorkflowDefinitionQuery: vi.fn(() => ({
+    data: mockQueryData.workflowDefinition.current,
+  })),
+}))
 
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchWorkflows: vi.fn(),
   fetchWorkspaces: vi.fn(),
+  deleteWorkspace: vi.fn(),
   listRegisterTokens: vi.fn().mockResolvedValue([]),
   listAgentWorkers: vi.fn().mockResolvedValue([]),
   createRegisterToken: vi.fn(),
@@ -33,6 +62,35 @@ vi.mock('../api', () => ({
 
 const mockApi = vi.mocked(api)
 const mockFetchWorkflows = vi.mocked(fetchWorkflows)
+const mockDeleteWorkspace = vi.mocked(deleteWorkspace)
+const mockHydration = vi.mocked(useSettingStoreHydration)
+
+function setSnapshot(partial: Partial<WorkspaceSettingsSnapshot>) {
+  mockQueryData.settingsSnapshot.current = {
+    workspaceName: '',
+    workspaceDescription: '',
+    settings: {
+      entityType: 'question',
+      intakeModes: [],
+      labelOverrides: {},
+      workflowKey: '',
+    },
+    executorConfiguration: {
+      allocations: [],
+      bindings: [],
+      node_limits: [],
+      migration_warnings: [],
+      agent_capacity: null,
+    },
+    executorCatalog: [],
+    agentRoutes: [],
+    ...partial,
+  }
+}
+
+function setWorkflowDefinition(definition: WorkflowDefinitionRecord) {
+  mockQueryData.workflowDefinition.current = definition
+}
 
 // Capture the real store actions before beforeEach replaces them with mocks.
 const originalActions = { ...useSettingStore.getState() }
@@ -46,27 +104,14 @@ const defaultState: SettingState = {
     intakeModes: [],
     labelOverrides: {},
     workflowKey: '',
-    resources: {},
   },
   originalWorkspaceName: '测试空间',
   originalWorkspaceDescription: '测试描述',
   originalSettings: null,
   isDirty: false,
-  globalServices: {
-    cms: {
-      baseUrl: 'http://cms.example.com',
-      tokenConfigured: true,
-      env: 'prod',
-      healthy: null,
-      lastCheckedAt: null,
-    },
-  },
-  resourceProviders: [],
-  workflowDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
-  executorCatalog: [],
   executorConfiguration: {
     allocations: [],
     bindings: [],
@@ -75,7 +120,6 @@ const defaultState: SettingState = {
   },
   originalExecutorConfiguration: null,
   pendingAllocationRemoval: null,
-  agentRoutes: [],
   setWorkspaceId: vi.fn(),
   setWorkspaceName: vi.fn((name: string) => {
     useSettingStore.setState({ workspaceName: name, isDirty: true })
@@ -96,10 +140,7 @@ const defaultState: SettingState = {
   setNodeBinding: vi.fn(),
   setNodeLimit: vi.fn(),
   setAgentCapacity: vi.fn(),
-  fetchSettings: vi.fn().mockResolvedValue(undefined),
-  fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
-  fetchResourceProviders: vi.fn().mockResolvedValue(undefined),
-  fetchWorkflowDefinition: vi.fn().mockResolvedValue(undefined),
+  hydrateSettings: vi.fn(),
   saveAll: vi.fn().mockResolvedValue(undefined),
   testConnection: vi.fn().mockResolvedValue(undefined),
   resetTestStatus: vi.fn(),
@@ -130,72 +171,57 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     useUiStore.setState({ toast: null })
-    // Stub the worker refresh so its debounced api('/api/agent-workers')
-    // call never lands in the shared mocked api call history.
-    useExecutorsStore.setState({
-      workers: [],
-      connectionStatus: {},
-      refreshWorkers: vi.fn().mockResolvedValue(undefined),
-    })
-    useWorkspaceStore.setState({
-      workspaces: [
-        makeWorkspace({
-          id: 'ws1',
-          name: '测试空间',
-          description: '测试描述',
-          default_workflow_key: 'question_content',
-        }),
-      ],
-      currentWorkspace: null,
-      workspaceStats: {},
-      loading: false,
-      error: null,
-      deleteWorkspace: vi.fn().mockResolvedValue(undefined),
-    })
+    mockQueryData.settingsSnapshot.current = null
+    mockQueryData.workflowDefinition.current = null
+    mockHydration.mockClear()
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
     mockFetchWorkflows.mockReset()
     mockFetchWorkflows.mockResolvedValue({ workflows: [] })
+    mockDeleteWorkspace.mockReset()
+    mockDeleteWorkspace.mockResolvedValue(undefined)
   })
 
   it('renders all sections in order', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        intake: {
-          modes: [
-            {
-              key: 'direct_ids',
-              label: '直接输入 ID',
-              input_field: 'question_ids',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [
+    setWorkflowDefinition({
+      key: 'question_content',
+      label: '题目内容生成',
+      intake: {
+        modes: [
           {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: [],
+            key: 'direct_ids',
+            label: '直接输入 ID',
+            input_field: 'question_ids',
           },
         ],
       },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: [],
+        },
+      ],
+    })
+    setSnapshot({
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local',
+          id: 'code-default',
+          kind: 'code',
           capabilities: ['fetch_questions'],
           global_capacity: 4,
         },
       ],
+    })
+    useSettingStore.setState({
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -204,7 +230,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'question_content',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -219,13 +245,31 @@ describe('SettingsPage', () => {
       '基本信息',
       '接入与资源',
       '工作流',
-      '执行器分配',
-      '节点绑定',
-      'Agent 执行',
-      'Worker Token',
-      '本地节点并发',
+      '执行器',
+      'Agent 与 Worker',
+      'Agent 默认配置',
+      '代码节点并发',
       '危险操作',
     ])
+  })
+
+  it('renders nav items matching the sections and marks the active one', async () => {
+    renderPage()
+    await act(async () => {})
+
+    const nav = screen.getByRole('navigation')
+    const navButtons = within(nav).getAllByRole('button')
+    expect(navButtons.map((b) => b.textContent)).toEqual([
+      '基础信息',
+      '接入与资源',
+      '工作流',
+      '执行器',
+      'Agent 与 Worker',
+      'Agent 默认配置',
+      '危险操作',
+    ])
+    expect(navButtons[0]).toHaveAttribute('aria-current', 'true')
+    expect(navButtons[1]).not.toHaveAttribute('aria-current')
   })
 
   it('renders workspace name in header', async () => {
@@ -266,25 +310,10 @@ describe('SettingsPage', () => {
     expect(screen.getByText('Workspace main')).toBeInTheDocument()
   })
 
-  it('calls fetchSettings on mount', async () => {
-    const fetchSettings = vi.fn().mockResolvedValue(undefined)
-    useSettingStore.setState({ fetchSettings })
+  it('hydrates the setting store through the settings query hook', async () => {
     renderPage()
     await waitFor(() => {
-      expect(fetchSettings).toHaveBeenCalledWith('ws1')
-    })
-  })
-
-  it('calls fetchGlobalServices and fetchResourceProviders on mount', async () => {
-    const fetchGlobalServices = vi.fn().mockResolvedValue(undefined)
-    const fetchResourceProviders = vi.fn().mockResolvedValue(undefined)
-    useSettingStore.setState({ fetchGlobalServices, fetchResourceProviders })
-    renderPage()
-    await waitFor(() => {
-      expect(fetchGlobalServices).toHaveBeenCalled()
-    })
-    await waitFor(() => {
-      expect(fetchResourceProviders).toHaveBeenCalled()
+      expect(mockHydration).toHaveBeenCalledWith('ws1')
     })
   })
 
@@ -356,70 +385,28 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('renders resource provider params when intake mode is checked', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        intake: {
-          modes: [
-            {
-              key: 'by_knowledge',
-              label: '按知识点',
-              input_field: 'knowledge_codes',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [],
-      },
-      resourceProviders: [
-        {
-          key: 'question_detail',
-          provider: 'cms.question.detail',
-          path: '/question/detail',
-          defaultParams: { bank_version: 'v5' },
-          paramKeys: ['bank_version', 'country_id'],
-        },
-      ],
-      settings: {
-        ...defaultState.settings,
-        intakeModes: ['by_knowledge'],
-        resources: {
-          question_detail: { enabled: true, config: {} },
-        },
-      },
-    })
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('cms.question.detail')).toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('bank_version')).toBeInTheDocument()
-    expect(screen.getByLabelText('country_id')).toBeInTheDocument()
-  })
-
   it('renders checked checkbox for enabled intake modes', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_comprehension_info',
-        label: '题目审题信息生成',
-        intake: {
-          modes: [
-            {
-              key: 'batch_by_knowledge',
-              label: '按知识点批量',
-              input_field: 'knowledge_codes',
-            },
-            {
-              key: 'batch_by_ids',
-              label: '按题目ID批量',
-              input_field: 'question_ids',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [],
+    setWorkflowDefinition({
+      key: 'question_comprehension_info',
+      label: '题目审题信息生成',
+      intake: {
+        modes: [
+          {
+            key: 'batch_by_knowledge',
+            label: '按知识点批量',
+            input_field: 'knowledge_codes',
+          },
+          {
+            key: 'batch_by_ids',
+            label: '按题目ID批量',
+            input_field: 'question_ids',
+          },
+        ],
       },
+      edges: [],
+      nodes: [],
+    })
+    useSettingStore.setState({
       settings: {
         ...defaultState.settings,
         intakeModes: ['batch_by_ids'],
@@ -435,22 +422,22 @@ describe('SettingsPage', () => {
   })
 
   it('renders unchecked checkbox for disabled intake modes', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_comprehension_info',
-        label: '题目审题信息生成',
-        intake: {
-          modes: [
-            {
-              key: 'batch_by_ids',
-              label: '按题目ID批量',
-              input_field: 'question_ids',
-            },
-          ],
-        },
-        edges: [],
-        nodes: [],
+    setWorkflowDefinition({
+      key: 'question_comprehension_info',
+      label: '题目审题信息生成',
+      intake: {
+        modes: [
+          {
+            key: 'batch_by_ids',
+            label: '按题目ID批量',
+            input_field: 'question_ids',
+          },
+        ],
       },
+      edges: [],
+      nodes: [],
+    })
+    useSettingStore.setState({
       settings: {
         ...defaultState.settings,
         intakeModes: [],
@@ -466,35 +453,37 @@ describe('SettingsPage', () => {
   })
 
   it('renders executor binding section between allocation and local limit sections', async () => {
-    useSettingStore.setState({
-      workflowDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: [],
-          },
-        ],
-      },
+    setWorkflowDefinition({
+      key: 'question_content',
+      label: '题目内容生成',
+      intake: { modes: [] },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: [],
+        },
+      ],
+    })
+    setSnapshot({
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local',
+          id: 'code-default',
+          kind: 'code',
           capabilities: ['fetch_questions'],
           global_capacity: 4,
         },
       ],
+    })
+    useSettingStore.setState({
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
@@ -503,7 +492,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'question_content',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -513,12 +502,12 @@ describe('SettingsPage', () => {
     renderPage()
     await act(async () => {})
 
-    const headings = screen.getAllByRole('heading', { level: 2 })
+    const headings = screen.getAllByRole('heading')
     const labels = headings.map((h) => h.textContent)
     expect(labels.indexOf('节点绑定')).toBeGreaterThan(
       labels.indexOf('执行器分配')
     )
-    expect(labels.indexOf('本地节点并发')).toBeGreaterThan(
+    expect(labels.indexOf('代码节点并发')).toBeGreaterThan(
       labels.indexOf('节点绑定')
     )
   })
@@ -529,8 +518,33 @@ describe('SettingsPage', () => {
       intakeModes: [],
       labelOverrides: {},
       workflowKey: 'sample_workflow',
-      resources: {},
     }
+    setSnapshot({
+      executorCatalog: [
+        {
+          id: 'code-default',
+          kind: 'code' as const,
+          capabilities: ['fetch_questions'],
+          global_capacity: 4,
+        },
+      ],
+    })
+    setWorkflowDefinition({
+      key: 'sample_workflow',
+      label: '示例工作流',
+      intake: { modes: [] },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: ['questions.json'],
+        },
+      ],
+    })
     useSettingStore.setState({
       ...defaultState,
       workspaceName: 'Flow Workspace',
@@ -539,30 +553,6 @@ describe('SettingsPage', () => {
       originalWorkspaceDescription: '',
       settings,
       originalSettings: settings,
-      executorCatalog: [
-        {
-          id: 'local-default',
-          kind: 'local' as const,
-          capabilities: ['fetch_questions'],
-          global_capacity: 4,
-        },
-      ],
-      workflowDefinition: {
-        key: 'sample_workflow',
-        label: '示例工作流',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: ['questions.json'],
-          },
-        ],
-      },
       executorConfiguration: {
         allocations: [],
         bindings: [],
@@ -592,7 +582,7 @@ describe('SettingsPage', () => {
       executor_configuration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 1,
           },
@@ -601,7 +591,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [
@@ -620,12 +610,12 @@ describe('SettingsPage', () => {
 
     await waitFor(() => {
       expect(
-        screen.getByRole('checkbox', { name: '分配 local-default' })
+        screen.getByRole('checkbox', { name: '分配 code-default' })
       ).toBeInTheDocument()
     })
 
     const switchEl = screen.getByRole('checkbox', {
-      name: '分配 local-default',
+      name: '分配 code-default',
     })
     await act(async () => {
       fireEvent.click(switchEl)
@@ -645,7 +635,7 @@ describe('SettingsPage', () => {
     })
     await act(async () => {
       fireEvent.click(
-        screen.getByRole('option', { name: 'local-default (local)' })
+        screen.getByRole('option', { name: 'code-default (code)' })
       )
     })
 
@@ -691,13 +681,13 @@ describe('SettingsPage', () => {
       name: 'Flow Workspace',
       description: '',
       executor_allocations: [
-        { executor_id: 'local-default', concurrency_limit: 1 },
+        { executor_id: 'code-default', concurrency_limit: 1 },
       ],
       node_bindings: [
         {
           workflow_key: 'sample_workflow',
           node_key: 'fetch_questions',
-          executor_id: 'local-default',
+          executor_id: 'code-default',
         },
       ],
       node_limits: [
@@ -713,36 +703,38 @@ describe('SettingsPage', () => {
   }, 30000)
 
   it('confirms executor allocation removal from SettingsPage', async () => {
-    useSettingStore.setState({
-      ...defaultState,
+    setSnapshot({
       executorCatalog: [
         {
-          id: 'local-default',
-          kind: 'local' as const,
+          id: 'code-default',
+          kind: 'code' as const,
           capabilities: ['fetch_questions'],
           global_capacity: 4,
         },
       ],
-      workflowDefinition: {
-        key: 'sample_workflow',
-        label: '示例工作流',
-        intake: { modes: [] },
-        edges: [],
-        nodes: [
-          {
-            key: 'fetch_questions',
-            label: '获取题目',
-            capability: 'fetch_questions',
-            after: [],
-            inputs: [],
-            outputs: ['questions.json'],
-          },
-        ],
-      },
+    })
+    setWorkflowDefinition({
+      key: 'sample_workflow',
+      label: '示例工作流',
+      intake: { modes: [] },
+      edges: [],
+      nodes: [
+        {
+          key: 'fetch_questions',
+          label: '获取题目',
+          capability: 'fetch_questions',
+          after: [],
+          inputs: [],
+          outputs: ['questions.json'],
+        },
+      ],
+    })
+    useSettingStore.setState({
+      ...defaultState,
       executorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -751,7 +743,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -760,7 +752,7 @@ describe('SettingsPage', () => {
       originalExecutorConfiguration: {
         allocations: [
           {
-            executor_id: 'local-default',
+            executor_id: 'code-default',
             workspace_id: 'ws1',
             concurrency_limit: 2,
           },
@@ -769,7 +761,7 @@ describe('SettingsPage', () => {
           {
             workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
-            executor_id: 'local-default',
+            executor_id: 'code-default',
           },
         ],
         node_limits: [],
@@ -784,7 +776,7 @@ describe('SettingsPage', () => {
     await act(async () => {})
 
     const switchEl = screen.getByRole('checkbox', {
-      name: '分配 local-default',
+      name: '分配 code-default',
     })
     await act(async () => {
       fireEvent.click(switchEl)
@@ -859,9 +851,6 @@ describe('SettingsPage', () => {
   })
 
   it('opens delete dialog and deletes workspace on confirm', async () => {
-    const deleteWorkspace = vi.fn().mockResolvedValue(undefined)
-    useWorkspaceStore.setState({ deleteWorkspace })
-
     renderPage()
     await act(async () => {})
 
@@ -877,7 +866,7 @@ describe('SettingsPage', () => {
 
     fireEvent.click(within(dialog).getByText('确认删除'))
     await waitFor(() => {
-      expect(deleteWorkspace).toHaveBeenCalledWith('ws1')
+      expect(mockDeleteWorkspace).toHaveBeenCalledWith('ws1')
     })
     await waitFor(() => {
       expect(screen.getByText('Dashboard')).toBeInTheDocument()
@@ -885,10 +874,9 @@ describe('SettingsPage', () => {
   })
 
   it('shows error when delete workspace fails', async () => {
-    const deleteWorkspace = vi
-      .fn()
-      .mockRejectedValue(new Error('Cannot delete workspace with running jobs'))
-    useWorkspaceStore.setState({ deleteWorkspace })
+    mockDeleteWorkspace.mockRejectedValue(
+      new Error('Cannot delete workspace with running jobs')
+    )
 
     renderPage()
     await act(async () => {})

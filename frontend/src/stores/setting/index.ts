@@ -19,17 +19,12 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   originalWorkspaceDescription: '',
   originalSettings: null,
   isDirty: false,
-  globalServices: null,
-  resourceProviders: [],
-  workflowDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
-  executorCatalog: [],
   executorConfiguration: defaultExecutorConfiguration,
   originalExecutorConfiguration: null,
   pendingAllocationRemoval: null,
-  agentRoutes: [],
 
   setWorkspaceId(id) {
     set({ workspaceId: id })
@@ -65,14 +60,13 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       const nextState = {
         ...state,
         settings: nextSettings,
-        workflowDefinition: workflowChanged ? null : state.workflowDefinition,
         executorConfiguration: nextExecutorConfiguration,
       }
       return { ...nextState, isDirty: computeDirty(nextState) }
     })
   },
 
-  ...loadActions(set, get),
+  ...loadActions(set),
   ...saveActions(set, get),
   ...executorActions(set),
   ...testActions(set, get),

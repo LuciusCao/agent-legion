@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -77,7 +78,7 @@ class ExecutorLeaseRepository:
         """Return the lease's current status, or None when unknown."""
         with read_connection(self.path) as conn:
             row = conn.execute(
-                "select status from executor_leases where id=?", (lease_id,)
+                "select status from executor_leases where id=%s", (lease_id,)
             ).fetchone()
         return str(row["status"]) if row is not None else None
 
@@ -104,7 +105,7 @@ class ExecutorLeaseRepository:
     def has_active_for_job(self, job_id: str, now: datetime) -> bool:
         with read_connection(self.path) as conn:
             row = conn.execute(
-                "select 1 from executor_leases where job_id=? and status='active' and expires_at>? limit 1",
+                "select 1 from executor_leases where job_id=%s and status='active' and expires_at>%s limit 1",
                 (job_id, database_timestamp(now)),
             ).fetchone()
             return row is not None
@@ -112,10 +113,27 @@ class ExecutorLeaseRepository:
     def has_active_for_node(self, job_id: str, node_key: str, now: datetime) -> bool:
         with read_connection(self.path) as conn:
             row = conn.execute(
-                "select 1 from executor_leases where job_id=? and node_key=? and status='active' and expires_at>? limit 1",
+                "select 1 from executor_leases where job_id=%s and node_key=%s and status='active' and expires_at>%s limit 1",
                 (job_id, node_key, database_timestamp(now)),
             ).fetchone()
             return row is not None
+
+    def active_lease_node_keys_for_jobs(
+        self, job_ids: Sequence[str], now: datetime
+    ) -> set[tuple[str, str]]:
+        """Bulk form of ``has_active_for_node``: (job_id, node_key) pairs with
+        an active lease, for read-only batch checks (rerun preview)."""
+        ids = [str(job_id) for job_id in job_ids]
+        if not ids:
+            return set()
+        placeholders = ",".join("%s" for _ in ids)
+        with read_connection(self.path) as conn:
+            rows = conn.execute(
+                f"select job_id, node_key from executor_leases"
+                f" where job_id in ({placeholders}) and status='active' and expires_at>%s",
+                (*ids, database_timestamp(now)),
+            ).fetchall()
+        return {(str(row["job_id"]), str(row["node_key"])) for row in rows}
 
     def recover_orphaned_running_jobs(self, now: datetime) -> list[str]:
         """Reset jobs stuck in 'running' with no active lease back to 'queued'."""

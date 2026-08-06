@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import os
 from pathlib import Path
 
@@ -45,7 +46,7 @@ def test_disabled_workflows_require_no_pi_binary(tmp_path, monkeypatch):
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\nworkflows:\n  enabled: false\n  pi:\n    binary: /no/such/pi\n"
+    config += "\nworkflows:\n  enabled: false\n"
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
@@ -55,19 +56,33 @@ def test_agent_workflows_do_not_require_pi_binary_on_host(tmp_path, monkeypatch)
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\nworkflows:\n  enabled: true\n  pi:\n    binary: /no/such/pi\n"
+    config += "\nworkflows:\n  enabled: true\n"
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
 def test_enabled_workflows_accept_pi_command_from_path(tmp_path, monkeypatch):
+    """kind:pi 本地 executor（死路径保留）要求 pi 二进制在 PATH 上。
+
+    workflows.pi yaml 块已退役（agent 配置治理 phase 3），PiRuntimeConfig
+    只剩硬编码默认 binary="pi"。
+    """
     whisper = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     _make_executable(tmp_path / "pi")
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
     config = _minimal_config().format(binary=whisper, model=model, cwd=tmp_path)
-    config += "\nworkflows:\n  enabled: true\n  pi:\n    binary: pi\n"
+    config += (
+        "\nworkflows:\n  enabled: true\n"
+        "executors:\n"
+        "  pi-legacy:\n"
+        "    kind: pi\n"
+        "    global_capacity: 1\n"
+        "    capabilities:\n"
+        "      legacy_skill:\n"
+        "        skill: question/legacy\n"
+    )
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
@@ -188,7 +203,7 @@ openclaw:
     assert "asr.provider" in fields
 
 
-def test_cms_credentials_allowed_when_no_cms_resource(tmp_path, monkeypatch):
+def test_cms_credentials_allowed_when_no_cms_endpoint(tmp_path, monkeypatch):
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
@@ -198,7 +213,7 @@ def test_cms_credentials_allowed_when_no_cms_resource(tmp_path, monkeypatch):
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_credentials_required_when_cms_resource_enabled(tmp_path, monkeypatch):
+def test_cms_credentials_warning_when_cms_endpoint_configured(tmp_path, monkeypatch, caplog):
     # Set these to empty strings so the real .env file cannot populate them.
     for env_key in (
         "CMS_TOKEN",
@@ -218,53 +233,18 @@ def test_cms_credentials_required_when_cms_resource_enabled(tmp_path, monkeypatc
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
-    with pytest.raises(StartupValidationError) as exc_info:
+    # Workspace node config tokens live in the vault and cannot be pre-checked
+    # at startup, so missing env-level credentials only log a warning instead
+    # of failing startup.
+    with caplog.at_level(logging.WARNING, logger="server.app.executors.runtime_config"):
         _load_and_validate(tmp_path, monkeypatch, config)
 
-    fields = [loc for loc, _ in exc_info.value.fields]
-    assert "cms.token" in fields
-    message = str(exc_info.value)
-    assert "CMS_TOKEN" in message
-    assert "vault" in message
-
-
-def test_cms_credentials_required_for_provider_keyed_defaults(tmp_path, monkeypatch):
-    # Set these to empty strings so the real .env file cannot populate them.
-    for env_key in (
-        "CMS_TOKEN",
-        "CMS_APP_ID",
-        "CMS_NONCE",
-        "CMS_SECRET",
-        "CMS_TOKEN_URL",
-        "BASECMS_TOKEN",
-        "BASECMS_APP_ID",
-        "BASECMS_NONCE",
-        "BASECMS_SECRET",
-        "BASECMS_TOKEN_URL",
-    ):
-        monkeypatch.setenv(env_key, "")
-    binary = _make_executable(tmp_path / "whisper-cli")
-    model = tmp_path / "model.bin"
-    model.write_text("model", encoding="utf-8")
-    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
-"""
-
-    with pytest.raises(StartupValidationError) as exc_info:
-        _load_and_validate(tmp_path, monkeypatch, config)
-
-    fields = {loc for loc, _ in exc_info.value.fields}
-    assert "cms.token" in fields
+    messages = [record.getMessage() for record in caplog.records]
+    assert any("cms.token" in message and "vault" in message for message in messages)
 
 
 def test_aggregate_invalid_fields_in_one_exception(tmp_path, monkeypatch):
@@ -282,8 +262,6 @@ openclaw:
     - agent
 workflows:
   enabled: true
-  pi:
-    binary: /no/pi
 """
 
     with pytest.raises(StartupValidationError) as exc_info:
@@ -293,7 +271,6 @@ workflows:
     assert "asr.whisper.binary" in fields
     assert "asr.whisper.model" in fields
     assert "openclaw.cwd" in fields
-    assert "workflows.pi.binary" not in fields
 
 
 def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch):
@@ -306,10 +283,8 @@ def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch)
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     with pytest.raises(StartupValidationError) as exc_info:
@@ -322,23 +297,21 @@ resource_providers:
     assert "openclaw.cwd" in message
 
 
-def test_cms_resource_accepts_cms_token_env(tmp_path, monkeypatch):
+def test_cms_endpoint_accepts_cms_token_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CMS_TOKEN", "cms-token")
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_resource_accepts_basecms_token_alias(tmp_path, monkeypatch):
+def test_cms_endpoint_accepts_basecms_token_alias(tmp_path, monkeypatch):
     # Deprecated BASECMS_* aliases still satisfy the credential check (D3);
     # blank the CMS_* names so the worktree .env cannot add a conflicting
     # dual assignment.
@@ -350,16 +323,14 @@ def test_cms_resource_accepts_basecms_token_alias(tmp_path, monkeypatch):
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_resource_accepts_cms_token_gen_env(tmp_path, monkeypatch):
+def test_cms_endpoint_accepts_cms_token_gen_env(tmp_path, monkeypatch):
     monkeypatch.setenv("CMS_APP_ID", "app-id")
     monkeypatch.setenv("CMS_NONCE", "nonce")
     monkeypatch.setenv("CMS_SECRET", "cms-secret")
@@ -369,10 +340,8 @@ def test_cms_resource_accepts_cms_token_gen_env(tmp_path, monkeypatch):
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
     config += """
-resource_providers:
-  cms.question.detail:
-    resource_key: question_detail
-    path: /question/detail
+cms:
+  base_url: http://cms.example.com
 """
 
     _load_and_validate(tmp_path, monkeypatch, config)

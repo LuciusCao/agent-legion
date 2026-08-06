@@ -56,16 +56,17 @@ RUN apt-get update \
 COPY --from=velites-build /src/velites/target/release/velites /usr/local/bin/velites
 WORKDIR /app
 COPY worker /app/worker
-COPY server/__init__.py /app/server/__init__.py
-COPY server/app/__init__.py /app/server/app/__init__.py
-COPY server/app/workflows/__init__.py /app/server/app/workflows/__init__.py
-COPY server/app/workflows/pi_protocol.py /app/server/app/workflows/pi_protocol.py
-COPY server/app/services/__init__.py /app/server/app/services/__init__.py
-COPY server/app/services/pi_event_compression.py /app/server/app/services/pi_event_compression.py
+# Neutral stdlib-only helpers shared by Host and worker (pi event
+# compression / model-error detection); worker code must not import
+# ``server`` — guarded by tests/workers/test_worker_import_isolation.py.
+COPY shared /app/shared
 COPY config/agent-worker.example.yaml /app/config/agent-worker.example.yaml
 COPY worker/client.py /usr/local/bin/agent_worker_client.py
 COPY worker/cli_args.py /usr/local/bin/agent_worker_cli_args.py
 COPY --chmod=755 worker/cli.py /usr/local/bin/workerctl
+# Smoke: the image must be able to import every worker entry point;
+# a missing COPY fails the build here instead of crash-looping at runtime.
+RUN python3 -c "import worker.service, worker.executor, worker.upload_queue"
 ENV PYTHONUNBUFFERED=1
 EXPOSE 8787
 ENTRYPOINT ["python3", "-m", "worker.service"]

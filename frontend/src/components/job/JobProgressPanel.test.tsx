@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import { JobProgressPanel } from './JobProgressPanel'
 import * as jobApi from '../../api/jobApi'
 import type { JobNode, NodeRun } from '../../types/jobTypes'
@@ -28,7 +30,7 @@ const mockNodes: JobNode[] = [
     capability: 'extract',
     inputs: [],
     outputs: [],
-    executor_kind: 'local',
+    executor_kind: 'code',
     executor_id: 'local-1',
   },
   {
@@ -68,6 +70,10 @@ const mockRuns: NodeRun[] = [
   },
 ]
 
+function renderWithClient(ui: ReactElement) {
+  return render(ui, { wrapper: TestQueryProvider })
+}
+
 describe('JobProgressPanel', () => {
   beforeEach(() => {
     mockFetchJobLog.mockReset()
@@ -77,7 +83,7 @@ describe('JobProgressPanel', () => {
   })
 
   it('renders node labels and statuses', () => {
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -97,7 +103,7 @@ describe('JobProgressPanel', () => {
       truncated: false,
     })
 
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -113,7 +119,7 @@ describe('JobProgressPanel', () => {
   })
 
   it('does not render log_path in the timeline', () => {
-    const { container } = render(
+    const { container } = renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -132,7 +138,7 @@ describe('JobProgressPanel', () => {
       truncated: false,
     })
 
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -148,7 +154,7 @@ describe('JobProgressPanel', () => {
   })
 
   it('does not render stage title', () => {
-    const { container } = render(
+    const { container } = renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -170,7 +176,7 @@ describe('JobProgressPanel', () => {
         finished_at: '2026-06-09T08:00:05Z',
       },
     ]
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={staleNodes}
@@ -183,7 +189,7 @@ describe('JobProgressPanel', () => {
   })
 
   it('shows wait time instead of full datetime', () => {
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -198,7 +204,7 @@ describe('JobProgressPanel', () => {
   })
 
   it('computes downstream wait time from dependency finish, not job creation', () => {
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -218,7 +224,7 @@ describe('JobProgressPanel', () => {
         started_at: '2026-06-10T08:00:01Z',
       },
     ]
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={rerunNodes}
@@ -230,8 +236,8 @@ describe('JobProgressPanel', () => {
     expect(screen.getByText('1秒')).toBeInTheDocument()
   })
 
-  it('renders executor kind labels for local and agent nodes', () => {
-    render(
+  it('renders executor kind labels for code and agent nodes', () => {
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -239,7 +245,7 @@ describe('JobProgressPanel', () => {
         onOpenDagDialog={vi.fn()}
       />
     )
-    expect(screen.getByText('本地')).toBeInTheDocument()
+    expect(screen.getByText('代码')).toBeInTheDocument()
     expect(screen.getByText('Pi Agent')).toBeInTheDocument()
   })
 
@@ -268,7 +274,7 @@ describe('JobProgressPanel', () => {
         log_path: '/logs/old.log',
       },
     ]
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={rerunNodes}
@@ -309,7 +315,7 @@ describe('JobProgressPanel', () => {
       reason: null,
     })
 
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -321,7 +327,7 @@ describe('JobProgressPanel', () => {
       expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
     })
 
-    expect(screen.getByText(/Token: 1,250/)).toBeInTheDocument()
+    expect(await screen.findByText(/Token: 1,250/)).toBeInTheDocument()
     expect(screen.getByText(/USD 0.0081/)).toBeInTheDocument()
   })
 
@@ -354,7 +360,7 @@ describe('JobProgressPanel', () => {
       reason: null,
     })
 
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}
@@ -387,7 +393,7 @@ describe('JobProgressPanel', () => {
       reason: 'no token usage recorded for run',
     })
 
-    render(
+    renderWithClient(
       <JobProgressPanel
         jobId="j1"
         nodes={mockNodes}

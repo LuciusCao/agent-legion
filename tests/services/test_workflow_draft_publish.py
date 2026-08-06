@@ -45,12 +45,12 @@ def test_publish_creates_active_revision(tmp_path: Path) -> None:
     workspace = _workspace(queries)
     queries.replace_workspace_executor_configuration(
         workspace["id"],
-        allocations=[{"executor_id": "local-default", "concurrency_limit": 1}],
+        allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
         bindings=[
             {
                 "workflow_key": "test_publish_flow",
                 "node_key": "do_thing",
-                "executor_id": "local-default",
+                "executor_id": "code-default",
             }
         ],
         node_limits=[],
@@ -60,7 +60,7 @@ def test_publish_creates_active_revision(tmp_path: Path) -> None:
         queries,
         workspace["id"],
         _DRAFT_YAML,
-        {"local-default": SimpleNamespace(capabilities=["do_thing"])},
+        {"code-default": SimpleNamespace(capabilities=["do_thing"])},
     )
 
     assert (ok, errors) == (True, [])

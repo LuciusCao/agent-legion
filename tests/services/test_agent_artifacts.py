@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from server.app.agent_artifacts import stage_agent_inputs
+from server.app.agent_broker.agent_artifacts import stage_agent_inputs
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors.models import ExecutionContext
@@ -24,7 +24,7 @@ def _make_job(job_id: str) -> None:
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
-            " title, status, storage_dir) values (?, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
+            " title, status, storage_dir) values (%s, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
             (job_id,),
         )
 

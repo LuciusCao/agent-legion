@@ -1,7 +1,6 @@
 import { Button, Chip } from '@mui/material'
 import type { VideoArtifacts } from '../types'
-import { useArtifactStore } from '../stores/artifactStore'
-import { useInteractionStore } from '../stores/interactionStore'
+import { useVideoNodeStore } from '../stores/videoNodeStore'
 import { INTERACTION_TYPE_LABELS } from '../labels'
 import { parseTimeSeconds } from '../lib/formatters'
 import { RichText } from './RichText'
@@ -16,20 +15,18 @@ import styles from './NodePanel.module.css'
 interface NodePanelProps {
   onSeek?: (time: number) => void
   replayInteraction?: (index: number) => void
-  artifacts?: VideoArtifacts
+  artifacts: VideoArtifacts
   triggeredNodeIndexes?: Set<number>
 }
 
 export function NodePanel({
   onSeek,
   replayInteraction,
-  artifacts: artifactsProp,
+  artifacts,
   triggeredNodeIndexes: triggeredNodeIndexesProp,
 }: NodePanelProps) {
-  const { artifacts: storeArtifacts } = useArtifactStore()
   const { triggeredNodeIndexes: storeTriggeredNodeIndexes } =
-    useInteractionStore()
-  const artifacts = artifactsProp ?? storeArtifacts
+    useVideoNodeStore()
   const triggeredNodeIndexes =
     triggeredNodeIndexesProp ?? storeTriggeredNodeIndexes
   const nodes = artifacts.interactions

@@ -7,19 +7,20 @@ from collections import deque
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from server.app.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.workflow_worker.agent_gate import (
     AgentPassState,
     agent_claim_allowed,
     prepare_agent_pass,
     request_restock,
 )
+from server.app.workflow_worker.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
 from server.app.workflow_worker.ready_cache import ReadyCandidate
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
 _BATCH = "server.app.workflow_worker.agent_gate.batch.active_request_keys"
 _STOCK = "server.app.workflow_worker.agent_gate.load_stock_snapshot"
+_CATALOG = "server.app.workflow_worker.agent_gate.published_agent_definitions"
 
 
 def _node(key: str = "fetch") -> WorkflowNode:
@@ -39,7 +40,6 @@ def _candidate(definition: WorkflowDefinition, node: WorkflowNode, job_id: str) 
 
 def _worker(*, stock: AgentStockConfig | None = None) -> MagicMock:
     worker = MagicMock()
-    worker.settings.agent_definitions = {"agent-x": MagicMock()}
     worker.settings.executor_runtime.agent_stock = stock or AgentStockConfig()
     worker._route_cache = {}
     worker._agent_pass = AgentPassState()
@@ -48,14 +48,13 @@ def _worker(*, stock: AgentStockConfig | None = None) -> MagicMock:
 
 def test_prepare_skips_queries_without_agent_definitions() -> None:
     worker = _worker()
-    worker.settings.agent_definitions = {}
     node = _node()
     definition = WorkflowDefinition(
         key="test", label="Test", intake=WorkflowIntake(), nodes={node.key: node}
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_BATCH) as batch, patch(_STOCK) as stock:
+    with patch(_CATALOG, return_value={}), patch(_BATCH) as batch, patch(_STOCK) as stock:
         prepare_agent_pass(worker, queues)
 
     batch.assert_not_called()
@@ -84,6 +83,7 @@ def test_prepare_batch_loads_and_filters_by_route_cache() -> None:
     snapshot = StockSnapshot(config=AgentStockConfig())
 
     with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
         patch(_BATCH, return_value={("job-agent", "review")}) as batch,
         patch(_STOCK, return_value=snapshot),
     ):
@@ -102,7 +102,11 @@ def test_prepare_skips_stock_when_disabled() -> None:
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_BATCH, return_value=set()), patch(_STOCK) as stock:
+    with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_BATCH, return_value=set()),
+        patch(_STOCK) as stock,
+    ):
         prepare_agent_pass(worker, queues)
 
     stock.assert_not_called()
@@ -117,7 +121,11 @@ def test_stock_snapshot_refreshes_on_interval() -> None:
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_BATCH, return_value=set()), patch(_STOCK) as stock:
+    with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_BATCH, return_value=set()),
+        patch(_STOCK) as stock,
+    ):
         stock.return_value = StockSnapshot(config=AgentStockConfig())
         prepare_agent_pass(worker, queues)
         prepare_agent_pass(worker, queues)
@@ -127,6 +135,61 @@ def test_stock_snapshot_refreshes_on_interval() -> None:
         assert stock.call_count == 2
 
 
+def test_agent_claim_allowed_counts_enqueued_since_snapshot() -> None:
+    worker = _worker()
+    state = worker._agent_pass
+    state.stock_snapshot = StockSnapshot(
+        config=AgentStockConfig(min_stock=2, max_stock=10),
+        buckets={("ws1", "agent-x"): StockBucket(queued=1)},
+    )
+    # Snapshot says 1 of target 2 stocked: one more submission fits.
+    assert agent_claim_allowed(worker, "ws1", "job1", "fetch", "agent-x") is True
+    # The refresh window keeps the snapshot frozen at queued=1, but the
+    # submission counter must close the hole once the target is reached.
+    state.stock_enqueued[("ws1", "agent-x")] = 1
+    assert agent_claim_allowed(worker, "ws1", "job2", "fetch", "agent-x") is False
+    assert state.stock_gated == 1
+    # Other pairs are unaffected.
+    assert agent_claim_allowed(worker, "ws2", "job2", "fetch", "agent-x") is True
+
+
+def test_stock_reload_clears_enqueued_counter() -> None:
+    worker = _worker(stock=AgentStockConfig(refresh_seconds=30.0))
+    node = _node()
+    definition = WorkflowDefinition(
+        key="test", label="Test", intake=WorkflowIntake(), nodes={node.key: node}
+    )
+    queues = {"ws1": deque([_candidate(definition, node, "job1")])}
+
+    with (
+        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_BATCH, return_value=set()),
+        patch(_STOCK) as stock,
+    ):
+        stock.return_value = StockSnapshot(config=AgentStockConfig())
+        prepare_agent_pass(worker, queues)
+        worker._agent_pass.stock_enqueued[("ws1", "agent-x")] = 5
+        # Within the window the counter survives (snapshot stays frozen).
+        prepare_agent_pass(worker, queues)
+        assert worker._agent_pass.stock_enqueued == {("ws1", "agent-x"): 5}
+        # On reload the fresh snapshot sees the real queued rows again.
+        worker._agent_pass.stock_loaded_at -= 31.0
+        prepare_agent_pass(worker, queues)
+        assert worker._agent_pass.stock_enqueued == {}
+
+
+def test_agent_claim_allowed_skips_in_flight_submission() -> None:
+    worker = _worker()
+    state = worker._agent_pass
+    # Submitted to the enqueue pool but not yet visible in the DB: the
+    # pass must not resubmit a duplicate bundle build for it.
+    state.in_flight = {("job1", "fetch")}
+    assert agent_claim_allowed(worker, "ws1", "job1", "fetch", "agent-x") is False
+    # Other nodes/jobs of the same pair stay claimable.
+    assert agent_claim_allowed(worker, "ws1", "job1", "review", "agent-x") is True
+    assert agent_claim_allowed(worker, "ws1", "job2", "fetch", "agent-x") is True
+
+
 def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
     state = AgentPassState(
         active_nodes={("j", "n")},
@@ -134,6 +197,8 @@ def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
         stock_gated=3,
         stock_snapshot=StockSnapshot(config=AgentStockConfig()),
         stock_loaded_at=123.0,
+        stock_enqueued={("ws1", "agent-x"): 2},
+        in_flight={("j2", "n2")},
     )
     state.reset_pass()
     assert state.active_nodes == set()
@@ -141,6 +206,10 @@ def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
     assert state.stock_gated == 0
     assert state.stock_snapshot is not None
     assert state.stock_loaded_at == 123.0
+    # Tied to the snapshot's lifetime, not the pass's.
+    assert state.stock_enqueued == {("ws1", "agent-x"): 2}
+    # Tied to the pool closure, cleared only when the submission finishes.
+    assert state.in_flight == {("j2", "n2")}
 
 
 def test_agent_claim_allowed_gates() -> None:

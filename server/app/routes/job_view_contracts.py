@@ -71,7 +71,7 @@ class JobNodeResponse(BaseModel):
     inputs: list[str]
     outputs: list[str]
     executor_id: str | None = None
-    executor_kind: Literal["local", "pi", "openclaw"] | None = None
+    executor_kind: Literal["code", "pi", "openclaw"] | None = None
     agent_id: str | None = None
     worker_id: str | None = None
 

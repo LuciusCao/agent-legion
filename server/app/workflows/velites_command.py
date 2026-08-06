@@ -30,7 +30,7 @@ FLAVOR_VELITES = "velites"
 MAX_TURNS_KEY = "max_turns"
 MAX_TOKENS_KEY = "max_tokens"
 
-# velites CLI 原生支持的 provider 协议名；pi 命名 provider（如 gateway）统一收敛到
+# velites CLI 原生支持的 provider 协议名；pi 命名 provider（如 deepseek）统一收敛到
 # gateway 单出口（凭据见 ~/.velites/config.json，gateway 按 model 路由上游，§7）。
 VELITES_PROVIDERS = frozenset({"stub", "gateway", "openai_compat"})
 
@@ -45,7 +45,7 @@ def build_command_for_flavor(
     prompt_instruction: str,
     pi_fallback: Callable[..., list[str]],
 ) -> list[str]:
-    """按 ``manifest["pi"]["flavor"]`` 分发命令构建；未知 flavor fail-fast。
+    """按 ``manifest["runtime"]`` 分发命令构建；未知 runtime fail-fast。
 
     ``prompt_instruction`` / ``pi_fallback`` 由调用方（pi_protocol 侧）注入：
     本模块不得反向 import pi_protocol（架构契约禁 import 环，函数级也算）。
@@ -56,12 +56,12 @@ def build_command_for_flavor(
         "session_name": session_name,
         "prompt_file": prompt_file,
     }
-    flavor = str(manifest["pi"].get("flavor") or FLAVOR_PI).strip()
-    if flavor == FLAVOR_VELITES:
+    runtime = str(manifest.get("runtime") or "").strip()
+    if runtime == FLAVOR_VELITES:
         return build_velites_command(manifest, prompt_instruction=prompt_instruction, **kwargs)
-    if flavor == FLAVOR_PI:
+    if runtime == FLAVOR_PI:
         return pi_fallback(manifest, **kwargs)
-    raise ValueError(f"unknown pi flavor {flavor!r} (expected 'pi' or 'velites')")
+    raise ValueError(f"unknown agent runtime {runtime!r} (expected 'pi' or 'velites')")
 
 
 def build_velites_command(
@@ -74,9 +74,9 @@ def build_velites_command(
     prompt_instruction: str,
 ) -> list[str]:
     """Build the velites CLI argv for one workflow node run."""
-    pi = manifest["pi"]
+    execution = manifest["execution"]
     cmd: list[str] = [
-        str(pi.get("binary") or FLAVOR_VELITES),
+        str(execution.get("binary") or FLAVOR_VELITES),
         "--mode",
         "json",
         "--session-dir",
@@ -88,11 +88,11 @@ def build_velites_command(
         "--tools",
         ",".join(manifest["tools"]),
     ]
-    provider = str(pi.get("provider") or "")
+    provider = str(execution.get("provider") or "")
     if provider:
         cmd.extend(["--provider", provider if provider in VELITES_PROVIDERS else "gateway"])
     for flag, key in (("--model", "model"), ("--thinking", "thinking")):
-        value = str(pi.get(key) or "")
+        value = str(execution.get(key) or "")
         if value:
             cmd.extend([flag, value])
     node_config = manifest.get("config")
@@ -101,10 +101,10 @@ def build_velites_command(
             budget = node_config.get(key)
             if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
                 cmd.extend([flag, str(budget)])
-    timeout = pi.get("timeout_seconds")
+    timeout = execution.get("timeout_seconds")
     if isinstance(timeout, int) and not isinstance(timeout, bool) and timeout > 0:
         cmd.extend(["--timeout-seconds", str(timeout)])
-    if pi.get("velites_no_sandbox"):
+    if execution.get("no_sandbox"):
         cmd.append("--no-sandbox")
     for output in manifest.get("expected_outputs") or []:
         cmd.extend(["--require-output", str(output)])

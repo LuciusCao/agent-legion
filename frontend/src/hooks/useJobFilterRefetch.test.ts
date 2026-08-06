@@ -1,9 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { renderHook, act, waitFor } from '@testing-library/react'
 import { useJobFilterRefetch } from './useJobFilterRefetch'
-import { useJobStore } from '../stores/jobStore'
+import { createJobSummary, useJobStore } from '../stores/jobStore'
 import * as api from '../api'
-import { createJobSummary } from '../stores/job/actions/testHelpers'
 
 vi.mock('../api')
 

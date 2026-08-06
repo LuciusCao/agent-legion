@@ -8,25 +8,26 @@ control calls kept in ``worker.host_client``.
 
 from __future__ import annotations
 
-import http.client
 import json
-import urllib.error
 from pathlib import Path
 from typing import Any
+
+import requests
 
 from worker._retry import run_with_retry
 
 # Transient network errors (timeout/reset/refused) and Host 5xx get
-# exponential backoff (1s, 2s, 4s, …). Socket timeouts surface as
-# TimeoutError, which is NOT a URLError subclass — catch both explicitly or
-# a single 30s stall kills a finished execution.
+# exponential backoff (1s, 2s, 4s, …). requests wraps socket timeouts as
+# requests.Timeout and resets/refusals as requests.ConnectionError — both
+# are RequestException subclasses — so a single 30s stall no longer kills a
+# finished execution. Builtin TimeoutError/ConnectionError stay as a safety
+# net for errors raised below the requests layer.
 _RETRY_MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_BASE_SECONDS = 1.0
 _TRANSIENT_ERRORS = (
-    urllib.error.URLError,
+    requests.RequestException,
     TimeoutError,
     ConnectionError,
-    http.client.HTTPException,
 )
 
 DEFAULT_TRANSFER_TIMEOUT = 120
