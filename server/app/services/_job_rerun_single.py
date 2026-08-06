@@ -54,10 +54,28 @@ def execute_rerun(
     ineligible = check_rerun_eligibility(service, job, job_id, actual_node_key)
     if ineligible is not None:
         raise ineligible
+    return commit_rerun(service, job, job_id, actual_node_key)
 
-    definition = definition_from_job_snapshot(job) or service.workflows.definition(
-        str(job["workflow_key"])
-    )
+
+def commit_rerun(
+    service: JobRerunService,
+    job: dict[str, Any],
+    job_id: str,
+    actual_node_key: str,
+    *,
+    definition: Any | None = None,
+) -> JobOperationResult:
+    """Write portion of ``execute_rerun``; the caller has validated eligibility.
+
+    The DB-level guard (lease_guarded_mutation with reject_running_nodes)
+    still re-validates inside the write transaction, so a state change
+    between a batch caller's prefetch and this write fails safely.
+    ``definition`` lets batch callers pass their cached workflow definition.
+    """
+    if definition is None:
+        definition = definition_from_job_snapshot(job) or service.workflows.definition(
+            str(job["workflow_key"])
+        )
 
     stale_nodes = downstream_nodes(definition, actual_node_key)
     staged = None
@@ -114,6 +132,21 @@ def execute_rerun_result(
     """Rerun one node, capturing a non-succeeded outcome as a result dict (batch use)."""
     try:
         return execute_rerun(service, job, job_id, actual_node_key)
+    except JobOperationError as exc:
+        return exc.to_result()
+
+
+def commit_rerun_result(
+    service: JobRerunService,
+    job: dict[str, Any],
+    job_id: str,
+    actual_node_key: str,
+    *,
+    definition: Any | None = None,
+) -> JobOperationResult:
+    """commit_rerun with the same error capture as ``execute_rerun_result``."""
+    try:
+        return commit_rerun(service, job, job_id, actual_node_key, definition=definition)
     except JobOperationError as exc:
         return exc.to_result()
 

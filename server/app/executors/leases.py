@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -116,6 +117,23 @@ class ExecutorLeaseRepository:
                 (job_id, node_key, database_timestamp(now)),
             ).fetchone()
             return row is not None
+
+    def active_lease_node_keys_for_jobs(
+        self, job_ids: Sequence[str], now: datetime
+    ) -> set[tuple[str, str]]:
+        """Bulk form of ``has_active_for_node``: (job_id, node_key) pairs with
+        an active lease, for read-only batch checks (rerun preview)."""
+        ids = [str(job_id) for job_id in job_ids]
+        if not ids:
+            return set()
+        placeholders = ",".join("%s" for _ in ids)
+        with read_connection(self.path) as conn:
+            rows = conn.execute(
+                f"select job_id, node_key from executor_leases"
+                f" where job_id in ({placeholders}) and status='active' and expires_at>%s",
+                (*ids, database_timestamp(now)),
+            ).fetchall()
+        return {(str(row["job_id"]), str(row["node_key"])) for row in rows}
 
     def recover_orphaned_running_jobs(self, now: datetime) -> list[str]:
         """Reset jobs stuck in 'running' with no active lease back to 'queued'."""
