@@ -91,18 +91,27 @@
   workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
   （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
 - velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
-  runtime，由 `AgentDefinition.runtime` 声明（`config/workflow.yaml` `agents:` 段，
-  per-agent 灰度/回退都是单字段改动）。`workflows.pi.flavor` 只作用于
-  `runtime: pi` 的 agent（当前仅 video 链路）做实现选择；`runtime: velites`
-  钉死 velites 实现、忽略 flavor。pi 作为可选 runtime 长期保留（不退役），
-  新增 agent 按需要直接声明目标 runtime。Workflow 节点不感知 runtime/harness
-  实现。Worker 声明 velites 前必须先在 PATH 提供 velites 二进制（启动预检
-  缺失即拒启动）。
+  runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
+  （`versioned_entities` 表，经 Studio「Agent 管理」/ `/api/agent-definitions`
+  管理，draft → published → archived 生命周期，版本不可变，灰度/回退走
+  publish/rollback），不再走 yaml——`agents:` 段与 `workflows.pi` 块已退役，
+  出现在任何 split yaml 启动即报错（fail-fast 带迁移指引）。runtime 直接钉死
+  命令构建器与二进制（pi → pi argv，velites → velites argv；openclaw 未实现
+  即报错），没有 flavor 之类的实现选择层。pi 作为可选 runtime 长期保留
+  （不退役），新增 agent 按需要直接声明目标 runtime。Workflow 节点不感知
+  runtime/harness 实现。Worker 声明某 runtime 前必须先在 PATH 提供对应二进制
+  （启动预检缺失即拒启动）。
   事件 schema 改动必须同步 `velites/schema/events.schema.json`
   （`cargo run --bin velites-schema -- schema/events.schema.json`）并保证契约测试
   （`velites/tests/schema_current.rs`、`golden_events.rs`）通过；事件流只保留 Host
   消费的 pi 兼容子集，禁止引入 delta 事件（`message_update` /
   `tool_execution_update`）。
+- Agent 执行的 provider/model/thinking 解析链：节点 `execution.*` 覆盖 →
+  workspace Settings 默认（`default_agent_*` 三列）→ 报错，无 yaml/全局兜底；
+  manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
+  覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
+  只允许一个 published Agent（DB partial unique index 兜底）。测试的 Agent
+  目录由 `tests/conftest.py` 经 AgentService 播种，不从 yaml sync。
 
 典型反例：
 
