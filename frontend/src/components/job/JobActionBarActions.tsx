@@ -147,6 +147,9 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
         <JobAllMatchingRerunDialog
           open={rerunOpen}
           count={allMatchingCount}
+          jobs={jobs}
+          workflowDefinition={workflowDefinition}
+          workflowNodesByKey={workflowNodesByKey}
           onClose={() => setRerunOpen(false)}
           onConfirm={onRerun}
         />

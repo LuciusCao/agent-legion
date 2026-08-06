@@ -502,7 +502,13 @@ describe('JobActionBar in allMatching selection mode', () => {
   function renderAllMatching(onRerun = vi.fn()) {
     renderWithClient(
       <JobActionBar
-        jobs={[makeJob({ id: 'j1', status: 'failed' })]}
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'failed',
+            workflow_key: 'question_content',
+          }),
+        ]}
         workflowDefinition={workflow}
         mode="batch"
         selectedCount={10}
@@ -539,7 +545,7 @@ describe('JobActionBar in allMatching selection mode', () => {
       screen.getByText('重跑').click()
     })
     expect(
-      screen.getByText('将对符合筛选条件的 10 个 job 执行')
+      screen.getByText(/将对符合筛选条件的 10 个 job 执行/)
     ).toBeInTheDocument()
 
     await act(async () => {
@@ -561,5 +567,49 @@ describe('JobActionBar in allMatching selection mode', () => {
       screen.getByText('确认重跑').click()
     })
     expect(onRerun).toHaveBeenCalledWith(null, true, undefined, 'technical')
+  })
+
+  it('offers node chips and confirms a node rerun without jobIds', async () => {
+    const { onRerun } = renderAllMatching()
+
+    await act(async () => {
+      screen.getByText('重跑').click()
+    })
+    // 节点组与失败类别组同时展示。
+    expect(screen.getByText('从节点重跑')).toBeInTheDocument()
+    expect(screen.getByText('按失败类别重跑')).toBeInTheDocument()
+    expect(screen.getByTestId('rerun-chip-extract')).toBeInTheDocument()
+    expect(screen.getByTestId('rerun-chip-generate')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByTestId('rerun-chip-generate').click()
+    })
+    expect(
+      screen.getByText(/重跑节点：生成（按筛选条件由服务端解析）/)
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认重跑').click()
+    })
+    // 不带 jobIds：store 在 allMatching 模式下经 selection filter 服务端解析。
+    expect(onRerun).toHaveBeenCalledWith('generate', false)
+  })
+
+  it('switching back to a failure category clears the node selection', async () => {
+    const { onRerun } = renderAllMatching()
+
+    await act(async () => {
+      screen.getByText('重跑').click()
+    })
+    await act(async () => {
+      screen.getByTestId('rerun-chip-extract').click()
+    })
+    await act(async () => {
+      screen.getByTestId('rerun-chip-all-failed').click()
+    })
+    await act(async () => {
+      screen.getByText('确认重跑').click()
+    })
+    expect(onRerun).toHaveBeenCalledWith(null, true, undefined, undefined)
   })
 })
