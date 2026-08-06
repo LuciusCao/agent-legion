@@ -1,11 +1,8 @@
 """Bounded background pool for Agent enqueue staging and bundling.
 
-``AgentDispatchService.enqueue`` stages input artifacts and builds a tar.gz
-bundle synchronously (~1s per node); on the workflow worker's single poll
-thread that serialized the whole claim loop once thousands of nodes were
-ready. The poll thread therefore only submits the closure here and moves on;
-the broker's unique (job, node) index remains the authoritative dedup when a
-slow submission races the next pass.
+Each closure stages artifacts and builds a tar.gz bundle (~1s), too slow
+for the workflow worker's single poll thread, which only submits here;
+the broker's unique (job, node) index stays the authoritative dedup.
 """
 
 from __future__ import annotations
@@ -15,13 +12,25 @@ import queue
 import threading
 from collections.abc import Callable
 
+from pydantic import BaseModel, ConfigDict, Field
+
 logger = logging.getLogger(__name__)
+
+
+class AgentEnqueueConfig(BaseModel):
+    """Enqueue-pool tuning (``executor_runtime.agent_enqueue``); each closure
+    is ~1s of mostly-IO work, so throughput scales with ``workers``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    workers: int = Field(default=16, ge=1)
+    max_pending: int = Field(default=1024, ge=1)
 
 
 class AgentEnqueuePool:
     """Fixed daemon workers draining enqueue closures; drops nothing silently."""
 
-    def __init__(self, workers: int = 4, max_pending: int = 256) -> None:
+    def __init__(self, workers: int = 16, max_pending: int = 1024) -> None:
         self._queue: queue.Queue[Callable[[], None] | None] = queue.Queue(max_pending)
         for index in range(workers):
             threading.Thread(target=self._run, name=f"agent-enqueue-{index}", daemon=True).start()

@@ -1,17 +1,16 @@
 """Per-pass Agent claim gates for the workflow worker's poll thread.
 
-Three cheap in-memory gates keep the poll thread off the database when
+Four cheap in-memory gates keep the poll thread off the database when
 thousands of agent candidates pile up behind saturated Workers:
 
-- a batched active-request filter: one chunked query per pass (see
-  ``server.app.agent_broker.batch``) replaces one ``has_active_request``
-  round-trip per candidate;
+- a batched active-request filter (``server.app.agent_broker.batch``):
+  one chunked query per pass replaces per-candidate DB round-trips;
+- an in-flight submission set: candidates already submitted to the
+  enqueue pool are skipped until the pool closure removes them;
 - an enqueue-pool-full flag: once the bounded enqueue pool rejects a
-  submission, the remaining agent candidates of this pass are skipped
-  without further work (local executor candidates are unaffected);
-- the stockpile limit (``server.app.workflow_worker.agent_stock``): pairs already stocked
-  to their target are skipped, bounding bundle-build CPU/IO; enqueue
-  submissions within the refresh window count toward the target.
+  submission, the remaining agent candidates of this pass are skipped;
+- the stockpile limit (``agent_stock``): pairs stocked to target are
+  skipped; submissions within the refresh window count toward target.
 
 All gates are advisory: the broker's unique one-active-request index and
 the enqueue re-check on the pool thread stay the authoritative dedup.
@@ -38,12 +37,13 @@ if TYPE_CHECKING:
 class AgentPassState:
     """Agent claim-gate state owned by the worker thread.
 
-    ``active_nodes`` / ``pool_full`` / ``stock_gated`` are per-pass (reset
-    at the top of every poll); the stock snapshot persists across passes
-    and refreshes on ``AgentStockConfig.refresh_seconds``.
-    ``stock_enqueued`` counts enqueue-pool submissions per
-    (workspace_id, agent_id) since the snapshot was loaded, so a frozen
-    snapshot cannot over-release; it resets when the snapshot reloads.
+    Per-pass (reset every poll): ``active_nodes`` / ``pool_full`` /
+    ``stock_gated``. The stock snapshot persists across passes and
+    refreshes on ``AgentStockConfig.refresh_seconds``; ``stock_enqueued``
+    counts submissions per pair since the snapshot loaded, closing the
+    frozen-window over-release hole, and resets with the snapshot.
+    ``in_flight`` holds pool-submitted (job_id, node_key) pairs until the
+    pool closure removes them, blocking duplicate bundle builds.
     """
 
     active_nodes: set[tuple[str, str]] = field(default_factory=set)
@@ -52,6 +52,7 @@ class AgentPassState:
     stock_snapshot: StockSnapshot | None = None
     stock_loaded_at: float = 0.0
     stock_enqueued: dict[tuple[str, str], int] = field(default_factory=dict)
+    in_flight: set[tuple[str, str]] = field(default_factory=set)
 
     def reset_pass(self) -> None:
         self.active_nodes = set()
@@ -98,9 +99,8 @@ def _candidate_job_ids(
 ) -> set[str]:
     """Job ids of candidates that may route to an Agent.
 
-    Rough zero-DB filter on the route cache: candidates with a cached
-    non-agent route are excluded; uncached candidates are kept, so the
-    result is a superset (extra ids only cost extra rows in one query).
+    Rough zero-DB filter on the route cache: cached non-agent routes are
+    excluded; uncached candidates stay, so the result is a superset.
     """
     job_ids: set[str] = set()
     for workspace_id, queue in queues.items():
@@ -123,7 +123,7 @@ def agent_claim_allowed(
 ) -> bool:
     """In-memory per-pass gates before config resolution; zero DB here."""
     state = worker._agent_pass
-    if (job_id, node_key) in state.active_nodes:
+    if (job_id, node_key) in state.active_nodes or (job_id, node_key) in state.in_flight:
         return False
     snapshot = state.stock_snapshot
     if snapshot is not None and not snapshot.allows(
