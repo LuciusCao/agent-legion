@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
+from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
 from server.app.cms.auth import cms_token_available
 from server.app.executors.code_config import validate_code_config_paths
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
@@ -105,6 +106,7 @@ class ExecutorRuntimeConfig(BaseModel):
     )
     agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
     agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
+    agent_enqueue: AgentEnqueueConfig = Field(default_factory=AgentEnqueueConfig)
 
 
 class StartupValidationError(Exception):
