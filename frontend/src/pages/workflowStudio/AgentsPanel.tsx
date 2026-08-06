@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Button,
   Dialog,
@@ -9,7 +10,8 @@ import {
 } from '@mui/material'
 import { copyAgent, fetchAgentDefinitions } from '../../api'
 import type { AgentListItem } from '../../types'
-import { useAsync } from '../../hooks/useAsync'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { toErrorMessage } from '../../lib/queryError'
 import { AgentEditor } from './AgentEditor'
 import styles from './AgentsPanel.module.css'
 
@@ -24,11 +26,16 @@ const statusLabels: Record<AgentListItem['status'], string> = {
  * AgentEditor 负责草稿编辑、发布、归档与版本回滚。
  */
 export function AgentsPanel() {
-  const [refreshKey, setRefreshKey] = useState(0)
-  const { data, loading, error } = useAsync(
-    () => fetchAgentDefinitions(),
-    [refreshKey]
-  )
+  const queryClient = useQueryClient()
+  const {
+    data,
+    isPending: loading,
+    error: queryError,
+  } = useQuery({
+    queryKey: extraQueryKeys.agentDefinitions(),
+    queryFn: fetchAgentDefinitions,
+  })
+  const error = toErrorMessage(queryError)
   const agents = data?.agents ?? []
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [creating, setCreating] = useState(false)
@@ -37,7 +44,9 @@ export function AgentsPanel() {
   const [copyError, setCopyError] = useState('')
 
   function refresh() {
-    setRefreshKey((key) => key + 1)
+    void queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.agentDefinitions(),
+    })
   }
 
   function handleSelect(agentId: string) {
