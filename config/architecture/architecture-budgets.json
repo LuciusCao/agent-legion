@@ -548,6 +548,7 @@
     "scripts/remote/llm_gateway_http.py": 36,
     "scripts/remote/llm_gateway_sse.py": 31,
     "scripts/remote/llm_gateway_stream.py": 35,
+    "scripts/seed_from_prod.py": 594,
     "scripts/stress/_e2e_frontend.py": 64,
     "scripts/stress/_e2e_readiness.py": 65,
     "scripts/stress/_e2e_report.py": 67,

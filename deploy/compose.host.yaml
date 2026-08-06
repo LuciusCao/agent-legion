@@ -54,6 +54,13 @@ services:
       host:
         condition: service_healthy
     secrets: [agent_worker_register_token]
+    # velites 沙箱（bwrap）在容器内需要：seccomp 放行 unshare（默认 profile
+    # 拦截，setuid 绕不过）+ CAP_SYS_ADMIN（创建 mount/pid namespace，
+    # 容器默认能力集不含）。缺了则沙箱 fail-closed，agent 全部秒退。
+    security_opt:
+      - seccomp:unconfined
+    cap_add:
+      - SYS_ADMIN
     volumes:
       - ./worker.company.example.yaml:/etc/agent-legion/worker.yaml:ro
       - ${PI_CONFIG_DIR:-../pi-config}:/root/.pi/agent:ro
