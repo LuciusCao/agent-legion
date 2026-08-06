@@ -20,16 +20,19 @@ class JobRerunStateQueriesMixin(JobQueriesBase):
     ) -> dict[str, dict[str, Any]]:
         """Narrow job rows keyed by id for batch rerun eligibility checks.
 
-        Only the columns the checks read (status/workflow_key plus the
-        definition snapshot); a full ``select *`` pays per-column row
-        materialization for thousands of jobs.
+        Only the columns the checks read (status/workspace_id/workflow_key
+        plus the definition snapshot); a full ``select *`` pays per-column row
+        materialization for thousands of jobs. Deliberately NOT filtered by
+        workspace: the batch write path must distinguish not-found from
+        foreign-workspace ids, so the workspace check happens in Python.
         """
         if not job_ids:
             return {}
-        params = [workspace_id, *(str(job_id) for job_id in job_ids)]
+        del workspace_id  # workspace scoping is the caller's semantic check
+        params = [str(job_id) for job_id in job_ids]
         sql = (
-            "select id, status, workflow_key, workflow_definition_snapshot_json"
-            f" from jobs where workspace_id=%s and id in ({','.join('%s' for _ in job_ids)})"
+            "select id, workspace_id, status, workflow_key, workflow_definition_snapshot_json"
+            f" from jobs where id in ({','.join('%s' for _ in job_ids)})"
         )
         with self._connect_read() as conn:
             rows = conn.execute(sql, params).fetchall()
