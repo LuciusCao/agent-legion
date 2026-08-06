@@ -52,27 +52,32 @@ llm-gateway: ## 从 Pi models.json 读取凭据并启动远程 LLM 网关
 		--host "$(LLM_GATEWAY_HOST)" --port "$(LLM_GATEWAY_PORT)" \
 		--provider "$(LLM_GATEWAY_PROVIDER)" --models-json "$(PI_MODELS_JSON)"
 
+# 本机 compose 覆盖（如 deploy/compose.local.yaml，bind-mount 既有数据目录等
+# 机器特定配置）：存在即自动并入 stack 命令，不存在则只用基础编排。
+COMPOSE_HOST_FILES  := -f deploy/compose.host.yaml $(if $(wildcard deploy/compose.local.yaml),-f deploy/compose.local.yaml,)
+COMPOSE_WORKER_FILES := -f deploy/compose.worker.yaml $(if $(wildcard deploy/compose.worker.local.yaml),-f deploy/compose.worker.local.yaml,)
+
 .PHONY: stack-host-up
 stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Worker
-	docker compose -f deploy/compose.host.yaml up -d --build
+	docker compose $(COMPOSE_HOST_FILES) up -d --build
 
 .PHONY: stack-host-down
 stack-host-down: ## 停止部署机 Agent Legion stack
-	docker compose -f deploy/compose.host.yaml down
+	docker compose $(COMPOSE_HOST_FILES) down
 
 .PHONY: stack-worker-up
 stack-worker-up: ## Worker 机器：仅启动 Agent Legion Worker
-	docker compose -f deploy/compose.worker.yaml up -d --build
+	docker compose $(COMPOSE_WORKER_FILES) up -d --build
 
 .PHONY: stack-worker-down
 stack-worker-down: ## 停止 Worker 机器上的 Agent Legion Worker
-	docker compose -f deploy/compose.worker.yaml down
+	docker compose $(COMPOSE_WORKER_FILES) down
 
 STACK ?= host
 .PHONY: stack-down
 stack-down: ## 停止本机所有 Agent Legion stack（host 与 worker）
-	-docker compose -f deploy/compose.host.yaml down
-	-docker compose -f deploy/compose.worker.yaml down
+	-docker compose $(COMPOSE_HOST_FILES) down
+	-docker compose $(COMPOSE_WORKER_FILES) down
 
 .PHONY: stack-logs
 stack-logs: ## 跟踪 stack 日志（STACK=host 或 worker，默认 host）
