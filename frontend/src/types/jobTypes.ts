@@ -17,6 +17,10 @@ export type JobMutationResult =
 export type BatchJobMutationResult =
   components['schemas']['BatchJobMutationResponse']
 export type JobBatchRerunRequest = components['schemas']['JobBatchRerunRequest']
+export type JobBatchRerunPreviewRequest =
+  components['schemas']['JobBatchRerunPreviewRequest']
+export type BatchRerunPreviewResult =
+  components['schemas']['BatchRerunPreviewResponse']
 export type BatchJobIdsRequest = components['schemas']['BatchJobIdsRequest']
 export type WorkspacePackageResult =
   components['schemas']['WorkspacePackageResponse']

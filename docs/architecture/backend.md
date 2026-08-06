@@ -138,6 +138,7 @@ server/app/
 | GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/job_invalid_paths.py |
 | GET | `/workspaces/{workspace_id}/jobs/snapshot` | `snapshot_workspace_jobs` | routes/job_list.py |
 | GET | `/workspaces/{workspace_id}/jobs/facets` | `workspace_job_facets` | routes/job_list.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-rerun/preview` | `preview_batch_rerun_workspace_jobs` | routes/job_rerun_preview.py |
 | POST | `/workspaces/{workspace_id}/events/stress` | `record_stress_events` | routes/job_stress_events.py |
 | POST | `/jobs/{job_id}/upgrade-workflow` | `upgrade_job_workflow` | routes/job_workflow_upgrade.py |
 | GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
@@ -305,6 +306,7 @@ server/app/
 | ContinueJobRequest | BaseModel | — | app/routes/job_operation_contracts.py |
 | JobRerunByFailureRequest | BaseModel | category: Literal['technical', 'business', 'unknown'], strategy: Literal['aut... | app/routes/job_rerun_by_failure_contracts.py |
 | JobRerunByFailureResponse | BaseModel | results: list[JobRerunByFailureResultResponse] | app/routes/job_rerun_by_failure_contracts.py |
+| BatchRerunPreviewResponse | BaseModel | total_count: int, eligible_count: int | app/routes/job_rerun_preview_contracts.py |
 | StressEventRecord | BaseModel | job_id: str, kind: str | app/routes/job_stress_events.py |
 | StressEventBatchRequest | BaseModel | events: list[StressEventRecord] | app/routes/job_stress_events.py |
 | StressEventBatchResponse | BaseModel | recorded: int, recorded_at: float | app/routes/job_stress_events.py |

@@ -10,9 +10,13 @@ from server.app.services._job_rerun_by_failure_results import (
     execute_rerun_targets,
     job_failure_result,
 )
+from server.app.services._job_rerun_eligibility import (
+    failed_nodes_by_job,
+    resolve_failure_rerun_targets,
+)
 from server.app.services.job_selection_resolver import resolve_batch_selection
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
-from server.app.workflows.workflow_branching import downstream_nodes, upstream_nodes
+from server.app.workflows.workflow_branching import downstream_nodes
 
 if TYPE_CHECKING:
     from server.app.services.job_rerun import JobRerunService
@@ -40,28 +44,16 @@ def rerun_by_failure_category(
 ) -> list[dict[str, Any]]:
     """Rerun the latest failed node runs of one category, one result per job."""
     resolved = _AUTO_STRATEGIES.get(category, "rerun_self") if strategy == "auto" else strategy
-    runs = service.job_db.list_failed_node_runs(
-        workspace_id, category=category, workflow_key=workflow_key
-    )
     ids = resolve_batch_selection(service.job_db, workspace_id, job_ids, job_filter, exclude_ids)
     requested = [value.strip() for value in ids if value.strip()]
-    allowed = set(requested)
-    failed_nodes_by_job: dict[str, list[str]] = {}
-    for run in runs:
-        job_id = str(run["job_id"])
-        if allowed and job_id not in allowed:
-            continue
-        nodes = failed_nodes_by_job.setdefault(job_id, [])
-        node_key = str(run["node_key"])
-        if node_key not in nodes:
-            nodes.append(node_key)
+    grouped = failed_nodes_by_job(service, workspace_id, category, requested, workflow_key)
 
     results = [
         _rerun_job_failures(service, workspace_id, job_id, nodes, resolved, from_node_key)
-        for job_id, nodes in failed_nodes_by_job.items()
+        for job_id, nodes in grouped.items()
     ]
     for job_id in requested:
-        if job_id not in failed_nodes_by_job:
+        if job_id not in grouped:
             results.append(
                 job_failure_result(
                     job_id,
@@ -105,11 +97,5 @@ def _rerun_job_failures(
             )
         return execute_rerun_targets(service, job, job_id, [from_node_key])
 
-    targets: list[str] = []
-    for node_key in failed_nodes:
-        resolved = upstream_nodes(definition, node_key) if strategy == "rerun_upstream" else []
-        # A node without upstreams is rerun itself: it is the root candidate.
-        for target in resolved or [node_key]:
-            if target not in targets:
-                targets.append(target)
+    targets = resolve_failure_rerun_targets(definition, failed_nodes, strategy)
     return execute_rerun_targets(service, job, job_id, targets)
