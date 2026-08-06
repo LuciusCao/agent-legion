@@ -6,9 +6,11 @@
 //! unit tests in src/sandbox.rs; Python-side integration tests probe bwrap
 //! availability and skip when it is absent (CI Linux lanes without bwrap).
 
+#[cfg(target_os = "macos")]
 use std::path::Path;
 use std::process::Command;
 
+#[cfg(target_os = "macos")]
 fn run_wrap(cwd: &Path, args: &[String]) -> std::process::Output {
     let mut full: Vec<String> = vec!["sandbox".into(), "wrap".into()];
     full.extend(args.iter().cloned());
@@ -19,6 +21,7 @@ fn run_wrap(cwd: &Path, args: &[String]) -> std::process::Output {
         .expect("failed to spawn velites")
 }
 
+#[cfg(target_os = "macos")]
 fn wrap_args(cwd: &Path, command: &str) -> Vec<String> {
     vec![
         "--cwd".into(),
