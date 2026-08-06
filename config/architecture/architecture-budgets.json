@@ -139,6 +139,8 @@
     "frontend/src/components/job/JobActionBar.tsx": 92,
     "frontend/src/components/job/JobActionBarActions.tsx": 187,
     "frontend/src/components/job/JobActionBarUpgrade.tsx": 66,
+    "frontend/src/components/job/JobAllMatchingFailureCategoryRow.tsx": 58,
+    "frontend/src/components/job/JobAllMatchingNodeRow.tsx": 49,
     "frontend/src/components/job/JobAllMatchingRerunDialog.tsx": 115,
     "frontend/src/components/job/JobDeleteDialog.tsx": 68,
     "frontend/src/components/job/JobDetailActions.module.css": 15,
