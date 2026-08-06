@@ -73,6 +73,10 @@ stack-prod-up: ## 一键启动本地生产 stack（secrets 检查 + 模型预热
 native-prod-up: ## 一键启动原生（非 Docker）生产环境（后端含 SPA + Worker）
 	./scripts/native-prod-up.sh
 
+.PHONY: native-prod-down
+native-prod-down: ## 停止原生生产环境（先 worker 后后端，SIGTERM 优雅停机）
+	./scripts/native-prod-down.sh
+
 .PHONY: stack-host-down
 stack-host-down: ## 停止部署机 Agent Legion stack
 	docker compose $(COMPOSE_HOST_FILES) down
