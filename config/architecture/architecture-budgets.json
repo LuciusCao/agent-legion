@@ -784,7 +784,7 @@
     "server/app/security.py": 48,
     "server/app/services/__init__.py": 11,
     "server/app/services/_failure_classification_markers.py": 63,
-    "server/app/services/_failure_classification_rules.py": 152,
+    "server/app/services/_failure_classification_rules.py": 166,
     "server/app/services/_job_batch_ops.py": 60,
     "server/app/services/_job_rerun_by_failure.py": 125,
     "server/app/services/_job_rerun_by_failure_results.py": 60,

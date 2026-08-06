@@ -192,6 +192,21 @@ def test_stale_agent_definition_is_technical():
     ) == ("technical", "stale_definition")
 
 
+def test_unresolved_manifest_model_is_technical():
+    # 旧 guard 文案（agent 配置治理前）与现文案（provider/model 对）都归一类。
+    assert classify_failure(
+        None,
+        "Agent request manifest has unresolved model '': no Worker could ever claim it; "
+        "declare the model via the node/agent execution settings",
+    ) == ("technical", "unresolved_model")
+    assert classify_failure(
+        None,
+        "Agent request manifest has unresolved provider/model 'gateway'/'': no Worker "
+        "could ever claim it; declare them via the node execution settings or the "
+        "workspace defaults",
+    ) == ("technical", "unresolved_model")
+
+
 def test_http_502_is_provider_request():
     assert classify_failure(
         1, "HTTPError: 502 Server Error: Bad Gateway for url: http://account.internal/x"
