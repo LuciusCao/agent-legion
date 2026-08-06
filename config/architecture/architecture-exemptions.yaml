@@ -108,11 +108,12 @@ exemptions:
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router, the artifact
     authentication dependency, the workspace-scoped custom node code
-    router (EXEC-CODE-002), and the DB-backed Agent definition catalog +
-    skill validation routers (agent config governance, schema v26).
+    router (EXEC-CODE-002), the DB-backed Agent definition catalog +
+    skill validation routers (agent config governance, schema v26), and the
+    quality replay router (schema v29, EXEC-QUALITY-REPLAY-001).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 127
+  ceiling: 132
 - check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
@@ -153,11 +154,12 @@ exemptions:
     resolution (node override -> workspace default -> fail fast, runtime-pinned
     command builder) into the dispatch boundary; the manifest builder and the
     resolver share the runtime binary constants, so splitting now would just
-    scatter one cohesive rule. Extract the resolver with the phase 4
-    pi cleanup.
+    scatter one cohesive rule. The per-run Agent version pin (schema v29,
+    EXEC-QUALITY-REPLAY-001) added the pinned_agent_version passthrough. Extract
+    the resolver with the phase 4 pi cleanup.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
-  ceiling: 176
+  ceiling: 180
 - check: architecture.file_budget
   path: server/app/services/agent_service.py
   reason: Schema v27 made this service the only Agent catalog source of truth;

@@ -22,10 +22,11 @@ from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, 
 
 @pytest.fixture(autouse=True)
 def _agent_catalog():
-    """The claim path reads the published catalog from the DB now; stub it."""
+    """The claim path resolves the published catalog from the DB now; stub it."""
+    catalog = {"agent-x": MagicMock(config_schema={})}
     with patch(
-        "server.app.workflow_worker.agent_claim.published_agent_definitions",
-        return_value={"agent-x": MagicMock(config_schema={})},
+        "server.app.workflow_worker.agent_claim.resolve_dispatch_agent_definition",
+        side_effect=lambda _dsn, agent_id, _pin: catalog.get(agent_id),
     ):
         yield
 

@@ -602,3 +602,18 @@ invariants:
       - kind: integration
         target: tests/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
         gate: quick
+
+  - id: EXEC-QUALITY-REPLAY-001
+    statement: "A quality replay never touches the original job: it builds an isolated copy job from the original's frozen workflow snapshot, file-copies the target node's frozen inputs, marks upstream nodes completed and downstream nodes not_applicable (only the replayed node is ever scheduled, and the copy converges to completed), and dispatches the pinned immutable Agent version (draft/published/archived) via the frozen batch payload pin — the broker enqueue check, claim candidate join, and definition sweepers match the pinned version row instead of the currently published one. Replay status is derived lazily from the copy job's node row; at most one replay per sample item may be in flight."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_quality_replays.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_version_pin.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_quality_replay_routes.py
+        gate: quick
