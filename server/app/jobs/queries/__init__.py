@@ -9,6 +9,7 @@ from server.app.jobs.queries.failed_node_runs import FailedNodeRunQueriesMixin
 from server.app.jobs.queries.job_bulk import JobBulkQueriesMixin
 from server.app.jobs.queries.job_keys import JobKeyQueriesMixin
 from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
+from server.app.jobs.queries.job_rerun_states import JobRerunStateQueriesMixin
 from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
@@ -24,6 +25,7 @@ class JobQueries(
     WorkflowRevisionQueriesMixin,
     JobBulkQueriesMixin,
     JobNodeQueriesMixin,
+    JobRerunStateQueriesMixin,
     FailedNodeRunQueriesMixin,
     JobScanMarksMixin,
     JobStatusQueriesMixin,
