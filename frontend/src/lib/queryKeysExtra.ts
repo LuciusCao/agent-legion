@@ -36,4 +36,16 @@ export const extraQueryKeys = {
     ['workflowStudioData', workspaceId] as const,
   agentDefinitions: () => ['agentDefinitions'] as const,
   agentVersions: (agentId: string) => ['agentVersions', agentId] as const,
+  qualityBatches: (workspaceId: string) =>
+    ['qualityBatches', workspaceId] as const,
+  qualityBatchDetail: (workspaceId: string, batchId: string) =>
+    ['qualityBatchDetail', workspaceId, batchId] as const,
+  qualityBatchStats: (workspaceId: string, batchId: string) =>
+    ['qualityBatchStats', workspaceId, batchId] as const,
+  qualityItemDetail: (workspaceId: string, itemId: string) =>
+    ['qualityItemDetail', workspaceId, itemId] as const,
+  qualityReplays: (workspaceId: string, itemId: string) =>
+    ['qualityReplays', workspaceId, itemId] as const,
+  qualityReplayDetail: (workspaceId: string, replayId: string) =>
+    ['qualityReplayDetail', workspaceId, replayId] as const,
 }

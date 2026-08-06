@@ -102,6 +102,16 @@ export default function WorkspaceLayout() {
                 {tokenAnalysisButton}
                 <IconButton
                   size="small"
+                  aria-label="质量闭环"
+                  onClick={() =>
+                    workspaceId &&
+                    navigate(`/workspaces/${workspaceId}/quality`)
+                  }
+                >
+                  <MaterialIcon name="add_task" />
+                </IconButton>
+                <IconButton
+                  size="small"
                   aria-label="Workflow Studio"
                   onClick={() =>
                     navigate(`/workspaces/${workspaceId}/workflow-studio`)
