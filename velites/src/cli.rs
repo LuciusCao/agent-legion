@@ -79,8 +79,9 @@ pub struct Cli {
 
     /// Files that must exist when the run ends. Repeatable. Paths must
     /// resolve inside the working directory (same sandbox as the tools);
-    /// missing files trigger one remediation turn, and an
-    /// `outputs_validation` event reports the final state.
+    /// missing files trigger one remediation turn, an `outputs_validation`
+    /// event reports the final state, and files still missing when a
+    /// non-cancelled run ends make the process exit 1 (output contract).
     #[arg(long = "require-output")]
     pub require_output: Vec<PathBuf>,
 

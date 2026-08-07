@@ -8,7 +8,8 @@ Drives the real ``velites`` binary as a subprocess with the stub provider
 - SIGTERM ends the run promptly with ``agent_end{reason: "cancelled"}`` and
   exit code 0 (cancellation is a Host action, not a harness fault);
 - ``--require-output`` triggers one remediation turn and always emits
-  ``outputs_validation{missing: [...]}``;
+  ``outputs_validation{missing: [...]}``; artifacts still missing when the
+  run ends make the process exit 1 (output contract, EXEC-HARNESS-OUTPUTS-001);
 - zero auto-discovery: an AGENTS.md in the cwd never reaches the provider
   request or the event stream.
 
@@ -245,7 +246,7 @@ def test_require_output_remediation_and_validation(tmp_path: Path, velites_binar
 def test_require_output_still_missing_reports_validation(
     tmp_path: Path, velites_binary: Path
 ) -> None:
-    """Remediation did not produce the artifact: outputs_validation lists it."""
+    """Remediation did not produce the artifact: validation lists it, exit 1."""
     (tmp_path / "prompt.md").write_text("Produce result.txt.", encoding="utf-8")
     fixture = _write_fixture(
         tmp_path,
@@ -259,7 +260,9 @@ def test_require_output_still_missing_reports_validation(
         tmp_path,
         [*_base_args(tmp_path, fixture), "--require-output", "result.txt"],
     )
-    assert proc.returncode == 0, proc.stderr
+    # Output contract violation: an exit-0 run with missing declared outputs
+    # must never reach the caller (EXEC-HARNESS-OUTPUTS-001).
+    assert proc.returncode == 1, proc.stderr
     events = _events(proc)
     validations = [e for e in events if e["type"] == "outputs_validation"]
     assert len(validations) == 1
