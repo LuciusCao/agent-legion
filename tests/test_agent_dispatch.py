@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
 import pytest
@@ -49,6 +50,7 @@ def _node() -> WorkflowNode:
 def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     manager = MagicMock()
     pool = MagicMock()
+    pool_kwargs: dict[str, Any] = {}
     broker = MagicMock()
     broker.bundle_dir = tmp_path / "bundles"
     broker.has_active_request.return_value = False
@@ -68,8 +70,12 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
 
     build_agent_bundle = MagicMock(side_effect=build_bundle)
 
+    def _pool(**kwargs: Any) -> MagicMock:
+        pool_kwargs.update(kwargs)
+        return pool
+
     monkeypatch.setattr(agent_dispatch, "build_skill_manager", lambda _root: manager)
-    monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", lambda: pool)
+    monkeypatch.setattr(agent_dispatch, "AgentEnqueuePool", _pool)
     monkeypatch.setattr(agent_dispatch, "resolve_skill_dir", resolve_skill_dir)
     monkeypatch.setattr(agent_dispatch, "get_skill_version", get_skill_version)
     monkeypatch.setattr(agent_dispatch, "stage_agent_inputs", stage_agent_inputs)
@@ -82,6 +88,7 @@ def harness(settings, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Simple
         service=service,
         manager=manager,
         pool=pool,
+        pool_kwargs=pool_kwargs,
         broker=broker,
         artifact_store=artifact_store,
         skill_dir=skill_dir,
@@ -107,6 +114,12 @@ def _enqueue(harness: SimpleNamespace, *, definition: AgentDefinition | None = N
         inputs=("question.json",),
         node_config={"page_size": 25, "api_key": "must-not-leak", "unknown": "drop"},
     )
+
+
+def test_enqueue_pool_sized_from_settings(harness: SimpleNamespace) -> None:
+    # Defaults come from executor_runtime.agent_enqueue (AgentEnqueueConfig).
+    assert harness.pool_kwargs == {"workers": 16, "max_pending": 1024}
+    assert harness.service.enqueue_pool is harness.pool
 
 
 def test_enqueue_skips_an_existing_active_request(harness: SimpleNamespace) -> None:

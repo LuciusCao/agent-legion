@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.events.aggregator import broadcast_job_update, record_job_update
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.services._job_rerun_eligibility import check_rerun_eligibility
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
@@ -50,47 +51,30 @@ def execute_rerun(
     actual_node_key: str,
 ) -> JobOperationResult:
     """Validate and mark a single node for rerun."""
-    definition = definition_from_job_snapshot(job) or service.workflows.definition(
-        str(job["workflow_key"])
-    )
-    if actual_node_key not in definition.nodes:
-        raise JobOperationError(
-            job_id,
-            "rerun",
-            "failed",
-            actual_node_key,
-            "node_not_found",
-            f"Node {actual_node_key} not found in workflow",
-        )
+    ineligible = check_rerun_eligibility(service, job, job_id, actual_node_key)
+    if ineligible is not None:
+        raise ineligible
+    return commit_rerun(service, job, job_id, actual_node_key)
 
-    if service.job_db.get_job_node(job_id, actual_node_key) is None:
-        raise JobOperationError(
-            job_id,
-            "rerun",
-            "failed",
-            actual_node_key,
-            "node_not_found",
-            f"Node {actual_node_key} not found for job",
-        )
 
-    if service.lease_repo.has_active_for_node(job_id, actual_node_key, service._now()):
-        raise JobOperationError(
-            job_id,
-            "rerun",
-            "skipped",
-            actual_node_key,
-            "busy",
-            "Node has an active executor lease",
-        )
+def commit_rerun(
+    service: JobRerunService,
+    job: dict[str, Any],
+    job_id: str,
+    actual_node_key: str,
+    *,
+    definition: Any | None = None,
+) -> JobOperationResult:
+    """Write portion of ``execute_rerun``; the caller has validated eligibility.
 
-    if service._job_has_running_nodes(job_id):
-        raise JobOperationError(
-            job_id,
-            "rerun",
-            "skipped",
-            actual_node_key,
-            "busy",
-            "Job has running nodes",
+    The DB-level guard (lease_guarded_mutation with reject_running_nodes)
+    still re-validates inside the write transaction, so a state change
+    between a batch caller's prefetch and this write fails safely.
+    ``definition`` lets batch callers pass their cached workflow definition.
+    """
+    if definition is None:
+        definition = definition_from_job_snapshot(job) or service.workflows.definition(
+            str(job["workflow_key"])
         )
 
     stale_nodes = downstream_nodes(definition, actual_node_key)
@@ -148,6 +132,21 @@ def execute_rerun_result(
     """Rerun one node, capturing a non-succeeded outcome as a result dict (batch use)."""
     try:
         return execute_rerun(service, job, job_id, actual_node_key)
+    except JobOperationError as exc:
+        return exc.to_result()
+
+
+def commit_rerun_result(
+    service: JobRerunService,
+    job: dict[str, Any],
+    job_id: str,
+    actual_node_key: str,
+    *,
+    definition: Any | None = None,
+) -> JobOperationResult:
+    """commit_rerun with the same error capture as ``execute_rerun_result``."""
+    try:
+        return commit_rerun(service, job, job_id, actual_node_key, definition=definition)
     except JobOperationError as exc:
         return exc.to_result()
 

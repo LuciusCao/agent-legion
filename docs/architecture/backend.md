@@ -138,6 +138,7 @@ server/app/
 | GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/job_invalid_paths.py |
 | GET | `/workspaces/{workspace_id}/jobs/snapshot` | `snapshot_workspace_jobs` | routes/job_list.py |
 | GET | `/workspaces/{workspace_id}/jobs/facets` | `workspace_job_facets` | routes/job_list.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-rerun/preview` | `preview_batch_rerun_workspace_jobs` | routes/job_rerun_preview.py |
 | POST | `/workspaces/{workspace_id}/events/stress` | `record_stress_events` | routes/job_stress_events.py |
 | POST | `/jobs/{job_id}/upgrade-workflow` | `upgrade_job_workflow` | routes/job_workflow_upgrade.py |
 | GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
@@ -218,6 +219,7 @@ server/app/
 
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
+| AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/agent_broker/dispatch_pool.py |
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
 | CodeCapabilityConfig | BaseModel | path: str, timeout_seconds: int, sandbox_network: bool, config_schema: dict[s... | app/executors/code_config.py |
 | CodeExecutorConfig | BaseModel | kind: Literal['code'], global_capacity: int, capabilities: dict[str, CodeCapa... | app/executors/code_config.py |
@@ -314,6 +316,7 @@ server/app/
 | ContinueJobRequest | BaseModel | — | app/routes/job_operation_contracts.py |
 | JobRerunByFailureRequest | BaseModel | category: Literal['technical', 'business', 'unknown'], strategy: Literal['aut... | app/routes/job_rerun_by_failure_contracts.py |
 | JobRerunByFailureResponse | BaseModel | results: list[JobRerunByFailureResultResponse] | app/routes/job_rerun_by_failure_contracts.py |
+| BatchRerunPreviewResponse | BaseModel | total_count: int, eligible_count: int | app/routes/job_rerun_preview_contracts.py |
 | StressEventRecord | BaseModel | job_id: str, kind: str | app/routes/job_stress_events.py |
 | StressEventBatchRequest | BaseModel | events: list[StressEventRecord] | app/routes/job_stress_events.py |
 | StressEventBatchResponse | BaseModel | recorded: int, recorded_at: float | app/routes/job_stress_events.py |
@@ -454,8 +457,10 @@ server/app/
   UV_CACHE_DIR=.uv-cache uv run python -m scripts.check_architecture
   ```
 
-  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。此外 production 文件有
-  800 行绝对上限（`production.max_lines`），豁免也不能突破；挂账超过 30 天的豁免由
+  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。ceiling 按有效行数计
+  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释
+  对预算没有帮助。此外 production 文件有
+  800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
 ## Runtime Architecture

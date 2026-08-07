@@ -78,7 +78,10 @@ class AgentDispatchService:
         self.broker = broker
         self.artifact_store = artifact_store
         self.skill_manager = build_skill_manager(settings.root_dir)
-        self.enqueue_pool = AgentEnqueuePool()
+        enqueue_config = settings.executor_runtime.agent_enqueue
+        self.enqueue_pool = AgentEnqueuePool(
+            workers=enqueue_config.workers, max_pending=enqueue_config.max_pending
+        )
 
     def enqueue(
         self,

@@ -130,6 +130,7 @@ export default function WorkspaceMainPage() {
             jobs={selectedJobs}
             selectedCount={selectedCount}
             allMatchingCount={allMatchingCount}
+            workspaceId={workspaceId}
             workflowDefinition={workflowDefinition}
             workflowNodesByKey={workflowNodesByKey}
             mode="batch"

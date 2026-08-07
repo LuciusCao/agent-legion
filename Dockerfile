@@ -23,6 +23,11 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
 WORKDIR /app
+# g++：funasr 依赖链（editdistance 等 sdist）无预编译 wheel，uv sync 需现场编译。
+# ffmpeg：视频管线（转写前转 wav、章节切片、yt-dlp 合并）在 host 上直接调用。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends g++ ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir "uv==${UV_VERSION}"
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
@@ -46,7 +51,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends bubblewrap \
     && rm -rf /var/lib/apt/lists/* \
     && chmod u+s /usr/bin/bwrap \
-    && pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" \
+    && pip install --no-cache-dir "fastapi==0.116.1" "pyyaml==6.0.3" "uvicorn==0.35.0" "requests==2.34.2" \
     && npm install --global "@earendil-works/pi-coding-agent@${PI_VERSION}" \
     && pi --version
 # velites harness binary. Transition flavor: pi above stays installed and

@@ -178,6 +178,18 @@ def test_stock_reload_clears_enqueued_counter() -> None:
         assert worker._agent_pass.stock_enqueued == {}
 
 
+def test_agent_claim_allowed_skips_in_flight_submission() -> None:
+    worker = _worker()
+    state = worker._agent_pass
+    # Submitted to the enqueue pool but not yet visible in the DB: the
+    # pass must not resubmit a duplicate bundle build for it.
+    state.in_flight = {("job1", "fetch")}
+    assert agent_claim_allowed(worker, "ws1", "job1", "fetch", "agent-x") is False
+    # Other nodes/jobs of the same pair stay claimable.
+    assert agent_claim_allowed(worker, "ws1", "job1", "review", "agent-x") is True
+    assert agent_claim_allowed(worker, "ws1", "job2", "fetch", "agent-x") is True
+
+
 def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
     state = AgentPassState(
         active_nodes={("j", "n")},
@@ -186,6 +198,7 @@ def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
         stock_snapshot=StockSnapshot(config=AgentStockConfig()),
         stock_loaded_at=123.0,
         stock_enqueued={("ws1", "agent-x"): 2},
+        in_flight={("j2", "n2")},
     )
     state.reset_pass()
     assert state.active_nodes == set()
@@ -195,6 +208,8 @@ def test_reset_pass_clears_per_pass_fields_but_keeps_snapshot() -> None:
     assert state.stock_loaded_at == 123.0
     # Tied to the snapshot's lifetime, not the pass's.
     assert state.stock_enqueued == {("ws1", "agent-x"): 2}
+    # Tied to the pool closure, cleared only when the submission finishes.
+    assert state.in_flight == {("j2", "n2")}
 
 
 def test_agent_claim_allowed_gates() -> None:

@@ -57,6 +57,7 @@ def _make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={},
+        database_url=TEST_DATABASE_URL,
         executor_definitions=registry.definitions(),
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(

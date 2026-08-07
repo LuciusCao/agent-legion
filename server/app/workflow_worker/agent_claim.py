@@ -123,9 +123,10 @@ def claim_agent_node(
             batch_payload,
         )
     except ValueError as exc:
-        # Route/definition/capacity drift must fail THIS node, not
-        # abort the whole poll pass and starve every workspace.
+        # Config drift must fail THIS node, not abort the whole poll pass.
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+
+    flight_key = (str(job["id"]), node.key)
 
     def _enqueue() -> None:
         try:
@@ -144,17 +145,19 @@ def claim_agent_node(
             )
         except ValueError as exc:
             fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        finally:
+            worker._agent_pass.in_flight.discard(flight_key)
 
-    # Staging + bundling run off the poll thread; the broker's one-active-
-    # request index dedups a resubmission if the next pass arrives first.
+    # Staging + bundling run off the poll thread. Register in-flight before
+    # submit so duplicate candidates are skipped until the closure finishes.
+    worker._agent_pass.in_flight.add(flight_key)
     if not dispatch.enqueue_pool.submit(_enqueue):
         # Pool backlog full: skip this pass's remaining agent candidates.
+        worker._agent_pass.in_flight.discard(flight_key)
         worker._agent_pass.pool_full = True
         return False
     # Count the submission toward the stock gate: the snapshot stays frozen
-    # until its next refresh, and without this a single window could release
-    # several times the target (the request lands in the DB off-thread, so
-    # this slightly over-counts on enqueue failure — conservative, fine).
+    # until refresh (over-counts on enqueue failure — conservative, fine).
     enqueued = worker._agent_pass.stock_enqueued
     stock_key = (str(workspace_id), agent_id)
     enqueued[stock_key] = enqueued.get(stock_key, 0) + 1

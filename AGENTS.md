@@ -6,6 +6,7 @@
 ## 1. Worktree & Isolation
 
 - 每次独立开发任务优先在新的 git worktree 中进行。
+- worktree 一律建为主仓库根的平级子目录：先 `cd` 到主仓库根（`git worktree list` 的第一个条目），再 `git worktree add .worktrees/<name> -b <branch> <base>`。禁止嵌套（在其他 worktree 里用相对路径 `git worktree add .worktrees/<name>` 会建进当前 worktree 内部）——嵌套会让 `data/`、测试库派生、端口隔离和清理路径全部混乱。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
 - 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`（缺这两个文件会导致 pytest/服务启动即失败）。手工初始化时必须自行补上这两个 secrets 文件。
@@ -14,6 +15,7 @@
 - 多 worktree 并行开发时，必须在每个 worktree 的 shell 里 `export AGENT_LEGION_TEST_WORKERS=4`（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。不设置时 pytest `-n auto` 会让每个 worktree 吃满所有核，互相拖慢并打满共享 Postgres。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化（后来者等待，崩溃残留自动回收）；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist worker schema 固定为 gw0..gwN，两个进程并发会互相 TRUNCATE（现场症状：随机测试报 "Bootstrap is only available before the first user exists" 等 setup 错误，单跑必过）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
+- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 拿正式代码与 `make native-prod-up/down` 启停服务。所有修复与调试（含 Docker 容器调试）必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令（`native-prod-*` / `stack-prod-*`）只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
 
 ## 2. Agent Tool Discipline
 
@@ -33,7 +35,8 @@
 - 任何代码修改后先跑 `./scripts/check-quick.sh`。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
   的 backend-unit、backend-postgres-a/b/c、frontend-logic、frontend-component、
-  frontend-coverage、e2e-smoke、rust 等 job）；CI 不可用时本地跑 `./scripts/check.sh` 代替。
+  frontend-coverage、e2e-smoke、rust、docker-build 等 job）；CI 不可用时本地跑
+  `./scripts/check.sh` 代替。
 - 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
   默认跑 smoke 级（静态 + 精选 smoke 测试层，成员见 `tests/conftest.py`；按推送路径
   裁剪 lane：纯前端改动跳过 backend pytest、纯 `velites/` 改动只跑 rust lane、docs
@@ -41,8 +44,9 @@
   （完整 quick 套件）或 `AGENT_LEGION_GATE_LEVEL=full`（本地 full gate）升级单次
   推送。full gate 由 GitHub CI 在 PR/push 执行，并按变更路径裁剪 lane
   （与本地 pre-push 一致：纯前端改动跳过 backend pytest shards 但保留
-  api:check、纯 `velites/` 改动只跑 rust、docs-only 全跳过、共享文件
-  全量，检测逻辑见 workflow 的 `changes` job）；push 触发只留
+  api:check、纯 `velites/` 改动只跑 rust、`Dockerfile`/依赖锁/`worker/`/
+  `shared/`/`deploy/` 改动加跑 docker-build 镜像构建 lane（CI-only）、
+  docs-only 全跳过、共享文件全量，检测逻辑见 workflow 的 `changes` job）；push 触发只留
   main/master（develop 合并已由 PR gate 覆盖）；ci-extended 压力门与
   nightly-e2e 改为每周 schedule + 手动 dispatch，schedule 不重复跑
   普通 lane。
@@ -63,7 +67,8 @@
 - 新增 invariant 或临时豁免要同步更新 registry。
 - spec / plan 必须包含 `Quality Impact` 小节。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
-- 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。
+- 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计
+  （排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计。
 
 ## 6. Boundary Rules（禁止模式摘要）
 

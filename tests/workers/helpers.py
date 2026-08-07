@@ -99,6 +99,7 @@ def _make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={},
+        database_url=str(db_path),
         executor_definitions=registry.definitions(),
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
@@ -178,6 +179,7 @@ def _make_pi_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={},
+        database_url=str(db_path),
         executor_definitions=registry.definitions(),
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(

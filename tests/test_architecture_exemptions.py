@@ -296,7 +296,30 @@ def test_file_budget_ceiling_below_actual_rejected(write_exemptions, exemptions_
         }
     )
     errors = validate_exemptions(exemptions, exemptions_root)
-    assert any("ceiling 50 is below actual file size" in e for e in errors)
+    assert any("ceiling 50 is below actual effective line count" in e for e in errors)
+
+
+def test_file_budget_ceiling_compares_against_effective_lines(write_exemptions, exemptions_root):
+    (exemptions_root / "server" / "app").mkdir(parents=True)
+    (exemptions_root / "server" / "app" / "example.py").write_text(
+        "\n".join(["line"] * 100 + ["# comment"] * 20), encoding="utf-8"
+    )
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.file_budget",
+                    "path": "server/app/example.py",
+                    "reason": "Oversized module needs staged split.",
+                    "owner": "agent-legion",
+                    "remove_when": "docs/superpowers/plans/example.md#task-3",
+                    "ceiling": 110,
+                }
+            ]
+        }
+    )
+    errors = validate_exemptions(exemptions, exemptions_root)
+    assert not any("below actual" in e for e in errors)
 
 
 @pytest.mark.parametrize(

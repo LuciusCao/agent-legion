@@ -480,7 +480,7 @@ fn bwrap_argv_opts(read_write: &[PathBuf], inner: &[String], unshare_net: bool) 
 }
 
 /// `bwrap` argv with the bash tool's shared-network policy.
-#[cfg(any(target_os = "linux", test))]
+#[cfg(test)]
 fn bwrap_argv(read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
     bwrap_argv_opts(read_write, inner, false)
 }

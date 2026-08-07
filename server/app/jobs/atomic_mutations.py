@@ -154,7 +154,7 @@ def mark_nodes_for_rerun(
     conn.execute(
         """
         update jobs
-        set status='queued', error_message='', updated_at=current_timestamp
+        set status='queued', error_message='', packed=0, updated_at=current_timestamp
         where id=%s
         """,
         (job_id,),

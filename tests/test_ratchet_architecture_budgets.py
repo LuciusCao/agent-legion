@@ -31,7 +31,7 @@ def _write_baseline(root: Path, files: dict[str, int]) -> None:
     path = root / "config/architecture/architecture-budgets.json"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
-        json.dumps({"version": 2, "files": files}, indent=2, sort_keys=True),
+        json.dumps({"version": 3, "files": files}, indent=2, sort_keys=True),
         encoding="utf-8",
     )
 
@@ -93,6 +93,20 @@ def baseline_text(root: Path) -> str:
 
 def test_adds_new_file_at_actual_plus_buffer(tmp_path):
     root = configured_repo(tmp_path, {"server/app/new.py": 20}, baseline={})
+    result = ratchet_budgets(root)
+    assert result.errors == ()
+    assert result.changed is True
+    assert read_baseline(root) == {"server/app/new.py": 30}
+
+
+def test_ratchet_excludes_comment_and_blank_lines(tmp_path):
+    root = configured_repo(tmp_path, {"server/app/new.py": 20}, baseline={})
+    file_path = root / "server" / "app" / "new.py"
+    content = file_path.read_text(encoding="utf-8")
+    file_path.write_text(
+        "# header comment\n\n" + content + "\n# trailing comment\n",
+        encoding="utf-8",
+    )
     result = ratchet_budgets(root)
     assert result.errors == ()
     assert result.changed is True
