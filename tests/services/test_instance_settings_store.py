@@ -58,6 +58,35 @@ def test_default_document_matches_retired_yaml_values() -> None:
         "max_archive_bytes": 64 * 1024 * 1024,
         "min_protocol_version": 1,
     }
+    # openclaw defaults mirror the retired agent_legion.yaml section.
+    assert document["openclaw"] == {
+        "cwd": ".",
+        "timeout_seconds": 600,
+        "isolated_workspace_root": "",
+        "command_template": [
+            "openclaw",
+            "agent",
+            "--local",
+            "--agent",
+            "main",
+            "--session-id",
+            "{video_id}-{timestamp}",
+            "--thinking",
+            "on",
+            "--message",
+            "{prompt_text}",
+            "--json",
+        ],
+        "skill_safety": {
+            "enabled": True,
+            "repos": [
+                {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_interactions"},
+                {"path": "~/.agents/skills/agent-legion/video_knowledge/review_video_content"},
+                {"path": "~/.agents/skills/agent-legion/video_knowledge/review_subtitles"},
+                {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_chapters"},
+            ],
+        },
+    }
 
 
 def test_effective_document_merges_partial_stored_over_defaults() -> None:

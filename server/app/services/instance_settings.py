@@ -6,23 +6,27 @@ once at startup (``create_app``, right after ``JobQueries`` is constructed)
 and takes effect on restart; there is no runtime hot-reload:
 
 - executor runtime scalars plus ``workflows.enabled`` /
-  ``agent_workers.{max_archive_bytes,min_protocol_version}`` are merged onto
-  the already-loaded ``ExecutorRuntimeConfig`` (sub-blocks the DB does not
-  manage, e.g. openclaw/agent_stock/agent_enqueue, keep their loaded values)
-  and re-validated;
+  ``agent_workers.{max_archive_bytes,min_protocol_version}`` and the
+  ``openclaw`` block are merged onto the loaded ``ExecutorRuntimeConfig``
+  (unmanaged sub-blocks keep their loaded values) and re-validated;
 - ``cleanup`` / ``monitoring`` values are written back into
   ``settings.config`` for construction-time consumers (OpsMetricsService,
   CleanupConfig, WorkflowMaintenance).
+
+``AGENT_LEGION_OPENCLAW_CWD`` outranks the DB document (re-applied post-merge).
 """
 
 from __future__ import annotations
 
+import copy
+import os
 from typing import Any
 
 from server.app.configuration.instance_defaults import (
     DEFAULT_CLEANUP_CONFIG,
     DEFAULT_MONITORING_CONFIG,
 )
+from server.app.configuration.openclaw_defaults import DEFAULT_OPENCLAW_CONFIG
 from server.app.db.connection import DatabaseDsn
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.services.instance_settings_store import InstanceSettingsStore
@@ -37,6 +41,9 @@ _EXECUTOR_SCALAR_KEYS = (
     "sweeper_interval_seconds",
 )
 
+# Same variable load_settings maps onto config["openclaw"]["cwd"].
+_OPENCLAW_CWD_ENV = "AGENT_LEGION_OPENCLAW_CWD"
+
 
 def default_instance_document() -> dict[str, Any]:
     """Return the code-default instance settings document."""
@@ -44,6 +51,7 @@ def default_instance_document() -> dict[str, Any]:
     document: dict[str, Any] = {
         "cleanup": dict(DEFAULT_CLEANUP_CONFIG),
         "monitoring": dict(DEFAULT_MONITORING_CONFIG),
+        "openclaw": copy.deepcopy(DEFAULT_OPENCLAW_CONFIG),
         "workflows": {"enabled": runtime.workflows.enabled},
         "agent_workers": {
             "max_archive_bytes": runtime.agent_workers.max_archive_bytes,
@@ -87,6 +95,11 @@ def apply_instance_settings(settings: Settings, database_dsn: DatabaseDsn) -> No
     base["agent_workers"]["min_protocol_version"] = effective["agent_workers"][
         "min_protocol_version"
     ]
+    openclaw = {**base["openclaw"], **effective["openclaw"]}
+    env_cwd = os.environ.get(_OPENCLAW_CWD_ENV)
+    if env_cwd is not None:
+        openclaw["cwd"] = os.path.expanduser(env_cwd)
+    base["openclaw"] = openclaw
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(base)
     settings.config["cleanup"] = effective["cleanup"]
     settings.config["monitoring"] = effective["monitoring"]

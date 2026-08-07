@@ -30,6 +30,8 @@ def _clear_agent_legion_env(monkeypatch):
         "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
         "AGENT_LEGION_ASR_WHISPER_BINARY",
         "AGENT_LEGION_ASR_WHISPER_MODEL",
+        "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
+        "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
         "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
         "AGENT_LEGION_OPENCLAW_CWD",
         "AGENT_LEGION_SKIP_DOTENV",
@@ -169,20 +171,19 @@ def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
         assert env_key in message
 
 
-def test_split_layout_rejects_cms_section_as_unowned(tmp_path, monkeypatch):
-    """The global yaml ``cms:`` section is retired: no split file owns ``cms``.
-
-    G2 (``cms.token`` / ``cms.token_gen`` rejection) is still covered by the
-    explicit-layout tests above; in the split layout the whole section now
-    fails the owned-key check first.
-    """
+def test_split_layout_rejects_retired_agent_legion_yaml(tmp_path, monkeypatch):
+    """config/agent_legion.yaml is retired: its presence fails startup with guidance."""
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "agent_legion.yaml").write_text("cms: {token: yaml-token}\n", encoding="utf-8")
+    (config_dir / "agent_legion.yaml").write_text("asr: {provider: auto}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
 
-    with pytest.raises(ValueError, match=r"agent_legion\.yaml.*unowned.*cms"):
+    with pytest.raises(ValueError, match=r"retired.*agent_legion\.yaml") as exc_info:
         load_settings()
+
+    message = str(exc_info.value)
+    assert "AGENT_LEGION_ASR_WHISPER_BINARY" in message
+    assert "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR" in message
 
 
 def test_cms_env_takes_precedence_over_agent_legion_cms_env(tmp_path, monkeypatch):
@@ -219,28 +220,9 @@ def test_cms_env_takes_precedence_over_agent_legion_cms_env(tmp_path, monkeypatc
     assert token_gen["url"] == "http://cms/token"
 
 
-def _write_split_config(root: Path) -> None:
-    config_dir = root / "config"
-    config_dir.mkdir()
-    (config_dir / "agent_legion.yaml").write_text(
-        "asr:\n"
-        "  provider: whisper\n"
-        "  whisper:\n"
-        "    binary: yaml-binary\n"
-        "    model: yaml-model\n"
-        "  sensevoice:\n"
-        "    model_dir: yaml-dir\n"
-        "openclaw:\n"
-        "  cwd: yaml-cwd\n"
-        "  command_template:\n"
-        "    - openclaw\n"
-        "    - agent\n",
-        encoding="utf-8",
-    )
-
-
 def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
-    _write_split_config(tmp_path)
+    # The split layout carries zero files (agent_legion.yaml is retired); the
+    # config dict is built from code defaults plus env overrides.
     (tmp_path / ".env").write_text("AGENT_LEGION_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.delenv("AGENT_LEGION_SKIP_DOTENV", raising=False)
@@ -251,26 +233,18 @@ def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
 
 
 def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
-    _write_split_config(tmp_path)
     (tmp_path / ".env").write_text("AGENT_LEGION_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
 
     settings = load_settings()
 
-    # With the dotenv skipped, no env-injected CMS token exists; yaml values
-    # from the split config stand on their own.
+    # With the dotenv skipped, no env-injected CMS token exists.
     assert "token" not in settings.config.get("cms", {})
-    assert settings.config["asr"]["whisper"]["binary"] == "yaml-binary"
 
 
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "agent_legion.yaml").write_text(
-        "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
-        encoding="utf-8",
-    )
+    # Zero split config files: the canonical layout starts from code defaults.
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     # data_dir is env-only after the app.yaml retirement.
     monkeypatch.setenv("AGENT_LEGION_DATA_DIR", str(tmp_path / "runtime"))
@@ -290,10 +264,6 @@ def test_split_layout_rejects_retired_app_yaml(tmp_path, monkeypatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
-    (config_dir / "agent_legion.yaml").write_text(
-        "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
-        encoding="utf-8",
-    )
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
 
     with pytest.raises(ValueError, match=r"retired.*app\.yaml"):
@@ -488,6 +458,20 @@ def test_unknown_executor_kind_rejected_at_definition_load() -> None:
         ),
         (
             "legacy",
+            "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
+            ["asr", "whisper", "vad_model"],
+            "/tmp/vad.bin",
+            "/tmp/vad.bin",
+        ),
+        (
+            "legacy",
+            "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
+            ["asr", "sensevoice", "script"],
+            "/tmp/transcribe.py",
+            "/tmp/transcribe.py",
+        ),
+        (
+            "legacy",
             "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
             ["asr", "sensevoice", "model_dir"],
             "/tmp/sensevoice",
@@ -522,6 +506,20 @@ def test_unknown_executor_kind_rejected_at_definition_load() -> None:
             ["asr", "whisper", "model"],
             "/tmp/model.bin",
             "/tmp/model.bin",
+        ),
+        (
+            "split",
+            "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
+            ["asr", "whisper", "vad_model"],
+            "/tmp/vad.bin",
+            "/tmp/vad.bin",
+        ),
+        (
+            "split",
+            "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
+            ["asr", "sensevoice", "script"],
+            "/tmp/transcribe.py",
+            "/tmp/transcribe.py",
         ),
         (
             "split",
@@ -561,7 +559,8 @@ def test_env_override_precedes_yaml(
             encoding="utf-8",
         )
     else:
-        _write_split_config(tmp_path)
+        # The split layout carries zero files (agent_legion.yaml is retired):
+        # env overrides land on the code-default config dict.
         config_path_file = tmp_path / "config" / "workflow.yaml"
 
     if layout == "split":

@@ -157,67 +157,40 @@ def validate_runtime(
     """Validate enabled runtime dependencies at startup.
 
     Disabled runtimes require nothing. Enabled executors require their executable
-    or working directory to exist. Selected ASR providers require their files;
-    ``auto`` needs at least one usable provider. Missing env-level CMS
-    credentials only log a warning when a CMS-backed resource provider is
-    enabled (workspace vault bindings cannot be pre-checked at startup).
+    or working directory to exist. The yaml ``asr:`` section is retired: ASR
+    machine paths arrive only via the ``AGENT_LEGION_ASR_*`` env overrides, so
+    when ``config["asr"]`` is present every provided path must resolve (a typo'd
+    env value fails fast); with no ASR env configured nothing is checked and a
+    missing binary surfaces as the provider's FileNotFoundError at transcription
+    time. Missing env-level CMS credentials only log a warning when a CMS-backed
+    resource provider is enabled (workspace vault bindings cannot be pre-checked
+    at startup).
     """
     errors: list[tuple[str, str]] = []
 
-    asr_config = config.get("asr") or {}
-    if not isinstance(asr_config, dict):
-        asr_config = {}
-    provider = str(asr_config.get("provider", "auto")).lower()
-    whisper_cfg = asr_config.get("whisper") or {}
-    if not isinstance(whisper_cfg, dict):
-        whisper_cfg = {}
-    sensevoice_cfg = asr_config.get("sensevoice") or {}
-    if not isinstance(sensevoice_cfg, dict):
-        sensevoice_cfg = {}
-
-    def _whisper_usable() -> bool:
-        binary = str(whisper_cfg.get("binary", ""))
-        model = str(whisper_cfg.get("model", ""))
-        if not binary or not model:
-            return False
-        model_path = _expand(model)
-        return _resolve_executable(binary) is not None and model_path.is_file()
-
-    def _sensevoice_usable() -> bool:
-        model_dir = str(sensevoice_cfg.get("model_dir", ""))
-        script = str(sensevoice_cfg.get("script", ""))
-        if not model_dir:
-            return False
-        model_dir_path = _expand(model_dir)
-        script_path = _expand(script) if script else None
-        if not model_dir_path.is_dir():
-            return False
-        return script_path is None or script_path.is_file()
-
-    if provider == "whisper":
-        binary = str(whisper_cfg.get("binary", ""))
-        model = str(whisper_cfg.get("model", ""))
-        if not binary:
-            errors.append(("asr.whisper.binary", "missing whisper binary"))
-        elif _resolve_executable(binary) is None:
+    asr_config = config.get("asr")
+    if isinstance(asr_config, dict) and asr_config:
+        whisper_cfg = asr_config.get("whisper") or {}
+        if not isinstance(whisper_cfg, dict):
+            whisper_cfg = {}
+        sensevoice_cfg = asr_config.get("sensevoice") or {}
+        if not isinstance(sensevoice_cfg, dict):
+            sensevoice_cfg = {}
+        binary = str(whisper_cfg.get("binary") or "")
+        if binary and _resolve_executable(binary) is None:
             errors.append(("asr.whisper.binary", "whisper binary is not executable or on PATH"))
-        if not model:
-            errors.append(("asr.whisper.model", "missing whisper model"))
-        elif not _expand(model).is_file():
+        model = str(whisper_cfg.get("model") or "")
+        if model and not _expand(model).is_file():
             errors.append(("asr.whisper.model", "whisper model does not exist"))
-
-    if provider == "sensevoice":
-        model_dir = str(sensevoice_cfg.get("model_dir", ""))
-        script = str(sensevoice_cfg.get("script", ""))
-        if not model_dir:
-            errors.append(("asr.sensevoice.model_dir", "missing sensevoice model_dir"))
-        elif not _expand(model_dir).is_dir():
+        vad_model = str(whisper_cfg.get("vad_model") or "")
+        if vad_model and not _expand(vad_model).is_file():
+            errors.append(("asr.whisper.vad_model", "whisper VAD model does not exist"))
+        model_dir = str(sensevoice_cfg.get("model_dir") or "")
+        if model_dir and not _expand(model_dir).is_dir():
             errors.append(("asr.sensevoice.model_dir", "sensevoice model_dir does not exist"))
+        script = str(sensevoice_cfg.get("script") or "")
         if script and not _expand(script).is_file():
             errors.append(("asr.sensevoice.script", "sensevoice script does not exist"))
-
-    if provider == "auto" and not (_whisper_usable() or _sensevoice_usable()):
-        errors.append(("asr.provider", "auto mode requires at least one usable ASR provider"))
 
     if runtime.workflows.enabled and any(
         isinstance(definition, PiExecutorConfig)

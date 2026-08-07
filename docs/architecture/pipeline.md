@@ -49,7 +49,7 @@ server/app/workflows/
 
 - ASR 使用 `auto` 模式：先尝试 whisper.cpp，失败则回退 SenseVoice。
 - 每个阶段失败都会将视频标记为 `failed`，支持从任意阶段重跑。
-- Agent 阶段由 `config/workflow.yaml` 的 `agents:` 段按 runtime（pi / velites）声明驱动；`config/agent_legion.yaml` 的 `openclaw` 段服务于 OpenClaw executor runtime 与 `skill_safety` 白名单。
+- Agent 阶段由 DB 中的 Agent 定义按 runtime（pi / velites）声明驱动；OpenClaw executor runtime 与 `skill_safety` 白名单由 DB 实例设置文档的 `openclaw` 块提供（原 `config/agent_legion.yaml` 的 `openclaw` 段已退役）。
 
 ## API Surface / Interface
 

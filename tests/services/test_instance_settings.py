@@ -51,8 +51,11 @@ def test_apply_overrides_executor_runtime_and_writes_back_config(settings, job_d
     assert runtime.heartbeat_failure_threshold == 3
     assert runtime.agent_workers.min_protocol_version == 1
     # Sub-blocks the DB does not manage keep their loaded values.
-    assert runtime.openclaw.command_template
     assert runtime.workflows.pi.binary == "pi"
+    # openclaw is DB-managed now: absent from the stored document it falls
+    # back to the code defaults (= the retired yaml values).
+    assert runtime.openclaw.command_template[0] == "openclaw"
+    assert runtime.openclaw.skill_safety.enabled is True
     # cleanup/monitoring are written back into the config dict, merged over
     # defaults (run_dir_retention_days was not in the stored document).
     assert settings.config["cleanup"] == {
@@ -68,3 +71,37 @@ def test_apply_revalidates_executor_runtime_constraints(settings, job_db, store)
 
     with pytest.raises(ValueError):
         apply_instance_settings(settings, job_db.path)
+
+
+def test_apply_overrides_openclaw_block(settings, job_db, store) -> None:
+    store.put(
+        {
+            "openclaw": {
+                "cwd": "/tmp/openclaw-db",
+                "timeout_seconds": 300,
+                "command_template": ["openclaw", "agent", "--json"],
+                "skill_safety": {"enabled": False, "repos": [{"path": "~/skills/s1"}]},
+            }
+        }
+    )
+
+    apply_instance_settings(settings, job_db.path)
+
+    openclaw = settings.executor_runtime.openclaw
+    assert openclaw.cwd == "/tmp/openclaw-db"
+    assert openclaw.timeout_seconds == 300
+    assert openclaw.command_template == ("openclaw", "agent", "--json")
+    assert openclaw.skill_safety.enabled is False
+    assert [repo.path for repo in openclaw.skill_safety.repos] == ["~/skills/s1"]
+    # Keys absent from the stored block fall back to the code defaults.
+    assert openclaw.isolated_workspace_root == ""
+
+
+def test_apply_openclaw_env_cwd_outranks_db_document(settings, job_db, store, monkeypatch) -> None:
+    """AGENT_LEGION_OPENCLAW_CWD keeps top priority over the DB document."""
+    monkeypatch.setenv("AGENT_LEGION_OPENCLAW_CWD", "/tmp/openclaw-env")
+    store.put({"openclaw": {"cwd": "/tmp/openclaw-db"}})
+
+    apply_instance_settings(settings, job_db.path)
+
+    assert settings.executor_runtime.openclaw.cwd == "/tmp/openclaw-env"

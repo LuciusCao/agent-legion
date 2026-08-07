@@ -2,13 +2,16 @@
 
 bootstrap/security-level keys are env-only with these code defaults (= the
 last tracked yaml values); cleanup/monitoring are hydrated from the DB
-instance settings document when one exists.
+instance settings document when one exists. The retired ``openclaw:`` yaml
+section defaults live in ``openclaw_defaults.py``.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from server.app.configuration.openclaw_defaults import apply_openclaw_config_defaults
 
 if TYPE_CHECKING:
     from server.app.executors.runtime_config import AgentWorkersRuntimeConfig
@@ -32,7 +35,8 @@ def apply_instance_config_defaults(config: dict[str, Any]) -> None:
     Consumers (CleanupConfig, OpsMetricsService, WorkflowMaintenance) read
     these sections from the config dict; explicit single-file configs may
     still carry them, so only missing keys are filled. ``server.cors``
-    defaults stay in ``CorsSettings`` and are not written here.
+    defaults stay in ``CorsSettings`` and are not written here. The retired
+    ``openclaw:`` section is filled the same way (see openclaw_defaults.py).
     """
     config.setdefault("data_dir", DEFAULT_DATA_DIR)
     sections = (
@@ -46,6 +50,7 @@ def apply_instance_config_defaults(config: dict[str, Any]) -> None:
             config[section] = node = {}
         for key, value in defaults.items():
             node.setdefault(key, value)
+    apply_openclaw_config_defaults(config)
 
 
 def resolve_worker_register_token(agent_workers: AgentWorkersRuntimeConfig, root_dir: Path) -> None:

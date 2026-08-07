@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.routes.instance_openclaw_contracts import InstanceOpenClawSettings
+
 
 class InstanceCleanupSettings(BaseModel):
     model_config = ConfigDict(extra="forbid")
@@ -45,6 +47,7 @@ class InstanceSettingsDocument(BaseModel):
     sweeper_interval_seconds: float = Field(gt=0)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
+    openclaw: InstanceOpenClawSettings
 
 
 class InstanceSettingsResponse(InstanceSettingsDocument):

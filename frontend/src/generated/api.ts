@@ -2683,6 +2683,30 @@ export interface components {
       /** Sample Interval Seconds */
       sample_interval_seconds: number
     }
+    /** InstanceOpenClawSettings */
+    InstanceOpenClawSettings: {
+      /** Command Template */
+      command_template: string[]
+      /** Cwd */
+      cwd: string
+      /** Isolated Workspace Root */
+      isolated_workspace_root: string
+      skill_safety: components['schemas']['InstanceOpenClawSkillSafetySettings']
+      /** Timeout Seconds */
+      timeout_seconds: number
+    }
+    /** InstanceOpenClawSkillSafetyRepo */
+    InstanceOpenClawSkillSafetyRepo: {
+      /** Path */
+      path: string
+    }
+    /** InstanceOpenClawSkillSafetySettings */
+    InstanceOpenClawSkillSafetySettings: {
+      /** Enabled */
+      enabled: boolean
+      /** Repos */
+      repos: components['schemas']['InstanceOpenClawSkillSafetyRepo'][]
+    }
     /** InstanceSettingsResponse */
     InstanceSettingsResponse: {
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
@@ -2694,6 +2718,7 @@ export interface components {
       /** Lease Ttl Seconds */
       lease_ttl_seconds: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
+      openclaw: components['schemas']['InstanceOpenClawSettings']
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */
@@ -2711,6 +2736,7 @@ export interface components {
       /** Lease Ttl Seconds */
       lease_ttl_seconds: number
       monitoring: components['schemas']['InstanceMonitoringSettings']
+      openclaw: components['schemas']['InstanceOpenClawSettings']
       /** Sweeper Enabled */
       sweeper_enabled: boolean
       /** Sweeper Interval Seconds */

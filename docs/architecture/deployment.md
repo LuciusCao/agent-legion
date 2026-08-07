@@ -8,12 +8,13 @@ Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生�
 
 ```
 config/
-├── agent_legion.yaml         # ASR、OpenClaw 配置
-├── workflow.yaml             # Workspace 执行器定义
 ├── skills.yaml               # 外部 Pi skill 源声明
 ├── skills.lock               # 解析后的 skill commit 锁定
 ├── agent-worker.example.yaml # Agent Worker 配置模板
-└── workflows/                # Workflow DAG 定义（video_knowledge、question_comprehension_info）
+└── architecture/             # 架构治理配置（不变量、豁免、体积预算）
+
+# 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已整体退役：
+# 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错（带迁移指引）。
 
 data/                       # 文件产物（gitignored）
 ├── videos/                 # 下载的视频与产物
@@ -51,7 +52,6 @@ scripts/
 
 ### 顶层配置项
 
-- `asr` — ASR 提供商配置（whisper / SenseVoice）
-- `openclaw` — OpenClaw 命令模板与工作目录
+_全部运行时配置段已从 split yaml 退役：业务参数在 capability config_schema（Studio 节点/workspace 配置覆盖），实例级调参在 DB 实例设置文档（/api/admin/instance-settings），机器路径与密钥走 env（如 AGENT_LEGION_ASR_* / AGENT_LEGION_DATABASE_URL）。_
 
 <!-- END AUTO-GENERATED -->

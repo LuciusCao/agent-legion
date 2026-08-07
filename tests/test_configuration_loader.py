@@ -18,24 +18,22 @@ def _write(path: Path, text: str = "{}\n") -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_detect_layout_accepts_complete_split(tmp_path: Path):
-    _write(tmp_path / "agent_legion.yaml")
-    assert detect_layout(tmp_path).layout is ConfigLayout.SPLIT
+def test_detect_layout_accepts_zero_split_files(tmp_path: Path):
+    """Every runtime split file is retired: the canonical layout is empty."""
+    selection = detect_layout(tmp_path)
+    assert selection.layout is ConfigLayout.SPLIT
+    assert selection.paths == ()
 
 
-def test_detect_layout_rejects_missing_split_file(tmp_path: Path):
-    with pytest.raises(ConfigurationLoadError) as exc_info:
-        detect_layout(tmp_path)
-    message = str(exc_info.value)
-    assert "present=" in message
-    assert "missing=" in message
-    assert "agent_legion.yaml" in message
+def test_empty_split_layout_loads_empty_config(tmp_path: Path):
+    loaded = load_application_config(tmp_path)
+    assert loaded.layout is ConfigLayout.SPLIT
+    assert loaded.config == {}
 
 
 def test_retired_app_yaml_is_rejected_with_migration_guidance(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write(config_dir / "app.yaml", "database: {url: postgresql://configured/app}\n")
-    _write(config_dir / "agent_legion.yaml")
     with pytest.raises(ConfigurationLoadError, match=r"retired.*app\.yaml"):
         load_application_config(tmp_path)
 
@@ -52,7 +50,6 @@ def test_retired_app_yaml_alone_is_rejected(tmp_path: Path):
 
 def test_retired_workflow_yaml_is_rejected_with_migration_guidance(tmp_path: Path):
     config_dir = tmp_path / "config"
-    _write(config_dir / "agent_legion.yaml")
     _write(config_dir / "workflow.yaml", "executors: {}\n")
     with pytest.raises(ConfigurationLoadError) as exc_info:
         load_application_config(tmp_path)
@@ -62,21 +59,16 @@ def test_retired_workflow_yaml_is_rejected_with_migration_guidance(tmp_path: Pat
     assert "Studio" in message
 
 
-def test_split_layout_merges_owned_keys(tmp_path: Path):
+def test_retired_agent_legion_yaml_is_rejected_with_migration_guidance(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write(config_dir / "agent_legion.yaml", "asr: {provider: auto}\n")
-    loaded = load_application_config(tmp_path)
-    assert loaded.layout is ConfigLayout.SPLIT
-    assert loaded.config == {
-        "asr": {"provider": "auto"},
-    }
-
-
-def test_split_layout_rejects_unowned_key(tmp_path: Path):
-    config_dir = tmp_path / "config"
-    _write(config_dir / "agent_legion.yaml", "executors: {}\n")
-    with pytest.raises(ConfigurationLoadError, match="agent_legion.yaml.*executors"):
+    with pytest.raises(ConfigurationLoadError) as exc_info:
         load_application_config(tmp_path)
+    message = str(exc_info.value)
+    assert "agent_legion.yaml" in message
+    assert "transcribe_video" in message
+    assert "AGENT_LEGION_ASR_WHISPER_BINARY" in message
+    assert "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR" in message
 
 
 @pytest.mark.parametrize("text", ["", "[]\n", "value\n"])
@@ -95,9 +87,11 @@ def test_explicit_path_accepts_flat_legacy_keys(tmp_path: Path):
     assert loaded.config["cms"]["token"] == "value"
 
 
-def test_missing_config_files_rejected(tmp_path: Path):
-    with pytest.raises(ConfigurationLoadError, match="partial configuration layout"):
-        load_application_config(tmp_path)
+def test_explicit_path_ignores_neighbor_split_layout(tmp_path: Path):
+    explicit = tmp_path / "custom.yaml"
+    _write(explicit, "data_dir: selected\n")
+    loaded = load_application_config(tmp_path, config_path=explicit)
+    assert loaded.config["data_dir"] == "selected"
 
 
 def test_load_yaml_mapping_reports_invalid_yaml(tmp_path: Path):

@@ -30,14 +30,14 @@ def _seed_workspace(conn, workspace_id: str, concurrency: int = 4) -> None:
         )
 
 
-def test_schema_v30_recorded() -> None:
-    assert SCHEMA_VERSION == 30
+def test_schema_v31_recorded() -> None:
+    assert SCHEMA_VERSION == 31
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "executor_entity_type"
+    assert row["name"] == "executor_asr_config_schema"
 
 
 def test_migration_rebinds_first_nodes_and_copies_concurrency() -> None:
