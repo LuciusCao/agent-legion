@@ -48,8 +48,8 @@ def queries(tmp_db: str, tmp_path: Path) -> JobQueries:
 
 
 @pytest.fixture
-def repo(tmp_db: str) -> ExecutorLeaseRepository:
-    return ExecutorLeaseRepository(tmp_db)
+def repo(tmp_db: str, tmp_path: Path) -> ExecutorLeaseRepository:
+    return ExecutorLeaseRepository(tmp_db, data_dir=tmp_path)
 
 
 def _branched_definition() -> WorkflowDefinition:
@@ -461,7 +461,7 @@ def _make_worker(
         global_capacities={"code-default": 2},
         definitions={"code-default": executor_def},
     )
-    leases = ExecutorLeaseRepository(queries.path)
+    leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,

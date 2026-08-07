@@ -96,7 +96,7 @@ def _request_state(execution_id: str) -> str:
 def test_enqueue_accepts_pinned_draft_version(job_db) -> None:
     _seed_catalog()
     _insert_job_rows(job_db, "job-pinned")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     execution_id = broker.enqueue(_request("job-pinned", _v2(), pinned_agent_version=2))
 
@@ -111,7 +111,7 @@ def test_enqueue_accepts_pinned_draft_version(job_db) -> None:
 
 def test_enqueue_rejects_pin_mismatch(job_db) -> None:
     _seed_catalog()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     _insert_job_rows(job_db, "job-hash")
     with pytest.raises(ValueError, match="pinned Agent version"):
         # Pin says v2 but the hash is v1's.
@@ -124,7 +124,7 @@ def test_enqueue_rejects_pin_mismatch(job_db) -> None:
 def test_enqueue_unpinned_still_requires_published(job_db) -> None:
     _seed_catalog()
     _insert_job_rows(job_db, "job-draft")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     with pytest.raises(ValueError, match="unavailable or changed"):
         broker.enqueue(_request("job-draft", _v2()))
     assert broker.enqueue(_request("job-draft", _v1())) is not None
@@ -140,7 +140,7 @@ def test_claim_joins_the_pinned_version(job_db) -> None:
     _seed_catalog()
     _insert_job_rows(job_db, "job-pinned")
     _insert_job_rows(job_db, "job-published")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     assert broker.enqueue(_request("job-pinned", _v2(), pinned_agent_version=2)) is not None
     assert broker.enqueue(_request("job-published", _v1())) is not None
     AgentWorkerRegistry(TEST_DATABASE_URL).issue_token(
@@ -163,7 +163,7 @@ def test_stale_definition_sweeper_respects_pin(job_db) -> None:
     _seed_catalog()
     _insert_job_rows(job_db, "job-unpinned")
     _insert_job_rows(job_db, "job-pinned")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     unpinned_id = broker.enqueue(_request("job-unpinned", _v1()))
     pinned_id = broker.enqueue(_request("job-pinned", _v2(), pinned_agent_version=2))
     assert unpinned_id is not None and pinned_id is not None

@@ -34,7 +34,8 @@ class ExecutorLeaseRepository:
         path: str,
         job_db: JobQueries | None = None,
         job_event_manager: JobEventManager | None = None,
-        data_dir: Path | None = None,
+        *,
+        data_dir: Path,
         job_event_buffer: Any | None = None,
     ):
         self.path = path

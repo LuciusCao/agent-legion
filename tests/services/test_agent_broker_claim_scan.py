@@ -122,7 +122,7 @@ def _pin_queue_order(job_db, job_ids: list[str]) -> None:
 def test_claim_pages_past_poisoned_queue_head(job_db) -> None:
     """8+ unclaimable head entries must not starve the claimable tail."""
     definition = _seed_definition()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     poison_jobs = [f"job-poison-{index}" for index in range(9)]
     for job_id in poison_jobs + ["job-good"]:
         _insert_job_rows(job_db, job_id=job_id)
@@ -141,7 +141,7 @@ def test_claim_pages_past_poisoned_queue_head(job_db) -> None:
 def test_claim_with_fully_unclaimable_queue_returns_none(job_db) -> None:
     """A queue of only unclaimable requests ends the bounded scan with None."""
     definition = _seed_definition()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     poison_jobs = [f"job-poison-{index}" for index in range(10)]
     for job_id in poison_jobs:
         _insert_job_rows(job_db, job_id=job_id)
@@ -160,7 +160,7 @@ def test_claim_with_fully_unclaimable_queue_returns_none(job_db) -> None:
 def test_enqueue_rejects_unresolved_execution_model(job_db) -> None:
     definition = _seed_definition()
     _insert_job_rows(job_db, job_id="job-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     for bad_model in ("", "your-model"):
         with pytest.raises(ValueError, match="unresolved provider/model"):
@@ -172,7 +172,7 @@ def test_enqueue_rejects_unresolved_execution_model(job_db) -> None:
 
 def test_empty_claim_with_blocked_queue_logs_skip_reasons(job_db, caplog) -> None:
     definition = _seed_definition()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     poison_jobs = [f"job-poison-{index}" for index in range(3)]
     for job_id in poison_jobs:
         _insert_job_rows(job_db, job_id=job_id)
@@ -188,7 +188,7 @@ def test_empty_claim_with_blocked_queue_logs_skip_reasons(job_db, caplog) -> Non
 
 
 def test_empty_claim_with_dry_queue_triggers_restock_without_warning(job_db, caplog) -> None:
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     restock = MagicMock()
     broker.empty_claim.on_empty_queue = restock
     _register_worker()

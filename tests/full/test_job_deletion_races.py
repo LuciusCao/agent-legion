@@ -69,7 +69,7 @@ def test_delete_rollback_survives_concurrent_recreation(
     original_artifact = storage_dir / "artifact.bin"
     original_artifact.write_bytes(b"original-bytes")
 
-    lease_repo = ExecutorLeaseRepository(job_db.path)
+    lease_repo = ExecutorLeaseRepository(job_db.path, data_dir=data_dir)
     service = JobDeletionService(job_db, lease_repo, settings)
 
     staged_event = threading.Event()
