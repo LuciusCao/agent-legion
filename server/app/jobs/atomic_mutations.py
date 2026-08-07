@@ -161,6 +161,45 @@ def mark_nodes_for_rerun(
     )
 
 
+def prepare_replay_copy(
+    conn: DatabaseConnection,
+    job_id: str,
+    *,
+    completed_nodes: Sequence[str],
+    skipped_nodes: Sequence[str],
+) -> None:
+    """Set up a quality-replay copy job's node states (schema v29).
+
+    Upstream nodes are marked completed without running (their frozen output
+    files were copied into the copy's job directory); downstream nodes are
+    marked not_applicable so the copy never schedules past the replayed node
+    and converges to completed once the target finishes.
+    """
+    for node_key in completed_nodes:
+        cursor = conn.execute(
+            """
+            update job_nodes
+            set status='completed', finished_at=current_timestamp
+            where job_id=%s and node_key=%s and status='pending'
+            """,
+            (job_id, node_key),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"Unknown job node: {job_id}.{node_key}")
+    if skipped_nodes:
+        placeholders = ",".join("%s" for _ in skipped_nodes)
+        conn.execute(
+            f"""
+            update job_nodes
+            set status='not_applicable', stale_reason='quality replay copy',
+                finished_at=current_timestamp
+            where job_id=%s and node_key in ({placeholders})
+              and status in ('pending', 'ready', 'stale')
+            """,
+            (job_id, *skipped_nodes),
+        )
+
+
 def delete_job(conn: DatabaseConnection, job_id: str) -> None:
     cursor = conn.execute("delete from jobs where id=%s", (job_id,))
     if cursor.rowcount == 0:

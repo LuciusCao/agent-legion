@@ -13,6 +13,10 @@ from ..services.artifact_store import ArtifactStore
 from ..services.executor_catalog import ExecutorCatalogService
 from ..services.job_packages import JobPackageService
 from ..services.ops_metrics import OpsMetricsService
+from ..services.quality_labels import QualityLabelService
+from ..services.quality_replays import QualityReplayService
+from ..services.quality_sampling import QualitySamplingService
+from ..services.quality_stats import QualityStatsService
 from ..services.workflow_catalog import WorkflowCatalogService
 from ..services.workspace_configuration import WorkspaceConfigurationService
 from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
@@ -26,6 +30,8 @@ from .common import create_common_router
 from .job_route_group import include_job_routes
 from .metrics import create_metrics_router
 from .packages import create_packages_router
+from .quality import create_quality_router
+from .quality_replays import create_quality_replays_router
 from .skills import create_skills_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
@@ -58,6 +64,10 @@ def create_router(
     agent_worker_registry: AgentWorkerRegistry | None = None,
     agent_completion: AgentCompletionHandler | None = None,
     ops_metrics: OpsMetricsService | None = None,
+    quality_sampling: QualitySamplingService | None = None,
+    quality_labels: QualityLabelService | None = None,
+    quality_stats: QualityStatsService | None = None,
+    quality_replays: QualityReplayService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -85,6 +95,10 @@ def create_router(
         )
     if ops_metrics is not None:
         secured(create_metrics_router(ops_metrics))
+    if quality_sampling is not None and quality_labels is not None and quality_stats is not None:
+        secured(create_quality_router(quality_sampling, quality_labels, quality_stats))
+    if quality_replays is not None:
+        secured(create_quality_replays_router(quality_replays))
     secured(create_workflow_catalog_router(workflow_catalog, settings))
     workspaces_router = create_workspaces_router(
         workspace_configuration, settings, job_event_manager=job_event_manager

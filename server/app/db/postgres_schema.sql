@@ -533,3 +533,91 @@ create unique index if not exists versioned_entities_published
   where status = 'published';
 create index if not exists idx_versioned_entities_type_key
   on versioned_entities(entity_type, entity_key);
+
+-- Quality loop (schema v28): deterministic sampling of node runs into review
+-- batches, per-run snapshot items, and insert-only labels whose newest row
+-- per (item_id, target) is the current label.
+create table if not exists quality_sample_batches (
+  id text primary key,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  name text not null default '',
+  workflow_key text not null default '',
+  filters_json jsonb not null default '{}',
+  sample_size integer not null check(sample_size > 0),
+  seed text not null default '',
+  created_by text not null default '',
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_quality_sample_batches_workspace
+  on quality_sample_batches(workspace_id, created_at desc);
+
+-- Item rows are point-in-time snapshots: node_run_id/job_id deliberately
+-- carry no FK so the sample stays analyzable after run cleanup.
+create table if not exists quality_sample_items (
+  id text primary key,
+  batch_id text not null references quality_sample_batches(id) on delete cascade,
+  node_run_id bigint not null,
+  job_id text not null,
+  node_key text not null default '',
+  capability text not null default '',
+  skill_version text not null default '',
+  agent_definition_hash text not null default '',
+  agent_version integer,
+  provider text not null default '',
+  model text not null default '',
+  run_status text not null default '',
+  failure_category text not null default '',
+  failure_detail text not null default '',
+  created_at timestamptz not null default current_timestamp,
+  unique(batch_id, node_run_id)
+);
+create index if not exists idx_quality_sample_items_batch
+  on quality_sample_items(batch_id);
+
+create table if not exists quality_labels (
+  id text primary key,
+  item_id text not null references quality_sample_items(id) on delete cascade,
+  target text not null check(target in ('run', 'replay')),
+  verdict text not null check(verdict in ('good', 'bad')),
+  reason_codes jsonb not null default '[]',
+  note text not null default '',
+  labeled_by text not null default '',
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_quality_labels_item_target
+  on quality_labels(item_id, target, created_at desc);
+
+-- Quality replays (schema v29): a replay re-runs one sampled node inside an
+-- isolated copy job built from the original job's frozen workflow snapshot —
+-- upstream inputs are file-copied into the copy's job directory, upstream
+-- nodes are marked completed, downstream nodes not_applicable, so only the
+-- target node is scheduled and the original job is never touched. Status is
+-- reconciled lazily from the copy job's node row on read.
+create table if not exists quality_replays (
+  id text primary key,
+  item_id text not null references quality_sample_items(id) on delete cascade,
+  agent_id text not null default '',
+  agent_version integer,
+  replay_job_id text not null default '',
+  status text not null default 'pending'
+    check(status in ('pending', 'running', 'succeeded', 'failed')),
+  error_message text not null default '',
+  created_by text not null default '',
+  created_at timestamptz not null default current_timestamp,
+  finished_at timestamptz
+);
+create index if not exists idx_quality_replays_item
+  on quality_replays(item_id, created_at desc);
+-- At most one in-flight replay per sample item; the service reconciles lazy
+-- terminal states before evaluating this guard, the index is the backstop.
+create unique index if not exists quality_replays_one_active_per_item
+  on quality_replays(item_id) where status in ('pending', 'running');
+
+-- Replay labels must distinguish multiple replays of the same item:
+-- latest-wins groups by (item_id, target, replay_id).
+alter table quality_labels add column if not exists replay_id text;
+
+-- Per-run Agent version pin (quality replay): when set, the broker enqueue
+-- check, the claim candidate join, and the definition sweepers match this
+-- immutable version row instead of the currently published one.
+alter table agent_execution_requests add column if not exists pinned_agent_version integer;

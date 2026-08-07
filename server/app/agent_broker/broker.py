@@ -50,6 +50,9 @@ class AgentExecutionRequest:
     agent_definition_hash: str
     manifest: Mapping[str, Any]
     execution_id: str = ""
+    # Quality replay (schema v29): pin an immutable Agent version instead of
+    # the currently published one; enqueue/claim/sweep match by version+hash.
+    pinned_agent_version: int | None = None
 
 
 class AgentExecutionBroker:
@@ -120,17 +123,36 @@ class AgentExecutionBroker:
                     raise ValueError("workspace node is not routed to an Agent")
                 if route["target_id"] != request.agent_id:
                     raise ValueError("workspace node Agent route changed before enqueue")
-                definition = conn.execute(
-                    "select definition_hash from versioned_entities"
-                    " where entity_type='agent' and workspace_id is null"
-                    " and entity_key=%s and status='published'",
-                    (request.agent_id,),
-                ).fetchone()
-                if (
-                    definition is None
-                    or definition["definition_hash"] != request.agent_definition_hash
-                ):
-                    raise ValueError("Agent definition is unavailable or changed before enqueue")
+                if request.pinned_agent_version is not None:
+                    # Quality replay: the pin matches one immutable version row
+                    # (any status — archived/draft replays are the use case).
+                    definition = conn.execute(
+                        "select definition_hash from versioned_entities"
+                        " where entity_type='agent' and workspace_id is null"
+                        " and entity_key=%s and version=%s",
+                        (request.agent_id, request.pinned_agent_version),
+                    ).fetchone()
+                    if (
+                        definition is None
+                        or definition["definition_hash"] != request.agent_definition_hash
+                    ):
+                        raise ValueError(
+                            "pinned Agent version is unavailable or changed before enqueue"
+                        )
+                else:
+                    definition = conn.execute(
+                        "select definition_hash from versioned_entities"
+                        " where entity_type='agent' and workspace_id is null"
+                        " and entity_key=%s and status='published'",
+                        (request.agent_id,),
+                    ).fetchone()
+                    if (
+                        definition is None
+                        or definition["definition_hash"] != request.agent_definition_hash
+                    ):
+                        raise ValueError(
+                            "Agent definition is unavailable or changed before enqueue"
+                        )
                 capacity = conn.execute(
                     "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
                     (request.workspace_id,),
@@ -144,8 +166,8 @@ class AgentExecutionBroker:
                     insert into agent_execution_requests(
                       execution_id, workspace_id, job_id, workflow_key, node_key,
                       agent_id, agent_definition_hash, node_concurrency_limit,
-                      queued_at, manifest_json
-                    ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s)
+                      queued_at, manifest_json, pinned_agent_version
+                    ) values (%s, %s, %s, %s, %s, %s, %s, %s, current_timestamp, %s, %s)
                     """,
                     (
                         execution_id,
@@ -157,6 +179,7 @@ class AgentExecutionBroker:
                         request.agent_definition_hash,
                         stored_limit,
                         json.dumps(dict(request.manifest), ensure_ascii=False, sort_keys=True),
+                        request.pinned_agent_version,
                     ),
                 )
         except IntegrityError as exc:
