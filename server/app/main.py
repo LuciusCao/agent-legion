@@ -73,6 +73,7 @@ def create_app(
         job_db.path,
         lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
         bundle_dir=settings.data_dir / "agent_bundles",
+        data_dir=settings.data_dir,
         agent_status=agent_manager,
         is_workspace_paused=workspace_worker_control.is_paused,
         job_db=job_db,

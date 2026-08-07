@@ -11,6 +11,7 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.sweeper import SweeperThread
 from server.app.jobs import JobQueries
 from server.app.scheduler_wakeup import register_wakeup
+from server.app.services.path_hygiene import report_absolute_db_paths
 from server.app.settings import Settings
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker.agent_gate import request_restock
@@ -35,6 +36,10 @@ def start_worker_threads(
     Startup failures are logged and recorded in the returned status map
     (surfaced via /api/health) instead of aborting app startup.
     """
+    # DB path columns must hold data-dir-relative values only; legacy
+    # absolute rows (bare-metal era, issue #37) break on deployment shape
+    # changes, so surface them at startup instead of mid-incident.
+    report_absolute_db_paths(job_db)
     worker_startup: dict[str, str] = {}
     if not WorkflowWorkerThread.is_enabled(settings):
         return None, None, worker_startup

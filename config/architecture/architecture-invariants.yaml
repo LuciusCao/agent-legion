@@ -609,6 +609,18 @@ invariants:
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
         gate: full
 
+  - id: EXEC-PATH-STORAGE-001
+    statement: "DB path columns (node_runs.log_path/run_dir/session_dir, jobs.storage_dir) store data-dir-relative paths only — absolute paths are environment-specific and break on deployment shape changes. Every write boundary canonicalizes (job intake, executor claim/finish, agent claim); legacy absolute log_path values frozen in queued manifests are healed at agent claim time without crashing the claim scan; a startup report surfaces any remaining absolute rows; reads stay fail-closed via resolve_data_path."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_scan.py::test_claim_heals_legacy_absolute_log_path
+        gate: quick
+      - kind: integration
+        target: tests/services/test_path_hygiene.py
+        gate: quick
+
   - id: EXEC-CLAIM-RUNTIME-001
     statement: "A queued Agent request no single non-revoked Worker can claim — judged per Worker on runtime, capability and model together, never on cross-Worker unions — is failed by the unclaimable sweeper with an explicit reason; it never rots in queued. With zero non-revoked Workers the sweeper stays inactive (a deployment gap, not a definition problem)."
     owner: workspace-executor
