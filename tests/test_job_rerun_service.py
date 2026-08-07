@@ -159,6 +159,15 @@ def test_rerun_resets_node_created_at(rerun_service, job):
     assert len(rerun_node["created_at"]) >= 19
 
 
+def test_rerun_resets_packed_flag(rerun_service, job):
+    rerun_service.job_db.set_jobs_packed([job["id"]], packed=1)
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
+
+    assert result["status"] == "succeeded"
+    assert rerun_service.job_db.get_job(job["id"])["packed"] == 0
+
+
 def test_rerun_preserves_ancestors(rerun_service, job):
     rerun_service.job_db.update_job_node(job["id"], "fetch_questions", status="completed")
 
