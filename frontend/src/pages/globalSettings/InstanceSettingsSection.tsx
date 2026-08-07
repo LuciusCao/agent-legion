@@ -12,6 +12,12 @@ import type {
   InstanceSettingsResponse,
   InstanceSettingsUpdate,
 } from '../../api/instanceSettings'
+import {
+  buildOpenClawPayload,
+  OpenClawInstanceFields,
+  openClawFormValues,
+} from './OpenClawInstanceFields'
+import type { InstanceFormValues } from './OpenClawInstanceFields'
 import styles from '../GlobalSettingsPage.module.css'
 
 interface NumberFieldDef {
@@ -120,7 +126,7 @@ const FIELD_GROUPS: FieldGroup[] = [
   },
 ]
 
-type FormValues = Record<string, string | boolean>
+type FormValues = InstanceFormValues
 
 function fieldDef(path: string): NumberFieldDef {
   for (const group of FIELD_GROUPS) {
@@ -154,6 +160,7 @@ function toFormValues(doc: InstanceSettingsResponse): FormValues {
     'agent_workers.min_protocol_version': String(
       doc.agent_workers.min_protocol_version
     ),
+    ...openClawFormValues(doc.openclaw),
   }
 }
 
@@ -207,6 +214,7 @@ function buildPayload(values: FormValues): InstanceSettingsUpdate {
         'agent_workers.min_protocol_version'
       ),
     },
+    openclaw: buildOpenClawPayload(values),
   }
 }
 
@@ -303,6 +311,7 @@ function InstanceSettingsEditor({
           ))}
         </div>
       ))}
+      <OpenClawInstanceFields values={values} setValues={setValues} />
       <button
         type="button"
         className={styles.textButton}

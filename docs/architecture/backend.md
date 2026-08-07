@@ -309,6 +309,9 @@ server/app/
 | ExecutorArchiveResponse | BaseModel | archived: int | app/routes/executor_definition_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
+| InstanceOpenClawSkillSafetyRepo | BaseModel | path: str | app/routes/instance_openclaw_contracts.py |
+| InstanceOpenClawSkillSafetySettings | BaseModel | enabled: bool, repos: list[InstanceOpenClawSkillSafetyRepo] | app/routes/instance_openclaw_contracts.py |
+| InstanceOpenClawSettings | BaseModel | cwd: str, timeout_seconds: int, isolated_workspace_root: str, command_templat... | app/routes/instance_openclaw_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
 | InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
 | InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
@@ -564,8 +567,8 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `server/app/configuration/` 负责加载并校验按领域拆分的 YAML 配置。
 
-- `loader.py`: 加载 `config/agent_legion.yaml`, `config/workflow.yaml` 并合并环境变量覆盖；`config/app.yaml` 存在即报错（已退役）。
-- `owned_keys.py`: 声明每个配置文件的 owned keys，防止跨文件键冲突。
+- `loader.py`:  canonical split 布局已不含任何运行时配置文件（全部退役）；启动时从代码默认值 + env 覆盖合成配置，`config/app.yaml` / `config/workflow.yaml` / `config/agent_legion.yaml` 存在即报错（带迁移指引）。
+- `owned_keys.py`: 登记退役文件名与迁移指引（`CONFIG_FILE_KEYS` 已为空——没有任何 split 文件再拥有顶层键）。
 
 ### Quality Subsystem
 
@@ -594,35 +597,20 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 ## Configuration Reference
 
-配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
+运行时配置已全部从 split yaml 退役：`config/app.yaml` / `config/workflow.yaml` / `config/agent_legion.yaml` 存在即启动报错（带迁移指引，见 `server/app/configuration/owned_keys.py`）。有效配置 = 代码默认值 + env 覆盖 + DB 文档。
 
-- `config/agent_legion.yaml`：ASR、OpenClaw 设置。
-- `config/workflow.yaml`：workspace executor（`executors`，executor 并发为 `executors.<name>.global_capacity`）。`agents` 仅保留为退役报错桩（写 `agents:` 启动即 fail-fast）。
-
-`config/app.yaml` 已整体退役（存在即启动报错，带迁移指引）：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
+`config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers.register_token[_file]` → `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]`（缺省读 `deploy/secrets/agent_worker_register_token`）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`。代码默认值 = 退役前 tracked yaml 的生效值。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd` / `timeout_seconds` / `isolated_workspace_root` / `command_template`（含 `{prompt_text}`、`{video_id}`、`{timestamp}` 占位符的命令参数列表）/ `skill_safety`（OpenClaw skill 安全校验；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 `config/skills.lock` 解析——config 治理 G3 单源化，实例设置 API 写 `ref` 返回 422，explicit 单文件配置写 `ref` 启动即报错）。代码默认值 = 退役前 tracked yaml 的生效值；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
-常用 `config/agent_legion.yaml` 配置项：
+`config/agent_legion.yaml` 的 `asr:` 段已退役（文件整体存在即报错）：业务参数 `provider`（`auto` / `whisper` / `sensevoice`，默认 `auto`）与 `timeout_seconds`（默认 900）声明在 `transcribe_video` capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析（Studio 节点配置可改）；机器路径转 env-only：`AGENT_LEGION_ASR_WHISPER_BINARY` / `AGENT_LEGION_ASR_WHISPER_MODEL` / `AGENT_LEGION_ASR_WHISPER_VAD_MODEL`（可选 VAD 模型）/ `AGENT_LEGION_ASR_SENSEVOICE_SCRIPT` / `AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR`。启动预检只在 env 显式注入时校验所给路径存在（配错即 fail-fast）；未配置时 server 正常启动，缺二进制在转写时由 provider 的 FileNotFoundError 报错。
 
-- `asr.provider`: `auto`, `whisper`, `sensevoice`
-- `asr.whisper.binary`: 本地 `whisper-cli` 路径
-- `asr.whisper.model`: 本地 whisper 模型路径
-- `asr.whisper.vad_model`: 可选 VAD 模型路径
-- `asr.sensevoice.script`: SenseVoice 转写脚本路径
-- `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
-- `openclaw.timeout_seconds`: 默认 600 秒
-- `openclaw.skill_safety`: OpenClaw skill 安全校验配置；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 `config/skills.lock`（locked commit）解析（config 治理 G3 单源化），yaml 中写 `ref` 会在启动校验时报错
+CMS 集成不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：`env` / `bank_version` / `country_id` / `subject_id` / `page_size` 的出厂默认值声明在 `fetch_questions` / `download_video` capability 的 `config_schema`（内置 executor 工厂定义，DB `versioned_entities` 承载），沿「schema defaults → 节点 config → workspace 覆盖」链解析（Settings UI 可改）；`base_url` 无出厂默认值，由节点/workspace 配置或 env `CMS_BASE_URL` 提供。token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）；单文件 explicit 配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
 
-CMS 集成不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞 owned-key 校验报错）：`env` / `bank_version` / `country_id` / `subject_id` / `page_size` 的出厂默认值声明在 `config/workflow.yaml` 的 capability `config_schema`（`fetch_questions` / `download_video`），沿「schema defaults → 节点 config → workspace 覆盖」链解析（Settings UI 可改）；`base_url` 无出厂默认值，由节点/workspace 配置或 env `CMS_BASE_URL` 提供。token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）；单文件 explicit 配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
-
-`config/workflow.yaml` 核心配置项：
-
-- `executors`: code / pi / openclaw 执行器定义；code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键
+`config/workflow.yaml` 的 `executors` 段已退役进 DB：executor 定义（code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键）存于 `versioned_entities` 表，内置工厂目录（`server/app/executors/builtin_definitions.py`）在启动时 seed-if-absent，Studio 管理发布，重启生效。
 
 实例级运行时设置（`agent_workers` 限额、`workflows.enabled`、lease/heartbeat/sweeper 时序）不再出现在 yaml，见上文「DB 实例设置」。
 
@@ -655,7 +643,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
-- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自用户可写的 `config/agent_legion.yaml`；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量；仍需确保该配置文件不被未信任用户修改。
+- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自 DB 实例设置文档（`/api/admin/instance-settings`，仅管理员可写）；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量。
 - PostgreSQL 与视频存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的 User Authentication 章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证（如 CMS token）经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

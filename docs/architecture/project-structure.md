@@ -13,15 +13,16 @@ agent-legion/
 ├── .env.example                # 运行时密钥与覆盖项模板
 ├── Makefile                    # 常用命令快捷方式
 ├── config/                     # 按领域拆分的配置
-│   ├── agent_legion.yaml       # ASR、OpenClaw
-│   ├── workflow.yaml           # Workspace 执行器定义
 │   ├── skills.yaml             # 外部 Pi skill 源声明
 │   ├── skills.lock             # 解析后的 skill commit 锁定
+│   ├── agent-worker.example.yaml # Agent Worker 配置模板
 │   └── architecture/           # 架构治理配置
 │       ├── architecture-invariants.yaml
 │       ├── architecture-exemptions.yaml
 │       ├── architecture-budget-policy.yaml
 │       └── architecture-budgets.json
+│   # 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已退役：
+│   # 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错。
 ├── server/
 │   └── app/
 │       ├── main.py             # FastAPI app factory + lifespan worker

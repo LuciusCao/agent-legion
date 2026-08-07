@@ -162,8 +162,15 @@ CodeExecutor(...).execute(context)
   全局 `cms:` 段已从 split yaml 退役（出厂默认值在 capability config_schema，
   base_url 走 env `CMS_BASE_URL` 或节点/workspace 配置），split yaml 写 `cms:`
   撞 owned-key 校验报错；explicit 单文件配置出现 `cms.token` / `cms.token_gen`
-  启动即报错（G2），`openclaw.skill_safety`
-  写 `ref` 启动即报错（G3，ref 以 `config/skills.lock` 为唯一权威）。
+  启动即报错（G2）；`openclaw` 段已从 split yaml 退役进实例设置（DB
+  `global_settings` 的 `instance` 文档，`/api/admin/instance-settings` 维护），
+  split yaml 写 `openclaw:` 撞 owned-key 校验报错；`openclaw.skill_safety`
+  写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以
+  `config/skills.lock` 为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
+  整体退役（文件存在即启动报错，带迁移指引）：业务参数
+  `provider` / `timeout_seconds` 在 `transcribe_video` capability 的
+  config_schema（Studio 节点/workspace 配置覆盖），机器路径只走 env
+  `AGENT_LEGION_ASR_*`。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
   （CONFIG-YAML-001）。
 - OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。

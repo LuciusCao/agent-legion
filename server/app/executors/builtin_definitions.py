@@ -129,10 +129,32 @@ BUILTIN_EXECUTOR_DEFINITIONS: dict[str, dict[str, Any]] = {
             "assemble_comprehension_info": {
                 "path": "workflow_nodes/comprehension_assemble.py",
             },
-            # ASR providers are remote APIs: allow network in the sandbox.
+            # ASR providers are local subprocesses (whisper-cli / the SenseVoice
+            # funasr script); SenseVoice may download models on first run, so
+            # allow network in the sandbox. The retired yaml ``asr:`` section's
+            # business parameters live in this config_schema (factory defaults,
+            # overridable per node/workspace); the machine-local binary/model
+            # paths are env-only (AGENT_LEGION_ASR_*).
             "transcribe_video": {
                 "path": "workflow_nodes/video_transcribe.py",
                 "sandbox_network": True,
+                "config_schema": {
+                    "type": "object",
+                    "properties": {
+                        "provider": {
+                            "type": "string",
+                            "enum": ["auto", "whisper", "sensevoice"],
+                            "default": "auto",
+                            "description": "ASR 提供方选择（出厂默认值，可被节点/workspace 覆盖）",
+                        },
+                        "timeout_seconds": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "default": 900,
+                            "description": "单次转写超时秒数（出厂默认值，可被节点/workspace 覆盖）",
+                        },
+                    },
+                },
             },
             "assemble_video_metadata": {
                 "path": "workflow_nodes/video_assemble.py",

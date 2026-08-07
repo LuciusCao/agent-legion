@@ -132,25 +132,41 @@ make install-hooks    # install pre-commit / pre-push gates
 
 ## Configuration
 
-Config is split by domain under `config/`; each file owns a fixed set of
-top-level keys and anything else fails startup:
+All runtime split yaml files are retired — `config/app.yaml`,
+`config/workflow.yaml`, and `config/agent_legion.yaml` fail startup with
+migration guidance when present. The effective configuration is composed from
+code defaults, env overrides, and DB documents. Remaining tracked config
+files:
 
 | File | Owns |
 |------|------|
-| `config/agent_legion.yaml` | ASR, OpenClaw |
-| `config/workflow.yaml` | executors (code executor capabilities) |
 | `server/app/workflows/builtin.py` | built-in workflow DAG definitions |
 | `config/skills.yaml` + `skills.lock` | skill sources and pinned refs |
 
-`config/app.yaml` is retired: bootstrap/security-level keys are env-only —
+Bootstrap/security-level keys are env-only —
 database URL comes from `AGENT_LEGION_DATABASE_URL`, the data root from
 `AGENT_LEGION_DATA_DIR`, browser CORS origins from
 `AGENT_LEGION_CORS_ALLOW_ORIGINS` / `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`.
 Instance-level tunables (cleanup/monitoring policy, lease/heartbeat/sweeper
-timing, agent worker limits, `workflows.enabled`) live in the DB
+timing, agent worker limits, `workflows.enabled`, the OpenClaw runtime block
+`openclaw.*`) live in the DB
 `global_settings` document `instance` and are edited through the admin API
 `GET/PUT /api/admin/instance-settings`; they hydrate at startup and take
-effect on restart.
+effect on restart. `AGENT_LEGION_OPENCLAW_CWD` stays as an env override that
+outranks the DB value. Executor definitions (the retired `workflow.yaml`
+`executors` section) live in the DB `versioned_entities` table, seeded from
+the built-in factory catalog at startup and managed in Studio.
+
+ASR (the retired `agent_legion.yaml` `asr:` section): the business parameters
+`provider` (`auto` / `whisper` / `sensevoice`, default `auto`) and
+`timeout_seconds` (default 900) are declared on the `transcribe_video`
+capability `config_schema` and overridable per node/workspace in Studio; the
+machine-local paths are env-only — `AGENT_LEGION_ASR_WHISPER_BINARY`,
+`AGENT_LEGION_ASR_WHISPER_MODEL`, `AGENT_LEGION_ASR_WHISPER_VAD_MODEL`,
+`AGENT_LEGION_ASR_SENSEVOICE_SCRIPT`, `AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR`.
+Startup validates only env-provided paths (a typo fails fast); with no ASR
+env configured the server starts fine and a missing binary surfaces as the
+provider's `FileNotFoundError` at transcription time.
 
 Secrets are never written to yaml: database URL comes from
 `AGENT_LEGION_DATABASE_URL`, the vault master key from

@@ -178,7 +178,30 @@ openclaw:
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_auto_provider_fails_when_no_usable_provider(tmp_path, monkeypatch):
+def test_auto_provider_no_longer_requires_a_usable_provider(tmp_path, monkeypatch):
+    """The global 'auto needs one usable provider' check is retired.
+
+    ASR business parameters (provider/timeout) live in the transcribe_video
+    capability config_schema; startup only validates configured paths. With no
+    asr paths configured at all the server starts, and a missing binary
+    surfaces as the provider's FileNotFoundError at transcription time.
+    """
+    config = f"""
+data_dir: data
+asr:
+  provider: auto
+openclaw:
+  cwd: {tmp_path}
+  command_template:
+    - openclaw
+    - agent
+"""
+
+    _load_and_validate(tmp_path, monkeypatch, config)
+
+
+def test_configured_asr_paths_still_fail_fast(tmp_path, monkeypatch):
+    """Provided asr paths (env-injected or explicit config) must resolve."""
     config = f"""
 data_dir: data
 asr:
@@ -199,8 +222,45 @@ openclaw:
     with pytest.raises(StartupValidationError) as exc_info:
         _load_and_validate(tmp_path, monkeypatch, config)
 
+    fields = {loc for loc, _ in exc_info.value.fields}
+    assert "asr.provider" not in fields
+    assert "asr.whisper.binary" in fields
+    assert "asr.whisper.model" in fields
+    assert "asr.sensevoice.script" in fields
+    assert "asr.sensevoice.model_dir" in fields
+
+
+def test_env_injected_asr_path_fails_fast(tmp_path, monkeypatch):
+    """A typo'd AGENT_LEGION_ASR_* env value fails startup, not transcription."""
+    monkeypatch.setenv("AGENT_LEGION_ASR_WHISPER_VAD_MODEL", "/no/vad.bin")
+    config = f"""
+data_dir: data
+openclaw:
+  cwd: {tmp_path}
+  command_template:
+    - openclaw
+    - agent
+"""
+
+    with pytest.raises(StartupValidationError) as exc_info:
+        _load_and_validate(tmp_path, monkeypatch, config)
+
     fields = [loc for loc, _ in exc_info.value.fields]
-    assert "asr.provider" in fields
+    assert "asr.whisper.vad_model" in fields
+
+
+def test_missing_asr_config_starts_clean(tmp_path, monkeypatch):
+    """No asr configuration anywhere: startup validates nothing ASR-related."""
+    config = f"""
+data_dir: data
+openclaw:
+  cwd: {tmp_path}
+  command_template:
+    - openclaw
+    - agent
+"""
+
+    _load_and_validate(tmp_path, monkeypatch, config)
 
 
 def test_cms_credentials_allowed_when_no_cms_endpoint(tmp_path, monkeypatch):

@@ -62,3 +62,10 @@ def test_builtin_definitions_preserve_factory_semantics() -> None:
     download_schema = capabilities["download_video"].config_schema["properties"]
     assert download_schema["token"]["secret"] is True
     assert "page_size" not in download_schema
+    # The retired yaml asr: section's business parameters live here (factory
+    # defaults; node/workspace can override). Machine paths stay env-only.
+    transcribe_schema = capabilities["transcribe_video"].config_schema["properties"]
+    assert transcribe_schema["provider"]["enum"] == ["auto", "whisper", "sensevoice"]
+    assert transcribe_schema["provider"]["default"] == "auto"
+    assert transcribe_schema["timeout_seconds"]["default"] == 900
+    assert transcribe_schema["timeout_seconds"]["minimum"] == 1
