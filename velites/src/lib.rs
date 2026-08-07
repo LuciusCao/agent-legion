@@ -25,8 +25,10 @@ use crate::tools::ToolKind;
 /// Run one headless session from parsed CLI args. Returns the process exit
 /// code: 0 even for unrecovered model errors (Pi semantics) and for
 /// SIGTERM-cancelled runs (cancellation is a deliberate Host action, not a
-/// harness fault); non-zero only for harness failures (bad args, fixture
-/// errors, I/O).
+/// harness fault); 1 when declared `--require-output` artifacts are still
+/// missing at the end of a non-cancelled run (output contract violation);
+/// 2 for harness failures (bad args, fixture errors, I/O, missing gateway
+/// credentials).
 pub async fn run(cli: Cli) -> anyhow::Result<u8> {
     let cwd = std::env::current_dir()
         .context("failed to resolve current directory")?
