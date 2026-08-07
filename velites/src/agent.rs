@@ -23,6 +23,9 @@
 //!   declared artifacts are checked; missing ones trigger ONE remediation
 //!   turn, and an `outputs_validation{missing: [...]}` event is always
 //!   emitted (on normal/budget endings) so the Host can decide explicitly.
+//!   Artifacts still missing when a non-cancelled run ends fail the output
+//!   contract: the process exits 1, so an exit-0 run with missing declared
+//!   outputs never reaches the caller.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -40,6 +43,11 @@ use crate::events::{
 use crate::provider::{CompletionRequest, Provider, ToolSpec};
 use crate::session::SessionLog;
 use crate::tools::{resolve_in_cwd, ToolContext, ToolKind, ToolOutput};
+
+/// Exit code for a run that ended without its declared `--require-output`
+/// artifacts (output contract violation). Harness faults exit 2 (see
+/// main.rs); 0 keeps Pi semantics for everything else.
+const EXIT_MISSING_OUTPUTS: u8 = 1;
 
 pub struct AgentConfig {
     /// Session identifier (`--name`); a pid-based fallback is generated.
@@ -310,6 +318,20 @@ pub async fn run<P: Provider>(
         error: final_error,
         reason: end_reason,
     }));
+
+    // Output contract at exit: a run that declared --require-output
+    // artifacts and ends without them FAILED, whatever the loop ending
+    // looked like (normal stop, budget exhaustion, unrecovered model
+    // error) — say so with a non-zero exit code instead of forcing the
+    // caller to parse the event stream (exit-0 "false completions").
+    // Cancellation is exempt: it is a deliberate Host action, not a
+    // failed run.
+    if !required_outputs.is_empty()
+        && !matches!(end_reason, Some(EndReason::Cancelled))
+        && !missing_outputs(&required_outputs).is_empty()
+    {
+        return Ok(EXIT_MISSING_OUTPUTS);
+    }
     Ok(0)
 }
 
