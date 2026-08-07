@@ -29,6 +29,7 @@ from server.app.executors.runtime_config import (
     PiRuntimeConfig,
 )
 from server.app.skills.manager import SkillManager
+from tests.helpers.skill_store import memory_skill_store
 
 
 def _write_node(repo_root: Path, name: str) -> str:
@@ -92,8 +93,7 @@ def definitions(tmp_path: Path) -> dict[str, ExecutorConfig]:
 @pytest.fixture
 def runtime_dependencies(tmp_path: Path) -> RuntimeDependencies:
     skill_manager = SkillManager(
-        config_path=tmp_path / "skills.yaml",
-        lock_path=tmp_path / "skills.lock",
+        store=memory_skill_store(),
         base_dir=tmp_path / "skills",
     )
     return RuntimeDependencies(

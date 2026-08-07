@@ -17,6 +17,7 @@ import type {
   TokenUsagePricingRate,
 } from '../api/tokenUsagePricing'
 import { InstanceSettingsSection } from './globalSettings/InstanceSettingsSection'
+import { SkillSourcesSection } from './globalSettings/SkillSourcesSection'
 import styles from './GlobalSettingsPage.module.css'
 
 interface RateRow {
@@ -296,6 +297,7 @@ function GlobalSettingsEditor({
           }
         />
         <InstanceSettingsSection />
+        <SkillSourcesSection />
       </div>
     </AppShell>
   )

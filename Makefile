@@ -134,8 +134,8 @@ audit: ## 依赖漏洞审计 (pip-audit + npm audit)
 
 # Skill 维护
 .PHONY: skills-lock
-skills-lock: ## 刷新 config/skills.lock
-	PYTHONPATH=. $(UV) run python server/app/skills/lock.py
+skills-lock: ## 刷新 DB skill lock（global_settings skill_lock 文档）
+	PYTHONPATH=. $(UV) run python -m server.app.skills.lock
 
 # 架构预算与契约
 .PHONY: architecture-ratchet

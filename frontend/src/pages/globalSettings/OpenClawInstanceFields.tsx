@@ -60,10 +60,11 @@ function parseSkillSafetyRepos(values: InstanceFormValues): { path: string }[] {
       throw new Error('skill_safety repos 元素必须是对象')
     }
     const keys = Object.keys(item)
-    // G3: refs are pinned by config/skills.lock; only `path` is allowed.
+    // G3: refs are pinned by the DB skill lock (global_settings skill_lock);
+    // only `path` is allowed.
     if (keys.length !== 1 || keys[0] !== 'path') {
       throw new Error(
-        'skill_safety repos 元素只允许 path 键（ref 由 skills.lock 钉死）'
+        'skill_safety repos 元素只允许 path 键（ref 由 DB skill_lock 钉死）'
       )
     }
     const path = (item as { path: unknown }).path

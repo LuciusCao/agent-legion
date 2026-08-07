@@ -34,6 +34,7 @@ from .metrics import create_metrics_router
 from .packages import create_packages_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
+from .skill_sources import create_skill_sources_router
 from .skills import create_skills_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
@@ -82,6 +83,7 @@ def create_router(
     # Global admin endpoints (not workspace-scoped): the sub-routers enforce
     # require_admin themselves, so they must not go through secured().
     router.include_router(create_instance_settings_router(job_db, settings))
+    router.include_router(create_skill_sources_router(settings))
     router.include_router(create_workflow_node_files_router(settings))
     secured(create_packages_router(job_db, settings, job_packages))
     secured(create_worker_router(workspace_worker_control))

@@ -81,7 +81,7 @@ def test_openclaw_skill_safety_valid_overrides():
 
 
 def test_openclaw_skill_safety_rejects_ref_override():
-    """Refs are pinned by skills.lock (config governance G3); yaml ref is retired."""
+    """Refs are pinned by the DB skill_lock document (G3); yaml ref is retired."""
     with pytest.raises(ValidationError) as exc_info:
         OpenClawSkillSafetyRuntimeConfig(
             enabled=True,

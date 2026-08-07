@@ -40,8 +40,8 @@ class PiRuntimeConfig(BaseModel):
 class OpenClawSkillSafetyRepo(BaseModel):
     """One skill checkout the OpenClaw runner may force-restore before a run.
 
-    Only the path is declared here; the restore ref is pinned by
-    ``config/skills.lock`` (config governance G3, single source of truth).
+    Only the path is declared here; the restore ref is pinned by the DB
+    ``skill_lock`` document (config governance G3, single source of truth).
     A ``ref`` key is rejected as an extra field.
     """
 

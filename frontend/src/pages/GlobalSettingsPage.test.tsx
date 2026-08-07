@@ -22,6 +22,12 @@ vi.mock('../api/instanceSettings', () => ({
   updateInstanceSettings: vi.fn(),
 }))
 
+vi.mock('../api/skillSources', () => ({
+  getSkillSources: vi.fn().mockResolvedValue({ skills: [] }),
+  updateSkillSource: vi.fn(),
+  relockSkillSources: vi.fn(),
+}))
+
 const adminUser: UserResponse = {
   id: 'u1',
   username: 'admin',

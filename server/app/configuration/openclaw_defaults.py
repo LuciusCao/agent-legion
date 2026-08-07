@@ -12,8 +12,8 @@ from __future__ import annotations
 import copy
 from typing import Any
 
-# Path whitelist only in skill_safety: refs are pinned by config/skills.lock
-# (single source of truth, config governance G3). A ref key is rejected.
+# Path whitelist only in skill_safety: refs are pinned by the DB skill_lock
+# document (single source of truth, config governance G3). A ref key is rejected.
 DEFAULT_OPENCLAW_CONFIG: dict[str, Any] = {
     "cwd": ".",
     "timeout_seconds": 600,

@@ -2,8 +2,8 @@
 
 The block carries the values retired from the ``config/agent_legion.yaml``
 ``openclaw:`` section. Skill-safety repos are a path-only allowlist: restore
-refs are pinned by ``config/skills.lock`` (config governance G3), so a ``ref``
-key is rejected as an extra field (422).
+refs are pinned by the DB ``skill_lock`` document (config governance G3), so a
+``ref`` key is rejected as an extra field (422).
 """
 
 from __future__ import annotations

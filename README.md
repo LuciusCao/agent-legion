@@ -36,9 +36,11 @@ It ships with two production workflows:
   provider/model/thinking resolve from per-node Studio overrides, then the
   workspace Settings「Agent 默认配置」.
 - **Versioned external skills.** Each capability maps to a skill in a
-  standalone git repository, declared in `config/skills.yaml` and pinned by
-  `config/skills.lock`. Every run restores the locked ref, so workflow output
-  is reproducible.
+  standalone git repository, declared in the DB `global_settings`
+  `skill_sources` document and pinned by the `skill_lock` document (managed
+  via /admin/settings「Skill 源管理」or `make skills-lock`; the tracked
+  `config/skills.yaml` / `config/skills.lock` files are retired). Every run
+  restores the locked ref, so workflow output is reproducible.
 - **Local & remote executors.** Capacity is granted through executor leases;
   remote **Agent Workers** register over HTTP, claim executions, stream
   heartbeats, and upload artifacts — scale out by adding machines.
@@ -126,7 +128,7 @@ make dev-frontend     # frontend dev server
 make check-quick      # quick quality gate (daily)
 make check            # full quality gate (before handoff)
 make api-generate     # regenerate frontend API types
-make skills-lock      # refresh config/skills.lock
+make skills-lock      # refresh the DB skill lock (global_settings skill_lock)
 make install-hooks    # install pre-commit / pre-push gates
 ```
 
@@ -141,7 +143,14 @@ files:
 | File | Owns |
 |------|------|
 | `server/app/workflows/builtin.py` | built-in workflow DAG definitions |
-| `config/skills.yaml` + `skills.lock` | skill sources and pinned refs |
+
+Skill sources and pinned refs are no longer tracked files: they live in the
+DB `global_settings` documents `skill_sources` / `skill_lock`, managed through
+the admin API (`GET/PUT /api/admin/skill-sources`,
+`POST /api/admin/skill-sources/relock`) and the /admin/settings「Skill 源管理」
+section; `make skills-lock` re-resolves the lock. A leftover
+`config/skills.yaml` / `config/skills.lock` is imported into the DB once at
+startup (with a warning) and never read again.
 
 Bootstrap/security-level keys are env-only —
 database URL comes from `AGENT_LEGION_DATABASE_URL`, the data root from
@@ -180,7 +189,7 @@ or the workspace vault. Full reference:
 Agent nodes execute through external skills — standalone git repositories
 containing `SKILL.md`, an output contract, and a validator — typically checked
 out under `~/.agents/skills/agent-legion/<workflow>/<capability>/` and pinned
-by `config/skills.lock`.
+by the DB `skill_lock` document (refresh with `make skills-lock`).
 
 Two harness runtimes run them:
 

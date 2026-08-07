@@ -15,7 +15,7 @@ def build_executor_registry(
 ) -> ExecutorRegistry:
     """Build the application-wide executor registry from settings (once per app)."""
     if skill_manager is None:
-        skill_manager = build_skill_manager(settings.root_dir)
+        skill_manager = build_skill_manager(settings.database_url)
     runtime = RuntimeDependencies(
         pi_runtime=settings.executor_runtime.workflows.pi,
         skill_manager=skill_manager,

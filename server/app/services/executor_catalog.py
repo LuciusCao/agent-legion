@@ -92,7 +92,7 @@ def _agent_entry(
 class ExecutorCatalogService:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.skills = SkillCatalogService(settings.root_dir)
+        self.skills = SkillCatalogService(settings.database_url)
 
     def catalog(self) -> dict[str, Any]:
         return execution_catalog(self.settings, self.skills)

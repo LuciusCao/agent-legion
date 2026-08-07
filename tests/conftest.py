@@ -32,7 +32,9 @@ from server.app.services.executor_definition_service import (
     reset_published_executor_cache,
     seed_builtin_executor_definitions,
 )
+from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import load_settings
+from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
 # Test Agent catalog: mirrors the retired config/workflow.yaml `agents:`
 # section, with the 4 video agents already flipped to velites (schema v27
@@ -113,6 +115,16 @@ def _seed_agent_definitions() -> None:
 def _seed_executor_definitions() -> None:
     service = ExecutorDefinitionService(TEST_DATABASE_URL, Path(__file__).resolve().parents[1])
     seed_builtin_executor_definitions(service)
+
+
+# Test skill sources: the built-in constants (retired config/skills.yaml +
+# skills.lock transcription) re-seeded into global_settings after every
+# TRUNCATE, mirroring the app startup seed so DB-driven skill resolution
+# (SkillManager, skill catalog, openclaw skill_safety) sees the pinned skills.
+def _seed_skill_sources() -> None:
+    store = SkillSourceStore(TEST_DATABASE_URL)
+    store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))
+    store.put_lock(BUILTIN_SKILL_LOCK.model_copy(deep=True))
 
 
 # Deterministic pricing seeded into global_settings after every TRUNCATE (see
@@ -265,6 +277,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_quality_replays.py",
         "tests/services/test_quality_sampling.py",
         "tests/services/test_quality_stats.py",
+        "tests/services/test_skill_source_store.py",
         "tests/services/test_token_usage.py",
         "tests/test_export_openapi.py",
         "tests/test_jobs_route_contracts.py",
@@ -292,6 +305,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_question_comprehension_info_workflow.py",
         "tests/test_relative_path_portability.py",
         "tests/test_run_dir_cleanup.py",
+        "tests/test_skill_catalog_service.py",
         "tests/test_worker_control_db.py",
         "tests/test_workflow_execution_control.py",
         "tests/test_workflow_revisions.py",
@@ -440,6 +454,7 @@ def _isolate_postgres_database(request):
     _seed_agent_definitions()
     reset_published_executor_cache()
     _seed_executor_definitions()
+    _seed_skill_sources()
     yield
     if fresh:
         # Erase any DDL drift the test left behind so later TRUNCATE-isolated
