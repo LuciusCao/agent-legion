@@ -925,6 +925,7 @@
     "server/app/workflow_worker/agent_gate.py": 134,
     "server/app/workflow_worker/agent_status.py": 66,
     "server/app/workflow_worker/agent_stock.py": 122,
+    "server/app/workflow_worker/agent_stock_snapshot.py": 127,
     "server/app/workflow_worker/claim_flush.py": 78,
     "server/app/workflow_worker/execution.py": 81,
     "server/app/workflow_worker/executor_claim.py": 90,
