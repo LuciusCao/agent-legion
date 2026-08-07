@@ -159,7 +159,10 @@ CodeExecutor(...).execute(context)
 - Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS token 只走 env
   （`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
   节点配置的 `secret: true` 字段（workspace node config + vault）；
-  yaml 出现 `cms.token` / `cms.token_gen` 启动即报错（G2），`openclaw.skill_safety`
+  全局 `cms:` 段已从 split yaml 退役（出厂默认值在 capability config_schema，
+  base_url 走 env `CMS_BASE_URL` 或节点/workspace 配置），split yaml 写 `cms:`
+  撞 owned-key 校验报错；explicit 单文件配置出现 `cms.token` / `cms.token_gen`
+  启动即报错（G2），`openclaw.skill_safety`
   写 `ref` 启动即报错（G3，ref 以 `config/skills.lock` 为唯一权威）。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
   （CONFIG-YAML-001）。

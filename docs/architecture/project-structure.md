@@ -14,7 +14,7 @@ agent-legion/
 ├── Makefile                    # 常用命令快捷方式
 ├── config/                     # 按领域拆分的配置
 │   ├── app.yaml                # 应用路径、PostgreSQL URL、HTTP 设置、清理、监控
-│   ├── agent_legion.yaml       # ASR、CMS、资源提供方、OpenClaw
+│   ├── agent_legion.yaml       # ASR、OpenClaw
 │   ├── workflow.yaml           # Workspace 执行器、工作流运行时、Pi 配置
 │   ├── skills.yaml             # 外部 Pi skill 源声明
 │   ├── skills.lock             # 解析后的 skill commit 锁定

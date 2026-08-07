@@ -40,8 +40,9 @@ def make_workflow_worker(
 
     definition = load_builtin_definition(workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    # Avoid real CMS/network calls in tests: with no global cms: config the
-    # node resolves no api_url and writes the base payload. The settings travel
+    # Avoid real CMS/network calls in tests: strip the env-injected global cms
+    # config (conftest points CMS_BASE_URL at the fake CMS host) so the node
+    # resolves no api_url and writes the base payload. The settings travel
     # with the executor context into isolated child processes (which do not
     # inherit parent monkeypatches).
     settings.config["cms"] = {}

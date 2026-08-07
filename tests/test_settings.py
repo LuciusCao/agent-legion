@@ -168,7 +168,13 @@ def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
         assert env_key in message
 
 
-def test_load_settings_rejects_retired_yaml_cms_keys_in_split_layout(tmp_path, monkeypatch):
+def test_split_layout_rejects_cms_section_as_unowned(tmp_path, monkeypatch):
+    """The global yaml ``cms:`` section is retired: no split file owns ``cms``.
+
+    G2 (``cms.token`` / ``cms.token_gen`` rejection) is still covered by the
+    explicit-layout tests above; in the split layout the whole section now
+    fails the owned-key check first.
+    """
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
@@ -176,7 +182,7 @@ def test_load_settings_rejects_retired_yaml_cms_keys_in_split_layout(tmp_path, m
     (config_dir / "workflow.yaml").write_text("workflows: {enabled: false}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
 
-    with pytest.raises(ValueError, match=r"cms\.token"):
+    with pytest.raises(ValueError, match=r"agent_legion\.yaml.*unowned.*cms"):
         load_settings()
 
 
@@ -269,7 +275,6 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     config_dir.mkdir()
     (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
     (config_dir / "agent_legion.yaml").write_text(
-        "cms: {base_url: 'https://cms.example/v2'}\n"
         "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
         encoding="utf-8",
     )
@@ -277,6 +282,8 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
         "workflows: {enabled: false}\nexecutors: {}\n", encoding="utf-8"
     )
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+    # The global yaml cms: section is retired; base_url arrives via env.
+    monkeypatch.setenv("CMS_BASE_URL", "https://cms.example/v2")
     settings = load_settings()
     assert settings.data_dir == tmp_path / "runtime"
     assert settings.config["cms"]["knowledge_url"].startswith("https://cms.example/v2")

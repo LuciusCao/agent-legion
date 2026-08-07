@@ -449,6 +449,10 @@ def _isolate_project_dotenv(monkeypatch):
 def _block_real_cms_http(monkeypatch):
     if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
         return
+    # The repo yaml no longer carries a global cms: section; tests loading the
+    # real settings get the fake CMS host below through the supported env
+    # channel (node/workspace config still overrides it, as in production).
+    monkeypatch.setenv("CMS_BASE_URL", "https://cms.example.com/v2")
     original_request = requests.sessions.Session.request
 
     def guarded_request(self, method, url, *args, **kwargs):
