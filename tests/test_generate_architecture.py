@@ -160,9 +160,6 @@ asr:
 openclaw:
   timeout_seconds: 600
 """)
-    (config_dir / "workflow.yaml").write_text("""
-executors: {}
-""")
 
     result = extract_config(tmp_path)
     assert "`asr`" in result

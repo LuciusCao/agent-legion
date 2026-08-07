@@ -3,7 +3,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -17,7 +17,6 @@ from server.app.configuration.instance_defaults import (
 )
 from server.app.executors import registration as _registration  # noqa: F401
 from server.app.executors.config import ExecutorConfig
-from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
@@ -42,6 +41,9 @@ class Settings:
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
+    # executor_definitions starts empty: the catalog lives in the DB
+    # (versioned_entities, entity_type 'executor') and create_app hydrates it
+    # after seeding the built-in factory definitions (restart-effective).
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -251,7 +253,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     jobs_dir = resolved_data_dir / "jobs"
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
-    executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     resolve_worker_register_token(executor_runtime.agent_workers, root_dir)
     return Settings(
@@ -264,7 +265,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         jobs_dir=jobs_dir,
         config=config,
         cors=load_cors_settings(config),
-        executor_definitions=executor_definitions,
         executor_runtime=executor_runtime,
     )
 

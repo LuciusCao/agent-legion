@@ -130,6 +130,15 @@ server/app/
 | GET | `/artifacts/{hash}` | `download_artifact` | routes/artifacts.py |
 | GET | `/health` | `health` | routes/common.py |
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
+| GET | `/executor-definitions` | `list_executor_definitions` | routes/executor_definitions.py |
+| POST | `/executor-definitions` | `create_executor_definition` | routes/executor_definitions.py |
+| GET | `/executor-definitions/{executor_id}` | `get_executor_definition` | routes/executor_definitions.py |
+| GET | `/executor-definitions/{executor_id}/versions` | `list_executor_definition_versions` | routes/executor_definitions.py |
+| PUT | `/executor-definitions/{executor_id}/draft` | `save_executor_definition_draft` | routes/executor_definitions.py |
+| POST | `/executor-definitions/{executor_id}/publish` | `publish_executor_definition` | routes/executor_definitions.py |
+| POST | `/executor-definitions/{executor_id}/rollback` | `rollback_executor_definition` | routes/executor_definitions.py |
+| POST | `/executor-definitions/{executor_id}/copy` | `copy_executor_definition` | routes/executor_definitions.py |
+| DELETE | `/executor-definitions/{executor_id}` | `archive_executor_definition` | routes/executor_definitions.py |
 | GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
 | GET | `/admin/instance-settings` | `get_instance_settings` | routes/instance_settings.py |
@@ -288,6 +297,16 @@ server/app/
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
+| ExecutorDefinitionPayload | BaseModel | kind: str, global_capacity: int, capabilities: dict[str, dict[str, Any]] | app/routes/executor_definition_contracts.py |
+| ExecutorCopyRequest | BaseModel | new_executor_id: str | app/routes/executor_definition_contracts.py |
+| ExecutorRollbackRequest | BaseModel | version: int | app/routes/executor_definition_contracts.py |
+| ExecutorVersionResponse | BaseModel | id: str, executor_id: str, version: int, status: Literal['draft', 'published'... | app/routes/executor_definition_contracts.py |
+| ExecutorVersionSummary | BaseModel | id: str, executor_id: str, version: int, status: Literal['draft', 'published'... | app/routes/executor_definition_contracts.py |
+| ExecutorListItem | BaseModel | executor_id: str, kind: str, global_capacity: int, capabilities: list[str], v... | app/routes/executor_definition_contracts.py |
+| ExecutorListResponse | BaseModel | executors: list[ExecutorListItem] | app/routes/executor_definition_contracts.py |
+| ExecutorDetailResponse | BaseModel | executor_id: str, latest: ExecutorVersionResponse | None, published: Executor... | app/routes/executor_definition_contracts.py |
+| ExecutorVersionsResponse | BaseModel | versions: list[ExecutorVersionSummary] | app/routes/executor_definition_contracts.py |
+| ExecutorArchiveResponse | BaseModel | archived: int | app/routes/executor_definition_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |

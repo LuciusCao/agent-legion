@@ -40,6 +40,9 @@ def make_workflow_worker(
 
     definition = load_builtin_definition(workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
+    # Executor definitions are DB-backed: hydrate the seeded catalog (the app
+    # does this in create_app; this helper builds the registry directly).
+    app_main.hydrate_executor_definitions(settings)
     # Avoid real CMS/network calls in tests: strip the env-injected global cms
     # config (conftest points CMS_BASE_URL at the fake CMS host) so the node
     # resolves no api_url and writes the base payload. The settings travel
@@ -151,6 +154,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
+    # The fake root has no workflow_nodes/: skip the executor definition
+    # hydration (SPA tests never dispatch jobs).
+    monkeypatch.setattr(app_main, "hydrate_executor_definitions", lambda settings: None)
     return root_dir, data_dir
 
 

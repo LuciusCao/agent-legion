@@ -27,6 +27,7 @@ from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
+from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
@@ -49,10 +50,7 @@ from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
-def create_app(
-    data_dir: Path | None = None,
-    start_worker: bool = False,
-) -> FastAPI:
+def create_app(data_dir: Path | None = None, start_worker: bool = False) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
     event_bus = InProcessEventBus()
     agent_manager = AgentStatusManager(
@@ -64,6 +62,10 @@ def create_app(
     # Hydrate instance-level settings from the DB before any service reads
     # them (executor runtime, cleanup/monitoring config).
     apply_instance_settings(settings, job_db.path)
+    # Executor definitions live in the DB (versioned_entities, entity_type
+    # 'executor'): seed-if-absent the built-in catalog, then hydrate from the
+    # published rows (restart-effective, no hot rebuild).
+    hydrate_executor_definitions(settings)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
     # Resume state must not survive a restart: dispatch stays off until an

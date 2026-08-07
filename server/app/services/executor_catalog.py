@@ -2,7 +2,9 @@ from collections.abc import Mapping
 from typing import Any
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.executors.config import ExecutorConfig
 from server.app.services.agent_service import published_agent_definitions
+from server.app.services.executor_definition_service import published_executor_definitions
 from server.app.services.skill_catalog import SkillCatalogService
 from server.app.settings import Settings
 
@@ -39,16 +41,21 @@ def execution_catalog(
     settings: Settings,
     skills: SkillCatalogService,
     agent_definitions: Mapping[str, AgentDefinition] | None = None,
+    executor_definitions: Mapping[str, ExecutorConfig] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Catalog of executor + Agent definitions for Studio display.
 
-    Agents come from the published DB catalog (versioned_entities). The old
-    global provider/model/thinking projection (retired ``workflows.pi``) is
-    gone: execution defaults are workspace-scoped now, so the Studio "继承默认"
+    Both halves come from the published DB catalog (versioned_entities) so
+    Studio shows the live DB values; ``settings.executor_definitions`` is the
+    startup-hydrated snapshot of the same rows. The old global
+    provider/model/thinking projection (retired ``workflows.pi``) is gone:
+    execution defaults are workspace-scoped now, so the Studio "继承默认"
     hints read the workspace settings payload's agentDefaults instead.
     """
     if agent_definitions is None:
         agent_definitions = published_agent_definitions(settings.database_url)
+    if executor_definitions is None:
+        executor_definitions = published_executor_definitions(settings.database_url)
     return {
         "agents": [
             _agent_entry(skills, agent_id, definition)
@@ -65,7 +72,7 @@ def execution_catalog(
                     for capability, config in sorted(definition.capabilities.items())
                 ],
             }
-            for executor_id, definition in sorted(settings.executor_definitions.items())
+            for executor_id, definition in sorted(executor_definitions.items())
         ],
     }
 

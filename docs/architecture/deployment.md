@@ -52,7 +52,6 @@ scripts/
 ### 顶层配置项
 
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
-- `executors` — Workspace 执行器定义
 - `openclaw` — OpenClaw 命令模板与工作目录
 
 <!-- END AUTO-GENERATED -->

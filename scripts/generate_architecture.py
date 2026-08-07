@@ -236,7 +236,6 @@ def extract_config(root: Path) -> str:
         "cms": "CMS 集成配置",
         "resource_providers": "资源提供方声明（path/url_key 及各自可调参数的 config_schema，含 secret 标记）",
         "openclaw": "OpenClaw 命令模板与工作目录",
-        "executors": "Workspace 执行器定义",
         "workflows": "Agent Legion DAG 工作流开关",
     }
 

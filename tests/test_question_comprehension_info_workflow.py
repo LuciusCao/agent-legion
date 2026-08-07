@@ -3,9 +3,9 @@ import sys
 from pathlib import Path
 
 import pytest
-import yaml
 
 from server.app.executors import registration as _registration  # noqa: F401  # 触发内建 kind 注册
+from server.app.executors.builtin_definitions import BUILTIN_EXECUTOR_DEFINITIONS
 from server.app.executors.definitions import load_executor_definitions
 from server.app.jobs.queries import JobQueries
 from server.app.storage_paths import resolve_job_dir
@@ -431,8 +431,7 @@ def test_clean_and_parse_missing_fingerprint_when_no_content(tmp_path):
 
 
 def test_code_executor_config_binds_question_comprehension_info_nodes():
-    raw = yaml.safe_load(Path("config/workflow.yaml").read_text(encoding="utf-8"))
-    config = load_executor_definitions(raw["executors"])
+    config = load_executor_definitions(BUILTIN_EXECUTOR_DEFINITIONS)
     code = config["code-default"]
     assert code.kind == "code"
 
