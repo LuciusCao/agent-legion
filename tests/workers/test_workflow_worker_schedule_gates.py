@@ -196,11 +196,53 @@ def test_agent_enqueue_counts_pass_claim(tmp_path: Path) -> None:
     assert worker._pass_claim_counts == {"agent:agent-x": 1}
     # The submission counts toward the stock gate within the snapshot window.
     assert worker._agent_pass.stock_enqueued == {("ws1", "agent-x"): 1}
+    # And blocks duplicate submissions until the pool finishes it.
+    assert worker._agent_pass.in_flight == {("job1", "fetch")}
     # The enqueue itself is submitted as a background closure.
     closure = worker.agent_dispatch.enqueue_pool.submit.call_args.args[0]
     worker.agent_dispatch.enqueue.return_value = True
     closure()
     worker.agent_dispatch.enqueue.assert_called_once()
+    assert worker._agent_pass.in_flight == set()
+
+
+def test_agent_in_flight_submission_blocks_duplicate(tmp_path: Path) -> None:
+    node = _node()
+    worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
+    worker.agent_dispatch.enqueue_pool.submit.return_value = True
+    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+
+    first = try_claim_and_submit(
+        worker,
+        {"id": "ws1"},
+        _definition(node),
+        {"id": "job1", "batch_id": "b1"},
+        node,
+        tmp_path,
+        None,
+        None,
+        CapacitySnapshot(),
+    )
+    # Same (job, node) evaluated again before the pool closure ran.
+    second = try_claim_and_submit(
+        worker,
+        {"id": "ws1"},
+        _definition(node),
+        {"id": "job1", "batch_id": "b1"},
+        node,
+        tmp_path,
+        None,
+        None,
+        CapacitySnapshot(),
+    )
+
+    assert first is True
+    assert second is False
+    assert worker.agent_dispatch.enqueue_pool.submit.call_count == 1
+    # Once the closure finishes (success or failure), later passes retry.
+    closure = worker.agent_dispatch.enqueue_pool.submit.call_args.args[0]
+    closure()
+    assert worker._agent_pass.in_flight == set()
 
 
 def test_agent_stock_gate_uses_enqueued_counter_within_window(tmp_path: Path) -> None:
@@ -266,6 +308,8 @@ def test_agent_enqueue_skipped_when_pool_full(tmp_path: Path) -> None:
     # A rejected submission raises the per-pass flag for the skip gate.
     assert worker._agent_pass.pool_full is True
     assert worker._pass_claim_counts == {}
+    # And the in-flight entry is rolled back so the next pass retries.
+    assert worker._agent_pass.in_flight == set()
     worker.agent_dispatch.enqueue.assert_not_called()
 
 

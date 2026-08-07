@@ -155,7 +155,8 @@ fn require_output_still_missing_reports_validation() {
         &cwd.join("fixture.json"),
         &["--require-output", "result.txt"],
     );
-    assert!(output.status.success());
+    // Output contract violation: still missing after the remediation turn.
+    assert_eq!(output.status.code(), Some(1));
     let events = parse_events(&output.stdout);
     let validation = events
         .iter()
@@ -168,6 +169,40 @@ fn require_output_still_missing_reports_validation() {
         2
     );
     assert!(events.last().unwrap().get("reason").is_none());
+}
+
+#[test]
+fn model_error_with_missing_outputs_exits_nonzero() {
+    // The false-completion incident class: the model call fails
+    // (stopReason=error), the declared artifact is never produced, and the
+    // run must NOT exit 0 — callers treat exit 0 as success.
+    let dir = tempfile::tempdir().unwrap();
+    let cwd = dir.path();
+    write(&cwd.join("prompt.md"), "Produce result.txt.");
+    write(
+        &cwd.join("fixture.json"),
+        r#"{
+  "responses": [
+    {
+      "content": [],
+      "stopReason": "error",
+      "errorMessage": "upstream 401: unauthorized",
+      "usage": {"input": 0, "output": 0, "cacheRead": 0}
+    }
+  ]
+}"#,
+    );
+
+    let output = run_velites(
+        cwd,
+        &cwd.join("fixture.json"),
+        &["--require-output", "result.txt"],
+    );
+    assert_eq!(output.status.code(), Some(1));
+    let events = parse_events(&output.stdout);
+    let agent_end = events.last().unwrap();
+    assert_eq!(agent_end["type"], "agent_end");
+    assert_eq!(agent_end["error"], "upstream 401: unauthorized");
 }
 
 #[test]

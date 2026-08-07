@@ -4,6 +4,72 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
+# Space-separated lane selector: "backend frontend rust" (default, full quick
+# gate), any subset (e.g. "backend" / "rust"), or "static" (all lanes, static
+# phase only — used by pre-push for docs-only changes). The full gate in CI
+# always runs every lane; this only trims the local feedback loop.
+#
+# When GATE_LANES is unset, lanes are derived from the worktree's uncommitted
+# changes using the same path rules as .githooks/pre-push: a pure backend
+# edit skips the rust lane, a pure velites/ edit runs rust only, docs-only
+# runs the static phase, and shared files or anything ambiguous (not a git
+# repo, git failure, clean tree) falls back to all lanes. Derivation runs
+# before the lock/coverage artifacts below so they cannot pollute the
+# working-tree classification (they are gitignored in this repo, but the
+# gate-script tests run the script inside fixture repos without ignores).
+derive_lanes_from_worktree() {
+  local saw_frontend=0 saw_backend=0 saw_rust=0 saw_non_docs=0 saw_any=0
+  local status line path
+  if ! status="$(git status --porcelain=v1 --untracked-files=all 2>/dev/null)"; then
+    echo "backend frontend rust"
+    return
+  fi
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    path="${line:3}"
+    path="${path##* -> }"
+    saw_any=1
+    case "$path" in
+      # Shared/global files: all lanes, no trimming.
+      pyproject.toml|uv.lock|Makefile|scripts/*|.githooks/*|.github/*|config/*|frontend/package.json|frontend/package-lock.json)
+        echo "backend frontend rust"
+        return
+        ;;
+      velites/*)
+        saw_rust=1
+        saw_non_docs=1
+        ;;
+      frontend/*)
+        saw_frontend=1
+        saw_non_docs=1
+        ;;
+      docs/*|*.md)
+        ;;
+      *)
+        saw_backend=1
+        saw_non_docs=1
+        ;;
+    esac
+  done <<<"$status"
+
+  if [[ "$saw_any" -eq 0 ]]; then
+    echo "backend frontend rust"
+  elif [[ "$saw_non_docs" -eq 0 ]]; then
+    echo "static"
+  else
+    local lanes=""
+    [[ "$saw_backend" -eq 1 ]] && lanes="backend"
+    [[ "$saw_frontend" -eq 1 ]] && lanes="${lanes:+$lanes }frontend"
+    [[ "$saw_rust" -eq 1 ]] && lanes="${lanes:+$lanes }rust"
+    echo "$lanes"
+  fi
+}
+
+if [[ -z "${GATE_LANES:-}" ]]; then
+  GATE_LANES="$(derive_lanes_from_worktree)"
+  echo "Derived lanes from worktree changes: $GATE_LANES"
+fi
+
 # Serialize same-worktree gates: concurrent invocations (multiple agent
 # sessions, or a manual run next to an agent loop) share the per-worktree
 # test database, and their xdist workers use the same gw0..gwN schemas —
@@ -52,12 +118,6 @@ fi
 echo "=== Parallel Quick Gate ==="
 echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
-
-# Space-separated lane selector: "backend frontend rust" (default, full quick
-# gate), any subset (e.g. "backend" / "rust"), or "static" (all lanes, static
-# phase only — used by pre-push for docs-only changes). The full gate in CI
-# always runs every lane; this only trims the local feedback loop.
-GATE_LANES="${GATE_LANES:-backend frontend rust}"
 
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]

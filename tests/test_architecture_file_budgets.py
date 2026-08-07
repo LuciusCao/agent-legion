@@ -61,7 +61,7 @@ def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, B
 def write_baseline(root: Path, files_dict: dict[str, int]) -> None:
     path = root / "config" / "architecture" / "architecture-budgets.json"
     path.write_text(
-        json.dumps({"version": 2, "files": files_dict}, indent=2, sort_keys=True),
+        json.dumps({"version": 3, "files": files_dict}, indent=2, sort_keys=True),
         encoding="utf-8",
     )
 
@@ -76,7 +76,8 @@ def test_rejects_growth_above_ceiling(tmp_path: Path) -> None:
     root, policy = governed_repo(tmp_path, "server/app/example.py", lines=111)
     write_baseline(root, {"server/app/example.py": 110})
     assert check_file_budgets(root, policy, ()) == [
-        "server/app/example.py: 111 lines exceeds ceiling 110; split the file or revert growth"
+        "server/app/example.py: 111 effective lines exceeds ceiling 110; "
+        "split the file or revert growth"
     ]
 
 
@@ -84,9 +85,21 @@ def test_rejects_stale_ceiling_after_shrink(tmp_path: Path) -> None:
     root, policy = governed_repo(tmp_path, "server/app/example.py", lines=90)
     write_baseline(root, {"server/app/example.py": 110})
     assert check_file_budgets(root, policy, ()) == [
-        "server/app/example.py: ceiling 110 is stale for 90 lines; "
+        "server/app/example.py: ceiling 110 is stale for 90 effective lines; "
         "run scripts/ratchet_architecture_budgets.py"
     ]
+
+
+def test_comment_and_blank_lines_do_not_count_toward_ceiling(tmp_path: Path) -> None:
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
+    file_path = root / "server" / "app" / "example.py"
+    content = file_path.read_text(encoding="utf-8")
+    file_path.write_text(
+        "# header comment\n\n" + content + "\n# trailing comment\n",
+        encoding="utf-8",
+    )
+    write_baseline(root, {"server/app/example.py": 110})
+    assert check_file_budgets(root, policy, ()) == []
 
 
 def test_missing_production_baseline_entry_fails(tmp_path: Path) -> None:
@@ -155,13 +168,13 @@ def test_stale_baseline_entry_for_non_production_file_fails(tmp_path: Path) -> N
     "baseline_text,expected_substring",
     [
         ("not json", "Malformed JSON"),
-        ('{"version": 1, "files": {}}', "Unsupported baseline version"),
-        ('{"version": 2, "files": {}, "extra": true}', "unknown fields"),
+        ('{"version": 2, "files": {}}', "Unsupported baseline version"),
+        ('{"version": 3, "files": {}, "extra": true}', "unknown fields"),
         ('{"files": {}}', "missing fields"),
-        ('{"version": 2}', "missing fields"),
-        ('{"version": 2, "files": {"a.py": true}}', "must be an integer"),
-        ('{"version": 2, "files": {"a.py": 0}}', "must be positive"),
-        ('{"version": 2, "files": {"a.py": -1}}', "must be positive"),
+        ('{"version": 3}', "missing fields"),
+        ('{"version": 3, "files": {"a.py": true}}', "must be an integer"),
+        ('{"version": 3, "files": {"a.py": 0}}', "must be positive"),
+        ('{"version": 3, "files": {"a.py": -1}}', "must be positive"),
     ],
 )
 def test_bad_baseline_configuration_fails(
@@ -178,14 +191,14 @@ def test_bad_baseline_configuration_fails(
 
 def test_load_budget_baseline_rejects_boolean_ceiling(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
-    path.write_text('{"version": 2, "files": {"a.py": true}}', encoding="utf-8")
+    path.write_text('{"version": 3, "files": {"a.py": true}}', encoding="utf-8")
     with pytest.raises(ValueError, match="must be an integer"):
         load_budget_baseline(path)
 
 
 def test_load_budget_baseline_normalizes_paths(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
-    path.write_text('{"version": 2, "files": {"server/app//a.py": 10}}', encoding="utf-8")
+    path.write_text('{"version": 3, "files": {"server/app//a.py": 10}}', encoding="utf-8")
     baseline = load_budget_baseline(path)
     assert baseline == BudgetBaseline(files={"server/app/a.py": 10})
 
@@ -193,7 +206,7 @@ def test_load_budget_baseline_normalizes_paths(tmp_path: Path) -> None:
 def test_load_budget_baseline_rejects_normalized_path_collision(tmp_path: Path) -> None:
     path = tmp_path / "baseline.json"
     path.write_text(
-        '{"version": 2, "files": {"server/app/a.py": 10, "server/app//a.py": 20}}',
+        '{"version": 3, "files": {"server/app/a.py": 10, "server/app//a.py": 20}}',
         encoding="utf-8",
     )
 
@@ -344,7 +357,8 @@ def test_frozen_exemption_rejects_growth_above_exemption_ceiling(tmp_path: Path)
         ceiling=100,
     )
     assert check_file_budgets(root, policy, (exemption,)) == [
-        "server/app/example.py: 101 lines exceeds ceiling 100; split the file or revert growth"
+        "server/app/example.py: 101 effective lines exceeds ceiling 100; "
+        "split the file or revert growth"
     ]
 
 

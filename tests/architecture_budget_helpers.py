@@ -21,7 +21,7 @@ def write_neutral_budget_governance(root: Path) -> None:
         encoding="utf-8",
     )
     (config / "architecture-budgets.json").write_text(
-        '{\n  "version": 2,\n  "files": {}\n}\n', encoding="utf-8"
+        '{\n  "version": 3,\n  "files": {}\n}\n', encoding="utf-8"
     )
     (config / "sql-placeholders-baseline.json").write_text(
         '{\n  "version": 1,\n  "files": {}\n}\n', encoding="utf-8"

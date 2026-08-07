@@ -1,11 +1,5 @@
 import { useMemo, useState } from 'react'
-import {
-  Button,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-} from '@mui/material'
+import { Dialog, DialogContent, DialogTitle } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
 import {
   computeOrderedNodes,
@@ -15,12 +9,14 @@ import type { JobRerunConfirmArgs } from '../JobRerunDialog/useFailureCategories
 import { type FailureCategorySelection } from '../JobRerunDialog/failureCategoryCounts'
 import { JobAllMatchingNodeRow } from './JobAllMatchingNodeRow'
 import { JobAllMatchingFailureCategoryRow } from './JobAllMatchingFailureCategoryRow'
-import styles from '../JobRerunDialog/JobRerunDialog.module.css'
+import { JobAllMatchingRerunFooter } from './JobAllMatchingRerunFooter'
+import { useBatchRerunPreview } from './useBatchRerunPreview'
 
 export type JobAllMatchingRerunDialogProps = {
   open: boolean
   count: number
   jobs: JobSummary[]
+  workspaceId?: string
   workflowDefinition?: WorkflowDefinitionRecord | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   onClose: () => void
@@ -29,12 +25,14 @@ export type JobAllMatchingRerunDialogProps = {
 
 /**
  * Rerun dialog for 'allMatching' selections: from-node or failure-category
- * rerun, both resolved server-side from the selection filter.
+ * rerun, both resolved server-side from the selection filter. The footer
+ * shows the server-computed 「将重跑 N 个任务」 once the preview answers.
  */
 export function JobAllMatchingRerunDialog({
   open,
   count,
   jobs,
+  workspaceId,
   workflowDefinition,
   workflowNodesByKey,
   onClose,
@@ -47,6 +45,16 @@ export function JobAllMatchingRerunDialog({
   const orderedNodes = useMemo(
     () => computeOrderedNodes(jobs, workflowDefinition, workflowNodesByKey),
     [jobs, workflowDefinition, workflowNodesByKey]
+  )
+
+  const preview = useBatchRerunPreview(
+    workspaceId,
+    open,
+    selectedNodeKey
+      ? { kind: 'node', nodeKey: selectedNodeKey }
+      : selection === 'all'
+        ? { kind: 'failedNode' }
+        : { kind: 'category', category: selection }
   )
 
   if (!open) return null
@@ -69,11 +77,6 @@ export function JobAllMatchingRerunDialog({
     onClose()
   }
 
-  const selectedNodeLabel = selectedNodeKey
-    ? (orderedNodes.find((node) => node.key === selectedNodeKey)?.label ??
-      selectedNodeKey)
-    : null
-
   return (
     <Dialog open onClose={onClose}>
       <DialogTitle>批量重跑</DialogTitle>
@@ -92,24 +95,20 @@ export function JobAllMatchingRerunDialog({
             setSelection(value)
           }}
         />
-        <div className={styles.summary}>
-          {selectedNodeLabel
-            ? `重跑节点：${selectedNodeLabel}（按筛选条件由服务端解析）`
-            : '按失败类别重跑（按筛选条件由服务端解析）'}
-        </div>
       </DialogContent>
-      <DialogActions>
-        <Button variant="text" onClick={onClose} disabled={loading}>
-          取消
-        </Button>
-        <Button
-          variant="contained"
-          onClick={handleConfirm}
-          disabled={loading || count === 0}
-        >
-          确认重跑
-        </Button>
-      </DialogActions>
+      <JobAllMatchingRerunFooter
+        eligibleCount={preview.data?.eligible_count}
+        selectedNodeLabel={
+          selectedNodeKey
+            ? (orderedNodes.find((node) => node.key === selectedNodeKey)
+                ?.label ?? selectedNodeKey)
+            : null
+        }
+        loading={loading}
+        count={count}
+        onClose={onClose}
+        onConfirm={handleConfirm}
+      />
     </Dialog>
   )
 }

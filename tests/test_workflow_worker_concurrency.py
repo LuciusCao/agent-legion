@@ -199,6 +199,7 @@ def _make_worker(
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
         config={"workflows": {"enabled": True}},
+        database_url=str(db_path),
         executor_definitions=registry.definitions(),
     )
     worker = WorkflowWorkerThread(
