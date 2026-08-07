@@ -161,7 +161,8 @@ class SkillManager:
         if locked is not None and locked.commit:
             if locked.repo != source.repo or locked.ref != source.ref:
                 raise SkillConfigError(
-                    f"skill {skill_key!r} config differs from skills.lock; refresh the lock"
+                    f"skill {skill_key!r} config differs from the published skill lock; "
+                    "refresh the lock"
                 )
             commit = locked.commit
             if not self._has_commit(cache_dir, commit):
