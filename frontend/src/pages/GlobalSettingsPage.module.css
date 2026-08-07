@@ -35,6 +35,12 @@
   font-size: 13px;
   color: #43474e;
 }
+.groupTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #43474e;
+  margin: 12px 0 8px;
+}
 .currencyInput {
   width: 120px;
   padding: 8px 10px;

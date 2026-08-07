@@ -73,7 +73,9 @@ class OpenClawRuntimeConfig(BaseModel):
 class WorkflowsRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = False
+    # Default on: matches the retired tracked workflow.yaml value
+    # (workflows.enabled: true); tunable via the DB instance settings document.
+    enabled: bool = True
     # Feature gate for DB-backed custom workflow node codes (EXEC-CODE-002).
     # Default on in this phase: self-hosted, workspace editors are all team
     # members (design §7 trust assumption). Disable via

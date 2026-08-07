@@ -27,6 +27,7 @@ from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
+from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
 from server.app.services.ops_metrics import OpsMetricsService
@@ -60,6 +61,9 @@ def create_app(
     )
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
+    # Hydrate instance-level settings from the DB before any service reads
+    # them (executor runtime, cleanup/monitoring config).
+    apply_instance_settings(settings, job_db.path)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
     # Resume state must not survive a restart: dispatch stays off until an

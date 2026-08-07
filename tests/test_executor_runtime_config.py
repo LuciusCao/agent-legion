@@ -146,7 +146,9 @@ def test_openclaw_runtime_config_ignores_extra_fields():
 
 def test_workflows_runtime_config_defaults():
     config = WorkflowsRuntimeConfig()
-    assert config.enabled is False
+    # Default on: matches the retired tracked workflow.yaml value
+    # (workflows.enabled: true).
+    assert config.enabled is True
     assert config.pi.binary == "pi"
 
 

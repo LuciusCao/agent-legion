@@ -27,7 +27,7 @@ def test_repository_split_configuration_builds_application(tmp_path: Path, monke
     ):
         monkeypatch.setenv(key, "")
     settings = load_settings(data_dir=tmp_path / "settings-data")
-    assert settings.config["workflows"]["enabled"] is True
+    assert settings.executor_runtime.workflows.enabled is True
     assert settings.executor_definitions
     app = create_app(data_dir=tmp_path / "app-data", start_worker=False)
     assert app.state.settings.config["data_dir"] == "data"

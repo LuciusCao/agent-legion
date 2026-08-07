@@ -90,7 +90,7 @@ server/app/
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
 - CMS 客户端将网络、响应解析和鉴权失败统一为 `CmsClientError`；业务层只降级明确的
   集成错误，不吞掉编程异常。
-- CORS 来源由 `config/app.yaml` 的 `server.cors` 显式配置；默认仅允许本机 Vite 开发源。
+- CORS 来源由 env `AGENT_LEGION_CORS_ALLOW_ORIGINS` / `AGENT_LEGION_CORS_ALLOW_CREDENTIALS` 显式配置；默认仅允许本机 Vite 开发源。
 
 ## API Surface / Interface
 
@@ -132,6 +132,8 @@ server/app/
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
 | GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
+| GET | `/admin/instance-settings` | `get_instance_settings` | routes/instance_settings.py |
+| PUT | `/admin/instance-settings` | `put_instance_settings` | routes/instance_settings.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
@@ -288,6 +290,11 @@ server/app/
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
+| InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
+| InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
+| InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
+| InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/routes/instance_settings_contracts.py |
+| InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
@@ -469,7 +476,7 @@ server/app/
 
 - `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
-  - 在 `config/workflow.yaml` 中 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
+  - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
   - 视频 Job 由 `video_knowledge` workflow 的节点（`download_video`（code executor）、`transcribe_video`、Agent 阶段、`assemble_video_metadata`、`package_video_job`）处理。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
 - 视频 Job 的 `content_type` 固定为 `knowledge`（`video_capabilities/contracts.py` 强制校验），pipeline 节点序列：
@@ -538,7 +545,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `server/app/configuration/` 负责加载并校验按领域拆分的 YAML 配置。
 
-- `loader.py`: 加载 `config/app.yaml`, `config/agent_legion.yaml`, `config/workflow.yaml` 并合并环境变量覆盖。
+- `loader.py`: 加载 `config/agent_legion.yaml`, `config/workflow.yaml` 并合并环境变量覆盖；`config/app.yaml` 存在即报错（已退役）。
 - `owned_keys.py`: 声明每个配置文件的 owned keys，防止跨文件键冲突。
 
 ### Quality Subsystem
@@ -570,9 +577,13 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
 
-- `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）。
 - `config/agent_legion.yaml`：ASR、OpenClaw 设置。
-- `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
+- `config/workflow.yaml`：workspace executor（`executors`，executor 并发为 `executors.<name>.global_capacity`）。`agents` 仅保留为退役报错桩（写 `agents:` 启动即 fail-fast）。
+
+`config/app.yaml` 已整体退役（存在即启动报错，带迁移指引）：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
+
+- env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers.register_token[_file]` → `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]`（缺省读 `deploy/secrets/agent_worker_register_token`）。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`。代码默认值 = 退役前 tracked yaml 的生效值。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
@@ -590,20 +601,13 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 
 CMS 集成不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞 owned-key 校验报错）：`env` / `bank_version` / `country_id` / `subject_id` / `page_size` 的出厂默认值声明在 `config/workflow.yaml` 的 capability `config_schema`（`fetch_questions` / `download_video`），沿「schema defaults → 节点 config → workspace 覆盖」链解析（Settings UI 可改）；`base_url` 无出厂默认值，由节点/workspace 配置或 env `CMS_BASE_URL` 提供。token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）；单文件 explicit 配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
 
-`config/app.yaml` 额外配置项：
-
-- `data_dir`: 数据根目录
-- `server.cors`: 浏览器跨域来源和 credentials 策略
-- `cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`: 日志与运行目录清理策略
-- `monitoring.sample_interval_seconds` / `retention_days`: 资源监控采样间隔与保留天数
-
-token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
-
 `config/workflow.yaml` 核心配置项：
 
-- `agent_workers`: Agent Worker 注册设置（`register_token` / `register_token_file` 等；token 值亦可经 env `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 注入）
 - `executors`: code / pi / openclaw 执行器定义；code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键
-- `workflows.enabled`: 是否启用 Agent Legion DAG workflow worker
+
+实例级运行时设置（`agent_workers` 限额、`workflows.enabled`、lease/heartbeat/sweeper 时序）不再出现在 yaml，见上文「DB 实例设置」。
+
+token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
 
 Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（全局，workspace_id NULL），经 Studio「Agent 管理」或 `/api/agent-definitions` 做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workspace `default_agent_*`（Settings「Agent 默认配置」）→ 报错（无全局兜底）；thinking 可空（空 = runtime 决定）。
 

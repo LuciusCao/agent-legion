@@ -11,6 +11,8 @@ import yaml
 from server.app.configuration.owned_keys import (
     CONFIG_FILE_KEYS,
     owned_keys_for_file,
+    retired_file_guidance,
+    retired_split_files,
 )
 
 logger = logging.getLogger(__name__)
@@ -38,6 +40,13 @@ class LoadedConfig:
     config: dict[str, Any]
     layout: ConfigLayout
     paths: tuple[Path, ...]
+
+
+def reject_retired_files(config_dir: Path) -> None:
+    """Fail fast when a retired split config file is still present."""
+    retired = retired_split_files(config_dir)
+    if retired:
+        raise ConfigurationLoadError(retired_file_guidance(retired))
 
 
 def detect_layout(config_dir: Path) -> LayoutSelection:
@@ -113,7 +122,9 @@ def load_application_config(
     if config_path is not None:
         mapping = load_yaml_mapping(config_path, allow_missing=True)
         return LoadedConfig(mapping, ConfigLayout.EXPLICIT, (config_path,))
-    selection = detect_layout(root_dir / "config")
+    config_dir = root_dir / "config"
+    reject_retired_files(config_dir)
+    selection = detect_layout(config_dir)
     sections = [(path, load_yaml_mapping(path)) for path in selection.paths]
     for path, mapping in sections:
         validate_owned_keys(path, mapping)
