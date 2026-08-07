@@ -4,8 +4,10 @@ Scans the tracked split configuration files and asserts the hygiene red lines
 hold in the repository itself (the startup-side rejections are covered by
 tests/test_settings.py and tests/test_configuration_loader.py):
 
-- retired secret keys (``cms.token`` / ``cms.token_gen``, config governance G2)
-  never reappear — tokens live in env or the vault;
+- the global ``cms:`` section stays retired — CMS defaults live in the
+  capability ``config_schema``; base_url/token arrive via env or workspace
+  node config (retired ``cms.token`` / ``cms.token_gen``, config governance
+  G2, can never reappear);
 - ``openclaw.skill_safety.repos`` entries stay a pure path allowlist — refs are
   pinned by ``config/skills.lock`` (config governance G3);
 - env-only sections (``vault``, ``auth``) stay out of every yaml file — they
@@ -30,10 +32,14 @@ def _load(name: str) -> dict[str, Any]:
     return data
 
 
-def test_tracked_cms_section_has_no_retired_secret_keys():
-    cms = _load("agent_legion.yaml").get("cms") or {}
-    assert "token" not in cms, "cms.token was retired (G2); use env or a vault binding"
-    assert "token_gen" not in cms, "cms.token_gen was retired (G2); use CMS_* env"
+def test_tracked_split_files_have_no_cms_section():
+    for name in SPLIT_FILES:
+        mapping = _load(name)
+        assert "cms" not in mapping, (
+            f"{name} carries the retired global cms: section; "
+            "CMS defaults live in the capability config_schema, "
+            "base_url/token arrive via env or workspace node config"
+        )
 
 
 def test_tracked_skill_safety_repos_are_path_only():

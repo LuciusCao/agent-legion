@@ -1,7 +1,8 @@
 """CMS endpoint URL derivation (pure functions, no settings side effects).
 
-Node code resolves its effective CMS config (global ``cms:`` defaults
-overridden by the node's config) and derives endpoint URLs here; an explicit
+Node code resolves its effective CMS config (config_schema defaults and
+settings-level env-injected keys overridden by the node's config) and derives
+endpoint URLs here; an explicit
 ``api_url`` / ``question_list_url`` node config value always wins over the
 derived URL. Query params mirror the retired resource-provider chain:
 bank_version / country_id / subject_id on every endpoint, plus page_size on

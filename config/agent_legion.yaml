@@ -8,13 +8,6 @@ asr:
   sensevoice:
     script: server/app/pipeline/transcribe_sensevoice.py
     model_dir: ~/.cache/SenseVoiceSmall
-cms:
-  base_url: https://cms.example.com/v2
-  env: prod
-  bank_version: v5
-  country_id: '1'
-  subject_id: '2'
-  page_size: '50'
 openclaw:
   cwd: .
   timeout_seconds: 600

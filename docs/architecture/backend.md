@@ -493,7 +493,7 @@ server/app/
 
 Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）：
 
-- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经节点 config（全局 `cms:` 默认值 ← workspace 节点覆盖）+ vault 完成。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
+- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经节点 config（capability `config_schema` 出厂默认值 ← 节点/workspace 覆盖，叠加 settings 层 env 注入的 `cms` 键）+ vault 完成。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
 - `phase=None`：direct 模式，不访问外部资源。
 
 `phase="intake"`（intake 期调 CMS 做 1:N fan-out）已从 question resolver 退役：intake 不再调用 CMS，非法 id/code 在执行期以 job 失败暴露。
@@ -571,7 +571,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
 
 - `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）。
-- `config/agent_legion.yaml`：ASR、CMS、OpenClaw 设置。
+- `config/agent_legion.yaml`：ASR、OpenClaw 设置。
 - `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
@@ -584,10 +584,11 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 - `asr.whisper.vad_model`: 可选 VAD 模型路径
 - `asr.sensevoice.script`: SenseVoice 转写脚本路径
 - `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
 - `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
 - `openclaw.timeout_seconds`: 默认 600 秒
 - `openclaw.skill_safety`: OpenClaw skill 安全校验配置；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 `config/skills.lock`（locked commit）解析（config 治理 G3 单源化），yaml 中写 `ref` 会在启动校验时报错
+
+CMS 集成不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞 owned-key 校验报错）：`env` / `bank_version` / `country_id` / `subject_id` / `page_size` 的出厂默认值声明在 `config/workflow.yaml` 的 capability `config_schema`（`fetch_questions` / `download_video`），沿「schema defaults → 节点 config → workspace 覆盖」链解析（Settings UI 可改）；`base_url` 无出厂默认值，由节点/workspace 配置或 env `CMS_BASE_URL` 提供。token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）；单文件 explicit 配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
 
 `config/app.yaml` 额外配置项：
 

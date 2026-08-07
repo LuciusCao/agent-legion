@@ -517,7 +517,7 @@ invariants:
         gate: full
 
   - id: CONFIG-YAML-001
-    statement: "Tracked split config yaml files carry no secret values: the retired yaml keys `cms.token` / `cms.token_gen` (G2) and `openclaw.skill_safety` refs (G3, pinned by config/skills.lock) are rejected at startup, and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
+    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; base_url/token arrive via env CMS_BASE_URL / CMS_TOKEN or workspace node config), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); `openclaw.skill_safety` refs (G3, pinned by config/skills.lock) are rejected at startup, and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
     owner: config
     risk: high
     evidence:

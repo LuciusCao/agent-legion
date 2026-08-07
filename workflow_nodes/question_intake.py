@@ -33,9 +33,11 @@ def _decode_json_object(value: Any) -> dict[str, Any]:
 
 
 def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
-    """Effective CMS config: global ``cms:`` defaults overridden by node config.
+    """Effective CMS config: settings-level ``cms`` (env-injected) + node config.
 
-    The node config token arrives already resolved from the vault at dispatch
+    Node config carries the config_schema defaults (factory values) plus any
+    node/workspace overrides and wins over the settings-level keys. The node
+    config token arrives already resolved from the vault at dispatch
     time; it is a workspace-scoped credential, so mark it to win over the
     env-level global default (same precedence as the retired binding chain).
     """

@@ -204,6 +204,8 @@ openclaw:
 
 
 def test_cms_credentials_allowed_when_no_cms_endpoint(tmp_path, monkeypatch):
+    # No CMS endpoint anywhere: neutralize the conftest-injected CMS_BASE_URL.
+    monkeypatch.setenv("CMS_BASE_URL", "")
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
