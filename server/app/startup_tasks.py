@@ -65,3 +65,8 @@ class BackgroundTasks:
             # database pools; in-flight thread work (asyncio.to_thread) is not
             # interruptible, so bound the wait and let the timeout win.
             await asyncio.wait(tasks, timeout=timeout_seconds)
+        # Daemon enqueue workers block on queue.get forever; release them so
+        # long-lived processes (tests create many apps) do not leak threads.
+        agent_dispatch = getattr(app.state, "agent_dispatch", None)
+        if agent_dispatch is not None:
+            agent_dispatch.enqueue_pool.close()

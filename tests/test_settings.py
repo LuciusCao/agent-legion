@@ -67,7 +67,7 @@ def test_env_example_lists_all_cms_variables():
 
 
 def test_vault_master_key_env_overrides_map_to_config(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", "fernet-key-value")
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", "/run/secrets/vault_key")
@@ -80,7 +80,7 @@ def test_vault_master_key_env_overrides_map_to_config(tmp_path, monkeypatch):
 
 
 def test_database_url_environment_override(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     # Skip the worktree .env so only the names set below are in play.
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
@@ -93,7 +93,7 @@ def test_database_url_environment_override(tmp_path, monkeypatch):
 
 
 def test_cms_env_alias_conflict_rejected_at_startup(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     monkeypatch.setenv("CMS_TOKEN", "new-token")
@@ -106,7 +106,7 @@ def test_cms_env_alias_conflict_rejected_at_startup(tmp_path, monkeypatch):
 
 
 def test_cms_base_url_alias_only_applies_with_warning(tmp_path, monkeypatch, caplog):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     monkeypatch.setenv("BASECMS_BASE_URL", "http://cms.alias.example/v2")
@@ -120,7 +120,7 @@ def test_cms_base_url_alias_only_applies_with_warning(tmp_path, monkeypatch, cap
 
 
 def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: data/app.sqlite}\n", encoding="utf-8")
     monkeypatch.delenv("AGENT_LEGION_DATABASE_URL", raising=False)
     # Worktrees carry a real AGENT_LEGION_DATABASE_URL in the project .env;
@@ -132,7 +132,7 @@ def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
 
 
 def test_load_settings_rejects_retired_yaml_cms_token(tmp_path):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text(
         "database: {url: postgresql://configured/app}\ncms: {token: yaml-token}\n",
         encoding="utf-8",
@@ -148,7 +148,7 @@ def test_load_settings_rejects_retired_yaml_cms_token(tmp_path):
 
 
 def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text(
         "database: {url: postgresql://configured/app}\n"
         "cms:\n"
@@ -177,9 +177,8 @@ def test_split_layout_rejects_cms_section_as_unowned(tmp_path, monkeypatch):
     """
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
     (config_dir / "agent_legion.yaml").write_text("cms: {token: yaml-token}\n", encoding="utf-8")
-    (config_dir / "workflow.yaml").write_text("workflows: {enabled: false}\n", encoding="utf-8")
+    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
 
     with pytest.raises(ValueError, match=r"agent_legion\.yaml.*unowned.*cms"):
@@ -223,7 +222,6 @@ def test_cms_env_takes_precedence_over_agent_legion_cms_env(tmp_path, monkeypatc
 def _write_split_config(root: Path) -> None:
     config_dir = root / "config"
     config_dir.mkdir()
-    (config_dir / "app.yaml").write_text("data_dir: data\nserver: {}\n", encoding="utf-8")
     (config_dir / "agent_legion.yaml").write_text(
         "asr:\n"
         "  provider: whisper\n"
@@ -239,10 +237,7 @@ def _write_split_config(root: Path) -> None:
         "    - agent\n",
         encoding="utf-8",
     )
-    (config_dir / "workflow.yaml").write_text(
-        "workflows:\n  enabled: false\nexecutors: {}\n",
-        encoding="utf-8",
-    )
+    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
 
 
 def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
@@ -273,15 +268,14 @@ def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
     (config_dir / "agent_legion.yaml").write_text(
         "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
         encoding="utf-8",
     )
-    (config_dir / "workflow.yaml").write_text(
-        "workflows: {enabled: false}\nexecutors: {}\n", encoding="utf-8"
-    )
+    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+    # data_dir is env-only after the app.yaml retirement.
+    monkeypatch.setenv("AGENT_LEGION_DATA_DIR", str(tmp_path / "runtime"))
     # The global yaml cms: section is retired; base_url arrives via env.
     monkeypatch.setenv("CMS_BASE_URL", "https://cms.example/v2")
     settings = load_settings()
@@ -292,6 +286,21 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     assert "question_url" not in settings.config["cms"]
     assert "question_detail_url" not in settings.config["cms"]
     assert "question_list_url" not in settings.config["cms"]
+
+
+def test_split_layout_rejects_retired_app_yaml(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
+    (config_dir / "agent_legion.yaml").write_text(
+        "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
+        encoding="utf-8",
+    )
+    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
+    monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(ValueError, match=r"retired.*app\.yaml"):
+        load_settings()
 
 
 def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):

@@ -8,9 +8,8 @@ Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生�
 
 ```
 config/
-├── app.yaml                  # PostgreSQL、应用路径、HTTP 设置、清理、监控
 ├── agent_legion.yaml         # ASR、OpenClaw 配置
-├── workflow.yaml             # Workspace 执行器与工作流运行时开关
+├── workflow.yaml             # Workspace 执行器定义
 ├── skills.yaml               # 外部 Pi skill 源声明
 ├── skills.lock               # 解析后的 skill commit 锁定
 ├── agent-worker.example.yaml # Agent Worker 配置模板
@@ -52,18 +51,8 @@ scripts/
 
 ### 顶层配置项
 
-- `agent_workers`
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
-- `cleanup`
-- `data_dir` — 数据目录
-- `database`
 - `executors` — Workspace 执行器定义
-- `heartbeat_failure_threshold`
-- `heartbeat_interval_seconds`
-- `lease_ttl_seconds`
-- `monitoring`
 - `openclaw` — OpenClaw 命令模板与工作目录
-- `server` — HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）
-- `workflows` — Agent Legion DAG 工作流开关
 
 <!-- END AUTO-GENERATED -->

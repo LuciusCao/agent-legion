@@ -1,8 +1,3 @@
-agent_workers:
-  register_token: ""
-  register_token_file: "deploy/secrets/agent_worker_register_token"
-  max_archive_bytes: 67108864
-  min_protocol_version: 1
 executors:
   code-default:
     kind: code
@@ -109,8 +104,3 @@ executors:
         path: workflow_nodes/video_assemble.py
       package_video_job:
         path: workflow_nodes/video_package.py
-heartbeat_interval_seconds: 10
-lease_ttl_seconds: 90
-heartbeat_failure_threshold: 3
-workflows:
-  enabled: true

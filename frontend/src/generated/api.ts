@@ -4,6 +4,24 @@
  */
 
 export interface paths {
+  '/api/admin/instance-settings': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Instance Settings */
+    get: operations['get_instance_settings_api_admin_instance_settings_get']
+    /** Put Instance Settings */
+    put: operations['put_instance_settings_api_admin_instance_settings_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/token-usage-pricing': {
     parameters: {
       query?: never
@@ -2378,6 +2396,68 @@ export interface components {
         [key: string]: string
       } | null
     }
+    /** InstanceAgentWorkersSettings */
+    InstanceAgentWorkersSettings: {
+      /** Max Archive Bytes */
+      max_archive_bytes: number
+      /** Min Protocol Version */
+      min_protocol_version: number
+    }
+    /** InstanceCleanupSettings */
+    InstanceCleanupSettings: {
+      /** Interval Seconds */
+      interval_seconds: number
+      /** Log Retention Days */
+      log_retention_days: number
+      /** Run Dir Retention Days */
+      run_dir_retention_days: number
+    }
+    /** InstanceMonitoringSettings */
+    InstanceMonitoringSettings: {
+      /** Retention Days */
+      retention_days: number
+      /** Sample Interval Seconds */
+      sample_interval_seconds: number
+    }
+    /** InstanceSettingsResponse */
+    InstanceSettingsResponse: {
+      agent_workers: components['schemas']['InstanceAgentWorkersSettings']
+      cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Heartbeat Failure Threshold */
+      heartbeat_failure_threshold: number
+      /** Heartbeat Interval Seconds */
+      heartbeat_interval_seconds: number
+      /** Lease Ttl Seconds */
+      lease_ttl_seconds: number
+      monitoring: components['schemas']['InstanceMonitoringSettings']
+      /** Sweeper Enabled */
+      sweeper_enabled: boolean
+      /** Sweeper Interval Seconds */
+      sweeper_interval_seconds: number
+      workflows: components['schemas']['InstanceWorkflowsSettings']
+    }
+    /** InstanceSettingsUpdate */
+    InstanceSettingsUpdate: {
+      agent_workers: components['schemas']['InstanceAgentWorkersSettings']
+      cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Heartbeat Failure Threshold */
+      heartbeat_failure_threshold: number
+      /** Heartbeat Interval Seconds */
+      heartbeat_interval_seconds: number
+      /** Lease Ttl Seconds */
+      lease_ttl_seconds: number
+      monitoring: components['schemas']['InstanceMonitoringSettings']
+      /** Sweeper Enabled */
+      sweeper_enabled: boolean
+      /** Sweeper Interval Seconds */
+      sweeper_interval_seconds: number
+      workflows: components['schemas']['InstanceWorkflowsSettings']
+    }
+    /** InstanceWorkflowsSettings */
+    InstanceWorkflowsSettings: {
+      /** Enabled */
+      enabled: boolean
+    }
     /** JobBatchRequest */
     JobBatchRequest: {
       /**
@@ -4578,6 +4658,59 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
+  get_instance_settings_api_admin_instance_settings_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InstanceSettingsResponse']
+        }
+      }
+    }
+  }
+  put_instance_settings_api_admin_instance_settings_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InstanceSettingsUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InstanceSettingsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_token_usage_pricing_api_admin_token_usage_pricing_get: {
     parameters: {
       query?: never

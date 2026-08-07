@@ -16,6 +16,7 @@ import type {
   TokenUsagePricingConfigResponse,
   TokenUsagePricingRate,
 } from '../api/tokenUsagePricing'
+import { InstanceSettingsSection } from './globalSettings/InstanceSettingsSection'
 import styles from './GlobalSettingsPage.module.css'
 
 interface RateRow {
@@ -294,6 +295,7 @@ function GlobalSettingsEditor({
             setRows((prev) => prev.filter((_, i) => i !== index))
           }
         />
+        <InstanceSettingsSection />
       </div>
     </AppShell>
   )
