@@ -22,7 +22,7 @@ from typing import Any
 import yaml
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
-SPLIT_FILES = ("agent_legion.yaml", "workflow.yaml")
+SPLIT_FILES = ("agent_legion.yaml",)
 ENV_ONLY_SECTIONS = ("vault", "auth")
 
 

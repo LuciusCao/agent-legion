@@ -135,6 +135,15 @@ export type AgentDefinitionPayload = ApiSchemas['AgentDefinitionPayload']
 export type AgentCreateRequest = ApiSchemas['AgentCreateRequest']
 export type AgentRuntime = AgentDefinitionPayload['runtime']
 
+export type ExecutorListItem = ApiSchemas['ExecutorListItem']
+export type ExecutorListResponse = ApiSchemas['ExecutorListResponse']
+export type ExecutorDetailResponse = ApiSchemas['ExecutorDetailResponse']
+export type ExecutorVersion = ApiSchemas['ExecutorVersionResponse']
+export type ExecutorVersionSummary = ApiSchemas['ExecutorVersionSummary']
+export type ExecutorVersionsResponse = ApiSchemas['ExecutorVersionsResponse']
+export type ExecutorPayload = ApiSchemas['ExecutorDefinitionPayload']
+export type ExecutorCreateRequest = ApiSchemas['ExecutorCreateRequest']
+
 export type SkillValidateResponse = ApiSchemas['SkillValidateResponse']
 export type SkillTagsResponse = ApiSchemas['SkillTagsResponse']
 

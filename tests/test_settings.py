@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 import server.app.cms.env as cms_env
+from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.kinds import UnknownExecutorKindError
 from server.app.settings import load_env_file, load_settings
 
@@ -178,7 +179,6 @@ def test_split_layout_rejects_cms_section_as_unowned(tmp_path, monkeypatch):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
     (config_dir / "agent_legion.yaml").write_text("cms: {token: yaml-token}\n", encoding="utf-8")
-    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
 
     with pytest.raises(ValueError, match=r"agent_legion\.yaml.*unowned.*cms"):
@@ -237,7 +237,6 @@ def _write_split_config(root: Path) -> None:
         "    - agent\n",
         encoding="utf-8",
     )
-    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
 
 
 def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
@@ -272,7 +271,6 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
         "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
         encoding="utf-8",
     )
-    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     # data_dir is env-only after the app.yaml retirement.
     monkeypatch.setenv("AGENT_LEGION_DATA_DIR", str(tmp_path / "runtime"))
@@ -296,7 +294,6 @@ def test_split_layout_rejects_retired_app_yaml(tmp_path, monkeypatch):
         "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
         encoding="utf-8",
     )
-    (config_dir / "workflow.yaml").write_text("executors: {}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
 
     with pytest.raises(ValueError, match=r"retired.*app\.yaml"):
@@ -314,7 +311,14 @@ def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):
     assert settings.config.get("worker") is None
 
 
-def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
+def test_load_settings_ignores_executors_yaml_section(tmp_path, monkeypatch):
+    """Executor definitions moved to the DB (schema v30): yaml is inert.
+
+    ``load_settings`` no longer parses an ``executors:`` section — the catalog
+    is seeded from the built-in factory definitions and hydrated from
+    versioned_entities at app startup (restart-effective). A stray executors
+    section in an explicit config is ignored rather than validated.
+    """
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
@@ -326,12 +330,9 @@ def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError) as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    message = str(exc_info.value)
-    assert "bad-exec" in message
-    assert "global_capacity" in message
+    assert settings.executor_definitions == {}
 
 
 def test_load_settings_rejects_retired_agents_yaml(tmp_path, monkeypatch):
@@ -364,25 +365,14 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
 
-def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
+def test_load_settings_starts_with_empty_executor_definitions(tmp_path, monkeypatch):
+    """executor_definitions 在 load_settings 时为空：DB hydration 由 create_app 完成。"""
     config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\n"
-        "executors:\n"
-        "  code-default:\n"
-        "    kind: code\n"
-        "    global_capacity: 4\n"
-        "    capabilities:\n"
-        "      fetch_questions:\n"
-        "        path: workflow_nodes/question_intake.py\n",
-        encoding="utf-8",
-    )
+    config_path.write_text("data_dir: data\n", encoding="utf-8")
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert "code-default" in settings.executor_definitions
-    assert settings.executor_definitions["code-default"].kind == "code"
-    assert settings.executor_definitions["code-default"].global_capacity == 4
+    assert settings.executor_definitions == {}
 
 
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
@@ -454,20 +444,12 @@ def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeyp
     assert "command_template" in str(exc_info.value)
 
 
-def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
-    config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\n"
-        "executors:\n"
-        "  weird-exec:\n"
-        "    kind: unknown\n"
-        "    global_capacity: 1\n"
-        "    capabilities: {}\n",
-        encoding="utf-8",
-    )
-
+def test_unknown_executor_kind_rejected_at_definition_load() -> None:
+    """Unknown kinds fail in the definition loader (save_draft validation path)."""
     with pytest.raises(UnknownExecutorKindError) as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+        load_executor_definitions(
+            {"weird-exec": {"kind": "unknown", "global_capacity": 1, "capabilities": {}}}
+        )
 
     assert "weird-exec" in str(exc_info.value)
 

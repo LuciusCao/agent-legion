@@ -19,34 +19,23 @@ def _write(path: Path, text: str = "{}\n") -> None:
 
 
 def test_detect_layout_accepts_complete_split(tmp_path: Path):
-    for name in ("agent_legion.yaml", "workflow.yaml"):
-        _write(tmp_path / name)
+    _write(tmp_path / "agent_legion.yaml")
     assert detect_layout(tmp_path).layout is ConfigLayout.SPLIT
 
 
-@pytest.mark.parametrize(
-    "present",
-    [
-        set(),
-        {"workflow.yaml"},
-        {"agent_legion.yaml"},
-    ],
-)
-def test_detect_layout_rejects_partial_split(tmp_path: Path, present: set[str]):
-    for name in present:
-        _write(tmp_path / name)
+def test_detect_layout_rejects_missing_split_file(tmp_path: Path):
     with pytest.raises(ConfigurationLoadError) as exc_info:
         detect_layout(tmp_path)
     message = str(exc_info.value)
     assert "present=" in message
     assert "missing=" in message
+    assert "agent_legion.yaml" in message
 
 
 def test_retired_app_yaml_is_rejected_with_migration_guidance(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write(config_dir / "app.yaml", "database: {url: postgresql://configured/app}\n")
     _write(config_dir / "agent_legion.yaml")
-    _write(config_dir / "workflow.yaml")
     with pytest.raises(ConfigurationLoadError, match=r"retired.*app\.yaml"):
         load_application_config(tmp_path)
 
@@ -61,23 +50,32 @@ def test_retired_app_yaml_alone_is_rejected(tmp_path: Path):
     assert "instance-settings" in message
 
 
+def test_retired_workflow_yaml_is_rejected_with_migration_guidance(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    _write(config_dir / "agent_legion.yaml")
+    _write(config_dir / "workflow.yaml", "executors: {}\n")
+    with pytest.raises(ConfigurationLoadError) as exc_info:
+        load_application_config(tmp_path)
+    message = str(exc_info.value)
+    assert "workflow.yaml" in message
+    assert "versioned_entities" in message
+    assert "Studio" in message
+
+
 def test_split_layout_merges_owned_keys(tmp_path: Path):
     config_dir = tmp_path / "config"
     _write(config_dir / "agent_legion.yaml", "asr: {provider: auto}\n")
-    _write(config_dir / "workflow.yaml", "executors: {}\n")
     loaded = load_application_config(tmp_path)
     assert loaded.layout is ConfigLayout.SPLIT
     assert loaded.config == {
         "asr": {"provider": "auto"},
-        "executors": {},
     }
 
 
-def test_split_layout_rejects_key_in_wrong_file(tmp_path: Path):
+def test_split_layout_rejects_unowned_key(tmp_path: Path):
     config_dir = tmp_path / "config"
-    _write(config_dir / "workflow.yaml", "asr: {}\n")
-    _write(config_dir / "agent_legion.yaml")
-    with pytest.raises(ConfigurationLoadError, match="workflow.yaml.*asr"):
+    _write(config_dir / "agent_legion.yaml", "executors: {}\n")
+    with pytest.raises(ConfigurationLoadError, match="agent_legion.yaml.*executors"):
         load_application_config(tmp_path)
 
 
@@ -125,9 +123,9 @@ def test_load_yaml_mapping_does_not_leak_secret_in_error(tmp_path: Path):
 
 
 def test_validate_owned_keys_rejects_unowned_keys(tmp_path: Path):
-    path = tmp_path / "workflow.yaml"
+    path = tmp_path / "agent_legion.yaml"
     _write(path, "{}")
-    with pytest.raises(ConfigurationLoadError, match="workflow.yaml.*unowned"):
+    with pytest.raises(ConfigurationLoadError, match="agent_legion.yaml.*unowned"):
         validate_owned_keys(path, {"cms": {}, "unknown_key": []})
 
 

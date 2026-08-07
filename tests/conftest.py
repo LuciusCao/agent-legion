@@ -1,6 +1,7 @@
 import json
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -26,6 +27,11 @@ from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import AgentService, reset_published_agent_cache
+from server.app.services.executor_definition_service import (
+    ExecutorDefinitionService,
+    reset_published_executor_cache,
+    seed_builtin_executor_definitions,
+)
 from server.app.settings import load_settings
 
 # Test Agent catalog: mirrors the retired config/workflow.yaml `agents:`
@@ -98,6 +104,15 @@ def _seed_agent_definitions() -> None:
     for agent_id, definition in _TEST_AGENT_DEFINITIONS.items():
         service.save_draft(agent_id, definition, created_by="test-seed")
         service.publish(agent_id)
+
+
+# Test executor catalog: the built-in factory definitions (retired
+# config/workflow.yaml executors section) seeded via ExecutorDefinitionService
+# after every TRUNCATE, mirroring the app startup seed so published executor
+# definitions exist before any app hydration reads them.
+def _seed_executor_definitions() -> None:
+    service = ExecutorDefinitionService(TEST_DATABASE_URL, Path(__file__).resolve().parents[1])
+    seed_builtin_executor_definitions(service)
 
 
 # Deterministic pricing seeded into global_settings after every TRUNCATE (see
@@ -192,6 +207,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_agent_catalog_cutover_migration.py",
         "tests/db/test_code_executor_migration.py",
         "tests/db/test_custom_node_codes_migration.py",
+        "tests/db/test_executor_entity_type_migration.py",
         "tests/db/test_local_executor_removal_migration.py",
         "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",
@@ -421,6 +437,8 @@ def _isolate_postgres_database(request):
         _reset_schema_data()
     reset_published_agent_cache()
     _seed_agent_definitions()
+    reset_published_executor_cache()
+    _seed_executor_definitions()
     yield
     if fresh:
         # Erase any DDL drift the test left behind so later TRUNCATE-isolated

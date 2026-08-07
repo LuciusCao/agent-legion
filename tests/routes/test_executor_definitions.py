@@ -1,0 +1,172 @@
+"""DB-backed executor definition catalog routes (schema v30)."""
+
+from __future__ import annotations
+
+BASE = "/api/executor-definitions"
+PAYLOAD_V1 = {
+    "kind": "code",
+    "global_capacity": 2,
+    "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+}
+PAYLOAD_V2 = {
+    "kind": "code",
+    "global_capacity": 4,
+    "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+}
+
+
+def test_list_contains_seeded_builtin(client) -> None:
+    listed = client.get(BASE)
+    assert listed.status_code == 200
+    executors = {item["executor_id"]: item for item in listed.json()["executors"]}
+    seeded = executors["code-default"]
+    assert seeded["kind"] == "code"
+    assert seeded["global_capacity"] == 16
+    assert seeded["status"] == "published"
+    assert "fetch_questions" in seeded["capabilities"]
+    assert len(seeded["capabilities"]) == 9
+
+
+def test_create_draft_publish_flow(client) -> None:
+    created = client.post(BASE, json={"executor_id": "code-extra", **PAYLOAD_V1})
+    assert created.status_code == 200
+    body = created.json()
+    assert body["executor_id"] == "code-extra"
+    assert body["version"] == 1
+    assert body["status"] == "draft"
+    assert body["created_by"].startswith("user:")
+    assert body["definition"]["global_capacity"] == 2
+
+    detail = client.get(f"{BASE}/code-extra")
+    assert detail.status_code == 200
+    assert detail.json()["latest"]["status"] == "draft"
+    assert detail.json()["published"] is None
+
+    published = client.post(f"{BASE}/code-extra/publish")
+    assert published.status_code == 200
+    assert published.json()["status"] == "published"
+    assert published.json()["published_at"] is not None
+
+    detail = client.get(f"{BASE}/code-extra").json()
+    assert detail["published"]["version"] == 1
+
+
+def test_list_shows_latest_per_executor(client) -> None:
+    client.post(BASE, json={"executor_id": "code-extra", **PAYLOAD_V1})
+    client.post(f"{BASE}/code-extra/publish")
+    client.put(f"{BASE}/code-extra/draft", json=PAYLOAD_V2)
+
+    listed = client.get(BASE)
+    assert listed.status_code == 200
+    executors = {item["executor_id"]: item for item in listed.json()["executors"]}
+    assert executors["code-extra"]["status"] == "draft"
+    assert executors["code-extra"]["has_draft"] is True
+    assert executors["code-extra"]["version"] == 2
+    assert executors["code-extra"]["global_capacity"] == 4
+
+
+def test_versions_and_rollback(client) -> None:
+    client.post(BASE, json={"executor_id": "code-extra", **PAYLOAD_V1})
+    client.post(f"{BASE}/code-extra/publish")
+    client.put(f"{BASE}/code-extra/draft", json=PAYLOAD_V2)
+    client.post(f"{BASE}/code-extra/publish")
+
+    versions = client.get(f"{BASE}/code-extra/versions").json()["versions"]
+    assert [row["version"] for row in versions] == [2, 1]
+    assert {row["version"]: row["status"] for row in versions} == {
+        1: "archived",
+        2: "published",
+    }
+    # The list stays lean: no definition payload in version summaries.
+    assert "definition" not in versions[0]
+
+    rolled = client.post(f"{BASE}/code-extra/rollback", json={"version": 1})
+    assert rolled.status_code == 200
+    assert rolled.json()["version"] == 3
+    assert rolled.json()["status"] == "published"
+    assert rolled.json()["definition"]["global_capacity"] == 2
+
+
+def test_copy_creates_draft(client) -> None:
+    client.post(BASE, json={"executor_id": "code-extra", **PAYLOAD_V1})
+    client.post(f"{BASE}/code-extra/publish")
+
+    copied = client.post(f"{BASE}/code-extra/copy", json={"new_executor_id": "code-fork"})
+    assert copied.status_code == 200
+    body = copied.json()
+    assert body["executor_id"] == "code-fork"
+    assert body["version"] == 1
+    assert body["status"] == "draft"
+
+    missing = client.post(f"{BASE}/code-missing/copy", json={"new_executor_id": "code-fork2"})
+    assert missing.status_code == 404
+
+
+def test_archive_all(client) -> None:
+    client.post(BASE, json={"executor_id": "code-extra", **PAYLOAD_V1})
+    client.post(f"{BASE}/code-extra/publish")
+
+    archived = client.delete(f"{BASE}/code-extra")
+    assert archived.status_code == 200
+    assert archived.json()["archived"] == 1
+
+    detail = client.get(f"{BASE}/code-extra").json()
+    assert detail["published"] is None
+    assert detail["latest"]["status"] == "archived"
+
+
+def test_unknown_executor_404(client) -> None:
+    assert client.get(f"{BASE}/code-missing").status_code == 404
+    assert client.get(f"{BASE}/code-missing/versions").status_code == 404
+    assert client.post(f"{BASE}/code-missing/publish").status_code == 404
+
+
+def test_invalid_definition_rejected(client) -> None:
+    unsafe_path = client.post(
+        BASE,
+        json={
+            "executor_id": "code-bad",
+            **PAYLOAD_V1,
+            "capabilities": {"x": {"path": "../outside.py"}},
+        },
+    )
+    assert unsafe_path.status_code == 422
+    bad_schema = client.post(
+        BASE,
+        json={
+            "executor_id": "code-bad",
+            **PAYLOAD_V1,
+            "capabilities": {
+                "x": {
+                    "path": "workflow_nodes/question_clean_parse.py",
+                    "config_schema": {"type": "object", "properties": {"bad": {"type": "nope"}}},
+                }
+            },
+        },
+    )
+    assert bad_schema.status_code == 422
+    unknown_kind = client.post(
+        BASE, json={"executor_id": "code-bad", **PAYLOAD_V1, "kind": "quantum"}
+    )
+    assert unknown_kind.status_code == 422
+
+
+def test_publish_rejects_path_outside_repo(client) -> None:
+    payload = {
+        "kind": "code",
+        "global_capacity": 1,
+        "capabilities": {"x": {"path": "workflow_nodes/does_not_exist.py"}},
+    }
+    assert client.post(BASE, json={"executor_id": "code-bad", **payload}).status_code == 200
+
+    rejected = client.post(f"{BASE}/code-bad/publish")
+    assert rejected.status_code == 400
+    assert "publish rejected" in rejected.json()["detail"]
+
+
+def test_endpoints_require_auth(anon_client) -> None:
+    assert anon_client.get(BASE).status_code == 401
+    assert anon_client.post(BASE, json={"executor_id": "x", **PAYLOAD_V1}).status_code == 401
+    assert anon_client.put(f"{BASE}/code-default/draft", json=PAYLOAD_V1).status_code == 401
+    assert anon_client.post(f"{BASE}/code-default/publish").status_code == 401
+    assert anon_client.delete(f"{BASE}/code-default").status_code == 401
