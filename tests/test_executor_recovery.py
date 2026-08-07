@@ -46,7 +46,7 @@ def repo(tmp_db: str, queries: JobQueries) -> ExecutorLeaseRepository:
 
 @pytest.fixture
 def broker(tmp_db: str, tmp_path: Path) -> AgentExecutionBroker:
-    return AgentExecutionBroker(tmp_db, bundle_dir=tmp_path / "agent_bundles")
+    return AgentExecutionBroker(tmp_db, bundle_dir=tmp_path / "agent_bundles", data_dir=tmp_path)
 
 
 def _local_node(key: str) -> WorkflowNode:

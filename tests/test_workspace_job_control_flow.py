@@ -242,7 +242,9 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
         definition = WorkflowCatalogService(app.state.settings).definition(WORKFLOW_KEY)
         registry = _make_registry()
-        leases = ExecutorLeaseRepository(app.state.job_db.path)
+        leases = ExecutorLeaseRepository(
+            app.state.job_db.path, data_dir=app.state.settings.data_dir
+        )
         worker = _make_worker(app.state.job_db, leases, registry, app.state.settings, definition)
 
         # 2. run-to claims only the target closure.

@@ -164,7 +164,7 @@ def _make_pi_worker(
         definitions={"pi-default": executor_def},
     )
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    leases = ExecutorLeaseRepository(db_path)
+    leases = ExecutorLeaseRepository(db_path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,

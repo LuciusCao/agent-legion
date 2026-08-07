@@ -34,7 +34,7 @@ def _seed_queued_request(job_db, *, job_id: str, workspace_id: str = "test-works
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
             (workspace_id,),
         )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     assert broker.enqueue(
         AgentExecutionRequest(
             workspace_id=workspace_id,
@@ -65,7 +65,7 @@ def _register_worker(worker_id: str, *, labels: dict[str, str] | None = None) ->
 
 def test_empty_claim_on_empty_queue_fires_restock_once_per_debounce(job_db) -> None:
     _register_worker("worker-empty-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     calls: list[int] = []
     broker.empty_claim.on_empty_queue = lambda: calls.append(1)
 
@@ -77,7 +77,7 @@ def test_empty_claim_on_empty_queue_fires_restock_once_per_debounce(job_db) -> N
 
 def test_restock_fires_again_after_debounce(job_db) -> None:
     _register_worker("worker-empty-2")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     calls: list[int] = []
     broker.empty_claim.on_empty_queue = lambda: calls.append(1)
 
@@ -93,7 +93,7 @@ def test_empty_claim_with_queued_stock_does_not_fire(job_db) -> None:
     # Worker cannot run the only queued request (label mismatch), so the claim
     # comes back empty while stock exists: no restock signal.
     _register_worker("worker-mismatch", labels={"arch": "x86"})
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     calls: list[int] = []
     broker.empty_claim.on_empty_queue = lambda: calls.append(1)
 
@@ -105,7 +105,7 @@ def test_empty_claim_with_queued_stock_does_not_fire(job_db) -> None:
 def test_successful_claim_does_not_fire(job_db) -> None:
     _seed_queued_request(job_db, job_id="job-claimable")
     _register_worker("worker-hungry")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     calls: list[int] = []
     broker.empty_claim.on_empty_queue = lambda: calls.append(1)
 
@@ -116,6 +116,6 @@ def test_successful_claim_does_not_fire(job_db) -> None:
 
 def test_empty_claim_without_callback_is_noop(job_db) -> None:
     _register_worker("worker-noop")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert broker.claim("worker-noop") is None

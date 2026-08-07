@@ -129,7 +129,7 @@ def make_worker(
     executor_runtime: ExecutorRuntimeConfig | None = None,
 ) -> WorkflowWorkerThread:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    leases = ExecutorLeaseRepository(db_path)
+    leases = ExecutorLeaseRepository(db_path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,

@@ -162,7 +162,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
         )
         jobs.append(job)
 
-    repo = ExecutorLeaseRepository(job_db.path)
+    repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
     claim_specs = [
         ("code-default", "fetch", "fetch_questions", 16, None),
         ("openclaw-main", "review", "review", 8, None),
@@ -261,7 +261,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
             node_limits=[],
         )
 
-    repo = ExecutorLeaseRepository(job_db.path)
+    repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
     for i in range(128):
         owner = other
         job = job_db.create_job(
