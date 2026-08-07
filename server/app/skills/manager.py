@@ -12,6 +12,7 @@ from pathlib import Path
 import yaml
 from filelock import FileLock
 
+from server.app.skills.cache_state import cache_at_commit
 from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
 
@@ -173,8 +174,10 @@ class SkillManager:
                     )
                     self._write_lock_unlocked(lock)
 
-        self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
-        self._run_git(["-C", str(cache_dir), "clean", "-fd"])
+        # Read-only fast path (issue #42).
+        if not cache_at_commit(self._run_git, cache_dir, commit):
+            self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
+            self._run_git(["-C", str(cache_dir), "clean", "-fd"])
 
     def _refresh_source(
         self,
@@ -263,6 +266,9 @@ class SkillManager:
     def _cache_lock_for(self, cache_dir: Path) -> FileLock:
         key = str(cache_dir.resolve())
         if key not in self._cache_locks:
-            lock_path = cache_dir.with_suffix(".lock")
-            self._cache_locks[key] = FileLock(str(lock_path))
+            # Skills base dir is a read-only input (issue #42): locks live under runs_dir.
+            lock_dir = self.runs_dir / ".locks"
+            lock_dir.mkdir(parents=True, exist_ok=True)
+            name = f"{cache_dir.parent.name}--{cache_dir.name}.lock"
+            self._cache_locks[key] = FileLock(str(lock_dir / name))
         return self._cache_locks[key]
