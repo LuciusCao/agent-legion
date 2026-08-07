@@ -64,7 +64,11 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
             join versioned_entities d
               on d.entity_type='agent' and d.workspace_id is null
              and d.entity_key=r.agent_id and d.definition_hash=r.agent_definition_hash
-             and d.status='published'
+             -- Mirrors the claim candidate join: quality replay pins match
+             -- their immutable version row, unpinned match published.
+             and ((r.pinned_agent_version is not null
+                   and d.version=r.pinned_agent_version)
+                  or (r.pinned_agent_version is null and d.status='published'))
             join jobs j on j.id=r.job_id
             left join workflow_revisions wr on wr.id=j.workflow_revision_id
             where r.state='queued'

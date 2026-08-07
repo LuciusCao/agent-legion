@@ -1345,6 +1345,127 @@ export interface paths {
     patch: operations['update_workspace_package_route_api_workspaces__workspace_id__packages__package_id__patch']
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/quality/replays/{replay_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Replay */
+    get: operations['get_replay_api_workspaces__workspace_id__quality_replays__replay_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/quality/sample-batches': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Sample Batches */
+    get: operations['list_sample_batches_api_workspaces__workspace_id__quality_sample_batches_get']
+    put?: never
+    /** Create Sample Batch */
+    post: operations['create_sample_batch_api_workspaces__workspace_id__quality_sample_batches_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/quality/sample-batches/{batch_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Sample Batch */
+    get: operations['get_sample_batch_api_workspaces__workspace_id__quality_sample_batches__batch_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/quality/sample-batches/{batch_id}/stats': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Sample Batch Stats */
+    get: operations['get_sample_batch_stats_api_workspaces__workspace_id__quality_sample_batches__batch_id__stats_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/quality/sample-items/{item_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Sample Item */
+    get: operations['get_sample_item_api_workspaces__workspace_id__quality_sample_items__item_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Add Sample Item Label */
+    post: operations['add_sample_item_label_api_workspaces__workspace_id__quality_sample_items__item_id__labels_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Replays */
+    get: operations['list_replays_api_workspaces__workspace_id__quality_sample_items__item_id__replays_get']
+    put?: never
+    /** Create Replay */
+    post: operations['create_replay_api_workspaces__workspace_id__quality_sample_items__item_id__replays_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/questions/{question_id}': {
     parameters: {
       query?: never
@@ -2787,6 +2908,319 @@ export interface components {
       queue_alert: components['schemas']['QueueAlert'] | null
       recent_hour_runs: components['schemas']['RecentHourRunSummary']
       recent_hour_tokens: components['schemas']['RecentHourTokenSummary']
+    }
+    /** QualityArtifactContent */
+    QualityArtifactContent: {
+      /** Content */
+      content: string
+      /** Name */
+      name: string
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated: boolean
+    }
+    /** QualityBatchStatsResponse */
+    QualityBatchStatsResponse: {
+      /** Batch Id */
+      batch_id: string
+      /** Groups */
+      groups: components['schemas']['QualityStatsGroup'][]
+    }
+    /**
+     * QualityConfusionMatrix
+     * @description Review outcome vs. human label. Positive class = 拦截 (review rejected).
+     *
+     *     Cells: tp = 拦截+bad (正确拦截), fp = 拦截+good (误杀),
+     *     fn = 放行+bad (漏放), tn = 放行+good (正确放行).
+     *     precision = tp/(tp+fp) — 拦截中确实 bad 的比例;
+     *     recall = tp/(tp+fn) — bad 中被拦住的比例; both None when undefined.
+     *     accuracy = (tp+tn)/total over labeled, classifiable items.
+     */
+    QualityConfusionMatrix: {
+      /** Accuracy */
+      accuracy: number
+      /** Fn */
+      fn: number
+      /** Fp */
+      fp: number
+      /** Precision */
+      precision?: number | null
+      /** Recall */
+      recall?: number | null
+      /** Tn */
+      tn: number
+      /** Tp */
+      tp: number
+    }
+    /** QualityLabel */
+    QualityLabel: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Id */
+      id: string
+      /** Item Id */
+      item_id: string
+      /** Labeled By */
+      labeled_by: string
+      /** Note */
+      note: string
+      /** Reason Codes */
+      reason_codes?: string[]
+      /** Replay Id */
+      replay_id?: string | null
+      /** Target */
+      target: string
+      /** Verdict */
+      verdict: string
+    }
+    /** QualityLabelCreateRequest */
+    QualityLabelCreateRequest: {
+      /**
+       * Note
+       * @default
+       */
+      note: string
+      /** Reason Codes */
+      reason_codes?: string[]
+      /** Replay Id */
+      replay_id?: string | null
+      /**
+       * Verdict
+       * @enum {string}
+       */
+      verdict: 'good' | 'bad'
+    }
+    /** QualityLabelResponse */
+    QualityLabelResponse: {
+      label: components['schemas']['QualityLabel']
+    }
+    /** QualityReplay */
+    QualityReplay: {
+      /**
+       * Agent Id
+       * @default
+       */
+      agent_id: string
+      /** Agent Version */
+      agent_version?: number | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /**
+       * Created By
+       * @default
+       */
+      created_by: string
+      /**
+       * Error Message
+       * @default
+       */
+      error_message: string
+      /** Finished At */
+      finished_at?: string | null
+      /** Id */
+      id: string
+      /** Item Id */
+      item_id: string
+      /**
+       * Replay Job Id
+       * @default
+       */
+      replay_job_id: string
+      /** Status */
+      status: string
+    }
+    /** QualityReplayCreateRequest */
+    QualityReplayCreateRequest: {
+      /** Agent Version */
+      agent_version?: number | null
+    }
+    /** QualityReplayDetailResponse */
+    QualityReplayDetailResponse: {
+      /** Artifacts */
+      artifacts: components['schemas']['QualityArtifactContent'][]
+      /** Input Artifacts */
+      input_artifacts?: components['schemas']['QualityArtifactContent'][]
+      /** Labels */
+      labels: components['schemas']['QualityLabel'][]
+      replay: components['schemas']['QualityReplay']
+    }
+    /** QualityReplayListResponse */
+    QualityReplayListResponse: {
+      /** Replays */
+      replays: components['schemas']['QualityReplay'][]
+    }
+    /** QualityReplayResponse */
+    QualityReplayResponse: {
+      replay: components['schemas']['QualityReplay']
+    }
+    /** QualitySampleBatch */
+    QualitySampleBatch: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Filters */
+      filters?: {
+        [key: string]: unknown
+      }
+      /** Id */
+      id: string
+      /** Name */
+      name: string
+      /** Sample Size */
+      sample_size: number
+      /** Seed */
+      seed: string
+      /** Workflow Key */
+      workflow_key: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** QualitySampleBatchCreateRequest */
+    QualitySampleBatchCreateRequest: {
+      filters?: components['schemas']['QualitySampleFilters']
+      /** Name */
+      name: string
+      /** Sample Size */
+      sample_size: number
+      /** Seed */
+      seed?: string | null
+      /** Workflow Key */
+      workflow_key?: string | null
+    }
+    /** QualitySampleBatchCreateResponse */
+    QualitySampleBatchCreateResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Filters */
+      filters?: {
+        [key: string]: unknown
+      }
+      /** Id */
+      id: string
+      /** Name */
+      name: string
+      /** Sample Size */
+      sample_size: number
+      /** Sampled Count */
+      sampled_count: number
+      /** Seed */
+      seed: string
+      /** Workflow Key */
+      workflow_key: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** QualitySampleBatchDetailResponse */
+    QualitySampleBatchDetailResponse: {
+      batch: components['schemas']['QualitySampleBatch']
+      /** Items */
+      items: components['schemas']['QualitySampleItem'][]
+      /** Total */
+      total: number
+    }
+    /** QualitySampleBatchListResponse */
+    QualitySampleBatchListResponse: {
+      /** Batches */
+      batches: components['schemas']['QualitySampleBatch'][]
+    }
+    /** QualitySampleFilters */
+    QualitySampleFilters: {
+      /** Node Keys */
+      node_keys?: string[] | null
+      /** Since */
+      since?: string | null
+      /** Statuses */
+      statuses?: string[] | null
+      /** Until */
+      until?: string | null
+    }
+    /** QualitySampleItem */
+    QualitySampleItem: {
+      /** Agent Definition Hash */
+      agent_definition_hash: string
+      /** Agent Version */
+      agent_version?: number | null
+      /** Batch Id */
+      batch_id: string
+      /** Capability */
+      capability: string
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      current_label?: components['schemas']['QualityLabel'] | null
+      /** Failure Category */
+      failure_category: string
+      /** Failure Detail */
+      failure_detail: string
+      /** Id */
+      id: string
+      /** Job Id */
+      job_id: string
+      /** Model */
+      model: string
+      /** Node Key */
+      node_key: string
+      /** Node Run Id */
+      node_run_id: number
+      /** Provider */
+      provider: string
+      /** Run Status */
+      run_status: string
+      /** Skill Version */
+      skill_version: string
+    }
+    /** QualitySampleItemDetailResponse */
+    QualitySampleItemDetailResponse: {
+      /** Artifacts */
+      artifacts: components['schemas']['QualityArtifactContent'][]
+      item: components['schemas']['QualitySampleItem']
+      /** Labels */
+      labels: components['schemas']['QualityLabel'][]
+    }
+    /** QualityStatsGroup */
+    QualityStatsGroup: {
+      /** Bad */
+      bad: number
+      confusion_matrix?: components['schemas']['QualityConfusionMatrix'] | null
+      /** Good */
+      good: number
+      /** Good Rate */
+      good_rate?: number | null
+      /** Labeled */
+      labeled: number
+      /** Model */
+      model: string
+      /** Node Key */
+      node_key: string
+      /** Provider */
+      provider: string
+      /** Runs */
+      runs: number
+      /** Skill Version */
+      skill_version: string
+      /** Succeeded */
+      succeeded: number
+      /** Success Rate */
+      success_rate: number
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
@@ -6875,6 +7309,307 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspacePackageUpdateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_replay_api_workspaces__workspace_id__quality_replays__replay_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        replay_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualityReplayDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_sample_batches_api_workspaces__workspace_id__quality_sample_batches_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualitySampleBatchListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_sample_batch_api_workspaces__workspace_id__quality_sample_batches_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['QualitySampleBatchCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualitySampleBatchCreateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_sample_batch_api_workspaces__workspace_id__quality_sample_batches__batch_id__get: {
+    parameters: {
+      query?: {
+        limit?: number
+        offset?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        batch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualitySampleBatchDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_sample_batch_stats_api_workspaces__workspace_id__quality_sample_batches__batch_id__stats_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        batch_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualityBatchStatsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_sample_item_api_workspaces__workspace_id__quality_sample_items__item_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualitySampleItemDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  add_sample_item_label_api_workspaces__workspace_id__quality_sample_items__item_id__labels_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['QualityLabelCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualityLabelResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_replays_api_workspaces__workspace_id__quality_sample_items__item_id__replays_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualityReplayListResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_replay_api_workspaces__workspace_id__quality_sample_items__item_id__replays_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        item_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['QualityReplayCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['QualityReplayResponse']
         }
       }
       /** @description Validation Error */

@@ -30,6 +30,10 @@ from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
 from server.app.services.ops_metrics import OpsMetricsService
+from server.app.services.quality_labels import QualityLabelService
+from server.app.services.quality_replays import QualityReplayService
+from server.app.services.quality_sampling import QualitySamplingService
+from server.app.services.quality_stats import QualityStatsService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -189,6 +193,10 @@ def create_app(
             agent_worker_registry=agent_worker_registry,
             agent_completion=agent_completion,
             ops_metrics=ops_metrics,
+            quality_sampling=QualitySamplingService(job_db.path),
+            quality_labels=QualityLabelService(job_db.path, artifact_store),
+            quality_stats=QualityStatsService(job_db.path),
+            quality_replays=QualityReplayService(job_db, artifact_store),
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")
