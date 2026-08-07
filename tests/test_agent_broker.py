@@ -20,6 +20,10 @@ from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
 
+def _broker(data_dir, **kwargs) -> AgentExecutionBroker:
+    return AgentExecutionBroker(TEST_DATABASE_URL, data_dir=data_dir, **kwargs)
+
+
 def _insert_job_rows(
     job_db,
     *,
@@ -83,8 +87,7 @@ def _seed_request(
         workspace_id=workspace_id,
         agent_id=agent_id,
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
-    assert broker.enqueue(
+    assert _broker(job_db.jobs_dir.parent).enqueue(
         AgentExecutionRequest(
             workspace_id=workspace_id,
             job_id=job_id,
@@ -130,7 +133,7 @@ def test_claim_starts_node_and_consumes_both_capacity_domains(job_db) -> None:
         max_concurrency=10,
         labels={"arch": "arm64"},
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     first = broker.claim("worker-1")
     second = broker.claim("worker-1")
@@ -152,7 +155,7 @@ def test_worker_machine_capacity_is_shared_across_nodes(job_db) -> None:
         max_concurrency=1,
         labels={"arch": "arm64"},
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     assert broker.claim("worker-1") is not None
     assert broker.claim("worker-1") is None
@@ -170,7 +173,7 @@ def test_claim_redeclares_live_worker_capacity(job_db) -> None:
         max_concurrency=1,
         labels={"arch": "arm64"},
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     assert broker.claim("worker-1", 3) is not None
     # Registered capacity was 1; the live re-declaration raised it to 3.
@@ -192,7 +195,7 @@ def test_workspace_capacity_is_shared_across_nodes(job_db) -> None:
         max_concurrency=2,
         labels={"arch": "arm64"},
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     first = broker.claim("worker-1")
     second = broker.claim("worker-1")
@@ -217,7 +220,7 @@ def test_incompatible_worker_does_not_claim_or_start_node(job_db) -> None:
         labels={"arch": "amd64"},
     )
 
-    assert AgentExecutionBroker(TEST_DATABASE_URL).claim("worker-1") is None
+    assert _broker(job_db.jobs_dir.parent).claim("worker-1") is None
     assert job_db.get_job_node("job-1", "generate")["status"] == "pending"
 
 
@@ -232,7 +235,7 @@ def test_expired_worker_claim_is_requeued_for_another_worker(job_db) -> None:
             max_concurrency=1,
             labels={"arch": "arm64"},
         )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1)
+    broker = _broker(job_db.jobs_dir.parent, lease_ttl_seconds=1)
     first = broker.claim("worker-1")
     assert first is not None
     with job_db.connect() as conn:
@@ -261,7 +264,7 @@ def test_node_twenty_and_three_workers_ten_never_claim_more_than_twenty(job_db) 
             max_concurrency=10,
             labels={"arch": "arm64"},
         )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     claimed = [
         broker.claim(worker_id)
@@ -291,7 +294,7 @@ def test_sweep_closes_request_when_lease_already_finished(job_db) -> None:
         max_concurrency=1,
         labels={"arch": "arm64"},
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1)
+    broker = _broker(job_db.jobs_dir.parent, lease_ttl_seconds=1)
     claim = broker.claim("worker-1")
     assert claim is not None
     with job_db.connect() as conn:
@@ -331,7 +334,7 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
     old = datetime.now(UTC).timestamp() - 7200
     os.utime(stale_archive, (old, old))
 
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
     with job_db.connect() as conn:
         # The seeded request stays queued (its bundle must survive); add a
         # terminal request pointing at done.tar.gz.
@@ -365,7 +368,7 @@ def test_discard_result_archive_and_retire_bundle(tmp_path) -> None:
     archive.write_bytes(b"archive")
     bundle = bundle_dir / "bundle.tar.gz"
     bundle.write_bytes(b"bundle")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
 
     broker.discard_result_archive(archive.name)
     broker.retire_bundle(bundle.name)
@@ -377,7 +380,7 @@ def test_discard_result_archive_and_retire_bundle(tmp_path) -> None:
     # bundle storage tolerates both calls.
     broker.discard_result_archive("missing.result.tar.gz")
     broker.retire_bundle("../escape.tar.gz")
-    storageless = AgentExecutionBroker(TEST_DATABASE_URL)
+    storageless = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=tmp_path)
     storageless.discard_result_archive(archive.name)
     storageless.retire_bundle(bundle.name)
 
@@ -485,7 +488,7 @@ def test_scoped_worker_claims_only_its_workspace(job_db) -> None:
         labels={"arch": "arm64"},
         allowed_workspaces=["test-workspace"],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     first = broker.claim("scoped-worker")
     assert first is not None
@@ -522,9 +525,7 @@ def test_paused_workspace_requests_are_not_claimed(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
     paused = {"test-workspace": True}
-    broker = AgentExecutionBroker(
-        TEST_DATABASE_URL, is_workspace_paused=lambda ws: paused.get(ws, False)
-    )
+    broker = _broker(job_db.jobs_dir.parent, is_workspace_paused=lambda ws: paused.get(ws, False))
 
     # Paused: the queued request stays queued and the node stays pending.
     assert broker.claim("worker-1") is None
@@ -547,7 +548,7 @@ def test_claim_and_done_mirror_worker_status_panel(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
     manager = AgentStatusManager()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, agent_status=manager)
+    broker = _broker(job_db.jobs_dir.parent, agent_status=manager)
 
     claimed = broker.claim("worker-1")
     assert claimed is not None
@@ -570,7 +571,7 @@ def test_idle_claim_poll_registers_worker_panel_rows(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
     manager = AgentStatusManager()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, agent_status=manager)
+    broker = _broker(job_db.jobs_dir.parent, agent_status=manager)
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspaces(id, name) values ('idle-workspace', 'Idle')"
@@ -592,7 +593,7 @@ def test_swept_expired_claim_releases_worker_status_panel(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
     manager = AgentStatusManager()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1, agent_status=manager)
+    broker = _broker(job_db.jobs_dir.parent, lease_ttl_seconds=1, agent_status=manager)
     claimed = broker.claim("worker-1")
     assert claimed is not None
     with job_db.connect() as conn:
@@ -626,7 +627,7 @@ def test_claim_records_job_update_for_live_list(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
     buffer = _StubJobEventBuffer()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, job_db=job_db, job_event_buffer=buffer)
+    broker = _broker(job_db.jobs_dir.parent, job_db=job_db, job_event_buffer=buffer)
 
     assert broker.claim("worker-1") is not None
 
@@ -646,7 +647,7 @@ def test_release_slot_frees_worker_and_workspace_capacity(job_db) -> None:
         max_concurrency=1,
         labels={"arch": "arm64"},
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     first = broker.claim("worker-1")
     assert first is not None
@@ -663,7 +664,7 @@ def test_release_slot_requires_matching_lease_and_state(job_db) -> None:
     _seed_request(job_db, job_id="job-1", limit=1)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
     claimed = broker.claim("worker-1")
     assert claimed is not None
 
@@ -681,7 +682,7 @@ def test_heartbeat_and_mark_done_accept_reporting_state(job_db) -> None:
     _seed_request(job_db, job_id="job-1", limit=1)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
     claimed = broker.claim("worker-1")
     assert claimed is not None
     assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
@@ -709,7 +710,7 @@ def test_heartbeat_returns_false_when_lease_no_longer_active(job_db) -> None:
     _seed_request(job_db, job_id="job-1", limit=1)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
     claimed = broker.claim("worker-1")
     assert claimed is not None
     with job_db.connect() as conn:
@@ -728,7 +729,7 @@ def test_sweep_requeue_limit_failure_message_carries_context(job_db, caplog) -> 
     _seed_request(job_db, job_id="job-1", limit=1)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1, requeue_limit=0)
+    broker = _broker(job_db.jobs_dir.parent, lease_ttl_seconds=1, requeue_limit=0)
     claimed = broker.claim("worker-1")
     assert claimed is not None
     with job_db.connect() as conn:
@@ -762,7 +763,7 @@ def test_reporting_blocks_duplicate_enqueue(job_db) -> None:
     _seed_request(job_db, job_id="job-1", limit=1)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
     claimed = broker.claim("worker-1")
     assert claimed is not None
     assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
@@ -805,7 +806,7 @@ def test_sweep_requeues_reporting_with_expired_heartbeat(job_db) -> None:
     _seed_request(job_db, job_id="job-1", limit=1)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_worker(registry)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=90)
+    broker = _broker(job_db.jobs_dir.parent, lease_ttl_seconds=90)
     claimed = broker.claim("worker-1")
     assert claimed is not None
     assert broker.release_slot(claimed.execution_id, "worker-1", claimed.lease_id) is True
@@ -846,7 +847,7 @@ def test_pi_only_worker_cannot_claim_velites_request(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_runtime_worker(registry, "worker-pi", ["pi"])
     _register_runtime_worker(registry, "worker-velites", ["velites"])
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     assert broker.claim("worker-pi") is None
     assert job_db.get_job_node("job-1", "generate")["status"] == "pending"
@@ -897,7 +898,7 @@ def test_mixed_runtime_fleet_claims_matching_requests(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register_runtime_worker(registry, "worker-pi", ["pi"])
     _register_runtime_worker(registry, "worker-velites", ["pi", "velites"])
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
 
     claimed_pi = broker.claim("worker-pi")
     assert claimed_pi is not None
@@ -932,7 +933,7 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
         workspace_id="test-workspace",
         agent_id="generator-v1",
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = _broker(job_db.jobs_dir.parent)
     fresh_execution_id = broker.enqueue(
         AgentExecutionRequest(
             workspace_id="test-workspace",
@@ -975,7 +976,7 @@ def test_dispatch_fails_fast_on_unsupported_runtime(job_db, tmp_path) -> None:
         jobs_dir=tmp_path / "jobs",
         config={},
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=tmp_path / "bundles")
+    broker = _broker(tmp_path, bundle_dir=tmp_path / "bundles")
     store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
     service = AgentDispatchService(settings, broker, store)
     definition = AgentDefinition(

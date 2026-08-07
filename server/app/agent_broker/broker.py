@@ -64,7 +64,7 @@ class AgentExecutionBroker:
         *,
         lease_ttl_seconds: int = 90,
         bundle_dir: Path | None = None,
-        data_dir: Path | None = None,
+        data_dir: Path,
         requeue_limit: int = 3,
         agent_status: AgentStatusManager | None = None,
         is_workspace_paused: Callable[[str], bool] | None = None,

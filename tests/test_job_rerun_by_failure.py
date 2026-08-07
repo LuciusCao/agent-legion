@@ -19,7 +19,7 @@ NODE_KEYS = [
 def rerun_service(job_db, settings):
     return JobRerunService(
         job_db,
-        ExecutorLeaseRepository(job_db.path),
+        ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
         settings,
         WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),

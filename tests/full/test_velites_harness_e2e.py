@@ -319,7 +319,7 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
         )
         bundle_dir = tmp_path / "bundles"
         bundle_dir.mkdir()
-        broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir)
+        broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
         store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
         service = AgentDispatchService(settings, broker, store)
         service.skill_manager = _LocalSkillManager(skill_root)
