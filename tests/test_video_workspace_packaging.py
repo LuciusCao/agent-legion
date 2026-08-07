@@ -99,3 +99,21 @@ def test_video_knowledge_workspace_package_includes_deliverables(
         assert f"{prefix}source.mp4" not in names
         assert f"{prefix}video_input.json" not in names
         assert f"{prefix}report.md" not in names
+
+
+def test_video_knowledge_workspace_package_purges_source_video(
+    job_db: JobQueries, settings: Settings
+) -> None:
+    service = JobPackageService(job_db, settings)
+    workspace_id = "video-pkg-ws"
+    job = _create_video_knowledge_job(job_db, settings, workspace_id, "VID001")
+    _write_video_artifacts(job, settings)
+    job_dir = resolve_job_dir(job, settings.jobs_dir)
+
+    response = service.package(workspace_id, [job["id"]])
+
+    assert response["succeeded_count"] == 1
+    assert not (job_dir / "source.mp4").exists()
+    # Packaged deliverables and rerun inputs stay on disk.
+    assert (job_dir / "chapters.json").is_file()
+    assert (job_dir / "video_input.json").is_file()
