@@ -58,6 +58,10 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     # Business: output quality / contract violations and unusable source data.
     if message.startswith("Output validation failed:"):
         return CATEGORY_BUSINESS, "output_invalid"
+    # Technical: the validator itself failed to run (environment/setup fault),
+    # as opposed to the output failing the contract above.
+    if message.startswith("Validator error:"):
+        return CATEGORY_TECHNICAL, "validator_env"
     if message.startswith("invalid json ") or _INTERACTION_CONTRACT_RE.match(message):
         return CATEGORY_BUSINESS, "output_invalid"
     if "All transcription providers failed" in message:

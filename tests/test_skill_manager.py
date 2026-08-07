@@ -201,6 +201,56 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     assert not (skill_dir / ".git").exists()
 
 
+def _make_manager_with_cache(tmp_path: Path) -> SkillManager:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    return manager
+
+
+def test_cache_lock_files_live_under_runs_dir(tmp_path: Path) -> None:
+    """Lock files are runtime state, not skill content (issue #42). filelock
+    deletes its file on release, so the location is asserted while held."""
+    manager = _make_manager_with_cache(tmp_path)
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
+
+    with manager._cache_lock_for(cache_dir):
+        held = sorted(path.name for path in (tmp_path / "runs" / ".locks").glob("*.lock"))
+        assert held == ["question_comprehension_info--generate_key_info.lock"]
+        assert list((tmp_path / "skills").rglob("*.lock")) == []
+
+
+def test_get_skill_dir_works_with_read_only_skills_base(tmp_path: Path) -> None:
+    """Docker :ro skills mount regression (issue #42): once the cache is
+    cloned and pinned, resolving a skill must not write the skills base at
+    all — locks live under runs_dir and a clean cache at the locked commit
+    skips checkout/clean entirely."""
+    manager = _make_manager_with_cache(tmp_path)
+    base_dir = tmp_path / "skills"
+
+    def _chmod(mode_dir: int, mode_file: int) -> None:
+        for path in sorted(base_dir.rglob("*"), reverse=True):
+            path.chmod(mode_dir if path.is_dir() else mode_file)
+
+    _chmod(0o555, 0o444)
+    try:
+        skill_dir = manager.get_skill_dir(
+            "question_comprehension_info/generate_key_info", str(uuid.uuid4())
+        )
+        assert (skill_dir / "SKILL.md").is_file()
+    finally:
+        _chmod(0o755, 0o644)
+
+
 def test_tilde_local_source_can_be_managed_in_place(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
