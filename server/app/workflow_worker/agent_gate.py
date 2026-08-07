@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING
 
 from server.app.agent_broker import batch
 from server.app.services.agent_service import published_agent_definitions
-from server.app.workflow_worker.agent_stock import StockSnapshot, load_stock_snapshot
+from server.app.workflow_worker.agent_stock_snapshot import StockSnapshot, load_stock_snapshot
 
 if TYPE_CHECKING:
     from collections import deque

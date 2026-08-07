@@ -68,7 +68,7 @@ def _seed_request(
                 " set max_concurrency=excluded.max_concurrency",
                 (workspace_id, workspace_cap),
             )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     execution_id = broker.enqueue(
         AgentExecutionRequest(
             workspace_id=workspace_id,
@@ -132,7 +132,7 @@ def test_two_workers_racing_for_last_node_slot_exactly_one_wins(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     for worker_id in ("worker-1", "worker-2", "worker-3"):
         _register(registry, worker_id)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     for _ in range(10):
         assert broker.claim("worker-1") is not None
     for _ in range(9):
@@ -144,7 +144,9 @@ def test_two_workers_racing_for_last_node_slot_exactly_one_wins(job_db) -> None:
 
     def race(worker_id: str) -> None:
         barrier.wait(timeout=10)
-        results[worker_id] = AgentExecutionBroker(TEST_DATABASE_URL).claim(worker_id)
+        results[worker_id] = AgentExecutionBroker(
+            TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent
+        ).claim(worker_id)
 
     threads = [threading.Thread(target=race, args=(w,)) for w in ("worker-2", "worker-3")]
     for thread in threads:
@@ -162,7 +164,9 @@ def test_late_result_and_zombie_heartbeat_rejected_after_requeue(job_db) -> None
     execution_id = _seed_request(job_db, job_id="late-job-1")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register(registry, "worker-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1)
+    broker = AgentExecutionBroker(
+        TEST_DATABASE_URL, lease_ttl_seconds=1, data_dir=job_db.jobs_dir.parent
+    )
     first = broker.claim("worker-1")
     assert first is not None
     with job_db.connect() as conn:
@@ -197,7 +201,9 @@ def test_sweep_does_not_requeue_a_just_completed_node(job_db) -> None:
     execution_id = _seed_request(job_db, job_id="finish-race-job")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register(registry, "worker-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, lease_ttl_seconds=1)
+    broker = AgentExecutionBroker(
+        TEST_DATABASE_URL, lease_ttl_seconds=1, data_dir=job_db.jobs_dir.parent
+    )
     claim = broker.claim("worker-1")
     assert claim is not None
     with job_db.connect() as conn:
@@ -232,7 +238,7 @@ def test_claim_rotates_across_workspaces(job_db) -> None:
         )
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register(registry, "worker-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     claims = [broker.claim("worker-1") for _ in range(4)]
 
@@ -245,7 +251,7 @@ def test_claim_skips_paused_job_and_cancels_failed_job(job_db) -> None:
     failed_execution = _seed_request(job_db, job_id="failed-job")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register(registry, "worker-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     with job_db.connect() as conn:
         conn.execute("update jobs set execution_paused=1 where id='paused-job'")
         conn.execute("update jobs set status='failed' where id='failed-job'")
@@ -284,7 +290,9 @@ def test_cross_node_same_workspace_race_exactly_one_winner(job_db) -> None:
 
     def race(worker_id: str) -> None:
         barrier.wait(timeout=10)
-        results[worker_id] = AgentExecutionBroker(TEST_DATABASE_URL).claim(worker_id)
+        results[worker_id] = AgentExecutionBroker(
+            TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent
+        ).claim(worker_id)
 
     threads = [threading.Thread(target=race, args=(w,)) for w in ("worker-1", "worker-2")]
     for thread in threads:
@@ -305,7 +313,7 @@ def test_different_workspaces_do_not_block_each_other(job_db) -> None:
     _seed_request(job_db, job_id="ws-b-job-1", workspace_id="ws-b", workspace_cap=1)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register(registry, "worker-1", max_concurrency=4)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     first = broker.claim("worker-1")
     second = broker.claim("worker-1")
@@ -325,7 +333,7 @@ def test_workspace_without_capacity_row_is_unlimited(job_db) -> None:
         _seed_request(job_db, job_id=f"uncapped-job-{index}", workspace_cap=None)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register(registry, "worker-1", max_concurrency=12)
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     claims = [broker.claim("worker-1") for _ in range(12)]
 
@@ -337,7 +345,7 @@ def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
     execution_id = _seed_request(job_db, job_id="stale-def-job")
     # Republish the Agent with changed content: the pinned hash is now gone.
     replace_agent_catalog({"generator-v1": _definition(skill="question/generate-v2")})
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert broker.fail_stale_definition_requests() == [execution_id]
 
@@ -379,7 +387,7 @@ def test_unclaimable_model_requests_are_failed_by_sweeper(job_db) -> None:
         capabilities=["generate"],
         models=[{"provider": "gateway", "model": "other-model"}],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == [execution_id]
 
@@ -416,7 +424,7 @@ def test_unclaimable_sweeper_leaves_matching_worker_requests_queued(job_db) -> N
         capabilities=["generate"],
         models=[{"provider": "gateway", "model": "test-model"}],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == []
 
@@ -434,7 +442,7 @@ def test_unclaimable_sweeper_fails_on_capability_mismatch(job_db) -> None:
         capabilities=["other-capability"],
         models=[{"provider": "gateway", "model": "test-model"}],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == [execution_id]
 
@@ -448,7 +456,7 @@ def test_unclaimable_sweeper_fails_on_capability_mismatch(job_db) -> None:
 def test_unclaimable_sweeper_without_workers_is_a_noop(job_db) -> None:
     """Zero registered Workers is a deployment gap, not a definition problem."""
     execution_id = _seed_request(job_db, job_id="no-worker-job")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == []
 
@@ -466,7 +474,7 @@ def test_unclaimable_sweeper_revoked_worker_does_not_count(job_db) -> None:
         models=[{"provider": "gateway", "model": "test-model"}],
     )
     registry.revoke("worker-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     # Revoked Workers carry no declarations; with none left the deployment-gap
     # guard applies just like the zero-Worker case.
@@ -479,7 +487,7 @@ def test_unclaimable_sweeper_wildcard_worker_passes(job_db) -> None:
     execution_id = _seed_request(job_db, job_id="wildcard-job")
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     _register(registry, "worker-1")  # legacy ("*", "*") model / "*" capability
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == []
 
@@ -500,7 +508,7 @@ def test_unclaimable_sweeper_fails_on_runtime_mismatch(job_db) -> None:
         models=[{"provider": "gateway", "model": "test-model"}],
         runtimes=["pi"],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == [execution_id]
 
@@ -524,7 +532,7 @@ def test_unclaimable_sweeper_runtime_match_stays_queued(job_db) -> None:
         models=[{"provider": "gateway", "model": "test-model"}],
         runtimes=["pi", "velites"],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == []
 
@@ -553,7 +561,7 @@ def test_unclaimable_sweeper_fails_on_cross_worker_combination(job_db) -> None:
         models=[{"provider": "gateway", "model": "test-model"}],
         runtimes=["pi"],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == [execution_id]
 
@@ -608,7 +616,7 @@ def test_unclaimable_sweeper_resolves_revision_execution_overrides(job_db) -> No
         capabilities=["generate"],
         models=[{"provider": "gateway", "model": "test-model"}],
     )
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert fail_unclaimable_model_requests(broker) == []
 

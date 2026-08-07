@@ -20,7 +20,7 @@ from server.app.workflows.definition import load_workflow_definition
 def rerun_service(job_db, settings):
     return JobRerunService(
         job_db,
-        ExecutorLeaseRepository(job_db.path),
+        ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
         settings,
         WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),
@@ -157,6 +157,15 @@ def test_rerun_resets_node_created_at(rerun_service, job):
     assert rerun_node is not None
     assert rerun_node["created_at"] != old_created_at
     assert len(rerun_node["created_at"]) >= 19
+
+
+def test_rerun_resets_packed_flag(rerun_service, job):
+    rerun_service.job_db.set_jobs_packed([job["id"]], packed=1)
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
+
+    assert result["status"] == "succeeded"
+    assert rerun_service.job_db.get_job(job["id"])["packed"] == 0
 
 
 def test_rerun_preserves_ancestors(rerun_service, job):

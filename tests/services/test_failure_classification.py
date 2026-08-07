@@ -245,6 +245,16 @@ def test_output_validation_failure_is_business_output_invalid():
     ) == ("business", "output_invalid")
 
 
+def test_validator_environment_failure_is_technical_validator_env():
+    """The validator itself failing to run (ro skills mount, missing skill)
+    is an environment fault, distinct from the output failing the contract."""
+    assert classify_failure(
+        1,
+        "Validator error: [Errno 30] Read-only file system: "
+        "'/root/.agents/skills/agent-legion/x/y.lock'",
+    ) == ("technical", "validator_env")
+
+
 def test_invalid_json_output_is_business_output_invalid():
     assert classify_failure(
         1, "invalid json interactions.json: Expecting ',' delimiter: line 15 column 17"

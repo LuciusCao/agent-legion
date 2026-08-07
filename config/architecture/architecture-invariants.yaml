@@ -558,6 +558,27 @@ invariants:
         target: tests/executors/test_velites_controllability.py::test_budget_exhaustion_marks_agent_end
         gate: quick
 
+  - id: EXEC-HARNESS-OUTPUTS-001
+    statement: "velites enforces the declared output contract at exit: when --require-output artifacts are declared and any is still missing when a non-cancelled run ends (normal stop, budget exhaustion, or unrecovered model error), the harness exits 1 — an exit-0 run with missing declared outputs never reaches the caller. Cancellation (SIGTERM) is exempt as a deliberate Host action; the outputs_validation{missing:[...]} event is still emitted on normal/budget endings for Host-side observability."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_controllability.py::test_require_output_still_missing_reports_validation
+        gate: quick
+
+  - id: EXEC-SKILL-HERMETIC-001
+    statement: "The skills base dir is a read-only runtime input: cache lock files live under runs_dir (never next to the skill cache), and resolving a skill whose cache already sits clean at the pinned commit performs no writes (no checkout/clean) — a read-only skills mount (container deployment) works for every steady-state execution and validation. Writes (clone/fetch/checkout/clean) happen only on cache misses or version changes."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_skill_manager.py::test_get_skill_dir_works_with_read_only_skills_base
+        gate: quick
+      - kind: integration
+        target: tests/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
+        gate: quick
+
   - id: EXEC-HARNESS-SANDBOX-001
     statement: "velites confines the bash tool in a default-on OS-level filesystem sandbox (macOS seatbelt via sandbox-exec, Linux bubblewrap): reads are limited to the working directory, the session dir, explicit --skill dirs and system paths; writes are limited to the working directory, the session dir and $TMPDIR//tmp — escapes surface as tool_execution_end{isError: true}. When the sandbox backend is unavailable the harness fails closed (non-zero exit before the agent loop) and never degrades to an unsandboxed run; --no-sandbox is the only escape hatch."
     owner: workspace-executor
@@ -588,6 +609,18 @@ invariants:
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
         gate: full
 
+  - id: EXEC-PATH-STORAGE-001
+    statement: "DB path columns (node_runs.log_path/run_dir/session_dir, jobs.storage_dir) store data-dir-relative paths only — absolute paths are environment-specific and break on deployment shape changes. Every write boundary canonicalizes (job intake, executor claim/finish, agent claim); legacy absolute log_path values frozen in queued manifests are healed at agent claim time without crashing the claim scan; a startup report surfaces any remaining absolute rows; reads stay fail-closed via resolve_data_path."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_agent_broker_claim_scan.py::test_claim_heals_legacy_absolute_log_path
+        gate: quick
+      - kind: integration
+        target: tests/services/test_path_hygiene.py
+        gate: quick
+
   - id: EXEC-CLAIM-RUNTIME-001
     statement: "A queued Agent request no single non-revoked Worker can claim — judged per Worker on runtime, capability and model together, never on cross-Worker unions — is failed by the unclaimable sweeper with an explicit reason; it never rots in queued. With zero non-revoked Workers the sweeper stays inactive (a deployment gap, not a definition problem)."
     owner: workspace-executor
@@ -603,6 +636,20 @@ invariants:
         target: tests/test_agent_broker.py::test_pi_only_worker_cannot_claim_velites_request
         gate: quick
 
+  - id: EXEC-QUALITY-REPLAY-001
+    statement: "A quality replay never touches the original job: it builds an isolated copy job from the original's frozen workflow snapshot, file-copies the target node's frozen inputs, marks upstream nodes completed and downstream nodes not_applicable (only the replayed node is ever scheduled, and the copy converges to completed), and dispatches the pinned immutable Agent version (draft/published/archived) via the frozen batch payload pin — the broker enqueue check, claim candidate join, and definition sweepers match the pinned version row instead of the currently published one. Replay status is derived lazily from the copy job's node row; at most one replay per sample item may be in flight."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_quality_replays.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_version_pin.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_quality_replay_routes.py
+        gate: quick
   - id: DB-ARTIFACT-GC-001
     statement: "An artifact blob is reclaimed only when its catalog row has zero artifact_refs and is older than the in-flight grace window. The orphan GC covers what job-deletion GC cannot see (zero-ref rows from lost result reports, crashed Workers, pre-claim cleanups): it scans the whole catalog keyset-paginated, delegates deletion to delete_unreferenced (transactional refcount + grace re-check, blob unlink after commit), and is driven hourly by the sweeper-owning replica or manually via scripts/gc_artifacts.py (dry-run default)."
     owner: jobs

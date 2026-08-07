@@ -23,6 +23,7 @@ export const TokenUsagePage = lazy(() =>
   import('../pages/TokenUsagePage').then((m) => ({ default: m.TokenUsagePage }))
 )
 export const MonitoringPage = lazy(() => import('../pages/MonitoringPage'))
+export const QualityPage = lazy(() => import('../pages/QualityPage'))
 export const GlobalSettingsPage = lazy(
   () => import('../pages/GlobalSettingsPage')
 )

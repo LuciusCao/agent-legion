@@ -1,7 +1,8 @@
-import warnings
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
+
+from server.app.services.path_hygiene import warn_legacy_absolute
 
 _MANAGED_CATEGORIES = frozenset({"videos", "jobs", "logs", "packages"})
 
@@ -147,11 +148,7 @@ def resolve_data_path(
         if resolved_candidate != resolved_data_dir and resolved_candidate.is_relative_to(
             resolved_data_dir
         ):
-            warnings.warn(
-                "Legacy absolute path stored; resolving relative to data_dir instead",
-                DeprecationWarning,
-                stacklevel=2,
-            )
+            warn_legacy_absolute()
             return resolved_candidate
 
         parts = resolved_candidate.parts
@@ -168,11 +165,7 @@ def resolve_data_path(
                 root_kind="data",
             )
 
-        warnings.warn(
-            "Legacy absolute path stored; resolving relative to data_dir instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
+        warn_legacy_absolute()
         candidate = resolved_data_dir.joinpath(*suffix_parts)
     else:
         candidate = resolved_data_dir / candidate

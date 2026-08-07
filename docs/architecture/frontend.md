@@ -114,6 +114,7 @@ frontend/src/
 | `/workspaces/:workspaceId` | SettingsPage |
 | `/workspaces/:workspaceId/token-usage` | TokenUsagePage |
 | `/workspaces/:workspaceId/monitoring` | MonitoringPage |
+| `/workspaces/:workspaceId/quality` | QualityPage |
 | `/workspaces/:workspaceId/workflow-studio` | WorkflowStudioPage |
 
 <!-- END AUTO-GENERATED -->

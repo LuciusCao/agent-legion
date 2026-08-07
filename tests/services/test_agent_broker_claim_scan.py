@@ -122,7 +122,7 @@ def _pin_queue_order(job_db, job_ids: list[str]) -> None:
 def test_claim_pages_past_poisoned_queue_head(job_db) -> None:
     """8+ unclaimable head entries must not starve the claimable tail."""
     definition = _seed_definition()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     poison_jobs = [f"job-poison-{index}" for index in range(9)]
     for job_id in poison_jobs + ["job-good"]:
         _insert_job_rows(job_db, job_id=job_id)
@@ -141,7 +141,7 @@ def test_claim_pages_past_poisoned_queue_head(job_db) -> None:
 def test_claim_with_fully_unclaimable_queue_returns_none(job_db) -> None:
     """A queue of only unclaimable requests ends the bounded scan with None."""
     definition = _seed_definition()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     poison_jobs = [f"job-poison-{index}" for index in range(10)]
     for job_id in poison_jobs:
         _insert_job_rows(job_db, job_id=job_id)
@@ -160,7 +160,7 @@ def test_claim_with_fully_unclaimable_queue_returns_none(job_db) -> None:
 def test_enqueue_rejects_unresolved_execution_model(job_db) -> None:
     definition = _seed_definition()
     _insert_job_rows(job_db, job_id="job-1")
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     for bad_model in ("", "your-model"):
         with pytest.raises(ValueError, match="unresolved provider/model"):
@@ -172,7 +172,7 @@ def test_enqueue_rejects_unresolved_execution_model(job_db) -> None:
 
 def test_empty_claim_with_blocked_queue_logs_skip_reasons(job_db, caplog) -> None:
     definition = _seed_definition()
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     poison_jobs = [f"job-poison-{index}" for index in range(3)]
     for job_id in poison_jobs:
         _insert_job_rows(job_db, job_id=job_id)
@@ -188,7 +188,7 @@ def test_empty_claim_with_blocked_queue_logs_skip_reasons(job_db, caplog) -> Non
 
 
 def test_empty_claim_with_dry_queue_triggers_restock_without_warning(job_db, caplog) -> None:
-    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
     restock = MagicMock()
     broker.empty_claim.on_empty_queue = restock
     _register_worker()
@@ -198,3 +198,76 @@ def test_empty_claim_with_dry_queue_triggers_restock_without_warning(job_db, cap
 
     restock.assert_called_once_with()
     assert not caplog.records
+
+
+def _enqueue_with_log_path(
+    broker: AgentExecutionBroker,
+    definition: AgentDefinition,
+    *,
+    job_id: str,
+    log_path: str,
+) -> str | None:
+    return broker.enqueue(
+        AgentExecutionRequest(
+            workspace_id="test-workspace",
+            job_id=job_id,
+            workflow_key="questions",
+            node_key="generate",
+            agent_id="generator-v1",
+            agent_definition_hash=definition.definition_hash(),
+            manifest={
+                "job_id": job_id,
+                "log_path": log_path,
+                "execution": {"provider": "gateway", "model": _GOOD_MODEL},
+            },
+        )
+    )
+
+
+def _claimed_log_path(job_db, job_id: str) -> str:
+    with job_db._connect_read() as conn:
+        row = conn.execute("select log_path from node_runs where job_id=%s", (job_id,)).fetchone()
+    assert row is not None
+    return row["log_path"]
+
+
+def test_claim_heals_legacy_absolute_log_path(job_db, tmp_path) -> None:
+    """Manifests frozen with absolute log_path heal to relative at claim (issue #37)."""
+    definition = _seed_definition()
+    data_dir = tmp_path / "data"
+    log_file = data_dir / "logs" / "jobs" / "job-legacy-generate.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("x", encoding="utf-8")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=data_dir)
+    _insert_job_rows(job_db, job_id="job-legacy")
+    assert (
+        _enqueue_with_log_path(broker, definition, job_id="job-legacy", log_path=str(log_file))
+        is not None
+    )
+    _register_worker(models=[{"provider": "gateway", "model": _GOOD_MODEL}])
+
+    claimed = broker.claim("worker-1")
+
+    assert claimed is not None
+    assert _claimed_log_path(job_db, "job-legacy") == "logs/jobs/job-legacy-generate.log"
+
+
+def test_claim_keeps_unmappable_absolute_log_path(job_db, tmp_path) -> None:
+    """An unmappable legacy path must not crash the claim scan (queue-head poison)."""
+    definition = _seed_definition()
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=data_dir)
+    _insert_job_rows(job_db, job_id="job-legacy")
+    assert (
+        _enqueue_with_log_path(
+            broker, definition, job_id="job-legacy", log_path="/elsewhere/job-legacy.log"
+        )
+        is not None
+    )
+    _register_worker(models=[{"provider": "gateway", "model": _GOOD_MODEL}])
+
+    claimed = broker.claim("worker-1")
+
+    assert claimed is not None
+    assert _claimed_log_path(job_db, "job-legacy") == "/elsewhere/job-legacy.log"

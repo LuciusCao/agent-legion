@@ -6,6 +6,7 @@ import {
   JobDetailPage,
   LoginPage,
   MonitoringPage,
+  QualityPage,
   SettingsPage,
   SetupPage,
   TokenUsagePage,
@@ -32,6 +33,7 @@ export default function AppRoutes() {
           <Route path="settings" element={<SettingsPage />} />
           <Route path="token-usage" element={<TokenUsagePage />} />
           <Route path="monitoring" element={<MonitoringPage />} />
+          <Route path="quality" element={<QualityPage />} />
           <Route path="workflow-studio" element={<WorkflowStudioPage />} />
         </Route>
       </Routes>

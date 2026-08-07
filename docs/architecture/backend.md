@@ -156,6 +156,15 @@ server/app/
 | PATCH | `/workspaces/{workspace_id}/packages/{package_id:int}` | `update_workspace_package_route` | routes/packages.py |
 | POST | `/workspaces/{workspace_id}/jobs/package` | `package_workspace_jobs` | routes/packages.py |
 | GET | `/workspaces/{workspace_id}/packages/{filename:path}` | `download_workspace_package` | routes/packages.py |
+| POST | `/workspaces/{workspace_id}/quality/sample-batches` | `create_sample_batch` | routes/quality.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-batches` | `list_sample_batches` | routes/quality.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-batches/{batch_id}` | `get_sample_batch` | routes/quality.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-batches/{batch_id}/stats` | `get_sample_batch_stats` | routes/quality.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}` | `get_sample_item` | routes/quality.py |
+| POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels` | `add_sample_item_label` | routes/quality.py |
+| POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `create_replay` | routes/quality_replays.py |
+| GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
+| GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/questions/{question_id}` | `get_question_detail` | routes/questions.py |
 | GET | `/executors/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
@@ -335,6 +344,25 @@ server/app/
 | WorkspacePackagesResponse | BaseModel | packages: list[WorkspacePackageItemResponse] | app/routes/package_history_contracts.py |
 | WorkspacePackageDeleteResponse | BaseModel | deleted: bool | app/routes/package_history_contracts.py |
 | WorkspacePackageUpdateResponse | BaseModel | id: int, name: str | None, locked: bool | None | app/routes/package_history_contracts.py |
+| QualitySampleFilters | BaseModel | node_keys: list[str] | None, statuses: list[str] | None, since: datetime | No... | app/routes/quality_contracts.py |
+| QualitySampleBatchCreateRequest | BaseModel | name: str, workflow_key: str | None, filters: QualitySampleFilters, sample_si... | app/routes/quality_contracts.py |
+| QualitySampleBatch | BaseModel | id: str, workspace_id: str, name: str, workflow_key: str, filters: dict[str, ... | app/routes/quality_contracts.py |
+| QualitySampleBatchListResponse | BaseModel | batches: list[QualitySampleBatch] | app/routes/quality_contracts.py |
+| QualityLabel | BaseModel | id: str, item_id: str, target: str, verdict: str, reason_codes: list[str], no... | app/routes/quality_contracts.py |
+| QualitySampleItem | BaseModel | id: str, batch_id: str, node_run_id: int, job_id: str, node_key: str, capabil... | app/routes/quality_contracts.py |
+| QualitySampleBatchDetailResponse | BaseModel | batch: QualitySampleBatch, items: list[QualitySampleItem], total: int | app/routes/quality_contracts.py |
+| QualityArtifactContent | BaseModel | name: str, content: str, truncated: bool | app/routes/quality_contracts.py |
+| QualitySampleItemDetailResponse | BaseModel | item: QualitySampleItem, labels: list[QualityLabel], artifacts: list[QualityA... | app/routes/quality_contracts.py |
+| QualityLabelCreateRequest | BaseModel | verdict: LabelVerdict, reason_codes: list[str], note: str, replay_id: str | N... | app/routes/quality_contracts.py |
+| QualityLabelResponse | BaseModel | label: QualityLabel | app/routes/quality_contracts.py |
+| QualityReplayCreateRequest | BaseModel | agent_version: int | None | app/routes/quality_contracts.py |
+| QualityReplay | BaseModel | id: str, item_id: str, agent_id: str, agent_version: int | None, replay_job_i... | app/routes/quality_contracts.py |
+| QualityReplayResponse | BaseModel | replay: QualityReplay | app/routes/quality_contracts.py |
+| QualityReplayListResponse | BaseModel | replays: list[QualityReplay] | app/routes/quality_contracts.py |
+| QualityReplayDetailResponse | BaseModel | replay: QualityReplay, labels: list[QualityLabel], artifacts: list[QualityArt... | app/routes/quality_contracts.py |
+| QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
+| QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
+| QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
 | QuestionNormalized | BaseModel | stem: str | None, options: list[dict[str, Any]] | None, answer: Any | None, a... | app/routes/questions.py |
 | QuestionDetailResponse | BaseModel | question_id: str, title: str, normalized: QuestionNormalized, cms_payload: di... | app/routes/questions.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
@@ -429,8 +457,10 @@ server/app/
   UV_CACHE_DIR=.uv-cache uv run python -m scripts.check_architecture
   ```
 
-  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。此外 production 文件有
-  800 行绝对上限（`production.max_lines`），豁免也不能突破；挂账超过 30 天的豁免由
+  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。ceiling 按有效行数计
+  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释
+  对预算没有帮助。此外 production 文件有
+  800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
 ## Runtime Architecture
