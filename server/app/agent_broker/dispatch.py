@@ -96,6 +96,7 @@ class AgentDispatchService:
         log_path: Path,
         inputs: tuple[str, ...],
         node_config: dict[str, Any] | None = None,
+        pinned_agent_version: int | None = None,
     ) -> bool:
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
@@ -131,6 +132,10 @@ class AgentDispatchService:
                 "execution": execution,
                 "execution_defaults": execution_defaults,
             }
+            # Quality replay audit trail: the pinned immutable version that
+            # produced this manifest (absent on the normal published path).
+            if pinned_agent_version is not None:
+                manifest["agent_version"] = pinned_agent_version
             context = ExecutionContext(
                 execution_id=execution_id,
                 lease_id="",
@@ -167,6 +172,7 @@ class AgentDispatchService:
                         agent_definition_hash=definition.definition_hash(),
                         manifest=manifest,
                         execution_id=execution_id,
+                        pinned_agent_version=pinned_agent_version,
                     )
                 )
                 if queued is None:

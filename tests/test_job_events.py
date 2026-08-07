@@ -171,6 +171,7 @@ def test_finish_broadcasts_job_updated(manager, tmp_path):
         TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
+        data_dir=tmp_path,
     )
     expires_at = datetime.now(UTC) + timedelta(hours=1)
     conn = connect_database(lease_repo.path)
@@ -195,6 +196,7 @@ def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
         TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
+        data_dir=tmp_path,
     )
     conn = connect_database(lease_repo.path)
     try:
@@ -229,6 +231,7 @@ def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
         TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
+        data_dir=tmp_path,
     )
     expires_at = datetime.now(UTC) - timedelta(seconds=1)
     conn = connect_database(lease_repo.path)
@@ -253,6 +256,7 @@ def test_recover_orphaned_running_jobs_broadcasts_job_updated(manager, tmp_path)
         TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
+        data_dir=tmp_path,
     )
     conn = connect_database(lease_repo.path)
     try:
@@ -279,6 +283,7 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
         TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
+        data_dir=tmp_path,
     )
     expires_at = datetime.now(UTC) + timedelta(hours=1)
     conn = connect_database(lease_repo.path)
@@ -326,7 +331,7 @@ def test_connect_evicts_oldest_at_capacity():
 def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
     from server.app.services.job_deletion import JobDeletionService
 
-    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL)
+    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path)
     settings = MagicMock(spec=Settings)
     settings.logs_dir = tmp_path / "logs"
     settings.jobs_dir = tmp_path / "jobs"
@@ -346,7 +351,7 @@ def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
 def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
     from server.app.services.job_deletion import JobDeletionService
 
-    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL)
+    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path)
     settings = MagicMock(spec=Settings)
     settings.logs_dir = tmp_path / "logs"
     settings.jobs_dir = tmp_path / "jobs"

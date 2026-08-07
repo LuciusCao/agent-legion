@@ -113,6 +113,71 @@ def test_quick_gate_hoists_api_contract_out_of_parallel_static_round(tmp_path: P
     assert calls == ["static:0", "api-contract:unset", "test:1"]
 
 
+def _quick_gate_fixture(scripts: Path) -> Path:
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 0\n")
+    _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
+    return quick_gate
+
+
+def _init_git_repo(path: Path) -> None:
+    subprocess.run(["git", "init", "-q"], cwd=path, check=True, capture_output=True)
+    subprocess.run(["git", "add", "-A"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        [
+            "git",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "user.name=Test",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+        cwd=path,
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_quick_gate_derives_backend_lane_from_worktree_changes(tmp_path: Path) -> None:
+    quick_gate = _quick_gate_fixture(tmp_path / "scripts")
+    _init_git_repo(tmp_path)
+    backend_file = tmp_path / "server" / "app" / "foo.py"
+    backend_file.parent.mkdir(parents=True)
+    backend_file.write_text("", encoding="utf-8")
+
+    result = _run(quick_gate, cwd=tmp_path, env={})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Derived lanes from worktree changes: backend\n" in result.stdout
+    assert "Parallel quick gate passed" in result.stdout
+
+
+def test_quick_gate_derives_static_phase_for_docs_only_changes(tmp_path: Path) -> None:
+    quick_gate = _quick_gate_fixture(tmp_path / "scripts")
+    _init_git_repo(tmp_path)
+    (tmp_path / "README.md").write_text("# fixture\n", encoding="utf-8")
+
+    result = _run(quick_gate, cwd=tmp_path, env={})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Derived lanes from worktree changes: static\n" in result.stdout
+    assert "Parallel quick gate passed" in result.stdout
+
+
+def test_quick_gate_explicit_lanes_skip_derivation(tmp_path: Path) -> None:
+    quick_gate = _quick_gate_fixture(tmp_path / "scripts")
+    _init_git_repo(tmp_path)
+
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_LANES": "backend"})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Derived lanes" not in result.stdout
+
+
 def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -> None:
     scripts = tmp_path / "scripts"
     frontend = tmp_path / "frontend"

@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import agent_claim_compatibility
+from server.app.agent_broker.claim_paths import claim_log_path
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -101,7 +102,11 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
           join versioned_entities d
             on d.entity_type='agent' and d.workspace_id is null
            and d.entity_key=r2.agent_id and d.definition_hash=r2.agent_definition_hash
-           and d.status='published'
+           -- Quality replay pins match their immutable version row (any
+           -- status); unpinned requests match the currently published row.
+           and ((r2.pinned_agent_version is not null
+                 and d.version=r2.pinned_agent_version)
+                or (r2.pinned_agent_version is null and d.status='published'))
           where r2.workspace_id=ws.workspace_id and r2.state='queued'
           order by r2.queued_at, r2.execution_id limit %s
         ) r
@@ -232,7 +237,7 @@ def evaluate_candidate(
         state.skip_reasons["node_not_pending"] += 1
         return None
 
-    log_path = str(manifest.get("log_path", ""))
+    log_path = claim_log_path(manifest, broker.data_dir)
     run = conn.execute(
         """
         insert into node_runs(
