@@ -18,14 +18,11 @@ agent-legion/
 │   ├── workflow.yaml           # Workspace 执行器、工作流运行时、Pi 配置
 │   ├── skills.yaml             # 外部 Pi skill 源声明
 │   ├── skills.lock             # 解析后的 skill commit 锁定
-│   ├── architecture/           # 架构治理配置
-│   │   ├── architecture-invariants.yaml
-│   │   ├── architecture-exemptions.yaml
-│   │   ├── architecture-budget-policy.yaml
-│   │   └── architecture-budgets.json
-│   └── workflows/              # Workflow DAG 定义
-│       ├── video_knowledge.yaml
-│       └── question_comprehension_info.yaml
+│   └── architecture/           # 架构治理配置
+│       ├── architecture-invariants.yaml
+│       ├── architecture-exemptions.yaml
+│       ├── architecture-budget-policy.yaml
+│       └── architecture-budgets.json
 ├── server/
 │   └── app/
 │       ├── main.py             # FastAPI app factory + lifespan worker

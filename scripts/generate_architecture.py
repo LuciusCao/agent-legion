@@ -199,10 +199,10 @@ def extract_frontend_routes(root: Path) -> str:
 
 
 def extract_pipeline_phases(root: Path) -> str:
-    """Extract video pipeline node sequence from config/workflows/video_knowledge.yaml."""
+    """Extract the video pipeline node sequence from the built-in video_knowledge DAG."""
     from scripts.generate_architecture_pipeline import extract_pipeline_phases as _extract
 
-    return _extract(root)
+    return _extract()
 
 
 # ---------------------------------------------------------------------------

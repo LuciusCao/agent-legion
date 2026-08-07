@@ -1,29 +1,10 @@
-import contextlib
-from pathlib import Path
-
-from server.app.workflows.definition import WorkflowDefinition, load_workflow_definition
-
-WORKFLOW_FILES = {
-    "question_comprehension_info": "question_comprehension_info.yaml",
-    "video_knowledge": "video_knowledge.yaml",
-}
+from server.app.workflows.builtin import list_builtin_workflows, load_builtin_workflow
+from server.app.workflows.definition import WorkflowDefinition
 
 
-def load_registered_workflow(
-    root_dir: Path,
-    workflow_key: str,
-) -> WorkflowDefinition:
-    filename = WORKFLOW_FILES.get(workflow_key)
-    if filename is None:
-        raise KeyError(workflow_key)
-    return load_workflow_definition(root_dir / "config" / "workflows" / filename)
+def load_registered_workflow(workflow_key: str) -> WorkflowDefinition:
+    return load_builtin_workflow(workflow_key)
 
 
-def list_registered_workflows(
-    root_dir: Path,
-) -> list[WorkflowDefinition]:
-    workflows: list[WorkflowDefinition] = []
-    for key in WORKFLOW_FILES:
-        with contextlib.suppress(KeyError, FileNotFoundError):
-            workflows.append(load_registered_workflow(root_dir, key))
-    return workflows
+def list_registered_workflows() -> list[WorkflowDefinition]:
+    return list_builtin_workflows()

@@ -1,9 +1,7 @@
-from pathlib import Path
-
 import pytest
 
 from server.app.jobs.queries import JobQueries
-from server.app.workflows.definition import load_workflow_definition
+from tests.helpers import load_builtin_definition
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -175,7 +173,7 @@ def test_start_node_run_rejects_missing_node(tmp_path):
 def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question_id",

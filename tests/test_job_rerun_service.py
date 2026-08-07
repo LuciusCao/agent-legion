@@ -1,6 +1,5 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -13,7 +12,7 @@ from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflows.definition import load_workflow_definition
+from tests.helpers import load_builtin_definition
 
 
 @pytest.fixture
@@ -551,7 +550,7 @@ def _node_statuses(job_db, job_id):
 
 def test_rerun_from_classifier_resets_not_applicable_downstream(job_db, rerun_service):
     workspace = job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     job = job_db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
