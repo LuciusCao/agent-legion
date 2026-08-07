@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 from server.app.workflows.registry import load_registered_workflow
 
 VIDEO_KNOWLEDGE_PACKAGE_FILES = [
@@ -15,9 +13,7 @@ VIDEO_KNOWLEDGE_PACKAGE_FILES = [
 ]
 
 
-def workspace_artifact_names(
-    root_dir: Path, workflow_keys: set[str], base_names: set[str]
-) -> list[str]:
+def workspace_artifact_names(workflow_keys: set[str], base_names: set[str]) -> list[str]:
     """Return the curated artifact list for packaging.
 
     ``video_knowledge`` packages use the fixed ``VIDEO_KNOWLEDGE_PACKAGE_FILES``
@@ -30,8 +26,8 @@ def workspace_artifact_names(
         if not workflow_key:
             continue
         try:
-            definition = load_registered_workflow(root_dir, workflow_key)
-        except (KeyError, FileNotFoundError):
+            definition = load_registered_workflow(workflow_key)
+        except KeyError:
             continue
         for node in definition.nodes.values():
             names.update(node.outputs)

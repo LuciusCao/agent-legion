@@ -6,7 +6,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.workflows.definition import load_workflow_definition
+from tests.helpers import load_builtin_definition
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -29,7 +29,7 @@ class _RecordingEventManager:
 def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
     current = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -69,7 +69,7 @@ def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path
 def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     revisions = WorkflowRevisionService(queries)
     revisions.publish_workspace_revision(workspace["id"], definition)
     current = revisions.publish_workspace_revision(workspace["id"], definition)
@@ -102,7 +102,7 @@ def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
 def test_upgrade_job_workflow_skips_current_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     current = WorkflowRevisionService(queries).publish_workspace_revision(
         workspace["id"], definition
     )
@@ -156,7 +156,7 @@ def test_upgrade_job_workflow_fails_without_active_revision(tmp_path: Path) -> N
 def test_upgrade_job_workflow_skips_running_job(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
     revisions.publish_workspace_revision(workspace["id"], definition)
@@ -188,7 +188,7 @@ def test_upgrade_job_workflow_skips_running_job(tmp_path: Path) -> None:
 def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
     revisions.publish_workspace_revision(workspace["id"], definition)
@@ -262,7 +262,7 @@ def test_upgrade_job_workflow_fails_for_missing_or_wrong_workspace(tmp_path: Pat
 def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
     revisions.publish_workspace_revision(workspace["id"], definition)
@@ -295,7 +295,7 @@ def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> Non
 def test_upgrade_job_workflow_broadcasts_via_event_manager(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     revisions = WorkflowRevisionService(queries)
     original = revisions.publish_workspace_revision(workspace["id"], definition)
     revisions.publish_workspace_revision(workspace["id"], definition)

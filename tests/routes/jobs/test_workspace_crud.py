@@ -20,8 +20,7 @@ def test_fresh_install_workspace_and_revision_flow(tmp_path):
 
     from server.app.main import create_app
     from server.app.services.workflow_revisions import WorkflowRevisionService
-    from server.app.settings import PROJECT_ROOT
-    from server.app.workflows.definition import load_workflow_definition
+    from tests.helpers import load_builtin_definition
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -33,9 +32,7 @@ def test_fresh_install_workspace_and_revision_flow(tmp_path):
         )
         workspace_id = created.json()["workspace"]["id"]
 
-        definition = load_workflow_definition(
-            PROJECT_ROOT / "config" / "workflows" / "question_comprehension_info.yaml"
-        )
+        definition = load_builtin_definition("question_comprehension_info")
         revision = WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
             workspace_id, definition
         )

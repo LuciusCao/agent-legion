@@ -1,5 +1,4 @@
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -42,7 +41,7 @@ def _create_job(
         {"question_ids": [source_id]},
         workspace_id=workspace_id,
     )
-    definition = load_registered_workflow(Path(".").resolve(), workflow_key)
+    definition = load_registered_workflow(workflow_key)
     return job_db.create_job(
         workflow_key=workflow_key,
         source_type="question",

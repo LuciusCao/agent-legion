@@ -132,22 +132,18 @@ def test_extract_frontend_routes(tmp_path: Path):
 
 
 def test_extract_pipeline_phases(tmp_path: Path):
-    workflows_dir = tmp_path / "config" / "workflows"
-    workflows_dir.mkdir(parents=True)
-    (workflows_dir / "video_knowledge.yaml").write_text("""
-key: video_knowledge
-nodes:
-  package:
-    after: [assemble]
-  download:
-    after: []
-  assemble:
-    after: [download]
-""")
-
     result = extract_pipeline_phases(tmp_path)
-    assert "知识视频（3 阶段）" in result
-    assert result.index("`download`") < result.index("`assemble`") < result.index("`package`")
+    assert "知识视频（8 阶段）" in result
+    assert (
+        result.index("`download`")
+        < result.index("`transcribe`")
+        < result.index("`subtitle_review`")
+        < result.index("`chapter_generate`")
+        < result.index("`interaction_generate`")
+        < result.index("`content_review`")
+        < result.index("`assemble`")
+        < result.index("`package`")
+    )
 
 
 # ---------------------------------------------------------------------------

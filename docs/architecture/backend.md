@@ -609,7 +609,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 其他配置文件：
 
 - `config/skills.yaml` / `config/skills.lock`：外部 Pi skill 仓库源与固定 commit；lock 是 skill ref 的唯一权威（G3）。
-- `config/workflows/*.yaml`：workflow 定义，Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；workspace 绑定时发布为 per-workspace DB revision。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 

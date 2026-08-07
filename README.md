@@ -18,8 +18,9 @@ It ships with two production workflows:
 
 ## Features
 
-- **Workspace-scoped DAG workflows.** Workflows are YAML files in
-  `config/workflows/`; nodes declare only a business `capability` and their
+- **Workspace-scoped DAG workflows.** Built-in workflow DAGs are Python
+  constants in `server/app/workflows/builtin.py`; nodes declare only a
+  business `capability` and their
   input/output artifacts — never how to run them. Rerun a single node, run to
   a target node, or continue from a pause; downstream staleness is tracked
   automatically.
@@ -139,7 +140,7 @@ top-level keys and anything else fails startup:
 | `config/app.yaml` | database URL, paths, HTTP, cleanup, monitoring |
 | `config/agent_legion.yaml` | ASR, CMS, OpenClaw |
 | `config/workflow.yaml` | agent catalog, agent workers, executors, Pi/velites runtime |
-| `config/workflows/*.yaml` | workflow DAG definitions |
+| `server/app/workflows/builtin.py` | built-in workflow DAG definitions |
 | `config/skills.yaml` + `skills.lock` | skill sources and pinned refs |
 
 Secrets are never written to yaml: database URL comes from
