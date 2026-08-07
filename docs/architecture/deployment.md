@@ -8,13 +8,15 @@ Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生�
 
 ```
 config/
-├── skills.yaml               # 外部 Pi skill 源声明
-├── skills.lock               # 解析后的 skill commit 锁定
 ├── agent-worker.example.yaml # Agent Worker 配置模板
 └── architecture/             # 架构治理配置（不变量、豁免、体积预算）
 
 # 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已整体退役：
 # 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错（带迁移指引）。
+# skill 源与锁（skills.yaml / skills.lock）亦已退役：声明与解析后的 commit 锁
+# 存 DB global_settings（skill_sources / skill_lock），经 /admin/settings
+# 「Skill 源管理」或 make skills-lock 管理；残留文件启动时一次性导入 DB
+# （warning），此后不再读取。
 
 data/                       # 文件产物（gitignored）
 ├── videos/                 # 下载的视频与产物

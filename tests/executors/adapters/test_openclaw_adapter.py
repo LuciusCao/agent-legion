@@ -3,7 +3,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-import yaml
 
 from server.app.executors.config import (
     OpenClawCapabilityConfig,
@@ -18,6 +17,7 @@ from server.app.executors.runtime_config import (
 )
 from server.app.skills.errors import SkillConfigError
 from server.app.skills.manager import SkillManager
+from tests.helpers.skill_store import memory_skill_store
 
 
 def test_openclaw_executor_supports_capability(tmp_path: Path) -> None:
@@ -206,14 +206,8 @@ def _executor_config() -> OpenClawExecutorConfig:
 
 
 def _skill_manager(tmp_path: Path, skills: dict[str, dict[str, str]]) -> SkillManager:
-    lock_path = tmp_path / "skills.lock"
-    lock_path.write_text(
-        yaml.safe_dump({"version": "1", "skills": skills}),
-        encoding="utf-8",
-    )
     return SkillManager(
-        config_path=tmp_path / "skills.yaml",
-        lock_path=lock_path,
+        store=memory_skill_store(lock={"version": "1", "skills": skills}),
         base_dir=tmp_path / "skill-cache",
     )
 
@@ -256,7 +250,7 @@ def test_build_openclaw_executor_rejects_safety_repo_missing_from_lock(tmp_path:
         ),
     )
 
-    with pytest.raises(SkillConfigError, match="not declared in skills.lock"):
+    with pytest.raises(SkillConfigError, match="not declared in the skill lock"):
         build_openclaw_executor("oc", runtime, _executor_config(), skill_manager=manager)
 
 

@@ -17,26 +17,24 @@ import pytest
 
 from server.app.skills.errors import SkillPathError, SkillRepoError
 from server.app.skills.manager import SkillManager
+from tests.helpers.skill_store import memory_skill_store
 
 
 def _make_manager(
     tmp_path: Path,
     declared_key: str | None = "question_comprehension_info/generate_key_info",
 ) -> SkillManager:
-    config_path = tmp_path / "skills.yaml"
-    if declared_key:
-        config_path.write_text(
-            f"skills:\n  {declared_key}:\n    repo: file:///nonexistent/repo.git\n    ref: main\n"
-        )
-    else:
-        config_path.write_text("skills: {}\n")
+    skills = (
+        {declared_key: {"repo": "file:///nonexistent/repo.git", "ref": "main"}}
+        if declared_key
+        else {}
+    )
 
     base_dir = tmp_path / "skills"
     base_dir.mkdir(parents=True, exist_ok=True)
 
     return SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
+        store=memory_skill_store(skills),
         base_dir=base_dir,
         runs_dir=tmp_path / "runs",
     )

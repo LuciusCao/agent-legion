@@ -147,8 +147,16 @@ CodeExecutor(...).execute(context)
 ## 7. Pi / External Skills
 
 - Skill 只在外部仓库（如 `~/.agents/skills/agent-legion/...`）修改，不要复制或 symlink 到项目根。
-- 修改后同步 shared assets，更新 `config/skills.yaml` 与 `config/skills.lock`。
-- 跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py` 验证共享引用文件一致。
+- skill 源与锁已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB
+  `global_settings`（key=`skill_sources` / `skill_lock`）；tracked
+  `config/skills.yaml` / `config/skills.lock` 已退役，残留文件只在 DB 无记录时
+  启动 import-once（warning）作一次性迁移通道，此后不再读取。
+- 变更流程：外部仓库改 skill 并打 tag → admin UI（/admin/settings「Skill 源管理」）
+  或 admin API（`PUT /api/admin/skill-sources/{skill_key}`）更新 ref → relock
+  （`POST /api/admin/skill-sources/relock`，或 CLI `make skills-lock` /
+  `uv run python -m server.app.skills.lock`）解析并冻结 commit。
+- 修改后同步 shared assets，跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py`
+  验证共享引用文件一致（skill 清单来自 `server/app/skills/builtin_sources.py` 常量）。
 - 完整流程见 [README.md](README.md) 的 Agent Runtimes 章节。
 
 ## 8. Security & Data
@@ -165,8 +173,8 @@ CodeExecutor(...).execute(context)
   启动即报错（G2）；`openclaw` 段已从 split yaml 退役进实例设置（DB
   `global_settings` 的 `instance` 文档，`/api/admin/instance-settings` 维护），
   split yaml 写 `openclaw:` 撞 owned-key 校验报错；`openclaw.skill_safety`
-  写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以
-  `config/skills.lock` 为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
+  写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以 DB
+  `skill_lock` 文档为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
   整体退役（文件存在即启动报错，带迁移指引）：业务参数
   `provider` / `timeout_seconds` 在 `transcribe_video` capability 的
   config_schema（Studio 节点/workspace 配置覆盖），机器路径只走 env

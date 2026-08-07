@@ -11,6 +11,7 @@ from server.app.executors.code import CodeExecutor
 from server.app.executors.config import CodeCapabilityConfig, PiCapabilityConfig
 from server.app.executors.pi import PiExecutor
 from server.app.jobs import JobQueries
+from server.app.services.skill_source_store import InMemorySkillSourceStore
 from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.pi_runner import PiConfig
@@ -33,8 +34,7 @@ class _StubSkillManager(SkillManager):
 
     def __init__(self, base_dir: Path) -> None:
         super().__init__(
-            config_path=base_dir / "skills.yaml",
-            lock_path=base_dir / "skills.lock",
+            store=InMemorySkillSourceStore(),
             base_dir=base_dir,
         )
 

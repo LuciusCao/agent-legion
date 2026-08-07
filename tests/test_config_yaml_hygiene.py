@@ -17,7 +17,7 @@ tests/test_configuration_loader.py):
 - ``openclaw.skill_safety.repos`` stay a pure path allowlist — the yaml
   ``openclaw:`` section retired into the DB instance settings document, so
   the code defaults in ``configuration/instance_defaults.py`` are the
-  tracked source; refs are pinned by ``config/skills.lock`` (config
+  tracked source; refs are pinned by the DB ``skill_lock`` document (config
   governance G3);
 - env-only sections (``vault``, ``auth``) stay out of every yaml file — they
   are injected via environment variables only.
@@ -33,7 +33,7 @@ import yaml
 from server.app.configuration.openclaw_defaults import DEFAULT_OPENCLAW_CONFIG
 
 CONFIG_DIR = Path(__file__).resolve().parent.parent / "config"
-TRACKED_CONFIG_FILES = ("skills.yaml", "agent-worker.example.yaml")
+TRACKED_CONFIG_FILES = ("agent-worker.example.yaml",)
 ENV_ONLY_SECTIONS = ("vault", "auth")
 
 
@@ -69,7 +69,7 @@ def test_skill_safety_repos_are_path_only():
     for repo in repos:
         assert set(repo) <= {"path"}, (
             "skill_safety repos are a pure path allowlist (G3); "
-            "refs resolve from config/skills.lock"
+            "refs resolve from the DB skill_lock document"
         )
 
 

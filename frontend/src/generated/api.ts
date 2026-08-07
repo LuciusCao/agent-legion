@@ -22,6 +22,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/admin/skill-sources': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill Sources */
+    get: operations['get_skill_sources_api_admin_skill_sources_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/skill-sources/relock': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Relock Skill Sources */
+    post: operations['relock_skill_sources_api_admin_skill_sources_relock_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/skill-sources/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Put Skill Source */
+    put: operations['put_skill_source_api_admin_skill_sources__skill_key__put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/token-usage-pricing': {
     parameters: {
       query?: never
@@ -3798,6 +3849,36 @@ export interface components {
        */
       truncated: boolean
     }
+    /**
+     * SkillSourceEntry
+     * @description Merged view of one skill: declared source + resolved lock entry.
+     */
+    SkillSourceEntry: {
+      /** Key */
+      key: string
+      /** Locked Commit */
+      locked_commit: string | null
+      /** Ref */
+      ref: string
+      /** Repo */
+      repo: string
+      /** Resolved At */
+      resolved_at: string | null
+      /** Stale */
+      stale: boolean
+    }
+    /** SkillSourceUpdate */
+    SkillSourceUpdate: {
+      /** Ref */
+      ref: string
+      /** Repo */
+      repo: string
+    }
+    /** SkillSourcesResponse */
+    SkillSourcesResponse: {
+      /** Skills */
+      skills: components['schemas']['SkillSourceEntry'][]
+    }
     /** SkillTagsResponse */
     SkillTagsResponse: {
       /** Latest Tag */
@@ -4988,6 +5069,81 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['InstanceSettingsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_skill_sources_api_admin_skill_sources_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSourcesResponse']
+        }
+      }
+    }
+  }
+  relock_skill_sources_api_admin_skill_sources_relock_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSourcesResponse']
+        }
+      }
+    }
+  }
+  put_skill_source_api_admin_skill_sources__skill_key__put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillSourceUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSourcesResponse']
         }
       }
       /** @description Validation Error */

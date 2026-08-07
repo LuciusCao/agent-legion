@@ -28,6 +28,7 @@ from server.app.executors.openclaw_runner import OpenClawRunner
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime import ExecutionRuntime
+from server.app.services.skill_source_store import InMemorySkillSourceStore
 from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_runner import PiConfig
 
@@ -218,8 +219,7 @@ class _StubSkillManager(SkillManager):
 
     def __init__(self, base_dir: Path) -> None:
         super().__init__(
-            config_path=base_dir / "skills.yaml",
-            lock_path=base_dir / "skills.lock",
+            store=InMemorySkillSourceStore(),
             base_dir=base_dir,
         )
 

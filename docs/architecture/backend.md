@@ -178,6 +178,9 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/questions/{question_id}` | `get_question_detail` | routes/questions.py |
 | GET | `/executors/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
+| GET | `/admin/skill-sources` | `get_skill_sources` | routes/skill_sources.py |
+| PUT | `/admin/skill-sources/{skill_key:path}` | `put_skill_source` | routes/skill_sources.py |
+| POST | `/admin/skill-sources/relock` | `relock_skill_sources` | routes/skill_sources.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
@@ -399,6 +402,9 @@ server/app/
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
 | SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
 | SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
+| SkillSourceEntry | BaseModel | key: str, repo: str, ref: str, locked_commit: str | None, resolved_at: str | ... | app/routes/skill_source_contracts.py |
+| SkillSourcesResponse | BaseModel | skills: list[SkillSourceEntry] | app/routes/skill_source_contracts.py |
+| SkillSourceUpdate | BaseModel | repo: str, ref: str | app/routes/skill_source_contracts.py |
 | TokenUsageRunItem | BaseModel | run_id: int, node_key: str, status: str, usage: RunUsage | None, reason: str ... | app/routes/token_usage_contracts.py |
 | TokenUsageTotal | BaseModel | message_count: int, input_tokens: int, output_tokens: int, cache_read_tokens:... | app/routes/token_usage_contracts.py |
 | TokenUsageJobResponse | BaseModel | job_id: str, runs: list[TokenUsageRunItem], total: TokenUsageTotal, runs_with... | app/routes/token_usage_contracts.py |
@@ -602,7 +608,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
 
 - env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers.register_token[_file]` → `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]`（缺省读 `deploy/secrets/agent_worker_register_token`）。
-- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd` / `timeout_seconds` / `isolated_workspace_root` / `command_template`（含 `{prompt_text}`、`{video_id}`、`{timestamp}` 占位符的命令参数列表）/ `skill_safety`（OpenClaw skill 安全校验；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 `config/skills.lock` 解析——config 治理 G3 单源化，实例设置 API 写 `ref` 返回 422，explicit 单文件配置写 `ref` 启动即报错）。代码默认值 = 退役前 tracked yaml 的生效值；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd` / `timeout_seconds` / `isolated_workspace_root` / `command_template`（含 `{prompt_text}`、`{video_id}`、`{timestamp}` 占位符的命令参数列表）/ `skill_safety`（OpenClaw skill 安全校验；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 DB `skill_lock` 文档（`global_settings`）解析——config 治理 G3 单源化，实例设置 API 写 `ref` 返回 422，explicit 单文件配置写 `ref` 启动即报错）。代码默认值 = 退役前 tracked yaml 的生效值；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
@@ -620,7 +626,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 
 其他配置文件：
 
-- `config/skills.yaml` / `config/skills.lock`：外部 Pi skill 仓库源与固定 commit；lock 是 skill ref 的唯一权威（G3）。
+- 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
 - 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；workspace 绑定时发布为 per-workspace DB revision。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。

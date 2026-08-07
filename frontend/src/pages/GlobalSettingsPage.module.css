@@ -89,6 +89,10 @@
   font-size: 13px;
   cursor: pointer;
 }
+.staleBadge {
+  color: #ba1a1a;
+  font-size: 12px;
+}
 .empty {
   font-size: 13px;
   color: #74777f;
