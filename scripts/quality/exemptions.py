@@ -105,9 +105,11 @@ def _validate_ceiling(ex: ArchitectureExemption, root: Path, prefix: str) -> str
     if ex.check == "architecture.file_budget" and ex.path.strip():
         file_path = root / ex.path
         if file_path.is_file():
-            actual = len(file_path.read_text(encoding="utf-8").splitlines())
+            from scripts.architecture.effective_lines import count_effective_lines
+
+            actual = count_effective_lines(file_path)
             if ex.ceiling < actual:
-                return f"ceiling {ex.ceiling} is below actual file size ({actual} lines)"
+                return f"ceiling {ex.ceiling} is below actual effective line count ({actual} lines)"
 
     return None
 

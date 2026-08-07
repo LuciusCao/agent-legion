@@ -11,6 +11,7 @@ from scripts.quality.exemptions import ArchitectureExemption
 
 from .budget_inventory import build_budget_inventory
 from .budget_policy import BudgetPolicy
+from .effective_lines import count_effective_lines
 
 __test__ = False
 
@@ -27,7 +28,7 @@ class _BudgetConfigurationError(ValueError):
 
 
 def load_budget_baseline(path: Path) -> BudgetBaseline:
-    """Require exactly version 2 and a normalized positive ceiling map."""
+    """Require exactly version 3 and a normalized positive ceiling map."""
     if not path.is_file():
         raise _BudgetConfigurationError(f"Baseline file not found: {path}")
 
@@ -52,7 +53,7 @@ def load_budget_baseline(path: Path) -> BudgetBaseline:
         raise _BudgetConfigurationError(f"Invalid baseline structure; {'; '.join(parts)}")
 
     version = raw.get("version")
-    if type(version) is not int or version != 2:
+    if type(version) is not int or version != 3:
         raise _BudgetConfigurationError(f"Unsupported baseline version: {version!r}")
 
     files = raw.get("files")
@@ -76,6 +77,7 @@ def load_budget_baseline(path: Path) -> BudgetBaseline:
 
 
 def count_source_lines(path: Path) -> int:
+    """Raw line count, used for absolute size limits (not budget ceilings)."""
     return len(path.read_text(encoding="utf-8").splitlines())
 
 
@@ -129,7 +131,7 @@ def check_file_budgets(
 
     for path, ceiling in frozen_ceilings.items():
         file_path = root / path
-        actual = count_source_lines(file_path)
+        actual = count_effective_lines(file_path)
 
         normal_ceiling = baseline_files.get(path)
         if normal_ceiling is not None:
@@ -173,15 +175,15 @@ def check_file_budgets(
             continue
         effective_ceiling = _positive_int(effective_ceiling)
         file_path = root / path
-        actual = count_source_lines(file_path)
+        actual = count_effective_lines(file_path)
         if actual > effective_ceiling:
             errors.append(
-                f"{path}: {actual} lines exceeds ceiling {effective_ceiling}; "
+                f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}; "
                 "split the file or revert growth"
             )
         elif effective_ceiling > actual + policy.buffer_lines:
             errors.append(
-                f"{path}: ceiling {effective_ceiling} is stale for {actual} lines; "
+                f"{path}: ceiling {effective_ceiling} is stale for {actual} effective lines; "
                 "run scripts/ratchet_architecture_budgets.py"
             )
 

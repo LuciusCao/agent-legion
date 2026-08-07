@@ -66,7 +66,8 @@
 - 新增 invariant 或临时豁免要同步更新 registry。
 - spec / plan 必须包含 `Quality Impact` 小节。
 - 不要手写 frontend transport types，必须从 `frontend/src/generated/api.ts` 派生。
-- 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。
+- 超出体积预算的文件必须拆分或回退，不能手动抬高 ceiling。ceiling 按有效行数计
+  （排除注释行与空行），不要为凑预算压缩注释；`max_lines` 绝对上限按原始行数计。
 
 ## 6. Boundary Rules（禁止模式摘要）
 
