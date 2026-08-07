@@ -198,3 +198,76 @@ def test_empty_claim_with_dry_queue_triggers_restock_without_warning(job_db, cap
 
     restock.assert_called_once_with()
     assert not caplog.records
+
+
+def _enqueue_with_log_path(
+    broker: AgentExecutionBroker,
+    definition: AgentDefinition,
+    *,
+    job_id: str,
+    log_path: str,
+) -> str | None:
+    return broker.enqueue(
+        AgentExecutionRequest(
+            workspace_id="test-workspace",
+            job_id=job_id,
+            workflow_key="questions",
+            node_key="generate",
+            agent_id="generator-v1",
+            agent_definition_hash=definition.definition_hash(),
+            manifest={
+                "job_id": job_id,
+                "log_path": log_path,
+                "execution": {"provider": "gateway", "model": _GOOD_MODEL},
+            },
+        )
+    )
+
+
+def _claimed_log_path(job_db, job_id: str) -> str:
+    with job_db._connect_read() as conn:
+        row = conn.execute("select log_path from node_runs where job_id=%s", (job_id,)).fetchone()
+    assert row is not None
+    return row["log_path"]
+
+
+def test_claim_heals_legacy_absolute_log_path(job_db, tmp_path) -> None:
+    """Manifests frozen with absolute log_path heal to relative at claim (issue #37)."""
+    definition = _seed_definition()
+    data_dir = tmp_path / "data"
+    log_file = data_dir / "logs" / "jobs" / "job-legacy-generate.log"
+    log_file.parent.mkdir(parents=True)
+    log_file.write_text("x", encoding="utf-8")
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=data_dir)
+    _insert_job_rows(job_db, job_id="job-legacy")
+    assert (
+        _enqueue_with_log_path(broker, definition, job_id="job-legacy", log_path=str(log_file))
+        is not None
+    )
+    _register_worker(models=[{"provider": "gateway", "model": _GOOD_MODEL}])
+
+    claimed = broker.claim("worker-1")
+
+    assert claimed is not None
+    assert _claimed_log_path(job_db, "job-legacy") == "logs/jobs/job-legacy-generate.log"
+
+
+def test_claim_keeps_unmappable_absolute_log_path(job_db, tmp_path) -> None:
+    """An unmappable legacy path must not crash the claim scan (queue-head poison)."""
+    definition = _seed_definition()
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=data_dir)
+    _insert_job_rows(job_db, job_id="job-legacy")
+    assert (
+        _enqueue_with_log_path(
+            broker, definition, job_id="job-legacy", log_path="/elsewhere/job-legacy.log"
+        )
+        is not None
+    )
+    _register_worker(models=[{"provider": "gateway", "model": _GOOD_MODEL}])
+
+    claimed = broker.claim("worker-1")
+
+    assert claimed is not None
+    assert _claimed_log_path(job_db, "job-legacy") == "/elsewhere/job-legacy.log"

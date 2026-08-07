@@ -64,6 +64,7 @@ class AgentExecutionBroker:
         *,
         lease_ttl_seconds: int = 90,
         bundle_dir: Path | None = None,
+        data_dir: Path | None = None,
         requeue_limit: int = 3,
         agent_status: AgentStatusManager | None = None,
         is_workspace_paused: Callable[[str], bool] | None = None,
@@ -73,6 +74,7 @@ class AgentExecutionBroker:
         self.database_dsn = database_dsn
         self.lease_ttl_seconds = lease_ttl_seconds
         self.bundle_dir = bundle_dir
+        self.data_dir = data_dir
         self.requeue_limit = requeue_limit
         # Optional status-panel sink: when wired, claim/finish transitions are
         # mirrored into the /api/agents feed so the workspace panel shows

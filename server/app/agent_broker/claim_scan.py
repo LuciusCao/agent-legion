@@ -19,6 +19,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import agent_claim_compatibility
+from server.app.agent_broker.claim_paths import claim_log_path
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -236,7 +237,7 @@ def evaluate_candidate(
         state.skip_reasons["node_not_pending"] += 1
         return None
 
-    log_path = str(manifest.get("log_path", ""))
+    log_path = claim_log_path(manifest, broker.data_dir)
     run = conn.execute(
         """
         insert into node_runs(
