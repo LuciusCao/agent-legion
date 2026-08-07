@@ -22,7 +22,7 @@ from server.app.services.workspace_package_lifecycle import (
     WorkspacePackageNotFoundError,  # noqa: F401
 )
 from server.app.settings import Settings
-from server.app.storage_paths import make_data_relative
+from server.app.storage_paths import make_data_relative, resolve_job_dir
 
 
 class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecycleMixin):
@@ -114,7 +114,14 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
             workspace_id, relative_path, name=name, job_count=count, size_bytes=size_bytes
         )
         self.job_db.set_jobs_packed([job["id"] for job in eligible_jobs], packed=1)
+        self._purge_source_videos(eligible_jobs)
 
         response["package_filename"] = package_filename
         response["download_url"] = download_url
         return response
+
+    def _purge_source_videos(self, jobs: list[dict[str, Any]]) -> None:
+        """Drop the original source.mp4 once packaged; preview falls back to source_url."""
+        for job in jobs:
+            source_path = resolve_job_dir(job, self.settings.jobs_dir) / "source.mp4"
+            source_path.unlink(missing_ok=True)
