@@ -24,6 +24,10 @@ _GIT_STUB = """#!/usr/bin/env bash
 if [[ "$1" == "worktree" && "$2" == "list" ]]; then
   echo "worktree {main}"
   echo "bare"
+  echo
+  echo "worktree {main}/.worktrees/develop"
+  echo "HEAD 0000000000000000000000000000000000000000"
+  echo "branch refs/heads/develop"
   exit 0
 fi
 echo "unexpected git call: $*" >&2
@@ -79,8 +83,10 @@ def test_nested_worktree_is_rejected(tmp_path: Path) -> None:
 
 def test_flat_worktree_passes_guard_and_initializes(tmp_path: Path) -> None:
     main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
-    # .env 从基准 worktree 复制；合成的 main 需要先有一个。
-    (main / ".env").write_text("# stub env\n")
+    # 主仓库是 bare，.env 从第一个非 bare 的基准 worktree 复制。
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
     script_path = main / ".worktrees/flat/scripts/init-worktree.sh"
 
     result = _run(script_path, bin_dir)

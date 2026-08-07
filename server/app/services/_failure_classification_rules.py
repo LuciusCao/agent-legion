@@ -126,7 +126,7 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
     if message.startswith("Agent request manifest has unresolved"):
         return CATEGORY_TECHNICAL, "unresolved_model"
 
-    if "config differs from skills.lock" in message or message.startswith(
+    if "config differs from the published skill lock" in message or message.startswith(
         ("skill missing references", "git command failed")
     ):
         return CATEGORY_TECHNICAL, "skill_config"
