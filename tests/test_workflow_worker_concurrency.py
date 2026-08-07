@@ -184,7 +184,7 @@ def _make_worker(
     definitions: list[WorkflowDefinition],
 ) -> WorkflowWorkerThread:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    leases = ExecutorLeaseRepository(db_path)
+    leases = ExecutorLeaseRepository(db_path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,
@@ -585,7 +585,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
     _allocate(job_db, ws["id"], "code-default", 2)
 
     # Simulate a worker with a stale snapshot by calling try_claim directly.
-    leases = ExecutorLeaseRepository(db_path)
+    leases = ExecutorLeaseRepository(db_path, data_dir=tmp_path)
 
     job_db.set_job_execution_target(job["id"], "left")
     claim = leases.try_claim(

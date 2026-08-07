@@ -50,7 +50,7 @@ def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path
     queries.update_job_status(job["id"], "completed")
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -86,7 +86,7 @@ def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
     queries.update_job_status(job["id"], "completed")
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -121,7 +121,7 @@ def test_upgrade_job_workflow_skips_current_revision(tmp_path: Path) -> None:
     )
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -144,7 +144,7 @@ def test_upgrade_job_workflow_fails_without_active_revision(tmp_path: Path) -> N
     )
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -176,7 +176,7 @@ def test_upgrade_job_workflow_skips_running_job(tmp_path: Path) -> None:
     queries.update_job_node(job["id"], "fetch_questions", status="running")
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -221,7 +221,7 @@ def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
         )
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
     )
 
     result = service.upgrade(workspace["id"], job["id"])
@@ -247,7 +247,7 @@ def test_upgrade_job_workflow_fails_for_missing_or_wrong_workspace(tmp_path: Pat
     )
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
     )
 
     missing = service.upgrade(workspace["id"], "missing")
@@ -282,7 +282,7 @@ def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> Non
     buffer = _RecordingEventBuffer()
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
         job_event_buffer=buffer,
     )
 
@@ -315,7 +315,7 @@ def test_upgrade_job_workflow_broadcasts_via_event_manager(tmp_path: Path) -> No
     manager = _RecordingEventManager()
     service = JobWorkflowUpgradeService(
         queries,
-        ExecutorLeaseRepository(queries.path, job_db=queries),
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
         job_event_manager=manager,
     )
 
