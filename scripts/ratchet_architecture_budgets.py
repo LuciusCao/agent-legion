@@ -16,11 +16,11 @@ from pathlib import Path
 
 from scripts.architecture.budget_inventory import build_budget_inventory
 from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
+from scripts.architecture.effective_lines import count_effective_lines
 from scripts.architecture.exemptions import load_exemptions
 from scripts.architecture.file_budgets import (
     _BudgetConfigurationError,
     _build_frozen_ceilings,
-    count_source_lines,
     load_budget_baseline,
 )
 
@@ -64,7 +64,7 @@ def ratchet_budgets(
         return RatchetResult(changed=False, errors=(f"budget configuration: {exc}",))
 
     for path in inventory.production:
-        actual = count_source_lines(root / path)
+        actual = count_effective_lines(root / path)
         desired = actual + policy.buffer_lines
         existing = old_map.get(path)
         frozen = frozen_ceilings.get(path)
@@ -87,7 +87,7 @@ def ratchet_budgets(
             continue
 
         if effective_ceiling is not None and actual > effective_ceiling:
-            errors.append(f"{path}: {actual} lines exceeds ceiling {effective_ceiling}; split the file or revert growth")  # fmt: skip
+            errors.append(f"{path}: {actual} effective lines exceeds ceiling {effective_ceiling}; split the file or revert growth")  # fmt: skip
             if existing is not None:
                 new_map[path] = existing
             continue
@@ -108,7 +108,7 @@ def ratchet_budgets(
     if new_map == old_map:
         return RatchetResult(changed=False, errors=())
 
-    payload = {"version": 2, "files": dict(sorted(new_map.items()))}
+    payload = {"version": 3, "files": dict(sorted(new_map.items()))}
     text = json.dumps(payload, indent=2, sort_keys=False) + "\n"
 
     baseline_path.parent.mkdir(parents=True, exist_ok=True)

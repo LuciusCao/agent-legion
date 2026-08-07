@@ -429,8 +429,10 @@ server/app/
   UV_CACHE_DIR=.uv-cache uv run python -m scripts.check_architecture
   ```
 
-  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。此外 production 文件有
-  800 行绝对上限（`production.max_lines`），豁免也不能突破；挂账超过 30 天的豁免由
+  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。ceiling 按有效行数计
+  （排除注释行与空行，实现见 `scripts/architecture/effective_lines.py`），压缩注释
+  对预算没有帮助。此外 production 文件有
+  800 行绝对上限（`production.max_lines`，按原始行数计），豁免也不能突破；挂账超过 30 天的豁免由
   `scripts/check_exemption_age.py` 在 full gate 中告警（不阻断）。
 
 ## Runtime Architecture
