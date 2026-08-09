@@ -135,6 +135,29 @@ def test_cd_evasion_blocked(tmp_path: Path, velites_binary: Path) -> None:
     assert "blocked by velites guard" in results[0]
 
 
+def test_subshell_evasion_blocked(tmp_path: Path, velites_binary: Path) -> None:
+    """`(cd / && find .)` hides the scan in a subshell group — also blocked."""
+    events = _run_with_fixture(
+        velites_binary,
+        tmp_path,
+        [
+            {
+                "content": [
+                    {
+                        "type": "toolCall",
+                        "name": "bash",
+                        "arguments": {"command": "(cd / && find . -name python3)"},
+                    }
+                ]
+            },
+            {"content": [{"type": "text", "text": "ok"}]},
+        ],
+    )
+    results = _bash_results(events)
+    assert len(results) == 1, f"expected one bash result: {results}"
+    assert "blocked by velites guard" in results[0]
+
+
 def test_scoped_command_still_runs(tmp_path: Path, velites_binary: Path) -> None:
     """The guard must not break normal scoped commands."""
     events = _run_with_fixture(
