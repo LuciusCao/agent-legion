@@ -1,15 +1,21 @@
 """One-shot migration: move legacy flat job dirs into the sharded layout.
 
 Legacy rows store ``storage_dir = jobs/<workspace>/<job_id>`` (3 segments);
-the sharded layout adds a shard segment (4 segments). This script renames the
-on-disk directory (atomic same-filesystem rename, outside any transaction)
-and then updates ``jobs.storage_dir`` in a short batched transaction.
+the sharded layout adds a shard segment (4 segments). For each row this
+script renames the on-disk directory (atomic same-filesystem rename, outside
+any transaction) and then updates that row's ``jobs.storage_dir`` immediately,
+so the window where filesystem and DB disagree is a single job for a few
+milliseconds. ``--apply`` must still be run with the backend and workers
+stopped: an online writer resolving the legacy path mid-rename could
+recreate the old directory and split one job's files across both layouts.
 
 Safe to interrupt and re-run: already-migrated rows are skipped (4-segment
 ``storage_dir``), and a row whose dir was renamed but whose DB update was
 missed (crash between the two steps) self-heals — the new path is detected
-and only the DB update is applied. Rows where both paths exist are reported
-as conflicts and never overwritten.
+and only the DB update is applied. An empty shard dir left behind by a
+resubmitted legacy job (the old create-then-conflict path) is removed and
+migration proceeds. Rows where both paths exist with real content are
+reported as conflicts and never overwritten.
 
 Usage:
     uv run python -m scripts.migrate_job_dirs_to_shards [--apply] [--database-url ...]
@@ -36,6 +42,7 @@ class MigrationStats:
     already_sharded: int = 0
     missing_dir: int = 0
     healed_db_only: int = 0
+    removed_empty_stub: int = 0
     conflicts: list[str] = field(default_factory=list)
 
 
@@ -64,12 +71,13 @@ def _is_legacy(storage_dir: str) -> bool:
     return len(Path(storage_dir).parts) == 3
 
 
-def _flush_updates(db: JobQueries, pending: list[tuple[str, str]]) -> None:
-    if not pending:
-        return
+def _update_storage_dir(db: JobQueries, job_id: str, new_rel: str) -> None:
     with db.connect() as conn:
-        conn.executemany("update jobs set storage_dir = %s where id = %s", pending)
-    pending.clear()
+        conn.execute("update jobs set storage_dir = %s where id = %s", (new_rel, job_id))
+
+
+def _is_empty_dir(path: Path) -> bool:
+    return path.is_dir() and not any(path.iterdir())
 
 
 def migrate_job_dirs(db: JobQueries, data_dir: Path, *, apply: bool) -> MigrationStats:
@@ -80,7 +88,6 @@ def migrate_job_dirs(db: JobQueries, data_dir: Path, *, apply: bool) -> Migratio
     """
     stats = MigrationStats()
     jobs_dir = data_dir / "jobs"
-    pending: list[tuple[str, str]] = []
     for row in _iter_legacy_rows(db):
         job_id = str(row["id"])
         storage_dir = row["storage_dir"] or ""
@@ -91,7 +98,10 @@ def migrate_job_dirs(db: JobQueries, data_dir: Path, *, apply: bool) -> Migratio
         old_abs = data_dir / storage_dir
         new_abs = job_storage_dir(jobs_dir, workspace_id, job_id)
         new_rel = make_data_relative(new_abs, data_dir)
-        if old_abs.is_dir() and new_abs.exists():
+        # An empty shard dir is a stub left by a resubmitted legacy job; it is
+        # safe to remove. Both paths with real content is a true conflict.
+        empty_stub = _is_empty_dir(new_abs)
+        if old_abs.is_dir() and new_abs.exists() and not empty_stub:
             stats.conflicts.append(job_id)
             continue
         if not old_abs.is_dir() and not new_abs.exists():
@@ -104,12 +114,12 @@ def migrate_job_dirs(db: JobQueries, data_dir: Path, *, apply: bool) -> Migratio
             stats.migrated += 1
         if apply:
             if old_abs.is_dir():
+                if empty_stub:
+                    new_abs.rmdir()
+                    stats.removed_empty_stub += 1
                 new_abs.parent.mkdir(parents=True, exist_ok=True)
                 os.rename(old_abs, new_abs)
-            pending.append((new_rel, job_id))
-            if len(pending) >= _BATCH_SIZE:
-                _flush_updates(db, pending)
-    _flush_updates(db, pending)
+            _update_storage_dir(db, job_id, new_rel)
     return stats
 
 
@@ -135,7 +145,7 @@ def main() -> None:
     print(
         f"[{mode}] migrated={stats.migrated} already_sharded={stats.already_sharded} "
         f"healed_db_only={stats.healed_db_only} missing_dir={stats.missing_dir} "
-        f"conflicts={len(stats.conflicts)}"
+        f"removed_empty_stub={stats.removed_empty_stub} conflicts={len(stats.conflicts)}"
     )
     if stats.conflicts:
         print("conflicting job ids (both paths exist, skipped):")
