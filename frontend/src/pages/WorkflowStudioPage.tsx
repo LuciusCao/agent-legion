@@ -20,6 +20,7 @@ export function WorkflowStudioPage() {
           onOpenChanges={() => view.setGlobalMode('changes')}
           onOpenYaml={() => view.setGlobalMode('yaml')}
           onOpenAgents={() => view.setGlobalMode('agents')}
+          onOpenExecutors={() => view.setGlobalMode('executors')}
           onValidate={() => void view.validateAndShowResult()}
         />
       )}

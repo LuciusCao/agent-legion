@@ -11,8 +11,13 @@ from server.app.jobs import JobQueries
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
+from server.app.workflows.builtin import load_builtin_workflow
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.registry import load_registered_workflow
+
+
+def load_builtin_definition(workflow_key: str) -> WorkflowDefinition:
+    """Load a built-in workflow DAG definition (retired config/workflows yaml)."""
+    return load_builtin_workflow(workflow_key)
 
 
 def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
@@ -33,10 +38,14 @@ def make_workflow_worker(
     from server.app.executors.leases import ExecutorLeaseRepository
     from server.app.executors.runtime import ExecutionRuntime
 
-    definition = load_registered_workflow(Path("."), workflow_key)
+    definition = load_builtin_definition(workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    # Avoid real CMS/network calls in tests: with no global cms: config the
-    # node resolves no api_url and writes the base payload. The settings travel
+    # Executor definitions are DB-backed: hydrate the seeded catalog (the app
+    # does this in create_app; this helper builds the registry directly).
+    app_main.hydrate_executor_definitions(settings)
+    # Avoid real CMS/network calls in tests: strip the env-injected global cms
+    # config (conftest points CMS_BASE_URL at the fake CMS host) so the node
+    # resolves no api_url and writes the base payload. The settings travel
     # with the executor context into isolated child processes (which do not
     # inherit parent monkeypatches).
     settings.config["cms"] = {}
@@ -124,18 +133,6 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True)
 
-    # Copy workflow definitions so the legacy finalizer can resolve the default
-    # workspace workflow during app construction.
-    import shutil
-
-    real_root = Path(__file__).resolve().parents[2]
-    workflows_src = real_root / "config" / "workflows"
-    workflows_dst = root_dir / "config" / "workflows"
-    workflows_dst.mkdir(parents=True, exist_ok=True)
-    for src_file in workflows_src.iterdir():
-        if src_file.is_file():
-            shutil.copy2(src_file, workflows_dst / src_file.name)
-
     from server.app import main as app_main
     from tests.postgres_support import TEST_DATABASE_URL
 
@@ -157,6 +154,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
+    # The fake root has no workflow_nodes/: skip the executor definition
+    # hydration (SPA tests never dispatch jobs).
+    monkeypatch.setattr(app_main, "hydrate_executor_definitions", lambda settings: None)
     return root_dir, data_dir
 
 

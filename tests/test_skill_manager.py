@@ -8,9 +8,11 @@ from pathlib import Path
 
 import pytest
 
+from server.app.services.skill_source_store import InMemorySkillSourceStore
 from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
 from server.app.skills.manager import SkillManager
+from tests.helpers.skill_store import memory_skill_store
 
 
 def test_skills_config_parses_minimal() -> None:
@@ -176,21 +178,30 @@ def _make_in_place_repo(repo: Path) -> str:
     ).stdout.strip()
 
 
-def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
+_KEY = "question_comprehension_info/generate_key_info"
+
+
+def _make_manager(
+    tmp_path: Path,
+    skills: dict[str, dict[str, str]],
+) -> SkillManager:
+    return SkillManager(
+        store=memory_skill_store(skills),
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
     )
 
+
+def _single_skill(repo_uri: str, ref: str = "main") -> dict[str, dict[str, str]]:
+    return {_KEY: {"repo": repo_uri, "ref": ref}}
+
+
+def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+
     execution_id = str(uuid.uuid4())
-    skill_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", execution_id)
+    skill_dir = manager.get_skill_dir(_KEY, execution_id)
 
     assert skill_dir.is_dir()
     assert (
@@ -203,17 +214,8 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
 
 def _make_manager_with_cache(tmp_path: Path) -> SkillManager:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
-    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     return manager
 
 
@@ -243,9 +245,7 @@ def test_get_skill_dir_works_with_read_only_skills_base(tmp_path: Path) -> None:
 
     _chmod(0o555, 0o444)
     try:
-        skill_dir = manager.get_skill_dir(
-            "question_comprehension_info/generate_key_info", str(uuid.uuid4())
-        )
+        skill_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
         assert (skill_dir / "SKILL.md").is_file()
     finally:
         _chmod(0o755, 0o644)
@@ -260,29 +260,26 @@ def test_tilde_local_source_can_be_managed_in_place(
     commit = _make_in_place_repo(repo)
     monkeypatch.setenv("HOME", str(fake_home))
 
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        "skills:\n"
-        "  question_comprehension_info/generate_key_info:\n"
-        "    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info\n"
-        "    ref: v1.0.0\n"
-    )
     manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
+        store=memory_skill_store(
+            {
+                _KEY: {
+                    "repo": (
+                        "~/.agents/skills/agent-legion/"
+                        "question_comprehension_info/generate_key_info"
+                    ),
+                    "ref": "v1.0.0",
+                }
+            }
+        ),
         base_dir=base_dir,
         runs_dir=tmp_path / "runs",
     )
 
-    skill_dir = manager.get_skill_dir(
-        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
-    )
+    skill_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
     assert (skill_dir / "SKILL.md").read_text() == "# local skill\n"
-    assert (
-        manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit
-        == commit
-    )
+    assert manager._load_lock().skills[_KEY].commit == commit
     assert (repo / ".git").is_dir()
 
 
@@ -291,12 +288,7 @@ def test_normalize_repo_expands_tilde_per_user(
 ) -> None:
     fake_home = tmp_path / "home"
     monkeypatch.setenv("HOME", str(fake_home))
-    manager = SkillManager(
-        config_path=tmp_path / "skills.yaml",
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, {})
     assert manager._normalize_repo("~/.agents/skills/agent-legion/wf/cap") == str(
         (fake_home / ".agents" / "skills" / "agent-legion" / "wf" / "cap").resolve()
     )
@@ -311,137 +303,81 @@ def test_normalize_repo_expands_tilde_per_user(
     ],
 )
 def test_normalize_repo_leaves_urls_untouched(tmp_path: Path, repo: str) -> None:
-    manager = SkillManager(
-        config_path=tmp_path / "skills.yaml",
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, {})
     assert manager._normalize_repo(repo) == repo
 
 
 def test_normalize_repo_resolves_absolute_path(tmp_path: Path) -> None:
-    manager = SkillManager(
-        config_path=tmp_path / "skills.yaml",
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, {})
     assert manager._normalize_repo(str(tmp_path / "repo")) == str((tmp_path / "repo").resolve())
 
 
 def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
 
     first_execution = str(uuid.uuid4())
-    first_dir = manager.get_skill_dir(
-        "question_comprehension_info/generate_key_info", first_execution
-    )
+    first_dir = manager.get_skill_dir(_KEY, first_execution)
     locked_content = (first_dir / "SKILL.md").read_text()
 
     _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
 
     second_execution = str(uuid.uuid4())
-    second_dir = manager.get_skill_dir(
-        "question_comprehension_info/generate_key_info", second_execution
-    )
+    second_dir = manager.get_skill_dir(_KEY, second_execution)
 
     assert (second_dir / "SKILL.md").read_text() == locked_content
 
 
 def test_lock_source_drift_is_rejected(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
+    store = memory_skill_store(_single_skill(repo_uri))
     manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
+        store=store,
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
     )
-    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: HEAD\n"
-    )
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    store.put_sources(SkillsConfig.model_validate({"skills": _single_skill(repo_uri, "HEAD")}))
 
     with pytest.raises(SkillConfigError, match="refresh"):
-        manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
 
 def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
     from server.app.skills.lock import refresh_lock
 
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    lock_path = tmp_path / "skills.lock"
+    store = memory_skill_store(_single_skill(repo_uri))
     base_dir = tmp_path / "skills"
     manager = SkillManager(
-        config_path=config_path,
-        lock_path=lock_path,
+        store=store,
         base_dir=base_dir,
         runs_dir=tmp_path / "runs",
     )
-    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
-    first_commit = (
-        manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit
-    )
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    first_commit = manager._load_lock().skills[_KEY].commit
 
     _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
-    refresh_lock(config_path, lock_path, base_dir)
+    refresh_lock(store, base_dir)
 
-    refreshed = manager._load_lock().skills["question_comprehension_info/generate_key_info"]
+    refreshed = manager._load_lock().skills[_KEY]
     assert refreshed.commit != first_commit
     assert refreshed.repo == repo_uri
     assert refreshed.ref == "main"
 
 
 def test_undeclared_skill_key_raises_config_error(tmp_path: Path) -> None:
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text("skills: {}\n")
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, {})
     with pytest.raises(SkillConfigError):
         manager.get_skill_dir("not/declared", str(uuid.uuid4()))
 
 
 def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
 
-    first_dir = manager.get_skill_dir(
-        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
-    )
-    second_dir = manager.get_skill_dir(
-        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
-    )
+    first_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    second_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
     original = (first_dir / "SKILL.md").read_text()
     (first_dir / "SKILL.md").write_text("# modified\n")
@@ -464,14 +400,7 @@ def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
     ],
 )
 def test_malicious_or_absolute_or_empty_skill_key_rejected(skill_key: str, tmp_path: Path) -> None:
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text("skills: {}\n")
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, {})
     with pytest.raises((SkillPathError, SkillConfigError)):
         manager.get_skill_dir(skill_key, str(uuid.uuid4()))
 
@@ -480,45 +409,28 @@ def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
     from server.app.skills.lock import refresh_lock
 
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: HEAD\n"
-    )
-    lock_path = tmp_path / "skills.lock"
-    base_dir = tmp_path / "skills"
+    store = memory_skill_store(_single_skill(repo_uri, "HEAD"))
 
-    refresh_lock(config_path, lock_path, base_dir)
+    refresh_lock(store, tmp_path / "skills")
 
-    assert lock_path.is_file()
-    content = lock_path.read_text()
-    assert "question_comprehension_info/generate_key_info" in content
-    assert "commit:" in content
+    lock = store.get_lock()
+    assert lock is not None
+    entry = lock.skills[_KEY]
+    assert entry.repo == repo_uri
+    assert entry.commit
 
 
 def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
 
-    first_dir = manager.get_skill_dir(
-        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
-    )
+    first_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     assert (first_dir / "SKILL.md").is_file()
 
     cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
     (cache_dir / "garbage.txt").write_text("trash")
 
-    second_dir = manager.get_skill_dir(
-        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
-    )
+    second_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     assert second_dir.is_dir()
     assert not (second_dir / "garbage.txt").exists()
     assert (second_dir / "SKILL.md").is_file()
@@ -526,21 +438,10 @@ def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
 
 def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
 
     def fetch_copy(_index: int) -> Path:
-        return manager.get_skill_dir(
-            "question_comprehension_info/generate_key_info", str(uuid.uuid4())
-        )
+        return manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(fetch_copy, i) for i in range(5)]
@@ -555,47 +456,27 @@ def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> N
 
 def test_broken_cache_directory_raises_skill_repo_error(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
 
     cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
     cache_dir.mkdir(parents=True)
 
     with pytest.raises(SkillRepoError):
-        manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
 
 
-def test_lockfile_content_stays_stable_across_calls(tmp_path: Path) -> None:
+def test_lock_content_stays_stable_across_calls(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, _single_skill(repo_uri))
 
-    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     first_lock = manager._load_lock()
-    first_commit = first_lock.skills["question_comprehension_info/generate_key_info"].commit
+    first_commit = first_lock.skills[_KEY].commit
 
-    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     second_lock = manager._load_lock()
 
-    assert (
-        second_lock.skills["question_comprehension_info/generate_key_info"].commit == first_commit
-    )
+    assert second_lock.skills[_KEY].commit == first_commit
     assert second_lock.resolved_at == first_lock.resolved_at
 
 
@@ -614,16 +495,9 @@ def test_lockfile_content_stays_stable_across_calls(tmp_path: Path) -> None:
     ],
 )
 def test_invalid_execution_id_rejected(execution_id: str, tmp_path: Path) -> None:
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text("skills: {}\n")
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
-    )
+    manager = _make_manager(tmp_path, {})
     with pytest.raises(SkillPathError):
-        manager.get_skill_dir("question_comprehension_info/generate_key_info", execution_id)
+        manager.get_skill_dir(_KEY, execution_id)
 
 
 def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None:
@@ -635,21 +509,12 @@ def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None
     repo_b = _make_bare_repo(dir_b)
     _push_new_commit(repo_a, dir_a, "# skill a\n")
     _push_new_commit(repo_b, dir_b, "# skill b\n")
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n"
-        f"  question_comprehension_info/generate_key_info:\n"
-        f"    repo: {repo_a}\n"
-        f"    ref: main\n"
-        f"  summarization/summarize:\n"
-        f"    repo: {repo_b}\n"
-        f"    ref: main\n"
-    )
-    manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
-        base_dir=tmp_path / "skills",
-        runs_dir=tmp_path / "runs",
+    manager = _make_manager(
+        tmp_path,
+        {
+            _KEY: {"repo": repo_a, "ref": "main"},
+            "summarization/summarize": {"repo": repo_b, "ref": "main"},
+        },
     )
 
     def fetch(key: str) -> Path:
@@ -678,18 +543,19 @@ def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None
 
 
 def test_invalid_repo_uri_raises_skill_repo_error(tmp_path: Path) -> None:
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        "skills:\n"
-        "  question_comprehension_info/generate_key_info:\n"
-        "    repo: file:///nonexistent/repo.git\n"
-        "    ref: main\n"
-    )
+    manager = _make_manager(tmp_path, _single_skill("file:///nonexistent/repo.git"))
+    with pytest.raises(SkillRepoError):
+        manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+
+
+def test_missing_sources_document_behaves_as_empty(tmp_path: Path) -> None:
+    """An unseeded store (None document) is an empty config, not an error."""
     manager = SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
+        store=InMemorySkillSourceStore(),
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
     )
-    with pytest.raises(SkillRepoError):
-        manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    assert manager._load_config().skills == {}
+    assert manager.load_lock().skills == {}
+    with pytest.raises(SkillConfigError, match="DB skill sources"):
+        manager.get_skill_dir(_KEY, str(uuid.uuid4()))

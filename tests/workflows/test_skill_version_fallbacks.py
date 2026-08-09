@@ -1,19 +1,16 @@
-from pathlib import Path
 from types import SimpleNamespace
 
 from server.app.services.workflow_revision_format import serialize_definition
-from server.app.workflows.definition import load_workflow_definition
 from server.app.workflows.skill_version_fallbacks import (
     UNAVAILABLE_SKILL_VERSION,
     configured_skill_fallbacks,
     job_node_fallbacks,
 )
-
-DEFINITION_PATH = Path("config/workflows/question_comprehension_info.yaml")
+from tests.helpers import load_builtin_definition
 
 
 def _job_with_snapshot() -> dict:
-    definition = load_workflow_definition(DEFINITION_PATH)
+    definition = load_builtin_definition("question_comprehension_info")
     return {"workflow_definition_snapshot_json": serialize_definition(definition)}
 
 
@@ -24,7 +21,7 @@ def _context_with_skill(capability: str, skill: str) -> dict:
 
 
 def test_configured_skill_fallbacks_maps_skill_backed_nodes() -> None:
-    definition = load_workflow_definition(DEFINITION_PATH)
+    definition = load_builtin_definition("question_comprehension_info")
     node = next(iter(definition.nodes.values()))
 
     fallbacks = configured_skill_fallbacks(
@@ -49,7 +46,7 @@ def test_configured_skill_fallbacks_skips_nodes_without_skill_mapping() -> None:
 
 
 def test_configured_skill_fallbacks_ignores_executors_without_skill() -> None:
-    definition = load_workflow_definition(DEFINITION_PATH)
+    definition = load_builtin_definition("question_comprehension_info")
     node = next(iter(definition.nodes.values()))
 
     fallbacks = configured_skill_fallbacks(

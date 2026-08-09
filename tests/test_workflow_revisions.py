@@ -22,11 +22,10 @@ from server.app.services.workflow_revision_format import (
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import (
     WorkflowDefinition,
-    load_workflow_definition,
     workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
-from tests.helpers import replace_agent_catalog
+from tests.helpers import load_builtin_definition, replace_agent_catalog
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -34,7 +33,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     service = WorkflowRevisionService(queries)
 
     revision = service.publish_workspace_revision(workspace["id"], definition)
@@ -168,7 +167,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    video_definition = load_workflow_definition(Path("config/workflows/video_knowledge.yaml"))
+    video_definition = load_builtin_definition("video_knowledge")
     service.publish_workspace_revision(workspace["id"], video_definition)
     # Legacy projection: a stale per-node capacity row must be pruned by the
     # next publish even though publish no longer writes such rows.
@@ -274,7 +273,7 @@ def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Pat
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    video_definition = load_workflow_definition(Path("config/workflows/video_knowledge.yaml"))
+    video_definition = load_builtin_definition("video_knowledge")
     service.publish_workspace_revision(workspace["id"], video_definition)
     # Simulate a pre-cutover active revision: no materialized routes/capacities.
     with queries.connect() as conn:
@@ -297,7 +296,7 @@ def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Pat
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     service = WorkflowRevisionService(queries)
     revision = service.publish_workspace_revision(workspace["id"], definition)
 
@@ -346,7 +345,7 @@ edges: []
 def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
 
     errors = validate_workflow_for_publish(
         definition=definition,
@@ -361,7 +360,7 @@ def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> 
 def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     service = WorkflowRevisionService(queries)
     active = service.publish_workspace_revision(workspace["id"], definition)
 
@@ -492,7 +491,7 @@ def test_get_active_workflow_revision_returns_404_for_workspace_without_revision
 
 
 def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> None:
-    definition = load_workflow_definition(Path("config/workflows/video_knowledge.yaml"))
+    definition = load_builtin_definition("video_knowledge")
 
     yaml_text = definition_to_yaml(definition)
 
@@ -503,7 +502,7 @@ def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> N
 
 
 def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
 
     payload = workflow_definition_to_response_payload(definition)
 
@@ -527,7 +526,7 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
         "user:u1",
     )
     codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     service = WorkflowRevisionService(queries)
 
     service.publish_workspace_revision(workspace["id"], definition)
@@ -550,7 +549,7 @@ def test_publish_revision_without_custom_codes_has_no_pins(tmp_path: Path) -> No
     workspace = queries.create_workspace(
         "ws-no-pins", default_workflow_key="question_comprehension_info"
     )
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     service = WorkflowRevisionService(queries)
 
     service.publish_workspace_revision(workspace["id"], definition)
@@ -573,7 +572,7 @@ def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
         "user:u1",
     )
     codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     service = WorkflowRevisionService(queries, custom_nodes_enabled=False)
 
     service.publish_workspace_revision(workspace["id"], definition)
@@ -601,7 +600,7 @@ def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
         "user:u1",
     )
     codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(workspace["id"], definition)
 

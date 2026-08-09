@@ -25,6 +25,7 @@ type Props = {
   onOpenChanges: () => void
   onOpenYaml: () => void
   onOpenAgents: () => void
+  onOpenExecutors: () => void
   onSelectRevision: (revisionId: string) => void
   onValidate: () => void
   onPublish: () => void
@@ -52,6 +53,7 @@ export function WorkflowStudioCommandBar({
   onOpenChanges,
   onOpenYaml,
   onOpenAgents,
+  onOpenExecutors,
   onSelectRevision,
   onValidate,
   onPublish,
@@ -87,6 +89,7 @@ export function WorkflowStudioCommandBar({
         onOpenChanges={onOpenChanges}
         onOpenYaml={onOpenYaml}
         onOpenAgents={onOpenAgents}
+        onOpenExecutors={onOpenExecutors}
       />
       <WorkflowRevisionSelect
         revisions={revisions}

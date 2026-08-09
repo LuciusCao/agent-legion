@@ -32,8 +32,19 @@ class AgentEnqueuePool:
 
     def __init__(self, workers: int = 16, max_pending: int = 1024) -> None:
         self._queue: queue.Queue[Callable[[], None] | None] = queue.Queue(max_pending)
-        for index in range(workers):
-            threading.Thread(target=self._run, name=f"agent-enqueue-{index}", daemon=True).start()
+        self._threads = [
+            threading.Thread(target=self._run, name=f"agent-enqueue-{index}", daemon=True)
+            for index in range(workers)
+        ]
+        for thread in self._threads:
+            thread.start()
+
+    def close(self) -> None:
+        """Stop the worker threads (app shutdown); pending closures are dropped."""
+        for _ in self._threads:
+            self._queue.put(None)
+        for thread in self._threads:
+            thread.join(timeout=5)
 
     def submit(self, fn: Callable[[], None]) -> bool:
         """Queue ``fn``; False when the backlog is full (retry next pass)."""

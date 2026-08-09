@@ -3,17 +3,18 @@
 A skill is a directory under the managed skills base dir
 (``~/.agents/skills/agent-legion``) containing a ``SKILL.md``; each skill
 directory is its own git repository whose tags are the selectable refs
-(``config/skills.lock`` stays the authority on which ref is pinned — the
-validator only reports what exists, it never mutates the lock).
+(the DB ``skill_lock`` document stays the authority on which ref is pinned —
+the validator only reports what exists, it never mutates the lock).
 """
 
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
+from server.app.skills.config import SkillsLock
 
 _GIT_TAG_TIMEOUT_SECONDS = 5
 
@@ -39,9 +40,13 @@ class SkillTags:
 class SkillValidator:
     """Validate skill directories and list their git tags (latest first)."""
 
-    def __init__(self, base_dir: Path, lock_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        base_dir: Path,
+        lock_getter: Callable[[], SkillsLock | None] | None = None,
+    ) -> None:
         self._base_dir = base_dir.expanduser()
-        self._lock_path = lock_path
+        self._lock_getter = lock_getter
 
     def validate(self, raw_path: str) -> SkillValidation:
         path, error = self._resolve_inside_base(raw_path)
@@ -104,19 +109,15 @@ class SkillValidator:
         return tuple(line.strip() for line in result.stdout.splitlines() if line.strip())
 
     def _locked_ref(self, skill_key: str) -> str | None:
-        if self._lock_path is None or not self._lock_path.is_file():
+        if self._lock_getter is None:
             return None
         try:
-            raw = yaml.safe_load(self._lock_path.read_text(encoding="utf-8"))
-        except (OSError, yaml.YAMLError):
+            lock = self._lock_getter()
+        except Exception:
             return None
-        if not isinstance(raw, dict):
+        if lock is None:
             return None
-        skills = raw.get("skills")
-        if not isinstance(skills, dict):
+        entry = lock.skills.get(skill_key)
+        if entry is None:
             return None
-        entry = skills.get(skill_key)
-        if not isinstance(entry, dict):
-            return None
-        ref = entry.get("ref")
-        return str(ref) if ref else None
+        return entry.ref or None

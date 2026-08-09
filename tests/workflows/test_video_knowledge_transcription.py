@@ -3,13 +3,15 @@ from pathlib import Path
 import pytest
 
 from server.app.pipeline.transcribe_providers import SenseVoiceProvider, WhisperCppProvider
-from server.app.workflows.video_knowledge_transcription import build_default_providers
+from server.app.workflows.video_knowledge_transcription import build_providers
+
+pytestmark = pytest.mark.no_db
+
+ROOT_DIR = Path("/repo")
 
 
-def test_build_default_providers_uses_config_defaults(settings) -> None:
-    settings.config["asr"] = {}
-
-    providers = build_default_providers(settings)
+def test_build_providers_uses_config_defaults() -> None:
+    providers = build_providers({}, ROOT_DIR)
 
     whisper, sensevoice = providers
     assert isinstance(whisper, WhisperCppProvider)
@@ -19,14 +21,14 @@ def test_build_default_providers_uses_config_defaults(settings) -> None:
     assert whisper.timeout == 900
     assert sensevoice.timeout == 900
     assert whisper.vad_model is None
-    assert sensevoice.script == settings.root_dir / "server/app/pipeline/transcribe_sensevoice.py"
-    assert sensevoice.model_dir == settings.root_dir / "models/SenseVoiceSmall"
+    assert sensevoice.script == ROOT_DIR / "server/app/pipeline/transcribe_sensevoice.py"
+    assert sensevoice.model_dir == ROOT_DIR / "models/SenseVoiceSmall"
 
 
-def test_build_default_providers_honors_custom_config(settings, tmp_path: Path) -> None:
+def test_build_providers_honors_custom_config(tmp_path: Path) -> None:
     vad_model = tmp_path / "ggml-silero.bin"
     vad_model.write_bytes(b"vad")
-    settings.config["asr"] = {
+    asr_config = {
         "timeout_seconds": "30",
         "whisper": {
             "binary": "/bin/echo",
@@ -39,30 +41,28 @@ def test_build_default_providers_honors_custom_config(settings, tmp_path: Path) 
         },
     }
 
-    whisper, sensevoice = build_default_providers(settings)
+    whisper, sensevoice = build_providers(asr_config, ROOT_DIR)
 
     assert whisper.timeout == 30
     assert sensevoice.timeout == 30
     assert whisper.binary == Path("/bin/echo")
     assert whisper.model == Path("/tmp/ggml-custom.bin")
     assert whisper.vad_model == vad_model
-    assert sensevoice.script == settings.root_dir / "relative/transcribe.py"
+    assert sensevoice.script == ROOT_DIR / "relative/transcribe.py"
     assert sensevoice.model_dir == Path("/opt/models/SenseVoiceCustom")
 
 
-def test_build_default_providers_expands_user_in_asr_paths(settings) -> None:
-    settings.config["asr"] = {
-        "sensevoice": {"script": "~/bin/transcribe.py", "model_dir": "~/models/sensevoice"}
-    }
+def test_build_providers_expands_user_in_asr_paths() -> None:
+    asr_config = {"sensevoice": {"script": "~/bin/transcribe.py", "model_dir": "~/models/sv"}}
 
-    _, sensevoice = build_default_providers(settings)
+    _, sensevoice = build_providers(asr_config, ROOT_DIR)
 
     assert sensevoice.script == Path.home() / "bin/transcribe.py"
-    assert sensevoice.model_dir == Path.home() / "models/sensevoice"
+    assert sensevoice.model_dir == Path.home() / "models/sv"
 
 
-def test_build_default_providers_rejects_missing_vad_model(settings, tmp_path: Path) -> None:
-    settings.config["asr"] = {"whisper": {"vad_model": str(tmp_path / "missing-vad.bin")}}
+def test_build_providers_rejects_missing_vad_model(tmp_path: Path) -> None:
+    asr_config = {"whisper": {"vad_model": str(tmp_path / "missing-vad.bin")}}
 
     with pytest.raises(FileNotFoundError, match="Configured VAD model not found"):
-        build_default_providers(settings)
+        build_providers(asr_config, ROOT_DIR)

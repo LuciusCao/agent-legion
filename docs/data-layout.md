@@ -2,7 +2,7 @@
 
 `data/` 是 Agent Legion 的运行时数据根目录（已 gitignore，禁止提交）。本文从代码推导**权威布局**：各子目录由哪个组件持有、内容是什么、生命周期如何。某个实例 `data/` 下实际存在的目录只是该实例的运行时残留，不作为布局依据——未在下文出现的子目录均为历史或本地残留，可安全删除。
 
-数据根的位置由 `config/app.yaml` 的 `data_dir`（默认 `data`）决定，可被环境变量 `AGENT_LEGION_DATA_DIR` 覆盖（`server/app/settings.py:206-210`）。Host 启动时确保 `data/` 及其下 `videos/`、`logs/`、`packages/`、`jobs/` 存在（`server/app/settings.py:215-220`）。
+数据根的位置默认是仓库下 `data/`，由环境变量 `AGENT_LEGION_DATA_DIR` 覆盖（`config/app.yaml` 的 `data_dir` 键已退役；`server/app/settings.py`）。Host 启动时确保 `data/` 及其下 `videos/`、`logs/`、`packages/`、`jobs/` 存在（`server/app/settings.py`）。
 
 ## 1. Host 侧子目录
 
@@ -15,7 +15,7 @@
 | `artifacts/` | `ArtifactStore` | 内容寻址存储：`artifacts/<digest[:2]>/<digest>`，外加 `.staging/` 暂存区（`server/app/services/artifact_store.py:46-57`） | Worker 回传 artifact 的持久存储。GC 两条路径：job 删除时回收其引用过的零引用 blob（`job_artifact_gc.py`）；全库零引用孤儿扫描由周期 orphan GC（默认 1h 一轮，随 sweeper 副本运行，`server/app/services/artifact_orphan_gc.py`）或 `scripts/gc_artifacts.py`（默认 dry-run）执行，删除统一走 `delete_unreferenced` 的事务内 refcount + grace 复查 |
 | `agent_bundles/` | `AgentExecutionBroker` / dispatch | 派发给 Worker 的 bundle `<execution_id>.tar.gz`，Worker 回传的结果包 `*.result.tar.gz`（`server/app/agent_broker/dispatch.py:118`、`server/app/agent_broker/agent_result_commit.py:34-37`） | 在途传输文件。结果提交后即删除，孤儿文件由 reaper 清扫（`server/app/agent_broker/broker.py:299-306`、`server/app/agent_broker/reaper.py:55-60`） |
 
-清理节奏由 `config/app.yaml:11-14` 的 `cleanup` 段控制（`log_retention_days`、`run_dir_retention_days`、`interval_seconds`），加载逻辑见 `server/app/services/log_cleanup.py:21-34`。
+清理节奏由 DB 实例设置（`global_settings` 表 `instance` 文档的 `cleanup` 段：`log_retention_days`、`run_dir_retention_days`、`interval_seconds`，admin API `/api/admin/instance-settings` 维护）控制，加载逻辑见 `server/app/services/log_cleanup.py:21-34`。
 
 所有落盘路径都经过 `server/app/storage_paths.py` 的 `resolve_data_path` / `resolve_managed_path` 约束，保证存储路径不会逃出各自 managed root；受管理的顶层类别为 `videos`、`jobs`、`logs`、`packages`（`server/app/storage_paths.py:6`）。
 
@@ -45,7 +45,7 @@ Worker 不读写 Host 的 `data/`，它持有自己的两个根：
 
 - `server/app/settings.py:195-245` — data 根解析与受管子目录创建
 - `server/app/storage_paths.py` — managed root 路径约束与 `jobs/`、`logs/` 结构
-- `server/app/services/log_cleanup.py`、`config/app.yaml:11-14` — 日志与 run dir 保留策略
+- `server/app/services/log_cleanup.py`、DB 实例设置 `cleanup` 段 — 日志与 run dir 保留策略
 - `server/app/services/artifact_store.py`、`server/app/agent_broker/broker.py` — `artifacts/` 与 `agent_bundles/`
 - `worker/executor.py:228`、`worker/cleanup.py`、`worker/upload_queue.py`、`worker/config_store.py` — Worker work root 与状态目录
 - `deploy/compose.host.yaml`、`deploy/compose.worker.yaml` — 容器卷映射

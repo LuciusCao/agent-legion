@@ -10,11 +10,12 @@ import sys
 from pathlib import Path
 from urllib.parse import urlparse
 
-import yaml
-
 logger = logging.getLogger(__name__)
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-SKILLS_CONFIG = PROJECT_ROOT / "config" / "skills.yaml"
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from server.app.skills.builtin_sources import BUILTIN_SKILL_SOURCES  # noqa: E402
 
 SHARED_FILES = {
     "ability taxonomy": "references/question_comprehension_abilities.json",
@@ -29,13 +30,6 @@ def _resolve_local_repo(repo_url: str) -> Path | None:
         return None
     path = Path(repo_url).expanduser()
     return path.resolve() if path.is_absolute() else None
-
-
-def _load_config(path: Path) -> dict:
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    if not isinstance(raw, dict):
-        raise ValueError(f"{path} must contain a YAML mapping")
-    return raw
 
 
 def _skills_for_workflow(config: dict, workflow: str) -> dict[str, str]:
@@ -103,7 +97,6 @@ def _check_and_sync(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Check shared files across Pi skills.")
-    parser.add_argument("--config", type=Path, default=SKILLS_CONFIG)
     parser.add_argument("--workflow", default="question_comprehension_info")
     parser.add_argument("--sync", action="store_true")
     parser.add_argument("--source", default=None)
@@ -111,12 +104,8 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 
-    if not args.config.is_file():
-        logger.error("skills config not found: %s", args.config)
-        return 1
-
     try:
-        skills = _skills_for_workflow(_load_config(args.config), args.workflow)
+        skills = _skills_for_workflow(BUILTIN_SKILL_SOURCES.model_dump(), args.workflow)
     except Exception as exc:
         logger.error("invalid skills config: %s", exc)
         return 1
@@ -166,7 +155,8 @@ def main(argv: list[str] | None = None) -> int:
     if args.sync and all_synced:
         logger.info(
             "Synced shared files from %s to %d skill(s). "
-            "Remember to commit, tag, and update skills.yaml/lock.",
+            "Remember to commit, tag, and update the DB skill sources/lock "
+            "(make skills-lock).",
             source_key,
             len(set(all_synced)),
         )

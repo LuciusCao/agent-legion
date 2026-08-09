@@ -199,10 +199,10 @@ def extract_frontend_routes(root: Path) -> str:
 
 
 def extract_pipeline_phases(root: Path) -> str:
-    """Extract video pipeline node sequence from config/workflows/video_knowledge.yaml."""
+    """Extract the video pipeline node sequence from the built-in video_knowledge DAG."""
     from scripts.generate_architecture_pipeline import extract_pipeline_phases as _extract
 
-    return _extract(root)
+    return _extract()
 
 
 # ---------------------------------------------------------------------------
@@ -232,11 +232,8 @@ def extract_config(root: Path) -> str:
         "data_dir": "数据目录",
         "server": "HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）",
         "worker": "后台 worker 并发配置",
-        "asr": "ASR 提供商配置（whisper / SenseVoice）",
         "cms": "CMS 集成配置",
         "resource_providers": "资源提供方声明（path/url_key 及各自可调参数的 config_schema，含 secret 标记）",
-        "openclaw": "OpenClaw 命令模板与工作目录",
-        "executors": "Workspace 执行器定义",
         "workflows": "Agent Legion DAG 工作流开关",
     }
 
@@ -247,7 +244,17 @@ def extract_config(root: Path) -> str:
             lines.append(f"- `{key}` — {desc}")
         else:
             lines.append(f"- `{key}`")
-    return "\n".join(lines) + "\n" if lines else "_Empty config._\n"
+    if lines:
+        return "\n".join(lines) + "\n"
+    # All runtime split yaml files are retired (app.yaml / workflow.yaml /
+    # agent_legion.yaml fail startup when present), so the composed config
+    # starts empty: code defaults + env overrides only.
+    return (
+        "_全部运行时配置段已从 split yaml 退役：业务参数在 capability config_schema"
+        "（Studio 节点/workspace 配置覆盖），实例级调参在 DB 实例设置文档"
+        "（/api/admin/instance-settings），机器路径与密钥走 env（如"
+        " AGENT_LEGION_ASR_* / AGENT_LEGION_DATABASE_URL）。_\n"
+    )
 
 
 # ---------------------------------------------------------------------------
