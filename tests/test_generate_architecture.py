@@ -132,22 +132,18 @@ def test_extract_frontend_routes(tmp_path: Path):
 
 
 def test_extract_pipeline_phases(tmp_path: Path):
-    workflows_dir = tmp_path / "config" / "workflows"
-    workflows_dir.mkdir(parents=True)
-    (workflows_dir / "video_knowledge.yaml").write_text("""
-key: video_knowledge
-nodes:
-  package:
-    after: [assemble]
-  download:
-    after: []
-  assemble:
-    after: [download]
-""")
-
     result = extract_pipeline_phases(tmp_path)
-    assert "知识视频（3 阶段）" in result
-    assert result.index("`download`") < result.index("`assemble`") < result.index("`package`")
+    assert "知识视频（8 阶段）" in result
+    assert (
+        result.index("`download`")
+        < result.index("`transcribe`")
+        < result.index("`subtitle_review`")
+        < result.index("`chapter_generate`")
+        < result.index("`interaction_generate`")
+        < result.index("`content_review`")
+        < result.index("`assemble`")
+        < result.index("`package`")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -156,20 +152,18 @@ nodes:
 
 
 def test_extract_config(tmp_path: Path):
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "app.yaml").write_text("data_dir: data\n")
-    (config_dir / "agent_legion.yaml").write_text("""
-asr:
-  provider: auto
-openclaw:
-  timeout_seconds: 600
-""")
-    (config_dir / "workflow.yaml").write_text("""
-workflows:
-  enabled: true
-""")
+    """All runtime split yaml files are retired: the composed config is empty."""
+    (tmp_path / "config").mkdir()
 
     result = extract_config(tmp_path)
-    assert "`asr`" in result
-    assert "`openclaw`" in result
+    assert "退役" in result
+    assert "AGENT_LEGION_ASR_" in result
+
+
+def test_extract_config_retired_split_file_is_an_error(tmp_path: Path):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "agent_legion.yaml").write_text("asr: {provider: auto}\n")
+
+    result = extract_config(tmp_path)
+    assert "Could not parse configuration" in result

@@ -79,6 +79,35 @@ def test_derive_run_dir_from_log_path_finds_legacy_layout(tmp_path) -> None:
     assert found == run_dir
 
 
+def test_derive_run_dir_from_log_path_probes_past_empty_sharded_dir(tmp_path) -> None:
+    """Re-intake can leave an empty sharded dir while runs live in the legacy one."""
+    from server.app.storage_paths import derive_run_dir_from_log_path
+
+    data_dir = tmp_path / "data"
+    jobs_dir = data_dir / "jobs"
+    job_id = "ws_wf_job-both"
+    make_job_dir(data_dir, "ws", job_id)  # empty sharded dir, no runs/
+    legacy_run = make_job_dir(data_dir, "ws", job_id, sharded=False) / "runs" / "node-a" / "tok-1"
+    legacy_run.mkdir(parents=True)
+
+    found = derive_run_dir_from_log_path(
+        f"logs/jobs/{job_id}-node-a.log", "node-a", job_id, jobs_dir
+    )
+    assert found == legacy_run
+
+
+def test_locate_job_dir_rejects_paths_outside_jobs_root(tmp_path) -> None:
+    from server.app.services.job_dir_index import locate_job_dir
+
+    data_dir = tmp_path / "data"
+    (data_dir / "jobs").mkdir(parents=True)
+    (data_dir / "packages").mkdir(parents=True)
+
+    assert locate_job_dir("job-1", "packages/workspace-ws/pkg.zip", data_dir) is None
+    assert locate_job_dir("job-1", "videos/vid1", data_dir) is None
+    assert locate_job_dir("job-1", "jobs/ws/ab/job-1", data_dir) is not None
+
+
 def _seed_job(conn, job_id, workspace_id, storage_dir) -> None:
     conn.execute(
         "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",

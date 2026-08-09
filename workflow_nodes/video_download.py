@@ -1,9 +1,10 @@
 """First node of video_knowledge: resolve the input source and download the MP4.
 
 Knowledge-mode intake writes an opaque ``source_ref``; this node resolves it
-against the CMS through the node config chain (global ``cms:`` defaults
-overridden by the node's config, token resolved from the workspace vault at
-dispatch), writes the resolved fields back to ``video_input.json`` so
+against the CMS through the node config chain (config_schema defaults and
+settings-level env-injected ``cms`` keys, overridden by the node's config;
+token resolved from the workspace vault at dispatch), writes the resolved
+fields back to ``video_input.json`` so
 downstream nodes (assemble) see the same fields as the urls intake mode,
 then downloads ``source.mp4``.
 """
@@ -31,9 +32,11 @@ def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
 
 
 def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
-    """Effective CMS config: global ``cms:`` defaults overridden by node config.
+    """Effective CMS config: settings-level ``cms`` (env-injected) + node config.
 
-    The node config token arrives already resolved from the vault at dispatch
+    Node config carries the config_schema defaults (factory values) plus any
+    node/workspace overrides and wins over the settings-level keys. The node
+    config token arrives already resolved from the vault at dispatch
     time; it is a workspace-scoped credential, so mark it to win over the
     env-level global default (same precedence as the retired binding chain).
     """

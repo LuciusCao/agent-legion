@@ -10,7 +10,7 @@
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
 - 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`（缺这两个文件会导致 pytest/服务启动即失败）。手工初始化时必须自行补上这两个 secrets 文件。
-- 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（不要用 tracked 的 `config/app.yaml` 里的共享库）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
+- 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（`database.url` 为 env-only，代码默认库是共享库，不要依赖默认值）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
 - 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并在首次测试运行时自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
 - 多 worktree 并行开发时，必须在每个 worktree 的 shell 里 `export AGENT_LEGION_TEST_WORKERS=4`（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。不设置时 pytest `-n auto` 会让每个 worktree 吃满所有核，互相拖慢并打满共享 Postgres。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化（后来者等待，崩溃残留自动回收）；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist worker schema 固定为 gw0..gwN，两个进程并发会互相 TRUNCATE（现场症状：随机测试报 "Bootstrap is only available before the first user exists" 等 setup 错误，单跑必过）。
@@ -147,8 +147,16 @@ CodeExecutor(...).execute(context)
 ## 7. Pi / External Skills
 
 - Skill 只在外部仓库（如 `~/.agents/skills/agent-legion/...`）修改，不要复制或 symlink 到项目根。
-- 修改后同步 shared assets，更新 `config/skills.yaml` 与 `config/skills.lock`。
-- 跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py` 验证共享引用文件一致。
+- skill 源与锁已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB
+  `global_settings`（key=`skill_sources` / `skill_lock`）；tracked
+  `config/skills.yaml` / `config/skills.lock` 已退役，残留文件只在 DB 无记录时
+  启动 import-once（warning）作一次性迁移通道，此后不再读取。
+- 变更流程：外部仓库改 skill 并打 tag → admin UI（/admin/settings「Skill 源管理」）
+  或 admin API（`PUT /api/admin/skill-sources/{skill_key}`）更新 ref → relock
+  （`POST /api/admin/skill-sources/relock`，或 CLI `make skills-lock` /
+  `uv run python -m server.app.skills.lock`）解析并冻结 commit。
+- 修改后同步 shared assets，跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py`
+  验证共享引用文件一致（skill 清单来自 `server/app/skills/builtin_sources.py` 常量）。
 - 完整流程见 [README.md](README.md) 的 Agent Runtimes 章节。
 
 ## 8. Security & Data
@@ -159,8 +167,18 @@ CodeExecutor(...).execute(context)
 - Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS token 只走 env
   （`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
   节点配置的 `secret: true` 字段（workspace node config + vault）；
-  yaml 出现 `cms.token` / `cms.token_gen` 启动即报错（G2），`openclaw.skill_safety`
-  写 `ref` 启动即报错（G3，ref 以 `config/skills.lock` 为唯一权威）。
+  全局 `cms:` 段已从 split yaml 退役（出厂默认值在 capability config_schema，
+  base_url 走 env `CMS_BASE_URL` 或节点/workspace 配置），split yaml 写 `cms:`
+  撞 owned-key 校验报错；explicit 单文件配置出现 `cms.token` / `cms.token_gen`
+  启动即报错（G2）；`openclaw` 段已从 split yaml 退役进实例设置（DB
+  `global_settings` 的 `instance` 文档，`/api/admin/instance-settings` 维护），
+  split yaml 写 `openclaw:` 撞 owned-key 校验报错；`openclaw.skill_safety`
+  写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以 DB
+  `skill_lock` 文档为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
+  整体退役（文件存在即启动报错，带迁移指引）：业务参数
+  `provider` / `timeout_seconds` 在 `transcribe_video` capability 的
+  config_schema（Studio 节点/workspace 配置覆盖），机器路径只走 env
+  `AGENT_LEGION_ASR_*`。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
   （CONFIG-YAML-001）。
 - OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。

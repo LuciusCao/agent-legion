@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from server.app.services.skill_validator import SkillValidator
+from server.app.skills.config import LockedSkillSource, SkillsLock
 
 pytestmark = pytest.mark.no_db
 
@@ -51,10 +52,11 @@ def base_dir(tmp_path):
 
 def test_validate_happy_path_with_tags(base_dir, tmp_path) -> None:
     skill_dir = _make_skill(base_dir, "wf/review", tags=["v1.0.0", "v1.10.0", "v1.2.0"])
-    lock = tmp_path / "skills.lock"
-    lock.write_text("skills:\n  wf/review:\n    ref: v1.2.0\n", encoding="utf-8")
+    lock = SkillsLock(
+        skills={"wf/review": LockedSkillSource(repo="local", ref="v1.2.0", commit="abc123")}
+    )
 
-    result = SkillValidator(base_dir, lock).validate(str(skill_dir))
+    result = SkillValidator(base_dir, lambda: lock).validate(str(skill_dir))
 
     assert result.valid is True
     assert result.skill_key == "wf/review"

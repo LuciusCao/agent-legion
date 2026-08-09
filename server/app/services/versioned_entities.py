@@ -1,9 +1,10 @@
 """Unified versioned entity storage (schema v26).
 
 One table (``versioned_entities``) backs the draft → published → archived
-lifecycle of every versioned definition: custom node codes (``node_code``)
-and Agent definitions (``agent``). ``workspace_id`` is NULL for global
-entities (agents); node codes stay workspace-scoped. Versions are immutable:
+lifecycle of every versioned definition: custom node codes (``node_code``),
+Agent definitions (``agent``), and executor definitions (``executor``).
+``workspace_id`` is NULL for global entities (agents, executors); node codes
+stay workspace-scoped. Versions are immutable:
 publishing archives the previously published row (the partial unique index
 guarantees at most one published row per entity), and rollback re-publishes
 an old definition as a new version.
@@ -27,7 +28,7 @@ from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.job_errors import ConflictError, NotFoundError
 
-EntityType = Literal["node_code", "agent"]
+EntityType = Literal["node_code", "agent", "executor"]
 EntityStatus = Literal["draft", "published", "archived"]
 
 _COLUMNS = (

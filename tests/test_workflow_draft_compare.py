@@ -1,5 +1,4 @@
 from dataclasses import replace
-from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -7,8 +6,8 @@ from fastapi.testclient import TestClient
 from server.app.main import create_app
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.workflows.definition import load_workflow_definition
 from server.app.workflows.schema import WorkflowNodeExecution
+from tests.helpers import load_builtin_definition
 from tests.helpers.auth import authenticate_client
 
 
@@ -21,7 +20,7 @@ def app_with_workspace(tmp_path):
         json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
     )
     workspace_id = response.json()["workspace"]["id"]
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     WorkflowRevisionService(app.state.job_db).publish_workspace_revision(workspace_id, definition)
     return app, workspace_id
 
@@ -37,7 +36,7 @@ def _compare(client: TestClient, workspace_id: str, definition_yaml: str) -> dic
 
 def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     yaml_text = definition_to_yaml(definition)
 
     with authenticate_client(TestClient(app)) as client:
@@ -56,7 +55,7 @@ def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
 
 def test_compare_node_added_returns_info_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     definition.nodes["extra_node"] = definition.nodes["fetch_questions"].__class__(
         key="extra_node",
         label="额外节点",
@@ -82,7 +81,7 @@ def test_compare_node_added_returns_info_change(app_with_workspace):
 
 def test_compare_execution_only_change_does_not_create_revision(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     node = definition.nodes["fetch_questions"]
     definition.nodes["fetch_questions"] = replace(
         node,
@@ -102,7 +101,7 @@ def test_compare_execution_only_change_does_not_create_revision(app_with_workspa
 
 def test_compare_node_removed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     del definition.nodes["fetch_questions"]
     clean_node = definition.nodes["clean_and_parse"]
     definition.nodes["clean_and_parse"] = clean_node.__class__(
@@ -141,7 +140,7 @@ def test_compare_node_removed_returns_breaking_change(app_with_workspace):
 
 def test_compare_capability_changed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     node = definition.nodes["fetch_questions"]
     definition.nodes["fetch_questions"] = node.__class__(
         key=node.key,
@@ -171,7 +170,7 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace):
 
 def test_compare_output_removed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     node = definition.nodes["fetch_questions"]
     definition.nodes["fetch_questions"] = node.__class__(
         key=node.key,
@@ -201,7 +200,7 @@ def test_compare_output_removed_returns_breaking_change(app_with_workspace):
 
 def test_compare_edge_condition_changed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     new_edges = []
     for edge in definition.edges:
         if (
@@ -267,7 +266,7 @@ def test_compare_missing_active_revision_returns_revision_error(tmp_path):
         default_workflow_key="question_comprehension_info",
     )
     workspace_id = workspace["id"]
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     raw = definition_to_yaml(definition)
 
     with authenticate_client(TestClient(app)) as client:
@@ -281,7 +280,7 @@ def test_compare_missing_active_revision_returns_revision_error(tmp_path):
 
 def test_compare_rejects_draft_key_mismatch(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     raw = definition_to_yaml(definition).replace(
         "key: question_comprehension_info",
         "key: changed_workflow_key",
@@ -302,7 +301,7 @@ def test_compare_rejects_draft_key_mismatch(app_with_workspace):
 
 def test_compare_aggregate_risk_breaking_wins(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     # Add a node (info) and remove an output (breaking) before serializing.
     definition.nodes["extra_node"] = definition.nodes["fetch_questions"].__class__(
         key="extra_node",
@@ -336,7 +335,7 @@ def test_compare_aggregate_risk_breaking_wins(app_with_workspace):
 
 def test_compare_workflow_label_changed_returns_info_metadata_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     object.__setattr__(definition, "label", f"{definition.label} v2")
     raw = definition_to_yaml(definition)
 
@@ -352,7 +351,7 @@ def test_compare_workflow_label_changed_returns_info_metadata_change(app_with_wo
 
 def test_compare_schema_version_changed_returns_breaking_metadata_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     raw = definition_to_yaml(definition).replace("schema_version: 2", "schema_version: 3")
 
     with authenticate_client(TestClient(app)) as client:

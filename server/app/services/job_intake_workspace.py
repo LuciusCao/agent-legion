@@ -4,7 +4,6 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
-from server.app.settings import Settings
 
 
 def get_workspace(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
@@ -20,12 +19,6 @@ def singular_field_name(value: str) -> str:
     if value.endswith("s"):
         return value[:-1]
     return value
-
-
-def effective_cms_config(settings: Settings) -> dict[str, Any]:
-    """Global CMS config for resolvers that still consume it (video intake)."""
-    base = settings.config.get("cms", {})
-    return dict(base) if isinstance(base, dict) else {}
 
 
 def enabled_intake_modes(workspace: dict[str, Any]) -> set[str] | None:

@@ -1,10 +1,7 @@
-from types import SimpleNamespace
-
 import pytest
 
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_intake_workspace import (
-    effective_cms_config,
     enabled_intake_modes,
     get_workspace,
     singular_field_name,
@@ -40,19 +37,6 @@ def test_get_workspace_raises_not_found():
 )
 def test_singular_field_name(value, expected):
     assert singular_field_name(value) == expected
-
-
-def test_effective_cms_config_returns_global_config():
-    settings = SimpleNamespace(config={"cms": {"api_url": "https://base", "limit": 10}})
-    assert effective_cms_config(settings) == {
-        "api_url": "https://base",
-        "limit": 10,
-    }
-
-
-def test_effective_cms_config_tolerates_non_dict_base():
-    settings = SimpleNamespace(config={"cms": "not-a-dict"})
-    assert effective_cms_config(settings) == {}
 
 
 def test_enabled_intake_modes_returns_none_without_config():

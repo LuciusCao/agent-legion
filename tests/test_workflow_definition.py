@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from server.app.workflows.definition import WorkflowDefinitionError, load_workflow_definition
+from tests.helpers import load_builtin_definition
 
 
 def write_workflow(tmp_path: Path, node_body: str) -> Path:
@@ -35,7 +36,7 @@ def test_workflow_node_loads_capability(tmp_path: Path) -> None:
 
 
 def test_load_question_comprehension_info_definition():
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
 
     assert definition.key == "question_comprehension_info"
     assert definition.label == "题目审题信息生成 DAG"
@@ -186,7 +187,7 @@ nodes:
 
 
 def test_load_question_comprehension_info_capabilities():
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
 
     assert definition.key == "question_comprehension_info"
     assert definition.label == "题目审题信息生成 DAG"

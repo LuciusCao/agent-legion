@@ -5,6 +5,7 @@ import subprocess
 from pathlib import Path
 
 from server.app.skills.manager import SkillManager
+from tests.helpers.skill_store import memory_skill_store
 
 
 def _git_env() -> dict[str, str]:
@@ -57,14 +58,8 @@ def _make_skill_manager(
     subprocess.run(["git", "-C", str(clone), "push", "origin", "HEAD"], check=True, env=env)
     repo_uri = f"file://{repo.resolve()}"
 
-    config_path = tmp_path / "skills.yaml"
-    config_path.write_text(
-        f"skills:\n  {skill_key}:\n    repo: {repo_uri}\n    ref: main\n",
-        encoding="utf-8",
-    )
     return SkillManager(
-        config_path=config_path,
-        lock_path=tmp_path / "skills.lock",
+        store=memory_skill_store({skill_key: {"repo": repo_uri, "ref": "main"}}),
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
     )

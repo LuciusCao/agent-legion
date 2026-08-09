@@ -27,6 +27,8 @@ from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
+from server.app.services.executor_definition_service import hydrate_executor_definitions
+from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
 from server.app.services.ops_metrics import OpsMetricsService
@@ -41,6 +43,7 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
+from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
@@ -48,18 +51,25 @@ from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 
 
-def create_app(
-    data_dir: Path | None = None,
-    start_worker: bool = False,
-) -> FastAPI:
+def create_app(data_dir: Path | None = None, start_worker: bool = False) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
     event_bus = InProcessEventBus()
     agent_manager = AgentStatusManager(
-        event_bus=event_bus,
-        discover_agents=lambda: list_openclaw_agents(timeout=10),
+        event_bus=event_bus, discover_agents=lambda: list_openclaw_agents(timeout=10)
     )
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
+    # Hydrate instance-level settings from the DB before any service reads
+    # them (executor runtime, cleanup/monitoring config).
+    apply_instance_settings(settings, job_db.path)
+    # Executor definitions live in the DB (versioned_entities, entity_type
+    # 'executor'): seed-if-absent the built-in catalog, then hydrate from the
+    # published rows (restart-effective, no hot rebuild).
+    hydrate_executor_definitions(settings)
+    # Skill sources/lock retired from tracked yaml into global_settings:
+    # import-once the legacy files when present, else seed the built-in
+    # constants; with rows present this is a no-op (DB is authoritative).
+    seed_skill_sources(settings.database_url, settings.root_dir)
     WorkflowRevisionService(job_db).reconcile_active_agent_routes()
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
     # Resume state must not survive a restart: dispatch stays off until an
@@ -80,7 +90,7 @@ def create_app(
         job_event_buffer=job_event_buffer,
     )
     agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
-    skill_manager = build_skill_manager(settings.root_dir)
+    skill_manager = build_skill_manager(settings.database_url)
     executor_registry = build_executor_registry(
         settings, job_db, artifact_store=artifact_store, skill_manager=skill_manager
     )
@@ -139,10 +149,9 @@ def create_app(
             yield
         finally:
             await background_tasks.stop(app)
-            if sweeper_thread is not None:
-                sweeper_thread.stop()
-            if artifact_gc_thread is not None:
-                artifact_gc_thread.stop()
+            for thread in (sweeper_thread, artifact_gc_thread):
+                if thread is not None:
+                    thread.stop()
             if workflow_worker_thread is not None:
                 unregister_wakeup(workflow_worker_thread.wake)
                 workflow_worker_thread.stop()

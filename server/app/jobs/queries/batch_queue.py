@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.batch_queue_sql import BATCH_REQUEUE_DEPLETED
 
 
 class BatchQueueQueriesMixin(JobQueriesBase):
@@ -39,6 +40,19 @@ class BatchQueueQueriesMixin(JobQueriesBase):
             )
             claimed = conn.execute("select * from job_batches where id=%s", (row["id"],)).fetchone()
         return dict(claimed) if claimed else None
+
+    # Requeue a completed batch whose jobs were (partially) deleted; None when
+    # the batch is intact or no longer completed (the UPDATE's guard clause
+    # makes the check-and-transition atomic against consumer claims).
+    def requeue_completed_batch_if_depleted(
+        self, batch_id: str, source_payload: dict[str, Any], recorded_count: int
+    ) -> dict[str, Any] | None:
+        payload_json = json.dumps(source_payload, ensure_ascii=False, sort_keys=True)
+        with self.connect() as conn:
+            row = conn.execute(
+                BATCH_REQUEUE_DEPLETED, (payload_json, batch_id, batch_id, batch_id, recorded_count)
+            ).fetchone()
+        return dict(row) if row else None
 
     def update_intake_batch(
         self,

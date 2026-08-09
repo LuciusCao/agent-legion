@@ -6,10 +6,10 @@ import os
 import re
 import shutil
 import subprocess
-import uuid
+import threading
 from pathlib import Path
+from typing import Protocol
 
-import yaml
 from filelock import FileLock
 
 from server.app.skills.cache_state import cache_at_commit
@@ -21,25 +21,39 @@ logger = logging.getLogger(__name__)
 _EXECUTION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
+class SkillStore(Protocol):
+    """Persistence contract for the skill source documents (DB or in-memory).
+
+    None means the document was never seeded; the manager treats it as an
+    empty document (same semantics as the retired missing-file behavior).
+    """
+
+    def get_sources(self) -> SkillsConfig | None: ...
+
+    def get_lock(self) -> SkillsLock | None: ...
+
+    def put_lock(self, lock: SkillsLock) -> None: ...
+
+
 class SkillManager:
     def __init__(
         self,
-        config_path: Path,
-        lock_path: Path,
+        store: SkillStore,
         base_dir: Path,
         runs_dir: Path | None = None,
         git_command: list[str] | None = None,
     ) -> None:
-        self.config_path = Path(config_path)
-        self.lock_path = Path(lock_path)
+        self._store = store
         self.base_dir = Path(base_dir)
         self.runs_dir = (
             Path(runs_dir) if runs_dir else self.base_dir.parent / f"{self.base_dir.name}.runs"
         )
         self.git_command = git_command or ["git"]
         self._cache_locks: dict[str, FileLock] = {}
-        self._lockfile_lock_path = self.lock_path.with_suffix(self.lock_path.suffix + ".lock")
-        self._lockfile_lock = FileLock(str(self._lockfile_lock_path))
+        # Serializes the read-modify-write of the DB lock document within this
+        # process; cross-process git concurrency stays on the runs_dir cache
+        # locks (filesystem-level, see _cache_lock_for).
+        self._lock_write_lock = threading.Lock()
 
     def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
         self._validate_execution_id(execution_id)
@@ -118,14 +132,11 @@ class SkillManager:
         config = self._load_config()
         source = config.skills.get(skill_key)
         if source is None:
-            raise SkillConfigError(f"skill {skill_key!r} not declared in {self.config_path}")
+            raise SkillConfigError(f"skill {skill_key!r} not declared in the DB skill sources")
         return source
 
     def _load_config(self) -> SkillsConfig:
-        if not self.config_path.is_file():
-            raise SkillConfigError(f"skills config not found: {self.config_path}")
-        data = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
-        return SkillsConfig.model_validate(data)
+        return self._store.get_sources() or SkillsConfig()
 
     def _ensure_cached(
         self,
@@ -143,14 +154,15 @@ class SkillManager:
         elif not (cache_dir / ".git").is_dir():
             raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
 
-        with self._lockfile_lock:
+        with self._lock_write_lock:
             lock = self._load_lock()
             locked = lock.skills.get(skill_key)
 
         if locked is not None and locked.commit:
             if locked.repo != source.repo or locked.ref != source.ref:
                 raise SkillConfigError(
-                    f"skill {skill_key!r} config differs from skills.lock; refresh the lock"
+                    f"skill {skill_key!r} config differs from the published skill lock; "
+                    "refresh the lock"
                 )
             commit = locked.commit
             if not self._has_commit(cache_dir, commit):
@@ -163,7 +175,7 @@ class SkillManager:
                 commit = fetched_commit
         else:
             commit = self._resolve_source_ref(cache_dir, source.ref, in_place=in_place)
-            with self._lockfile_lock:
+            with self._lock_write_lock:
                 lock = self._load_lock()
                 current = lock.skills.get(skill_key)
                 if current is None:
@@ -237,19 +249,16 @@ class SkillManager:
         return result
 
     def load_lock(self) -> SkillsLock:
-        """Return the current skills.lock contents (empty when the file is missing)."""
+        """Return the current skill lock (empty when the document is missing)."""
         return self._load_lock()
 
     def _load_lock(self) -> SkillsLock:
-        if not self.lock_path.is_file():
-            return SkillsLock()
-        data = yaml.safe_load(self.lock_path.read_text(encoding="utf-8")) or {}
-        return SkillsLock.model_validate(data)
+        return self._store.get_lock() or SkillsLock()
 
     def _write_lock_unlocked(self, lock: SkillsLock) -> None:
-        """Write ``lock`` to disk atomically.
+        """Persist ``lock`` through the store.
 
-        The caller must already hold ``self._lockfile_lock``.
+        The caller must already hold ``self._lock_write_lock``.
         """
         lock.resolved_at = (
             datetime.datetime.now(datetime.UTC)
@@ -257,11 +266,7 @@ class SkillManager:
             .isoformat()
             .replace("+00:00", "Z")
         )
-        payload = yaml.safe_dump(lock.model_dump(), sort_keys=False)
-        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = self.lock_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
-        tmp_path.write_text(payload, encoding="utf-8")
-        tmp_path.replace(self.lock_path)
+        self._store.put_lock(lock)
 
     def _cache_lock_for(self, cache_dir: Path) -> FileLock:
         key = str(cache_dir.resolve())

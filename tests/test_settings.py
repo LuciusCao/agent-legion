@@ -5,6 +5,7 @@ import pytest
 from pydantic import ValidationError
 
 import server.app.cms.env as cms_env
+from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.kinds import UnknownExecutorKindError
 from server.app.settings import load_env_file, load_settings
 
@@ -29,6 +30,8 @@ def _clear_agent_legion_env(monkeypatch):
         "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
         "AGENT_LEGION_ASR_WHISPER_BINARY",
         "AGENT_LEGION_ASR_WHISPER_MODEL",
+        "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
+        "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
         "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
         "AGENT_LEGION_OPENCLAW_CWD",
         "AGENT_LEGION_SKIP_DOTENV",
@@ -67,7 +70,7 @@ def test_env_example_lists_all_cms_variables():
 
 
 def test_vault_master_key_env_overrides_map_to_config(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", "fernet-key-value")
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", "/run/secrets/vault_key")
@@ -80,7 +83,7 @@ def test_vault_master_key_env_overrides_map_to_config(tmp_path, monkeypatch):
 
 
 def test_database_url_environment_override(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     # Skip the worktree .env so only the names set below are in play.
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
@@ -93,7 +96,7 @@ def test_database_url_environment_override(tmp_path, monkeypatch):
 
 
 def test_cms_env_alias_conflict_rejected_at_startup(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     monkeypatch.setenv("CMS_TOKEN", "new-token")
@@ -106,7 +109,7 @@ def test_cms_env_alias_conflict_rejected_at_startup(tmp_path, monkeypatch):
 
 
 def test_cms_base_url_alias_only_applies_with_warning(tmp_path, monkeypatch, caplog):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     monkeypatch.setenv("BASECMS_BASE_URL", "http://cms.alias.example/v2")
@@ -120,7 +123,7 @@ def test_cms_base_url_alias_only_applies_with_warning(tmp_path, monkeypatch, cap
 
 
 def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: data/app.sqlite}\n", encoding="utf-8")
     monkeypatch.delenv("AGENT_LEGION_DATABASE_URL", raising=False)
     # Worktrees carry a real AGENT_LEGION_DATABASE_URL in the project .env;
@@ -132,7 +135,7 @@ def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
 
 
 def test_load_settings_rejects_retired_yaml_cms_token(tmp_path):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text(
         "database: {url: postgresql://configured/app}\ncms: {token: yaml-token}\n",
         encoding="utf-8",
@@ -148,7 +151,7 @@ def test_load_settings_rejects_retired_yaml_cms_token(tmp_path):
 
 
 def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
-    config_path = tmp_path / "app.yaml"
+    config_path = tmp_path / "explicit.yaml"
     config_path.write_text(
         "database: {url: postgresql://configured/app}\n"
         "cms:\n"
@@ -168,16 +171,19 @@ def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
         assert env_key in message
 
 
-def test_load_settings_rejects_retired_yaml_cms_keys_in_split_layout(tmp_path, monkeypatch):
+def test_split_layout_rejects_retired_agent_legion_yaml(tmp_path, monkeypatch):
+    """config/agent_legion.yaml is retired: its presence fails startup with guidance."""
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
-    (config_dir / "agent_legion.yaml").write_text("cms: {token: yaml-token}\n", encoding="utf-8")
-    (config_dir / "workflow.yaml").write_text("workflows: {enabled: false}\n", encoding="utf-8")
+    (config_dir / "agent_legion.yaml").write_text("asr: {provider: auto}\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
 
-    with pytest.raises(ValueError, match=r"cms\.token"):
+    with pytest.raises(ValueError, match=r"retired.*agent_legion\.yaml") as exc_info:
         load_settings()
+
+    message = str(exc_info.value)
+    assert "AGENT_LEGION_ASR_WHISPER_BINARY" in message
+    assert "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR" in message
 
 
 def test_cms_env_takes_precedence_over_agent_legion_cms_env(tmp_path, monkeypatch):
@@ -214,33 +220,9 @@ def test_cms_env_takes_precedence_over_agent_legion_cms_env(tmp_path, monkeypatc
     assert token_gen["url"] == "http://cms/token"
 
 
-def _write_split_config(root: Path) -> None:
-    config_dir = root / "config"
-    config_dir.mkdir()
-    (config_dir / "app.yaml").write_text("data_dir: data\nserver: {}\n", encoding="utf-8")
-    (config_dir / "agent_legion.yaml").write_text(
-        "asr:\n"
-        "  provider: whisper\n"
-        "  whisper:\n"
-        "    binary: yaml-binary\n"
-        "    model: yaml-model\n"
-        "  sensevoice:\n"
-        "    model_dir: yaml-dir\n"
-        "openclaw:\n"
-        "  cwd: yaml-cwd\n"
-        "  command_template:\n"
-        "    - openclaw\n"
-        "    - agent\n",
-        encoding="utf-8",
-    )
-    (config_dir / "workflow.yaml").write_text(
-        "workflows:\n  enabled: false\nexecutors: {}\n",
-        encoding="utf-8",
-    )
-
-
 def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
-    _write_split_config(tmp_path)
+    # The split layout carries zero files (agent_legion.yaml is retired); the
+    # config dict is built from code defaults plus env overrides.
     (tmp_path / ".env").write_text("AGENT_LEGION_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.delenv("AGENT_LEGION_SKIP_DOTENV", raising=False)
@@ -251,32 +233,23 @@ def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
 
 
 def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
-    _write_split_config(tmp_path)
     (tmp_path / ".env").write_text("AGENT_LEGION_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
 
     settings = load_settings()
 
-    # With the dotenv skipped, no env-injected CMS token exists; yaml values
-    # from the split config stand on their own.
+    # With the dotenv skipped, no env-injected CMS token exists.
     assert "token" not in settings.config.get("cms", {})
-    assert settings.config["asr"]["whisper"]["binary"] == "yaml-binary"
 
 
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
-    config_dir = tmp_path / "config"
-    config_dir.mkdir()
-    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
-    (config_dir / "agent_legion.yaml").write_text(
-        "cms: {base_url: 'https://cms.example/v2'}\n"
-        "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
-        encoding="utf-8",
-    )
-    (config_dir / "workflow.yaml").write_text(
-        "workflows: {enabled: false}\nexecutors: {}\n", encoding="utf-8"
-    )
+    # Zero split config files: the canonical layout starts from code defaults.
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+    # data_dir is env-only after the app.yaml retirement.
+    monkeypatch.setenv("AGENT_LEGION_DATA_DIR", str(tmp_path / "runtime"))
+    # The global yaml cms: section is retired; base_url arrives via env.
+    monkeypatch.setenv("CMS_BASE_URL", "https://cms.example/v2")
     settings = load_settings()
     assert settings.data_dir == tmp_path / "runtime"
     assert settings.config["cms"]["knowledge_url"].startswith("https://cms.example/v2")
@@ -285,6 +258,16 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     assert "question_url" not in settings.config["cms"]
     assert "question_detail_url" not in settings.config["cms"]
     assert "question_list_url" not in settings.config["cms"]
+
+
+def test_split_layout_rejects_retired_app_yaml(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "app.yaml").write_text("data_dir: runtime\n", encoding="utf-8")
+    monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+
+    with pytest.raises(ValueError, match=r"retired.*app\.yaml"):
+        load_settings()
 
 
 def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):
@@ -298,7 +281,14 @@ def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):
     assert settings.config.get("worker") is None
 
 
-def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
+def test_load_settings_ignores_executors_yaml_section(tmp_path, monkeypatch):
+    """Executor definitions moved to the DB (schema v30): yaml is inert.
+
+    ``load_settings`` no longer parses an ``executors:`` section — the catalog
+    is seeded from the built-in factory definitions and hydrated from
+    versioned_entities at app startup (restart-effective). A stray executors
+    section in an explicit config is ignored rather than validated.
+    """
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
@@ -310,12 +300,9 @@ def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError) as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    message = str(exc_info.value)
-    assert "bad-exec" in message
-    assert "global_capacity" in message
+    assert settings.executor_definitions == {}
 
 
 def test_load_settings_rejects_retired_agents_yaml(tmp_path, monkeypatch):
@@ -348,25 +335,14 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
 
-def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
+def test_load_settings_starts_with_empty_executor_definitions(tmp_path, monkeypatch):
+    """executor_definitions 在 load_settings 时为空：DB hydration 由 create_app 完成。"""
     config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\n"
-        "executors:\n"
-        "  code-default:\n"
-        "    kind: code\n"
-        "    global_capacity: 4\n"
-        "    capabilities:\n"
-        "      fetch_questions:\n"
-        "        path: workflow_nodes/question_intake.py\n",
-        encoding="utf-8",
-    )
+    config_path.write_text("data_dir: data\n", encoding="utf-8")
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert "code-default" in settings.executor_definitions
-    assert settings.executor_definitions["code-default"].kind == "code"
-    assert settings.executor_definitions["code-default"].global_capacity == 4
+    assert settings.executor_definitions == {}
 
 
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
@@ -438,20 +414,12 @@ def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeyp
     assert "command_template" in str(exc_info.value)
 
 
-def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
-    config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\n"
-        "executors:\n"
-        "  weird-exec:\n"
-        "    kind: unknown\n"
-        "    global_capacity: 1\n"
-        "    capabilities: {}\n",
-        encoding="utf-8",
-    )
-
+def test_unknown_executor_kind_rejected_at_definition_load() -> None:
+    """Unknown kinds fail in the definition loader (save_draft validation path)."""
     with pytest.raises(UnknownExecutorKindError) as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+        load_executor_definitions(
+            {"weird-exec": {"kind": "unknown", "global_capacity": 1, "capabilities": {}}}
+        )
 
     assert "weird-exec" in str(exc_info.value)
 
@@ -487,6 +455,20 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
             ["asr", "whisper", "model"],
             "/tmp/model.bin",
             "/tmp/model.bin",
+        ),
+        (
+            "legacy",
+            "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
+            ["asr", "whisper", "vad_model"],
+            "/tmp/vad.bin",
+            "/tmp/vad.bin",
+        ),
+        (
+            "legacy",
+            "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
+            ["asr", "sensevoice", "script"],
+            "/tmp/transcribe.py",
+            "/tmp/transcribe.py",
         ),
         (
             "legacy",
@@ -527,6 +509,20 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
         ),
         (
             "split",
+            "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
+            ["asr", "whisper", "vad_model"],
+            "/tmp/vad.bin",
+            "/tmp/vad.bin",
+        ),
+        (
+            "split",
+            "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
+            ["asr", "sensevoice", "script"],
+            "/tmp/transcribe.py",
+            "/tmp/transcribe.py",
+        ),
+        (
+            "split",
             "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
             ["asr", "sensevoice", "model_dir"],
             "/tmp/sensevoice",
@@ -563,7 +559,8 @@ def test_env_override_precedes_yaml(
             encoding="utf-8",
         )
     else:
-        _write_split_config(tmp_path)
+        # The split layout carries zero files (agent_legion.yaml is retired):
+        # env overrides land on the code-default config dict.
         config_path_file = tmp_path / "config" / "workflow.yaml"
 
     if layout == "split":

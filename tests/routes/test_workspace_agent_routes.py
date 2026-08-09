@@ -4,14 +4,14 @@ from fastapi.testclient import TestClient
 
 from server.app.jobs.queries import JobQueries
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.workflows.definition import load_workflow_definition
+from tests.helpers import load_builtin_definition
 from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _publish(client: TestClient, workspace_id: str = "ws-routes") -> None:
     job_db = JobQueries(TEST_DATABASE_URL, Path(client.app.state.settings.jobs_dir))
     job_db.create_workspace(workspace_id)
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
 
 
