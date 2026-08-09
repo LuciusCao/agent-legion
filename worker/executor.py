@@ -105,6 +105,12 @@ def run_execution(
             command = prepared.command
             events = run_dir / "events.jsonl"
             env = {**os.environ, **environment}
+            # Guarantee agent subprocesses (velites/pi bash tools) resolve
+            # `python`/`python3` to the worker's own interpreter regardless of
+            # the launch context's PATH; otherwise agents hunt it with
+            # full-disk `find /` scans that flood fseventsd/Spotlight.
+            bin_dir = str(Path(sys.executable).resolve().parent)
+            env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
             # LLM gateway token: pi reads it via the provider's apiKey
             # "$LLM_GATEWAY_TOKEN" interpolation; keep the worker env authoritative.
             if gateway_token := os.environ.get("LLM_GATEWAY_TOKEN", ""):
