@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from server.app.services.job_dir_index import iter_job_dirs
 from server.app.services.job_run_dir_lookup import derive_run_dir_from_index
 from server.app.services.run_dir_cleanup import find_extra_run_dirs, remove_path
 from server.app.storage_paths import resolve_data_path
@@ -51,38 +52,34 @@ def _flush_run_dir_updates(db: JobQueries, pending: list[str]) -> None:
 
 
 def cleanup_extra_runs_per_node(db: JobQueries, data_dir: Path) -> int:
-    """Scan the filesystem and keep only the newest run dir per (job, node).
+    """Walk the jobs table and keep only the newest run dir per (job, node).
 
-    This bounds disk usage even when retention windows are long: a retried
-    node may produce many run directories, but only the latest one is useful
-    after the node has finished. Directories are removed outside any
+    Job directories are located via the ``jobs.storage_dir`` column (keyset
+    pagination over the jobs primary key) instead of enumerating workspace
+    directories, so the sweep stays cheap when a workspace accumulates 100k+
+    job dirs and works transparently across the sharded and legacy flat
+    layouts. This bounds disk usage even when retention windows are long: a
+    retried node may produce many run directories, but only the latest one is
+    useful after the node has finished. Directories are removed outside any
     transaction; the matching ``node_runs`` updates (served by
     ``idx_node_runs_run_dir``) are flushed every ``RUN_DIR_UPDATE_BATCH_SIZE``
     removals in a short transaction.
     """
-    jobs_dir = data_dir / "jobs"
-    if not jobs_dir.is_dir():
-        return 0
     removed = 0
     pending: list[str] = []
-    for workspace_dir in jobs_dir.iterdir():
-        if not workspace_dir.is_dir():
+    for _job_id, job_dir in iter_job_dirs(db, data_dir):
+        runs_dir = job_dir / "runs"
+        if not runs_dir.is_dir():
             continue
-        for job_dir in workspace_dir.iterdir():
-            if not job_dir.is_dir():
+        for node_dir in runs_dir.iterdir():
+            if not node_dir.is_dir():
                 continue
-            runs_dir = job_dir / "runs"
-            if not runs_dir.is_dir():
-                continue
-            for node_dir in runs_dir.iterdir():
-                if not node_dir.is_dir():
-                    continue
-                for old, old_rel in find_extra_run_dirs(data_dir, job_dir, node_dir.name):
-                    remove_path(old)
-                    pending.append(old_rel)
-                    removed += 1
-                    if len(pending) >= RUN_DIR_UPDATE_BATCH_SIZE:
-                        _flush_run_dir_updates(db, pending)
+            for old, old_rel in find_extra_run_dirs(data_dir, job_dir, node_dir.name):
+                remove_path(old)
+                pending.append(old_rel)
+                removed += 1
+                if len(pending) >= RUN_DIR_UPDATE_BATCH_SIZE:
+                    _flush_run_dir_updates(db, pending)
     _flush_run_dir_updates(db, pending)
     return removed
 

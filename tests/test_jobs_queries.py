@@ -5,6 +5,8 @@ import pytest
 from psycopg import IntegrityError
 
 from server.app.jobs.queries import JobQueries
+from server.app.jobs.storage_layout import job_storage_dir
+from tests.helpers.job_dirs import job_storage_ref
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -68,11 +70,10 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
         workspace_id=workspace["id"],
     )
 
-    assert (
-        job["storage_dir"]
-        == "jobs/created_at_workspace/created_at_workspace_question_comprehension_info_Q-CREATED"
+    assert job["storage_dir"] == job_storage_ref(
+        "created_at_workspace", "created_at_workspace_question_comprehension_info_Q-CREATED"
     )
-    assert (tmp_path / "jobs" / "created_at_workspace" / job["id"]).is_dir()
+    assert job_storage_dir(tmp_path / "jobs", "created_at_workspace", job["id"]).is_dir()
 
     node = db.get_job_node(job["id"], "fetch_question_context")
     assert node is not None
