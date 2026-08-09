@@ -44,6 +44,24 @@ CLAIM_BACKOFF_CAP_SECONDS = 60.0
 load_claim_controls = runtime_controls.load_claim_controls
 
 
+def agent_subprocess_env(environment: dict[str, str]) -> dict[str, str]:
+    """Env for one agent subprocess: worker env + config overrides."""
+    # Prepend the worker interpreter's bin dir (its own venv, carrying
+    # `python`/`python3`) to PATH so agent bash sessions resolve the
+    # interpreter regardless of the launch context; otherwise agents hunt it
+    # with full-disk `find /` scans that flood fseventsd/Spotlight. The path
+    # stays unresolved on purpose: resolving the `.venv/bin/python` symlink
+    # would point at the base installation and bypass the venv.
+    env = {**os.environ, **environment}
+    env["PATH"] = str(Path(sys.executable).parent) + os.pathsep + env.get("PATH", "")
+    # LLM gateway token: pi reads it via the provider's apiKey
+    # "$LLM_GATEWAY_TOKEN" interpolation; keep the worker env authoritative.
+    env.pop("LLM_GATEWAY_TOKEN", None)
+    if gateway_token := os.environ.get("LLM_GATEWAY_TOKEN", ""):
+        env["LLM_GATEWAY_TOKEN"] = gateway_token
+    return env
+
+
 def run_execution(
     client: Client,
     claim: dict[str, Any],
@@ -104,13 +122,7 @@ def run_execution(
             manifest = prepared.manifest
             command = prepared.command
             events = run_dir / "events.jsonl"
-            env = {**os.environ, **environment}
-            # LLM gateway token: pi reads it via the provider's apiKey
-            # "$LLM_GATEWAY_TOKEN" interpolation; keep the worker env authoritative.
-            if gateway_token := os.environ.get("LLM_GATEWAY_TOKEN", ""):
-                env["LLM_GATEWAY_TOKEN"] = gateway_token
-            else:
-                env.pop("LLM_GATEWAY_TOKEN", None)
+            env = agent_subprocess_env(environment)
             status.set_phase(execution_id, "running")
             with events.open("wb") as output:
                 proc = subprocess.Popen(
