@@ -57,7 +57,7 @@ velites/                 # Cargo crate（本仓库根下新目录）
     events.rs            # 事件 schema 定义（serde）+ emitter
     config.rs            # gateway 凭据（文件 + env 覆盖，§7）
     session.rs           # session.jsonl 镜像落盘（--session-dir）
-    tools/{mod,read,write,bash,truncate}.rs
+    tools/{mod,read,write,bash,command_guard,truncate}.rs
     provider/{mod,openai_compat,retry,stub}.rs
     skill.rs             # SKILL.md 加载
     budget.rs            # 预算治理
@@ -307,6 +307,9 @@ fail-closed 报错，内置节点不受影响。
 - **bash**：`cwd=job_dir`，env 继承父进程；超时 → 进程组 TERM → grace → KILL（对齐
   Pi 语义，Rust 下用 `process-group` 或手动 `killpg`）；
   必须能跑 `python3`（skill scripts 依赖，worker 镜像已具备）；
+  命令守卫（`tools/command_guard.rs`）在 spawn 前拒绝全盘扫描命令
+  （`find /` 等从宽泛根递归遍历，并行 job 下会打爆宿主机 fseventsd/Spotlight），
+  拒绝时以工具错误返回修正指引（EXEC-HARNESS-GUARD-001）；
 - **输出截断（pi 对齐）**：工具输出按双阈值截断——2000 行 或 50KB
   （50×1024 字节），任一先到即截，语义与 pi `truncate.js` 完全一致
   （实现集中在 `velites/src/tools/truncate.rs`）：

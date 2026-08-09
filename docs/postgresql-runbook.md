@@ -22,7 +22,14 @@ Agent count and database connection count are deliberately decoupled. Each API
 process uses a bounded pool (currently 32 connections, overridable via the
 `AGENT_LEGION_DB_POOL_MAX_SIZE` environment variable; see
 `server/app/db/pools.py:16-17`) and returns connections after short
-transactions. Remote queue claims use `FOR UPDATE SKIP LOCKED`, so
+transactions. Connections are recycled explicitly: `AGENT_LEGION_DB_POOL_MAX_IDLE`
+(default 120s) bounds how long an idle connection stays in the pool — note the
+pool's idle shrink closes at most one connection per interval — and
+`AGENT_LEGION_DB_POOL_MAX_LIFETIME` (default 900s) bounds total connection age.
+A PostgreSQL backend's session memory (plan/sort caches) only returns to the OS
+when its connection closes, so under sustained load these knobs keep long-lived
+backends from ballooning; both default tighter than psycopg-pool's built-in
+600s/3600s. Remote queue claims use `FOR UPDATE SKIP LOCKED`, so
 different workers can claim different rows concurrently; an advisory lock per
 worker prevents its concurrent polls from exceeding `slots`. Executor lease
 claims use an advisory lock per executor so capacity checks stay correct across
