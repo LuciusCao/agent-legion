@@ -601,7 +601,7 @@ invariants:
         gate: quick
 
   - id: EXEC-HARNESS-GUARD-001
-    statement: "The velites bash tool rejects full-disk scan commands (recursive traversal from broad roots: find/rg/tree/du always, grep/ls with -r/-R — over /, /System, /Library, /Users, /private, /Volumes, /Applications, ~/$HOME) before spawn, with or without the OS sandbox; the rejection is a tool error carrying remediation guidance (scoped search / command -v) back to the model. Scoped searches still execute. Rationale: under parallel agent load, per-job full-disk scans flood host fs indexing (fseventsd/Spotlight) and stall the machine."
+    statement: "The velites bash tool rejects full-disk scan commands (recursive traversal from broad roots: find/rg/tree/du always, grep/ls with -r/-R — over /, /System, /Library, /Users, /home, /private, /Volumes, /Applications, and ~/$HOME including its expanded absolute form) before spawn, with or without the OS sandbox; shell cwd tracking covers `cd / && find .`-style evasion and wrapper options (sudo/env/nice) are unwrapped before identification. The rejection is a tool error carrying remediation guidance (scoped search / command -v) back to the model. Scoped searches still execute. Rationale: under parallel agent load, per-job full-disk scans flood host fs indexing (fseventsd/Spotlight) and stall the machine."
     owner: workspace-executor
     risk: high
     evidence:
