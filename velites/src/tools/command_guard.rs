@@ -80,9 +80,12 @@ pub fn check(command: &str) -> Result<(), ToolError> {
 
 fn check_inner(command: &str, vars: &mut HashMap<String, String>) -> Result<(), ToolError> {
     // `cd` in one segment changes the cwd of later segments in the same
-    // shell, so `cd / && find .` must be judged against `/`, not the job dir.
-    let mut cwd: Option<String> = None;
-    for segment in split_segments(command) {
+    // shell, so `cd / && find .` must be judged against `/`, not the job
+    // dir. Subshells `( … )` fork the shell state: their `cd` applies to
+    // segments inside the group but never leaks to the parent shell, so
+    // the tracked cwd is scoped per paren depth.
+    let mut cwd_by_depth: Vec<Option<String>> = vec![None];
+    for (segment, depth) in split_segments(command) {
         let tokens: Vec<String> = segment.split_whitespace().map(unquote).collect();
         // Pure assignment segment (`D=/; find $D`): record for expansion.
         if !tokens.is_empty() && tokens.iter().all(|t| is_assignment(t)) {
@@ -98,7 +101,12 @@ fn check_inner(command: &str, vars: &mut HashMap<String, String>) -> Result<(), 
         };
         if cmd == "cd" {
             let arg = args.iter().find(|a| !a.starts_with('-'));
-            cwd = Some(resolve_cd(cwd.as_deref(), arg.map(String::as_str)));
+            let parent = effective_cwd(&cwd_by_depth, depth);
+            let new_cwd = resolve_cd(parent.as_deref(), arg.map(String::as_str));
+            while cwd_by_depth.len() <= depth {
+                cwd_by_depth.push(None);
+            }
+            cwd_by_depth[depth] = Some(new_cwd);
             continue;
         }
         // Nested shells and eval: recurse into the inner command text.
@@ -117,6 +125,7 @@ fn check_inner(command: &str, vars: &mut HashMap<String, String>) -> Result<(), 
         if !is_recursive(&cmd, args) {
             continue;
         }
+        let cwd = effective_cwd(&cwd_by_depth, depth);
         let paths = scan_paths(&cmd, args);
         let mut hit = paths
             .iter()
@@ -145,17 +154,30 @@ fn check_inner(command: &str, vars: &mut HashMap<String, String>) -> Result<(), 
     Ok(())
 }
 
-/// Split a shell command into simple-command segments: pipelines, lists,
-/// command substitutions and subshell groups each get their own segment.
-/// Separators inside quotes stay intact so `bash -c "cd / && find ."` keeps
-/// its inner command whole for the recursive check; `$(` boundaries drop the
-/// opener so the inner text splits as its own segment. `{`/`}` stay
-/// untouched so `${HOME}` keeps its variable form for later expansion.
-fn split_segments(command: &str) -> Vec<String> {
+/// The tracked cwd at a paren depth: the nearest explicitly set level,
+/// falling back towards the top-level shell (subshell `cd` never leaks
+/// outwards; a subshell without its own `cd` inherits the parent's).
+fn effective_cwd(cwd_by_depth: &[Option<String>], depth: usize) -> Option<String> {
+    (0..=depth.min(cwd_by_depth.len().saturating_sub(1)))
+        .rev()
+        .find_map(|level| cwd_by_depth[level].clone())
+}
+
+/// Split a shell command into simple-command segments with their paren
+/// depth: pipelines, lists, command substitutions and subshell groups each
+/// get their own segment. Separators inside quotes stay intact — except
+/// `$(` and backticks inside DOUBLE quotes, which bash still executes and
+/// therefore must open new segments (paren depth + quote state are restored
+/// at the matching `)`). `{`/`}` stay untouched so `${HOME}` keeps its
+/// variable form for later expansion.
+fn split_segments(command: &str) -> Vec<(String, usize)> {
     let mut segments = Vec::new();
     let mut cur = String::new();
     let mut in_single = false;
     let mut in_double = false;
+    let mut depth = 0usize;
+    // Quote state to restore when a paren opened inside double quotes closes.
+    let mut resume_double: Vec<bool> = Vec::new();
     let mut chars = command.chars().peekable();
     while let Some(c) = chars.next() {
         if in_single {
@@ -166,10 +188,22 @@ fn split_segments(command: &str) -> Vec<String> {
             continue;
         }
         if in_double {
-            if c == '"' {
-                in_double = false;
+            match c {
+                '"' => {
+                    in_double = false;
+                    cur.push(c);
+                }
+                // Command substitution still runs inside double quotes.
+                '$' if chars.peek() == Some(&'(') => {
+                    chars.next();
+                    push_segment(&mut segments, &mut cur, depth);
+                    resume_double.push(true);
+                    in_double = false;
+                    depth += 1;
+                }
+                '`' => push_segment(&mut segments, &mut cur, depth),
+                _ => cur.push(c),
             }
-            cur.push(c);
             continue;
         }
         match c {
@@ -183,20 +217,34 @@ fn split_segments(command: &str) -> Vec<String> {
             }
             '$' if chars.peek() == Some(&'(') => {
                 chars.next();
-                push_segment(&mut segments, &mut cur);
+                push_segment(&mut segments, &mut cur, depth);
+                resume_double.push(false);
+                depth += 1;
             }
-            '`' | '(' | ')' | '|' | '&' | ';' | '\n' => push_segment(&mut segments, &mut cur),
+            '(' => {
+                push_segment(&mut segments, &mut cur, depth);
+                resume_double.push(false);
+                depth += 1;
+            }
+            ')' => {
+                push_segment(&mut segments, &mut cur, depth);
+                depth = depth.saturating_sub(1);
+                if resume_double.pop() == Some(true) {
+                    in_double = true;
+                }
+            }
+            '`' | '|' | '&' | ';' | '\n' => push_segment(&mut segments, &mut cur, depth),
             _ => cur.push(c),
         }
     }
-    push_segment(&mut segments, &mut cur);
+    push_segment(&mut segments, &mut cur, depth);
     segments
 }
 
-fn push_segment(segments: &mut Vec<String>, cur: &mut String) {
+fn push_segment(segments: &mut Vec<(String, usize)>, cur: &mut String, depth: usize) {
     let trimmed = cur.trim();
     if !trimmed.is_empty() {
-        segments.push(trimmed.to_string());
+        segments.push((trimmed.to_string(), depth));
     }
     cur.clear();
 }
@@ -326,30 +374,55 @@ fn scan_paths<'a>(cmd: &str, args: &'a [String]) -> Vec<&'a str> {
         .map(String::as_str)
         .collect();
     match cmd {
-        "rg" | "grep" | "egrep" | "fgrep" => {
-            if pattern_via_option(args) {
-                operands
-            } else {
-                operands.into_iter().skip(1).collect()
-            }
-        }
+        "rg" | "grep" | "egrep" | "fgrep" => grep_paths(args),
         _ => operands,
     }
 }
 
-/// True when the pattern (or the listing itself) comes from an option
-/// rather than a positional PATTERN operand.
-fn pattern_via_option(args: &[String]) -> bool {
-    args.iter().any(|a| {
-        a == "-e"
-            || a == "--regexp"
-            || a.starts_with("--regexp=")
-            || (a.starts_with("-e") && !a.starts_with("--") && a.len() > 2)
-            || a == "-f"
-            || a == "--file"
-            || a.starts_with("--file=")
-            || a == "--files"
-    })
+/// rg/grep paths: PATTERN is the first positional operand, unless the
+/// pattern (or the listing itself) comes from an option — then every
+/// positional is a path candidate. Option values are consumed with their
+/// option so `-e foo` never leaks `foo` into the path list, nor does
+/// `rg -e / .` mistake the pattern `/` for a scan root.
+fn grep_paths(args: &[String]) -> Vec<&str> {
+    let mut operands: Vec<&str> = Vec::new();
+    let mut pattern_via_option = false;
+    let mut i = 0;
+    while i < args.len() {
+        let a = args[i].as_str();
+        match a {
+            "-e" | "--regexp" | "-f" | "--file" => {
+                pattern_via_option = true;
+                i += 2; // option + its value
+            }
+            _ if a.starts_with("--regexp=") || a.starts_with("--file=") => {
+                pattern_via_option = true;
+                i += 1;
+            }
+            // Attached short forms: -efoo, -ffile.
+            _ if (a.starts_with("-e") || a.starts_with("-f"))
+                && !a.starts_with("--")
+                && a.len() > 2 =>
+            {
+                pattern_via_option = true;
+                i += 1;
+            }
+            "--files" => {
+                pattern_via_option = true;
+                i += 1;
+            }
+            _ if a.starts_with('-') => i += 1,
+            _ => {
+                operands.push(a);
+                i += 1;
+            }
+        }
+    }
+    if pattern_via_option {
+        operands
+    } else {
+        operands.into_iter().skip(1).collect()
+    }
 }
 
 fn is_dot(path: &str) -> bool {
@@ -633,6 +706,34 @@ mod tests {
         // `cd /` in a pipeline runs in a subshell and does NOT move the cwd
         // of `find .`; blocking it anyway is a deliberate fail-safe choice.
         assert!(blocked("cd / | find ."));
+    }
+
+    #[test]
+    fn blocks_command_substitution_in_double_quotes() {
+        // Bash performs command substitution inside double quotes.
+        assert!(blocked("echo \"$(find / -name x)\""));
+        assert!(blocked("echo \"result: $(cd / && find .)\""));
+        assert!(blocked("x=\"$(find /System)\""));
+    }
+
+    #[test]
+    fn subshell_cd_does_not_leak_to_parent() {
+        // The parent shell keeps its own cwd across `( … )`.
+        assert!(blocked("cd /; (cd /usr/local); find ."));
+        assert!(blocked("cd /; (cd /usr/local); rg foo ."));
+        // Conversely, a subshell cd / must not poison a scoped parent.
+        assert!(!blocked("cd /usr/local; (cd /); find . -name x"));
+        assert!(!blocked("(cd /usr/local); find . -name x"));
+    }
+
+    #[test]
+    fn pattern_option_values_are_not_paths() {
+        // `foo` is the pattern here, not a path: the scan root is the cwd.
+        assert!(blocked("cd / && rg -e foo"));
+        assert!(blocked("cd / && grep -r -e foo"));
+        // And the pattern `/` must not be mistaken for a scan root.
+        assert!(!blocked("rg -e / ."));
+        assert!(!blocked("rg -e foo ."));
     }
 
     #[test]
