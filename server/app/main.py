@@ -55,8 +55,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     settings = load_settings(data_dir=data_dir)
     event_bus = InProcessEventBus()
     agent_manager = AgentStatusManager(
-        event_bus=event_bus,
-        discover_agents=lambda: list_openclaw_agents(timeout=10),
+        event_bus=event_bus, discover_agents=lambda: list_openclaw_agents(timeout=10)
     )
     job_event_manager = JobEventManager(event_bus)
     job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
