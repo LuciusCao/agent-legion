@@ -13,6 +13,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tokio::io::AsyncReadExt;
 
+use super::command_guard;
 use super::truncate::{self, TruncatedBy};
 use super::{ToolContext, ToolError, ToolOutput};
 
@@ -67,6 +68,11 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         .and_then(Value::as_u64)
         .unwrap_or(DEFAULT_TIMEOUT_SECS)
         .max(1);
+
+    // Footgun guard: reject full-disk scan commands (`find /` …) before
+    // spawn; one scan per parallel job floods host fs indexing. Applies with
+    // or without the OS sandbox.
+    command_guard::check(command)?;
 
     let mut cmd = {
         let argv = vec!["bash".to_string(), "-c".to_string(), command.to_string()];

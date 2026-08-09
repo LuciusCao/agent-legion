@@ -8,6 +8,7 @@
 //! symlinks) are rejected before any filesystem mutation happens.
 
 pub mod bash;
+pub mod command_guard;
 pub mod read;
 pub mod truncate;
 pub mod write;
@@ -73,6 +74,8 @@ pub enum ToolError {
     SandboxEscape(String),
     #[error("invalid tool arguments: {0}")]
     InvalidArgs(String),
+    #[error("command blocked by velites guard: {0}")]
+    CommandBlocked(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }
@@ -141,7 +144,11 @@ impl ToolKind {
                  Output is truncated to the last 2000 lines or 50KB \
                  (whichever is hit first); if truncated, the full output is \
                  saved to a temp file. On timeout the whole process group \
-                 gets SIGTERM, then SIGKILL after a grace period.",
+                 gets SIGTERM, then SIGKILL after a grace period. \
+                 Full-disk scan commands (e.g. `find /`) are rejected; \
+                 search within the working directory or a specific \
+                 subdirectory, and use `command -v <name>` to locate \
+                 executables (python/python3 are on PATH).",
                 serde_json::json!({
                     "type": "object",
                     "properties": {
