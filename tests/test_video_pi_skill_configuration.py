@@ -1,8 +1,4 @@
-from pathlib import Path
-
-import yaml
-
-ROOT = Path(__file__).resolve().parents[1]
+from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
 # Skill repos are declared as machine-independent `~/...` paths (expanded per
 # user at resolve time), so they are pinned by their path suffix instead of a
@@ -32,14 +28,17 @@ VIDEO_SKILLS = {
 
 
 def test_video_pi_skills_are_declared_and_locked() -> None:
-    skills = yaml.safe_load((ROOT / "config/skills.yaml").read_text(encoding="utf-8"))["skills"]
-    lock = yaml.safe_load((ROOT / "config/skills.lock").read_text(encoding="utf-8"))["skills"]
+    """Video skills stay pinned in the DB seed constants (retired tracked files)."""
+    skills = BUILTIN_SKILL_SOURCES.skills
+    lock = BUILTIN_SKILL_LOCK.skills
 
     for key, expected in VIDEO_SKILLS.items():
-        assert set(skills[key]) == {"repo", "ref"}
-        assert skills[key]["repo"].endswith(expected["repo_suffix"])
-        assert skills[key]["ref"] == expected["ref"]
-        assert set(lock[key]) == {"repo", "ref", "commit"}
-        assert lock[key]["repo"].endswith(expected["repo_suffix"])
-        assert lock[key]["ref"] == expected["ref"]
-        assert lock[key]["commit"] == expected["commit"]
+        source = skills[key]
+        assert source.model_dump().keys() == {"repo", "ref"}
+        assert source.repo.endswith(expected["repo_suffix"])
+        assert source.ref == expected["ref"]
+        locked = lock[key]
+        assert locked.model_dump().keys() == {"repo", "ref", "commit"}
+        assert locked.repo.endswith(expected["repo_suffix"])
+        assert locked.ref == expected["ref"]
+        assert locked.commit == expected["commit"]

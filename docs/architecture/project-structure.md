@@ -13,19 +13,17 @@ agent-legion/
 ├── .env.example                # 运行时密钥与覆盖项模板
 ├── Makefile                    # 常用命令快捷方式
 ├── config/                     # 按领域拆分的配置
-│   ├── app.yaml                # 应用路径、PostgreSQL URL、HTTP 设置、清理、监控
-│   ├── agent_legion.yaml       # ASR、CMS、资源提供方、OpenClaw
-│   ├── workflow.yaml           # Workspace 执行器、工作流运行时、Pi 配置
-│   ├── skills.yaml             # 外部 Pi skill 源声明
-│   ├── skills.lock             # 解析后的 skill commit 锁定
-│   ├── architecture/           # 架构治理配置
-│   │   ├── architecture-invariants.yaml
-│   │   ├── architecture-exemptions.yaml
-│   │   ├── architecture-budget-policy.yaml
-│   │   └── architecture-budgets.json
-│   └── workflows/              # Workflow DAG 定义
-│       ├── video_knowledge.yaml
-│       └── question_comprehension_info.yaml
+│   ├── agent-worker.example.yaml # Agent Worker 配置模板
+│   └── architecture/           # 架构治理配置
+│       ├── architecture-invariants.yaml
+│       ├── architecture-exemptions.yaml
+│       ├── architecture-budget-policy.yaml
+│       └── architecture-budgets.json
+│   # 运行时 split 配置（app.yaml / workflow.yaml / agent_legion.yaml）已退役：
+│   # 代码默认值 + env 覆盖 + DB 实例设置文档，文件存在即启动报错。
+│   # skill 源与锁（skills.yaml / skills.lock）亦已退役：存 DB global_settings
+│   # （skill_sources / skill_lock），经 admin API 与 make skills-lock 管理；
+│   # 残留文件启动时一次性导入 DB（warning），此后不再读取。
 ├── server/
 │   └── app/
 │       ├── main.py             # FastAPI app factory + lifespan worker

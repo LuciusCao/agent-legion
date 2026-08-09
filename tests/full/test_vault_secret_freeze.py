@@ -14,6 +14,7 @@ import pytest
 from cryptography.fernet import Fernet
 
 from server.app.services.agent_service import published_agent_definitions
+from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.node_secrets import node_secret_name
 from server.app.services.vault import VaultService
@@ -34,6 +35,9 @@ def vault_key(monkeypatch):
 
 @pytest.mark.full_gate
 def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -> None:
+    # The bare settings fixture does not hydrate executor definitions
+    # (create_app does); the node config schema chain needs the seeded catalog.
+    hydrate_executor_definitions(settings)
     workspace = job_db.create_workspace(
         "vault-full", default_workflow_key="question_comprehension_info"
     )

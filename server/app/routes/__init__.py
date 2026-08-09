@@ -27,11 +27,14 @@ from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
 from .artifacts import create_artifacts_router
 from .common import create_common_router
+from .executor_definitions import create_executor_definitions_router
+from .instance_settings import create_instance_settings_router
 from .job_route_group import include_job_routes
 from .metrics import create_metrics_router
 from .packages import create_packages_router
 from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
+from .skill_sources import create_skill_sources_router
 from .skills import create_skills_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
@@ -77,8 +80,10 @@ def create_router(
     router.include_router(create_common_router())
     router.include_router(create_agents_router(agent_manager))
     router.include_router(create_token_usage_pricing_router(job_db, settings))
-    # Global admin endpoint (not workspace-scoped): the sub-router enforces
-    # require_admin itself, so it must not go through secured().
+    # Global admin endpoints (not workspace-scoped): the sub-routers enforce
+    # require_admin themselves, so they must not go through secured().
+    router.include_router(create_instance_settings_router(job_db, settings))
+    router.include_router(create_skill_sources_router(settings))
     router.include_router(create_workflow_node_files_router(settings))
     secured(create_packages_router(job_db, settings, job_packages))
     secured(create_worker_router(workspace_worker_control))
@@ -108,6 +113,7 @@ def create_router(
     secured(create_workflow_revisions_router(job_db, settings))
     secured(create_workflow_node_codes_router(job_db, settings))
     secured(create_agent_definitions_router(job_db, settings))
+    secured(create_executor_definitions_router(job_db, settings))
     secured(create_skills_router(settings))
     secured(create_workspace_configuration_router(workspace_configuration, settings))
     executors_router = create_workspace_executors_router(

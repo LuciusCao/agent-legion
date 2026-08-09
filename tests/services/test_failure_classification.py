@@ -320,7 +320,8 @@ def test_executor_binding_failures_are_technical():
 
 def test_skill_setup_failures_are_technical_skill_config():
     assert classify_failure(
-        None, "skill 'video_knowledge/review_subtitles' config differs from skills.lock"
+        None,
+        "skill 'video_knowledge/review_subtitles' config differs from the published skill lock",
     ) == ("technical", "skill_config")
     assert classify_failure(
         None, "skill missing references/output-contract.md: 'video_knowledge/review_subtitles'"

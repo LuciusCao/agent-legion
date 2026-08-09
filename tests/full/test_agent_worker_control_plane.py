@@ -16,12 +16,10 @@ from server.app.agent_workers import AgentWorkerRegistry
 from server.app.main import create_app
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.settings import PROJECT_ROOT
-from server.app.workflows.definition import load_workflow_definition
 from tests.db.test_postgres_runtime import (
     test_schema_initialization_is_idempotent as _assert_schema_idempotent,
 )
-from tests.helpers import replace_agent_catalog
+from tests.helpers import load_builtin_definition, replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.test_agent_broker import _seed_request
 from tests.test_agent_broker import (
@@ -128,9 +126,7 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
         "Route Check", default_workflow_key="question_comprehension_info"
     )
     workspace_id = workspace["id"]
-    definition = load_workflow_definition(
-        PROJECT_ROOT / "config" / "workflows" / "question_comprehension_info.yaml"
-    )
+    definition = load_builtin_definition("question_comprehension_info")
     revision_service = WorkflowRevisionService(job_db)
     revision_service.publish_workspace_revision(workspace_id, definition)
     revision_service.reconcile_active_agent_routes()

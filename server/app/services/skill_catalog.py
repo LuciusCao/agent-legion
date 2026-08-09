@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-import yaml
-
+from server.app.db.connection import DatabaseDsn
 from server.app.services.job_errors import NotFoundError
+from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.config import SkillsConfig, SkillsLock
 
 _TEXT_EXTENSIONS = {".json", ".md", ".py", ".sh", ".toml", ".txt", ".yaml", ".yml"}
@@ -13,9 +13,8 @@ _MAX_FILE_BYTES = 128 * 1024
 
 
 class SkillCatalogService:
-    def __init__(self, root_dir: Path, base_dir: Path | None = None) -> None:
-        self.config_path = root_dir / "config" / "skills.yaml"
-        self.lock_path = root_dir / "config" / "skills.lock"
+    def __init__(self, database_dsn: DatabaseDsn, base_dir: Path | None = None) -> None:
+        self._store = SkillSourceStore(database_dsn)
         self.base_dir = base_dir or Path.home() / ".agents" / "skills" / "agent-legion"
 
     def metadata(self, skill_key: str) -> dict[str, str]:
@@ -80,11 +79,7 @@ class SkillCatalogService:
         return files
 
     def _config(self) -> SkillsConfig:
-        raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
-        return SkillsConfig.model_validate(raw)
+        return self._store.get_sources() or SkillsConfig()
 
     def _lock(self) -> SkillsLock:
-        if not self.lock_path.is_file():
-            return SkillsLock()
-        raw = yaml.safe_load(self.lock_path.read_text(encoding="utf-8")) or {}
-        return SkillsLock.model_validate(raw)
+        return self._store.get_lock() or SkillsLock()

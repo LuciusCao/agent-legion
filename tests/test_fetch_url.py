@@ -98,22 +98,22 @@ def test_get_token_marker_without_token_falls_back_to_env(monkeypatch):
 
 
 def test_lookup_knowledge_video_requires_configured_url():
-    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+    with pytest.raises(CmsClientError, match="not configured"):
         lookup_knowledge_video("K001")
 
 
 def test_lookup_question_video_requires_configured_url():
-    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+    with pytest.raises(CmsClientError, match="not configured"):
         lookup_question_video("Q001")
 
 
 def test_list_questions_by_knowledge_requires_configured_url():
-    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+    with pytest.raises(CmsClientError, match="not configured"):
         list_questions_by_knowledge("K001")
 
 
 def test_fetch_question_detail_requires_configured_url():
-    with pytest.raises(CmsClientError, match=r"cms\.base_url"):
+    with pytest.raises(CmsClientError, match="not configured"):
         fetch_question_detail("Q001")
 
 

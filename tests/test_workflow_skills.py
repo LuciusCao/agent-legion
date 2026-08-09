@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from server.app.workflows.definition import load_workflow_definition
 from server.app.workflows.skills import resolve_workflow_skill
+from tests.helpers import load_builtin_definition
 
 WORKFLOWS = {
     "question_comprehension_info": {
@@ -31,7 +31,7 @@ def test_all_agent_nodes_map_to_complete_skill_contracts(
     workflow_key: str,
     local_capabilities: set[str],
 ) -> None:
-    definition = load_workflow_definition(Path(f"config/workflows/{workflow_key}.yaml"))
+    definition = load_builtin_definition(workflow_key)
 
     for node in definition.nodes.values():
         if node.capability in local_capabilities:

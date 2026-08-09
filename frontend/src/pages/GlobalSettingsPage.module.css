@@ -35,6 +35,12 @@
   font-size: 13px;
   color: #43474e;
 }
+.groupTitle {
+  font-size: 13px;
+  font-weight: 500;
+  color: #43474e;
+  margin: 12px 0 8px;
+}
 .currencyInput {
   width: 120px;
   padding: 8px 10px;
@@ -82,6 +88,10 @@
   color: #c62828;
   font-size: 13px;
   cursor: pointer;
+}
+.staleBadge {
+  color: #ba1a1a;
+  font-size: 12px;
 }
 .empty {
   font-size: 13px;

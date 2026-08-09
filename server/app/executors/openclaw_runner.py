@@ -30,7 +30,7 @@ def _lock_repo_path(repo: str) -> str | None:
 
 
 def resolve_skill_safety_repos(paths: list[str], lock: SkillsLock) -> list[dict[str, str]]:
-    """Resolve skill-safety whitelist paths to locked refs from ``skills.lock``.
+    """Resolve skill-safety whitelist paths to locked refs from the DB skill lock.
 
     The whitelist only declares which checkouts may be force-restored; the
     restore ref is the locked commit (falling back to the locked ref), so the
@@ -47,9 +47,9 @@ def resolve_skill_safety_repos(paths: list[str], lock: SkillsLock) -> list[dict[
         locked = locked_by_path.get(path)
         if locked is None:
             raise SkillConfigError(
-                f"openclaw skill_safety repo {raw_path!r} is not declared in skills.lock; "
-                "declare the skill in config/skills.yaml and refresh the lock, or remove "
-                "the whitelist entry"
+                f"openclaw skill_safety repo {raw_path!r} is not declared in the skill "
+                "lock; declare the skill in the DB skill sources and refresh the lock "
+                "(make skills-lock), or remove the whitelist entry"
             )
         resolved.append({"path": path, "ref": locked.commit or locked.ref})
     return resolved

@@ -22,9 +22,13 @@ class WhisperCppProvider(TranscriptionProvider):
 
     def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
         if not self.binary.exists():
-            raise FileNotFoundError(f"whisper binary not found: {self.binary}")
+            raise FileNotFoundError(
+                f"whisper binary not found: {self.binary} (set env AGENT_LEGION_ASR_WHISPER_BINARY)"
+            )
         if not self.model.exists():
-            raise FileNotFoundError(f"whisper model not found: {self.model}")
+            raise FileNotFoundError(
+                f"whisper model not found: {self.model} (set env AGENT_LEGION_ASR_WHISPER_MODEL)"
+            )
         wav_path = output_path.with_suffix(".wav")
         try:
             subprocess.run(
@@ -95,7 +99,10 @@ class SenseVoiceProvider(TranscriptionProvider):
 
     def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
         if not self.script.exists():
-            raise FileNotFoundError(f"SenseVoice script not found: {self.script}")
+            raise FileNotFoundError(
+                f"SenseVoice script not found: {self.script} "
+                "(set env AGENT_LEGION_ASR_SENSEVOICE_SCRIPT)"
+            )
         video_id = video_path.stem
         script_output_dir = (
             output_path.parent.parent if output_path.parent.name == video_id else output_path.parent

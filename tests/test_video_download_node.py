@@ -2,8 +2,9 @@
 
 Knowledge-mode intake writes an opaque ``source_ref``; the download node
 (``workflow_nodes/video_download.py``) resolves it against the CMS through
-the node config chain (global ``cms:`` defaults overridden by
-``runtime["node_config"]``; the dispatch layer already resolved any vault
+the node config chain (config_schema defaults and settings-level env-injected
+``cms`` keys, overridden by ``runtime["node_config"]``; the dispatch layer
+already resolved any vault
 secret_ref into a plaintext token) and writes the resolved fields back to
 video_input.json before downloading.
 """
