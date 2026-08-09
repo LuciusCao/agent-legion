@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from server.app.jobs.storage_layout import job_storage_dir
 from server.app.main import create_app
 from tests.helpers.auth import authenticate_client
 
@@ -33,7 +34,7 @@ def test_video_job_projection_returns_job_directory_artifacts(client, app, tmp_p
         node_keys=["download", "transcribe"],
         workspace_id="video_knowledge",
     )
-    job_dir = app.state.settings.jobs_dir / job["workspace_id"] / job["id"]
+    job_dir = job_storage_dir(app.state.settings.jobs_dir, job["workspace_id"], job["id"])
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "video_input.json").write_text(
         json.dumps(
@@ -80,7 +81,7 @@ def test_video_job_projection_accepts_legacy_interactions_wrapper(client, app) -
         node_keys=["download", "transcribe"],
         workspace_id="video_knowledge",
     )
-    job_dir = app.state.settings.jobs_dir / job["workspace_id"] / job["id"]
+    job_dir = job_storage_dir(app.state.settings.jobs_dir, job["workspace_id"], job["id"])
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "video_input.json").write_text(
         json.dumps(
@@ -123,7 +124,7 @@ def test_video_job_source_file_serves_copied_artifact(client, app) -> None:
         node_keys=["download"],
         workspace_id="video_knowledge",
     )
-    job_dir = app.state.settings.jobs_dir / job["workspace_id"] / job["id"]
+    job_dir = job_storage_dir(app.state.settings.jobs_dir, job["workspace_id"], job["id"])
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "source.mp4").write_bytes(b"fake mp4")
 
