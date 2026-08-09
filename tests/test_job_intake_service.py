@@ -1,5 +1,6 @@
 import pytest
 
+from server.app.jobs.storage_layout import job_storage_dir
 from server.app.services import job_intake_chunks
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
@@ -38,11 +39,15 @@ def test_job_intake_creates_direct_id_jobs(job_db, settings):
     assert result["created_count"] == 2
     assert [job["source_id"] for job in result["jobs"]] == ["Q1", "Q2"]
     assert [job["storage_dir"] for job in result["jobs"]] == [
-        str(settings.jobs_dir / "default" / "default_question_comprehension_info_Q1"),
-        str(settings.jobs_dir / "default" / "default_question_comprehension_info_Q2"),
+        str(
+            job_storage_dir(settings.jobs_dir, "default", "default_question_comprehension_info_Q1")
+        ),
+        str(
+            job_storage_dir(settings.jobs_dir, "default", "default_question_comprehension_info_Q2")
+        ),
     ]
     for job in result["jobs"]:
-        assert (settings.data_dir / "jobs" / "default" / job["id"]).is_dir()
+        assert job_storage_dir(settings.jobs_dir, "default", job["id"]).is_dir()
 
 
 def test_job_intake_rejects_missing_workspace(intake_service):

@@ -18,6 +18,7 @@ from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
+from server.app.jobs.storage_layout import job_storage_dir
 from server.app.workflows.definition import WorkflowNode
 from server.app.workflows.schema import WorkflowReduceSpec, WorkflowShardSpec
 from server.app.workflows.sharding import (
@@ -317,7 +318,7 @@ def _make_e2e(tmp_path: Path, definition, executor, *, capacity: int = 10):
         workspace_id=workspace["id"],
     )
     worker = make_worker(tmp_path, db_path, registry, [definition])
-    job_dir = tmp_path / "jobs" / workspace["id"] / str(job["id"])
+    job_dir = job_storage_dir(tmp_path / "jobs", workspace["id"], str(job["id"]))
     return worker, job_db, job, job_dir
 
 

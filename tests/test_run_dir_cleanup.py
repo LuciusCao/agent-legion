@@ -8,6 +8,7 @@ from server.app.services.cleanup_sweep import (
 )
 from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
 from server.app.storage_paths import make_data_relative
+from tests.helpers.job_dirs import job_storage_ref, make_job_dir
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -16,8 +17,9 @@ def _setup(conn):
         "insert into workspaces(id, name) values ('ws1', 'ws1') on conflict (id) do nothing"
     )
     conn.execute(
-        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
-        " values ('job-1', 'ws1', 'wf', 'question', 'q1')"
+        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
+        " values ('job-1', 'ws1', 'wf', 'question', 'q1', %s)",
+        (job_storage_ref("ws1", "job-1"),),
     )
 
 
@@ -35,10 +37,10 @@ def _seed_job(conn, job_id, workspace_id="ws1"):
     )
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
-        values (%s, %s, 'wf', 'question', %s)
+        insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)
+        values (%s, %s, 'wf', 'question', %s, %s)
         """,
-        (job_id, workspace_id, job_id),
+        (job_id, workspace_id, job_id, job_storage_ref(workspace_id, job_id)),
     )
 
 
@@ -54,7 +56,7 @@ def _insert_node_run(conn, job_id, node_key, *, run_dir=""):
 
 def test_cleanup_extra_runs_for_node_keeps_newest(tmp_path):
     data_dir = tmp_path / "data"
-    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    node_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a"
     old_dir = node_dir / "tok-old"
     new_dir = node_dir / "tok-new"
     old_dir.mkdir(parents=True)
@@ -80,7 +82,7 @@ def test_cleanup_extra_runs_for_node_keeps_newest(tmp_path):
 
 def test_cleanup_extra_runs_for_node_keeps_single_run(tmp_path):
     data_dir = tmp_path / "data"
-    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    node_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a"
     only_dir = node_dir / "tok-only"
     only_dir.mkdir(parents=True)
 
@@ -95,7 +97,7 @@ def test_cleanup_extra_runs_per_node_scans_all_nodes(tmp_path):
     data_dir, db = _make_db(tmp_path)
     old_dirs = []
     for job_id in ("job-1", "job-2"):
-        node_dir = data_dir / "jobs" / "ws1" / job_id / "runs" / "node-a"
+        node_dir = make_job_dir(data_dir, "ws1", job_id) / "runs" / "node-a"
         old_dir = node_dir / "old"
         old_dir.mkdir(parents=True)
         (node_dir / "new").mkdir(parents=True)
@@ -117,7 +119,7 @@ def test_cleanup_extra_runs_per_node_scans_all_nodes(tmp_path):
 
 def test_cleanup_extra_runs_per_node_batches_updates(tmp_path, monkeypatch):
     data_dir, db = _make_db(tmp_path)
-    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    node_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a"
     extra_count = RUN_DIR_UPDATE_BATCH_SIZE + 5
     token_dirs = [node_dir / f"tok-{i:04d}" for i in range(extra_count + 1)]
     for token_dir in token_dirs:

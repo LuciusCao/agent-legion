@@ -2,6 +2,7 @@ import pytest
 
 from server.app.jobs.queries import JobQueries
 from tests.helpers import load_builtin_definition
+from tests.helpers.job_dirs import job_storage_ref
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -31,7 +32,9 @@ def test_create_batch_and_question_jobs(tmp_path):
     assert batch["workspace_id"] == "default"
     assert job["id"] == "default_question_comprehension_info_Q001"
     assert job["workspace_id"] == "default"
-    assert job["storage_dir"].endswith("jobs/default/default_question_comprehension_info_Q001")
+    assert job["storage_dir"].endswith(
+        job_storage_ref("default", "default_question_comprehension_info_Q001")
+    )
     nodes = queries.list_job_nodes(job["id"])
     assert [node["node_key"] for node in nodes] == [
         "fetch_question_context",

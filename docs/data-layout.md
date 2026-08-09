@@ -8,7 +8,7 @@
 
 | 子目录 | 持有者 | 内容与结构 | 生命周期 |
 |--------|--------|------------|----------|
-| `jobs/` | Workflow / Executor 运行时 | Job 运行产物：`jobs/<workspace>/<job_id>/runs/<node_key>/<token>/`，token 目录下含 `session/` 与 Pi 事件流等执行产物（`server/app/storage_paths.py:240-283`） | 运行时产物。由后台 cleanup 按 `cleanup.run_dir_retention_days`（默认 3 天）清理过期 run dir；默认每个节点只保留最新一次 run（`server/app/services/log_cleanup.py:21-82`） |
+| `jobs/` | Workflow / Executor 运行时 | Job 运行产物：`jobs/<workspace>/<shard>/<job_id>/runs/<node_key>/<token>/`，其中 `<shard>` 为 `sha1(job_id)` 前 2 位 hex（`server/app/jobs/storage_layout.py`），token 目录下含 `session/` 与 Pi 事件流等执行产物（`server/app/storage_paths.py:240-283`）。旧扁平布局 `jobs/<workspace>/<job_id>/` 只读兼容：读取一律经 `jobs.storage_dir` 列解析，不搬迁不回填 | 运行时产物。由后台 cleanup 按 `cleanup.run_dir_retention_days`（默认 3 天）清理过期 run dir；默认每个节点只保留最新一次 run（`server/app/services/log_cleanup.py:21-82`） |
 | `logs/` | 节点执行日志 + workflow worker | 节点日志 `logs/jobs/<job_id>-<node_key>.log`（`server/app/storage_paths.py:249`）、`workflow_worker_pass.log`（`server/app/workflow_worker/pass_log.py:24`） | 日志。按 `cleanup.log_retention_days`（默认 7 天）清理；删除 Job 时日志先移入 `logs/jobs/.trash/<operation_id>/` 再清除（`server/app/services/job_deletion.py:109-172`） |
 | `videos/` | 视频能力（video_knowledge workspace） | 视频文件 `videos/<video_id>/<video_id>.mp4`（`server/app/video_capabilities/_video_paths.py:25`） | 内容产物，随视频记录生命周期 |
 | `packages/` | Workspace 打包导出 | 导出包 `packages/workspace-<workspace_id>/workspace-jobs-*.zip`（`server/app/pipeline/workspace_package.py:23-32`、`server/app/services/job_packages.py:94`） | 导出产物，可重新生成 |
@@ -45,6 +45,7 @@ Worker 不读写 Host 的 `data/`，它持有自己的两个根：
 
 - `server/app/settings.py:195-245` — data 根解析与受管子目录创建
 - `server/app/storage_paths.py` — managed root 路径约束与 `jobs/`、`logs/` 结构
+- `server/app/jobs/storage_layout.py` — job 目录分片布局（shard 计算与新旧布局探测）
 - `server/app/services/log_cleanup.py`、DB 实例设置 `cleanup` 段 — 日志与 run dir 保留策略
 - `server/app/services/artifact_store.py`、`server/app/agent_broker/broker.py` — `artifacts/` 与 `agent_bundles/`
 - `worker/executor.py:228`、`worker/cleanup.py`、`worker/upload_queue.py`、`worker/config_store.py` — Worker work root 与状态目录

@@ -6,6 +6,7 @@ from typing import Any
 import pytest
 
 from server.app.executors._lease_transactions import database_timestamp
+from server.app.jobs.storage_layout import job_shard
 from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -495,7 +496,7 @@ def test_list_jobs_resolves_storage_dir_absolute(query_service, job_db, settings
     listed = query_service.list_jobs(job["workspace_id"])
 
     assert len(listed) == 1
-    expected_suffix = f"{job['workspace_id']}/{job['id']}"
+    expected_suffix = f"{job['workspace_id']}/{job_shard(job['id'])}/{job['id']}"
     assert listed[0]["storage_dir"] == str(settings.jobs_dir / expected_suffix)
     assert Path(listed[0]["storage_dir"]).is_absolute()
 
@@ -505,7 +506,7 @@ def test_detail_resolves_storage_dir_and_run_paths_absolute(query_service, job_d
 
     detail = query_service.detail(job["id"])
 
-    expected_suffix = f"{job['workspace_id']}/{job['id']}"
+    expected_suffix = f"{job['workspace_id']}/{job_shard(job['id'])}/{job['id']}"
     assert detail["job"]["storage_dir"] == str(settings.jobs_dir / expected_suffix)
     assert Path(detail["job"]["storage_dir"]).is_absolute()
 
