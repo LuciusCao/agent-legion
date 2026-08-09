@@ -2,6 +2,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+from server.app.jobs.storage_layout import resolve_job_dir_candidates
 from server.app.services.path_hygiene import warn_legacy_absolute
 
 _MANAGED_CATEGORIES = frozenset({"videos", "jobs", "logs", "packages"})
@@ -238,32 +239,30 @@ def derive_run_dir_from_log_path(
 ) -> Path | None:
     """Find the Pi token directory from the legacy log file path.
 
-    Pi artifacts live under ``jobs/<workspace>/<job_id>/runs/<node_key>/<token>/``
-    while the log file is stored at ``logs/jobs/<job_id>-<node_key>.log``. When the
-    executor result does not include ``run_dir``, we scan ``jobs_dir`` for the
-    workspace that contains this ``job_id`` and pick the most recently modified
-    token directory.
+    Pi artifacts live under ``jobs/<workspace>/<shard>/<job_id>/runs/<node_key>/<token>/``
+    (legacy layout: ``jobs/<workspace>/<job_id>/runs/...``) while the log file is
+    stored at ``logs/jobs/<job_id>-<node_key>.log``. When the executor result does
+    not include ``run_dir``, we scan ``jobs_dir`` for the workspace that contains
+    this ``job_id`` — probing the sharded path first, then the legacy flat one —
+    and pick the most recently modified token directory.
     """
     if not log_path or not node_key or not job_id:
         return None
     if not jobs_dir.is_dir():
         return None
 
-    job_dir: Path | None = None
+    # A job dir may exist in both layouts (e.g. re-intake created the empty
+    # sharded dir while runs still live in the legacy one), so keep probing
+    # until a candidate actually holds run tokens for this node.
+    token_dirs: list[Path] = []
     for workspace_dir in jobs_dir.iterdir():
         if not workspace_dir.is_dir():
             continue
-        candidate = workspace_dir / job_id
-        if candidate.is_dir():
-            job_dir = candidate
-            break
-    if job_dir is None:
-        return None
-
-    run_parent = job_dir / "runs" / node_key
-    if not run_parent.is_dir():
-        return None
-    token_dirs = [d for d in run_parent.iterdir() if d.is_dir()]
+        for candidate in resolve_job_dir_candidates(jobs_dir, workspace_dir.name, job_id):
+            run_parent = candidate / "runs" / node_key
+            if not run_parent.is_dir():
+                continue
+            token_dirs.extend(d for d in run_parent.iterdir() if d.is_dir())
     if not token_dirs:
         return None
     return max(token_dirs, key=lambda p: p.stat().st_mtime)

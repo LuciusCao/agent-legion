@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.storage_layout import job_storage_dir
 from server.app.storage_paths import make_data_relative
 
 
@@ -37,7 +38,7 @@ class JobBulkQueriesMixin(JobQueriesBase):
             if job_id in identities and identities[job_id] != identity:
                 raise ValueError(f"Job identity collision for {job_id}")
             identities[job_id] = identity
-            storage_dir = self.jobs_dir / workspace_id / job_id
+            storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
             storage_dir.mkdir(parents=True, exist_ok=True)
             job_ids.append(job_id)
             rows.append(

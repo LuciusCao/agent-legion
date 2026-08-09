@@ -7,6 +7,7 @@ from server.app.jobs import JobQueries
 from server.app.services import cleanup_sweep
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
 from server.app.storage_paths import make_data_relative
+from tests.helpers.job_dirs import job_storage_ref, make_job_dir
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -24,10 +25,10 @@ def _seed_workspace(conn, workspace_id="ws1"):
 def _insert_job(conn, job_id, workspace_id="ws1"):
     conn.execute(
         """
-        insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
-        values (%s, %s, 'wf', 'question', %s)
+        insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)
+        values (%s, %s, 'wf', 'question', %s, %s)
         """,
-        (job_id, workspace_id, job_id),
+        (job_id, workspace_id, job_id, job_storage_ref(workspace_id, job_id)),
     )
 
 
@@ -52,7 +53,7 @@ def _insert_node_run(
 
 def test_cleanup_removes_old_logs_and_run_dirs(tmp_path):
     data_dir, db = _make_db(tmp_path)
-    run_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a" / "tok-1"
+    run_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "tok-1"
     run_dir.mkdir(parents=True)
     log_path = data_dir / "logs" / "jobs" / "job-1-node-a.log"
     log_path.parent.mkdir(parents=True)
@@ -80,7 +81,7 @@ def test_cleanup_removes_old_logs_and_run_dirs(tmp_path):
 
 def test_cleanup_keeps_recent_logs_and_run_dirs(tmp_path):
     data_dir, db = _make_db(tmp_path)
-    run_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a" / "tok-1"
+    run_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "tok-1"
     run_dir.mkdir(parents=True)
     log_path = data_dir / "logs" / "jobs" / "job-1-node-a.log"
     log_path.parent.mkdir(parents=True)
@@ -108,7 +109,7 @@ def test_cleanup_keeps_recent_logs_and_run_dirs(tmp_path):
 
 def test_cleanup_derives_run_dir_when_empty(tmp_path):
     data_dir, db = _make_db(tmp_path)
-    run_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a" / "tok-1"
+    run_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "tok-1"
     run_dir.mkdir(parents=True)
     log_path = data_dir / "logs" / "jobs" / "job-1-node-a.log"
     log_path.parent.mkdir(parents=True)
@@ -158,7 +159,7 @@ def _pin_run_dir_order(old_dir, new_dir):
 
 def test_cleanup_keeps_only_latest_run_per_node(tmp_path):
     data_dir, db = _make_db(tmp_path)
-    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    node_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a"
     old_dir = node_dir / "tok-old"
     new_dir = node_dir / "tok-new"
     old_dir.mkdir(parents=True)
@@ -190,7 +191,7 @@ def test_cleanup_keeps_only_latest_run_per_node(tmp_path):
 
 def test_cleanup_respects_keep_all_runs_flag(tmp_path):
     data_dir, db = _make_db(tmp_path)
-    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    node_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a"
     old_dir = node_dir / "tok-old"
     new_dir = node_dir / "tok-new"
     old_dir.mkdir(parents=True)
@@ -265,7 +266,7 @@ def test_cleanup_processes_expired_rows_in_chunks(tmp_path, monkeypatch):
 
 def test_cleanup_deletes_files_outside_db_transaction(tmp_path, monkeypatch):
     data_dir, db = _make_db(tmp_path)
-    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    node_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a"
     old_dir = node_dir / "tok-old"
     new_dir = node_dir / "tok-new"
     old_dir.mkdir(parents=True)

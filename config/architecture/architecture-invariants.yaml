@@ -627,6 +627,18 @@ invariants:
         target: tests/services/test_path_hygiene.py
         gate: quick
 
+  - id: EXEC-PATH-STORAGE-002
+    statement: "Job storage directories use the sharded layout jobs/<workspace>/<sha1(job_id)[:2]>/<job_id>: all new job dirs are created via storage_layout.job_storage_dir (direct workspace-level concatenation is forbidden), legacy flat jobs/<workspace>/<job_id> dirs stay readable through the stored jobs.storage_dir and dual-probe filesystem fallbacks, and maintenance sweeps locate job dirs from the jobs table instead of enumerating workspace directories."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_job_storage_layout.py
+        gate: quick
+      - kind: integration
+        target: tests/test_run_dir_cleanup.py
+        gate: quick
+
   - id: EXEC-CLAIM-RUNTIME-001
     statement: "A queued Agent request no single non-revoked Worker can claim — judged per Worker on runtime, capability and model together, never on cross-Worker unions — is failed by the unclaimable sweeper with an explicit reason; it never rots in queued. With zero non-revoked Workers the sweeper stays inactive (a deployment gap, not a definition problem)."
     owner: workspace-executor
