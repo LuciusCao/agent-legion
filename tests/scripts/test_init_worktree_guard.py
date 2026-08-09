@@ -111,3 +111,28 @@ def test_main_repo_root_exits_without_side_effects(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "无需初始化" in result.stderr
     assert not (main / "deploy").exists()
+
+
+def test_worker_config_seeded_from_base_with_rewritten_identity(tmp_path: Path) -> None:
+    """缺失的 config/agent-worker.yaml 从基准复制并改写本实例字段。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / "config").mkdir()
+    (develop / "config" / "agent-worker.yaml").write_text(
+        "host_url: http://127.0.0.1:8000\n"
+        "worker_id: base-worker\n"
+        "name: Base Worker\n"
+        "runtimes: [velites]\n",
+        encoding="utf-8",
+    )
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    config = (main / ".worktrees/flat/config/agent-worker.yaml").read_text()
+    assert "host_url: http://127.0.0.1:8001" in config
+    assert "worker_id: flat" in config
+    assert "name: flat (worktree)" in config
+    assert "runtimes: [velites]" in config

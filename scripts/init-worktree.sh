@@ -85,8 +85,53 @@ if [[ ! -s deploy/secrets/vault_master_key ]]; then
 fi
 chmod 600 deploy/secrets/agent_worker_register_token deploy/secrets/vault_master_key
 
+# 4. config/agent-worker.yaml：缺失时从基准 worktree 复制并改写本实例字段
+#    （host_url 指向开发后端、worker_id 按 worktree 派生）。注意生效配置是
+#    状态副本 data/agent-worker-service/worker.yaml——首次启动后改 config
+#    文件不会自动生效，要走 worker 控制台或 PUT /api/config。
+if [[ ! -f config/agent-worker.yaml ]]; then
+    if [[ -n "$BASE" && -f "$BASE/config/agent-worker.yaml" ]]; then
+        mkdir -p config
+        cp "$BASE/config/agent-worker.yaml" config/agent-worker.yaml
+        sed -i '' -E "s|^host_url:.*|host_url: http://127.0.0.1:8001|" config/agent-worker.yaml
+        sed -i '' -E "s|^worker_id:.*|worker_id: ${NAME}|" config/agent-worker.yaml
+        sed -i '' -E "s|^name:.*|name: ${NAME} (worktree)|" config/agent-worker.yaml
+        echo "已生成 config/agent-worker.yaml <- $BASE（host_url/worker_id/name 已改写）"
+    else
+        echo "提示: 基准 worktree 无 config/agent-worker.yaml，跳过 worker 配置种子" >&2
+    fi
+fi
+
+# 5. 恢复 workspace 调度：后端每次启动都把全部 workspace 重置为暂停（刻意设计，
+#    防止重启后任务不受控自跑），且 unknown workspace 默认暂停。只有后端已建表
+#    并 seed 过 workspaces 时这步才能生效；否则在首次启动后端后重跑本脚本（幂等）。
+if [[ -f .env ]]; then
+    if PYTHONPATH="$ROOT" UV_CACHE_DIR=.uv-cache uv run python - <<'PY'
+from server.app.db.transaction import read_connection
+from server.app.settings import load_settings
+from server.app.worker_control import WorkspaceWorkerControl
+
+settings = load_settings()
+control = WorkspaceWorkerControl(settings.database_url)
+with read_connection(settings.database_url) as conn:
+    rows = conn.execute("select id from workspaces").fetchall()
+for row in rows:
+    control.resume(str(row["id"]))
+    print(f"已恢复 workspace 调度: {row['id']}")
+PY
+    then
+        :
+    else
+        echo "提示: workspace 恢复未执行（后端可能尚未首次启动建表），" >&2
+        echo "      请在启动后端后重跑本脚本，或在控制台手动恢复。" >&2
+    fi
+fi
+
 cat <<EOF
 完成。剩余手工步骤（如未做过）：
   - frontend: cd frontend && npm ci
   - 质量门: ./scripts/check-quick.sh
+  - worker: claim 默认关闭（刻意设计），启动后经 worker 控制台（默认 8789）
+    或 PUT /api/config 打开 claim_enabled；capabilities/models 已在
+    config/agent-worker.yaml 种子配置中声明，首次导入后修改要走控制台/API
 EOF
