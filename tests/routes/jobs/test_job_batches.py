@@ -394,6 +394,9 @@ def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path,
         assert body["batch"]["id"] == batch_id
         assert body["batch"]["status"] == "queued"
         assert body["created_count"] == 0
+        # The guarded transition is a no-op once the batch is no longer
+        # completed (already requeued, or claimed by the intake consumer).
+        assert app.state.job_db.requeue_completed_batch_if_depleted(batch_id, {}, 1) is None
 
         claimed = app.state.job_db.claim_intake_batch()
         assert claimed is not None
