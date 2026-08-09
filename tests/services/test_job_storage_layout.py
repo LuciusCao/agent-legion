@@ -172,3 +172,67 @@ def test_cleanup_extra_runs_per_node_sharded_layout(job_db, settings) -> None:
     assert removed == 1
     assert not old_dir.exists()
     assert new_dir.exists()
+
+
+_REVISION = {"id": "rev-1", "version": 1, "definition_hash": "h", "definition_json": "{}"}
+
+
+def _bulk_candidate(source_id: str) -> dict:
+    return {"entity_id": source_id, "entity_type": "question", "title": "t"}
+
+
+def test_create_jobs_bulk_creates_shard_dir_for_new_jobs(job_db, settings) -> None:
+    data_dir = settings.data_dir
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values ('ws', 'ws') on conflict (id) do nothing"
+        )
+
+    jobs = job_db.create_jobs_bulk(
+        candidates=[_bulk_candidate("q-new")],
+        workflow_key="wf",
+        batch_id="batch-1",
+        node_keys=["node-a"],
+        workspace_id="ws",
+        revision=_REVISION,
+    )
+
+    job_id = "ws_wf_q-new"
+    assert [str(job["id"]) for job in jobs] == [job_id]
+    assert job_storage_dir(data_dir / "jobs", "ws", job_id).is_dir()
+    with job_db._connect_read() as conn:
+        row = conn.execute("select storage_dir from jobs where id = %s", (job_id,)).fetchone()
+    assert row["storage_dir"] == job_storage_ref("ws", job_id)
+
+
+def test_create_jobs_bulk_resubmit_does_not_precreate_shard_dir(job_db, settings) -> None:
+    """Resubmitting a legacy job keeps its stored storage_dir; a stray empty
+    shard dir would block the flat→sharded migration as a conflict."""
+    data_dir = settings.data_dir
+    job_id = "ws_wf_q-legacy"  # _job_id("ws", "wf", "q-legacy")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values ('ws', 'ws') on conflict (id) do nothing"
+        )
+        conn.execute(
+            """
+            insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)
+            values (%s, 'ws', 'wf', 'question', 'q-legacy', %s)
+            """,
+            (job_id, job_storage_ref("ws", job_id, sharded=False)),
+        )
+
+    jobs = job_db.create_jobs_bulk(
+        candidates=[_bulk_candidate("q-legacy")],
+        workflow_key="wf",
+        batch_id="batch-2",
+        node_keys=["node-a"],
+        workspace_id="ws",
+        revision=_REVISION,
+    )
+
+    assert [str(job["id"]) for job in jobs] == [job_id]
+    assert not job_storage_dir(data_dir / "jobs", "ws", job_id).exists()
+    with job_db._connect_read() as conn:
+        row = conn.execute("select storage_dir from jobs where id = %s", (job_id,)).fetchone()
+    assert row["storage_dir"] == job_storage_ref("ws", job_id, sharded=False)
