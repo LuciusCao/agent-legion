@@ -343,6 +343,114 @@ def test_question_comprehension_info_batch_by_knowledge_creates_one_job_per_code
     assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
 
 
+def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path, monkeypatch):
+    """Regression (issue #55): re-submitting identical async input after the
+    batch's jobs were deleted must requeue the completed batch so the consumer
+    rebuilds the missing jobs, instead of silently returning 200 with 0 jobs."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+    from server.app.services.job_intake_queue import JobIntakeQueue
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
+    monkeypatch.setattr(
+        "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
+        lambda self: False,
+    )
+    payload = {
+        "workflow_key": "question_comprehension_info",
+        "source_kind": "batch_by_ids",
+        "question_ids": ["Q001", "Q002"],
+        "knowledge_codes": [],
+        "async_processing": True,
+    }
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(f"/api/workspaces/{ws_id}/job-batches", json=payload)
+        assert response.status_code == 200
+        batch_id = response.json()["batch"]["id"]
+
+        claimed = app.state.job_db.claim_intake_batch()
+        assert claimed is not None
+        intake_queue._consume_chunk(claimed)
+        completed = app.state.job_db.get_batch(batch_id)
+        assert completed is not None
+        assert completed["status"] == "completed"
+        assert completed["created_count"] == 2
+
+        job_ids = [job["id"] for job in app.state.job_db.list_jobs(workspace_id=ws_id)]
+        assert len(job_ids) == 2
+        delete_response = c.request(
+            "DELETE", f"/api/workspaces/{ws_id}/jobs/batch", json={"job_ids": job_ids}
+        )
+        assert delete_response.status_code == 200
+        assert app.state.job_db.list_jobs(workspace_id=ws_id) == []
+
+        resubmit = c.post(f"/api/workspaces/{ws_id}/job-batches", json=payload)
+        assert resubmit.status_code == 200
+        body = resubmit.json()
+        assert body["batch"]["id"] == batch_id
+        assert body["batch"]["status"] == "queued"
+        assert body["created_count"] == 0
+
+        claimed = app.state.job_db.claim_intake_batch()
+        assert claimed is not None
+        intake_queue._consume_chunk(claimed)
+        rebuilt = app.state.job_db.get_batch(batch_id)
+        assert rebuilt is not None
+        assert rebuilt["status"] == "completed"
+        assert rebuilt["created_count"] == 2
+        assert {job["source_id"] for job in app.state.job_db.list_jobs(workspace_id=ws_id)} == {
+            "Q001",
+            "Q002",
+        }
+
+
+def test_async_batch_resubmit_without_deletion_keeps_idempotency(tmp_path, monkeypatch):
+    """Re-submitting identical async input while the batch's jobs still exist
+    must remain a no-op: the completed batch is not requeued and no duplicate
+    jobs are created."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+    from server.app.services.job_intake_queue import JobIntakeQueue
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
+    monkeypatch.setattr(
+        "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
+        lambda self: False,
+    )
+    payload = {
+        "workflow_key": "question_comprehension_info",
+        "source_kind": "batch_by_ids",
+        "question_ids": ["Q001", "Q002"],
+        "knowledge_codes": [],
+        "async_processing": True,
+    }
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(f"/api/workspaces/{ws_id}/job-batches", json=payload)
+        assert response.status_code == 200
+        batch_id = response.json()["batch"]["id"]
+
+        claimed = app.state.job_db.claim_intake_batch()
+        assert claimed is not None
+        intake_queue._consume_chunk(claimed)
+
+        resubmit = c.post(f"/api/workspaces/{ws_id}/job-batches", json=payload)
+        assert resubmit.status_code == 200
+        body = resubmit.json()
+        assert body["batch"]["id"] == batch_id
+        assert body["batch"]["status"] == "completed"
+        assert body["created_count"] == 2
+        assert app.state.job_db.claim_intake_batch() is None
+        assert len(app.state.job_db.list_jobs(workspace_id=ws_id)) == 2
+
+
 def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp_path, monkeypatch):
     """Regression: one failing chunk must not terminally fail the whole async
     batch — the error is recorded, remaining values are still processed, and

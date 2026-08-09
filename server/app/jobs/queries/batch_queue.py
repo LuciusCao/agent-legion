@@ -40,6 +40,17 @@ class BatchQueueQueriesMixin(JobQueriesBase):
             claimed = conn.execute("select * from job_batches where id=%s", (row["id"],)).fetchone()
         return dict(claimed) if claimed else None
 
+    def requeue_completed_batch_if_depleted(
+        self, batch_id: str, source_payload: dict[str, Any], recorded_count: int
+    ) -> dict[str, Any] | None:
+        """Requeue a completed batch whose jobs were deleted; None when intact."""
+        remaining = self.count_jobs_in_batch(batch_id)
+        if remaining >= recorded_count:
+            return None
+        return self.update_intake_batch(
+            batch_id, source_payload=source_payload, created_count=remaining, status="queued"
+        )
+
     def update_intake_batch(
         self,
         batch_id: str,
