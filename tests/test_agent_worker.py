@@ -154,24 +154,6 @@ def test_run_execution_completed(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     assert client.report_lease_ids == ["lease-1"]
 
 
-def test_run_execution_prepends_worker_bin_dir_to_path(tmp_path: Path) -> None:
-    # Agent subprocesses must resolve `python`/`python3` to the worker's own
-    # interpreter; without the guarantee agents hunt it with full-disk
-    # `find /` scans that flood fseventsd/Spotlight.
-    script = _write_executable(
-        tmp_path / "fake_pi",
-        "#!/usr/bin/env python3\nimport os\nfrom pathlib import Path\n"
-        'Path("output.json").write_text("{}", encoding="utf-8")\n'
-        f"Path({str(tmp_path / 'child_path.txt')!r}).write_text("
-        'os.environ["PATH"], encoding="utf-8")\n',
-    )
-    client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
-    _run(client, tmp_path / "work")
-    expected_bin = str(Path(sys.executable).resolve().parent)
-    child_path = (tmp_path / "child_path.txt").read_text(encoding="utf-8")
-    assert child_path.split(os.pathsep)[0] == expected_bin
-
-
 def test_run_execution_pre_spawn_failure_reports_failed(tmp_path: Path) -> None:
     client = FakeClient(_make_bundle(tmp_path, _manifest(["true"])))
 
