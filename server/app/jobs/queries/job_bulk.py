@@ -31,6 +31,7 @@ class JobBulkQueriesMixin(JobQueriesBase):
         rows: list[tuple[Any, ...]] = []
         job_ids: list[str] = []
         identities: dict[str, tuple[str, str]] = {}
+        storage_dirs: dict[str, Path] = {}
         for candidate in candidates:
             source_id = str(candidate["entity_id"])
             job_id = _job_id(workspace_id, workflow_key, source_id)
@@ -38,8 +39,12 @@ class JobBulkQueriesMixin(JobQueriesBase):
             if job_id in identities and identities[job_id] != identity:
                 raise ValueError(f"Job identity collision for {job_id}")
             identities[job_id] = identity
+            # The dir is created only after the existing-row check below: for a
+            # resubmitted job the on-conflict update keeps the stored
+            # storage_dir, so pre-creating here would leave a stray shard dir
+            # that blocks the one-shot flat→sharded migration as a conflict.
             storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
-            storage_dir.mkdir(parents=True, exist_ok=True)
+            storage_dirs[job_id] = storage_dir
             job_ids.append(job_id)
             rows.append(
                 (
@@ -74,6 +79,10 @@ class JobBulkQueriesMixin(JobQueriesBase):
                     or current["source_id"] != row[4]
                 ):
                     raise ValueError(f"Job identity collision for {row[0]}")
+            for row in rows:
+                job_id = str(row[0])
+                if job_id not in by_id:
+                    storage_dirs[job_id].mkdir(parents=True, exist_ok=True)
             conn.executemany(
                 """
                 insert into jobs(
