@@ -24,15 +24,21 @@ def locate_job_dir(job_id: str, storage_dir: str, data_dir: Path) -> Path | None
     """Resolve a jobs row to its on-disk directory, or None on bad paths.
 
     Empty ``storage_dir`` falls back to the legacy ``jobs/<job_id>``
-    convention; paths failing managed-root resolution return None so one bad
-    row cannot stall the maintenance pass.
+    convention; paths failing managed-root resolution — or resolving outside
+    the jobs root (e.g. a corrupted row pointing at ``packages/...``) — return
+    None so one bad row cannot stall the sweep or turn it destructive.
     """
+    jobs_dir = data_dir / "jobs"
     if not storage_dir:
-        return data_dir / "jobs" / job_id
+        return jobs_dir / job_id
     try:
-        return resolve_data_path(storage_dir, data_dir, allow_missing=True)
+        resolved = resolve_data_path(storage_dir, data_dir, allow_missing=True)
     except ManagedPathError:
         return None
+    resolved_jobs_dir = jobs_dir.resolve()
+    if resolved == resolved_jobs_dir or not resolved.is_relative_to(resolved_jobs_dir):
+        return None
+    return resolved
 
 
 def build_job_dir_index(db: JobQueries, data_dir: Path, job_ids: set[str]) -> dict[str, Path]:

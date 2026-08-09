@@ -18,7 +18,7 @@ def skills_base(tmp_path, monkeypatch):
     monkeypatch.setattr(
         skills_routes,
         "build_skill_manager",
-        lambda _root: SimpleNamespace(base_dir=base, lock_path=None),
+        lambda _dsn: SimpleNamespace(base_dir=base, load_lock=lambda: None),
     )
     return base
 

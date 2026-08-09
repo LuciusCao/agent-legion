@@ -14,7 +14,7 @@ def cms_node_config(
     workflow_key: str,
     node_key: str,
 ) -> dict[str, Any]:
-    """Effective CMS config: global ``cms:`` defaults + workspace node override.
+    """Effective CMS config: settings-level ``cms`` keys + workspace node override.
 
     Used by server-side consumers (question detail, test-connection). Secret
     values stay as ``{"secret_ref": ...}`` markers; callers resolve them via

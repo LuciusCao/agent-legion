@@ -45,4 +45,17 @@ def enqueue_intake_batch(
         workspace_id=workspace_id,
         status="queued",
     )
+    # Re-submitting identical input collides with the deterministic batch id and
+    # the upsert above is a no-op for a completed batch. When jobs from that
+    # batch have since been deleted (current count below the created_count
+    # recorded at completion), requeue the batch from the start so the consumer
+    # rebuilds the missing jobs; job-level dedup filters the ones still present.
+    if str(batch["status"]) == "completed":
+        source_payload["_intake_queue"]["next_index"] = 0
+        source_payload["_intake_queue"].pop("chunk_errors", None)
+        requeued = job_db.requeue_completed_batch_if_depleted(
+            str(batch["id"]), source_payload, int(batch["created_count"] or 0)
+        )
+        if requeued is not None:
+            batch = requeued
     return {"batch": batch, "created_count": int(batch["created_count"]), "jobs": []}

@@ -10,9 +10,14 @@ import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPa
 import { WorkflowDefinitionEditor } from './WorkflowDefinitionEditor'
 import { WorkflowValidationPanel } from './WorkflowValidationPanel'
 import { AgentsPanel } from './AgentsPanel'
+import { ExecutorsPanel } from './ExecutorsPanel'
 import styles from './WorkflowStudioGlobalDialog.module.css'
 
-export type WorkflowStudioGlobalMode = 'changes' | 'yaml' | 'agents'
+export type WorkflowStudioGlobalMode =
+  | 'changes'
+  | 'yaml'
+  | 'agents'
+  | 'executors'
 
 type Props = {
   mode: WorkflowStudioGlobalMode | null
@@ -46,10 +51,13 @@ export function WorkflowStudioGlobalDialog({ mode, studio, onClose }: Props) {
           ? 'YAML 高级编辑'
           : mode === 'agents'
             ? 'Agent 管理'
-            : '变更与校验'}
+            : mode === 'executors'
+              ? 'Executor 管理'
+              : '变更与校验'}
       </DialogTitle>
       <DialogContent dividers className={styles.content}>
         {mode === 'agents' && <AgentsPanel />}
+        {mode === 'executors' && <ExecutorsPanel />}
         {mode === 'changes' && (
           <div className={styles.checks}>
             <section aria-label="校验结果">

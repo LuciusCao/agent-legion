@@ -1,6 +1,7 @@
 import json
 import os
 from contextlib import contextmanager
+from pathlib import Path
 from urllib.parse import urlparse
 
 import pytest
@@ -26,7 +27,14 @@ from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import AgentService, reset_published_agent_cache
+from server.app.services.executor_definition_service import (
+    ExecutorDefinitionService,
+    reset_published_executor_cache,
+    seed_builtin_executor_definitions,
+)
+from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import load_settings
+from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
 # Test Agent catalog: mirrors the retired config/workflow.yaml `agents:`
 # section, with the 4 video agents already flipped to velites (schema v27
@@ -98,6 +106,25 @@ def _seed_agent_definitions() -> None:
     for agent_id, definition in _TEST_AGENT_DEFINITIONS.items():
         service.save_draft(agent_id, definition, created_by="test-seed")
         service.publish(agent_id)
+
+
+# Test executor catalog: the built-in factory definitions (retired
+# config/workflow.yaml executors section) seeded via ExecutorDefinitionService
+# after every TRUNCATE, mirroring the app startup seed so published executor
+# definitions exist before any app hydration reads them.
+def _seed_executor_definitions() -> None:
+    service = ExecutorDefinitionService(TEST_DATABASE_URL, Path(__file__).resolve().parents[1])
+    seed_builtin_executor_definitions(service)
+
+
+# Test skill sources: the built-in constants (retired config/skills.yaml +
+# skills.lock transcription) re-seeded into global_settings after every
+# TRUNCATE, mirroring the app startup seed so DB-driven skill resolution
+# (SkillManager, skill catalog, openclaw skill_safety) sees the pinned skills.
+def _seed_skill_sources() -> None:
+    store = SkillSourceStore(TEST_DATABASE_URL)
+    store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))
+    store.put_lock(BUILTIN_SKILL_LOCK.model_copy(deep=True))
 
 
 # Deterministic pricing seeded into global_settings after every TRUNCATE (see
@@ -192,6 +219,8 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_agent_catalog_cutover_migration.py",
         "tests/db/test_code_executor_migration.py",
         "tests/db/test_custom_node_codes_migration.py",
+        "tests/db/test_executor_asr_config_schema_migration.py",
+        "tests/db/test_executor_entity_type_migration.py",
         "tests/db/test_local_executor_removal_migration.py",
         "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",
@@ -248,6 +277,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_quality_replays.py",
         "tests/services/test_quality_sampling.py",
         "tests/services/test_quality_stats.py",
+        "tests/services/test_skill_source_store.py",
         "tests/services/test_token_usage.py",
         "tests/test_export_openapi.py",
         "tests/test_jobs_route_contracts.py",
@@ -275,6 +305,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_question_comprehension_info_workflow.py",
         "tests/test_relative_path_portability.py",
         "tests/test_run_dir_cleanup.py",
+        "tests/test_skill_catalog_service.py",
         "tests/test_worker_control_db.py",
         "tests/test_workflow_execution_control.py",
         "tests/test_workflow_revisions.py",
@@ -421,6 +452,9 @@ def _isolate_postgres_database(request):
         _reset_schema_data()
     reset_published_agent_cache()
     _seed_agent_definitions()
+    reset_published_executor_cache()
+    _seed_executor_definitions()
+    _seed_skill_sources()
     yield
     if fresh:
         # Erase any DDL drift the test left behind so later TRUNCATE-isolated
@@ -449,6 +483,10 @@ def _isolate_project_dotenv(monkeypatch):
 def _block_real_cms_http(monkeypatch):
     if os.environ.get("AGENT_LEGION_TEST_REAL_CMS") == "1":
         return
+    # The repo yaml no longer carries a global cms: section; tests loading the
+    # real settings get the fake CMS host below through the supported env
+    # channel (node/workspace config still overrides it, as in production).
+    monkeypatch.setenv("CMS_BASE_URL", "https://cms.example.com/v2")
     original_request = requests.sessions.Session.request
 
     def guarded_request(self, method, url, *args, **kwargs):

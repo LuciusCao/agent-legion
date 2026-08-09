@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.architecture.workflow import check_workflow_raw_definitions
 from scripts.check_architecture import check_repository
 from tests.architecture_budget_helpers import write_neutral_budget_governance
 
@@ -182,16 +183,18 @@ def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
     assert not any("ThreadPoolExecutor" in error for error in errors)
 
 
-def test_workflow_yaml_capability_node_is_allowed(tmp_path):
-    (tmp_path / "server/app").mkdir(parents=True)
-    (tmp_path / "config/workflows").mkdir(parents=True)
-    write(
-        tmp_path / "config/workflows/example.yaml",
-        "key: example\nlabel: Example\nnodes:\n  review:\n    capability: review\n",
+def test_workflow_capability_only_definition_is_allowed():
+    errors = check_workflow_raw_definitions(
+        {
+            "example": {
+                "key": "example",
+                "label": "Example",
+                "nodes": {"review": {"capability": "review"}},
+            }
+        }
     )
-    write_neutral_budget_governance(tmp_path)
 
-    assert check_repository(tmp_path) == []
+    assert errors == []
 
 
 def test_executor_module_config_subscript_not_named_executors_is_allowed(tmp_path):

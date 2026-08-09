@@ -251,23 +251,18 @@ def derive_run_dir_from_log_path(
     if not jobs_dir.is_dir():
         return None
 
-    job_dir: Path | None = None
+    # A job dir may exist in both layouts (e.g. re-intake created the empty
+    # sharded dir while runs still live in the legacy one), so keep probing
+    # until a candidate actually holds run tokens for this node.
+    token_dirs: list[Path] = []
     for workspace_dir in jobs_dir.iterdir():
         if not workspace_dir.is_dir():
             continue
         for candidate in resolve_job_dir_candidates(jobs_dir, workspace_dir.name, job_id):
-            if candidate.is_dir():
-                job_dir = candidate
-                break
-        if job_dir is not None:
-            break
-    if job_dir is None:
-        return None
-
-    run_parent = job_dir / "runs" / node_key
-    if not run_parent.is_dir():
-        return None
-    token_dirs = [d for d in run_parent.iterdir() if d.is_dir()]
+            run_parent = candidate / "runs" / node_key
+            if not run_parent.is_dir():
+                continue
+            token_dirs.extend(d for d in run_parent.iterdir() if d.is_dir())
     if not token_dirs:
         return None
     return max(token_dirs, key=lambda p: p.stat().st_mtime)

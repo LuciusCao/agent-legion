@@ -359,7 +359,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-001
-    statement: "Built-in code executor capabilities must reference repo-tracked Python files via repo-relative paths: absolute paths and '..' segments are rejected at config load, paths must resolve to files inside the repository root at startup and executor construction, and node code runs only through the isolated child-process contract run(job, job_dir, runtime). Scope is built-in nodes only: built-in node code changes land exclusively through git review + CI; no runtime API may create, modify, or delete repo workflow_nodes/ files (the former Studio online-edit write endpoint was removed in M1)."
+    statement: "Built-in code executor capabilities must reference repo-tracked Python files via repo-relative paths stored as pointers in the DB executor definition (versioned_entities, entity_type 'executor'; the tracked yaml executors section is retired): absolute paths and '..' segments are rejected at draft validation, paths must resolve to files inside the repository root at publish and again at startup hydration / executor construction, and node code runs only through the isolated child-process contract run(job, job_dir, runtime). Scope is built-in nodes only: built-in node code changes land exclusively through git review + CI; no runtime API may create, modify, or delete repo workflow_nodes/ files (the former Studio online-edit write endpoint was removed in M1)."
     owner: workspace-executor
     risk: high
     evidence:
@@ -371,6 +371,12 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/db/test_code_executor_migration.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_builtin_definitions.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_executor_definition_service.py
         gate: quick
 
   - id: EXEC-CODE-002
@@ -517,7 +523,7 @@ invariants:
         gate: full
 
   - id: CONFIG-YAML-001
-    statement: "Tracked split config yaml files carry no secret values: the retired yaml keys `cms.token` / `cms.token_gen` (G2) and `openclaw.skill_safety` refs (G3, pinned by config/skills.lock) are rejected at startup, and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
+    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; base_url/token arrive via env CMS_BASE_URL / CMS_TOKEN or workspace node config), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); the `openclaw` section is retired from split yaml into the DB instance settings document (a split-file `openclaw` key fails the owned-key check; the admin API contract rejects extra keys), and `openclaw.skill_safety` refs (G3, pinned by the DB `skill_lock` document in `global_settings`) are rejected at startup validation and by the instance-settings admin API (422), and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
     owner: config
     risk: high
     evidence:

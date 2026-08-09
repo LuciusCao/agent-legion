@@ -4,6 +4,75 @@
  */
 
 export interface paths {
+  '/api/admin/instance-settings': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Instance Settings */
+    get: operations['get_instance_settings_api_admin_instance_settings_get']
+    /** Put Instance Settings */
+    put: operations['put_instance_settings_api_admin_instance_settings_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/skill-sources': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill Sources */
+    get: operations['get_skill_sources_api_admin_skill_sources_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/skill-sources/relock': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Relock Skill Sources */
+    post: operations['relock_skill_sources_api_admin_skill_sources_relock_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/skill-sources/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Put Skill Source */
+    put: operations['put_skill_source_api_admin_skill_sources__skill_key__put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/token-usage-pricing': {
     parameters: {
       query?: never
@@ -480,6 +549,127 @@ export interface paths {
     }
     /** Dashboard Events */
     get: operations['dashboard_events_api_dashboard_events_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/executor-definitions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Executor Definitions */
+    get: operations['list_executor_definitions_api_executor_definitions_get']
+    put?: never
+    /** Create Executor Definition */
+    post: operations['create_executor_definition_api_executor_definitions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/executor-definitions/{executor_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Executor Definition */
+    get: operations['get_executor_definition_api_executor_definitions__executor_id__get']
+    put?: never
+    post?: never
+    /** Archive Executor Definition */
+    delete: operations['archive_executor_definition_api_executor_definitions__executor_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/executor-definitions/{executor_id}/copy': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Copy Executor Definition */
+    post: operations['copy_executor_definition_api_executor_definitions__executor_id__copy_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/executor-definitions/{executor_id}/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Executor Definition Draft */
+    put: operations['save_executor_definition_draft_api_executor_definitions__executor_id__draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/executor-definitions/{executor_id}/publish': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Publish Executor Definition */
+    post: operations['publish_executor_definition_api_executor_definitions__executor_id__publish_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/executor-definitions/{executor_id}/rollback': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Rollback Executor Definition */
+    post: operations['rollback_executor_definition_api_executor_definitions__executor_id__rollback_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/executor-definitions/{executor_id}/versions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Executor Definition Versions */
+    get: operations['list_executor_definition_versions_api_executor_definitions__executor_id__versions_get']
     put?: never
     post?: never
     delete?: never
@@ -2272,6 +2462,11 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /** ExecutorArchiveResponse */
+    ExecutorArchiveResponse: {
+      /** Archived */
+      archived: number
+    }
     /** ExecutorCapabilityResponse */
     ExecutorCapabilityResponse: {
       /** Model */
@@ -2302,6 +2497,46 @@ export interface components {
       /** Executors */
       executors: components['schemas']['ExecutorDefinitionResponse'][]
     }
+    /** ExecutorCopyRequest */
+    ExecutorCopyRequest: {
+      /** New Executor Id */
+      new_executor_id: string
+    }
+    /** ExecutorCreateRequest */
+    ExecutorCreateRequest: {
+      /** Capabilities */
+      capabilities?: {
+        [key: string]: {
+          [key: string]: unknown
+        }
+      }
+      /** Executor Id */
+      executor_id: string
+      /** Global Capacity */
+      global_capacity: number
+      /** Kind */
+      kind: string
+    }
+    /**
+     * ExecutorDefinitionPayload
+     * @description Editable executor definition fields (raw executor config shape).
+     *
+     *     Kept deliberately loose: the full typed parse (kind dispatch, path safety,
+     *     config_schema contract) happens in ``ExecutorDefinitionService.save_draft``
+     *     via ``load_executor_definitions``, which is the single validation source.
+     */
+    ExecutorDefinitionPayload: {
+      /** Capabilities */
+      capabilities?: {
+        [key: string]: {
+          [key: string]: unknown
+        }
+      }
+      /** Global Capacity */
+      global_capacity: number
+      /** Kind */
+      kind: string
+    }
     /** ExecutorDefinitionResponse */
     ExecutorDefinitionResponse: {
       /** Capabilities */
@@ -2317,6 +2552,45 @@ export interface components {
        * @enum {string}
        */
       kind: 'code' | 'pi' | 'openclaw'
+    }
+    /** ExecutorDetailResponse */
+    ExecutorDetailResponse: {
+      /** Executor Id */
+      executor_id: string
+      latest?: components['schemas']['ExecutorVersionResponse'] | null
+      published?: components['schemas']['ExecutorVersionResponse'] | null
+    }
+    /** ExecutorListItem */
+    ExecutorListItem: {
+      /** Capabilities */
+      capabilities: string[]
+      /** Executor Id */
+      executor_id: string
+      /** Global Capacity */
+      global_capacity: number
+      /** Has Draft */
+      has_draft: boolean
+      /** Kind */
+      kind: string
+      /** Published At */
+      published_at?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+    }
+    /** ExecutorListResponse */
+    ExecutorListResponse: {
+      /** Executors */
+      executors: components['schemas']['ExecutorListItem'][]
+    }
+    /** ExecutorRollbackRequest */
+    ExecutorRollbackRequest: {
+      /** Version */
+      version: number
     }
     /** ExecutorRuntimeStatus */
     ExecutorRuntimeStatus: {
@@ -2339,6 +2613,65 @@ export interface components {
     ExecutorStatusSummary: {
       /** Executors */
       executors: components['schemas']['ExecutorRuntimeStatus'][]
+    }
+    /** ExecutorVersionResponse */
+    ExecutorVersionResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Definition */
+      definition: {
+        [key: string]: unknown
+      }
+      /** Definition Hash */
+      definition_hash: string
+      /** Executor Id */
+      executor_id: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+    }
+    /** ExecutorVersionSummary */
+    ExecutorVersionSummary: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Created By */
+      created_by: string
+      /** Definition Hash */
+      definition_hash: string
+      /** Executor Id */
+      executor_id: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'draft' | 'published' | 'archived'
+      /** Version */
+      version: number
+    }
+    /** ExecutorVersionsResponse */
+    ExecutorVersionsResponse: {
+      /** Versions */
+      versions: components['schemas']['ExecutorVersionSummary'][]
     }
     /** FailedNodeRunItem */
     FailedNodeRunItem: {
@@ -2377,6 +2710,94 @@ export interface components {
       workers?: {
         [key: string]: string
       } | null
+    }
+    /** InstanceAgentWorkersSettings */
+    InstanceAgentWorkersSettings: {
+      /** Max Archive Bytes */
+      max_archive_bytes: number
+      /** Min Protocol Version */
+      min_protocol_version: number
+    }
+    /** InstanceCleanupSettings */
+    InstanceCleanupSettings: {
+      /** Interval Seconds */
+      interval_seconds: number
+      /** Log Retention Days */
+      log_retention_days: number
+      /** Run Dir Retention Days */
+      run_dir_retention_days: number
+    }
+    /** InstanceMonitoringSettings */
+    InstanceMonitoringSettings: {
+      /** Retention Days */
+      retention_days: number
+      /** Sample Interval Seconds */
+      sample_interval_seconds: number
+    }
+    /** InstanceOpenClawSettings */
+    InstanceOpenClawSettings: {
+      /** Command Template */
+      command_template: string[]
+      /** Cwd */
+      cwd: string
+      /** Isolated Workspace Root */
+      isolated_workspace_root: string
+      skill_safety: components['schemas']['InstanceOpenClawSkillSafetySettings']
+      /** Timeout Seconds */
+      timeout_seconds: number
+    }
+    /** InstanceOpenClawSkillSafetyRepo */
+    InstanceOpenClawSkillSafetyRepo: {
+      /** Path */
+      path: string
+    }
+    /** InstanceOpenClawSkillSafetySettings */
+    InstanceOpenClawSkillSafetySettings: {
+      /** Enabled */
+      enabled: boolean
+      /** Repos */
+      repos: components['schemas']['InstanceOpenClawSkillSafetyRepo'][]
+    }
+    /** InstanceSettingsResponse */
+    InstanceSettingsResponse: {
+      agent_workers: components['schemas']['InstanceAgentWorkersSettings']
+      cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Heartbeat Failure Threshold */
+      heartbeat_failure_threshold: number
+      /** Heartbeat Interval Seconds */
+      heartbeat_interval_seconds: number
+      /** Lease Ttl Seconds */
+      lease_ttl_seconds: number
+      monitoring: components['schemas']['InstanceMonitoringSettings']
+      openclaw: components['schemas']['InstanceOpenClawSettings']
+      /** Sweeper Enabled */
+      sweeper_enabled: boolean
+      /** Sweeper Interval Seconds */
+      sweeper_interval_seconds: number
+      workflows: components['schemas']['InstanceWorkflowsSettings']
+    }
+    /** InstanceSettingsUpdate */
+    InstanceSettingsUpdate: {
+      agent_workers: components['schemas']['InstanceAgentWorkersSettings']
+      cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Heartbeat Failure Threshold */
+      heartbeat_failure_threshold: number
+      /** Heartbeat Interval Seconds */
+      heartbeat_interval_seconds: number
+      /** Lease Ttl Seconds */
+      lease_ttl_seconds: number
+      monitoring: components['schemas']['InstanceMonitoringSettings']
+      openclaw: components['schemas']['InstanceOpenClawSettings']
+      /** Sweeper Enabled */
+      sweeper_enabled: boolean
+      /** Sweeper Interval Seconds */
+      sweeper_interval_seconds: number
+      workflows: components['schemas']['InstanceWorkflowsSettings']
+    }
+    /** InstanceWorkflowsSettings */
+    InstanceWorkflowsSettings: {
+      /** Enabled */
+      enabled: boolean
     }
     /** JobBatchRequest */
     JobBatchRequest: {
@@ -3427,6 +3848,36 @@ export interface components {
        * @default false
        */
       truncated: boolean
+    }
+    /**
+     * SkillSourceEntry
+     * @description Merged view of one skill: declared source + resolved lock entry.
+     */
+    SkillSourceEntry: {
+      /** Key */
+      key: string
+      /** Locked Commit */
+      locked_commit: string | null
+      /** Ref */
+      ref: string
+      /** Repo */
+      repo: string
+      /** Resolved At */
+      resolved_at: string | null
+      /** Stale */
+      stale: boolean
+    }
+    /** SkillSourceUpdate */
+    SkillSourceUpdate: {
+      /** Ref */
+      ref: string
+      /** Repo */
+      repo: string
+    }
+    /** SkillSourcesResponse */
+    SkillSourcesResponse: {
+      /** Skills */
+      skills: components['schemas']['SkillSourceEntry'][]
     }
     /** SkillTagsResponse */
     SkillTagsResponse: {
@@ -4578,6 +5029,134 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
+  get_instance_settings_api_admin_instance_settings_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InstanceSettingsResponse']
+        }
+      }
+    }
+  }
+  put_instance_settings_api_admin_instance_settings_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['InstanceSettingsUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['InstanceSettingsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_skill_sources_api_admin_skill_sources_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSourcesResponse']
+        }
+      }
+    }
+  }
+  relock_skill_sources_api_admin_skill_sources_relock_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSourcesResponse']
+        }
+      }
+    }
+  }
+  put_skill_source_api_admin_skill_sources__skill_key__put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['SkillSourceUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillSourcesResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_token_usage_pricing_api_admin_token_usage_pricing_get: {
     parameters: {
       query?: never
@@ -5496,6 +6075,288 @@ export interface operations {
         }
         content: {
           'text/event-stream': unknown
+        }
+      }
+    }
+  }
+  list_executor_definitions_api_executor_definitions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorListResponse']
+        }
+      }
+    }
+  }
+  create_executor_definition_api_executor_definitions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExecutorCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_executor_definition_api_executor_definitions__executor_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        executor_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  archive_executor_definition_api_executor_definitions__executor_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        executor_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorArchiveResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  copy_executor_definition_api_executor_definitions__executor_id__copy_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        executor_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExecutorCopyRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_executor_definition_draft_api_executor_definitions__executor_id__draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        executor_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExecutorDefinitionPayload']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  publish_executor_definition_api_executor_definitions__executor_id__publish_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        executor_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  rollback_executor_definition_api_executor_definitions__executor_id__rollback_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        executor_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ExecutorRollbackRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_executor_definition_versions_api_executor_definitions__executor_id__versions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        executor_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorVersionsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

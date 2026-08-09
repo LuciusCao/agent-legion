@@ -10,6 +10,8 @@ export const extraQueryKeys = {
     ['workspaceMembers', workspaceId] as const,
   workerTokens: () => ['workerTokens'] as const,
   tokenUsagePricing: () => ['tokenUsagePricing'] as const,
+  instanceSettings: () => ['instanceSettings'] as const,
+  skillSources: () => ['skillSources'] as const,
   // SettingsPage 与 WorkspaceMainPage 经同一 key 共享工作流定义缓存。
   workflowDefinition: (workflowKey: string) =>
     ['workflowDefinition', workflowKey] as const,
@@ -36,6 +38,9 @@ export const extraQueryKeys = {
     ['workflowStudioData', workspaceId] as const,
   agentDefinitions: () => ['agentDefinitions'] as const,
   agentVersions: (agentId: string) => ['agentVersions', agentId] as const,
+  executorDefinitions: () => ['executorDefinitions'] as const,
+  executorVersions: (executorId: string) =>
+    ['executorVersions', executorId] as const,
   qualityBatches: (workspaceId: string) =>
     ['qualityBatches', workspaceId] as const,
   qualityBatchDetail: (workspaceId: string, batchId: string) =>

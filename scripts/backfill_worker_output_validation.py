@@ -14,7 +14,7 @@ unvalidated Worker run.
 Usage:
     uv run python -m scripts.backfill_worker_output_validation [--dry-run] \
         [--workspace-id ID] [--since YYYY-MM-DD] [--database-url DSN] \
-        [--data-dir PATH] [--root-dir PATH]
+        [--data-dir PATH]
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from typing import Any
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services.failure_classification import classify_failure
+from server.app.services.skill_source_store import SkillSourceStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import load_settings
 from server.app.skills.manager import SkillManager
@@ -254,11 +255,6 @@ def main() -> None:
         help="Data dir holding jobs/ (defaults to the configured data dir).",
     )
     parser.add_argument(
-        "--root-dir",
-        default=None,
-        help="Project root holding config/skills.yaml (defaults to configured root).",
-    )
-    parser.add_argument(
         "--workers",
         type=int,
         default=8,
@@ -269,10 +265,8 @@ def main() -> None:
     settings = load_settings()
     dsn = args.database_url or settings.database_url
     data_dir = Path(args.data_dir) if args.data_dir else settings.data_dir
-    root_dir = Path(args.root_dir) if args.root_dir else settings.root_dir
     skill_manager = SkillManager(
-        config_path=root_dir / "config" / "skills.yaml",
-        lock_path=root_dir / "config" / "skills.lock",
+        store=SkillSourceStore(dsn),
         base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
     )
 

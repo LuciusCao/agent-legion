@@ -7,6 +7,7 @@ import pytest
 
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.jobs.storage_layout import job_shard
+from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -18,6 +19,9 @@ from server.app.storage_paths import make_data_relative, resolve_job_dir
 
 @pytest.fixture
 def query_service(job_db, settings):
+    # The bare settings fixture does not hydrate executor definitions
+    # (create_app does); executor kind resolution needs the seeded catalog.
+    hydrate_executor_definitions(settings)
     return JobQueryService(
         job_db,
         settings,

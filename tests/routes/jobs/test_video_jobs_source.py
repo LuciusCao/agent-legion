@@ -28,7 +28,7 @@ def _create_video_knowledge_job(
         {"video_urls": [f"https://example.com/{external_id}.mp4"]},
         workspace_id,
     )
-    definition = load_registered_workflow(settings.root_dir, "video_knowledge")
+    definition = load_registered_workflow("video_knowledge")
     job = job_db.create_job(
         workflow_key="video_knowledge",
         source_type="video",

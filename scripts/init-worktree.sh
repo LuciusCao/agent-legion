@@ -4,7 +4,7 @@
 #   1. 从基准 worktree 复制 .env（若本 worktree 缺失）
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
 #   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
-# 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取 git worktree list 的第一个）
+# 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取第一个非 bare 且非当前的 worktree）
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -19,18 +19,34 @@ if [[ "$ROOT" != "$MAIN" && "$(dirname "$ROOT")" != "$MAIN/.worktrees" ]]; then
     exit 1
 fi
 
+# 在主仓库根本身执行时直接退出（bare 主仓库无工作区，更不会走到这里）
+if [[ "$ROOT" == "$MAIN" ]]; then
+    echo "当前就是主仓库根，无需初始化。" >&2
+    exit 0
+fi
+
 BASE="${1:-}"
 if [[ -z "$BASE" ]]; then
-    BASE="$MAIN"
+    # 主仓库可能是 bare（无工作区、无 .env），默认取第一个非 bare 且非当前的 worktree 作基准
+    BASE="$(git worktree list --porcelain | awk -v root="$ROOT" '
+        /^worktree / {
+            if (wt != "" && !isbare && wt != root) { print wt; found=1; exit }
+            wt = substr($0, 10); isbare = 0
+        }
+        /^bare$/ { isbare = 1 }
+        END { if (!found && wt != "" && !isbare && wt != root) print wt }
+    ')"
 fi
-if [[ "$BASE" == "$ROOT" ]]; then
+if [[ -n "$BASE" && "$BASE" == "$ROOT" ]]; then
     echo "当前就是基准 worktree，无需初始化。" >&2
     exit 0
 fi
 
 # 1. .env
 if [[ ! -f .env ]]; then
-    if [[ -f "$BASE/.env" ]]; then
+    if [[ -z "$BASE" ]]; then
+        echo "警告: 未找到基准 worktree（主仓库为 bare 且无其他 worktree），跳过 .env 复制" >&2
+    elif [[ -f "$BASE/.env" ]]; then
         cp "$BASE/.env" .env
         echo "已复制 .env <- $BASE"
     else

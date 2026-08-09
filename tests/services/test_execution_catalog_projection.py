@@ -43,7 +43,7 @@ _AGENTS = {
 
 @pytest.mark.no_db
 def test_catalog_lists_agents_without_execution_projection(tmp_path: Path) -> None:
-    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), _AGENTS)
+    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), _AGENTS, {})
 
     agents = {entry["id"]: entry for entry in catalog["agents"]}
     assert set(agents) == set(_AGENTS)
@@ -60,7 +60,7 @@ def test_catalog_lists_agents_without_execution_projection(tmp_path: Path) -> No
 
 @pytest.mark.no_db
 def test_executor_capability_details_have_no_runtime_projection(tmp_path: Path) -> None:
-    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), _AGENTS)
+    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), _AGENTS, {})
 
     for executor in catalog["executors"]:
         for detail in executor["capability_details"]:

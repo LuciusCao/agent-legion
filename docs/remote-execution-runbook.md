@@ -149,7 +149,8 @@ essentials, for orientation:
   `/api/agent-workers/register`, `/api/agent-executions/claim`,
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
   Registration carries `protocol_version` and `image_version`; the Host rejects
-  workers below `agent_workers.min_protocol_version` (config/workflow.yaml).
+  workers below `agent_workers.min_protocol_version` (DB instance settings,
+  `/api/admin/instance-settings`).
 - Concurrency is bounded by two layers only: the workflow Agent node's
   workspace-level `max_concurrency`, and each Worker's local
   `max_concurrency`. Upgrade order is Host first, then Workers.
