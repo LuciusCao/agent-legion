@@ -10,7 +10,7 @@ from server.app.services.cleanup_sweep import (
     cleanup_extra_runs_per_node,
     sweep_expired_node_runs,
 )
-from server.app.services.job_run_dir_lookup import build_job_dir_index
+from server.app.services.job_dir_index import build_job_dir_index
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
@@ -75,7 +75,7 @@ def cleanup_old_logs(
     log_cutoff = now - timedelta(days=config.log_retention_days)
     run_dir_cutoff = now - timedelta(days=config.run_dir_retention_days)
     cutoff = max(log_cutoff, run_dir_cutoff)
-    job_dir_index = build_job_dir_index(data_dir / "jobs", _expired_job_ids(db, cutoff))
+    job_dir_index = build_job_dir_index(db, data_dir, _expired_job_ids(db, cutoff))
     logs_removed, swept_run_dirs = sweep_expired_node_runs(
         db, data_dir, log_cutoff, run_dir_cutoff, job_dir_index
     )

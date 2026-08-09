@@ -8,6 +8,7 @@ from server.app.executors.config import (
 )
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import LeaseClaimRequest
+from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
@@ -15,6 +16,9 @@ from server.app.services.workspace_configuration import WorkspaceConfigurationSe
 
 @pytest.fixture
 def workspace_service(job_db, settings, agent_manager):
+    # The bare settings fixture does not hydrate executor definitions
+    # (create_app does); pull the conftest-seeded catalog in explicitly.
+    hydrate_executor_definitions(settings)
     return WorkspaceConfigurationService(
         job_db, settings, agent_manager, WorkflowCatalogService(settings)
     )

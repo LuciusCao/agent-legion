@@ -348,8 +348,8 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
 ) -> None:
     # fetch_questions runs on the code-default executor in an isolated child
     # process, which does not inherit parent monkeypatches. make_workflow_worker
-    # blanks the global cms: config, so the node resolves no CMS api_url and
-    # writes the base payload without any network call.
+    # blanks the settings-level cms config, so the node resolves no CMS api_url
+    # and writes the base payload without any network call.
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
     workspace = queries.create_workspace(

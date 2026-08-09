@@ -1,6 +1,10 @@
 import pytest
 
 from server.app.services.executor_catalog import ExecutorCatalogService
+from server.app.services.executor_definition_service import (
+    ExecutorDefinitionService,
+    reset_published_executor_cache,
+)
 
 
 @pytest.fixture
@@ -105,3 +109,25 @@ def test_catalog_exposes_published_agent_definitions(
     assert "provider" not in agent
     assert "model" not in agent
     assert "thinking" not in agent
+
+
+def test_catalog_reflects_db_published_edits(
+    service: ExecutorCatalogService, job_db, settings
+) -> None:
+    """Catalog reads the DB published rows: an admin edit shows up without restart."""
+    definitions = ExecutorDefinitionService(job_db.path, settings.root_dir)
+    edited = {
+        "kind": "code",
+        "global_capacity": 4,
+        "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+    }
+    definitions.save_draft("code-default", edited, "user:admin")
+    definitions.publish("code-default")
+    # TRUNCATE isolation may leave a stale TTL entry from an earlier test.
+    reset_published_executor_cache()
+
+    result = service.catalog()
+
+    executors_by_id = {executor["id"]: executor for executor in result["executors"]}
+    assert executors_by_id["code-default"]["global_capacity"] == 4
+    assert executors_by_id["code-default"]["capabilities"] == ["clean_and_parse"]

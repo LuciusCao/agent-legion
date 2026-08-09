@@ -3,7 +3,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 from urllib.parse import urlencode
 
 from dotenv import load_dotenv
@@ -11,9 +11,12 @@ from dotenv import load_dotenv
 from server.app.cms.env import resolve_cms_env, validate_cms_env_aliases
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
+from server.app.configuration.instance_defaults import (
+    apply_instance_config_defaults,
+    resolve_worker_register_token,
+)
 from server.app.executors import registration as _registration  # noqa: F401
 from server.app.executors.config import ExecutorConfig
-from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
@@ -38,6 +41,9 @@ class Settings:
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
+    # executor_definitions starts empty: the catalog lives in the DB
+    # (versioned_entities, entity_type 'executor') and create_app hydrates it
+    # after seeding the built-in factory definitions (restart-effective).
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -71,6 +77,10 @@ def _bool_parser(value: str) -> bool:
     raise ValueError(f"invalid boolean env value: {value!r}")
 
 
+def _csv_parser(value: str) -> list[str]:
+    return [part.strip() for part in value.split(",") if part.strip()]
+
+
 # Reviewed mapping from environment variable to config path and parser.
 # Do not add arbitrary double-underscore mutation; every override is listed here.
 # ``database.url`` is deliberately absent: it is handled by
@@ -81,6 +91,8 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "AGENT_LEGION_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
     "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
     "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
+    "AGENT_LEGION_ASR_WHISPER_VAD_MODEL": (("asr", "whisper", "vad_model"), _path_parser),
+    "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT": (("asr", "sensevoice", "script"), _path_parser),
     "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
     "AGENT_LEGION_CUSTOM_NODES_ENABLED": (
         ("workflows", "custom_nodes_enabled"),
@@ -93,6 +105,8 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
         _path_parser,
     ),
     "AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD": (("auth", "bootstrap_admin_password"), _str_parser),
+    "AGENT_LEGION_CORS_ALLOW_ORIGINS": (("server", "cors", "allow_origins"), _csv_parser),
+    "AGENT_LEGION_CORS_ALLOW_CREDENTIALS": (("server", "cors", "allow_credentials"), _bool_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY": (("vault", "master_key"), _str_parser),
     "AGENT_LEGION_VAULT_MASTER_KEY_FILE": (("vault", "master_key_file"), _path_parser),
 }
@@ -226,13 +240,13 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     _apply_env_overrides(config)
     _apply_cms_env_overrides(config)
     _normalize_cms_config(config)
+    apply_instance_config_defaults(config)
     if data_dir is None:
         env_data_dir = os.environ.get("AGENT_LEGION_DATA_DIR")
         if env_data_dir:
             data_dir = Path(env_data_dir)
-    resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
-    database_config = config.get("database", {})
-    database_url = str(database_config.get("url", "")) if isinstance(database_config, dict) else ""
+    resolved_data_dir = data_dir or root_dir / str(config["data_dir"])
+    database_url = str(config["database"]["url"])
     if not database_url.startswith(("postgresql://", "postgres://")):
         raise ValueError("database.url must be a PostgreSQL URL")
     videos_dir = resolved_data_dir / "videos"
@@ -241,13 +255,8 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     jobs_dir = resolved_data_dir / "jobs"
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
-    executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
-    token_file = executor_runtime.agent_workers.register_token_file
-    if token_file and not executor_runtime.agent_workers.register_token:
-        executor_runtime.agent_workers.register_token = (
-            Path(token_file).read_text(encoding="utf-8").strip()
-        )
+    resolve_worker_register_token(executor_runtime.agent_workers, root_dir)
     return Settings(
         root_dir=root_dir,
         database_url=database_url,
@@ -258,7 +267,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         jobs_dir=jobs_dir,
         config=config,
         cors=load_cors_settings(config),
-        executor_definitions=executor_definitions,
         executor_runtime=executor_runtime,
     )
 

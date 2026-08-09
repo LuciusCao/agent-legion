@@ -10,7 +10,7 @@ Knowledge videos (`content_type=knowledge`) are produced by a dedicated Workspac
 
 ### `video_knowledge` Workflow
 
-`config/workflows/video_knowledge.yaml` declares the Workspace DAG for knowledge videos. Nodes declare only business capabilities (`download_video`, `transcribe_video`, `review_subtitles`, `generate_chapters`, `generate_interactions`, `review_video_content`, `assemble_video_metadata`, plus a final `package_video_job` packaging node) and do not name runners, agents, skills, or command templates.
+`server/app/workflows/builtin.py` declares the built-in Workspace DAG for knowledge videos (the `video_knowledge` constant). Nodes declare only business capabilities (`download_video`, `transcribe_video`, `review_subtitles`, `generate_chapters`, `generate_interactions`, `review_video_content`, `assemble_video_metadata`, plus a final `package_video_job` packaging node) and do not name runners, agents, skills, or command templates.
 
 ### `server/app/video_capabilities/` Layer
 

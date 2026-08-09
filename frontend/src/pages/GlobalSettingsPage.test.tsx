@@ -9,10 +9,23 @@ import {
   updateTokenUsagePricing,
 } from '../api/tokenUsagePricing'
 import type { TokenUsagePricingConfigResponse } from '../api/tokenUsagePricing'
+import { getInstanceSettings } from '../api/instanceSettings'
+import type { InstanceSettingsResponse } from '../api/instanceSettings'
 
 vi.mock('../api/tokenUsagePricing', () => ({
   getTokenUsagePricing: vi.fn(),
   updateTokenUsagePricing: vi.fn(),
+}))
+
+vi.mock('../api/instanceSettings', () => ({
+  getInstanceSettings: vi.fn(),
+  updateInstanceSettings: vi.fn(),
+}))
+
+vi.mock('../api/skillSources', () => ({
+  getSkillSources: vi.fn().mockResolvedValue({ skills: [] }),
+  updateSkillSource: vi.fn(),
+  relockSkillSources: vi.fn(),
 }))
 
 const adminUser: UserResponse = {
@@ -46,6 +59,32 @@ const pricingConfig: TokenUsagePricingConfigResponse = {
   ],
 }
 
+const instanceSettings: InstanceSettingsResponse = {
+  cleanup: {
+    log_retention_days: 30,
+    run_dir_retention_days: 7,
+    interval_seconds: 3600,
+  },
+  monitoring: { sample_interval_seconds: 15, retention_days: 30 },
+  heartbeat_interval_seconds: 10,
+  lease_ttl_seconds: 90,
+  heartbeat_failure_threshold: 3,
+  sweeper_enabled: true,
+  sweeper_interval_seconds: 60,
+  workflows: { enabled: true },
+  agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
+  openclaw: {
+    cwd: '.',
+    timeout_seconds: 600,
+    isolated_workspace_root: '',
+    command_template: ['openclaw', 'agent', '--json'],
+    skill_safety: {
+      enabled: true,
+      repos: [{ path: '~/.agents/skills/agent-legion/s1' }],
+    },
+  },
+}
+
 function renderPage() {
   return render(
     <MemoryRouter>
@@ -56,6 +95,7 @@ function renderPage() {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  vi.mocked(getInstanceSettings).mockResolvedValue(instanceSettings)
   useAuthStore.setState({
     user: adminUser,
     status: 'authenticated',
@@ -73,6 +113,16 @@ describe('GlobalSettingsPage', () => {
     expect(screen.getByDisplayValue('model-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('CNY')).toBeInTheDocument()
     expect(screen.getByText('模型定价')).toBeInTheDocument()
+  })
+
+  it('renders the instance settings section', async () => {
+    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+
+    renderPage()
+
+    expect(await screen.findByText('实例设置')).toBeInTheDocument()
+    expect(screen.getByLabelText('日志保留天数')).toHaveValue(30)
+    expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
   })
 
   it('keeps the save button disabled until the form is dirty', async () => {

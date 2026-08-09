@@ -81,7 +81,7 @@ def test_openclaw_skill_safety_valid_overrides():
 
 
 def test_openclaw_skill_safety_rejects_ref_override():
-    """Refs are pinned by skills.lock (config governance G3); yaml ref is retired."""
+    """Refs are pinned by the DB skill_lock document (G3); yaml ref is retired."""
     with pytest.raises(ValidationError) as exc_info:
         OpenClawSkillSafetyRuntimeConfig(
             enabled=True,
@@ -146,7 +146,9 @@ def test_openclaw_runtime_config_ignores_extra_fields():
 
 def test_workflows_runtime_config_defaults():
     config = WorkflowsRuntimeConfig()
-    assert config.enabled is False
+    # Default on: matches the retired tracked workflow.yaml value
+    # (workflows.enabled: true).
+    assert config.enabled is True
     assert config.pi.binary == "pi"
 
 

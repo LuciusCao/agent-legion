@@ -90,7 +90,7 @@ server/app/
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
 - CMS 客户端将网络、响应解析和鉴权失败统一为 `CmsClientError`；业务层只降级明确的
   集成错误，不吞掉编程异常。
-- CORS 来源由 `config/app.yaml` 的 `server.cors` 显式配置；默认仅允许本机 Vite 开发源。
+- CORS 来源由 env `AGENT_LEGION_CORS_ALLOW_ORIGINS` / `AGENT_LEGION_CORS_ALLOW_CREDENTIALS` 显式配置；默认仅允许本机 Vite 开发源。
 
 ## API Surface / Interface
 
@@ -130,8 +130,19 @@ server/app/
 | GET | `/artifacts/{hash}` | `download_artifact` | routes/artifacts.py |
 | GET | `/health` | `health` | routes/common.py |
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
+| GET | `/executor-definitions` | `list_executor_definitions` | routes/executor_definitions.py |
+| POST | `/executor-definitions` | `create_executor_definition` | routes/executor_definitions.py |
+| GET | `/executor-definitions/{executor_id}` | `get_executor_definition` | routes/executor_definitions.py |
+| GET | `/executor-definitions/{executor_id}/versions` | `list_executor_definition_versions` | routes/executor_definitions.py |
+| PUT | `/executor-definitions/{executor_id}/draft` | `save_executor_definition_draft` | routes/executor_definitions.py |
+| POST | `/executor-definitions/{executor_id}/publish` | `publish_executor_definition` | routes/executor_definitions.py |
+| POST | `/executor-definitions/{executor_id}/rollback` | `rollback_executor_definition` | routes/executor_definitions.py |
+| POST | `/executor-definitions/{executor_id}/copy` | `copy_executor_definition` | routes/executor_definitions.py |
+| DELETE | `/executor-definitions/{executor_id}` | `archive_executor_definition` | routes/executor_definitions.py |
 | GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
+| GET | `/admin/instance-settings` | `get_instance_settings` | routes/instance_settings.py |
+| PUT | `/admin/instance-settings` | `put_instance_settings` | routes/instance_settings.py |
 | GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
 | POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
@@ -167,6 +178,9 @@ server/app/
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/questions/{question_id}` | `get_question_detail` | routes/questions.py |
 | GET | `/executors/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
+| GET | `/admin/skill-sources` | `get_skill_sources` | routes/skill_sources.py |
+| PUT | `/admin/skill-sources/{skill_key:path}` | `put_skill_source` | routes/skill_sources.py |
+| POST | `/admin/skill-sources/relock` | `relock_skill_sources` | routes/skill_sources.py |
 | POST | `/skills/validate` | `validate_skill` | routes/skills.py |
 | GET | `/skills/tags` | `list_skill_tags` | routes/skills.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
@@ -286,8 +300,26 @@ server/app/
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
+| ExecutorDefinitionPayload | BaseModel | kind: str, global_capacity: int, capabilities: dict[str, dict[str, Any]] | app/routes/executor_definition_contracts.py |
+| ExecutorCopyRequest | BaseModel | new_executor_id: str | app/routes/executor_definition_contracts.py |
+| ExecutorRollbackRequest | BaseModel | version: int | app/routes/executor_definition_contracts.py |
+| ExecutorVersionResponse | BaseModel | id: str, executor_id: str, version: int, status: Literal['draft', 'published'... | app/routes/executor_definition_contracts.py |
+| ExecutorVersionSummary | BaseModel | id: str, executor_id: str, version: int, status: Literal['draft', 'published'... | app/routes/executor_definition_contracts.py |
+| ExecutorListItem | BaseModel | executor_id: str, kind: str, global_capacity: int, capabilities: list[str], v... | app/routes/executor_definition_contracts.py |
+| ExecutorListResponse | BaseModel | executors: list[ExecutorListItem] | app/routes/executor_definition_contracts.py |
+| ExecutorDetailResponse | BaseModel | executor_id: str, latest: ExecutorVersionResponse | None, published: Executor... | app/routes/executor_definition_contracts.py |
+| ExecutorVersionsResponse | BaseModel | versions: list[ExecutorVersionSummary] | app/routes/executor_definition_contracts.py |
+| ExecutorArchiveResponse | BaseModel | archived: int | app/routes/executor_definition_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
+| InstanceOpenClawSkillSafetyRepo | BaseModel | path: str | app/routes/instance_openclaw_contracts.py |
+| InstanceOpenClawSkillSafetySettings | BaseModel | enabled: bool, repos: list[InstanceOpenClawSkillSafetyRepo] | app/routes/instance_openclaw_contracts.py |
+| InstanceOpenClawSettings | BaseModel | cwd: str, timeout_seconds: int, isolated_workspace_root: str, command_templat... | app/routes/instance_openclaw_contracts.py |
+| InstanceCleanupSettings | BaseModel | log_retention_days: int, run_dir_retention_days: int, interval_seconds: int | app/routes/instance_settings_contracts.py |
+| InstanceMonitoringSettings | BaseModel | sample_interval_seconds: float, retention_days: int | app/routes/instance_settings_contracts.py |
+| InstanceWorkflowsSettings | BaseModel | enabled: bool | app/routes/instance_settings_contracts.py |
+| InstanceAgentWorkersSettings | BaseModel | max_archive_bytes: int, min_protocol_version: int | app/routes/instance_settings_contracts.py |
+| InstanceSettingsDocument | BaseModel | cleanup: InstanceCleanupSettings, monitoring: InstanceMonitoringSettings, hea... | app/routes/instance_settings_contracts.py |
 | JobFilterPayload | BaseModel | status: str | None, search: str | None, workflow_version: int | None, workflo... | app/routes/job_batch_filter_contracts.py |
 | JobSelectionMixin | BaseModel | job_ids: list[str] | None, filter: JobFilterPayload | None, exclude_ids: list... | app/routes/job_batch_filter_contracts.py |
 | JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
@@ -370,6 +402,9 @@ server/app/
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
 | SkillValidateResponse | BaseModel | valid: bool, path: str, skill_key: str | None, error: str | None, tags: list[... | app/routes/skill_contracts.py |
 | SkillTagsResponse | BaseModel | path: str, tags: list[str], latest_tag: str | None | app/routes/skill_contracts.py |
+| SkillSourceEntry | BaseModel | key: str, repo: str, ref: str, locked_commit: str | None, resolved_at: str | ... | app/routes/skill_source_contracts.py |
+| SkillSourcesResponse | BaseModel | skills: list[SkillSourceEntry] | app/routes/skill_source_contracts.py |
+| SkillSourceUpdate | BaseModel | repo: str, ref: str | app/routes/skill_source_contracts.py |
 | TokenUsageRunItem | BaseModel | run_id: int, node_key: str, status: str, usage: RunUsage | None, reason: str ... | app/routes/token_usage_contracts.py |
 | TokenUsageTotal | BaseModel | message_count: int, input_tokens: int, output_tokens: int, cache_read_tokens:... | app/routes/token_usage_contracts.py |
 | TokenUsageJobResponse | BaseModel | job_id: str, runs: list[TokenUsageRunItem], total: TokenUsageTotal, runs_with... | app/routes/token_usage_contracts.py |
@@ -469,7 +504,7 @@ server/app/
 
 - `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
-  - 在 `config/workflow.yaml` 中 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
+  - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
   - 视频 Job 由 `video_knowledge` workflow 的节点（`download_video`（code executor）、`transcribe_video`、Agent 阶段、`assemble_video_metadata`、`package_video_job`）处理。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
 - 视频 Job 的 `content_type` 固定为 `knowledge`（`video_capabilities/contracts.py` 强制校验），pipeline 节点序列：
@@ -493,7 +528,7 @@ server/app/
 
 Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）：
 
-- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经节点 config（全局 `cms:` 默认值 ← workspace 节点覆盖）+ vault 完成。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
+- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经节点 config（capability `config_schema` 出厂默认值 ← 节点/workspace 覆盖，叠加 settings 层 env 注入的 `cms` 键）+ vault 完成。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
 - `phase=None`：direct 模式，不访问外部资源。
 
 `phase="intake"`（intake 期调 CMS 做 1:N fan-out）已从 question resolver 退役：intake 不再调用 CMS，非法 id/code 在执行期以 job 失败暴露。
@@ -538,8 +573,8 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 `server/app/configuration/` 负责加载并校验按领域拆分的 YAML 配置。
 
-- `loader.py`: 加载 `config/app.yaml`, `config/agent_legion.yaml`, `config/workflow.yaml` 并合并环境变量覆盖。
-- `owned_keys.py`: 声明每个配置文件的 owned keys，防止跨文件键冲突。
+- `loader.py`:  canonical split 布局已不含任何运行时配置文件（全部退役）；启动时从代码默认值 + env 覆盖合成配置，`config/app.yaml` / `config/workflow.yaml` / `config/agent_legion.yaml` 存在即报错（带迁移指引）。
+- `owned_keys.py`: 登记退役文件名与迁移指引（`CONFIG_FILE_KEYS` 已为空——没有任何 split 文件再拥有顶层键）。
 
 ### Quality Subsystem
 
@@ -568,48 +603,31 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 ## Configuration Reference
 
-配置按域拆分为多个文件；每个 split 文件只接受自己的 owned 顶层键（`server/app/configuration/owned_keys.py`），写错段名（未登记的顶层键）会在启动时直接报错：
+运行时配置已全部从 split yaml 退役：`config/app.yaml` / `config/workflow.yaml` / `config/agent_legion.yaml` 存在即启动报错（带迁移指引，见 `server/app/configuration/owned_keys.py`）。有效配置 = 代码默认值 + env 覆盖 + DB 文档。
 
-- `config/app.yaml`：应用路径、PostgreSQL URL、HTTP 设置、日志/运行目录清理（`cleanup`）、监控（`monitoring`）。
-- `config/agent_legion.yaml`：ASR、CMS、OpenClaw 设置。
-- `config/workflow.yaml`：agent 目录（`agents`）、agent worker 注册（`agent_workers`）、workspace executor（`executors`，executor 并发为 `executors.<name>.global_capacity`）与 workflow 运行时设置（`workflows`）。
+`config/app.yaml` 已整体退役：bootstrap/安全类键转 env-only，实例级可调配置迁入 DB：
+
+- env-only：`database.url` → `AGENT_LEGION_DATABASE_URL`（唯一权威变量，G4；缺省 `postgresql://127.0.0.1:5432/agent_legion`）；`data_dir` → `AGENT_LEGION_DATA_DIR`（缺省 `data`）；`server.cors` → `AGENT_LEGION_CORS_ALLOW_ORIGINS`（逗号分隔）/ `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`；`agent_workers.register_token[_file]` → `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]`（缺省读 `deploy/secrets/agent_worker_register_token`）。
+- DB 实例设置（`global_settings` 表 `instance` 文档，`GET/PUT /api/admin/instance-settings`，启动 hydration、重启生效，无运行期热更新）：`cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`（日志与运行目录清理策略）、`monitoring.sample_interval_seconds` / `retention_days`（资源监控采样间隔与保留天数）、`heartbeat_interval_seconds` / `lease_ttl_seconds` / `heartbeat_failure_threshold` / `sweeper_enabled` / `sweeper_interval_seconds`、`workflows.enabled`（是否启用 Agent Legion DAG workflow worker）、`agent_workers.max_archive_bytes` / `min_protocol_version`、`openclaw.cwd` / `timeout_seconds` / `isolated_workspace_root` / `command_template`（含 `{prompt_text}`、`{video_id}`、`{timestamp}` 占位符的命令参数列表）/ `skill_safety`（OpenClaw skill 安全校验；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 DB `skill_lock` 文档（`global_settings`）解析——config 治理 G3 单源化，实例设置 API 写 `ref` 返回 422，explicit 单文件配置写 `ref` 启动即报错）。代码默认值 = 退役前 tracked yaml 的生效值；`AGENT_LEGION_OPENCLAW_CWD` 作为 env 覆盖优先级高于 DB 文档。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
-常用 `config/agent_legion.yaml` 配置项：
+`config/agent_legion.yaml` 的 `asr:` 段已退役（文件整体存在即报错）：业务参数 `provider`（`auto` / `whisper` / `sensevoice`，默认 `auto`）与 `timeout_seconds`（默认 900）声明在 `transcribe_video` capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析（Studio 节点配置可改）；机器路径转 env-only：`AGENT_LEGION_ASR_WHISPER_BINARY` / `AGENT_LEGION_ASR_WHISPER_MODEL` / `AGENT_LEGION_ASR_WHISPER_VAD_MODEL`（可选 VAD 模型）/ `AGENT_LEGION_ASR_SENSEVOICE_SCRIPT` / `AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR`。启动预检只在 env 显式注入时校验所给路径存在（配错即 fail-fast）；未配置时 server 正常启动，缺二进制在转写时由 provider 的 FileNotFoundError 报错。
 
-- `asr.provider`: `auto`, `whisper`, `sensevoice`
-- `asr.whisper.binary`: 本地 `whisper-cli` 路径
-- `asr.whisper.model`: 本地 whisper 模型路径
-- `asr.whisper.vad_model`: 可选 VAD 模型路径
-- `asr.sensevoice.script`: SenseVoice 转写脚本路径
-- `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
-- `cms`: CMS 集成配置，yaml 只保留 `base_url` / `env` 与全局 query 参数（`bank_version` / `country_id` / `subject_id` / `page_size`）；`cms.token` / `cms.token_gen` 已从 yaml 退役，出现即启动报错（config 治理 G2），token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
-- `openclaw.command_template`: 含 `{prompt_text}`, `{video_id}`, `{timestamp}` 的命令参数列表
-- `openclaw.timeout_seconds`: 默认 600 秒
-- `openclaw.skill_safety`: OpenClaw skill 安全校验配置；`repos` 只声明允许强制恢复的 path 白名单，恢复 ref 统一从 `config/skills.lock`（locked commit）解析（config 治理 G3 单源化），yaml 中写 `ref` 会在启动校验时报错
+CMS 集成不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：`env` / `bank_version` / `country_id` / `subject_id` / `page_size` 的出厂默认值声明在 `fetch_questions` / `download_video` capability 的 `config_schema`（内置 executor 工厂定义，DB `versioned_entities` 承载），沿「schema defaults → 节点 config → workspace 覆盖」链解析（Settings UI 可改）；`base_url` 无出厂默认值，由节点/workspace 配置或 env `CMS_BASE_URL` 提供。token 只走 env（`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或节点配置的 `secret: true` 字段（workspace node config + vault）；单文件 explicit 配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。token 调用时优先级（`cms/client.py` `get_token`）：节点 config token（以 `token_from_binding` 标记）> env `CMS_TOKEN` > settings 注入值 > `token_gen`（仅 prod）；无节点 token 时行为与纯 env 部署一致。env 级凭据缺失在启动校验时只记 warning（workspace vault token 启动时无法预检），不再 fail-fast
 
-`config/app.yaml` 额外配置项：
+`config/workflow.yaml` 的 `executors` 段已退役进 DB：executor 定义（code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键）存于 `versioned_entities` 表，内置工厂目录（`server/app/executors/builtin_definitions.py`）在启动时 seed-if-absent，Studio 管理发布，重启生效。
 
-- `data_dir`: 数据根目录
-- `server.cors`: 浏览器跨域来源和 credentials 策略
-- `cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`: 日志与运行目录清理策略
-- `monitoring.sample_interval_seconds` / `retention_days`: 资源监控采样间隔与保留天数
+实例级运行时设置（`agent_workers` 限额、`workflows.enabled`、lease/heartbeat/sweeper 时序）不再出现在 yaml，见上文「DB 实例设置」。
 
 token 用量计价已产品化：定价存于 `global_settings` 表（`token_usage` 文档），由 admin 在「全局设置」页（`GET/PUT /api/admin/token-usage-pricing`）维护，成本按每条 run 的 provider + model 匹配定价逐行计算；不再有任何 yaml 侧配置。
-
-`config/workflow.yaml` 核心配置项：
-
-- `agent_workers`: Agent Worker 注册设置（`register_token` / `register_token_file` 等；token 值亦可经 env `AGENT_LEGION_WORKER_REGISTER_TOKEN[_FILE]` 注入）
-- `executors`: code / pi / openclaw 执行器定义；code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键
-- `workflows.enabled`: 是否启用 Agent Legion DAG workflow worker
 
 Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 schema v27 退役，出现在 yaml 中启动即报错）：AgentDefinition 存于 `versioned_entities` 表（全局，workspace_id NULL），经 Studio「Agent 管理」或 `/api/agent-definitions` 做 draft → publish → archive 生命周期管理；热读路径经 `AgentService` 的短 TTL（5s）published 缓存。执行配置（provider/model/thinking）不含在 AgentDefinition 内，按严格链解析：节点 `execution.*` 覆盖 → workspace `default_agent_*`（Settings「Agent 默认配置」）→ 报错（无全局兜底）；thinking 可空（空 = runtime 决定）。
 
 其他配置文件：
 
-- `config/skills.yaml` / `config/skills.lock`：外部 Pi skill 仓库源与固定 commit；lock 是 skill ref 的唯一权威（G3）。
-- `config/workflows/*.yaml`：workflow 定义，Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`。
+- 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；workspace 绑定时发布为 per-workspace DB revision。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 
@@ -631,7 +649,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
-- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自用户可写的 `config/agent_legion.yaml`；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量；仍需确保该配置文件不被未信任用户修改。
+- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自 DB 实例设置文档（`/api/admin/instance-settings`，仅管理员可写）；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量。
 - PostgreSQL 与视频存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的 User Authentication 章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证（如 CMS token）经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

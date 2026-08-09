@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from scripts.architecture.workflow import check_workflow_raw_definitions
 from scripts.check_architecture import check_repository, forbidden_imports, is_scheduler_path
 from tests.architecture_budget_helpers import write_neutral_budget_governance
 
@@ -355,34 +356,41 @@ def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "yaml_content,expected_error",
+    "definition,expected_error",
     [
         (
-            "key: example\nlabel: Example\nnodes:\n  fetch:\n    label: Fetch\n",
+            {"key": "example", "label": "Example", "nodes": {"fetch": {"label": "Fetch"}}},
             "non-empty capability",
         ),
         (
-            "key: example\nlabel: Example\nnodes:\n  fetch:\n    capability: fetch\n    runner: local\n",
+            {
+                "key": "example",
+                "label": "Example",
+                "nodes": {"fetch": {"capability": "fetch", "runner": "local"}},
+            },
             "field 'runner' was removed",
         ),
         (
-            "key: example\nlabel: Example\nnodes:\n  review:\n    capability: review\n    agent:\n      engine: pi\n",
+            {
+                "key": "example",
+                "label": "Example",
+                "nodes": {"review": {"capability": "review", "agent": {"engine": "pi"}}},
+            },
             "field 'agent' was removed",
         ),
         (
-            "key: example\nlabel: Example\nconcurrency:\n  nodes:\n    review: 2\n"
-            "nodes:\n  review:\n    capability: review\n",
+            {
+                "key": "example",
+                "label": "Example",
+                "concurrency": {"nodes": {"review": 2}},
+                "nodes": {"review": {"capability": "review"}},
+            },
             "top-level 'concurrency' was removed",
         ),
     ],
 )
-def test_rejects_invalid_workflow_yaml(tmp_path, yaml_content, expected_error):
-    (tmp_path / "server/app").mkdir(parents=True)
-    (tmp_path / "config/workflows").mkdir(parents=True)
-    write(tmp_path / "config/workflows/example.yaml", yaml_content)
-    write_neutral_budget_governance(tmp_path)
-
-    errors = check_repository(tmp_path)
+def test_rejects_invalid_builtin_workflow_definition(definition, expected_error):
+    errors = check_workflow_raw_definitions({"example": definition})
 
     assert any(expected_error in error for error in errors)
 

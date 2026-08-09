@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from scripts import export_openapi
 from scripts.export_openapi import build_openapi_schema
+from server.app.jobs.storage_layout import job_shard
 from server.app.routes.job_view_contracts import (
     ExecutionControlSummaryResponse,
     JobDetailResponse,
@@ -198,7 +199,7 @@ def test_get_jobs_returns_absolute_storage_dir(client):
     body = response.json()
     summary = next(job for job in body["jobs"] if job["id"] == job_id)
     assert Path(summary["storage_dir"]).is_absolute()
-    assert summary["storage_dir"].endswith(f"{workspace_id}/{job_id}")
+    assert summary["storage_dir"].endswith(f"{workspace_id}/{job_shard(job_id)}/{job_id}")
 
 
 def test_get_job_detail_returns_absolute_storage_dir(client):
@@ -207,4 +208,4 @@ def test_get_job_detail_returns_absolute_storage_dir(client):
     assert response.status_code == 200
     body = response.json()
     assert Path(body["job"]["storage_dir"]).is_absolute()
-    assert body["job"]["storage_dir"].endswith(f"{workspace_id}/{job_id}")
+    assert body["job"]["storage_dir"].endswith(f"{workspace_id}/{job_shard(job_id)}/{job_id}")

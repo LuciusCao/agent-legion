@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs.queries.job_node_lifecycle import JobNodeLifecycleQueriesMixin
+from server.app.jobs.storage_layout import job_storage_dir
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.storage_paths import make_data_relative
 
@@ -34,7 +35,7 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         workflow_definition_snapshot_json: str = "",
     ) -> dict[str, Any]:
         job_id = _job_id(workspace_id, workflow_key, source_id)
-        storage_dir = self.jobs_dir / workspace_id / job_id
+        storage_dir = job_storage_dir(self.jobs_dir, workspace_id, job_id)
         storage_dir.mkdir(parents=True, exist_ok=True)
 
         with self.connect() as conn:

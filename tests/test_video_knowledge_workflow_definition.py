@@ -1,12 +1,9 @@
-from pathlib import Path
-
-from server.app.workflows.definition import load_workflow_definition
-
-ROOT = Path(__file__).resolve().parents[1]
+from server.app.workflows.builtin import BUILTIN_WORKFLOW_DEFINITIONS
+from tests.helpers import load_builtin_definition
 
 
 def test_video_knowledge_workflow_is_linear_knowledge_video_dag() -> None:
-    definition = load_workflow_definition(ROOT / "config/workflows/video_knowledge.yaml")
+    definition = load_builtin_definition("video_knowledge")
 
     assert definition.key == "video_knowledge"
     assert list(definition.nodes) == [
@@ -26,10 +23,10 @@ def test_video_knowledge_workflow_is_linear_knowledge_video_dag() -> None:
 
 
 def test_video_knowledge_workflow_declares_capabilities_only() -> None:
-    text = (ROOT / "config/workflows/video_knowledge.yaml").read_text(encoding="utf-8")
-    assert "runner:" not in text
-    assert "agent:" not in text
-    definition = load_workflow_definition(ROOT / "config/workflows/video_knowledge.yaml")
+    raw_nodes = BUILTIN_WORKFLOW_DEFINITIONS["video_knowledge"]["nodes"]
+    assert all("runner" not in node for node in raw_nodes.values())
+    assert all("agent" not in node for node in raw_nodes.values())
+    definition = load_builtin_definition("video_knowledge")
     assert definition.nodes["download"].capability == "download_video"
     assert definition.nodes["transcribe"].capability == "transcribe_video"
     assert definition.nodes["assemble"].capability == "assemble_video_metadata"
@@ -37,7 +34,7 @@ def test_video_knowledge_workflow_declares_capabilities_only() -> None:
 
 
 def test_video_knowledge_download_node_outputs_video_input() -> None:
-    definition = load_workflow_definition(ROOT / "config/workflows/video_knowledge.yaml")
+    definition = load_builtin_definition("video_knowledge")
     download = definition.nodes["download"]
     # The node resolves knowledge source_refs at execution time (CMS access is
     # configured on the node config, not a DAG resource) and writes the

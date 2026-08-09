@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any
 
+from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.job_node_executor_resolver import resolve_node_executors
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
@@ -120,6 +121,9 @@ def test_resolve_node_executors_skips_bindings_without_node_key():
 
 
 def test_resolve_node_executors_with_real_service(job_db, settings):
+    # The bare settings fixture does not hydrate executor definitions
+    # (create_app does); kind resolution needs the seeded catalog.
+    hydrate_executor_definitions(settings)
     workspace = job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
     job_db.replace_workspace_executor_configuration(
         workspace["id"],

@@ -1,9 +1,8 @@
 """Video pipeline node extraction for scripts/generate_architecture.py."""
 
-from pathlib import Path
 from typing import Any
 
-import yaml
+from server.app.workflows.builtin import BUILTIN_WORKFLOW_DEFINITIONS
 
 
 def _topological_node_order(nodes: dict[str, Any]) -> list[str]:
@@ -26,20 +25,9 @@ def _topological_node_order(nodes: dict[str, Any]) -> list[str]:
     return ordered
 
 
-def extract_pipeline_phases(root: Path) -> str:
-    """Extract video pipeline node sequence from config/workflows/video_knowledge.yaml."""
-    workflow_file = root / "config" / "workflows" / "video_knowledge.yaml"
-    if not workflow_file.exists():
-        return "_No video_knowledge.yaml found._\n"
-
-    try:
-        data = yaml.safe_load(workflow_file.read_text(encoding="utf-8"))
-    except yaml.YAMLError:
-        return "_Could not parse video_knowledge.yaml._\n"
-
-    nodes = data.get("nodes") if isinstance(data, dict) else None
-    if not isinstance(nodes, dict) or not nodes:
-        return "_No pipeline nodes found._\n"
+def extract_pipeline_phases() -> str:
+    """Extract the video pipeline node sequence from the built-in video_knowledge DAG."""
+    nodes = BUILTIN_WORKFLOW_DEFINITIONS["video_knowledge"]["nodes"]
 
     ordered = _topological_node_order(nodes)
     lines = [
