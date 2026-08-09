@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from server.app.jobs.storage_layout import job_storage_dir
 from server.app.main import create_app
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -49,7 +50,7 @@ def test_video_url_intake_creates_video_job_and_input_artifact(app) -> None:
     assert result["created_count"] == 1
     job = result["jobs"][0]
     assert job["source_type"] == "video"
-    job_dir = app.state.settings.jobs_dir / job["workspace_id"] / job["id"]
+    job_dir = job_storage_dir(app.state.settings.jobs_dir, job["workspace_id"], job["id"])
     assert (job_dir / "video_input.json").is_file()
 
 
@@ -110,7 +111,7 @@ def test_video_knowledge_intake_writes_source_ref_video_input(app) -> None:
 
     assert result["created_count"] == 1
     job = result["jobs"][0]
-    job_dir = app.state.settings.jobs_dir / job["workspace_id"] / job["id"]
+    job_dir = job_storage_dir(app.state.settings.jobs_dir, job["workspace_id"], job["id"])
     raw = (job_dir / "video_input.json").read_text(encoding="utf-8")
     video_input = json.loads(raw)
     # Node-phase resolution: the candidate carries an opaque source_ref; the

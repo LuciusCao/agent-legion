@@ -4,8 +4,10 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
+from server.app.db.connection import DatabaseDsn
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.manager import SkillManager
 from server.app.workflows.skill_version import resolve_skill_version
 from server.app.workflows.skills import resolve_workflow_skill
@@ -59,10 +61,9 @@ def resolve_skill_dir(
         raise
 
 
-def build_skill_manager(root_dir: Path) -> SkillManager:
-    """Project-standard SkillManager: repo-pinned config, shared user-level base dir."""
+def build_skill_manager(database_dsn: DatabaseDsn) -> SkillManager:
+    """Project-standard SkillManager: DB-backed sources, shared user-level base dir."""
     return SkillManager(
-        config_path=root_dir / "config" / "skills.yaml",
-        lock_path=root_dir / "config" / "skills.lock",
+        store=SkillSourceStore(database_dsn),
         base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
     )

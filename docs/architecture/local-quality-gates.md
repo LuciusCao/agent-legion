@@ -108,8 +108,9 @@ CI environment notes:
   `create_app` + node_modules, so it lives in the backend-postgres-a job; the
   frontend jobs need neither Python nor Postgres.
 - `AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK=1` skips `check-skills-shared.py` in CI:
-  `config/skills.yaml` points at machine-local skill repos (`~/.agents/skills/...`)
-  that do not exist on runners. Local gates still run the check.
+  the built-in skill sources (`server/app/skills/builtin_sources.py`) point at
+  machine-local skill repos (`~/.agents/skills/...`) that do not exist on
+  runners. Local gates still run the check.
 - uv and npm caches are enabled; the first cold run is dominated by downloading
   torch/funasr and takes substantially longer than cached runs.
 

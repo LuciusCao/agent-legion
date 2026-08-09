@@ -1,5 +1,4 @@
 import json
-from pathlib import Path
 
 from server.app.workflows.conditions import condition_matches, selected_edges
 from server.app.workflows.definition import (
@@ -15,10 +14,11 @@ from server.app.workflows.workflow_branching import (
     downstream_nodes,
     evaluate_branches,
 )
+from tests.helpers import load_builtin_definition
 
 
 def _definition():
-    return load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    return load_builtin_definition("question_comprehension_info")
 
 
 def test_find_ready_nodes_starts_with_root(tmp_path):
@@ -133,7 +133,7 @@ def test_summarize_job_status_treats_not_applicable_as_terminal():
 
 
 def test_evaluate_branches_marks_unselected_branch_not_applicable(tmp_path):
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     (tmp_path / "comprehension_eligibility.json").write_text(
         json.dumps({"question_id": "Q1", "eligible": False}),
         encoding="utf-8",
@@ -152,7 +152,7 @@ def test_evaluate_branches_marks_unselected_branch_not_applicable(tmp_path):
 
 
 def test_evaluate_branches_marks_node_not_applicable_when_all_incoming_conditions_false(tmp_path):
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     (tmp_path / "comprehension_eligibility.json").write_text(
         json.dumps({"question_id": "Q1", "eligible": False}),
         encoding="utf-8",

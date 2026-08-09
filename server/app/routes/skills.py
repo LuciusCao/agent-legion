@@ -16,8 +16,8 @@ def create_skills_router(settings: Settings) -> APIRouter:
     router = APIRouter()
 
     def _validator() -> SkillValidator:
-        manager = build_skill_manager(settings.root_dir)
-        return SkillValidator(manager.base_dir, manager.lock_path)
+        manager = build_skill_manager(settings.database_url)
+        return SkillValidator(manager.base_dir, manager.load_lock)
 
     @router.post("/skills/validate", response_model=SkillValidateResponse)
     def validate_skill(request: SkillValidateRequest) -> SkillValidateResponse:

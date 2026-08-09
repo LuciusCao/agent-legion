@@ -52,11 +52,12 @@ def build_openclaw_executor(
 def _build_skill_safety(
     runtime: OpenClawRuntimeConfig, skill_manager: SkillManager | None
 ) -> SkillSafetyConfig:
-    """Resolve the skill-safety whitelist against skills.lock.
+    """Resolve the skill-safety whitelist against the DB skill lock.
 
-    Refs come from the lock (locked commit, single source of truth), never from
-    ``agent_legion.yaml``; an enabled whitelist that cannot be resolved fails the
-    build instead of silently skipping the safety restore.
+    Refs come from the lock (locked commit, single source of truth, config
+    governance G3), never from ``agent_legion.yaml``; an enabled whitelist that
+    cannot be resolved fails the build instead of silently skipping the safety
+    restore.
     """
     safety = runtime.skill_safety
     if not safety.enabled or not safety.repos:
@@ -64,7 +65,7 @@ def _build_skill_safety(
     if skill_manager is None:
         raise SkillConfigError(
             "openclaw skill_safety is enabled but no skill manager is available "
-            "to resolve refs from skills.lock"
+            "to resolve refs from the skill lock"
         )
     repos = resolve_skill_safety_repos(
         [repo.path for repo in safety.repos], skill_manager.load_lock()

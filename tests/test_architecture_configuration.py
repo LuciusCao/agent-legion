@@ -12,21 +12,30 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def test_configuration_ownership_accepts_split_files(tmp_path):
-    _write(tmp_path / "config/app.yaml", "data_dir: data\n")
-    _write(tmp_path / "config/agent_legion.yaml", "cms: {}\n")
-    _write(tmp_path / "config/workflow.yaml", "executors: {}\n")
+def test_configuration_ownership_accepts_zero_split_files(tmp_path):
+    """All runtime split files are retired: an empty config/ dir is clean."""
     assert check_configuration_ownership(tmp_path) == []
 
 
-def test_configuration_ownership_rejects_wrong_file_key(tmp_path):
-    _write(tmp_path / "config/app.yaml", "cms: {}\n")
-    _write(tmp_path / "config/agent_legion.yaml", "{}\n")
-    _write(tmp_path / "config/workflow.yaml", "{}\n")
+def test_configuration_ownership_rejects_retired_agent_legion_yaml(tmp_path):
+    _write(tmp_path / "config/agent_legion.yaml", "asr: {}\n")
     errors = check_configuration_ownership(tmp_path)
-    assert errors == ["config/app.yaml: top-level key 'cms' belongs to config/agent_legion.yaml"]
+    assert errors == [
+        "config/agent_legion.yaml: retired configuration file (see loader reject_retired_files)"
+    ]
 
 
-def test_configuration_ownership_rejects_partial_layout(tmp_path):
-    _write(tmp_path / "config/app.yaml", "{}\n")
-    assert "partial configuration layout" in check_configuration_ownership(tmp_path)[0]
+def test_configuration_ownership_rejects_retired_workflow_yaml(tmp_path):
+    _write(tmp_path / "config/workflow.yaml", "executors: {}\n")
+    errors = check_configuration_ownership(tmp_path)
+    assert errors == [
+        "config/workflow.yaml: retired configuration file (see loader reject_retired_files)"
+    ]
+
+
+def test_configuration_ownership_rejects_retired_app_yaml(tmp_path):
+    _write(tmp_path / "config/app.yaml", "data_dir: data\n")
+    errors = check_configuration_ownership(tmp_path)
+    assert errors == [
+        "config/app.yaml: retired configuration file (see loader reject_retired_files)"
+    ]

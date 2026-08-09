@@ -13,17 +13,16 @@ class CmsClientError(RuntimeError):
 def require_api_url(api_url: str | None, resource: str) -> str:
     """Return the configured CMS URL or fail with migration guidance.
 
-    There is no built-in fallback host anymore (config governance G2): the URL
-    must come from ``cms.base_url`` (yaml) / ``CMS_BASE_URL`` (env), or
-    from an ``api_url`` bound in the workspace resource config.
+    There is no built-in fallback host: the URL must come from the workspace
+    node config (Settings UI), env ``CMS_BASE_URL``, or an ``api_url`` bound
+    in the node config.
     """
     url = str(api_url or "").strip()
     if url:
         return url
     raise CmsClientError(
-        f"CMS {resource} URL is not configured: set cms.base_url in "
-        "config/agent_legion.yaml (or env CMS_BASE_URL), or bind api_url in "
-        "the workspace resource config"
+        f"CMS {resource} URL is not configured: set base_url/api_url in the "
+        "workspace node config (Settings), or set env CMS_BASE_URL"
     )
 
 

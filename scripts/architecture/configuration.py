@@ -6,10 +6,17 @@ from server.app.configuration.loader import (
     detect_layout,
     load_yaml_mapping,
 )
+from server.app.configuration.owned_keys import RETIRED_FILE_NAMES
 
 
 def check_configuration_ownership(root: Path) -> list[str]:
     config_dir = root / "config"
+    retired = [name for name in RETIRED_FILE_NAMES if (config_dir / name).exists()]
+    if retired:
+        return [
+            f"config/{name}: retired configuration file (see loader reject_retired_files)"
+            for name in retired
+        ]
     split_files = [config_dir / name for name in CONFIG_FILE_KEYS]
     if not any(path.exists() for path in split_files):
         # Synthetic repositories in tests have no runtime config; there is

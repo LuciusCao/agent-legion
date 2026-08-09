@@ -12,8 +12,9 @@ type Props = {
 /**
  * Skill picker for the Agent editor: validates an absolute skill path via
  * POST /api/skills/validate, fills the skill key on success, and shows the
- * repo tags as reference info. Tag selection never writes back — skills.lock
- * stays the single source of truth for the locked ref.
+ * repo tags as reference info. Tag selection never writes back — the DB skill
+ * lock (global_settings skill_lock) stays the single source of truth for the
+ * locked ref.
  */
 export function SkillSelector({ value, onChange }: Props) {
   const [path, setPath] = useState('')

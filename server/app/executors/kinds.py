@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
+from server.app.services.skill_source_store import InMemorySkillSourceStore
 from server.app.skills.manager import SkillManager
 
 if TYPE_CHECKING:
@@ -38,8 +39,7 @@ class RuntimeDependencies:
     pi_runtime: PiRuntimeConfig = field(default_factory=PiRuntimeConfig)
     skill_manager: SkillManager = field(
         default_factory=lambda: SkillManager(
-            config_path=Path("config") / "skills.yaml",
-            lock_path=Path("config") / "skills.lock",
+            store=InMemorySkillSourceStore.with_builtins(),
             base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
         )
     )

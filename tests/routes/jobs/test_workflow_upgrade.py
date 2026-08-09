@@ -1,8 +1,6 @@
-from pathlib import Path
-
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.workflows.definition import load_workflow_definition
+from tests.helpers import load_builtin_definition
 from tests.helpers.auth import authenticate_client
 
 
@@ -26,7 +24,7 @@ def _create_job(client, workspace_id, question_id="Q301"):
 
 
 def _publish_next_revision(app, workspace_id):
-    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    definition = load_builtin_definition("question_comprehension_info")
     return WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
         workspace_id, definition
     )

@@ -11,6 +11,7 @@ type Props = {
   onOpenChanges: () => void
   onOpenYaml: () => void
   onOpenAgents: () => void
+  onOpenExecutors: () => void
   onValidate: () => void
 }
 
@@ -21,6 +22,7 @@ export function WorkflowStudioAppBar({
   onOpenChanges,
   onOpenYaml,
   onOpenAgents,
+  onOpenExecutors,
   onValidate,
 }: Props) {
   const title = useWorkflowStudioAppTitle(workspaceId)
@@ -35,6 +37,7 @@ export function WorkflowStudioAppBar({
           onOpenChanges={onOpenChanges}
           onOpenYaml={onOpenYaml}
           onOpenAgents={onOpenAgents}
+          onOpenExecutors={onOpenExecutors}
           onValidate={onValidate}
         />
       }

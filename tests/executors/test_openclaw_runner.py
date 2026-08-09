@@ -307,7 +307,7 @@ def test_openclaw_runner_calls_restore_before_run(tmp_path):
 
 
 def test_resolve_skill_safety_repos_uses_locked_commit(tmp_path):
-    """The restore ref comes from skills.lock (locked commit), never from yaml."""
+    """The restore ref comes from the skill lock (locked commit), never from yaml."""
     repo = tmp_path / "skills" / "generate_chapters"
     lock = SkillsLock(
         skills={
@@ -344,5 +344,5 @@ def test_resolve_skill_safety_repos_falls_back_to_locked_ref(tmp_path):
 def test_resolve_skill_safety_repos_rejects_path_missing_from_lock(tmp_path):
     lock = SkillsLock()
 
-    with pytest.raises(SkillConfigError, match="not declared in skills.lock"):
+    with pytest.raises(SkillConfigError, match="not declared in the skill lock"):
         resolve_skill_safety_repos([str(tmp_path / "unknown")], lock)

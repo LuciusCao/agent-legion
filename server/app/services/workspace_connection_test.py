@@ -36,7 +36,7 @@ def test_workspace_connection(
     )
     if not api_url:
         raise InvalidOperationError(
-            "CMS URL 未配置:请在节点配置中设置 api_url 或 base_url,或配置 cms.base_url / CMS_BASE_URL"
+            "CMS URL 未配置:请在节点配置中设置 api_url 或 base_url,或配置 env CMS_BASE_URL"
         )
     try:
         # Resolve secret_ref markers in memory only (VAULT-SECRET-001).
