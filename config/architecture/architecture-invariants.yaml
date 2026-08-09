@@ -600,6 +600,18 @@ invariants:
         target: tests/executors/test_velites_sandbox.py::test_bash_sandbox_blocks_escape_macos
         gate: quick
 
+  - id: EXEC-HARNESS-GUARD-001
+    statement: "The velites bash tool rejects full-disk scan commands (recursive traversal from broad roots: find/rg/tree/du always, grep/ls with -r/-R — over /, /System, /Library, /Users, /home, /private, /Volumes, /Applications, and ~/$HOME including its expanded absolute form) before spawn, with or without the OS sandbox; shell cwd tracking covers `cd / && find .`-style evasion and wrapper options (sudo/env/nice) are unwrapped before identification. The rejection is a tool error carrying remediation guidance (scoped search / command -v) back to the model. Scoped searches still execute. Rationale: under parallel agent load, per-job full-disk scans flood host fs indexing (fseventsd/Spotlight) and stall the machine."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_velites_bash_guard.py::test_full_disk_scan_blocked_with_guidance
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_velites_bash_guard.py::test_scoped_command_still_runs
+        gate: quick
+
   - id: EXEC-RUNTIME-DISPATCH-001
     statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workspace default, else dispatch fails fast before any manifest is frozen; unknown runtimes fail fast the same way."
     owner: workspace-executor
