@@ -16,19 +16,18 @@
 use super::ToolError;
 
 /// Roots whose recursive enumeration is considered a full-disk scan.
-/// Trailing slashes are normalized before comparison.
+/// Trailing slashes are normalized before comparison; the process's $HOME
+/// (expanded or not) is blocked on top of this list.
 const BLOCKED_ROOTS: &[&str] = &[
     "/",
     "/System",
     "/Library",
     "/Users",
+    "/home",
     "/private",
     "/Volumes",
     "/Applications",
     "/Network",
-    "~",
-    "$HOME",
-    "${HOME}",
 ];
 
 /// Commands that recurse by default; any blocked-root argument triggers.
@@ -37,26 +36,56 @@ const ALWAYS_RECURSIVE: &[&str] = &["find", "rg", "tree", "du"];
 const FLAG_RECURSIVE: &[&str] = &["grep", "egrep", "fgrep", "ls"];
 /// Leading wrapper tokens skipped when identifying the real command.
 const WRAPPERS: &[&str] = &["sudo", "command", "env", "time", "nice", "ionice"];
+/// Wrapper options that consume the following token as their value, keyed
+/// by wrapper (`nice -n 10` vs `sudo -n` — the same flag differs).
+fn wrapper_value_opts(wrapper: &str) -> &'static [&'static str] {
+    match wrapper {
+        "sudo" => &["-u", "-g", "-h"],
+        "nice" | "ionice" => &["-n"],
+        "env" => &["-u", "-C", "-S"],
+        _ => &[],
+    }
+}
 
 /// Check `command` for full-disk scan patterns; `Err` blocks execution.
 pub fn check(command: &str) -> Result<(), ToolError> {
+    // `cd` in one segment changes the cwd of later segments in the same
+    // shell, so `cd / && find .` must be judged against `/`, not the job dir.
+    let mut cwd: Option<String> = None;
     for segment in split_segments(command) {
         let tokens: Vec<String> = segment.split_whitespace().map(unquote).collect();
-        if let Some((cmd, recursive)) = identify(&tokens) {
-            if !recursive {
-                continue;
+        let Some((cmd, args)) = identify(&tokens) else {
+            continue;
+        };
+        if cmd == "cd" {
+            cwd = Some(resolve_cd(cwd.as_deref(), args.first().map(String::as_str)));
+            continue;
+        }
+        if !is_recursive(&cmd, args) {
+            continue;
+        }
+        let paths = scan_paths(&cmd, args);
+        let mut hit = paths
+            .iter()
+            .map(|p| normalize(p))
+            .find_map(|p| blocked_root(&p));
+        // No explicit path (or `.`) means "scan the current directory",
+        // which a preceding `cd` may have moved to a broad root.
+        if hit.is_none() && (paths.is_empty() || paths.iter().any(|p| is_dot(p))) {
+            if let Some(cwd) = &cwd {
+                hit = blocked_root(&normalize(cwd));
             }
-            if let Some(root) = tokens.iter().find_map(|t| blocked_root(t)) {
-                return Err(ToolError::CommandBlocked(format!(
-                    "`{cmd} {root}` scans from a broad filesystem root. \
-                     Full-disk scans flood host file-system indexing \
-                     (fseventsd/Spotlight) and stall the machine under \
-                     parallel agent load. Search inside the working \
-                     directory or a specific subdirectory instead; to \
-                     locate an executable use `command -v <name>` \
-                     (python/python3 are on PATH)."
-                )));
-            }
+        }
+        if let Some(root) = hit {
+            return Err(ToolError::CommandBlocked(format!(
+                "`{cmd} {root}` scans from a broad filesystem root. \
+                 Full-disk scans flood host file-system indexing \
+                 (fseventsd/Spotlight) and stall the machine under \
+                 parallel agent load. Search inside the working \
+                 directory or a specific subdirectory instead; to \
+                 locate an executable use `command -v <name>` \
+                 (python/python3 are on PATH)."
+            )));
         }
     }
     Ok(())
@@ -81,9 +110,10 @@ fn unquote(token: &str) -> String {
     token.trim_matches(|c| c == '"' || c == '\'').to_string()
 }
 
-/// Identify the real command behind env assignments and wrapper commands.
-/// Returns the basename and whether the invocation recurses.
-fn identify(tokens: &[String]) -> Option<(String, bool)> {
+/// Identify the real command behind env assignments and wrapper commands
+/// (skipping the wrappers' own options and option values). Returns the
+/// basename and the remaining arguments.
+fn identify(tokens: &[String]) -> Option<(String, &[String])> {
     let mut rest = tokens;
     loop {
         match rest.first() {
@@ -97,18 +127,23 @@ fn identify(tokens: &[String]) -> Option<(String, bool)> {
             {
                 rest = &rest[1..];
             }
-            Some(t) if WRAPPERS.contains(&basename(t).as_str()) => rest = &rest[1..],
-            Some(t) => {
-                let name = basename(t);
-                if ALWAYS_RECURSIVE.contains(&name.as_str()) {
-                    return Some((name, true));
+            Some(t) if WRAPPERS.contains(&basename(t).as_str()) => {
+                let value_opts = wrapper_value_opts(&basename(t));
+                rest = &rest[1..];
+                // Skip the wrapper's options; value-taking options consume
+                // the next token too (`env -i find /`, `nice -n 10 du /`).
+                while let Some(opt) = rest.first() {
+                    if !opt.starts_with('-') {
+                        break;
+                    }
+                    let takes_value = value_opts.contains(&opt.as_str());
+                    rest = &rest[1..];
+                    if takes_value && !rest.is_empty() {
+                        rest = &rest[1..];
+                    }
                 }
-                if FLAG_RECURSIVE.contains(&name.as_str()) {
-                    let recursive = rest[1..].iter().any(|arg| is_recursive_flag(arg));
-                    return Some((name, recursive));
-                }
-                return None;
             }
+            Some(t) => return Some((basename(t), &rest[1..])),
             None => return None,
         }
     }
@@ -116,6 +151,13 @@ fn identify(tokens: &[String]) -> Option<(String, bool)> {
 
 fn basename(token: &str) -> String {
     token.rsplit('/').next().unwrap_or(token).to_string()
+}
+
+fn is_recursive(cmd: &str, args: &[String]) -> bool {
+    if ALWAYS_RECURSIVE.contains(&cmd) {
+        return true;
+    }
+    FLAG_RECURSIVE.contains(&cmd) && args.iter().any(|a| is_recursive_flag(a))
 }
 
 fn is_recursive_flag(token: &str) -> bool {
@@ -128,19 +170,93 @@ fn is_recursive_flag(token: &str) -> bool {
         && token[1..].chars().any(|c| c == 'r' || c == 'R')
 }
 
-/// Normalize a token and return the matched blocked root, if any.
-fn blocked_root(token: &str) -> Option<String> {
-    let mut t = token;
-    // Redirections (`2>/dev/null`) and flag values never match: they are
-    // neither bare roots nor start with a root prefix below.
-    while t.len() > 1 && t.ends_with('/') {
-        t = &t[..t.len() - 1];
+/// Extract the scan-root candidates from the argument list. `find`/`tree`/
+/// `du` take paths as leading operands (`find` paths precede the `-expr`);
+/// `rg`/`grep` take PATTERN before the paths, so the first operand is the
+/// pattern and the rest are paths. No operands at all means the command
+/// scans the current directory.
+fn scan_paths<'a>(cmd: &str, args: &'a [String]) -> Vec<&'a str> {
+    let operands: Vec<&str> = match cmd {
+        // find: paths are the tokens before the first `-expression`.
+        "find" => args
+            .iter()
+            .take_while(|a| !a.starts_with('-'))
+            .map(String::as_str)
+            .collect(),
+        _ => args
+            .iter()
+            .filter(|a| !a.starts_with('-'))
+            .map(String::as_str)
+            .collect(),
+    };
+    match cmd {
+        "rg" | "grep" | "egrep" | "fgrep" => operands.into_iter().skip(1).collect(),
+        _ => operands,
     }
-    if BLOCKED_ROOTS.contains(&t) {
-        return Some(t.to_string());
+}
+
+fn is_dot(path: &str) -> bool {
+    matches!(path, "." | "./")
+}
+
+/// Track the shell cwd across `cd` segments; a bare `cd` goes home, a
+/// relative `cd` resolves against the previous tracked cwd (if any).
+fn resolve_cd(prev: Option<&str>, arg: Option<&str>) -> String {
+    let arg = arg.unwrap_or("$HOME");
+    let joined = if arg.starts_with('/') || arg.starts_with('~') || arg.starts_with('$') {
+        arg.to_string()
+    } else if let Some(prev) = prev {
+        format!("{prev}/{arg}")
+    } else {
+        // Relative cd from the (unknown, scoped) job dir: nothing to track.
+        return String::new();
+    };
+    normalize(&joined)
+}
+
+/// Lexically normalize a path: expand `~`/`$HOME`/`${HOME}` to the real
+/// home (kept as the literal `$HOME` marker when HOME is unset), strip
+/// trailing slashes, and resolve `.`/`..` components so `/Users/..`
+/// compares equal to `/`.
+fn normalize(path: &str) -> String {
+    let home = std::env::var("HOME").unwrap_or_else(|_| "$HOME".to_string());
+    let expanded = match path {
+        "~" => home,
+        p if p.starts_with("~/") => format!("{home}/{}", &p[2..]),
+        "$HOME" | "${HOME}" => home,
+        p if p.starts_with("$HOME/") => format!("{home}/{}", &p[6..]),
+        p if p.starts_with("${HOME}/") => format!("{home}/{}", &p[8..]),
+        p => p.to_string(),
+    };
+    let mut parts: Vec<&str> = Vec::new();
+    for part in expanded.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                parts.pop();
+            }
+            p => parts.push(p),
+        }
     }
-    // `~/` or `$HOME/` with nothing after them was handled above; anything
-    // deeper (`~/GitHub`) is a scoped path and allowed.
+    let joined = parts.join("/");
+    if expanded.starts_with('/') {
+        format!("/{joined}")
+    } else {
+        joined
+    }
+}
+
+/// Return the matched blocked root for a normalized path, if any. The
+/// process's own $HOME (e.g. `/Users/alice`, `/root`) is blocked in
+/// addition to the static list; deeper subdirectories stay allowed.
+fn blocked_root(normalized: &str) -> Option<String> {
+    if BLOCKED_ROOTS.contains(&normalized) {
+        return Some(normalized.to_string());
+    }
+    let home = normalize("~");
+    if normalized == home || normalized == "$HOME" {
+        return Some(normalized.to_string());
+    }
     None
 }
 
@@ -168,6 +284,36 @@ mod tests {
         assert!(blocked("rg pattern /Applications"));
         assert!(blocked("du -sh /"));
         assert!(blocked("tree /private"));
+        assert!(blocked("find /home -name x"));
+    }
+
+    #[test]
+    fn blocks_cd_evasion() {
+        assert!(blocked("cd / && find . -name python3"));
+        assert!(blocked("cd /Users && rg pattern ."));
+        assert!(blocked("cd / && cd System && find . -name x"));
+        assert!(blocked("cd /Users/.. && find . -name x"));
+        assert!(blocked("cd /; du -sh"));
+        // A scoped cd followed by a scoped scan stays allowed.
+        assert!(!blocked("cd /usr/local && find . -name python3"));
+        assert!(!blocked("cd / && cd usr/local && find . -name x"));
+    }
+
+    #[test]
+    fn blocks_wrapper_option_evasion() {
+        assert!(blocked("env -i find / -name x"));
+        assert!(blocked("sudo -n find / -name x"));
+        assert!(blocked("nice -n 10 du /"));
+        assert!(blocked("sudo -u root find / -name x"));
+    }
+
+    #[test]
+    fn blocks_expanded_home() {
+        let home = std::env::var("HOME").expect("HOME set in tests");
+        assert!(blocked(&format!("find {home} -name x")));
+        assert!(blocked(&format!("find {home}/ -name x")));
+        // Deeper subdirectories of home stay scoped.
+        assert!(!blocked(&format!("find {home}/GitHub -name x")));
     }
 
     #[test]
