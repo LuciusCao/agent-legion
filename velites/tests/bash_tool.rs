@@ -204,3 +204,42 @@ async fn bash_single_huge_line_keeps_partial_tail() {
     );
     assert!(!text.contains("start"), "head should be dropped: {text}");
 }
+
+#[tokio::test]
+async fn bash_guard_blocks_full_disk_scan() {
+    let dir = tempfile::tempdir().unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "find / -name python3 -type f 2>/dev/null | head"}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(output.is_error, "full-disk scan must be rejected");
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+    assert!(text.contains("blocked by velites guard"), "got: {text}");
+    assert!(
+        text.contains("command -v"),
+        "missing remediation hint: {text}"
+    );
+}
+
+#[tokio::test]
+async fn bash_guard_allows_scoped_find() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("marker.txt"), "x").unwrap();
+    let output = ToolKind::Bash
+        .execute(
+            &serde_json::json!({"command": "find . -name marker.txt"}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error, "scoped find must run");
+    let text = match &output.content[0] {
+        velites::events::ContentBlock::Text { text } => text.clone(),
+        other => panic!("expected text content, got {other:?}"),
+    };
+    assert!(text.contains("marker.txt"), "missing find output: {text}");
+}
