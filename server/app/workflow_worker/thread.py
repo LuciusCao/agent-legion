@@ -20,6 +20,7 @@ from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_
 from server.app.workflow_worker.claim_flush import PreparedClaim, flush_prepared_claims
 from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
+from server.app.workflow_worker.mark_scan import MarkStore
 from server.app.workflow_worker.pass_log import log_pass_end, log_pass_start, pass_logger
 from server.app.workflow_worker.ready import build_ready_queues
 from server.app.workflow_worker.routing import NodeRoute
@@ -61,9 +62,11 @@ class WorkflowWorkerThread:
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
         # Cross-pass caches: parsed workflow definitions by definition hash,
-        # and ready-node evaluations by job id (scan-mark keyed).
+        # and ready-node evaluations by job id (scan-mark keyed). Job marks
+        # themselves live in the MarkStore (watermark delta refresh).
         self._definition_cache: dict[str, WorkflowDefinition | None] = {}
         self._job_evals: dict[str, tuple[tuple[Any, ...], list[Any]]] = {}
+        self._mark_store = MarkStore()
         self._last_ready_stats: dict[str, int] = {"hit": 0, "miss": 0}
         # Short-TTL route cache; see server.app.workflow_worker.routing.
         self._route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
@@ -178,7 +181,7 @@ class WorkflowWorkerThread:
         # of paying it once per job.
         paused: dict[str, bool] = {}
         for definition in self._definitions:
-            for job in self.job_db.list_active_job_marks(definition.key):
+            for job in self._mark_store.refresh(self.job_db, definition.key):
                 if not (workspace_id := job.get("workspace_id")):
                     continue
                 workspace_id = str(workspace_id)

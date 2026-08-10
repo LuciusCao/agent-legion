@@ -691,3 +691,15 @@ invariants:
       - kind: integration
         target: tests/services/test_artifact_store.py
         gate: quick
+
+  - id: DB-SCAN-INCREMENTAL-001
+    statement: "jobs.updated_at is the workflow worker's change signal: every jobs-row mutation that can alter scheduling evaluation (status, execution_paused, execution_mode, target_node_key, workflow_definition_hash) must bump updated_at in the same transaction. The poll pass refreshes its per-workflow mark cache via a watermark delta query (list_changed_job_marks) instead of re-fetching all active marks; the delta lower bound slides with the wall clock minus a fixed overlap window (covering rows that commit slightly out of timestamp order without pinning the bound to a past bulk-enqueue burst), and a periodic full rescan (MarkStore.FULL_RESCAN_SECONDS) reconciles deletions, missed bumps, and transactions open longer than the overlap. Node completions inside a still-running job do not bump updated_at; running jobs are therefore always re-evaluated every pass (also covering pending shards)."
+    owner: workflow-worker
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workers/test_workflow_worker_mark_scan.py
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_worker_ready_queue.py
+        gate: quick

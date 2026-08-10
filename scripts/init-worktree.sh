@@ -14,7 +14,7 @@ cd "$ROOT"
 #    嵌套会让 data/、测试库派生与清理路径全部混乱，直接拒绝。
 MAIN="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
 if [[ "$ROOT" != "$MAIN" && "$(dirname "$ROOT")" != "$MAIN/.worktrees" ]]; then
-    echo "错误: worktree 禁止嵌套（当前: $ROOT）。" >&2
+    echo "错误: worktree 禁止嵌套（当前: ${ROOT}）。" >&2
     echo "请先 cd 到主仓库根（$MAIN），再 git worktree add .worktrees/<name> -b <branch> <base>。" >&2
     exit 1
 fi
@@ -101,7 +101,7 @@ if [[ ! -f config/agent-worker.yaml ]]; then
         sed -i '' -E "s|^worker_id:.*|worker_id: ${NAME}|" config/agent-worker.yaml
         sed -i '' -E "s|^name:.*|name: ${NAME} (worktree)|" config/agent-worker.yaml
         sed -i '' -E "s|^register_token_file:.*|register_token_file: ${ROOT}/deploy/secrets/agent_worker_register_token|" config/agent-worker.yaml
-        echo "已生成 config/agent-worker.yaml <- $BASE（host_url/worker_id/name/register_token_file 已改写）"
+        echo "已生成 config/agent-worker.yaml <- ${BASE}（host_url/worker_id/name/register_token_file 已改写）"
     else
         echo "提示: 基准 worktree 无 config/agent-worker.yaml，跳过 worker 配置种子" >&2
     fi
