@@ -74,7 +74,7 @@ def test_stop_tolerates_corrupt_config(tmp_path: Path) -> None:
 def test_stop_reaps_orphaned_agent_process_groups(tmp_path: Path) -> None:
     supervisor, work_root = _make_supervisor(tmp_path)
     orphan = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
+        [sys.executable, "-c", "import time; time.sleep(60)  # agent-legion-exec-orphan"],
         start_new_session=True,
     )
     record_dir = work_root / "exec-orphan"
@@ -107,7 +107,7 @@ def test_crash_exit_reaps_orphaned_agent_groups(
     supervisor.start()
     wait_for_predicate(lambda: supervisor.running())
     orphan = subprocess.Popen(
-        [sys.executable, "-c", "import time; time.sleep(60)"],
+        [sys.executable, "-c", "import time; time.sleep(60)  # agent-legion-exec-orphan"],
         start_new_session=True,
     )
     record_dir = work_root / "exec-orphan"

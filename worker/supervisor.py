@@ -17,7 +17,7 @@ from yaml import YAMLError
 
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.metrics_cache import METRICS_FILENAME
-from worker.process_lifecycle import reap_orphaned_agents
+from worker.orphan_reaper import reap_orphaned_agents
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
 from worker.status_aggregates import execution_counts
 
