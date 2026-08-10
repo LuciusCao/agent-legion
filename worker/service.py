@@ -24,7 +24,7 @@ from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 logger = logging.getLogger(__name__)
 
 
-_HOT_CONFIG_FIELDS = {"claim_enabled", "max_concurrency"}
+_HOT_CONFIG_FIELDS = {"claim_enabled", "max_concurrency", "upload_max_concurrency"}
 
 
 def _public_config_response(store: WorkerConfigStore, config: dict[str, Any]) -> dict[str, Any]:

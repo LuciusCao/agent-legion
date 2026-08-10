@@ -26,3 +26,6 @@ def write_neutral_budget_governance(root: Path) -> None:
     (config / "sql-placeholders-baseline.json").write_text(
         '{\n  "version": 1,\n  "files": {}\n}\n', encoding="utf-8"
     )
+    (config / "test-root-files-baseline.json").write_text(
+        '{\n  "version": 1,\n  "files": []\n}\n', encoding="utf-8"
+    )

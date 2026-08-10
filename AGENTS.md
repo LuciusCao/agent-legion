@@ -61,8 +61,9 @@
   CI 与 `./scripts/check.sh` 强制）。多 worktree 并行时用 `AGENT_LEGION_TEST_WORKERS`
   限制 pytest worker 数（默认 `-n auto` 吃满所有核）。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增
-  `tests/` 根目录文件；确定不碰数据库的纯静态测试可加 `@pytest.mark.no_db` 跳过
-  TRUNCATE 隔离。
+  `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线
+  `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加
+  `@pytest.mark.no_db` 跳过 TRUNCATE 隔离。
 
 ## 5. Architecture Governance
 
@@ -122,6 +123,9 @@
   覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
   只允许一个 published Agent（DB partial unique index 兜底）。测试的 Agent
   目录由 `tests/conftest.py` 经 AgentService 播种，不从 yaml sync。
+- 多步变更必须先全部校验/备妥再统一应用：中间结果放临时变量，全部成功后
+  一次性赋值生效，禁止半应用状态；跨进程/跨事务动作（killpg、目录迁移、
+  重排队）前必须重新校验目标身份与状态。这是代码评审最高发的缺陷族。
 
 典型反例：
 
