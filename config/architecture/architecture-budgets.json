@@ -544,6 +544,7 @@
     "scripts/architecture/video_legacy.py": 124,
     "scripts/architecture/workflow.py": 54,
     "scripts/architecture/workspace_boundaries.py": 215,
+    "scripts/backfill_comprehension_ids.py": 314,
     "scripts/backfill_failure_classification.py": 91,
     "scripts/backfill_worker_output_validation.py": 302,
     "scripts/backfill_workflow_revision_resources.py": 108,
