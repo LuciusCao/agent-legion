@@ -83,6 +83,12 @@ def apply_run_to(
         """,
         (job_id, *sorted(closure)),
     )
+    # 已入队的 queued agent 请求不复查上游，重置节点前必须取消（见 mark_nodes_for_rerun）。
+    conn.execute(
+        "update agent_execution_requests set state='cancelled', finished_at=current_timestamp"
+        f" where job_id=%s and node_key in ({placeholders}) and state='queued'",
+        (job_id, *sorted(closure)),
+    )
     delete_shards(conn, job_id, closure)
     set_run_to_control(conn, job_id, target_node_key)
 
@@ -151,6 +157,15 @@ def mark_nodes_for_rerun(
             """,
             (job_id, descendant),
         )
+    # rerun 前合法入队的 queued agent 请求在 claim 侧只复查节点自身状态
+    # （stale 会放行），不复查上游；rerun 又已删除下游产出，不取消就会在
+    # 输入未重生成前抢跑（generate_possible_errors 缺输入失败事故）。
+    # claimed/reporting 的请求持有 active lease，lease_guarded_mutation 已拦。
+    conn.execute(
+        "update agent_execution_requests set state='cancelled', finished_at=current_timestamp"
+        f" where job_id=%s and node_key in ({placeholders}) and state='queued'",
+        (job_id, *sorted(affected_nodes)),
+    )
     conn.execute(
         """
         update jobs
