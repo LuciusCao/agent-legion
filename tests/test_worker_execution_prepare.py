@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+import hashlib
 import threading
 from pathlib import Path
+
+import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker.execution_prepare import prepare_execution
@@ -55,3 +58,80 @@ def test_prepare_execution_substitutes_prompt_placeholders(tmp_path: Path) -> No
     assert "{skill_dir}" not in prompt
     assert f"Working directory: {execution_dir}/job" in prompt
     assert f"Skill directory: {execution_dir}/bundle/skill" in prompt
+
+
+class ArtifactClient:
+    """Serves the bundle plus per-digest artifact payloads."""
+
+    def __init__(self, bundle: Path, artifacts: dict[str, bytes]) -> None:
+        self._bundle = bundle
+        self._artifacts = artifacts
+
+    def download(self, path: str, destination: Path) -> None:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if path.startswith("/api/artifacts/"):
+            destination.write_bytes(self._artifacts[path.rsplit("/", 1)[-1]])
+        else:
+            destination.write_bytes(self._bundle.read_bytes())
+
+
+def _manifest(input_artifacts: dict[str, str]) -> dict:
+    return {
+        "command_spec": {"command": ["pi"], "prompt": "hi"},
+        "input_artifacts": input_artifacts,
+        "expected_outputs": [],
+        "execution": {"timeout_seconds": 60},
+    }
+
+
+def _claim() -> dict:
+    return {
+        "execution_id": "exec-1",
+        "lease_id": "lease-1",
+        "node_key": "node_a",
+        "bundle_url": "/api/agent-executions/exec-1/bundle",
+    }
+
+
+@pytest.mark.parametrize("bad_name", ["../escape.txt", "a/../../escape.txt", "/etc/passwd"])
+def test_prepare_execution_rejects_unsafe_artifact_names(tmp_path: Path, bad_name: str) -> None:
+    digest = hashlib.sha256(b"payload").hexdigest()
+    bundle = _make_bundle(tmp_path, _manifest({bad_name: f"sha256:{digest}"}))
+
+    with pytest.raises(ValueError, match="unsafe input artifact name"):
+        prepare_execution(
+            ArtifactClient(bundle, {digest: b"payload"}),
+            _claim(),
+            tmp_path / "exec-1",
+            threading.Semaphore(1),
+        )
+
+    assert not (tmp_path / "escape.txt").exists()
+
+
+def test_prepare_execution_verifies_artifact_digest(tmp_path: Path) -> None:
+    payload = b"x" * (2 << 20)  # 大于 1MB 分块，覆盖流式 sha256
+    digest = hashlib.sha256(payload).hexdigest()
+    bundle = _make_bundle(tmp_path, _manifest({"inputs/data.bin": f"sha256:{digest}"}))
+    execution_dir = tmp_path / "exec-1"
+
+    prepare_execution(
+        ArtifactClient(bundle, {digest: payload}),
+        _claim(),
+        execution_dir,
+        threading.Semaphore(1),
+    )
+
+    assert (execution_dir / "job" / "inputs" / "data.bin").read_bytes() == payload
+
+
+def test_prepare_execution_rejects_digest_mismatch(tmp_path: Path) -> None:
+    bundle = _make_bundle(tmp_path, _manifest({"data.bin": f"sha256:{'0' * 64}"}))
+
+    with pytest.raises(RuntimeError, match="artifact digest mismatch"):
+        prepare_execution(
+            ArtifactClient(bundle, {"0" * 64: b"tampered"}),
+            _claim(),
+            tmp_path / "exec-1",
+            threading.Semaphore(1),
+        )

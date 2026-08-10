@@ -161,8 +161,12 @@ class WorkerConfigStore:
             if registration_token is not None:
                 token = normalized_registration_token(registration_token)
                 token_path = self.state_dir / "register_token"
-                atomic_write(token_path, token + "\n", mode=0o600)
                 updated["register_token_file"] = str(token_path)
+                # yaml 先于 token 落盘：中间崩溃留下的是「引用了缺失 token」的可见
+                # 状态（启动日志提示、重新配置即可恢复），而不是无人引用的孤儿 token。
+                self.write(updated)
+                atomic_write(token_path, token + "\n", mode=0o600)
+                return updated
             self.write(updated)
             return updated
 
