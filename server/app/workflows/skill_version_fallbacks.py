@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
+
+logger = logging.getLogger(__name__)
 
 UNAVAILABLE_SKILL_VERSION = "unavailable"
 
@@ -34,6 +37,7 @@ def job_node_fallbacks(job_id: str, job_db: Any) -> dict[str, str]:
     try:
         nodes = job_db.list_job_nodes(job_id)
     except Exception:
+        logger.debug("list_job_nodes failed for job %s", job_id, exc_info=True)
         return {}
     return {
         str(node["node_key"]): UNAVAILABLE_SKILL_VERSION for node in nodes if node.get("node_key")

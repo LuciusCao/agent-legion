@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from dataclasses import asdict
 from typing import Any, cast
 
 import yaml
 
 from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
+
+logger = logging.getLogger(__name__)
 
 
 def serialize_definition(definition: WorkflowDefinition) -> str:
@@ -20,6 +23,12 @@ def definition_hash(definition_json: str) -> str:
 
 
 def definition_from_job_snapshot(job: dict) -> WorkflowDefinition | None:
+    """Intake-frozen definition; ``None`` = no snapshot (legacy) or corrupt.
+
+    Known risk: a corrupt snapshot also falls back to the *current* definition
+    at every caller (kept for read-path compatibility); the warning is the
+    tripwire for that case.
+    """
     raw = job.get("workflow_definition_snapshot_json") or ""
     if not raw:
         return None
@@ -27,6 +36,7 @@ def definition_from_job_snapshot(job: dict) -> WorkflowDefinition | None:
         payload = json.loads(str(raw))
         return workflow_definition_from_dict(payload)
     except Exception:
+        logger.warning("Corrupt workflow snapshot for job %s", job.get("id"), exc_info=True)
         return None
 
 

@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 def _git_env() -> dict[str, str]:
@@ -37,4 +40,5 @@ def resolve_skill_version(skill_dir: Path) -> str:
             return f"{tag.stdout.strip()}@{commit}"
         return commit
     except Exception:
+        logger.debug("failed to resolve skill version in %s", skill_dir, exc_info=True)
         return ""

@@ -1,7 +1,7 @@
 import json
 import zipfile
 
-from server.app.pipeline.package import create_workspace_package
+from server.app.pipeline.workspace_package import create_workspace_package
 
 
 def test_create_workspace_package_includes_manifest_and_artifacts(tmp_path):
