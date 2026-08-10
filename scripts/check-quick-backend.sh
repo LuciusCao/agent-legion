@@ -35,6 +35,20 @@ run_static_checks() {
 }
 
 run_tests() {
+  # worker/ui is a no-build static console; its pure-function tests run on
+  # the backend lane (worker belongs to backend semantics) via Node's
+  # built-in runner. Skip with a notice when node is absent — or when the
+  # test file is missing (gate-script tests run this script inside fixture
+  # repos that only contain a copy of the script itself).
+  if ! command -v node >/dev/null 2>&1; then
+    echo "node not found; skipping worker/ui tests (install Node.js to enable them)."
+  elif [[ ! -f "$ROOT_DIR/worker/ui/app.test.mjs" ]]; then
+    echo "worker/ui/app.test.mjs not present; skipping worker/ui tests."
+  else
+    echo "=== Worker UI Tests (node --test) ==="
+    node --test "$ROOT_DIR/worker/ui/app.test.mjs"
+  fi
+
   # GATE_TIER=smoke runs the curated fast subset (membership lives in
   # tests/conftest.py) without coverage — the 85% coverage floor only makes
   # sense for the full suite, which remains the CI boundary. GATE_TIER=unit
