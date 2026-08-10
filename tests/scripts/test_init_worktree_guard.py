@@ -35,6 +35,7 @@ exit 1
 """
 
 _UV_STUB = """#!/usr/bin/env bash
+echo "AGENT_LEGION_DATABASE_URL=${AGENT_LEGION_DATABASE_URL-<unset>}" >> "${STUB_LOG:-/dev/null}"
 echo "stub-vault-master-key"
 """
 
@@ -57,8 +58,13 @@ def _setup(tmp_path: Path, script_rel: str) -> tuple[Path, Path]:
     return main, bin_dir
 
 
-def _run(script_path: Path, bin_dir: Path) -> subprocess.CompletedProcess[str]:
+def _run(
+    script_path: Path,
+    bin_dir: Path,
+    extra_env: dict[str, str] | None = None,
+) -> subprocess.CompletedProcess[str]:
     env = {"PATH": f"{bin_dir}:/usr/bin:/bin", "HOME": os.environ.get("HOME", "")}
+    env.update(extra_env or {})
     return subprocess.run(
         ["bash", str(script_path)],
         capture_output=True,
@@ -124,15 +130,67 @@ def test_worker_config_seeded_from_base_with_rewritten_identity(tmp_path: Path) 
         "host_url: http://127.0.0.1:8000\n"
         "worker_id: base-worker\n"
         "name: Base Worker\n"
-        "runtimes: [velites]\n",
+        "runtimes: [velites]\n"
+        "register_token_file: /run/secrets/agent_worker_register_token\n",
         encoding="utf-8",
     )
 
     result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
 
     assert result.returncode == 0, result.stderr
-    config = (main / ".worktrees/flat/config/agent-worker.yaml").read_text()
+    worktree = main / ".worktrees/flat"
+    config = (worktree / "config/agent-worker.yaml").read_text()
     assert "host_url: http://127.0.0.1:8001" in config
     assert "worker_id: flat" in config
     assert "name: flat (worktree)" in config
     assert "runtimes: [velites]" in config
+    # 容器路径 /run/secrets/... 必须改写为本 worktree 生成的本地密钥文件。
+    assert "/run/secrets" not in config
+    assert f"register_token_file: {worktree}/deploy/secrets/agent_worker_register_token" in config
+
+
+def test_worker_config_host_url_uses_dev_backend_port(tmp_path: Path) -> None:
+    """host_url 端口跟随 DEV_BACKEND_PORT（与 make dev-backend 一致）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    (develop / "config").mkdir()
+    (develop / "config" / "agent-worker.yaml").write_text(
+        "host_url: http://127.0.0.1:8000\n",
+        encoding="utf-8",
+    )
+
+    result = _run(
+        main / ".worktrees/flat/scripts/init-worktree.sh",
+        bin_dir,
+        extra_env={"DEV_BACKEND_PORT": "8010"},
+    )
+
+    assert result.returncode == 0, result.stderr
+    config = (main / ".worktrees/flat/config/agent-worker.yaml").read_text()
+    assert "host_url: http://127.0.0.1:8010" in config
+
+
+def test_resume_uses_worktree_database_url_not_inherited_env(tmp_path: Path) -> None:
+    """workspace 恢复子进程必须用本 worktree 的专属 URL，而不是调用 shell
+    已导出的 AGENT_LEGION_DATABASE_URL（load_dotenv override=False 会保留它）。"""
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+    stub_log = tmp_path / "uv-env.log"
+
+    result = _run(
+        main / ".worktrees/flat/scripts/init-worktree.sh",
+        bin_dir,
+        extra_env={
+            "AGENT_LEGION_DATABASE_URL": "postgresql://127.0.0.1:5432/agent_legion_base",
+            "STUB_LOG": str(stub_log),
+        },
+    )
+
+    assert result.returncode == 0, result.stderr
+    logged = stub_log.read_text().splitlines()
+    # 最后一次 uv 调用是 workspace 恢复子进程，必须携带新 worktree 的专属 URL。
+    assert logged[-1] == ("AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat")
