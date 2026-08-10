@@ -22,7 +22,8 @@ use crate::events::Message;
 pub type OnAttemptFailed = Box<dyn Fn(u32, u32, Duration, &ProviderError) + Send + Sync>;
 
 /// Retries `ProviderError::is_retryable()` failures with exponential backoff
-/// (`base_delay * 2^attempt`), up to `max_retries` extra attempts.
+/// ([`backoff_delay`]: `base_delay * 2^attempt`, saturating), up to
+/// `max_retries` extra attempts.
 pub struct RetryProvider<P> {
     inner: P,
     max_retries: u32,
@@ -49,6 +50,15 @@ impl<P> RetryProvider<P> {
     }
 }
 
+/// Backoff for one failed attempt: `base * 2^attempt`, saturating at both
+/// steps. A large `--max-retries` (e.g. 40) would otherwise overflow
+/// `2u32.pow(attempt)` — a debug panic, or a release wrap to a zero-delay
+/// hot retry loop.
+fn backoff_delay(base: Duration, attempt: u32) -> Duration {
+    base.checked_mul(2u32.saturating_pow(attempt))
+        .unwrap_or(Duration::MAX)
+}
+
 impl<P: Provider> Provider for RetryProvider<P> {
     async fn complete(&self, req: &CompletionRequest<'_>) -> Result<Message, ProviderError> {
         let mut attempt: u32 = 0;
@@ -56,7 +66,7 @@ impl<P: Provider> Provider for RetryProvider<P> {
             match self.inner.complete(req).await {
                 Ok(message) => return Ok(message),
                 Err(err) if err.is_retryable() && attempt < self.max_retries => {
-                    let delay = self.base_delay * 2u32.pow(attempt);
+                    let delay = backoff_delay(self.base_delay, attempt);
                     attempt += 1;
                     eprintln!(
                         "velites: transient provider error (attempt {attempt}/{}), retrying in {}ms: {err}",
@@ -107,6 +117,30 @@ mod tests {
             tools: &[],
             thinking: None,
         }
+    }
+
+    #[test]
+    fn backoff_delay_saturates_instead_of_overflowing() {
+        assert_eq!(
+            backoff_delay(Duration::from_secs(1), 0),
+            Duration::from_secs(1)
+        );
+        assert_eq!(
+            backoff_delay(Duration::from_secs(1), 3),
+            Duration::from_secs(8)
+        );
+        // 2^40 overflows u32: unsaturated this is a debug panic / a release
+        // wrap to a zero-delay hot retry loop.
+        let delay = backoff_delay(Duration::from_secs(1), 40);
+        assert!(
+            delay >= Duration::from_secs(1),
+            "never a zero delay: {delay:?}"
+        );
+        // An absurd base saturates to Duration::MAX instead of wrapping.
+        assert_eq!(
+            backoff_delay(Duration::from_secs(u64::MAX), 1),
+            Duration::MAX
+        );
     }
 
     #[tokio::test]
