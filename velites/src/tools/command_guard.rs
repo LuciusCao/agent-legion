@@ -18,15 +18,25 @@
 //! via-option forms (`rg --files /`, `grep --regexp=x /`), `cd`-tracked
 //! relative paths (`cd / && find ./System`), wrapper commands and their
 //! options (sudo/env/nice/timeout/nohup/setsid/stdbuf/xargs), nested shells
-//! (`bash -c '…'`, `eval`), shell variable indirection (`D=/; find $D`), and
-//! globs with broad literal prefixes (`find /*`).
+//! (`bash -c '…'`, including combined short-option clusters like
+//! `bash -xc '…'`, and `eval`), shell variable indirection (`D=/; find $D`,
+//! including assignment builtins `export`/`readonly`/`declare`/`typeset`/
+//! `local`), parameter-expansion defaults (`find ${X:-/}`), GNU coreutils
+//! with the Homebrew `g` prefix (`gfind`/`ggrep`/`gdu`), `fd` (recursive by
+//! default; its first operand is the pattern), and globs with broad literal
+//! prefixes (`find /*`).
 //!
 //! Known gaps (accepted, documented): brace-expansion paths (`find {/,/usr}`),
 //! `{ …; }` command groups, `if/then` keyword syntax, function definitions,
 //! `pushd`/`builtin cd`, ANSI-C quoting (`$'/'`), xargs stdin-fed paths
 //! (`echo / | xargs find`), and case variants on case-insensitive filesystems.
-//! Pipe-segment `cd` (`cd / | find .`) is over-blocked on purpose (the real
-//! shell runs it in a subshell; blocking err toward safety).
+//! `cd` targets are normalized LEXICALLY, never canonicalized: a symlink
+//! whose target is a broad root (`ln -s / tmp/link; cd tmp/link && find .`)
+//! slips through. `eval`/nested-shell recursion has no depth cap: absurdly
+//! deep nesting could overflow the stack (input size makes this impractical
+//! for a real model to hit). Pipe-segment `cd` (`cd / | find .`) is
+//! over-blocked on purpose (the real shell runs it in a subshell; blocking
+//! err toward safety).
 
 use std::collections::HashMap;
 
@@ -48,9 +58,15 @@ const BLOCKED_ROOTS: &[&str] = &[
 ];
 
 /// Commands that recurse by default; any blocked-root argument triggers.
-const ALWAYS_RECURSIVE: &[&str] = &["find", "rg", "tree", "du"];
+/// `gfind`/`gdu` are GNU coreutils under their Homebrew `g` prefix; `fd`
+/// recurses from its path operand by default.
+const ALWAYS_RECURSIVE: &[&str] = &["find", "gfind", "fd", "rg", "tree", "du", "gdu"];
 /// Commands that recurse only with -r/-R/--recursive.
-const FLAG_RECURSIVE: &[&str] = &["grep", "egrep", "fgrep", "ls"];
+const FLAG_RECURSIVE: &[&str] = &["grep", "egrep", "fgrep", "ggrep", "ls"];
+/// Builtins whose `VAR=value` arguments assign shell variables: their
+/// assignment arguments feed the same variable table as pure-assignment
+/// segments (`export R=/; find $R` must record R).
+const ASSIGNMENT_BUILTINS: &[&str] = &["export", "readonly", "declare", "typeset", "local"];
 /// Leading wrapper tokens skipped when identifying the real command.
 /// `timeout` is handled specially (it takes a duration positional).
 const WRAPPERS: &[&str] = &[
@@ -96,6 +112,22 @@ fn check_inner(command: &str, vars: &mut HashMap<String, String>) -> Result<(), 
             }
             continue;
         }
+        // Assignment builtins (`export R=/; find $R`): their `VAR=value`
+        // arguments enter the same variable table. Non-assignment arguments
+        // (flags, names) carry no value; the builtin itself never scans.
+        if tokens
+            .first()
+            .is_some_and(|t| ASSIGNMENT_BUILTINS.contains(&t.as_str()))
+        {
+            for token in &tokens[1..] {
+                if is_assignment(token) {
+                    if let Some((name, value)) = token.split_once('=') {
+                        vars.insert(name.to_string(), value.to_string());
+                    }
+                }
+            }
+            continue;
+        }
         let Some((cmd, args)) = identify(&tokens) else {
             continue;
         };
@@ -111,7 +143,7 @@ fn check_inner(command: &str, vars: &mut HashMap<String, String>) -> Result<(), 
         }
         // Nested shells and eval: recurse into the inner command text.
         if SHELLS.contains(&cmd.as_str()) {
-            if let Some(pos) = args.iter().position(|a| a == "-c") {
+            if let Some(pos) = args.iter().position(|a| is_shell_command_flag(a)) {
                 if pos + 1 < args.len() {
                     check_inner(&args[pos + 1..].join(" "), vars)?;
                 }
@@ -332,6 +364,14 @@ fn is_recursive_flag(token: &str) -> bool {
         && token[1..].chars().any(|c| c == 'r' || c == 'R')
 }
 
+/// `-c` and combined short-option clusters containing it (`-xc`, `-ec`,
+/// `-lc`): real shells accept the cluster and take the NEXT token as the
+/// command string. Long options are not a shell `-c` form and stay
+/// unrecognized.
+fn is_shell_command_flag(token: &str) -> bool {
+    token.starts_with('-') && !token.starts_with("--") && token[1..].contains('c')
+}
+
 /// Extract the scan-root candidates from the argument list. `find` takes
 /// paths after its leading global options and before the `-expression`;
 /// `rg`/`grep` take PATTERN before the paths unless the pattern/listing
@@ -339,7 +379,7 @@ fn is_recursive_flag(token: &str) -> bool {
 /// case every operand is a path candidate. No operands at all means the
 /// command scans the current directory.
 fn scan_paths<'a>(cmd: &str, args: &'a [String]) -> Vec<&'a str> {
-    if cmd == "find" {
+    if cmd == "find" || cmd == "gfind" {
         // GNU and BSD find both accept global options before the paths
         // (`find -L / -name x`); BSD `-f` carries a path as its value.
         // Anything else starting with `-` opens the expression and ends the
@@ -374,7 +414,9 @@ fn scan_paths<'a>(cmd: &str, args: &'a [String]) -> Vec<&'a str> {
         .map(String::as_str)
         .collect();
     match cmd {
-        "rg" | "grep" | "egrep" | "fgrep" => grep_paths(args),
+        "rg" | "grep" | "egrep" | "fgrep" | "ggrep" => grep_paths(args),
+        // `fd PATTERN [path]…`: the first operand is the pattern, not a path.
+        "fd" => operands.into_iter().skip(1).collect(),
         _ => operands,
     }
 }
@@ -429,26 +471,57 @@ fn is_dot(path: &str) -> bool {
     matches!(path, "." | "./")
 }
 
-/// Expand a leading `$VAR`/`${VAR}` from earlier pure-assignment segments.
-/// Unknown variables (e.g. `$HOME`) pass through for `normalize` to handle.
+/// Expand a leading `$VAR`/`${VAR}` from earlier assignment segments.
+/// Unknown plain variables (e.g. `$HOME`) pass through for `normalize` to
+/// handle. An unknown variable WITH a default/alternative expansion op
+/// (`${X:-/}`, `${X-default}`, `${X:=…}`, `${X+…}`) is expanded with that
+/// word instead: the real shell substitutes it when X is unset, and passing
+/// the raw `$…` token through would let the path slip past `flagged_path`
+/// (fail-safe direction).
 fn expand_vars(token: &str, vars: &HashMap<String, String>) -> String {
-    let (name, rest) = if let Some(r) = token.strip_prefix("${") {
-        match r.split_once('}') {
-            Some((n, r)) => (n, r),
-            None => return token.to_string(),
+    if let Some(r) = token.strip_prefix("${") {
+        let Some((inner, rest)) = r.split_once('}') else {
+            return token.to_string();
+        };
+        // Split the variable name off the expansion operator (`:-/`, `=x`, …).
+        let name_end = inner
+            .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+            .unwrap_or(inner.len());
+        let (name, op) = inner.split_at(name_end);
+        if let Some(value) = vars.get(name) {
+            return format!("{value}{rest}");
         }
-    } else if let Some(r) = token.strip_prefix('$') {
+        if let Some(word) = expansion_default_word(op) {
+            return format!("{word}{rest}");
+        }
+        return token.to_string();
+    }
+    if let Some(r) = token.strip_prefix('$') {
         let end = r
             .find(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
             .unwrap_or(r.len());
-        (&r[..end], &r[end..])
-    } else {
-        return token.to_string();
-    };
-    match vars.get(name) {
-        Some(value) => format!("{value}{rest}"),
-        None => token.to_string(),
+        let (name, rest) = (&r[..end], &r[end..]);
+        return match vars.get(name) {
+            Some(value) => format!("{value}{rest}"),
+            None => token.to_string(),
+        };
     }
+    token.to_string()
+}
+
+/// The word a `${VAR<op>word}` expansion can substitute: `:-`/`-`/`:=`/`=`
+/// (default when VAR is unset) and `:+`/`+` (alternative when VAR is SET —
+/// fail-safe judges the path with it either way). Other operators (`:?`,
+/// `${#…}`, …) have no path-shaped word: the token is kept as-is.
+fn expansion_default_word(op: &str) -> Option<&str> {
+    // Two-character operators must be tried before their one-character
+    // prefixes.
+    for prefix in [":-", ":=", ":+", "-", "=", "+"] {
+        if let Some(word) = op.strip_prefix(prefix) {
+            return Some(word);
+        }
+    }
+    None
 }
 
 /// A relative scan path is judged against the tracked cwd (`cd / && find
@@ -664,6 +737,80 @@ mod tests {
         assert!(blocked("D=/; find $D -name x"));
         assert!(blocked("D=/System; find ${D} -name x"));
         assert!(blocked("D=/Users; find ${D}/.. -name x"));
+    }
+
+    #[test]
+    fn blocks_assignment_builtin_indirection() {
+        // The first token of an assignment-builtin segment is not a
+        // `VAR=value` form; its assignment arguments must still be recorded.
+        assert!(blocked("export R=/; find $R -name x"));
+        assert!(blocked("export R=/System; find ${R} -name x"));
+        assert!(blocked("readonly R=/Users; find $R -name x"));
+        assert!(blocked("declare R=/; find $R -name x"));
+        assert!(blocked("declare -x R=/; find $R -name x"));
+        assert!(blocked("typeset R=/; find $R -name x"));
+        assert!(blocked("local R=/; find $R -name x"));
+        // Normal use stays allowed.
+        assert!(!blocked("export FOO=bar; echo $FOO"));
+        assert!(!blocked("export EDITOR=vi PAGER=less; echo done"));
+        assert!(!blocked("declare -x FOO=bar; echo $FOO"));
+    }
+
+    #[test]
+    fn blocks_shell_short_option_cluster() {
+        // Real shells accept combined short-option clusters; `-c` inside one
+        // still takes the next token as the command string.
+        assert!(blocked("bash -xc 'find /'"));
+        assert!(blocked("bash -ec 'find /System'"));
+        assert!(blocked("bash -lc 'find /'"));
+        assert!(blocked("sh -xc 'find /Users'"));
+        assert!(blocked("zsh -ec 'du -sh /'"));
+        // Plain `-c` keeps working.
+        assert!(blocked("bash -c 'find /'"));
+        // Normal use stays allowed.
+        assert!(!blocked("bash -c 'echo hi'"));
+        assert!(!blocked("bash -xc 'echo hi'"));
+        assert!(!blocked("bash -x script.sh"));
+        assert!(!blocked("bash --norc -c 'echo hi'"));
+        assert!(!blocked("sh -c 'find . -name x'"));
+    }
+
+    #[test]
+    fn blocks_parameter_expansion_defaults() {
+        // Unset variable + default/alternative word: the shell substitutes
+        // the word, so the guard must judge the path with it applied.
+        assert!(blocked("find ${X:-/} -name x"));
+        assert!(blocked("find ${X:=/System} -name x"));
+        assert!(blocked("find ${X-/Users} -name x"));
+        assert!(blocked("find ${X=/Library} -name x"));
+        assert!(blocked("find ${X+/} -name x"));
+        assert!(blocked("find ${X:+/Applications} -name x"));
+        // An explicitly assigned variable still wins over the default.
+        assert!(blocked("X=/; find ${X:-/usr} -name x"));
+        // Normal default-expansion use stays allowed.
+        assert!(!blocked("${EDITOR:-vi} file.txt"));
+        assert!(!blocked("echo ${X:-/}"));
+        assert!(!blocked("find ${X:-.} -name x"));
+        assert!(!blocked("find ${X:-/usr/local} -name x"));
+    }
+
+    #[test]
+    fn blocks_fd_and_gnu_g_prefixed_scans() {
+        // `fd` recurses by default; GNU coreutils carry a `g` prefix under
+        // Homebrew on macOS.
+        assert!(blocked("fd pattern /"));
+        assert!(blocked("fd . /System"));
+        assert!(blocked("gfind / -name x"));
+        assert!(blocked("gfind -L /Users -name x"));
+        assert!(blocked("ggrep -r foo /Library"));
+        assert!(blocked("gdu -sh /"));
+        // Scoped use stays allowed: fd's first operand is the pattern.
+        assert!(!blocked("fd pattern ."));
+        assert!(!blocked("fd '^foo' src"));
+        assert!(!blocked("fd /")); // pattern "/", scan root is the cwd
+        assert!(!blocked("gfind . -name x"));
+        assert!(!blocked("ggrep -r foo ."));
+        assert!(!blocked("gdu -sh ./data"));
     }
 
     #[test]

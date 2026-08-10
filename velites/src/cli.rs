@@ -59,8 +59,10 @@ pub struct Cli {
     #[arg(long, default_value_t = 3)]
     pub max_retries: u32,
 
-    /// Wall-clock bound for the whole run, in seconds. Also caps each
-    /// provider HTTP request. When the deadline (or any other budget) runs
+    /// Wall-clock bound for the whole run, in seconds. Does NOT cap
+    /// individual provider HTTP requests — long generations stream for many
+    /// minutes; per-request bounds live in the provider's connect/idle
+    /// timeouts (design §7). When the deadline (or any other budget) runs
     /// out, the model gets one wrap-up turn before the run ends with
     /// `agent_end{reason: "budget_exceeded"}`. The default matches the
     /// gateway's long-generation scenarios (design §7).
