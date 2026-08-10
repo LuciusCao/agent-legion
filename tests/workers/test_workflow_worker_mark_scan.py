@@ -138,6 +138,38 @@ def test_store_keeps_newest_first_order_after_delta(tmp_path: Path) -> None:
     assert [mark["id"] for mark in marks][0] == new_id
 
 
+def test_store_keeps_paused_and_recovers_on_resume(tmp_path: Path) -> None:
+    """paused is not terminal: the mark stays cached (downstream is_runnable
+    filters it), and a resume bumps updated_at so the delta re-admits it."""
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Mark Scan WS")
+    (job_id,) = _make_jobs(job_db, ws["id"], 1)
+    store = MarkStore()
+    assert [mark["id"] for mark in store.refresh(job_db, "test")] == [job_id]
+
+    job_db.update_job_status(job_id, "paused")
+    marks = store.refresh(job_db, "test")
+    assert [(mark["id"], mark["status"]) for mark in marks] == [(job_id, "paused")]
+
+    job_db.update_job_status(job_id, "queued")
+    marks = store.refresh(job_db, "test")
+    assert [(mark["id"], mark["status"]) for mark in marks] == [(job_id, "queued")]
+
+
+def test_store_readmits_rerun_job(tmp_path: Path) -> None:
+    """failed -> queued (rerun) must bring the job back via the delta."""
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Mark Scan WS")
+    (job_id,) = _make_jobs(job_db, ws["id"], 1)
+    store = MarkStore()
+    store.refresh(job_db, "test")
+
+    job_db.update_job_status(job_id, "failed")
+    assert store.refresh(job_db, "test") == []
+    job_db.update_job_status(job_id, "queued")
+    assert [mark["id"] for mark in store.refresh(job_db, "test")] == [job_id]
+
+
 def test_store_burst_does_not_pin_delta_lower_bound(tmp_path: Path) -> None:
     """Rows sharing one bulk-insert commit timestamp must not be re-fetched
     on every pass once the overlap window has slid past the burst."""

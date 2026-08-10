@@ -722,7 +722,7 @@
     "server/app/jobs/queries/job_nodes.py": 335,
     "server/app/jobs/queries/job_pagination.py": 41,
     "server/app/jobs/queries/job_rerun_states.py": 62,
-    "server/app/jobs/queries/job_scan_delta.py": 26,
+    "server/app/jobs/queries/job_scan_delta.py": 34,
     "server/app/jobs/queries/job_scan_marks.py": 44,
     "server/app/jobs/queries/status.py": 45,
     "server/app/jobs/queries/workflow_revisions.py": 95,
