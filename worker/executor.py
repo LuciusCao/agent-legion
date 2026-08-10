@@ -39,7 +39,7 @@ from worker.registration_retry import register_from_config
 from worker.runtime_preflight import preflight_error
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
-from worker.transfer_controls import load_transfer_controls
+from worker.transfer_controls import claim_availability, load_transfer_controls
 from worker.upload_queue import MAX_ERROR_MESSAGE_CHARS, UploadQueue, UploadTask
 
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
@@ -310,6 +310,8 @@ def main() -> int:
                     print(f"Agent execution failed: {exc}", flush=True)
             try:
                 max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
+                transfer = load_transfer_controls(args.config)
+                uploads.set_max_concurrency(transfer.upload_max_concurrency)
                 control_error = None
             except (OSError, ValueError, YAMLError) as exc:
                 message = str(exc)
@@ -319,17 +321,13 @@ def main() -> int:
                         flush=True,
                     )
                     control_error = message
-            available = max(0, max_concurrency - len(active)) if claim_enabled else 0
-            # Backpressure: a full upload backlog means the Host is not
-            # draining results; pause claiming instead of piling archives
-            # onto local disk.
-            backlog_limit = (
-                transfer.upload_backlog_limit
-                if transfer.upload_backlog_limit is not None
-                else 2 * max_concurrency
+            base = max(0, max_concurrency - len(active)) if claim_enabled else 0
+            # Backpressure: a deep upload backlog means the Host is not
+            # draining results; taper claiming linearly towards zero instead
+            # of an all-or-nothing gate, which hysteresis-oscillates.
+            available = claim_availability(
+                base, uploads.depth, max_concurrency, transfer.upload_backlog_limit
             )
-            if uploads.depth >= backlog_limit:
-                available = 0
             claimed = False
             try:
                 for _ in range(available):
