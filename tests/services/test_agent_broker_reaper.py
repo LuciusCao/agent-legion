@@ -95,3 +95,28 @@ def test_reap_terminal_bundles_incremental_uses_done_and_cancelled_branches(
     assert reaped == 2
     assert not (bundle_dir / "done.tar.gz").exists()
     assert not (bundle_dir / "cancelled.tar.gz").exists()
+
+
+def test_reap_incremental_query_never_seq_scans(job_db, tmp_path) -> None:
+    """Pin the performance property: the incremental query must stay index
+    driven. On production-scale tables the old OR-shaped predicate degraded
+    to a parallel seq scan of the whole table every sweeper pass."""
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+    broker.reap_terminal_bundles()  # sets the watermark
+    watermark = broker._reap_watermark
+    assert watermark is not None
+
+    query = (
+        "select manifest_json from agent_execution_requests"
+        " where state='done' and finished_at >= %s"
+        " union all"
+        " select manifest_json from agent_execution_requests"
+        " where state='cancelled' and finished_at >= %s"
+    )
+    with job_db.connect() as conn:
+        rows = conn.execute(f"explain {query}", (watermark, watermark)).fetchall()
+
+    plan = "\n".join(str(row[0]) for row in rows)
+    assert "Seq Scan on agent_execution_requests" not in plan
