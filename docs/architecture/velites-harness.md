@@ -215,7 +215,11 @@ macOS seatbelt 的两处实现注记（实测 macOS 15，`deny default` 下 dyld
 在 exec 时直接 abort/bus error，profile 必须放宽这两处，进程才起得来）：
 `file-read-metadata` 全局放行（仅 stat，读不到文件内容与目录项），
 `file-read-data` 附加 `(literal "/")`（根目录在启动时被打开）。内容边界不受影响：
-允许根之外的 `open(O_RDONLY)` 与 `readdir` 仍被 EPERM 拒绝。
+允许根之外的 `open(O_RDONLY)` 与 `readdir` 仍被 EPERM 拒绝。另外 bash 工具
+profile 对每个白名单读/写根的**父目录链授予仅可列**（bare `literal` 的
+file-read-data：可 readdir 看到下一级存在，文件内容仍不可读）——否则沙箱内
+`ls <execution_dir>` 呈现 EPERM/空目录，会误导 agent 误判「目录不存在」转而
+全盘扫描（2026-08-10 生产 `find /` 事故根因）。
 
 python3 读白名单（2026-08-02 金丝雀事故修复）：uv/Homebrew 系解释器的
 libpython 经 `@rpath` 从安装前缀加载，前缀不在系统读白名单内时沙箱内
@@ -227,8 +231,29 @@ venv 根——CPython 的 site.py 先 stat（元数据全局放行）再 open `p
 不在白名单内会在解释器启动时直接 EPERM 致命失败（B 面验证实测），放行
 venv 根同时保证其 site-packages 可导入。防呆：安装前缀必须真实存在且
 路径含 `python`，否则跳过（避免 `/usr/bin/python3` 误把 `/usr` 加进白名单
-——系统路径本就覆盖）；探测失败静默跳过。Linux 的 `--ro-bind / /`
-天然覆盖所有解释器位置，无需等价逻辑。
+——系统路径本就覆盖）；探测失败静默跳过。探测逻辑平台无关，Linux 侧
+bash 工具策略改为选择性 bind 后同样经 `python_read_roots` 放行解释器根
+（对齐 macOS 行为）。
+
+Linux bwrap 的 bash 工具策略（2026-08-10 收紧，回应生产 `find /` 全盘扫描）：
+早期是 `--ro-bind / /` 全盘只读 + cwd/session/$TMPDIR 读写 bind，沙箱内可
+读遍全主机（含 $HOME）。现改为与 `sandbox wrap` 同风格的选择性 bind：
+只读 bind = 系统路径（/usr /lib /lib64 /bin /sbin /etc /opt，缺失跳过）+
+`--skill` 目录 + python3 探测根，读写 bind = cwd/session/$TMPDIR（/tmp 为
+tmpfs）；白名单之外的路径在 mount namespace 里根本不存在。bash 工具保留
+两个历史差异：**共享网络**（不 `--unshare-net`）与**不 `--unshare-pid`**
+（`sandbox wrap` 严格变体两者都隔离）。收紧后沙箱内看不到宿主 `$HOME`
+是**有意切断**：依赖宿主凭证的命令（`~/.gitconfig`、`~/.ssh`、`gh`/`aws`
+配置）需要在 job 内显式注入凭证，不能指望宿主 home。DNS 逃逸通道：
+systemd-resolved 主机的 `/etc/resolv.conf` 是指向 `/run/...` 的 symlink，
+两个 bwrap 策略都会在 build 时 canonicalize 它并把 /etc 之外的解析目标
+以 `--ro-bind-try` 只读补 bind，沙箱内 DNS 不受影响。
+
+python3 解释器白名单覆盖的布局：系统 python（/usr）、uv
+（`~/.local/share/uv/python/...`）、conda（/opt 下，路径段含 `python` 经
+系统 /opt bind 或探测覆盖）。pyenv（`~/.pyenv/versions/<版本号>` 路径段
+不含 `python` 子串，且位于 $HOME 下）暂不在探测范围内——沙箱内需要
+pyenv 解释器的场景需另行立项。
 
 ## 6. CLI 接口
 

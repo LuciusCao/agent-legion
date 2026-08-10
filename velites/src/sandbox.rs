@@ -10,8 +10,10 @@
 //!   (`deny default`; reads allowed for system paths + cwd/session/skills +
 //!   the probed python3 venv root and install prefix, writes only for
 //!   cwd/session/$TMPDIR//tmp plus /dev).
-//! - Linux: `bubblewrap` (`--ro-bind / /` read-only root, tmpfs on /tmp,
-//!   read-write binds for cwd/session/$TMPDIR).
+//! - Linux: `bubblewrap` (selective read-only binds: system paths + skill
+//!   dirs + the probed python3 roots; read-write binds for
+//!   cwd/session/$TMPDIR, tmpfs on /tmp; the bash tool keeps the shared
+//!   network and pid namespaces it has always had).
 //!
 //! Fail-closed: [`Sandbox::new`] probes the backend and returns an error when
 //! it is unavailable; the harness refuses to start instead of degrading to an
@@ -35,13 +37,14 @@ enum Backend {
     Bwrap(BwrapPolicy),
 }
 
-/// Linux bubblewrap policy variants. The bash tool keeps its historical
-/// policy (read-only `/` bind, shared network namespace); `sandbox wrap`
-/// gets the strict one (selective read-only binds, private pid namespace,
+/// Linux bubblewrap policy variants. Both use selective read-only binds;
+/// the bash tool keeps its historical shared network and pid namespaces,
+/// while `sandbox wrap` gets the strict one (private pid namespace,
 /// isolated network unless allowed).
 #[cfg(target_os = "linux")]
 enum BwrapPolicy {
     BashTool {
+        read_only: Vec<PathBuf>,
         read_write: Vec<PathBuf>,
     },
     Wrap {
@@ -66,8 +69,7 @@ enum SandboxMode {
 pub struct WrapOptions {
     /// Additional read-write roots (canonicalized at build time).
     pub read_write: Vec<PathBuf>,
-    /// Additional read-only roots (Linux needs none: the read-only `/` bind
-    /// covers every read-only location).
+    /// Additional read-only roots (canonicalized at build time).
     pub read_only: Vec<PathBuf>,
     /// Outbound+inbound network is denied by default (macOS: no network rule
     /// in the seatbelt profile; Linux: `--unshare-net`); this flag allows it.
@@ -84,7 +86,7 @@ impl Sandbox {
     ///
     /// `cwd` is the job directory (read-write), `session_dir` the
     /// `--session-dir` (read-write), `skill_dirs` the explicit `--skill`
-    /// directories (read-only; Linux covers them via the read-only `/` bind).
+    /// directories (read-only).
     pub fn new(
         cwd: &Path,
         session_dir: Option<&Path>,
@@ -123,10 +125,13 @@ impl Sandbox {
     ) -> anyhow::Result<Self> {
         probe_macos()?;
         let mut read_only = macos_system_read_paths();
+        let mut skill_roots = Vec::new();
         for dir in &options.read_only {
-            read_only.push(dir.canonicalize().with_context(|| {
-                format!("failed to canonicalize read root `{}`", dir.display())
-            })?);
+            let canonical = dir
+                .canonicalize()
+                .with_context(|| format!("failed to canonicalize read root `{}`", dir.display()))?;
+            read_only.push(canonical.clone());
+            skill_roots.push(canonical);
         }
         // Design §8: python3 must run inside the sandbox (skill scripts).
         // uv/Homebrew interpreters live outside the system read list and
@@ -134,18 +139,37 @@ impl Sandbox {
         // python dies at startup when pyvenv.cfg is unreadable — whitelist
         // both READ-ONLY. A failed probe is silently skipped (system
         // pythons are covered by macos_system_read_paths already).
+        let mut python_roots = Vec::new();
         for root in python_read_roots() {
             if !read_only.contains(&root) {
-                read_only.push(root);
+                read_only.push(root.clone());
+                python_roots.push(root);
             }
         }
         let mut list_only = Vec::new();
-        if mode == SandboxMode::Wrap {
-            for root in options.read_only.iter().chain(options.read_write.iter()) {
-                if let Some(parent) = root.parent() {
-                    if !list_only.contains(&parent.to_path_buf()) {
-                        list_only.push(parent.to_path_buf());
+        match mode {
+            SandboxMode::Wrap => {
+                for root in options.read_only.iter().chain(options.read_write.iter()) {
+                    if let Some(parent) = root.parent() {
+                        if !list_only.contains(&parent.to_path_buf()) {
+                            list_only.push(parent.to_path_buf());
+                        }
                     }
+                }
+            }
+            // The bash tool grants the whole ANCESTOR CHAIN of every
+            // whitelist root list-only: without it a sandboxed `ls` of a
+            // parent dir fails (or looks empty), which misleads the agent
+            // into believing the roots do not exist (2026-08-10 incident:
+            // EPERM swallowed by 2>/dev/null read as "missing skill dir",
+            // triggering a `find /` full-disk scan).
+            SandboxMode::BashTool => {
+                for root in skill_roots
+                    .iter()
+                    .chain(&python_roots)
+                    .chain(read_write.iter())
+                {
+                    ancestor_list_only(root, &read_only, &read_write, &mut list_only);
                 }
             }
         }
@@ -170,9 +194,28 @@ impl Sandbox {
     ) -> anyhow::Result<Self> {
         probe_linux()?;
         let policy = match mode {
-            // Read-only extras need no extra bind: the read-only `/` bind
-            // already covers every read-only location.
-            SandboxMode::BashTool => BwrapPolicy::BashTool { read_write },
+            SandboxMode::BashTool => {
+                let mut read_only = Vec::new();
+                for dir in &options.read_only {
+                    read_only.push(dir.canonicalize().with_context(|| {
+                        format!("failed to canonicalize read root `{}`", dir.display())
+                    })?);
+                }
+                // Design §8: python3 must run inside the sandbox. With
+                // selective binds an interpreter outside the system roots
+                // (uv/Homebrew prefix, venv) no longer starts — whitelist the
+                // probed roots read-only, same as macOS. A failed probe is
+                // silently skipped.
+                for root in python_read_roots() {
+                    if !read_only.contains(&root) {
+                        read_only.push(root);
+                    }
+                }
+                BwrapPolicy::BashTool {
+                    read_only,
+                    read_write,
+                }
+            }
             SandboxMode::Wrap => {
                 let mut read_only = Vec::new();
                 for dir in &options.read_only {
@@ -252,9 +295,9 @@ fn canonical_or_raw(path: PathBuf) -> PathBuf {
 }
 
 /// Probe PATH for `python3` (manual `which` semantics — no subprocess) and
-/// collect the READ-ONLY roots the seatbelt profile must whitelist for that
-/// interpreter to actually start (design §8: python3 must run inside the
-/// sandbox). Up to two roots:
+/// collect the READ-ONLY roots the sandbox (seatbelt profile / bwrap binds)
+/// must whitelist for that interpreter to actually start (design §8: python3
+/// must run inside the sandbox). Up to two roots:
 ///
 /// - the venv root, when the PATH entry is a venv (`<venv>/bin/python3` with
 ///   `<venv>/pyvenv.cfg`): CPython's site.py stats pyvenv.cfg (metadata is
@@ -266,10 +309,12 @@ fn canonical_or_raw(path: PathBuf) -> PathBuf {
 ///   load libpython via @rpath from the prefix.
 ///
 /// Empty when no python3 is on PATH or it is a system python (already
-/// covered by `macos_system_read_paths`). Only `python3` is probed — design
-/// §8 promises exactly that, nothing more. Linux needs no equivalent: the
-/// bwrap read-only `/` bind already covers every interpreter location.
-#[cfg(any(target_os = "macos", test))]
+/// covered by the system read paths on both platforms). Only `python3` is
+/// probed — design §8 promises exactly that, nothing more. The probe itself
+/// is platform-independent (PATH search + pyvenv.cfg + prefix guards), so
+/// uv-style prefixes like `~/.local/share/uv/python/cpython-3.13-...` are
+/// found the same way on Linux and macOS.
+#[cfg(any(unix, test))]
 fn python_read_roots() -> Vec<PathBuf> {
     let Some(path_var) = std::env::var_os("PATH") else {
         return Vec::new();
@@ -279,7 +324,7 @@ fn python_read_roots() -> Vec<PathBuf> {
 
 /// PATH-value-taking core of [`python_read_roots`] (tests inject a
 /// controlled PATH instead of mutating the process-global one).
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(unix, test))]
 fn python_read_roots_from_path(path_var: &std::ffi::OsStr) -> Vec<PathBuf> {
     let mut roots: Vec<PathBuf> = Vec::new();
     let mut push = |path: PathBuf| {
@@ -311,7 +356,7 @@ fn python_read_roots_from_path(path_var: &std::ffi::OsStr) -> Vec<PathBuf> {
 /// First executable named `name` on the given PATH value, UNRESOLVED (the
 /// caller needs the symlink path for venv detection and canonicalizes
 /// separately for the install prefix).
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(unix, test))]
 fn find_executable_on_path(path_var: &std::ffi::OsStr, name: &str) -> Option<PathBuf> {
     std::env::split_paths(path_var)
         .map(|dir| dir.join(name))
@@ -323,7 +368,7 @@ fn find_executable_on_path(path_var: &std::ffi::OsStr, name: &str) -> Option<Pat
 /// contain "python": otherwise a `/usr/bin/python3` would put `/usr` on the
 /// whitelist (already readable via the system list, and far broader than
 /// this probe is meant to grant).
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(unix, test))]
 fn python_prefix_from_canonical(canonical: &Path) -> Option<PathBuf> {
     let prefix = canonical.parent()?.parent()?;
     if !prefix.is_dir() {
@@ -335,7 +380,7 @@ fn python_prefix_from_canonical(canonical: &Path) -> Option<PathBuf> {
     Some(prefix.to_path_buf())
 }
 
-#[cfg(any(target_os = "macos", test))]
+#[cfg(any(unix, test))]
 fn is_executable(path: &Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
     // fs::metadata follows symlinks, so a .venv/bin/python3 symlink is
@@ -373,6 +418,35 @@ fn seatbelt_escape(path: &Path) -> String {
         .to_string()
         .replace('\\', "\\\\")
         .replace('"', "\\\"")
+}
+
+/// Collect the LIST-ONLY ancestor chain of a whitelist root: every directory
+/// from the root's parent up to (but excluding) `/`, deduped against `out`
+/// and against roots that already carry literal+subpath grants. A bare
+/// `literal` grant allows readdir on the directory itself while keeping every
+/// file inside unreadable — a sandboxed `ls` along the chain sees the next
+/// level exist instead of a misleading EPERM/empty listing.
+#[cfg(any(target_os = "macos", test))]
+fn ancestor_list_only(
+    root: &Path,
+    read_only: &[PathBuf],
+    read_write: &[PathBuf],
+    out: &mut Vec<PathBuf>,
+) {
+    for ancestor in root.ancestors().skip(1) {
+        if ancestor.parent().is_none() {
+            // "/" already has a (literal "/") grant in the profile.
+            continue;
+        }
+        let ancestor = ancestor.to_path_buf();
+        if read_only.contains(&ancestor)
+            || read_write.contains(&ancestor)
+            || out.contains(&ancestor)
+        {
+            continue;
+        }
+        out.push(ancestor);
+    }
 }
 
 /// Generate the seatbelt profile.
@@ -444,21 +518,68 @@ fn seatbelt_profile_opts(
     profile
 }
 
-/// `bwrap` argv: everything read-only except the read-write roots. `/tmp`
-/// becomes an empty tmpfs (scratch writes stay off the host); read-write
-/// binds come after it because later mounts win. `unshare_net` additionally
-/// isolates the network namespace (the `sandbox wrap` default; the bash tool
-/// keeps the shared namespace it has always had).
+/// Canonical target of `path` (meant for /etc/resolv.conf) when it leaves
+/// `etc`: systemd-resolved hosts symlink /etc/resolv.conf into
+/// /run/systemd/resolve/..., which the selective bind list does not cover —
+/// without the extra bind, sandboxed DNS is dead. `etc` is a parameter so
+/// tests can point at a fixture tree. None when the file is missing or
+/// resolves inside `etc` (already covered by the /etc ro-bind).
 #[cfg(any(target_os = "linux", test))]
-fn bwrap_argv_opts(read_write: &[PathBuf], inner: &[String], unshare_net: bool) -> Vec<String> {
+fn resolv_conf_target_outside(path: &Path, etc: &Path) -> Option<PathBuf> {
+    let target = path.canonicalize().ok()?;
+    if target.starts_with(etc) {
+        return None;
+    }
+    Some(target)
+}
+
+/// Production entry point: probe the real /etc/resolv.conf.
+#[cfg(any(target_os = "linux", test))]
+fn resolv_conf_read_root() -> Option<PathBuf> {
+    resolv_conf_target_outside(Path::new("/etc/resolv.conf"), Path::new("/etc"))
+}
+
+/// Append the resolv.conf escape bind (`--ro-bind-try` covers a target that
+/// vanished between this probe and exec) when the probe found one.
+#[cfg(any(target_os = "linux", test))]
+fn push_resolv_conf_bind(argv: &mut Vec<String>) {
+    if let Some(target) = resolv_conf_read_root() {
+        let display = target.display().to_string();
+        argv.extend(["--ro-bind-try".into(), display.clone(), display]);
+    }
+}
+
+/// `bwrap` argv for the bash tool: selective read-only binds (system roots
+/// plus the read-only roots) instead of a blanket `/` bind, read-write
+/// binds for the read-write roots. The bash tool keeps its historical
+/// differences from the `sandbox wrap` strict policy: no `--unshare-pid`,
+/// and the network namespace is shared unless `unshare_net` is requested.
+/// `/tmp` becomes an empty tmpfs (scratch writes stay off the host);
+/// read-write binds come after it because later mounts win.
+#[cfg(any(target_os = "linux", test))]
+fn bwrap_argv_opts(
+    read_only: &[PathBuf],
+    read_write: &[PathBuf],
+    inner: &[String],
+    unshare_net: bool,
+) -> Vec<String> {
     let mut argv: Vec<String> = vec!["--die-with-parent".into()];
     if unshare_net {
         argv.push("--unshare-net".into());
     }
+    // Read-only system roots a binary needs to start; missing ones are
+    // skipped (e.g. /lib64 on some distros). Same list as bwrap_wrap_argv.
+    for system_root in ["/usr", "/lib", "/lib64", "/bin", "/sbin", "/etc", "/opt"] {
+        if Path::new(system_root).is_dir() {
+            argv.extend(["--ro-bind".into(), system_root.into(), system_root.into()]);
+        }
+    }
+    for path in read_only {
+        let display = path.display().to_string();
+        argv.extend(["--ro-bind".into(), display.clone(), display]);
+    }
+    push_resolv_conf_bind(&mut argv);
     argv.extend([
-        "--ro-bind".into(),
-        "/".into(),
-        "/".into(),
         "--dev".into(),
         "/dev".into(),
         "--proc".into(),
@@ -481,15 +602,18 @@ fn bwrap_argv_opts(read_write: &[PathBuf], inner: &[String], unshare_net: bool) 
 
 /// `bwrap` argv with the bash tool's shared-network policy.
 #[cfg(test)]
-fn bwrap_argv(read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
-    bwrap_argv_opts(read_write, inner, false)
+fn bwrap_argv(read_only: &[PathBuf], read_write: &[PathBuf], inner: &[String]) -> Vec<String> {
+    bwrap_argv_opts(read_only, read_write, inner, false)
 }
 
 /// Dispatch the bwrap argv per policy (bash tool vs `sandbox wrap`).
 #[cfg(target_os = "linux")]
 fn bwrap_argv_for(policy: &BwrapPolicy, inner: &[String]) -> Vec<String> {
     match policy {
-        BwrapPolicy::BashTool { read_write } => bwrap_argv_opts(read_write, inner, false),
+        BwrapPolicy::BashTool {
+            read_only,
+            read_write,
+        } => bwrap_argv_opts(read_only, read_write, inner, false),
         BwrapPolicy::Wrap {
             read_only,
             read_write,
@@ -523,6 +647,7 @@ fn bwrap_wrap_argv(
         let display = path.display().to_string();
         argv.extend(["--ro-bind".into(), display.clone(), display]);
     }
+    push_resolv_conf_bind(&mut argv);
     argv.extend(["--dev".into(), "/dev".into()]);
     // Private /proc: only meaningful (and safe to expose) inside the new pid
     // namespace created by --unshare-pid.
@@ -583,16 +708,31 @@ mod tests {
     }
 
     #[test]
-    fn bwrap_argv_read_only_root_plus_write_binds() {
+    fn bwrap_argv_selective_binds_plus_write_binds() {
         let rw = vec![
             PathBuf::from("/job/dir"),
             PathBuf::from("/job/dir/session"),
             PathBuf::from("/tmp"),
         ];
-        let argv = bwrap_argv(&rw, &inner());
+        let ro = vec![PathBuf::from("/skill/dir")];
+        let argv = bwrap_argv(&ro, &rw, &inner());
         let joined = argv.join(" ");
         assert!(joined.contains("--die-with-parent"));
-        assert!(joined.contains("--ro-bind / /"));
+        // No blanket root bind: reads are limited to the selective binds.
+        assert!(
+            !joined.contains("--ro-bind / /"),
+            "blanket root bind leaked: {joined}"
+        );
+        // System roots present on every supported host (the argv builder
+        // skips missing ones, so only assert roots that exist everywhere).
+        assert!(joined.contains("--ro-bind /usr /usr"));
+        assert!(joined.contains("--ro-bind /etc /etc"));
+        // Read-only roots are bound read-only, never read-write.
+        assert!(joined.contains("--ro-bind /skill/dir /skill/dir"));
+        assert!(!joined.contains("--bind /skill/dir"));
+        // The bash tool keeps its shared network and pid namespaces.
+        assert!(!joined.contains("--unshare-net"));
+        assert!(!joined.contains("--unshare-pid"));
         assert!(
             joined.contains("--tmpfs /tmp"),
             "tmpfs /tmp missing: {joined}"
@@ -616,7 +756,7 @@ mod tests {
 
     #[test]
     fn bwrap_argv_without_tmp_dir_has_no_tmpfs() {
-        let argv = bwrap_argv(&[PathBuf::from("/job")], &inner());
+        let argv = bwrap_argv(&[], &[PathBuf::from("/job")], &inner());
         assert!(!argv.iter().any(|a| a == "--tmpfs"));
     }
 
@@ -644,13 +784,65 @@ mod tests {
         assert!(allowed.contains("--unshare-pid"));
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn resolv_conf_target_outside_flags_symlink_leaving_etc() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("etc")).unwrap();
+        let etc = dir.path().join("etc").canonicalize().unwrap();
+        // A real file inside etc is covered by the /etc ro-bind: no extra bind.
+        std::fs::write(etc.join("resolv.conf"), "nameserver 1.1.1.1").unwrap();
+        assert_eq!(
+            resolv_conf_target_outside(&etc.join("resolv.conf"), &etc),
+            None
+        );
+        // systemd-resolved style: a symlink escaping etc → bind the target.
+        let run = dir.path().join("run/systemd/resolve");
+        std::fs::create_dir_all(&run).unwrap();
+        let target = run.join("resolv.conf");
+        std::fs::write(&target, "nameserver 127.0.0.53").unwrap();
+        std::os::unix::fs::symlink(&target, etc.join("resolv-link")).unwrap();
+        assert_eq!(
+            resolv_conf_target_outside(&etc.join("resolv-link"), &etc),
+            Some(target.canonicalize().unwrap())
+        );
+        // A missing file yields no bind.
+        assert_eq!(resolv_conf_target_outside(&etc.join("missing"), &etc), None);
+    }
+
+    #[test]
+    fn bwrap_argvs_bind_resolv_conf_target_when_it_leaves_etc() {
+        // Host-adaptive: only hosts whose /etc/resolv.conf resolves outside
+        // /etc (systemd-resolved; macOS' /private/etc in test builds) get
+        // the extra bind. Both the bash tool and wrap argv must agree.
+        let expected = resolv_conf_read_root();
+        for joined in [
+            bwrap_argv(&[], &[PathBuf::from("/job")], &inner()).join(" "),
+            bwrap_wrap_argv(&[], &[PathBuf::from("/job")], &inner(), false).join(" "),
+        ] {
+            match &expected {
+                Some(target) => {
+                    let display = target.display().to_string();
+                    assert!(
+                        joined.contains(&format!("--ro-bind-try {display} {display}")),
+                        "resolv.conf bind missing: {joined}"
+                    );
+                }
+                None => assert!(
+                    !joined.contains("--ro-bind-try"),
+                    "unexpected resolv.conf bind: {joined}"
+                ),
+            }
+        }
+    }
+
     #[test]
     fn bwrap_argv_opts_unshares_network_only_when_requested() {
-        let shared = bwrap_argv_opts(&[PathBuf::from("/job")], &inner(), false);
+        let shared = bwrap_argv_opts(&[], &[PathBuf::from("/job")], &inner(), false);
         assert!(!shared.iter().any(|a| a == "--unshare-net"));
-        let isolated = bwrap_argv_opts(&[PathBuf::from("/job")], &inner(), true);
+        let isolated = bwrap_argv_opts(&[], &[PathBuf::from("/job")], &inner(), true);
         assert!(isolated.iter().any(|a| a == "--unshare-net"));
-        // Network isolation lands before the read-only root bind.
+        // Network isolation lands before the first read-only bind.
         let unshare = isolated.iter().position(|a| a == "--unshare-net").unwrap();
         let ro_bind = isolated.iter().position(|a| a == "--ro-bind").unwrap();
         assert!(unshare < ro_bind);
@@ -712,6 +904,56 @@ mod tests {
         let profile =
             seatbelt_profile_opts(&[PathBuf::from("/weird\"quo\\te")], &[], &[], false, false);
         assert!(profile.contains("/weird\\\"quo\\\\te"));
+    }
+
+    #[test]
+    fn ancestor_list_only_grants_chain_excluding_root_and_slash() {
+        let ro = vec![PathBuf::from("/a/b/skill")];
+        let rw = vec![PathBuf::from("/a/b/job"), PathBuf::from("/a/b/session/sub")];
+        let mut out = Vec::new();
+        for root in ro.iter().chain(rw.iter()) {
+            ancestor_list_only(root, &ro, &rw, &mut out);
+        }
+        // /a/b is an ancestor of every root; /a/b/session is not itself a
+        // whitelisted root, so it stays list-only. "/" never appears.
+        assert_eq!(
+            out,
+            vec![
+                PathBuf::from("/a/b"),
+                PathBuf::from("/a"),
+                PathBuf::from("/a/b/session"),
+            ]
+        );
+        // Roots themselves are never downgraded to list-only.
+        assert!(!out.contains(&PathBuf::from("/a/b/skill")));
+        assert!(!out.contains(&PathBuf::from("/a/b/job")));
+        // A root directly under "/" contributes nothing.
+        let mut out = Vec::new();
+        ancestor_list_only(Path::new("/tmp"), &[], &[PathBuf::from("/tmp")], &mut out);
+        assert!(out.is_empty());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn seatbelt_profile_bash_tool_parents_are_literal_only() {
+        let ro = vec![PathBuf::from("/a/b/skill")];
+        let rw = vec![PathBuf::from("/a/b/job")];
+        let mut list_only = Vec::new();
+        for root in ro.iter().chain(rw.iter()) {
+            ancestor_list_only(root, &ro, &rw, &mut list_only);
+        }
+        let profile = seatbelt_profile_opts(&ro, &rw, &list_only, false, false);
+        // Ancestors get a bare literal (readdir yes, file contents no)…
+        assert!(profile.contains("(literal \"/a/b\")\n"));
+        assert!(profile.contains("(literal \"/a\")\n"));
+        // …never a subpath grant — "/a/b" appearing in "(subpath "/a/b/job")"
+        // is a different string, so a plain contains-check is exact here.
+        assert!(!profile.contains("(subpath \"/a/b\")\n"));
+        assert!(!profile.contains("(subpath \"/a\")\n"));
+        // List-only grants never reach the write allowlist.
+        let write_section = profile.split("(allow file-write*").nth(1).unwrap();
+        assert!(!write_section.contains("/a/b\""));
+        assert!(!write_section.contains("/a\""));
     }
 
     #[test]

@@ -586,7 +586,7 @@ invariants:
         gate: quick
 
   - id: EXEC-HARNESS-SANDBOX-001
-    statement: "velites confines the bash tool in a default-on OS-level filesystem sandbox (macOS seatbelt via sandbox-exec, Linux bubblewrap): reads are limited to the working directory, the session dir, explicit --skill dirs and system paths; writes are limited to the working directory, the session dir and $TMPDIR//tmp — escapes surface as tool_execution_end{isError: true}. When the sandbox backend is unavailable the harness fails closed (non-zero exit before the agent loop) and never degrades to an unsandboxed run; --no-sandbox is the only escape hatch."
+    statement: "velites confines the bash tool in a default-on OS-level filesystem sandbox (macOS seatbelt via sandbox-exec deny-default profile, Linux bubblewrap with selective read-only binds — system paths + --skill dirs + probed python3 interpreter roots, never a blanket `--ro-bind / /`): reads are limited to the working directory, the session dir, explicit --skill dirs, the probed python3 roots and system paths, plus list-only (readdir without content access) grants on the ancestor directories of those roots so sandboxed listings are not misleadingly empty; writes are limited to the working directory, the session dir and $TMPDIR//tmp — escapes surface as tool_execution_end{isError: true}. When the sandbox backend is unavailable the harness fails closed (non-zero exit before the agent loop) and never degrades to an unsandboxed run; --no-sandbox is the only escape hatch."
     owner: workspace-executor
     risk: high
     evidence:

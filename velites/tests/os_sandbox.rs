@@ -6,8 +6,9 @@
 //! - macOS seatbelt integration: a stub-provider session drives the bash tool
 //!   against $HOME (denied), the job dir / session dir (allowed) and a
 //!   `--skill` dir (read-only).
-//! - Linux bubblewrap integration: gated on `bwrap` availability (CI's Linux
-//!   lane has none; argv construction is unit-tested in src/sandbox.rs).
+//! - Linux bubblewrap integration: gated on `bwrap` availability (the CI rust
+//!   lane installs bubblewrap, see .github/workflows/quality-gate.yml; local
+//!   runs without bwrap skip).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -183,7 +184,10 @@ fn no_sandbox_flag_bypasses_unavailable_sandbox() {
 #[cfg(target_os = "macos")]
 #[test]
 fn macos_seatbelt_blocks_escape_and_allows_job_session_skill() {
-    let dir = tempfile::tempdir().unwrap();
+    // Fixture dirs must live OUTSIDE $TMPDIR and /tmp (both read-write roots
+    // with subpath grants): the parent-chain list-only assertions below are
+    // only meaningful when no whitelisted subtree covers the fixture dirs.
+    let dir = tempfile::tempdir_in("/var/tmp").unwrap();
     let job = dir.path().join("job");
     let session = dir.path().join("session");
     let skill = dir.path().join("skill");
@@ -191,6 +195,10 @@ fn macos_seatbelt_blocks_escape_and_allows_job_session_skill() {
     std::fs::create_dir(&skill).unwrap();
     write(&job.join("prompt.md"), "Run the commands.");
     write(&skill.join("SKILL.md"), "You are a test skill.");
+    // A file NEXT TO the whitelist roots: visible in a parent listing, but
+    // its contents must stay unreadable (list-only, not subpath).
+    let secret = dir.path().join("secret.txt");
+    write(&secret, "top secret");
     let probe = home_probe();
 
     let commands = vec![
@@ -207,6 +215,15 @@ fn macos_seatbelt_blocks_escape_and_allows_job_session_skill() {
             "echo session-ok > '{}'",
             session.join("extra.txt").display()
         ),
+        // 6. The parent chain of the whitelist roots is listable: the agent
+        //    sees the roots exist instead of a misleading EPERM/empty dir.
+        format!(
+            "ls '{0}' | grep -q '^job$' && ls '{0}' | grep -q '^skill$'",
+            dir.path().display()
+        ),
+        // 7. …but list-only is not read: file contents next to the roots
+        //    stay denied.
+        format!("cat '{}'", secret.display()),
     ];
     write_bash_fixture(&job, &commands);
 
@@ -225,7 +242,7 @@ fn macos_seatbelt_blocks_escape_and_allows_job_session_skill() {
     let events = parse_events(&output.stdout);
     assert_eq!(
         tool_end_errors(&events),
-        vec![true, true, false, false, false],
+        vec![true, true, false, false, false, false, true],
         "escape attempts must fail, allowed operations must succeed: {}",
         String::from_utf8_lossy(&output.stdout)
     );
@@ -239,7 +256,7 @@ fn macos_seatbelt_blocks_escape_and_allows_job_session_skill() {
 
 #[cfg(target_os = "linux")]
 #[test]
-fn linux_bwrap_blocks_writes_outside_allowed_roots() {
+fn linux_bwrap_blocks_reads_and_writes_outside_allowed_roots() {
     let bwrap_available = Command::new("bwrap")
         .arg("--version")
         .stdout(std::process::Stdio::null())
@@ -263,13 +280,16 @@ fn linux_bwrap_blocks_writes_outside_allowed_roots() {
     let probe = home_probe();
 
     let commands = vec![
-        // 1. The read-only `/` bind makes writes outside the allowed roots fail.
+        // 1. Writes outside the allowed roots fail.
         format!("echo pwned > '{}'", probe.display()),
-        // 2. Reads off the read-only root work.
+        // 2. Reads outside the allowed roots ($HOME) are denied: with
+        //    selective binds $HOME simply does not exist in the namespace.
+        "ls \"$HOME\" >/dev/null 2>&1".to_string(),
+        // 3. Reads off the whitelisted system roots still work.
         "cat /etc/os-release >/dev/null".to_string(),
-        // 3. The job dir stays writable.
+        // 4. The job dir stays writable.
         "echo hi > ok.txt".to_string(),
-        // 4. The session dir stays writable.
+        // 5. The session dir stays writable.
         format!(
             "echo session-ok > '{}'",
             session.join("extra.txt").display()
@@ -291,8 +311,8 @@ fn linux_bwrap_blocks_writes_outside_allowed_roots() {
     let events = parse_events(&output.stdout);
     assert_eq!(
         tool_end_errors(&events),
-        vec![true, false, false, false],
-        "escape write must fail, allowed operations must succeed: {}",
+        vec![true, true, false, false, false],
+        "escape attempts must fail, allowed operations must succeed: {}",
         String::from_utf8_lossy(&output.stdout)
     );
     assert!(!leaked, "sandbox let a write escape into $HOME");

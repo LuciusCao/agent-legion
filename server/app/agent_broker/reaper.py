@@ -35,13 +35,24 @@ def reap_terminal_bundles(
     if broker.bundle_dir is None:
         return 0
     reaped = 0
-    query = (
-        "select manifest_json from agent_execution_requests where state in ('done', 'cancelled')"
-    )
-    params: tuple[object, ...] = ()
-    if broker._reap_watermark is not None:
-        query += " and (finished_at is null or finished_at >= %s)"
-        params = (broker._reap_watermark,)
+    if broker._reap_watermark is None:
+        # First call after startup scans all terminal rows (including any
+        # should-never-happen terminal row with finished_at NULL).
+        query = "select manifest_json from agent_execution_requests where state in ('done', 'cancelled')"
+        params: tuple[object, ...] = ()
+    else:
+        # One branch per terminal state so each hits its partial finished_at
+        # index (idx_agent_requests_done_recent / _cancelled_recent). A single
+        # `state in (...) and (finished_at is null or ...)` query defeats both
+        # indexes and seq-scans the whole table every sweeper pass.
+        query = (
+            "select manifest_json from agent_execution_requests"
+            " where state='done' and finished_at >= %s"
+            " union all"
+            " select manifest_json from agent_execution_requests"
+            " where state='cancelled' and finished_at >= %s"
+        )
+        params = (broker._reap_watermark, broker._reap_watermark)
     with read_connection(broker.database_dsn) as conn:
         rows = conn.execute(query, params).fetchall()
     broker._reap_watermark = datetime.now(UTC) - _REAP_OVERLAP

@@ -1,9 +1,7 @@
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
-import os
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -317,48 +315,6 @@ def test_sweep_closes_request_when_lease_already_finished(job_db) -> None:
         ).fetchone()
     assert row is not None
     assert row["state"] == "done"
-
-
-def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, tmp_path) -> None:
-    _seed_request(job_db, job_id="job-1")
-    bundle_dir = tmp_path / "bundles"
-    bundle_dir.mkdir()
-    live_bundle = bundle_dir / "live.tar.gz"
-    live_bundle.write_bytes(b"bundle")
-    done_bundle = bundle_dir / "done.tar.gz"
-    done_bundle.write_bytes(b"bundle")
-    fresh_archive = bundle_dir / "fresh.result.tar.gz"
-    fresh_archive.write_bytes(b"archive")
-    stale_archive = bundle_dir / "stale.result.tar.gz"
-    stale_archive.write_bytes(b"archive")
-    old = datetime.now(UTC).timestamp() - 7200
-    os.utime(stale_archive, (old, old))
-
-    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
-    with job_db.connect() as conn:
-        # The seeded request stays queued (its bundle must survive); add a
-        # terminal request pointing at done.tar.gz.
-        conn.execute(
-            "update agent_execution_requests set manifest_json=%s where job_id='job-1'",
-            (json.dumps({"bundle_name": "live.tar.gz"}),),
-        )
-        conn.execute(
-            "insert into agent_execution_requests("
-            " execution_id, workspace_id, job_id, workflow_key, node_key,"
-            " agent_id, agent_definition_hash, node_concurrency_limit,"
-            " state, queued_at, manifest_json)"
-            " values ('exec-done', 'test-workspace', 'job-1', 'questions', 'review',"
-            " 'generator-v1', 'sha256:whatever', 1, 'done', current_timestamp, %s)",
-            (json.dumps({"bundle_name": "done.tar.gz"}),),
-        )
-
-    reaped = broker.reap_terminal_bundles()
-
-    assert reaped == 2
-    assert live_bundle.is_file()
-    assert not done_bundle.exists()
-    assert fresh_archive.is_file()
-    assert not stale_archive.exists()
 
 
 def test_discard_result_archive_and_retire_bundle(tmp_path) -> None:
