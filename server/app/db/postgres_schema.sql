@@ -287,6 +287,12 @@ create unique index if not exists idx_agent_requests_one_active_node
 create index if not exists idx_agent_requests_done_recent
   on agent_execution_requests(finished_at)
   where state = 'done';
+-- Bundle reaper's incremental window scan (schema v33,
+-- server.app.agent_broker.reaper): the cancelled branch mirrors the done
+-- partial index so neither branch degenerates into a full-table seq scan.
+create index if not exists idx_agent_requests_cancelled_recent
+  on agent_execution_requests(finished_at)
+  where state = 'cancelled';
 
 create table if not exists job_event_seq (
   id integer primary key check(id = 1),
