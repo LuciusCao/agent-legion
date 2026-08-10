@@ -19,7 +19,9 @@
 //!   keep-alive lines) are skipped; only `data:` payloads are interpreted.
 //! - A `data:` payload that fails JSON parsing is treated as TRANSIENT
 //!   stream corruption (proxy/gateway mangling), never as a deterministic
-//!   call failure.
+//!   call failure. Same for a `tool_calls` delta whose `index` exceeds
+//!   [`MAX_TOOL_CALL_INDEX`] — absurd indexes are corruption, and the
+//!   accumulator must never resize to a gateway-controlled length.
 //! - Chunk boundaries may split multi-byte UTF-8 sequences; lines are
 //!   assembled from raw bytes and decoded only once complete.
 //! - Reasoning text arrives as `delta.reasoning_content` (kimi/deepseek
@@ -272,6 +274,12 @@ struct ToolCallAcc {
     arguments: String,
 }
 
+/// Upper bound on a streamed `tool_calls[].index`. Real models emit a
+/// handful of sequentially numbered calls; anything beyond this is stream
+/// corruption (a mangled proxy chunk), rejected before `resize_with` could
+/// turn it into an overflow/OOM panic.
+const MAX_TOOL_CALL_INDEX: u64 = 1024;
+
 impl Aggregated {
     fn into_content(self) -> Vec<ContentBlock> {
         let mut content = Vec::new();
@@ -307,7 +315,7 @@ impl Aggregated {
         content
     }
 
-    fn apply_delta(&mut self, delta: &Value) {
+    fn apply_delta(&mut self, delta: &Value) -> Result<(), ProviderError> {
         if let Some(text) = delta.get("content").and_then(Value::as_str) {
             self.text.push_str(text);
         }
@@ -320,7 +328,18 @@ impl Aggregated {
         }
         if let Some(calls) = delta.get("tool_calls").and_then(Value::as_array) {
             for call in calls {
-                let index = call.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+                let index = call.get("index").and_then(Value::as_u64).unwrap_or(0);
+                // A malformed chunk can carry a huge `index`; resizing the
+                // accumulator to it would panic (overflow/OOM), killing the
+                // run without an `agent_end`. Real models emit a handful of
+                // sequentially numbered calls, so anything beyond the cap is
+                // stream corruption — transient, like a malformed chunk.
+                if index > MAX_TOOL_CALL_INDEX {
+                    return Err(ProviderError::Transient(format!(
+                        "malformed tool_calls index {index} (stream corruption)"
+                    )));
+                }
+                let index = index as usize;
                 if self.tool_calls.len() <= index {
                     self.tool_calls.resize_with(index + 1, ToolCallAcc::default);
                 }
@@ -338,6 +357,7 @@ impl Aggregated {
                 }
             }
         }
+        Ok(())
     }
 
     fn apply_chunk(&mut self, chunk: &Value) -> Result<(), ProviderError> {
@@ -353,7 +373,7 @@ impl Aggregated {
             .and_then(|choices| choices.first())
         {
             if let Some(delta) = choice.get("delta") {
-                self.apply_delta(delta);
+                self.apply_delta(delta)?;
             }
             if let Some(finish) = choice.get("finish_reason").and_then(Value::as_str) {
                 self.finish_reason = Some(finish.to_string());
@@ -774,6 +794,47 @@ mod tests {
             }
             other => panic!("expected toolCall, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn absurd_tool_call_index_is_transient_corruption_not_panic() {
+        // Regression: a malformed chunk with a huge `index` must not reach
+        // `resize_with` — `index + 1` overflow / OOM would kill the process
+        // without an `agent_end`. Corruption is transient, like a malformed
+        // JSON chunk.
+        let mut aggregated = Aggregated::default();
+        let err = aggregated
+            .apply_chunk(&json!({
+                "choices": [{"delta": {"tool_calls": [
+                    {"index": u64::MAX, "function": {"name": "read", "arguments": "{}"}}
+                ]}}]
+            }))
+            .expect_err("absurd index must be rejected");
+        assert!(err.is_retryable(), "stream corruption is transient: {err}");
+
+        // Beyond the cap without overflowing u64 is equally malformed.
+        let mut aggregated = Aggregated::default();
+        assert!(
+            aggregated
+                .apply_chunk(&json!({
+                    "choices": [{"delta": {"tool_calls": [{"index": 100_000}]}}]
+                }))
+                .is_err(),
+            "index beyond the cap must be rejected"
+        );
+
+        // Sequential indexes still aggregate normally.
+        let mut aggregated = Aggregated::default();
+        aggregated
+            .apply_chunk(&json!({
+                "choices": [{"delta": {"tool_calls": [
+                    {"index": 0, "function": {"name": "read", "arguments": ""}},
+                    {"index": 1, "function": {"name": "write", "arguments": ""}}
+                ]}}]
+            }))
+            .unwrap();
+        assert_eq!(aggregated.tool_calls.len(), 2);
+        assert_eq!(aggregated.tool_calls[1].name, "write");
     }
 
     #[test]

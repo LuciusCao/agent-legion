@@ -43,7 +43,7 @@ derive_lanes_from_worktree() {
         saw_frontend=1
         saw_non_docs=1
         ;;
-      docs/*|*.md)
+      docs/*|*.md|LICENSE)
         ;;
       *)
         saw_backend=1

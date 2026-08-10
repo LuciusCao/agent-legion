@@ -49,7 +49,9 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     let total_file_lines = lines.len();
     let start = (offset - 1).min(total_file_lines);
     let end = match limit {
-        Some(limit) => (start + limit).min(total_file_lines),
+        // Saturating: a huge model-supplied limit must not overflow the add
+        // (debug panic / release wrap → slice panic, exit 101 mid-run).
+        Some(limit) => start.saturating_add(limit).min(total_file_lines),
         None => total_file_lines,
     };
     let selected = lines[start..end].join("\n");
@@ -58,8 +60,9 @@ fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolError> {
     let truncation = truncate::truncate_head(&selected);
     let text = if truncation.first_line_exceeds_limit {
         // The first selected line alone exceeds the byte limit; point the
-        // model at a bash fallback (pi read.js semantics).
-        let line_size = truncate::format_size(lines[start].len());
+        // model at a bash fallback (pi read.js semantics). `get` guards the
+        // empty selection (offset at/past EOF), where no line exists.
+        let line_size = truncate::format_size(lines.get(start).map_or(0, |line| line.len()));
         format!(
             "[Line {} is {}, exceeds {} limit. Use bash: sed -n '{}p' {} | head -c {}]",
             start + 1,

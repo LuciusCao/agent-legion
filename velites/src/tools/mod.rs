@@ -153,7 +153,7 @@ impl ToolKind {
                     "type": "object",
                     "properties": {
                         "command": {"type": "string", "description": "Command passed to `bash -c`."},
-                        "timeout": {"type": "integer", "description": "Timeout in seconds (default 120)."}
+                        "timeout": {"type": "integer", "description": "Timeout in seconds (default 120, max 3600)."}
                     },
                     "required": ["command"]
                 }),

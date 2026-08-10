@@ -82,6 +82,7 @@ class AgentStatusManager:
                 for r in records
             ]
         except Exception:
+            logger.warning("agent discovery failed, returning empty list", exc_info=True)
             agents = []
         with self._lock:
             self.agents = agents

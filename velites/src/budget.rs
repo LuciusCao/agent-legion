@@ -4,8 +4,9 @@
 //!
 //! - `max_turns` — completed agent turns (assistant completions);
 //! - `max_tokens` — cumulative usage (input + output + cacheRead);
-//! - wall-clock deadline — derived from `--timeout-seconds`, which bounds the
-//!   whole run (each provider HTTP request is capped by the same value).
+//! - wall-clock deadline — derived from `--timeout-seconds`, which bounds
+//!   the whole run (individual provider HTTP requests are NOT capped by it;
+//!   long generations stream for many minutes, design §7).
 //!
 //! Exhaustion semantics: the agent loop injects ONE wrap-up message
 //! ([`wrap_up_message`]) giving the model a final turn to stop calling tools

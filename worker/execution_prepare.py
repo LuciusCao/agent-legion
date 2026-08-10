@@ -37,6 +37,15 @@ def safe_extract(archive: Path, destination: Path) -> dict[str, Any]:
     return json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
 
 
+def _sha256(path: Path) -> str:
+    """Streamed digest: artifacts can be multi-GB, never buffer them whole."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
 def substitute(value: str, paths: dict[str, str]) -> str:
     for key, replacement in paths.items():
         value = value.replace("{" + key + "}", replacement)
@@ -70,10 +79,15 @@ def prepare_execution(
     manifest = apply_live_manifest(safe_extract(bundle, extracted), claim)
     for name, ref in manifest.get("input_artifacts", {}).items():
         digest = str(ref).split(":", 1)[-1]
-        target = job_dir / PurePosixPath(str(name))
+        # 纵深防御：manifest 来自 Host，但落盘路径必须留在 job_dir 内
+        # （同 safe_extract 的 bundle 校验）。
+        relative = PurePosixPath(str(name))
+        if relative.is_absolute() or ".." in relative.parts:
+            raise ValueError(f"unsafe input artifact name: {name!r}")
+        target = job_dir / relative
         with download_slots:
             client.download(f"/api/artifacts/{digest}", target)
-        if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+        if _sha256(target) != digest:
             raise RuntimeError(f"artifact digest mismatch: {name}")
     command_spec = manifest["command_spec"]
     paths = {

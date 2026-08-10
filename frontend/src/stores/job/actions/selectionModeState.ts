@@ -55,16 +55,25 @@ export function countLoadedMatching(state: JobState): number {
   return count
 }
 
+/** The only selection fields resolveBatchTarget reads; callers may pass the
+ * whole JobState (store actions) or just the subscribed slice (hooks). */
+export type BatchSelectionSlice = Pick<
+  JobState,
+  'selectionMode' | 'selectionFilter' | 'excludedIds' | 'selectedIds'
+>
+
 /** Resolve the current selection to a batch endpoint target, or null when
  * nothing is selected. */
-export function resolveBatchTarget(state: JobState): BatchJobTarget | null {
-  if (state.selectionMode === 'allMatching' && state.selectionFilter) {
+export function resolveBatchTarget(
+  selection: BatchSelectionSlice
+): BatchJobTarget | null {
+  if (selection.selectionMode === 'allMatching' && selection.selectionFilter) {
     return {
-      filter: state.selectionFilter,
-      excludeIds: Array.from(state.excludedIds),
+      filter: selection.selectionFilter,
+      excludeIds: Array.from(selection.excludedIds),
     }
   }
-  const ids = Array.from(state.selectedIds)
+  const ids = Array.from(selection.selectedIds)
   return ids.length > 0 ? { jobIds: ids } : null
 }
 
