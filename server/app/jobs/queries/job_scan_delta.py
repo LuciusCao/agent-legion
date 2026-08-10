@@ -29,3 +29,15 @@ class JobScanDeltaMixin(JobQueriesBase):
                 (workflow_key, since),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def db_now(self) -> Any:
+        """Database wall clock: the clock domain ``jobs.updated_at`` lives in.
+
+        The watermark horizon must be compared in the DB's clock domain —
+        rows are stamped by ``current_timestamp``, so a Python-side wall
+        clock would corrupt the delta window when backend and Postgres run
+        on different hosts (DB-SCAN-INCREMENTAL-001).
+        """
+        with self._connect_read() as conn:
+            row = conn.execute("select current_timestamp as ts").fetchone()
+        return row["ts"] if row else None

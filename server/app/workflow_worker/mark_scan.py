@@ -12,7 +12,7 @@ to the scheduler bumps ``updated_at`` (claim, finish-driven status sync,
 execution control, rerun). Two safety nets bound the damage of a missed or
 late-committing row:
 
-- the delta lower bound slides with the wall clock minus a small overlap
+- the delta lower bound slides with the database clock minus a small overlap
   window, so rows committing slightly out of timestamp order are re-fetched
   (upserts are idempotent) without pinning the bound to a past burst;
 - a periodic full rescan (``FULL_RESCAN_SECONDS``) replaces the whole set,
@@ -71,13 +71,16 @@ class MarkStore:
             or now - state.last_full_scan >= self._full_rescan_seconds
         ):
             return self._full_refresh(job_db, workflow_key, now)
-        # The lower bound slides with the wall clock (minus the overlap
+        # The lower bound slides with the database clock (minus the overlap
         # window), not just with seen rows: a burst of rows sharing one commit
-        # timestamp must not pin the bound at the burst forever. A transaction
-        # still open past the overlap window can commit with an older
-        # ``updated_at`` and be missed until the periodic full rescan — the
-        # documented safety net.
-        horizon = datetime.now(UTC) - self._overlap
+        # timestamp must not pin the bound at the burst forever. The horizon
+        # must come from the DB clock — ``updated_at`` is stamped by
+        # ``current_timestamp``, so a Python wall clock would corrupt the
+        # window when backend and Postgres run on different hosts. A
+        # transaction still open past the overlap window can commit with an
+        # older ``updated_at`` and be missed until the periodic full rescan
+        # — the documented safety net.
+        horizon = (_parse_ts(job_db.db_now()) or datetime.now(UTC)) - self._overlap
         changed = job_db.list_changed_job_marks(workflow_key, min(state.watermark, horizon))
         batch_max = state.watermark
         has_new = False
