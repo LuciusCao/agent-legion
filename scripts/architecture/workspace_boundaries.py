@@ -55,7 +55,9 @@ def _is_workspace_module(rel_path: str) -> bool:
 
 
 def _is_legacy_video_import(module: str) -> bool:
-    if module == "server.app.pipeline.package" or module.startswith("server.app.pipeline.package."):
+    if module == "server.app.pipeline.workspace_package" or module.startswith(
+        "server.app.pipeline.workspace_package."
+    ):
         return False
     if module in _LEGACY_VIDEO_EXACT:
         return True

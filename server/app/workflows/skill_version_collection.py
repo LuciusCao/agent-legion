@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from server.app.workflows.skill_version_fallbacks import configured_skill_fallbacks
+
+logger = logging.getLogger(__name__)
 
 
 def collect_skill_versions(
@@ -21,6 +24,7 @@ def collect_skill_versions(
     try:
         runs = job_db.list_node_runs(job_id)
     except Exception:
+        logger.debug("list_node_runs failed for job %s", job_id, exc_info=True)
         return versions
 
     for run in runs:
