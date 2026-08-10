@@ -13,6 +13,7 @@ from __future__ import annotations
 import hashlib
 import json
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -139,4 +140,70 @@ def test_set_max_concurrency_backfills_pending_uploads(tmp_path: Path) -> None:
     client.release_uploads.set()
     queue.shutdown()
     assert client.events[-2:] == ["upload:out-1.json", "report:exec-1"]
+    assert queue.depth == 0
+
+
+class GatedUploadClient:
+    """每个 artifact 上传各自 park 在自己的 gate 上，可逐个放行。"""
+
+    def __init__(self) -> None:
+        self.entered: dict[str, threading.Event] = {}
+        self.gates: dict[str, threading.Event] = {}
+        self.reports: list[str] = []
+        self._lock = threading.Lock()
+
+    def upload_artifact(self, path: Path) -> str:
+        entered = threading.Event()
+        gate = threading.Event()
+        with self._lock:
+            self.entered[path.name] = entered
+            self.gates[path.name] = gate
+        entered.set()
+        assert gate.wait(10)
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        return f"sha256:{digest}"
+
+    def report(
+        self, execution_id: str, lease_id: str, metadata: dict, archive: Path
+    ) -> tuple[int, bytes]:
+        self.reports.append(execution_id)
+        return 204, b""
+
+    def heartbeat(self, execution_id: str, lease_id: str) -> int:
+        return 204
+
+
+def test_lower_max_concurrency_waits_for_in_flight_drain(tmp_path: Path) -> None:
+    """热调小并发不抢占：在途任务自然跑完，新任务等在途降到新 limit 以下才补位。"""
+    work_root = tmp_path / "work"
+    for index in (1, 2, 3, 4):
+        _execution_dir(work_root, f"exec-{index}", f"out-{index}.json")
+    client = GatedUploadClient()
+    queue = UploadQueue(
+        client,
+        ExecutionStatusReporter(None),
+        max_concurrency=3,
+        heartbeat_interval=0.05,
+        stop=threading.Event(),
+    )
+    for index in (1, 2, 3):
+        queue.submit(_task(work_root, f"exec-{index}", f"out-{index}.json"))
+    for index in (1, 2, 3):
+        wait_for_predicate(lambda i=index: f"out-{i}.json" in client.entered, timeout=10)
+    queue.submit(_task(work_root, "exec-4", "out-4.json"))
+
+    queue.set_max_concurrency(1)
+    # 放出两个在途任务：在途仍 >= 新 limit，exec-4 的 bulk 不得启动。
+    client.gates["out-1.json"].set()
+    client.gates["out-2.json"].set()
+    time.sleep(0.3)
+    assert "out-4.json" not in client.entered
+
+    # 最后一个在途任务跑完后才补位：report 车道先排空，然后 exec-4 启动。
+    client.gates["out-3.json"].set()
+    wait_for_predicate(lambda: "out-4.json" in client.entered, timeout=10)
+    client.gates["out-4.json"].set()
+    queue.shutdown()
+
+    assert sorted(client.reports) == ["exec-1", "exec-2", "exec-3", "exec-4"]
     assert queue.depth == 0

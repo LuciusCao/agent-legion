@@ -29,9 +29,9 @@ def claim_availability(
     base: int, depth: int, worker_capacity: int, backlog_limit: int | None
 ) -> int:
     """背压门渐变：soft=hard//2 以下全量、hard 归零、区间内线性衰减；hard<=1 退化为旧硬门。"""
-    hard = backlog_limit or 2 * worker_capacity
-    # min 只兜住 hard<=0 的防御性输入；hard>=1 时等价于 hard//2 且保证 soft < hard，
-    # hard=1 时下方区间判断自然退化为旧硬门语义。
+    hard = 2 * worker_capacity if backlog_limit is None else backlog_limit
+    # min 保证 soft < hard：hard=1 时 soft=0，下方区间判断退化为旧硬门；
+    # hard<=0 只是防御性输入（校验已拒绝），depth >= hard 先命中、恒返回 0。
     soft = min(hard // 2, hard - 1)
     if depth >= hard:
         return 0
