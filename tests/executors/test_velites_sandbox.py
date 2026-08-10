@@ -7,9 +7,10 @@ Evidence for EXEC-HARNESS-SANDBOX-001 (design doc §5 沙箱小节):
   exits non-zero BEFORE the agent loop — it never degrades to an unsandboxed
   run; ``--no-sandbox`` is the only escape hatch;
 - macOS seatbelt: a stub-provider session drives the bash tool against
-  ``$HOME`` (read and write both denied, ``tool_execution_end.isError``), the
-  job dir (read/write allowed), the session dir (write allowed), and a
-  ``--skill`` dir (read-only).
+  ``$HOME`` (file contents unreadable and writes denied; ancestor dirs of
+  whitelist roots may be list-only, names only), the job dir (read/write
+  allowed), the session dir (write allowed), and a ``--skill`` dir
+  (read-only).
 
 The Linux bubblewrap path is covered by the Rust tests (argv unit tests in
 ``velites/src/sandbox.rs`` plus a bwrap-gated integration test in
@@ -149,7 +150,7 @@ def test_no_sandbox_escape_hatch(tmp_path: Path, velites_binary: Path) -> None:
 
 @pytest.mark.skipif(sys.platform != "darwin", reason="seatbelt backend is macOS-only")
 def test_bash_sandbox_blocks_escape_macos(tmp_path: Path, velites_binary: Path) -> None:
-    """EXEC-HARNESS-SANDBOX-001: seatbelt denies $HOME, allows job/session/skill."""
+    """EXEC-HARNESS-SANDBOX-001: seatbelt denies $HOME contents/writes, allows job/session/skill."""
     job = tmp_path / "job"
     skill = tmp_path / "skill"
     session = tmp_path / "session"
@@ -158,10 +159,15 @@ def test_bash_sandbox_blocks_escape_macos(tmp_path: Path, velites_binary: Path) 
     (job / "prompt.md").write_text("Run the commands.", encoding="utf-8")
     (skill / "SKILL.md").write_text("You are a test skill.", encoding="utf-8")
     probe = Path.home() / ".velites_sandbox_probe"
+    read_probe = Path.home() / ".velites_sandbox_read_probe"
+    read_probe.write_text("secret", encoding="utf-8")
 
     commands = [
-        # Reading outside the allowed roots ($HOME) is denied.
-        'ls "$HOME" >/dev/null 2>&1',
+        # File contents outside the allowed roots ($HOME) stay unreadable.
+        # ($HOME itself may be *listable*: whitelist roots such as a uv python
+        # under ~/.local get list-only ancestor grants so agents can see the
+        # roots exist — names only, never file contents.)
+        f"cat '{read_probe}'",
         # Writing outside the allowed roots is denied.
         f"echo pwned > '{probe}'",
         # Read/write inside the job dir works.
@@ -203,6 +209,7 @@ def test_bash_sandbox_blocks_escape_macos(tmp_path: Path, velites_binary: Path) 
     leaked = probe.exists()
     if leaked:  # a regression let the write through; clean up before failing
         probe.unlink()
+    read_probe.unlink(missing_ok=True)
 
     assert proc.returncode == 0, proc.stderr
     errors = [e["isError"] for e in _events(proc) if e["type"] == "tool_execution_end"]

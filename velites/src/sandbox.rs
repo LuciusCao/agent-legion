@@ -139,9 +139,11 @@ impl Sandbox {
         // python dies at startup when pyvenv.cfg is unreadable — whitelist
         // both READ-ONLY. A failed probe is silently skipped (system
         // pythons are covered by macos_system_read_paths already).
+        let mut python_roots = Vec::new();
         for root in python_read_roots() {
             if !read_only.contains(&root) {
-                read_only.push(root);
+                read_only.push(root.clone());
+                python_roots.push(root);
             }
         }
         let mut list_only = Vec::new();
@@ -162,7 +164,11 @@ impl Sandbox {
             // EPERM swallowed by 2>/dev/null read as "missing skill dir",
             // triggering a `find /` full-disk scan).
             SandboxMode::BashTool => {
-                for root in skill_roots.iter().chain(read_write.iter()) {
+                for root in skill_roots
+                    .iter()
+                    .chain(&python_roots)
+                    .chain(read_write.iter())
+                {
                     ancestor_list_only(root, &read_only, &read_write, &mut list_only);
                 }
             }
@@ -512,6 +518,37 @@ fn seatbelt_profile_opts(
     profile
 }
 
+/// Canonical target of `path` (meant for /etc/resolv.conf) when it leaves
+/// `etc`: systemd-resolved hosts symlink /etc/resolv.conf into
+/// /run/systemd/resolve/..., which the selective bind list does not cover —
+/// without the extra bind, sandboxed DNS is dead. `etc` is a parameter so
+/// tests can point at a fixture tree. None when the file is missing or
+/// resolves inside `etc` (already covered by the /etc ro-bind).
+#[cfg(any(target_os = "linux", test))]
+fn resolv_conf_target_outside(path: &Path, etc: &Path) -> Option<PathBuf> {
+    let target = path.canonicalize().ok()?;
+    if target.starts_with(etc) {
+        return None;
+    }
+    Some(target)
+}
+
+/// Production entry point: probe the real /etc/resolv.conf.
+#[cfg(any(target_os = "linux", test))]
+fn resolv_conf_read_root() -> Option<PathBuf> {
+    resolv_conf_target_outside(Path::new("/etc/resolv.conf"), Path::new("/etc"))
+}
+
+/// Append the resolv.conf escape bind (`--ro-bind-try` covers a target that
+/// vanished between this probe and exec) when the probe found one.
+#[cfg(any(target_os = "linux", test))]
+fn push_resolv_conf_bind(argv: &mut Vec<String>) {
+    if let Some(target) = resolv_conf_read_root() {
+        let display = target.display().to_string();
+        argv.extend(["--ro-bind-try".into(), display.clone(), display]);
+    }
+}
+
 /// `bwrap` argv for the bash tool: selective read-only binds (system roots
 /// plus the read-only roots) instead of a blanket `/` bind, read-write
 /// binds for the read-write roots. The bash tool keeps its historical
@@ -541,6 +578,7 @@ fn bwrap_argv_opts(
         let display = path.display().to_string();
         argv.extend(["--ro-bind".into(), display.clone(), display]);
     }
+    push_resolv_conf_bind(&mut argv);
     argv.extend([
         "--dev".into(),
         "/dev".into(),
@@ -609,6 +647,7 @@ fn bwrap_wrap_argv(
         let display = path.display().to_string();
         argv.extend(["--ro-bind".into(), display.clone(), display]);
     }
+    push_resolv_conf_bind(&mut argv);
     argv.extend(["--dev".into(), "/dev".into()]);
     // Private /proc: only meaningful (and safe to expose) inside the new pid
     // namespace created by --unshare-pid.
@@ -743,6 +782,58 @@ mod tests {
         let allowed = bwrap_wrap_argv(&ro, &rw, &inner(), true).join(" ");
         assert!(!allowed.contains("--unshare-net"));
         assert!(allowed.contains("--unshare-pid"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn resolv_conf_target_outside_flags_symlink_leaving_etc() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("etc")).unwrap();
+        let etc = dir.path().join("etc").canonicalize().unwrap();
+        // A real file inside etc is covered by the /etc ro-bind: no extra bind.
+        std::fs::write(etc.join("resolv.conf"), "nameserver 1.1.1.1").unwrap();
+        assert_eq!(
+            resolv_conf_target_outside(&etc.join("resolv.conf"), &etc),
+            None
+        );
+        // systemd-resolved style: a symlink escaping etc → bind the target.
+        let run = dir.path().join("run/systemd/resolve");
+        std::fs::create_dir_all(&run).unwrap();
+        let target = run.join("resolv.conf");
+        std::fs::write(&target, "nameserver 127.0.0.53").unwrap();
+        std::os::unix::fs::symlink(&target, etc.join("resolv-link")).unwrap();
+        assert_eq!(
+            resolv_conf_target_outside(&etc.join("resolv-link"), &etc),
+            Some(target.canonicalize().unwrap())
+        );
+        // A missing file yields no bind.
+        assert_eq!(resolv_conf_target_outside(&etc.join("missing"), &etc), None);
+    }
+
+    #[test]
+    fn bwrap_argvs_bind_resolv_conf_target_when_it_leaves_etc() {
+        // Host-adaptive: only hosts whose /etc/resolv.conf resolves outside
+        // /etc (systemd-resolved; macOS' /private/etc in test builds) get
+        // the extra bind. Both the bash tool and wrap argv must agree.
+        let expected = resolv_conf_read_root();
+        for joined in [
+            bwrap_argv(&[], &[PathBuf::from("/job")], &inner()).join(" "),
+            bwrap_wrap_argv(&[], &[PathBuf::from("/job")], &inner(), false).join(" "),
+        ] {
+            match &expected {
+                Some(target) => {
+                    let display = target.display().to_string();
+                    assert!(
+                        joined.contains(&format!("--ro-bind-try {display} {display}")),
+                        "resolv.conf bind missing: {joined}"
+                    );
+                }
+                None => assert!(
+                    !joined.contains("--ro-bind-try"),
+                    "unexpected resolv.conf bind: {joined}"
+                ),
+            }
+        }
     }
 
     #[test]
