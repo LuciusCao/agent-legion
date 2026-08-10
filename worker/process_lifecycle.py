@@ -29,12 +29,12 @@ def terminate(proc: subprocess.Popen[bytes], grace_seconds: float) -> None:
 
 
 def reap_orphaned_agents(work_root: Path, log=print) -> None:
-    """SIGTERM→短等待→SIGKILL 清理记录残留的 agent 进程组（ESRCH/EPERM 忽略）。"""
+    # SIGTERM→短等待→SIGKILL 清理记录残留的 agent 进程组（ESRCH/EPERM 忽略）。
     for record in work_root.glob(f"*/{AGENT_PGID_FILENAME}"):
         with contextlib.suppress(OSError, ValueError):
             pgid = int(record.read_text(encoding="utf-8"))
-            # 内层容错信号发送本身：组已消亡（ESRCH）或只剩僵尸成员（macOS
-            # 报 EPERM）都视为清理成功，记录照常移除。
+            if pgid <= 1:  # 半截/恶意记录：0/-1 会把信号发给本进程组，按垃圾跳过
+                continue
             with contextlib.suppress(OSError):
                 os.killpg(pgid, signal.SIGTERM)
                 time.sleep(1)

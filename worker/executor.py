@@ -25,6 +25,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from worker import runtime_controls
+from worker._atomic import atomic_write
 from worker.cleanup import clean_work_root
 from worker.event_filter import spawn_event_pump
 from worker.execution_heartbeat import start_lease_heartbeat
@@ -136,7 +137,7 @@ def run_execution(
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
-                pgid_record.write_text(str(proc.pid), encoding="utf-8")
+                atomic_write(pgid_record, str(proc.pid))
                 heartbeat.proc_ref["proc"] = proc
                 # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
                 pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")

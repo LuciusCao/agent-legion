@@ -6,7 +6,6 @@ heartbeat/metrics) live here; retried bulk transfers come from the
 from __future__ import annotations
 
 import json
-import shutil
 import urllib.parse
 from pathlib import Path
 from typing import Any, BinaryIO
@@ -62,14 +61,15 @@ class Client(TransferOperations):
             stream=stream_to is not None,
         )
         # 大文件下载：流式写同目录临时文件再原子 rename，避免全量入内存；
-        # 出错（4xx/5xx 小 body）仍读 content 供上层判断。临时文件残留由
-        # clean_work_root 随执行目录一起回收。
+        # 出错（4xx/5xx 小 body）仍读 content 供上层判断。iter_content 会把
+        # urllib3 的断连/读超时包装成 RequestException，进入重试路径；重试时
+        # "wb" 重新截断 .part，不会追加。残留 .part 由 clean_work_root 回收。
         if stream_to is None or response.status_code >= 400:
             return response.status_code, response.content
         temporary = stream_to.with_suffix(stream_to.suffix + ".part")
-        response.raw.decode_content = True
         with response, temporary.open("wb") as handle:
-            shutil.copyfileobj(response.raw, handle)
+            for chunk in response.iter_content(chunk_size=1 << 20):
+                handle.write(chunk)
         temporary.replace(stream_to)
         return response.status_code, b""
 
