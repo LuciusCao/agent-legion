@@ -58,7 +58,7 @@ if [[ "$common_dir" != /* ]]; then
   common_dir="$ROOT_DIR/$common_dir"
 fi
 
-fingerprint_input="gate=$gate"$'\n'"lanes=$lanes"$'\n'
+fingerprint_input="gate=$gate"$'\n'"lanes=$lanes"$'\n'"tier=$tier"$'\n'
 fingerprint_paths=(
   scripts/check-fast.sh
   scripts/check-quick.sh

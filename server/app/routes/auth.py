@@ -27,6 +27,11 @@ _COOKIE_MAX_AGE = int(SESSION_TTL.total_seconds())
 
 
 def _set_session_cookie(response: Response, token: str) -> None:
+    # secure=True is deliberately omitted: deployments front the app with a
+    # TLS-terminating reverse proxy and may serve plain HTTP on trusted
+    # internal networks, where a Secure cookie would never be sent back.
+    # httponly + samesite=strict are always enforced; if the app is ever
+    # exposed to untrusted networks without TLS termination, add secure=True.
     response.set_cookie(
         SESSION_COOKIE,
         token,

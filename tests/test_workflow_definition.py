@@ -5,6 +5,8 @@ import pytest
 from server.app.workflows.definition import WorkflowDefinitionError, load_workflow_definition
 from tests.helpers import load_builtin_definition
 
+_SNAPSHOT_LOGGER = "server.app.services.workflow_revision_format"
+
 
 def write_workflow(tmp_path: Path, node_body: str) -> Path:
     config = tmp_path / "workflow.yaml"
@@ -299,3 +301,37 @@ def test_legacy_snapshot_without_node_config_still_loads() -> None:
     restored = definition_from_job_snapshot({"workflow_definition_snapshot_json": snapshot})
     assert restored is not None
     assert restored.nodes["one"].config == {}
+
+
+@pytest.mark.no_db
+def test_corrupt_job_snapshot_returns_none_and_logs_warning(caplog) -> None:
+    import logging
+
+    from server.app.services.workflow_revision_format import definition_from_job_snapshot
+
+    job = {"id": "job-corrupt", "workflow_definition_snapshot_json": "{not valid json"}
+    with caplog.at_level(logging.WARNING, logger=_SNAPSHOT_LOGGER):
+        restored = definition_from_job_snapshot(job)
+
+    assert restored is None
+    warnings = [r for r in caplog.records if r.levelno >= logging.WARNING]
+    assert len(warnings) == 1
+    assert "job-corrupt" in warnings[0].getMessage()
+
+
+@pytest.mark.no_db
+def test_missing_job_snapshot_returns_none_without_warning(caplog) -> None:
+    import logging
+
+    from server.app.services.workflow_revision_format import definition_from_job_snapshot
+
+    with caplog.at_level(logging.WARNING, logger=_SNAPSHOT_LOGGER):
+        assert definition_from_job_snapshot({"id": "job-legacy"}) is None
+        assert (
+            definition_from_job_snapshot(
+                {"id": "job-legacy", "workflow_definition_snapshot_json": ""}
+            )
+            is None
+        )
+
+    assert not [r for r in caplog.records if r.levelno >= logging.WARNING]

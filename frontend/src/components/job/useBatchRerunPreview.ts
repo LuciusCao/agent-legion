@@ -28,15 +28,20 @@ export function useBatchRerunPreview(
   open: boolean,
   mode: BatchRerunPreviewMode
 ) {
-  // Subscribe to the selection pieces so the query key tracks them; the
-  // target itself is recomputed from the store via the shared resolver.
+  // Subscribe to the exact selection fields the shared resolver reads, so the
+  // memoized target (and the query key) always tracks the store.
   const selectionMode = useJobStore((s) => s.selectionMode)
   const selectionFilter = useJobStore((s) => s.selectionFilter)
   const excludedIds = useJobStore((s) => s.excludedIds)
   const selectedIds = useJobStore((s) => s.selectedIds)
   const target: BatchJobTarget | null = useMemo(
-    () => resolveBatchTarget(useJobStore.getState()),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    () =>
+      resolveBatchTarget({
+        selectionMode,
+        selectionFilter,
+        excludedIds,
+        selectedIds,
+      }),
     [selectionMode, selectionFilter, excludedIds, selectedIds]
   )
 

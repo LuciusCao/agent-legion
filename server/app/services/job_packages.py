@@ -3,7 +3,10 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.pipeline.package import WORKSPACE_PACKAGE_FILES, create_workspace_package
+from server.app.pipeline.workspace_package import (
+    WORKSPACE_PACKAGE_FILES,
+    create_workspace_package,
+)
 from server.app.services.job_selection_resolver import (
     EmptyJobSelectionError,
     resolve_batch_selection,

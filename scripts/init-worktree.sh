@@ -5,6 +5,7 @@
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
 #   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
 # 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取第一个非 bare 且非当前的 worktree）
+# 前提: macOS（`sed -i ''` 是 BSD 语法，GNU sed 不兼容）。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -15,7 +16,7 @@ cd "$ROOT"
 MAIN="$(git worktree list --porcelain | awk '/^worktree /{print $2; exit}')"
 if [[ "$ROOT" != "$MAIN" && "$(dirname "$ROOT")" != "$MAIN/.worktrees" ]]; then
     echo "错误: worktree 禁止嵌套（当前: ${ROOT}）。" >&2
-    echo "请先 cd 到主仓库根（$MAIN），再 git worktree add .worktrees/<name> -b <branch> <base>。" >&2
+    echo "请先 cd 到主仓库根（${MAIN}），再 git worktree add .worktrees/<name> -b <branch> <base>。" >&2
     exit 1
 fi
 
@@ -59,8 +60,8 @@ NAME="$(printf '%s' "$(basename "$ROOT")" | tr -c 'a-zA-Z0-9_' '_')"
 DB="agent_legion_${NAME}"
 DB_URL="postgresql://127.0.0.1:5432/${DB}"
 if [[ -f .env ]]; then
-    if grep -q '^AGENT_LEGION_DATABASE_URL=' .env; then
-        sed -i '' -E "s|^AGENT_LEGION_DATABASE_URL=.*|AGENT_LEGION_DATABASE_URL=${DB_URL}|" .env
+    if grep -qE '^(export )?AGENT_LEGION_DATABASE_URL=' .env; then
+        sed -i '' -E "s|^(export )?AGENT_LEGION_DATABASE_URL=.*|\1AGENT_LEGION_DATABASE_URL=${DB_URL}|" .env
     else
         echo "AGENT_LEGION_DATABASE_URL=${DB_URL}" >> .env
     fi

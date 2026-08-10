@@ -31,7 +31,9 @@ def _subtree_latest_mtime(root: Path, latest: float) -> float:
     for dirpath, dirnames, filenames in os.walk(root):
         for name in (*dirnames, *filenames):
             try:
-                latest = max(latest, (Path(dirpath) / name).stat().st_mtime)
+                # lstat 不跟随 symlink： dangling link 不跳过整个子树，
+                # 也不把链接目标（可能在 work_root 外）的 mtime 算进来。
+                latest = max(latest, (Path(dirpath) / name).lstat().st_mtime)
             except OSError:
                 continue
     return latest
@@ -59,6 +61,10 @@ def sweep_stale_executions(
     except OSError:
         return
     for child in children:
+        # is_dir() 跟随 symlink：symlink 一律 unlink，绝不 rmtree 到链接目标。
+        if child.is_symlink():
+            child.unlink(missing_ok=True)
+            continue
         if not child.is_dir() or (child / PENDING_FILENAME).is_file():
             continue
         try:
