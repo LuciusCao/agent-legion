@@ -9,8 +9,11 @@ Agent Worker upload pipeline consume it.
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def fold_model_error(event: dict[str, Any], last_error: str | None) -> str | None:
@@ -73,5 +76,6 @@ def detect_model_error(events_file: Path) -> str | None:
                     continue
                 last_error = fold_model_error(event, last_error)
     except Exception:
+        logger.debug("Failed to scan Pi events for model errors: %s", events_file, exc_info=True)
         return None
     return last_error

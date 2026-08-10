@@ -81,6 +81,7 @@ def test_run_is_driven_by_node_config(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         video_transcribe, "build_providers", lambda asr_config, root_dir: ["providers"]
     )
+    monkeypatch.setattr(video_transcribe, "get_video_duration", lambda video_path: 100.0)
     # 节点不再读全量 settings：load_settings 一旦被调即失败。
     monkeypatch.setattr(
         "server.app.settings.load_settings",
@@ -95,6 +96,7 @@ def test_run_is_driven_by_node_config(monkeypatch, tmp_path: Path) -> None:
 
     assert captured["mode"] == "whisper"
     assert captured["providers"] == ["providers"]
+    assert captured["duration"] == 100.0  # 真实时长驱动覆盖率校验，不再是 0
     assert (tmp_path / "transcription.json").is_file()
 
 
@@ -110,7 +112,27 @@ def test_run_defaults_to_auto_mode(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         video_transcribe, "build_providers", lambda asr_config, root_dir: ["providers"]
     )
+    monkeypatch.setattr(video_transcribe, "get_video_duration", lambda video_path: 60.0)
 
     video_transcribe.run({}, tmp_path, {})
 
     assert captured["mode"] == "auto"
+
+
+def test_run_fails_loudly_when_duration_unprobeable(monkeypatch, tmp_path: Path) -> None:
+    """ffprobe 失败（返回 0）时必须显式报错，不允许静默传 0 使覆盖率校验失效。"""
+    _write_video_input(tmp_path)
+    monkeypatch.setattr(video_transcribe, "get_video_duration", lambda video_path: 0.0)
+    called = False
+
+    def _fake_transcribe(**kwargs: Any) -> Any:
+        nonlocal called
+        called = True
+        return SimpleNamespace()
+
+    monkeypatch.setattr(video_transcribe, "run_transcription_with_providers", _fake_transcribe)
+
+    with pytest.raises(RuntimeError, match="duration"):
+        video_transcribe.run({}, tmp_path, {})
+
+    assert called is False

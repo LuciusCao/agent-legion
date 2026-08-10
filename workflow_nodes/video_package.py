@@ -1,8 +1,8 @@
 """video_knowledge node: write the package manifest for the finished job.
 
-Lists every file in the job directory (excluding the manifest itself) into
-``package_manifest.json`` so downstream packaging/upload sees a stable file
-inventory.
+Lists the top-level files of the job directory (``iterdir()``, non-recursive,
+excluding the manifest itself) into ``package_manifest.json`` so downstream
+packaging/upload sees a stable file inventory.
 """
 
 from __future__ import annotations

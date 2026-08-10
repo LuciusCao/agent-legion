@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from contextlib import suppress
 from pathlib import Path
 from typing import Any
@@ -83,6 +84,9 @@ def scan_and_compress_pi_events(events_path: Path) -> tuple[str | None, int, int
                 model_error = fold_model_error(event, model_error)
                 if event.get("type") in RELEVANT_EVENT_TYPES:
                     dst.write(line + "\n")
+            # 对齐 worker/_atomic 标准：replace 前 flush + fsync，崩溃不留半截文件。
+            dst.flush()
+            os.fsync(dst.fileno())
     except Exception:
         logger.exception("Failed to compress Pi events: %s", events_path)
         with suppress(OSError):

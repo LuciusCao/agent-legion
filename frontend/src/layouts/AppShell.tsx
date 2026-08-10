@@ -49,9 +49,13 @@ export function AppShell({ appBar, children, mainClassName }: AppShellProps) {
     setReportedScrolled(null)
   }, [])
 
+  // Latest-ref mirror so the scroll listener below (bound once) can read the
+  // current reportedScrolled without re-subscribing; synced in an effect,
+  // not during render.
   const reportedScrolledRef = useRef(reportedScrolled)
-  // eslint-disable-next-line react-hooks/refs
-  reportedScrolledRef.current = reportedScrolled
+  useEffect(() => {
+    reportedScrolledRef.current = reportedScrolled
+  }, [reportedScrolled])
 
   useEffect(() => {
     const main = mainRef.current
