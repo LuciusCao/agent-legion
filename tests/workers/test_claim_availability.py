@@ -40,6 +40,19 @@ def test_degenerate_single_slot_backlog_keeps_hard_gate() -> None:
     assert claim_availability(6, 2, 8, 1) == 0
 
 
+def test_two_slot_backlog_has_no_decay_zone() -> None:
+    # hard=2 → soft=1：soft 与 hard 之间没有整数 depth，区间为空、仍是硬门。
+    assert claim_availability(6, 0, 8, 2) == 6
+    assert claim_availability(6, 1, 8, 2) == 6
+    assert claim_availability(6, 2, 8, 2) == 0
+
+
+def test_zero_backlog_limit_always_blocks() -> None:
+    # hard=0 是配置校验拒绝的防御性输入：depth >= hard 恒成立，恒返回 0。
+    assert claim_availability(6, 0, 8, 0) == 0
+    assert claim_availability(6, 5, 8, 0) == 0
+
+
 def test_zero_base_stays_zero() -> None:
     assert claim_availability(0, 0, 8, None) == 0
     assert claim_availability(0, 9, 8, None) == 0

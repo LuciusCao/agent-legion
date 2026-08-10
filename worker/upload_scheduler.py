@@ -7,6 +7,10 @@ current limit in flight. Raising the limit backfills immediately; lowering it
 lets in-flight work drain without preemption. The pool is sized at
 ``MAX_DYNAMIC_CONCURRENCY`` but creates threads lazily, so the real thread
 count never exceeds the historical peak limit.
+
+Priority inflow must be bounded — here reports are produced 1:1 by finished
+bulk work. Generic reuse with unbounded priority inflow risks starving the
+bulk lane under strict priority.
 """
 
 from __future__ import annotations
@@ -69,13 +73,20 @@ class LaneScheduler:
     def _pump_locked(self) -> None:
         while self._in_flight < self._limit:
             if self._priority:
-                fn = self._priority.popleft()
+                lane, fn = self._priority, self._priority.popleft()
             elif self._bulk:
-                fn = self._bulk.popleft()
+                lane, fn = self._bulk, self._bulk.popleft()
             else:
                 return
             self._in_flight += 1
-            self._pool.submit(self._run, fn)
+            try:
+                self._pool.submit(self._run, fn)
+            except RuntimeError:
+                # 池已关闭（关停竞态）：in_flight 回退、任务放回原 lane
+                # 队首，不丢任务。
+                self._in_flight -= 1
+                lane.appendleft(fn)
+                return
 
     def _run(self, fn: Callable[[], None]) -> None:
         try:

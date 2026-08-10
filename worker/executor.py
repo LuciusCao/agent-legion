@@ -309,10 +309,8 @@ def main() -> int:
                     traceback.print_exc()
                     print(f"Agent execution failed: {exc}", flush=True)
             try:
-                max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
-                transfer = load_transfer_controls(args.config)
-                uploads.set_max_concurrency(transfer.upload_max_concurrency)
-                control_error = None
+                new_controls = runtime_controls.load_claim_controls(args.config)
+                new_transfer = load_transfer_controls(args.config)
             except (OSError, ValueError, YAMLError) as exc:
                 message = str(exc)
                 if message != control_error:
@@ -321,6 +319,13 @@ def main() -> int:
                         flush=True,
                     )
                     control_error = message
+            else:
+                # 全部加载成功才统一生效：半应用会让 "keeping previous values"
+                # 撒谎（claim 控制已覆盖、transfer 控制还是旧值）。
+                max_concurrency, claim_enabled = new_controls
+                transfer = new_transfer
+                uploads.set_max_concurrency(transfer.upload_max_concurrency)
+                control_error = None
             base = max(0, max_concurrency - len(active)) if claim_enabled else 0
             # Backpressure: a deep upload backlog means the Host is not
             # draining results; taper claiming linearly towards zero instead
