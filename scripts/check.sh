@@ -16,7 +16,10 @@ trap cleanup_coverage EXIT
 echo "=== Quick Gate ==="
 # The full local gate keeps coverage semantics: check-quick.sh skips backend
 # coverage by default, so re-enable it here for the combined report below.
-AGENT_LEGION_COV=1 FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
+# GATE_LANES is pinned explicitly: without it check-quick.sh derives lanes
+# from the dirty worktree, but check.sh is the local full-gate substitute and
+# must always run every lane.
+GATE_LANES="backend frontend rust" AGENT_LEGION_COV=1 FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-full.XXXXXX")"
 cleanup_logs() {

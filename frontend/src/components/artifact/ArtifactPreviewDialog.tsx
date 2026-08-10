@@ -6,6 +6,7 @@ import {
   DialogTitle,
 } from '@mui/material'
 import { JsonTree } from '../JsonTree'
+import { tryParseJson } from '../../lib/parsers'
 import styles from './ArtifactPreviewDialog.module.css'
 
 export interface ArtifactPreviewDialogProps {
@@ -14,9 +15,6 @@ export interface ArtifactPreviewDialogProps {
   content: string
   onClose: () => void
 }
-
-// prettier-ignore
-const tryParseJson = (content: string): unknown | null => { try { return JSON.parse(content) } catch { return null } }
 
 export function ArtifactPreviewDialog({
   open,

@@ -53,12 +53,16 @@ def test_rate_limiter_success_resets_failures() -> None:
     limiter.check("bob")
 
 
-def test_rate_limiter_lock_expires() -> None:
-    limiter = LoginRateLimiter(max_failures=1, lock_seconds=0.05)
+def test_rate_limiter_lock_expires(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Drive the limiter with a fake monotonic clock instead of sleeping on the
+    # real one: sub-second real-clock waits are flaky on loaded CI runners.
+    now = [1000.0]
+    monkeypatch.setattr(time, "monotonic", lambda: now[0])
+    limiter = LoginRateLimiter(max_failures=1, lock_seconds=60)
     limiter.record_failure("carol")
     with pytest.raises(LoginLockedError):
         limiter.check("carol")
-    time.sleep(0.06)
+    now[0] += 61
     limiter.check("carol")
 
 

@@ -1,7 +1,11 @@
+import logging
+
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_node_executors(
@@ -18,6 +22,7 @@ def resolve_node_executors(
     try:
         config = workspace_executor_config.get(workspace_id)
     except Exception:
+        logger.debug("executor config unavailable for workspace %s", workspace_id, exc_info=True)
         return {}
 
     executor_kinds = {

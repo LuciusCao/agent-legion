@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import tempfile
 import time
-from contextlib import suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Protocol
 
+from worker._atomic import atomic_write
 from worker.status import ENV_VAR
 
 METRICS_FILENAME = "ops_metrics.json"
@@ -63,6 +62,12 @@ class WorkerMetricsCache:
         return cls(path)
 
     def refresh(self, client: MetricsClient, *, now: float | None = None) -> None:
+        """Poll every UI window once per refresh interval, then publish.
+
+        A failed window does not raise: it is folded into the published
+        error string so the UI keeps showing the other windows and the last
+        good snapshot of the failed one.
+        """
         current = time.monotonic() if now is None else now
         if current < self._next_refresh:
             return
@@ -82,6 +87,16 @@ class WorkerMetricsCache:
         snapshots: dict[str, dict[str, Any]],
         error: str | None = None,
     ) -> None:
+        """Persist the latest snapshots for the local UI process to read.
+
+        The write goes through ``worker._atomic.atomic_write`` (same-directory
+        temp file, fsync, then os.replace): the UI reads this file from
+        another process and must never observe a half-written JSON document.
+        A write failure is logged and swallowed — metrics are volatile and
+        the next refresh simply republishes them. The file intentionally
+        carries no credential material; ``read_metrics_cache`` also rejects
+        snapshots whose recorded writer pid is no longer alive.
+        """
         self._snapshots = dict(snapshots)
         if self._path is None:
             return
@@ -92,19 +107,6 @@ class WorkerMetricsCache:
             "updated_at": datetime.now(UTC).isoformat(),
         }
         try:
-            descriptor, temporary = tempfile.mkstemp(
-                dir=self._path.parent,
-                prefix=f"{self._path.stem}.",
-            )
-            try:
-                with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-                    json.dump(payload, handle, ensure_ascii=False)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, self._path)
-            except BaseException:
-                with suppress(OSError):
-                    os.unlink(temporary)
-                raise
+            atomic_write(self._path, json.dumps(payload, ensure_ascii=False))
         except OSError as exc:
             print(f"metrics cache write failed: {exc}", flush=True)

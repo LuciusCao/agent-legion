@@ -17,9 +17,9 @@ fi
 
 # 1. secrets
 missing=0
-for f in postgres_password postgres_pgpass agent_worker_register_token; do
+for f in postgres_password postgres_pgpass agent_worker_register_token vault_master_key; do
     if [[ ! -s "deploy/secrets/$f" ]]; then
-        echo "缺少 deploy/secrets/$f（生成方式见 docs/agent-worker-deployment.md §1）" >&2
+        echo "缺少 deploy/secrets/${f}（生成方式见 docs/agent-worker-deployment.md §1）" >&2
         missing=1
     fi
 done
@@ -33,6 +33,7 @@ for i in $(seq 1 30); do
     [[ "$status" == *healthy* ]] && break
     sleep 2
 done
+[[ "$status" == *healthy* ]] || { echo "postgres 未在预期时间内 healthy（当前: ${status:-unknown}）" >&2; exit 1; }
 
 # 3. ASR 模型预热（volume 已有所需模型则跳过）
 MODEL_DIR=/root/.cache/modelscope/hub/models/iic/SenseVoiceSmall

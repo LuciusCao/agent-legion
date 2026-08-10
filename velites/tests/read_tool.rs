@@ -123,3 +123,38 @@ async fn read_small_file_is_not_truncated() {
     assert!(!output.is_error);
     assert_eq!(result_text(&output), "alpha\nbeta");
 }
+
+#[tokio::test]
+async fn read_huge_limit_does_not_overflow() {
+    // Regression: a model-supplied u64::MAX limit must not overflow
+    // `start + limit` (debug panic / release wrap → slice panic, exit 101
+    // without an `agent_end` event).
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("small.txt"), "alpha\nbeta\n").unwrap();
+
+    let output = ToolKind::Read
+        .execute(
+            &serde_json::json!({"path": "small.txt", "limit": u64::MAX}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error);
+    assert_eq!(result_text(&output), "alpha\nbeta");
+}
+
+#[tokio::test]
+async fn read_offset_past_eof_with_huge_limit_selects_nothing() {
+    // Empty selection (start == total_file_lines) must not index past the
+    // line vector, even combined with a saturating limit.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("small.txt"), "alpha\nbeta\n").unwrap();
+
+    let output = ToolKind::Read
+        .execute(
+            &serde_json::json!({"path": "small.txt", "offset": 100, "limit": u64::MAX}),
+            &ctx(dir.path()),
+        )
+        .await;
+    assert!(!output.is_error);
+    assert_eq!(result_text(&output), "");
+}
