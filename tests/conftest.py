@@ -289,6 +289,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_agent_broker_batch.py",
         "tests/test_agent_broker_concurrency.py",
         "tests/test_agent_broker_empty.py",
+        "tests/test_agent_broker_reaper.py",
         "tests/test_agent_catalog.py",
         "tests/test_agent_stock.py",
         "tests/test_auth_queries.py",
