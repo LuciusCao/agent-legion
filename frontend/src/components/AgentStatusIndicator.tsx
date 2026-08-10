@@ -31,6 +31,10 @@ export function AgentStatusIndicator({
   const monitoringPath = `/workspaces/${workspaceId}/monitoring`
 
   useEffect(() => {
+    // Intentionally silent: a paused-status refresh failure degrades to the
+    // last known state and the popover still renders. Unlike togglePause
+    // (a user action that needs feedback), this background read would only
+    // produce noise with a toast.
     fetchWorkerStatus(workspaceId).catch(() => {})
   }, [fetchWorkerStatus, workspaceId])
 

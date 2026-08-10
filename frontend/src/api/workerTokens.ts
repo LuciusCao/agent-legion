@@ -15,9 +15,8 @@ type RevokeTokenResponse =
   components['schemas']['AgentRegisterTokenRevokeResponse']
 type RevokeWorkerResponse = components['schemas']['AgentWorkerRevokeResponse']
 
-// Management endpoints are currently unauthenticated (trusted-network
-// deployment); the backend TODO in authorize_management tracks restoring
-// checks once the login/permission system lands.
+// Management endpoints require an admin session: every route below is gated
+// by require_admin on the backend (server/app/routes/agent_workers.py).
 export async function listRegisterTokens(): Promise<
   AgentRegisterTokenSummary[]
 > {

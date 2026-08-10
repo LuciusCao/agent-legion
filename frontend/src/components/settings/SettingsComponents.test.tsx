@@ -252,10 +252,18 @@ describe('WorkflowSection', () => {
     expect(onChange).toHaveBeenCalledWith('q2')
   })
 
-  it('falls back to empty options when fetch fails', async () => {
+  it('falls back to empty options and shows an error when fetch fails', async () => {
     mockFetchWorkflows.mockRejectedValue(new Error('network error'))
 
     render(<WorkflowSection workflowKey="" onChange={vi.fn()} />)
+
+    // Assert before opening the menu: MUI aria-hides the rest of the tree
+    // while the dropdown is open, which would hide the alert from queries.
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toHaveTextContent(
+        '工作流列表加载失败，请刷新重试'
+      )
+    })
 
     const select = screen.getByRole('combobox', { name: '工作流' })
     await act(async () => {
