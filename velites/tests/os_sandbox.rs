@@ -6,8 +6,9 @@
 //! - macOS seatbelt integration: a stub-provider session drives the bash tool
 //!   against $HOME (denied), the job dir / session dir (allowed) and a
 //!   `--skill` dir (read-only).
-//! - Linux bubblewrap integration: gated on `bwrap` availability (CI's Linux
-//!   lane has none; argv construction is unit-tested in src/sandbox.rs).
+//! - Linux bubblewrap integration: gated on `bwrap` availability (the CI rust
+//!   lane installs bubblewrap, see .github/workflows/quality-gate.yml; local
+//!   runs without bwrap skip).
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

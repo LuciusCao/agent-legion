@@ -242,7 +242,18 @@ Linux bwrap 的 bash 工具策略（2026-08-10 收紧，回应生产 `find /` �
 `--skill` 目录 + python3 探测根，读写 bind = cwd/session/$TMPDIR（/tmp 为
 tmpfs）；白名单之外的路径在 mount namespace 里根本不存在。bash 工具保留
 两个历史差异：**共享网络**（不 `--unshare-net`）与**不 `--unshare-pid`**
-（`sandbox wrap` 严格变体两者都隔离）。
+（`sandbox wrap` 严格变体两者都隔离）。收紧后沙箱内看不到宿主 `$HOME`
+是**有意切断**：依赖宿主凭证的命令（`~/.gitconfig`、`~/.ssh`、`gh`/`aws`
+配置）需要在 job 内显式注入凭证，不能指望宿主 home。DNS 逃逸通道：
+systemd-resolved 主机的 `/etc/resolv.conf` 是指向 `/run/...` 的 symlink，
+两个 bwrap 策略都会在 build 时 canonicalize 它并把 /etc 之外的解析目标
+以 `--ro-bind-try` 只读补 bind，沙箱内 DNS 不受影响。
+
+python3 解释器白名单覆盖的布局：系统 python（/usr）、uv
+（`~/.local/share/uv/python/...`）、conda（/opt 下，路径段含 `python` 经
+系统 /opt bind 或探测覆盖）。pyenv（`~/.pyenv/versions/<版本号>` 路径段
+不含 `python` 子串，且位于 $HOME 下）暂不在探测范围内——沙箱内需要
+pyenv 解释器的场景需另行立项。
 
 ## 6. CLI 接口
 
