@@ -137,8 +137,7 @@ pub struct SandboxWrapCli {
     #[arg(long)]
     pub cwd: PathBuf,
 
-    /// Additional read-only root (repeatable; Linux covers reads via the
-    /// read-only `/` bind).
+    /// Additional read-only root (repeatable).
     #[arg(long = "allow-read")]
     pub allow_read: Vec<PathBuf>,
 
