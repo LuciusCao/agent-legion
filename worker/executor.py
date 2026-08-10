@@ -13,6 +13,7 @@ import subprocess
 import sys
 import threading
 import time
+import traceback
 from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ if str(_PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(_PROJECT_ROOT))
 
 from worker import runtime_controls
+from worker._atomic import atomic_write
 from worker.cleanup import clean_work_root
 from worker.event_filter import spawn_event_pump
 from worker.execution_heartbeat import start_lease_heartbeat
@@ -32,7 +34,7 @@ from worker.fd_limits import raise_fd_limit
 from worker.host_client import Client, WorkerAuthError
 from worker.host_status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
-from worker.process_lifecycle import terminate, wait_for_exit
+from worker.process_lifecycle import AGENT_PGID_FILENAME, terminate, wait_for_exit
 from worker.registration_retry import register_from_config
 from worker.runtime_preflight import preflight_error
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
@@ -86,6 +88,8 @@ def run_execution(
     execution_dir = work_root / execution_id
     job_dir = execution_dir / "job"
     run_dir = job_dir / "runs" / node_key / "worker"
+    # agent 进程组记录：executor 被 SIGKILL 时 supervisor 按此 killpg 兜底。
+    pgid_record = execution_dir / AGENT_PGID_FILENAME
     status_fields = {
         "job_id": str(claim.get("job_id", "")),
         "node_key": node_key,
@@ -133,6 +137,7 @@ def run_execution(
                     stderr=subprocess.STDOUT,
                     start_new_session=True,
                 )
+                atomic_write(pgid_record, str(proc.pid))
                 heartbeat.proc_ref["proc"] = proc
                 # Drop token-delta spam as it streams by; deltas are discarded at upload time anyway.
                 pump = spawn_event_pump(proc, output, f"pi-events-{execution_id[:8]}")
@@ -140,7 +145,7 @@ def run_execution(
                 # (dispatch.EXECUTION_TIMEOUT_SECONDS = 1800); manifests
                 # always carry timeout_seconds, so this only covers
                 # hand-built/legacy manifests.
-                timeout = int(manifest.get("execution", {}).get("timeout_seconds", 1800))
+                timeout = float(manifest.get("execution", {}).get("timeout_seconds", 1800))
                 exit_code, report_result = wait_for_exit(
                     proc, timeout, shutdown, shutdown_grace, ownership_lost
                 )
@@ -162,6 +167,7 @@ def run_execution(
             # else: lease lost mid-run — the Host owns the outcome; nothing
             # to deliver, fall through to the local-discard path below.
     except Exception as exc:
+        traceback.print_exc()
         task = UploadTask(
             execution_id=execution_id,
             lease_id=lease_id,
@@ -178,6 +184,7 @@ def run_execution(
     finally:
         if proc is not None and proc.poll() is None:
             terminate(proc, 5)
+        pgid_record.unlink(missing_ok=True)
     if task is not None:
         # Free the Host-side execution slot BEFORE queueing the upload: from
         # here on the remaining work is pure I/O. 404 = Host predates the
@@ -200,6 +207,7 @@ def run_execution(
             try:
                 uploads.submit(task)
             except Exception:
+                heartbeat.stop.set()  # 停止租约心跳线程，避免泄漏
                 heartbeat.adopted.clear()
                 raise
             return
@@ -280,8 +288,7 @@ def main() -> int:
                     host_worker = sync_host_status(client, status, metrics, host_worker)
                 except WorkerAuthError as exc:
                     print(
-                        f"Agent Worker rejected by server: {exc}; re-register required",
-                        flush=True,
+                        f"Agent Worker rejected by server: {exc}; re-register required", flush=True
                     )
                     return 2
                 print(
@@ -299,6 +306,7 @@ def main() -> int:
                 try:
                     future.result()
                 except Exception as exc:
+                    traceback.print_exc()
                     print(f"Agent execution failed: {exc}", flush=True)
             try:
                 max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
@@ -347,10 +355,7 @@ def main() -> int:
                         )
                     )
             except WorkerAuthError as exc:
-                print(
-                    f"Agent Worker rejected by server: {exc}; re-register required",
-                    flush=True,
-                )
+                print(f"Agent Worker rejected by server: {exc}; re-register required", flush=True)
                 return 2
             except Exception as exc:
                 print(f"Agent claim error: {exc}; retrying in {backoff:.1f}s", flush=True)

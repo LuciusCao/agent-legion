@@ -101,13 +101,23 @@ pub async fn run(cli: Cli) -> anyhow::Result<u8> {
         ))
     };
 
-    let model = cli
-        .model
-        .clone()
-        .unwrap_or_else(|| match cli.provider.as_str() {
+    let model = match cli.model.clone() {
+        Some(model) => model,
+        None => match cli.provider.as_str() {
             "stub" => "stub".to_string(),
+            // Fail fast: a gateway run without --model used to fall back to
+            // the literal string "unknown", surfacing only later as a
+            // provider-side model error.
+            "gateway" | "openai_compat" => {
+                return Err(anyhow!(
+                    "--provider {} requires --model <model-id>",
+                    cli.provider
+                ))
+            }
+            // Unknown providers fail below with their own error message.
             _ => "unknown".to_string(),
-        });
+        },
+    };
 
     let config = agent::AgentConfig {
         name: cli.name.clone(),

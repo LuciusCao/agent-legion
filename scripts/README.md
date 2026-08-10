@@ -14,6 +14,11 @@
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
 | `check-deps-audit.sh` | 依赖漏洞审计（pip-audit + npm audit）；非阻塞，需网络。 |
 | `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |
+| `check_coverage_partitions.py` | 按分区（关键模块/目录）报告覆盖率下限，防止关键模块被全局平均掩盖；默认 report 模式，`--enforce` / `AGENT_LEGION_COV_PARTITIONS=enforce` 转阻塞。 |
+| `pytest_gate_shard.py` | pytest 插件：`GATE_SHARD=i/n` 按 md5(nodeid) 对收集结果确定性分片（CI postgres tier 三个 shard 用）。 |
+| `pytest_telemetry.py` | pytest 插件：把 rerun 尝试记录为 JSON 报告，供 CI 遥测与 flaky 治理。 |
+| `summarize_test_results.py` | 把 JUnit 与 rerun 报告渲染为 Markdown 汇总（写 CI job summary；stdlib-only）。 |
+| `check_reruns.py` | flaky 治理：rerun 命中未登记 nodeid 或登记条目超期时失败（registry 在 `tests/flaky_registry.yaml`；nightly/ci-extended 用）。 |
 
 ## 架构治理
 
@@ -25,6 +30,7 @@
 | `generate_architecture.py` | 从代码 AST 自动生成 `docs/architecture/backend.md`、`frontend.md`、`pipeline.md`、`deployment.md` 的表格章节。 |
 | `generate_architecture_frontend.py` | `generate_architecture.py` 的前端路由提取 helper。 |
 | `generate_architecture_pipeline.py` | `generate_architecture.py` 的视频 pipeline 节点提取 helper。 |
+| `check_exemption_age.py` | 提醒移除条件已过期的架构豁免（非阻塞；check.sh / CI 调用）。 |
 
 ## Agent Worker 子系统
 
@@ -47,6 +53,11 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `export_openapi.py` | 不启动 Worker 导出 OpenAPI 模式。 |
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
+| `init-worktree.sh` | 一键初始化新 worktree（复制 .env、派生并创建专属 Postgres 库、生成 deploy/secrets、种子 worker 配置、恢复 workspace 调度；幂等，macOS）。 |
+| `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。 |
+| `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、ASR 模型预热、全 stack 健康等待（仅 prod worktree 使用）。 |
+| `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。 |
+| `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 
 ## 一次性与运维脚本
 
@@ -59,6 +70,8 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为（共享逻辑在 `_skill_cost_core.py`）。 | skill 成本对账不再需要按版本切片对比。 |
 | `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
 | `velites_diff_events.py` | 结构对比 Node Pi 与 velites 的 `events.jsonl` 事件流（忽略时序字段与 delta 事件差异）。 | velites 完全替代 Node Pi 且回归基线归档后。 |
+| `migrate_job_dirs_to_shards.py` | 一次性迁移：把扁平 `jobs/<workspace>/<job_id>` 目录改名为分片布局并同步 `jobs.storage_dir`（幂等可重入，`--apply` 需停后端/worker）。 | 生产库不再有 3 段 legacy `storage_dir` 行（全部迁移到 4 段分片布局）。 |
+| `velites_replay.py` | velites 灰度 Phase 1 影子回放：抽样生产 run 目录，离线双跑 Node Pi 与 velites 并对比事件流与声明输出（只读生产数据，不碰 DB）。 | velites 灰度完成、影子回放基线归档后。 |
 
 一次性脚本（`diagnose_cms.py`、`cleanup-agent-pollution.py`、`backfill-node-run-dirs.py`、`archive/backfill_source_uuid.py`）已于 2026-07-22 退役删除；一次性迁移脚本（`import-sqlite-to-postgres.py` + `sqlite_import_support.py`、`migrate-config-layout.py`）已于 2026-07-23 随 SQLite→PostgreSQL 迁移与配置布局拆分完成退役删除；历史用法见 git 历史。
 
@@ -71,6 +84,7 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `git-hooks/` | 版本化的 pre-commit / pre-push 钩子 dispatcher，由 `install-git-hooks.sh` 安装到 Git common directory，再转发到 worktree 根的 `.githooks/`。 |
 | `remote/` | 远程 LLM 网关（`llm_gateway.py` 及 HTTP/SSE/stream/config 模块），见 `docs/remote-execution-runbook.md`。 |
 | `stress/` | 压力测试：`simulate_agents.py` 合成负载生成器、`run_e2e_stress.py` 端到端压测 runner。 |
+| `e2e/` | 浏览器 smoke E2E：`run_browser_smoke.py`（确定性 Chromium 冒烟，CI e2e-smoke / nightly-e2e job 调用）与数据库 helper `_database.py`。 |
 
 ## 约定
 

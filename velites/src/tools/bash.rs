@@ -2,11 +2,13 @@
 //!
 //! The child is put in its own process group; on timeout OR cancellation the
 //! whole group receives SIGTERM, then SIGKILL after a grace period (Pi
-//! semantics, design §8). stdout+stderr volume is reported as `output_bytes`
-//! (pre-truncation measurement). Output is truncated from the tail to 2000
-//! lines or 50KB, whichever is hit first (pi-aligned, design §8); when
-//! truncated, the full output is written to a temp file and the notice
-//! points at it.
+//! semantics, design §8). The model-supplied `timeout` is clamped to
+//! [1s, 1h] (default 120s) so one call cannot outrun the run's wall-clock
+//! budget by orders of magnitude. stdout+stderr volume is reported as
+//! `output_bytes` (pre-truncation measurement). Output is truncated from the
+//! tail to 2000 lines or 50KB, whichever is hit first (pi-aligned, design
+//! §8); when truncated, the full output is written to a temp file and the
+//! notice points at it.
 
 use std::time::Duration;
 
@@ -18,6 +20,13 @@ use super::truncate::{self, TruncatedBy};
 use super::{ToolContext, ToolError, ToolOutput};
 
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
+/// Hard ceiling on one bash call's timeout. The model controls the
+/// `timeout` argument; without a cap, `timeout=10^9` would let a single
+/// tool call run for decades, far past the run's wall-clock budget
+/// (`--timeout-seconds`). Not the min with the loop's remaining budget on
+/// purpose: the tool layer does not see the agent loop's deadline, and one
+/// hour already dwarfs any sane command lifetime.
+const MAX_TIMEOUT_SECS: u64 = 3600;
 const TERM_GRACE: Duration = Duration::from_secs(3);
 
 pub async fn run(args: &Value, ctx: &ToolContext) -> ToolOutput {
@@ -63,11 +72,7 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
         .get("command")
         .and_then(Value::as_str)
         .ok_or_else(|| ToolError::InvalidArgs("missing string field `command`".into()))?;
-    let timeout_secs = args
-        .get("timeout")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_TIMEOUT_SECS)
-        .max(1);
+    let timeout_secs = requested_timeout_secs(args);
 
     // Footgun guard: reject full-disk scan commands (`find /` …) before
     // spawn; one scan per parallel job floods host fs indexing. Applies with
@@ -220,6 +225,15 @@ async fn run_inner(args: &Value, ctx: &ToolContext) -> Result<ToolOutput, ToolEr
     })
 }
 
+/// The model-supplied `timeout` argument, clamped into
+/// [1, MAX_TIMEOUT_SECS] (default [`DEFAULT_TIMEOUT_SECS`]).
+fn requested_timeout_secs(args: &Value) -> u64 {
+    args.get("timeout")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_TIMEOUT_SECS)
+        .clamp(1, MAX_TIMEOUT_SECS)
+}
+
 fn exit_code_display(status: std::process::ExitStatus) -> String {
     match status.code() {
         Some(code) => code.to_string(),
@@ -238,4 +252,32 @@ fn write_full_output(content: &str) -> Option<std::path::PathBuf> {
     let path =
         std::env::temp_dir().join(format!("velites-bash-{}-{nanos}.log", std::process::id()));
     std::fs::write(&path, content).ok().map(|_| path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn requested_timeout_is_clamped() {
+        assert_eq!(requested_timeout_secs(&serde_json::json!({})), 120);
+        assert_eq!(
+            requested_timeout_secs(&serde_json::json!({"timeout": 30})),
+            30
+        );
+        assert_eq!(
+            requested_timeout_secs(&serde_json::json!({"timeout": 0})),
+            1
+        );
+        // A model-supplied 10^9 must not let one call outrun the run's
+        // wall-clock budget by orders of magnitude.
+        assert_eq!(
+            requested_timeout_secs(&serde_json::json!({"timeout": 1_000_000_000u64})),
+            MAX_TIMEOUT_SECS
+        );
+        assert_eq!(
+            requested_timeout_secs(&serde_json::json!({"timeout": u64::MAX})),
+            MAX_TIMEOUT_SECS
+        );
+    }
 }

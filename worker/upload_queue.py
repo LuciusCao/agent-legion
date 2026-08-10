@@ -32,6 +32,7 @@ from shared.pi_events import (
     scan_and_compress_pi_events,
 )
 from worker import upload_heartbeat
+from worker._atomic import atomic_write
 from worker._retry import run_with_retry
 from worker.host_transfer import HostRequestError
 
@@ -132,7 +133,9 @@ class UploadQueue:
         Host requeues after the lease expires), never reports twice.
         """
         marker = task.execution_dir / PENDING_FILENAME
-        marker.write_text(json.dumps(task.to_json(), ensure_ascii=False), encoding="utf-8")
+        # 原子写：崩溃留下半截 JSON 会被 restore() 当成损坏 marker 而 rmtree 整个
+        # 执行目录，丢掉已完成的结果。
+        atomic_write(marker, json.dumps(task.to_json(), ensure_ascii=False))
         # upsert: 重启恢复的任务在 reporter 里尚无条目，积压期间也要以 queued_upload 可见。
         self._status.upsert_phase(task.execution_id, "queued_upload", **task.status_fields)
         with self._lock:

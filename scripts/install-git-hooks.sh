@@ -24,5 +24,6 @@ git -C "$ROOT_DIR" config --unset-all core.hooksPath >/dev/null 2>&1 || true
 echo "Installed shared Git hook dispatchers: $HOOKS_DIR"
 echo "Dispatch target for this worktree: $ROOT_DIR/.githooks"
 echo "  pre-commit: scripts/check-fast.sh"
-echo "  pre-push feature branches: scripts/check-quick.sh"
-echo "  pre-push protected branches/tags: scripts/check.sh"
+echo "  pre-push: smoke 级 quick gate（静态 + 精选 smoke 测试层，按推送路径裁剪 lane）；"
+echo "            AGENT_LEGION_GATE_LEVEL=quick|full 可升级单次推送，protected 分支的"
+echo "            full gate 在 GitHub Actions 执行（见 AGENTS.md §4）"

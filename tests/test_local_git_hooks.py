@@ -138,6 +138,43 @@ def test_feature_push_runs_quick_gate_once_and_reuses_evidence(
     assert "reusing cached evidence" in second.stdout
 
 
+def test_gate_level_upgrade_reruns_gate_on_same_sha(
+    hook_repo: tuple[Path, Path],
+) -> None:
+    # The evidence fingerprint includes the test tier: a cached smoke pass
+    # must not satisfy a later AGENT_LEGION_GATE_LEVEL=quick push of the same
+    # SHA (the full tier has not actually run yet).
+    repo, gate_log = hook_repo
+    push_input = _push_input(repo, "refs/heads/feature/test")
+
+    first = _run(
+        [repo / ".githooks" / "pre-push"],
+        cwd=repo,
+        input_text=push_input,
+        env=_hook_env(gate_log),
+    )
+    second = _run(
+        [repo / ".githooks" / "pre-push"],
+        cwd=repo,
+        input_text=push_input,
+        env={**_hook_env(gate_log), "AGENT_LEGION_GATE_LEVEL": "quick"},
+    )
+    third = _run(
+        [repo / ".githooks" / "pre-push"],
+        cwd=repo,
+        input_text=push_input,
+        env={**_hook_env(gate_log), "AGENT_LEGION_GATE_LEVEL": "quick"},
+    )
+
+    assert "Running local quick gate" in first.stdout
+    assert "Running local quick gate" in second.stdout
+    assert "reusing cached evidence" in third.stdout
+    assert gate_log.read_text(encoding="utf-8").splitlines() == [
+        "quick backend frontend rust",
+        "quick backend frontend rust",
+    ]
+
+
 @pytest.mark.parametrize("remote_ref", ["refs/heads/develop", "refs/tags/v1.0.0"])
 def test_protected_ref_push_runs_quick_gate(hook_repo: tuple[Path, Path], remote_ref: str) -> None:
     # The full gate for protected refs runs in GitHub Actions CI; the local
@@ -161,6 +198,7 @@ def test_protected_ref_push_runs_quick_gate(hook_repo: tuple[Path, Path], remote
         (["frontend/src/App.tsx"], "frontend"),
         (["server/app/main.py"], "backend"),
         (["docs/architecture/backend.md"], "static"),
+        (["LICENSE"], "static"),
         (["scripts/check.sh"], "backend frontend rust"),
         (["frontend/src/App.tsx", "server/app/main.py"], "backend frontend"),
         (["velites/src/main.rs"], "rust"),

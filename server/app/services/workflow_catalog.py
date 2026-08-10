@@ -1,8 +1,8 @@
 import logging
-from dataclasses import asdict
 from typing import Any
 
 from server.app.services.job_errors import NotFoundError
+from server.app.services.workflow_revision_format import workflow_definition_to_response_payload
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import list_registered_workflows, load_registered_workflow
@@ -32,48 +32,4 @@ class WorkflowCatalogService:
         return workflows
 
     def workflow(self, workflow_key: str) -> dict[str, Any]:
-        definition = self.definition(workflow_key)
-        nodes = [
-            {
-                "key": node.key,
-                "label": node.label,
-                "capability": node.capability,
-                "after": node.after,
-                "inputs": node.inputs,
-                "outputs": node.outputs,
-                "execution": asdict(node.execution),
-            }
-            for node in definition.nodes.values()
-        ]
-        edges = [
-            {
-                "source": edge.source,
-                "target": edge.target,
-                "condition": (
-                    {
-                        "artifact": edge.condition.artifact,
-                        "path": edge.condition.path,
-                        "equals": edge.condition.equals,
-                    }
-                    if edge.condition is not None
-                    else None
-                ),
-            }
-            for edge in definition.edges
-        ]
-        return {
-            "key": definition.key,
-            "label": definition.label,
-            "intake": {
-                "modes": [
-                    {
-                        "key": mode.key,
-                        "label": mode.label,
-                        "input_field": mode.input_field,
-                    }
-                    for mode in definition.intake.modes.values()
-                ]
-            },
-            "nodes": nodes,
-            "edges": edges,
-        }
+        return workflow_definition_to_response_payload(self.definition(workflow_key))

@@ -12,6 +12,7 @@ export function WorkflowSection({ workflowKey, onChange }: Props) {
   const [options, setOptions] = useState<Array<{ key: string; label: string }>>(
     []
   )
+  const [loadError, setLoadError] = useState(false)
 
   useEffect(() => {
     fetchWorkflows()
@@ -20,6 +21,7 @@ export function WorkflowSection({ workflowKey, onChange }: Props) {
       })
       .catch(() => {
         setOptions([])
+        setLoadError(true)
       })
   }, [])
 
@@ -43,6 +45,11 @@ export function WorkflowSection({ workflowKey, onChange }: Props) {
             </MenuItem>
           ))}
         </TextField>
+        {loadError && (
+          <div className="error-text" role="alert" style={{ marginTop: 12 }}>
+            工作流列表加载失败，请刷新重试
+          </div>
+        )}
       </div>
     </section>
   )

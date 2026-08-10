@@ -9,7 +9,7 @@
 - worktree 一律建为主仓库根的平级子目录：先 `cd` 到主仓库根（`git worktree list` 的第一个条目），再 `git worktree add .worktrees/<name> -b <branch> <base>`。禁止嵌套（在其他 worktree 里用相对路径 `git worktree add .worktrees/<name>` 会建进当前 worktree 内部）——嵌套会让 `data/`、测试库派生、端口隔离和清理路径全部混乱。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
-- 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`（缺这两个文件会导致 pytest/服务启动即失败）、缺失时从基准 worktree 种子 `config/agent-worker.yaml`（改写 host_url/worker_id）、恢复 workspace 调度。手工初始化时必须自行补上这两个 secrets 文件。
+- 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`、缺失时从基准 worktree 种子 `config/agent-worker.yaml`（改写 host_url/worker_id）、恢复 workspace 调度。手工初始化时必须自行补上这两个 secrets 文件。两个 secret 缺失的后果不同：register token 若被 `register_token_file` 显式引用而文件缺失，启动 fail fast（未显式配置时启动只尝试读 repo 默认路径 `deploy/secrets/agent_worker_register_token`，存在才生效）；vault master key 是 env-only（`AGENT_LEGION_VAULT_MASTER_KEY` / `_FILE`），代码没有默认读文件路径，缺 key 服务照常启动，但 vault 写入与 `secret_ref` 解析会抛 `VaultMasterKeyMissingError`。
 - 开发实例两个默认关闭的开关（刻意设计，防失控自跑）：后端每次启动把全部 workspace 重置为暂停，需恢复调度（init 脚本已做，但**必须在后端首次启动建表之后**执行才生效，否则启动后重跑一次脚本）；worker 的 `claim_enabled` 默认 false，启动后经 worker 控制台或 `PUT /api/config` 打开。worker 生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 `config/agent-worker.yaml` 不生效。
 - 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（`database.url` 为 env-only，代码默认库是共享库，不要依赖默认值）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
 - 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并在首次测试运行时自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
@@ -34,6 +34,8 @@
 ## 4. Quality Gates（必须执行）
 
 - 任何代码修改后先跑 `./scripts/check-quick.sh`。
+- quick gate 的 backend lane 同时跑 `worker/ui/app.test.mjs`（node:test，无 node 时跳过并提示）；
+  CI 侧在 backend-postgres-a job 执行同一入口。
 - 提交或交接前确认 GitHub Actions full gate 通过（`.github/workflows/quality-gate.yml`
   的 backend-unit、backend-postgres-a/b/c、frontend-logic、frontend-component、
   frontend-coverage、e2e-smoke、rust、docker-build 等 job）；CI 不可用时本地跑
@@ -83,9 +85,11 @@
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
-- `code` executor 节点：`config/workflow.yaml` 的 capability 用 `path`（仓库相对路径）绑定
-  `workflow_nodes/` 下的 Python 文件，文件暴露模块级 `run(job, job_dir, runtime)`；
-  path 禁止绝对路径与 `..`（EXEC-CODE-001），代码变更必须入库经 git review 与 CI。
+- `code` executor 节点：capability 定义的 `path`（仓库相对路径）绑定 `workflow_nodes/` 下的
+  Python 文件，文件暴露模块级 `run(job, job_dir, runtime)`。`config/workflow.yaml` 已退役，
+  出厂 executor 目录钉在 `server/app/executors/builtin_definitions.py`，经种子流发布为 DB
+  `versioned_entities`（Studio 可改，admin 编辑不被种子覆盖）。path 禁止绝对路径与 `..`
+  （EXEC-CODE-001），内置节点代码变更必须入库经 git review 与 CI。
 - 节点代码变更只有两条通道：内置节点走 git（EXEC-CODE-001）；自定义节点代码只存
   `workflow_node_codes` 表、经发布流生效、版本不可变、job intake 冻结代码版本
   （EXEC-CODE-002），禁止任何运行时 API 增删改 repo `workflow_nodes/` 文件。

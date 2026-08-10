@@ -7,6 +7,7 @@ from pathlib import Path
 
 from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
+    TERMINAL_JOB_STATUSES,
     _execution_control_rejects_claim,
     _read_job_execution_control,
 )
@@ -39,6 +40,11 @@ def claim_lease(
 
     current_control = _read_job_execution_control(conn, request.job_id)
     if _execution_control_rejects_claim(request, current_control):
+        return None
+    if current_control["status"] in TERMINAL_JOB_STATUSES:
+        # 终态作业不得再启动节点：调度侧的 mark 缓存可能滞后（长事务以事务
+        # 开始时刻的 updated_at 越过 watermark，见 mark_scan 模块文档），
+        # 认领事务内必须以当前 jobs.status 为准。
         return None
 
     allocation = conn.execute(
@@ -195,7 +201,8 @@ def claim_lease(
     )
 
     conn.execute(
-        "update jobs set status='running', updated_at=%s where id=%s and status != 'running'",
+        "update jobs set status='running', updated_at=%s"
+        " where id=%s and status not in ('running', 'completed', 'failed')",
         (now_str, request.job_id),
     )
 

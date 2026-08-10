@@ -9,22 +9,22 @@ import subprocess
 import threading
 import time
 
+# Executor 把 agent 子进程的 pid（= pgid，start_new_session=True）记到执行目录；
+# executor 被 SIGKILL 来不及清理时，supervisor 按记录 killpg 兜底。
+AGENT_PGID_FILENAME = "agent_pgid"
+
 
 def terminate(proc: subprocess.Popen[bytes], grace_seconds: float) -> None:
     """Best-effort process-group SIGTERM then SIGKILL; never raises."""
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, signal.SIGTERM)
-    try:
-        proc.wait(timeout=grace_seconds)
-        return
-    except subprocess.TimeoutExpired:
-        pass
-    with contextlib.suppress(ProcessLookupError):
-        os.killpg(proc.pid, signal.SIGKILL)
-    try:
-        proc.wait(timeout=grace_seconds)
-    except subprocess.TimeoutExpired:
-        print(f"Agent process {proc.pid} did not exit after SIGKILL", flush=True)
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        with contextlib.suppress(ProcessLookupError):
+            os.killpg(proc.pid, sig)
+        try:
+            proc.wait(timeout=grace_seconds)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+    print(f"Agent process {proc.pid} did not exit after SIGKILL", flush=True)
 
 
 def wait_for_exit(
