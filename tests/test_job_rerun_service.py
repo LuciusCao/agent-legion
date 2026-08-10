@@ -141,6 +141,30 @@ def test_rerun_selected_node_and_descendants_are_stale(rerun_service, job):
     assert nodes["assemble_comprehension_info"] == "stale"
 
 
+def test_rerun_cancels_queued_agent_requests(rerun_service, job, job_db):
+    """rerun 前已入队的 queued agent 请求必须取消：claim 侧不复查上游，
+    不取消会在上游重跑完成前抢跑（输入 artifact 已被 rerun 删除）。"""
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into agent_execution_requests("
+            " execution_id, workspace_id, job_id, workflow_key, node_key,"
+            " agent_id, agent_definition_hash, node_concurrency_limit,"
+            " state, queued_at, manifest_json)"
+            " values ('exec-queued', %s, %s, %s, 'generate_possible_errors',"
+            " 'generator-v1', 'sha256:whatever', 1, 'queued', current_timestamp, '{}')",
+            (job["workspace_id"], job["id"], job["workflow_key"]),
+        )
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
+
+    assert result["status"] == "succeeded"
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where execution_id='exec-queued'"
+        ).fetchone()
+    assert row["state"] == "cancelled"
+
+
 def test_rerun_resets_node_created_at(rerun_service, job):
     old_created_at = "2026-06-09T00:00:00Z"
     with rerun_service.job_db.connect() as conn:
