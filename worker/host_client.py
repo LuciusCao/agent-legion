@@ -1,7 +1,5 @@
-"""HTTP client for the Worker's pull protocol against the Host.
-
-Control calls (register/claim/heartbeat/metrics) live here; retried bulk
-transfers (download/upload/report/release-slot) come from the
+"""HTTP client for the Worker's pull protocol: control calls (register/claim/
+heartbeat/metrics) live here; retried bulk transfers come from the
 ``TransferOperations`` mixin in ``worker.host_transfer``.
 """
 
@@ -9,7 +7,8 @@ from __future__ import annotations
 
 import json
 import urllib.parse
-from typing import Any
+from pathlib import Path
+from typing import Any, BinaryIO
 
 import requests
 
@@ -45,9 +44,10 @@ class Client(TransferOperations):
         method: str,
         path: str,
         *,
-        data: bytes | None = None,
+        data: bytes | BinaryIO | None = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
+        stream_to: Path | None = None,
     ) -> tuple[int, bytes]:
         response = self.session.request(
             method,
@@ -58,8 +58,20 @@ class Client(TransferOperations):
                 **(headers or {}),
             },
             timeout=self.timeout if timeout is None else timeout,
+            stream=stream_to is not None,
         )
-        return response.status_code, response.content
+        # 大文件下载：流式写同目录临时文件再原子 rename，避免全量入内存；
+        # 出错（4xx/5xx 小 body）仍读 content 供上层判断。iter_content 会把
+        # urllib3 的断连/读超时包装成 RequestException，进入重试路径；重试时
+        # "wb" 重新截断 .part，不会追加。残留 .part 由 clean_work_root 回收。
+        if stream_to is None or response.status_code >= 400:
+            return response.status_code, response.content
+        temporary = stream_to.with_suffix(stream_to.suffix + ".part")
+        with response, temporary.open("wb") as handle:
+            for chunk in response.iter_content(chunk_size=1 << 20):
+                handle.write(chunk)
+        temporary.replace(stream_to)
+        return response.status_code, b""
 
     def register(self, config: dict[str, Any], management_token: str) -> str:
         payload = {

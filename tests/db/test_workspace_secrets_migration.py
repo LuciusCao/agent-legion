@@ -20,14 +20,14 @@ def test_workspace_secrets_table_exists() -> None:
     assert columns == {"workspace_id", "name", "ciphertext", "created_at", "updated_at"}
 
 
-def test_schema_v31_recorded() -> None:
-    assert SCHEMA_VERSION == 31
+def test_schema_v32_recorded() -> None:
+    assert SCHEMA_VERSION == 32
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "executor_asr_config_schema"
+    assert row["name"] == "jobs_workflow_updated_index"
 
 
 def test_schema_v23_workspace_scope_objects_exist() -> None:

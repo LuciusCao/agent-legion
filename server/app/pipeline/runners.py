@@ -1,6 +1,9 @@
 import json
+import logging
 import subprocess
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 
 def list_openclaw_agents(timeout: int = 10) -> list[dict[str, Any]]:
@@ -16,4 +19,5 @@ def list_openclaw_agents(timeout: int = 10) -> list[dict[str, Any]]:
         data = json.loads(result.stdout)
         return [a for a in data if isinstance(a, dict) and "id" in a]
     except Exception:
+        logger.debug("openclaw agents list failed", exc_info=True)
         return []

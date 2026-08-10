@@ -1,10 +1,8 @@
 import { Chip } from '@mui/material'
 import { JsonTree } from '../JsonTree'
+import { tryParseJson } from '../../lib/parsers'
 import type { QualityArtifactContent, QualityLabel } from '../../api/qualityApi'
 import styles from './QualityPanel.module.css'
-
-// prettier-ignore
-const tryParseJson = (content: string): unknown | null => { try { return JSON.parse(content) } catch { return null } }
 
 export function formatQualityDateTime(iso: string): string {
   const date = new Date(iso)

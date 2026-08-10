@@ -50,3 +50,12 @@ export function getInteractionQuestion(
     ? (node.question as Record<string, unknown>)
     : node
 }
+
+/** Parse JSON text, returning null instead of throwing on invalid input. */
+export function tryParseJson(content: string): unknown | null {
+  try {
+    return JSON.parse(content)
+  } catch {
+    return null
+  }
+}

@@ -377,11 +377,19 @@ pub trait EventSink: Send {
 
 /// Emits events as compact NDJSON on stdout (the worker pipes this into
 /// `events.jsonl`).
-pub struct StdoutJsonlSink;
+///
+/// Per the [`EventSink`] contract a write failure must never fail the agent
+/// loop; the FIRST failure is still reported as one stderr line, so a run
+/// whose event stream died (closed pipe, full disk) leaves a trace.
+pub struct StdoutJsonlSink {
+    failure_reported: bool,
+}
 
 impl StdoutJsonlSink {
     pub fn new() -> Self {
-        Self
+        Self {
+            failure_reported: false,
+        }
     }
 }
 
@@ -396,9 +404,14 @@ impl EventSink for StdoutJsonlSink {
         let line = serde_json::to_string(event).expect("event serialization cannot fail");
         let stdout = std::io::stdout();
         let mut lock = stdout.lock();
-        let _ = lock.write_all(line.as_bytes());
-        let _ = lock.write_all(b"\n");
-        let _ = lock.flush();
+        let result = lock
+            .write_all(line.as_bytes())
+            .and_then(|()| lock.write_all(b"\n"))
+            .and_then(|()| lock.flush());
+        if result.is_err() && !self.failure_reported {
+            self.failure_reported = true;
+            eprintln!("velites: failed to write event to stdout; further event loss stays silent");
+        }
     }
 }
 

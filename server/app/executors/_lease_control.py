@@ -7,11 +7,14 @@ from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.executors.models import LeaseClaimRequest
 
+# 与 mark_scan.TERMINAL_STATUSES 同源（executors 不反向依赖 workflow_worker）。
+TERMINAL_JOB_STATUSES = ("completed", "failed")
+
 
 def _read_job_execution_control(conn: DatabaseConnection, job_id: str) -> dict[str, Any]:
     row = conn.execute(
         """
-        select execution_mode, target_node_key, execution_paused, pause_reason
+        select execution_mode, target_node_key, execution_paused, pause_reason, status
         from jobs
         where id=%s
         """,
@@ -23,12 +26,14 @@ def _read_job_execution_control(conn: DatabaseConnection, job_id: str) -> dict[s
             "target_node_key": None,
             "execution_paused": False,
             "pause_reason": "",
+            "status": None,
         }
     return {
         "execution_mode": row["execution_mode"],
         "target_node_key": row["target_node_key"],
         "execution_paused": bool(row["execution_paused"]),
         "pause_reason": row["pause_reason"],
+        "status": row["status"],
     }
 
 
