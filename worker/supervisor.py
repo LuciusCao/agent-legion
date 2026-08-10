@@ -84,9 +84,8 @@ class WorkerSupervisor:
             self._generation += 1
             generation = self._generation
             status_file = self.store.state_dir / STATUS_FILENAME
-            status_file.unlink(missing_ok=True)
-            (self.store.state_dir / METRICS_FILENAME).unlink(missing_ok=True)
-            self._process = subprocess.Popen(
+            self._cleanup_runtime_files()
+            process = self._process = subprocess.Popen(
                 [sys.executable, str(self.worker_script), "--config", str(self.store.path)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.STDOUT,
@@ -96,7 +95,8 @@ class WorkerSupervisor:
             )
             self._started_at = time.time()
             self._exit_code = None
-            process = self._process
+        # 锁外 reap（新进程尚在解释器启动阶段，clean_work_root 远落后于 killpg）。
+        self._reap_orphans()
         threading.Thread(target=self._collect_logs, args=(process, generation), daemon=True).start()
 
     def stop(self) -> None:
@@ -113,11 +113,9 @@ class WorkerSupervisor:
             try:
                 config = self.store.read(require_identity=False)
                 wait_seconds = min(float(config["shutdown_grace_seconds"]), _STOP_GRACE_MAX)
-                work_root = Path(str(config["work_root"]))
             except (OSError, ValueError, KeyError, TypeError, YAMLError):
                 # stop 路径容忍配置损坏：能停进程即可（restart 的 _start 会再校验）。
                 wait_seconds = _STOP_GRACE_MAX
-                work_root = None
             process.terminate()
         try:
             process.wait(timeout=wait_seconds)
@@ -127,13 +125,18 @@ class WorkerSupervisor:
                 process.wait(timeout=_KILL_WAIT)
         if process.poll() is not None:
             self._cleanup_runtime_files()
-            if work_root is not None:
-                # executor 若被 SIGKILL，其 agent 子进程组按执行目录里的记录兜底清理。
-                reap_orphaned_agents(work_root, self._log)
+            self._reap_orphans()  # 已出锁
 
     def _cleanup_runtime_files(self) -> None:
         for filename in (STATUS_FILENAME, METRICS_FILENAME):
             (self.store.state_dir / filename).unlink(missing_ok=True)
+
+    def _reap_orphans(self) -> None:
+        # 锁外兜底 killpg：每条残留记录 SIGTERM 后固定等 1s，持状态锁执行会
+        # 卡住 status/stop 等 HTTP handler。配置损坏读不到 work_root 则跳过。
+        with suppress(OSError, ValueError, KeyError, TypeError, YAMLError):
+            work_root = Path(str(self.store.read(require_identity=False)["work_root"]))
+            reap_orphaned_agents(work_root, self._log)
 
     def restart(self) -> None:
         # 操作锁把 stop（含等待）+ start 做成临界区，避免返回 200 但仍跑旧配置。
@@ -159,6 +162,10 @@ class WorkerSupervisor:
             with self._lock:
                 self._log(line.rstrip())
         exit_code = process.wait()
+        # 锁外 reap（幂等）：仅当前 generation 的 executor 退出才有孤儿；过期
+        # generation 说明新 executor 已启动，其 agent 记录归属它，不能动。
+        if generation == self._generation:
+            self._reap_orphans()
         with self._lock:
             self._log(f"Worker 执行进程已退出，退出码 {exit_code}")
             if generation == self._generation:
@@ -167,10 +174,7 @@ class WorkerSupervisor:
                 return
             self._exit_code = exit_code
             if exit_code == _EXIT_REFUSED:
-                self._failed_reason = (
-                    "Host 拒绝注册、Worker 已被吊销或启动预检失败（退出码 2），"
-                    "详见上方 Worker 日志，请修正配置后手动重启"
-                )
+                self._failed_reason = "Host 拒绝注册、Worker 已被吊销或启动预检失败（退出码 2），详见上方 Worker 日志，请修正配置后手动重启"
                 self._log(self._failed_reason)
                 return
             if self._started_at is not None and time.time() - self._started_at >= _STABLE_AFTER:

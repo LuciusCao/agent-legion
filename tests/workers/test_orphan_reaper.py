@@ -8,6 +8,7 @@ recorded groups after killing the executor.
 
 from __future__ import annotations
 
+import os
 import subprocess
 import sys
 import time
@@ -84,6 +85,18 @@ def test_reap_ignores_garbage_and_esrch_records(tmp_path: Path) -> None:
 
     assert garbage.exists()  # 解析失败的记录保留，下次 stop 再试
     assert not stale.exists()  # ESRCH 忽略，记录正常清除
+
+
+@pytest.mark.parametrize("bad_pgid", ["0", "1", "-3"])
+def test_reap_rejects_dangerous_pgid_records(tmp_path: Path, bad_pgid: str) -> None:
+    """pgid <= 1 的记录（半截/恶意写入）会把信号发给调用方自身进程组，
+    必须按垃圾记录跳过：不发送信号、不崩溃、记录保留待人工检查。"""
+    record = _write_record(tmp_path, "exec-1", bad_pgid)
+
+    reap_orphaned_agents(tmp_path)  # must not raise, must not signal our own group
+
+    assert record.exists()
+    os.killpg(os.getpgrp(), 0)  # 我们所在进程组安然无恙
 
 
 def test_reap_tolerates_empty_work_root(tmp_path: Path) -> None:

@@ -6,6 +6,7 @@ import http.server
 import json
 import threading
 from pathlib import Path
+from typing import Any
 
 import pytest
 import requests
@@ -235,3 +236,41 @@ def test_request_stream_to_writes_body_atomically(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+def test_download_retries_mid_stream_connection_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """iter_content 中途断连（requests 已把 urllib3 异常包装成 RequestException）
+    必须进入重试路径；重试重新截断 .part，最终内容完整。"""
+    sleeps = _patch_sleep(monkeypatch)
+    body = b"stream-bytes"
+    attempts = {"n": 0}
+
+    class FakeResponse:
+        status_code = 200
+
+        def __enter__(self) -> FakeResponse:
+            return self
+
+        def __exit__(self, *args: object) -> bool:
+            return False
+
+        def iter_content(self, chunk_size: int = 1) -> Any:
+            attempts["n"] += 1
+            yield body[:4]
+            if attempts["n"] == 1:
+                raise requests.ConnectionError("connection reset mid-stream")
+            yield body[4:]
+
+    client = Client("http://host")
+    monkeypatch.setattr(client.session, "request", lambda *a, **k: FakeResponse())
+    target = tmp_path / "bundle.tar.gz"
+
+    client.download("/api/x/bundle", target)
+
+    assert attempts["n"] == 2  # 第一次中断后真的重试了
+    assert target.read_bytes() == body  # 重试截断重写，而非追加半截
+    assert list(tmp_path.glob("*.part")) == []
+    assert len(sleeps) == 1
+    assert 0 <= sleeps[0] <= 1.0
