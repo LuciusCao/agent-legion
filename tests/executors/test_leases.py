@@ -272,3 +272,39 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
     assert row["input_tokens"] == 5
     assert row["output_tokens"] == 3
     assert row["cache_read_tokens"] == 1
+
+
+def test_claim_lease_rejects_terminal_job(lease_repo):
+    """终态作业不得再认领节点：mark 缓存可能因长事务越过 watermark 而滞后
+    （mark_scan 文档化缺口），认领事务内必须以当前 jobs.status 为准。"""
+    repo, job_db, data_dir = lease_repo
+    _setup_workspace_and_job(job_db)
+    allocate(job_db, "ws-1", "pi-1", 10)
+    bind(job_db, "ws-1", "question_comprehension_info", "review_keywords", "pi-1")
+    with job_db.connect() as conn:
+        conn.execute("update jobs set status='failed' where id=%s", ("job-1",))
+
+    claimed = repo.try_claim(
+        LeaseClaimRequest(
+            executor_id="pi-1",
+            global_capacity=10,
+            workspace_id="ws-1",
+            job_id="job-1",
+            workflow_key="question_comprehension_info",
+            node_key="review_keywords",
+            capability="review_keywords",
+            local_node_limit=None,
+            lease_ttl_seconds=60,
+            log_path=str(data_dir / "logs" / "run.log"),
+        )
+    )
+
+    assert claimed is None
+    with job_db.connect() as conn:
+        job_row = conn.execute("select status from jobs where id=%s", ("job-1",)).fetchone()
+        node_row = conn.execute(
+            "select status from job_nodes where job_id=%s and node_key=%s",
+            ("job-1", "review_keywords"),
+        ).fetchone()
+    assert job_row["status"] == "failed"  # 未被认领路径复活为 running
+    assert node_row["status"] == "pending"
