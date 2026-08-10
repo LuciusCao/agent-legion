@@ -987,7 +987,7 @@
     "server/app/workflow_worker/execution.py": 68,
     "server/app/workflow_worker/executor_claim.py": 84,
     "server/app/workflow_worker/maintenance.py": 50,
-    "server/app/workflow_worker/mark_scan.py": 84,
+    "server/app/workflow_worker/mark_scan.py": 91,
     "server/app/workflow_worker/pass_log.py": 78,
     "server/app/workflow_worker/ready.py": 51,
     "server/app/workflow_worker/ready_cache.py": 122,

@@ -117,6 +117,27 @@ def test_store_delta_sees_new_and_terminal_jobs(tmp_path: Path) -> None:
     assert {mark["id"] for mark in marks} == {second, third}
 
 
+def test_store_keeps_newest_first_order_after_delta(tmp_path: Path) -> None:
+    """New jobs arriving via delta must not queue behind the cached backlog:
+    claim order follows created_at desc (list_active_job_marks contract)."""
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Mark Scan WS")
+    old_ids = _make_jobs(job_db, ws["id"], 2)
+    store = MarkStore()
+    store.refresh(job_db, "test")
+    # Backdate the cached jobs so the new one is unambiguously newest;
+    # created_at is not a mark_key field, so this does not perturb the delta.
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set created_at=current_timestamp - interval '1 day' where id = any(%s)",
+            (old_ids,),
+        )
+    (new_id,) = _make_jobs(job_db, ws["id"], 1, prefix="N")
+
+    marks = store.refresh(job_db, "test")
+    assert [mark["id"] for mark in marks][0] == new_id
+
+
 def test_store_burst_does_not_pin_delta_lower_bound(tmp_path: Path) -> None:
     """Rows sharing one bulk-insert commit timestamp must not be re-fetched
     on every pass once the overlap window has slid past the burst."""
