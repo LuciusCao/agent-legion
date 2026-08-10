@@ -80,12 +80,25 @@ class MarkStore:
         horizon = datetime.now(UTC) - self._overlap
         changed = job_db.list_changed_job_marks(workflow_key, min(state.watermark, horizon))
         batch_max = state.watermark
+        has_new = False
         for mark in changed:
+            batch_max = max(batch_max, _parse_ts(mark.get("updated_at")) or batch_max)
             if mark.get("status") in TERMINAL_STATUSES:
                 state.marks.pop(mark["id"], None)
-            else:
-                state.marks[mark["id"]] = mark
-            batch_max = max(batch_max, _parse_ts(mark.get("updated_at")) or batch_max)
+                continue
+            has_new = has_new or mark["id"] not in state.marks
+            state.marks[mark["id"]] = mark
+        if has_new:
+            # Dict assignment appends new ids at the end, but claim order is
+            # newest-first (list_active_job_marks orders by created_at desc);
+            # re-establish it or fresh jobs would queue behind the backlog.
+            state.marks = dict(
+                sorted(
+                    state.marks.items(),
+                    key=lambda item: str(item[1].get("created_at") or ""),
+                    reverse=True,
+                )
+            )
         state.watermark = max(batch_max, horizon)
         return list(state.marks.values())
 
