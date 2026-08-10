@@ -7,9 +7,17 @@ artifact upload, result report — to this queue. Upload concurrency stays
 small (default 4) so a completion wave of dozens of executions never turns
 into a transfer storm against the Host.
 
+Two lanes share one scheduler (worker/upload_scheduler.py): the bulk lane
+runs prepare + artifact uploads, the report lane runs the final report and
+is drained strictly first, so a completion wave cannot delay small reports
+behind other tasks' bulk transfers. The lane limit is hot-adjustable via
+``set_max_concurrency``.
+
 Durability: every task writes an ``upload_pending.json`` marker into its
 execution dir before entering the queue; the marker is removed only after
-the Host accepts the result. A crashed Worker rescans it on startup.
+the Host accepts the result. A crashed Worker rescans it on startup and
+re-enters through the bulk lane (artifact stores are content-addressed, so
+re-upload is harmless).
 
 Lease ownership: the per-execution heartbeat started at claim time keeps
 beating through the upload. It is quiesced for the final report and resumed
@@ -20,21 +28,18 @@ from __future__ import annotations
 
 import json
 import shutil
-import tarfile
 import threading
-from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from shared.pi_events import (
-    compress_pi_events,
-    scan_and_compress_pi_events,
-)
 from worker import upload_heartbeat
 from worker._atomic import atomic_write
 from worker._retry import run_with_retry
 from worker.host_transfer import HostRequestError
+from worker.runtime_controls import MAX_DYNAMIC_CONCURRENCY
+from worker.upload_prepare import prepare_result, write_empty_archive
+from worker.upload_scheduler import LaneScheduler
 
 PENDING_FILENAME = "upload_pending.json"
 _PENDING_VERSION = 1
@@ -63,6 +68,10 @@ class UploadTask:
     prebuilt_metadata: dict[str, Any] | None = None
     heartbeat_stop: threading.Event = field(default_factory=threading.Event)
     heartbeat_thread: threading.Thread | None = None
+    # bulk 车道产物，交给 report 车道；运行时状态，不持久化——崩溃恢复的任务
+    # 一律从 bulk 车道重进，prepare 与 artifact 上传会原样重做。
+    prepared_metadata: dict[str, Any] | None = None
+    prepared_archive: Path | None = None
 
     def to_json(self) -> dict[str, Any]:
         return {
@@ -97,11 +106,6 @@ class UploadTask:
         )
 
 
-def _write_empty_archive(archive: Path) -> None:
-    with tarfile.open(archive, "w:gz"):
-        pass
-
-
 class UploadQueue:
     def __init__(
         self,
@@ -116,7 +120,9 @@ class UploadQueue:
         self._status = status
         self._heartbeat_interval = heartbeat_interval
         self._stop = stop if stop is not None else threading.Event()
-        self._pool = ThreadPoolExecutor(max_concurrency, thread_name_prefix="agent-upload")
+        self._scheduler = LaneScheduler(
+            MAX_DYNAMIC_CONCURRENCY, max_concurrency, thread_name_prefix="agent-upload"
+        )
         self._lock = threading.Lock()
         self._depth = 0
 
@@ -125,6 +131,10 @@ class UploadQueue:
         """Tasks queued or in flight; the claim loop reads this for backpressure."""
         with self._lock:
             return self._depth
+
+    def set_max_concurrency(self, value: int) -> None:
+        """热更新上传并发：调大立即补位，调小不抢占、在途任务自然跑完。"""
+        self._scheduler.set_limit(value)
 
     def submit(self, task: UploadTask) -> None:
         """Persist the pending marker, then queue the delivery.
@@ -140,7 +150,7 @@ class UploadQueue:
         self._status.upsert_phase(task.execution_id, "queued_upload", **task.status_fields)
         with self._lock:
             self._depth += 1
-        self._pool.submit(self._run, task)
+        self._scheduler.submit(lambda: self._deliver_bulk(task))
 
     def restore(self, work_root: Path) -> int:
         """Re-queue executions whose results never reached the Host."""
@@ -167,9 +177,10 @@ class UploadQueue:
 
     def shutdown(self) -> None:
         # Tasks watch the shared stop event and bail out of retry loops quickly.
-        self._pool.shutdown(wait=True)
+        self._scheduler.shutdown()
 
-    def _run(self, task: UploadTask) -> None:
+    def _deliver_bulk(self, task: UploadTask) -> None:
+        """bulk 车道入口：prepare + artifact 上传，完成后挂入 report 车道。"""
         if task.heartbeat_thread is None:
             # Restored from disk: resume heartbeating so the lease survives.
             # The status entry already exists — submit() upserted it at restore.
@@ -181,67 +192,44 @@ class UploadQueue:
                 self._heartbeat_interval,
             )
         try:
-            self._deliver(task)
+            ready = self._bulk_transfer(task)
         except Exception as exc:
             print(f"upload task crashed for {task.execution_id}: {exc}", flush=True)
-        finally:
-            upload_heartbeat.quiesce_heartbeat(task.heartbeat_stop, task.heartbeat_thread, 2)
-            self._status.finish(task.execution_id)
-            with self._lock:
-                self._depth -= 1
-
-    def _prepare(self, task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
-        """Build (metadata, archive, output names); may raise — caller degrades
-        to a failed-result report, mirroring the old inline catch-all."""
-        archive = task.execution_dir / "result.tar.gz"
-        if task.kind == "prebuilt":
-            metadata = dict(task.prebuilt_metadata or {})
-            metadata.setdefault("output_artifacts", {})
-            _write_empty_archive(archive)
-            return metadata, archive, []
-        job_dir = task.execution_dir / "job"
-        run_dir = job_dir / "runs" / task.node_key / "worker"
-        events = run_dir / "events.jsonl"
-        # Pi exits 0 even when the model call fails (e.g. provider 401); one
-        # pass folds the model-error scan into the compression rewrite.
-        if task.exit_code == 0:
-            model_error, _, _ = scan_and_compress_pi_events(events)
-        else:
-            model_error = None
-            compress_pi_events(events)
-        outputs = [
-            name for name in task.expected_outputs if (job_dir / PurePosixPath(name)).is_file()
-        ]
-        if task.exit_code == 130:
-            result_status, error = "cancelled", "Agent Worker is shutting down"
-        elif task.exit_code == 0:
-            if model_error:
-                result_status, error = "failed", model_error
+            ready = False
+        if ready:
+            try:
+                # 心跳保持跳动直到 report 前才 quiesce：report 车道排队期间
+                # 租约仍需 proof of life。
+                self._scheduler.submit(lambda: self._deliver_report(task), priority=True)
+            except RuntimeError:
+                pass  # 调度器已关停；marker 留给下次启动恢复
             else:
-                result_status, error = "completed", ""
-        else:
-            result_status, error = "failed", f"Agent process exited {task.exit_code}"
-        metadata: dict[str, Any] = {
-            "status": result_status,
-            "exit_code": task.exit_code,
-            "error_message": error,
-            "command": list(task.command),
-            "output_artifacts": {},
-            "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
-        }
-        with tarfile.open(archive, "w:gz") as tar:
-            for name in outputs:
-                tar.add(job_dir / PurePosixPath(name), arcname=name)
-            tar.add(run_dir, arcname=str(run_dir.relative_to(job_dir)))
-        return metadata, archive, outputs
+                return
+        self._finalize(task)
 
-    def _deliver(self, task: UploadTask) -> None:
+    def _deliver_report(self, task: UploadTask) -> None:
+        """report 车道入口：quiesce 心跳 → report → 删 marker 清目录。"""
+        try:
+            self._report(task)
+        except Exception as exc:
+            print(f"upload report crashed for {task.execution_id}: {exc}", flush=True)
+        finally:
+            self._finalize(task)
+
+    def _finalize(self, task: UploadTask) -> None:
+        upload_heartbeat.quiesce_heartbeat(task.heartbeat_stop, task.heartbeat_thread, 2)
+        self._status.finish(task.execution_id)
+        with self._lock:
+            self._depth -= 1
+
+    def _bulk_transfer(self, task: UploadTask) -> bool:
+        """prepare + artifact 上传；True = 可进 report 车道，False = 中止（marker 保留）。"""
         if self._stop.is_set():
-            return  # never started; marker intact for the next startup
+            return False  # never started; marker intact for the next startup
         self._status.set_phase(task.execution_id, "uploading")
         job_dir = task.execution_dir / "job"
         try:
-            metadata, archive, outputs = self._prepare(task)
+            metadata, archive, outputs = prepare_result(task)
         except Exception as exc:
             metadata = {
                 "status": "failed",
@@ -251,7 +239,7 @@ class UploadQueue:
                 "output_artifacts": {},
             }
             archive = task.execution_dir / "result.tar.gz"
-            _write_empty_archive(archive)
+            write_empty_archive(archive)
             outputs = []
         uploaded: dict[str, str] = {}
         for name in outputs:
@@ -270,9 +258,16 @@ class UploadQueue:
                 uploaded = {}
                 break
             if ref is None:
-                return  # shutting down mid-upload; marker stays for restore
+                return False  # shutting down mid-upload; marker stays for restore
             uploaded[name] = ref
         metadata["output_artifacts"] = uploaded
+        task.prepared_metadata = metadata
+        task.prepared_archive = archive
+        return True
+
+    def _report(self, task: UploadTask) -> None:
+        metadata = task.prepared_metadata or {}
+        archive = task.prepared_archive or (task.execution_dir / "result.tar.gz")
         # Quiesce the heartbeat before the final report: a beat racing the
         # commit loses the row lock and logs a spurious "lost ownership" 409.
         # Resume only while a transient report failure backs off.
