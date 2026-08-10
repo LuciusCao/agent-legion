@@ -261,6 +261,25 @@ def test_claim_switch_and_capacity_are_hot_updated_without_restart(tmp_path: Pat
     assert supervisor.restarts == 0
 
 
+def test_upload_max_concurrency_is_hot_updated_without_restart(tmp_path: Path) -> None:
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config(_config()))
+    supervisor = FakeSupervisor(store)
+    app = create_app(supervisor, tmp_path)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={"upload_max_concurrency": 12},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["restarted"] is False
+    assert response.json()["config"]["upload_max_concurrency"] == 12
+    assert supervisor.restarts == 0
+
+
 def test_local_api_rejects_unknown_runtime(tmp_path: Path) -> None:
     store = WorkerConfigStore(tmp_path / "state")
     store.write(validate_config(_config()))
