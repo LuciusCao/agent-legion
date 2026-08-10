@@ -344,6 +344,9 @@ alter table job_batches
 create index if not exists idx_job_batches_intake_queue
   on job_batches(status, updated_at) where status in ('queued', 'processing');
 create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status);
+-- Workflow worker incremental scan (list_changed_job_marks) filters by
+-- workflow_key and updated_at > watermark on every poll pass.
+create index if not exists idx_jobs_workflow_updated on jobs(workflow_key, updated_at);
 create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
 create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
 create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
