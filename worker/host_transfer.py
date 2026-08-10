@@ -1,16 +1,16 @@
 """Transfer operations for the Worker's Host client: retries, downloads, uploads.
 
-Transfer calls (bundle/artifact download, artifact/result upload) move
-megabytes and share the Host with every other execution; they get a longer
-timeout and exponential-backoff retry on transient failures, unlike the
-control calls kept in ``worker.host_client``.
+Bulk transfers move megabytes and share the Host with every other execution;
+they get a longer timeout and backoff retry on transient failures, unlike
+the control calls in ``worker.host_client``.
 """
 
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO, cast
 
 import requests
 
@@ -24,11 +24,7 @@ from worker._retry import run_with_retry
 # net for errors raised below the requests layer.
 _RETRY_MAX_ATTEMPTS = 3
 _RETRY_BACKOFF_BASE_SECONDS = 1.0
-_TRANSIENT_ERRORS = (
-    requests.RequestException,
-    TimeoutError,
-    ConnectionError,
-)
+_TRANSIENT_ERRORS = (requests.RequestException, TimeoutError, ConnectionError)
 
 DEFAULT_TRANSFER_TIMEOUT = 120
 
@@ -59,9 +55,10 @@ class TransferOperations:
         method: str,
         path: str,
         *,
-        data: bytes | None = None,
+        data: bytes | BinaryIO | None = None,
         headers: dict[str, str] | None = None,
         timeout: float | None = None,
+        stream_to: Path | None = None,
     ) -> tuple[int, bytes]:
         raise NotImplementedError
 
@@ -72,23 +69,34 @@ class TransferOperations:
         *,
         label: str,
         timeout: float,
-        data: bytes | None = None,
+        data: bytes | Callable[[], BinaryIO] | None = None,
         headers: dict[str, str] | None = None,
+        stream_to: Path | None = None,
     ) -> tuple[int, bytes]:
         """Request with backoff on transient network errors and Host 5xx.
 
-        4xx passes through to the caller unchanged (it is a verdict, not a
-        transient condition). Exhaustion raises RuntimeError carrying the
-        last error with the call-site label as context.
+        4xx passes through unchanged (a verdict, not a transient condition);
+        exhaustion raises RuntimeError with the call-site label. A callable
+        ``data`` is invoked per attempt so upload streams are re-opened on
+        retry; ``stream_to`` streams the response to an atomic temp+rename.
         """
 
         def attempt() -> tuple[int, bytes]:
+            payload = data() if callable(data) else data
             try:
                 status, body = self.request(
-                    method, path, data=data, headers=headers, timeout=timeout
+                    method,
+                    path,
+                    data=payload,
+                    headers=headers,
+                    timeout=timeout,
+                    stream_to=stream_to,
                 )
             except _TRANSIENT_ERRORS as exc:
                 raise _TransientTransferError(str(exc) or type(exc).__name__) from exc
+            finally:
+                if callable(data):
+                    cast("BinaryIO", payload).close()
             if status >= 500:
                 raise _TransientTransferError(f"HTTP {status}: {body[:200]!r}")
             return status, body
@@ -106,13 +114,16 @@ class TransferOperations:
         return result
 
     def download(self, path: str, destination: Path) -> None:
-        status, body = self._request_with_retry(
-            "GET", path, label=f"download failed: {path}", timeout=self.transfer_timeout
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        status, _ = self._request_with_retry(
+            "GET",
+            path,
+            label=f"download failed: {path}",
+            timeout=self.transfer_timeout,
+            stream_to=destination,
         )
         if status != 200:
             raise HostRequestError(f"download failed: {path}: HTTP {status}", status)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(body)
 
     def upload_artifact(self, path: Path) -> str:
         """Upload one output artifact, retrying transient Host failures.
@@ -121,11 +132,10 @@ class TransferOperations:
         get exponential backoff (1s, 2s, 4s, …); 4xx and repeated failures
         raise immediately.
         """
-        data = path.read_bytes()
         status, body = self._request_with_retry(
             "POST",
             "/api/artifacts",
-            data=data,
+            data=lambda: path.open("rb"),
             label="artifact upload failed",
             timeout=self.transfer_timeout,
         )
@@ -136,9 +146,8 @@ class TransferOperations:
     def release_slot(self, execution_id: str, lease_id: str) -> int:
         """Ask the Host to flip claimed -> reporting, freeing execution capacity.
 
-        404 means the Host predates this endpoint; the caller falls back to
-        holding the slot until the result report. No retry: the caller's
-        upload queue keeps the lease alive either way.
+        404 = Host predates this endpoint (slot held until report). No retry:
+        the caller's upload queue keeps the lease alive either way.
         """
         status, _ = self.request(
             "POST",
@@ -155,7 +164,7 @@ class TransferOperations:
         return self._request_with_retry(
             "POST",
             f"/api/agent-executions/{execution_id}/result",
-            data=archive.read_bytes(),
+            data=lambda: archive.open("rb"),
             headers={
                 "X-Agent-Result": json.dumps(metadata, ensure_ascii=True),
                 "X-Agent-Lease-Id": lease_id,

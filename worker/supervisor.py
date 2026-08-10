@@ -13,8 +13,11 @@ from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
+from yaml import YAMLError
+
 from worker.config_store import WorkerConfigStore, public_config, validate_config
 from worker.metrics_cache import METRICS_FILENAME
+from worker.process_lifecycle import reap_orphaned_agents
 from worker.status import ENV_VAR, STATUS_FILENAME, read_runtime_status
 from worker.status_aggregates import execution_counts
 
@@ -65,6 +68,8 @@ class WorkerSupervisor:
             if self.running() or not self.store.configured():
                 return
             self.store.update_public({"claim_enabled": False})
+            # 刻意设计（含崩溃自动重启路径）：重启后默认暂停认领，需人工重新打开。
+            self._log("启动时已将 claim_enabled 重置为 false，需在控制台重新打开认领")
             config = self.store.read()
             token_file = Path(str(config["register_token_file"]))
             if not token_file.is_file():
@@ -105,8 +110,14 @@ class WorkerSupervisor:
             process = self._process
             if process is None or process.poll() is not None:
                 return
-            config = self.store.read(require_identity=False)
-            wait_seconds = min(float(config["shutdown_grace_seconds"]), _STOP_GRACE_MAX)
+            try:
+                config = self.store.read(require_identity=False)
+                wait_seconds = min(float(config["shutdown_grace_seconds"]), _STOP_GRACE_MAX)
+                work_root = Path(str(config["work_root"]))
+            except (OSError, ValueError, KeyError, TypeError, YAMLError):
+                # stop 路径容忍配置损坏：能停进程即可（restart 的 _start 会再校验）。
+                wait_seconds = _STOP_GRACE_MAX
+                work_root = None
             process.terminate()
         try:
             process.wait(timeout=wait_seconds)
@@ -116,6 +127,9 @@ class WorkerSupervisor:
                 process.wait(timeout=_KILL_WAIT)
         if process.poll() is not None:
             self._cleanup_runtime_files()
+            if work_root is not None:
+                # executor 若被 SIGKILL，其 agent 子进程组按执行目录里的记录兜底清理。
+                reap_orphaned_agents(work_root, self._log)
 
     def _cleanup_runtime_files(self) -> None:
         for filename in (STATUS_FILENAME, METRICS_FILENAME):

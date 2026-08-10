@@ -21,5 +21,8 @@ def clean_work_root(work_root: Path) -> None:
     report resolves."""
     work_root.mkdir(parents=True, exist_ok=True)
     for child in work_root.iterdir():
-        if child.is_dir() and not (child / PENDING_FILENAME).is_file():
+        # is_dir() 跟随 symlink：对 symlink 只能 unlink，rmtree 会报错或误伤目标。
+        if child.is_symlink():
+            child.unlink()
+        elif child.is_dir() and not (child / PENDING_FILENAME).is_file():
             shutil.rmtree(child, ignore_errors=True)

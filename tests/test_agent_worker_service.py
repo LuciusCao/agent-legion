@@ -14,6 +14,7 @@ from fastapi.testclient import TestClient
 
 import worker.service as service_module
 import worker.supervisor as state_module
+from tests.helpers import wait_for_predicate
 from worker.metrics_cache import WorkerMetricsCache, metrics_cache_key, metrics_cache_path
 from worker.registration_token import registration_token_configured
 from worker.service import create_app
@@ -65,15 +66,6 @@ def _config() -> dict[str, Any]:
 
 def _auth(store: WorkerConfigStore) -> dict[str, str]:
     return {"Authorization": f"Bearer {store.control_token()}"}
-
-
-def _wait_for(predicate: Callable[[], bool], timeout: float = 5.0) -> None:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if predicate():
-            return
-        time.sleep(0.02)
-    raise AssertionError("condition not met within timeout")
 
 
 class FakeSupervisor:
@@ -556,18 +548,18 @@ def test_supervisor_starts_and_stops_worker_process(
     supervisor.store.update_public({"claim_enabled": True})
 
     supervisor.start()
-    _wait_for(lambda: supervisor.running())
-    _wait_for(lambda: any("fake worker ready" in line for line in supervisor.logs()))
+    wait_for_predicate(lambda: supervisor.running())
+    wait_for_predicate(lambda: any("fake worker ready" in line for line in supervisor.logs()))
     pid = supervisor.status()["pid"]
     assert isinstance(pid, int)
     assert supervisor.status()["claim_enabled"] is False
     supervisor.store.update_public({"claim_enabled": True})
     supervisor.restart()
-    _wait_for(lambda: supervisor.running())
+    wait_for_predicate(lambda: supervisor.running())
     assert supervisor.status()["claim_enabled"] is False
 
     supervisor.stop()
-    _wait_for(lambda: not supervisor.running())
+    wait_for_predicate(lambda: not supervisor.running())
     time.sleep(0.2)
     assert supervisor.running() is False  # 手动停止后不自动重启
 
@@ -578,7 +570,7 @@ def test_supervisor_restarts_after_crash_with_backoff(
     supervisor = _make_supervisor(tmp_path, monkeypatch, "crash")
     try:
         supervisor.start()
-        _wait_for(lambda: supervisor.status()["restart_count"] >= 1)
+        wait_for_predicate(lambda: supervisor.status()["restart_count"] >= 1)
         status = supervisor.status()
         assert status["failed"] is None
         assert status["next_restart_delay"] is not None or status["worker_running"]
@@ -592,7 +584,7 @@ def test_supervisor_does_not_restart_after_exit_code_2(
     supervisor = _make_supervisor(tmp_path, monkeypatch, "exit2")
 
     supervisor.start()
-    _wait_for(lambda: supervisor.status()["failed"] is not None)
+    wait_for_predicate(lambda: supervisor.status()["failed"] is not None)
 
     time.sleep(0.3)
     status = supervisor.status()
@@ -607,7 +599,7 @@ def test_supervisor_restart_and_stop_can_race_without_error(
 ) -> None:
     supervisor = _make_supervisor(tmp_path, monkeypatch, "sleep")
     supervisor.start()
-    _wait_for(lambda: supervisor.running())
+    wait_for_predicate(lambda: supervisor.running())
 
     errors: list[BaseException] = []
 
@@ -660,7 +652,7 @@ def test_supervisor_injects_status_file_and_cleans_it_on_exit(
     supervisor.start()
     try:
         assert not metrics_path.exists()
-        _wait_for(lambda: supervisor.status()["current_executions"] != [])
+        wait_for_predicate(lambda: supervisor.status()["current_executions"] != [])
         metrics_path.write_text("runtime", encoding="utf-8")
         status = supervisor.status()
         executions = status["current_executions"]
@@ -671,7 +663,7 @@ def test_supervisor_injects_status_file_and_cleans_it_on_exit(
         assert status["host_worker"]["worker_id"] == "worker-1"
     finally:
         supervisor.stop()
-    _wait_for(lambda: supervisor.status()["current_executions"] == [])
+    wait_for_predicate(lambda: supervisor.status()["current_executions"] == [])
     assert not (tmp_path / "state" / "current_executions.json").exists()
     assert not metrics_path.exists()
 
@@ -716,7 +708,7 @@ time.sleep(30)
     supervisor = WorkerSupervisor(store, script)
     supervisor.start()
     try:
-        _wait_for(lambda: supervisor.status()["current_executions"] != [])
+        wait_for_predicate(lambda: supervisor.status()["current_executions"] != [])
         status = supervisor.status()
         assert status["running_executions_count"] == 2
         assert status["upload_queued_count"] == 1
