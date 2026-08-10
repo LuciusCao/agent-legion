@@ -540,6 +540,7 @@
     "scripts/architecture/service_boundaries.py": 48,
     "scripts/architecture/sql_placeholders.py": 81,
     "scripts/architecture/sql_placeholders_baseline.py": 67,
+    "scripts/architecture/test_placement.py": 78,
     "scripts/architecture/video_legacy.py": 124,
     "scripts/architecture/workflow.py": 54,
     "scripts/architecture/workspace_boundaries.py": 215,
