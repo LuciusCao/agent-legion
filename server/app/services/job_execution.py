@@ -11,6 +11,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services._job_batch_ops import batch_run_to as _batch_run_to
+from server.app.services._job_rerun_upstream_guard import raise_if_failed_upstream
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_staged_cleanup import commit_staged_outputs
@@ -205,6 +206,17 @@ class JobExecutionService:
                 "invalid_start",
                 f"Start node {start_node_key} is not in the target closure",
             )
+
+        # Same hazard as rerun: only the start node and its downstream are
+        # reset, so a failed ancestor would strand the job in queued forever.
+        raise_if_failed_upstream(
+            definition,
+            self.job_db.list_job_nodes(job_id),
+            start_node_key,
+            job_id,
+            "run_to",
+            target_node_key,
+        )
 
         staged = None
         try:
