@@ -116,6 +116,11 @@
 .table td {
   padding: 4px 8px 4px 0;
 }
+/* 长不可断内容（repo URL、commit）允许折行，避免表格撑破卡片 */
+.tableBreak td {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
 .input {
   width: 100%;
   box-sizing: border-box;
