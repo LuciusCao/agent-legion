@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from server.app.cms.knowledge import _extract_knowledge_video_url, _parse_knowledge_payload
 from server.app.pipeline.common import parse_srt, parse_srt_file
+from workspace_libs.cms.knowledge import _extract_knowledge_video_url, _parse_knowledge_payload
 
 
 def test_parse_srt():

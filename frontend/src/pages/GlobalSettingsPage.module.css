@@ -3,6 +3,59 @@
   margin: 0 auto;
   padding: 24px;
 }
+.settingsLayout {
+  display: flex;
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+.navSidebar {
+  width: 200px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+}
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.navItem,
+.navItemActive {
+  display: block;
+  width: 100%;
+  padding: 10px 16px;
+  border: none;
+  border-radius: 8px;
+  background: none;
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+  cursor: pointer;
+  color: #43474e;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
+}
+.navItem:hover {
+  background-color: #f0f0f0;
+}
+.navItemActive {
+  background-color: #f0f0f0;
+  color: #1a1c1e;
+  font-weight: 500;
+}
+.contentArea {
+  flex: 1;
+  min-width: 0;
+}
+.contentArea > section {
+  scroll-margin-top: 80px;
+}
 .card {
   border: 1px solid #c3c6cf;
   border-radius: 12px;

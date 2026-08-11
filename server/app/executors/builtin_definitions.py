@@ -15,22 +15,16 @@ from __future__ import annotations
 
 from typing import Any
 
-# CMS connection schema shared by the capabilities that call the CMS: non-secret
-# selectors plus the vault-backed token (secret: true). Values resolve along
-# schema defaults → node config → workspace override; the schema defaults are
-# the product factory values (the global yaml cms: section was retired), and
-# base_url comes from node/workspace config or env CMS_BASE_URL. The token is
-# stored Fernet-encrypted in the workspace vault and injected in memory at
-# dispatch (VAULT-SECRET-001).
-_TOKEN_PROPERTY: dict[str, Any] = {
+# CMS connection schema shared by the capabilities that call the CMS: the
+# instance-level external connection key plus non-secret business selectors.
+# Endpoint URLs and credentials live on the connection (admin settings →
+# 外部服务连接); values resolve along schema defaults → node config →
+# workspace override, and the connection config + token are injected in
+# memory at dispatch (VAULT-SECRET-001).
+_CONNECTION_PROPERTY: dict[str, Any] = {
     "type": "string",
-    "secret": True,
-    "description": "CMS 访问 token（存入 workspace vault，只写不读）",
-}
-_ENV_PROPERTY: dict[str, Any] = {
-    "type": "string",
-    "default": "prod",
-    "description": "CMS 环境标识（prod 时启用服务端 token 生成）",
+    "default": "cms-internal",
+    "description": "外部服务连接 key（admin 全局设置「外部服务连接」中维护；出厂默认值，可被节点/workspace 覆盖）",
 }
 _BANK_VERSION_PROPERTY: dict[str, Any] = {
     "type": "string",
@@ -49,20 +43,7 @@ _SUBJECT_ID_PROPERTY: dict[str, Any] = {
 }
 
 _FETCH_QUESTIONS_PROPERTIES: dict[str, Any] = {
-    "base_url": {
-        "type": "string",
-        "description": "CMS 服务根地址（用于派生各端点 URL；缺省由 env CMS_BASE_URL 提供）",
-    },
-    "api_url": {
-        "type": "string",
-        "description": "题目详情端点完整 URL（优先于 base_url 派生）",
-    },
-    "question_list_url": {
-        "type": "string",
-        "description": "知识点题目列表端点完整 URL（优先于 base_url 派生）",
-    },
-    "token": _TOKEN_PROPERTY,
-    "env": _ENV_PROPERTY,
+    "connection": _CONNECTION_PROPERTY,
     "bank_version": _BANK_VERSION_PROPERTY,
     "country_id": _COUNTRY_ID_PROPERTY,
     "subject_id": _SUBJECT_ID_PROPERTY,
@@ -76,16 +57,7 @@ _FETCH_QUESTIONS_PROPERTIES: dict[str, Any] = {
 }
 
 _DOWNLOAD_VIDEO_PROPERTIES: dict[str, Any] = {
-    "base_url": {
-        "type": "string",
-        "description": "CMS 服务根地址（用于派生端点 URL；缺省由 env CMS_BASE_URL 提供）",
-    },
-    "api_url": {
-        "type": "string",
-        "description": "知识点详情端点完整 URL（优先于 base_url 派生）",
-    },
-    "token": _TOKEN_PROPERTY,
-    "env": _ENV_PROPERTY,
+    "connection": _CONNECTION_PROPERTY,
     "bank_version": _BANK_VERSION_PROPERTY,
     "country_id": _COUNTRY_ID_PROPERTY,
     "subject_id": _SUBJECT_ID_PROPERTY,
@@ -107,8 +79,10 @@ BUILTIN_EXECUTOR_DEFINITIONS: dict[str, dict[str, Any]] = {
                 },
             },
             # Custom forks call the CMS / video source: allow network in the
-            # sandbox; same vault-backed token semantics and factory defaults
-            # as fetch_questions (page_size is not used by this node).
+            # sandbox; same instance-level connection injection (endpoint
+            # config + token resolved in memory at dispatch) and factory
+            # defaults as fetch_questions (page_size is not used by this
+            # node).
             "download_video": {
                 "path": "workflow_nodes/video_download.py",
                 "sandbox_network": True,

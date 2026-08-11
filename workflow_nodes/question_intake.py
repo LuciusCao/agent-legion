@@ -14,10 +14,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from server.app.cms import urls as cms_urls
-from server.app.cms.client import get_token
-from server.app.cms.question import fetch_question_detail, list_questions_by_knowledge
 from server.app.executors.cancellation import check_cancellation
+from server.app.services.connection_tokens import report_node_auth_failure
+from workspace_libs.cms import urls as cms_urls
+from workspace_libs.cms.client import CmsClientError, get_token
+from workspace_libs.cms.question import fetch_question_detail, list_questions_by_knowledge
 
 logger = logging.getLogger(__name__)
 
@@ -32,26 +33,37 @@ def _decode_json_object(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
-    """Effective CMS config: settings-level ``cms`` (env-injected) + node config.
+# Retired node-level connection keys (pre-connection era). They are honored
+# only when no connection was injected (legacy frozen payloads); a resolved
+# connection always wins.
+_LEGACY_CONNECTION_KEYS = ("token", "env", "base_url", "api_url", "question_list_url")
 
-    Node config carries the config_schema defaults (factory values) plus any
-    node/workspace overrides and wins over the settings-level keys. The node
-    config token arrives already resolved from the vault at dispatch
-    time; it is a workspace-scoped credential, so mark it to win over the
-    env-level global default (same precedence as the retired binding chain).
+
+def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
+    """Effective CMS config: dispatch-injected connection + node overrides.
+
+    The ``connection_config`` block arrives resolved from the instance-level
+    external connection at dispatch time (base URL/endpoint config plus the
+    plaintext token, in memory only). Node/workspace business overrides win.
+    Legacy frozen payloads without a connection fall back to their
+    vault-resolved node ``token``.
     """
-    settings_config = context.get("settings_config")
     merged: dict[str, Any] = {}
-    if isinstance(settings_config, dict):
-        cms = settings_config.get("cms")
-        if isinstance(cms, dict):
-            merged = dict(cms)
     node_config = context.get("node_config")
+    # The dispatch layer injects the resolved connection into the node config
+    # (ExecutionContext.node_config → runtime["node_config"]): non-secret
+    # endpoint config plus the plaintext token, in memory only.
+    injected = node_config.get("connection_config") if isinstance(node_config, dict) else None
+    has_connection = isinstance(injected, dict) and bool(injected)
+    if isinstance(injected, dict) and injected:
+        merged.update({key: value for key, value in injected.items() if value not in (None, "")})
     if isinstance(node_config, dict):
-        merged.update({key: value for key, value in node_config.items() if value not in (None, "")})
-    if merged.get("token"):
-        merged["token_from_binding"] = True
+        for key, value in node_config.items():
+            if key in ("connection", "connection_config") or value in (None, ""):
+                continue
+            if has_connection and key in _LEGACY_CONNECTION_KEYS:
+                continue
+            merged[key] = value
     return merged
 
 
@@ -81,6 +93,34 @@ def _detail_payload(detail: Any, fallback_id: str, fallback_title: str) -> dict[
         "normalized": detail.normalized,
         "cms_payload": detail.payload,
     }
+
+
+def _validate_fetched_detail(detail: Any, question_id: str) -> None:
+    """Fail fast on CMS error payloads and empty stems.
+
+    The CMS detail endpoint signals auth/parameter failures in-band via a
+    non-zero ``code`` with ``data: null``; treating such payloads as valid
+    questions poisons every downstream node (empty stem → empty key info →
+    business validation failures). Raising ``CmsClientError`` here classifies
+    the failure as technical/cms_auth (see _failure_classification_rules), so
+    the job stops at fetch instead of forwarding garbage. In knowledge mode a
+    single bad detail fails the whole batch before anything is written —
+    intentional: auth failures are systemic, and a partial questions.json
+    would silently drop the remaining questions of the batch.
+    """
+    payload = getattr(detail, "payload", None)
+    if isinstance(payload, dict):
+        code = payload.get("code")
+        # CMS contract is int; str() coercion guards a hypothetical "0".
+        if code is not None and str(code).strip() != "0":
+            message = payload.get("message") or ""
+            raise CmsClientError(
+                f"CMS 返回错误: code={code} message={message} (question_id={question_id})"
+            )
+    normalized = getattr(detail, "normalized", None)
+    stem = normalized.get("stem") if isinstance(normalized, dict) else None
+    if not str(stem or "").strip():
+        raise CmsClientError(f"CMS 响应缺少题干 (question_id={question_id})")
 
 
 def run(
@@ -125,7 +165,14 @@ def run(
         logger.info("  CMS returned %d question(s) for code=%s", len(summaries), source_id)
         for summary in summaries:
             check_cancellation(context)
-            detail = fetch_question_detail(summary.question_id, detail_url, token)
+            try:
+                detail = fetch_question_detail(summary.question_id, detail_url, token)
+                _validate_fetched_detail(detail, summary.question_id)
+            except CmsClientError:
+                # Auth-class failure: invalidate the cached connection token so
+                # the next dispatch re-acquires instead of reusing a dead one.
+                report_node_auth_failure(context)
+                raise
             questions.append(_detail_payload(detail, summary.question_id, summary.title))
     else:
         api_url = str(
@@ -136,7 +183,14 @@ def run(
         if api_url:
             logger.info("  fetching from CMS: %s", api_url)
             token = get_token(str(cms_config.get("env", "")), cms_config)
-            detail = fetch_question_detail(source_id, str(api_url), token)
+            try:
+                detail = fetch_question_detail(source_id, str(api_url), token)
+                _validate_fetched_detail(detail, source_id)
+            except CmsClientError:
+                # Auth-class failure: invalidate the cached connection token so
+                # the next dispatch re-acquires instead of reusing a dead one.
+                report_node_auth_failure(context)
+                raise
             check_cancellation(context)
             questions.append(_detail_payload(detail, source_id, str(job["title"])))
         else:

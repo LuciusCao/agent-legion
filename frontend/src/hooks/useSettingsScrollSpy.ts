@@ -9,9 +9,14 @@ import { useCallback, useEffect, useRef, useState } from 'react'
  *
  * `sectionsKey` should change whenever the set of rendered sections may have
  * changed (e.g. the nav items memo), so the observer re-attaches.
+ * `initialSection` is the nav item highlighted before the observer first
+ * fires; pass the page's first section id.
  */
-export function useSettingsScrollSpy(sectionsKey: unknown) {
-  const [activeSection, setActiveSection] = useState('basic-info')
+export function useSettingsScrollSpy(
+  sectionsKey: unknown,
+  initialSection = 'basic-info'
+) {
+  const [activeSection, setActiveSection] = useState(initialSection)
   const contentRef = useRef<HTMLDivElement>(null)
   const observerSuppressedUntilRef = useRef(0)
 

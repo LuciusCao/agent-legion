@@ -54,14 +54,22 @@ def test_builtin_definitions_preserve_factory_semantics() -> None:
         "download_video",
         "transcribe_video",
     }
-    # The CMS config schema factory defaults survive (node/workspace can override).
+    # The CMS connection schema factory defaults survive (node/workspace can
+    # override): endpoint URLs and credentials live on the instance-level
+    # external connection, the schema only carries the connection key plus
+    # non-secret business selectors.
     fetch_schema = capabilities["fetch_questions"].config_schema["properties"]
-    assert fetch_schema["token"]["secret"] is True
+    assert fetch_schema["connection"]["default"] == "cms-internal"
     assert fetch_schema["bank_version"]["default"] == "v5"
+    assert fetch_schema["country_id"]["default"] == "1"
+    assert fetch_schema["subject_id"]["default"] == "2"
     assert fetch_schema["page_size"]["default"] == 50
+    assert "token" not in fetch_schema
     download_schema = capabilities["download_video"].config_schema["properties"]
-    assert download_schema["token"]["secret"] is True
+    assert download_schema["connection"]["default"] == "cms-internal"
+    assert download_schema["bank_version"]["default"] == "v5"
     assert "page_size" not in download_schema
+    assert "token" not in download_schema
     # The retired yaml asr: section's business parameters live here (factory
     # defaults; node/workspace can override). Machine paths stay env-only.
     transcribe_schema = capabilities["transcribe_video"].config_schema["properties"]
