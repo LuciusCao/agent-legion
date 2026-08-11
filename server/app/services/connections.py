@@ -12,7 +12,6 @@ adapters (see :mod:`server.app.services.connection_adapters`).
 
 from __future__ import annotations
 
-import builtins
 import json
 import re
 from datetime import datetime
@@ -94,8 +93,8 @@ class ConnectionService:
             )
         adapter = self._adapter(type_name)
         stored = self._validate_config(adapter, config)
-        # Secret values need the vault before the row can reference them; fail
-        # before writing anything when the master key is missing (M10).
+        # Fail before writing anything when secret values are present but the
+        # master key is missing (M10).
         secret_values = {
             field: config[field]
             for field in adapter.secret_keys
@@ -105,33 +104,39 @@ class ConnectionService:
             raise InvalidOperationError(
                 "vault master key 未配置（AGENT_LEGION_VAULT_MASTER_KEY），无法保存 secret 字段"
             )
-        # Row first with secrets dropped: a conflicting key is rejected before
-        # any vault write can touch the existing connection's credentials.
+        # Phase 1: compute every value (config with ref markers, encrypted
+        # secrets) before any write.
+        stored_with_refs = dict(stored)
+        encrypted: dict[str, str] = {}
+        for field, value in secret_values.items():
+            name = connection_secret_name(key, field)
+            stored_with_refs[field] = {"secret_ref": name}
+            try:
+                encrypted[name] = self._vault.encrypt(name, value)
+            except VaultError as exc:
+                raise InvalidOperationError(f"vault 加密失败: {exc}") from exc
+        # Phase 2: one transaction — a key conflict or any other failure rolls
+        # back the row and the vault entries together, so a failed create
+        # leaves neither a half-created connection nor orphaned secrets (and
+        # an existing connection's credentials stay untouched).
         try:
             with write_transaction(self._dsn) as conn:
                 conn.execute(
                     "insert into external_connections(key, type, display_name, config_json)"
                     " values (%s, %s, %s, %s)",
-                    (key, adapter.type, display_name, json.dumps(stored, ensure_ascii=False)),
+                    (
+                        key,
+                        adapter.type,
+                        display_name,
+                        json.dumps(stored_with_refs, ensure_ascii=False),
+                    ),
                 )
+                for name, ciphertext in encrypted.items():
+                    InstanceVaultService.set_in(conn, name, ciphertext)
         except Exception as exc:
             if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
                 raise ConflictError(f"connection {key!r} 已存在") from exc
             raise
-        try:
-            for field, value in secret_values.items():
-                self._vault.set(connection_secret_name(key, field), value)
-            if secret_values:
-                stored_with_refs = dict(stored)
-                for field in secret_values:
-                    stored_with_refs[field] = {"secret_ref": connection_secret_name(key, field)}
-                with write_transaction(self._dsn) as conn:
-                    conn.execute(
-                        "update external_connections set config_json=%s where key=%s",
-                        (json.dumps(stored_with_refs, ensure_ascii=False), key),
-                    )
-        except VaultError as exc:
-            raise InvalidOperationError(f"vault 写入失败: {exc}") from exc
         self._republish_executor_schemas()
         return self.get(key)
 
@@ -146,24 +151,30 @@ class ConnectionService:
         row = self._row(key)
         adapter = self._adapter(str(row["type"]))
         stored: dict[str, Any] | None = None
-        secret_writes: dict[str, str] = {}
-        secret_deletes: list[str] = []
+        encrypted: dict[str, str] = {}
+        delete_names: list[str] = []
         if config is not None:
             current = self._decode_config(row)
-            stored, secret_writes, secret_deletes = self._validate_update(
-                adapter, key, config, current
-            )
+            stored, secret_writes = self._validate_update(adapter, key, config, current)
             if secret_writes and resolve_master_key(self._settings_config) is None:
                 raise InvalidOperationError(
                     "vault master key 未配置（AGENT_LEGION_VAULT_MASTER_KEY），无法保存 secret 字段"
                 )
-        try:
+            # Phase 1: compute every value before any write. Refs present in
+            # the current config but dropped from the new one (explicitly
+            # cleared secrets) are deleted from the vault with the same
+            # commit, so no orphans survive.
             for field, value in secret_writes.items():
-                self._vault.set(connection_secret_name(key, field), value)
-            for field in secret_deletes:
-                self._vault.delete(connection_secret_name(key, field))
-        except VaultError as exc:
-            raise InvalidOperationError(f"vault 写入失败: {exc}") from exc
+                name = connection_secret_name(key, field)
+                try:
+                    encrypted[name] = self._vault.encrypt(name, value)
+                except VaultError as exc:
+                    raise InvalidOperationError(f"vault 加密失败: {exc}") from exc
+            delete_names = sorted(
+                set(_secret_ref_fields(current)) - set(_secret_ref_fields(stored))
+            )
+        # Phase 2: one transaction — config update, token-cache invalidation,
+        # vault writes and vault deletes (last) commit or roll back together.
         with write_transaction(self._dsn) as conn:
             if display_name is not None:
                 conn.execute(
@@ -179,6 +190,10 @@ class ConnectionService:
                 )
                 # Reconfiguration invalidates the cached token.
                 conn.execute("delete from connection_tokens where connection_key=%s", (key,))
+                for name, ciphertext in encrypted.items():
+                    InstanceVaultService.set_in(conn, name, ciphertext)
+                for name in delete_names:
+                    InstanceVaultService.delete_in(conn, name)
             if enabled is not None:
                 conn.execute(
                     "update external_connections set enabled=%s, updated_at=current_timestamp"
@@ -195,10 +210,12 @@ class ConnectionService:
         # Secret fields are derived from the stored ref markers, not the
         # adapter: deletion must work even when the adapter fails to load.
         ref_names = _secret_ref_fields(self._decode_config(row))
+        # One transaction: the row and its vault entries disappear together
+        # (connection_tokens rows follow via ON DELETE CASCADE).
         with write_transaction(self._dsn) as conn:
             conn.execute("delete from external_connections where key=%s", (key,))
-        for name in ref_names:
-            self._vault.delete(name)
+            for name in ref_names:
+                InstanceVaultService.delete_in(conn, name)
 
     # ------------------------------------------------------------------
     # Probe & runtime resolution
@@ -286,22 +303,20 @@ class ConnectionService:
         key: str,
         config: dict[str, Any],
         current: dict[str, Any],
-    ) -> tuple[dict[str, Any], dict[str, str], builtins.list[str]]:
+    ) -> tuple[dict[str, Any], dict[str, str]]:
         """Validate an update payload.
 
-        Returns (stored config, secret writes, secret deletes). Secret field
-        semantics mirror node config secrets: a non-empty string upserts the
+        Returns (stored config, secret writes). Secret field semantics mirror
+        node config secrets ("omitted means keep"): a field left out of the
+        payload inherits the stored ref marker; a non-empty string upserts the
         vault; ``{"secret_set": ...}`` / ``{"secret_ref": ...}`` echoes keep
-        the stored value; an empty string clears it.
-
-        ``builtins.list`` is spelled out because the class defines a ``list``
-        method that shadows the builtin in class-scope annotations.
+        the stored value; an explicit empty string clears it (the dropped ref
+        is deleted from the vault by the caller).
         """
         if not isinstance(config, dict):
             raise InvalidOperationError("config 必须是 JSON 对象")
         stored: dict[str, Any] = {}
         writes: dict[str, str] = {}
-        deletes: list[str] = []
         for name, value in config.items():
             if name not in adapter.secret_keys:
                 if isinstance(value, dict) and ("secret_ref" in value or "secret_set" in value):
@@ -312,17 +327,20 @@ class ConnectionService:
                 if value.strip():
                     writes[name] = value
                     stored[name] = {"secret_ref": connection_secret_name(key, name)}
-                else:
-                    deletes.append(name)
             elif isinstance(value, dict) and ("secret_ref" in value or "secret_set" in value):
                 if name in current:
                     stored[name] = current[name]
             else:
                 raise InvalidOperationError(f"secret 字段 {name!r} 必须是字符串")
+        # Omitted secret fields keep their stored ref markers instead of
+        # silently dropping the credential (and orphaning the vault entry).
+        for name in adapter.secret_keys:
+            if name not in config and name in current:
+                stored[name] = current[name]
         for field in adapter.required_config_keys:
             if not str(stored.get(field) or "").strip():
                 raise InvalidOperationError(f"缺少必填配置项 {field!r}（type={adapter.type}）")
-        return stored, writes, deletes
+        return stored, writes
 
     def _republish_executor_schemas(self) -> None:
         """Backfill the ``connection`` config_schema property on CMS capabilities.

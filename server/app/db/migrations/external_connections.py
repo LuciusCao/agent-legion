@@ -1,27 +1,32 @@
-"""Instance-level external connection for the CMS (schema v34).
+"""Instance-level external connections for the CMS (schema v34).
 
-The CMS integration moves off the env/node-config channels onto a single
-admin-managed ``cms-internal`` connection:
+The CMS integration moves off the env/node-config channels onto admin-managed
+connections, one per distinct credential:
 
-- credentials are collected (first match wins): env ``CMS_TOKEN`` /
-  ``AGENT_LEGION_CMS_TOKEN`` (``BASECMS_TOKEN`` alias) or the first workspace
-  vault node token → ``static_bearer``; otherwise the env token_gen quartet
-  (``CMS_APP_ID`` / ``CMS_NONCE`` / ``CMS_SECRET`` / ``CMS_TOKEN_URL``,
-  ``BASECMS_*`` aliases) → ``cms_hmac``. Secrets are Fernet-encrypted into
-  ``instance_secrets``; without a master key the connection is created
-  without the secret field and the operator re-enters it in the admin UI.
-- endpoint config (base_url / api_url / question_list_url) is collected from
-  env ``CMS_BASE_URL`` and workspace node overrides;
-- workspace ``node_config_json`` CMS keys are rewritten to ``connection``;
-- frozen intake batch payloads gain ``connection`` on the CMS nodes so the
-  queued backlog dispatches against the connection;
+- each distinct workspace vault node token gets its own ``static_bearer``
+  connection (``cms-internal``, ``cms-internal-2``, …, in workspace-id
+  order), so no workspace ends up on another workspace's credential;
+  token-less workspaces fall back to the env credential — ``CMS_TOKEN`` /
+  ``AGENT_LEGION_CMS_TOKEN`` (``BASECMS_TOKEN`` alias) → ``static_bearer``,
+  otherwise the env token_gen quartet (``CMS_APP_ID`` / ``CMS_NONCE`` /
+  ``CMS_SECRET`` / ``CMS_TOKEN_URL``, ``BASECMS_*`` aliases) → ``cms_hmac``.
+  Secrets are Fernet-encrypted into ``instance_secrets``; without a master
+  key the connection is created without the secret field and the operator
+  re-enters it in the admin UI. A workspace whose vault token cannot be
+  decrypted is left untouched (its credential cannot be classified);
+- endpoint config (base_url / api_url / question_list_url) comes from env
+  ``CMS_BASE_URL`` and workspace node overrides, merged per group;
+- workspace ``node_config_json`` CMS keys are rewritten to ``connection``
+  pointing at the workspace's own credential group, and frozen intake batch
+  payloads gain ``connection`` on the CMS nodes;
 - the published ``code-default`` executor definition is re-published with the
-  ``connection`` config_schema property (legacy token/env/url keys dropped),
-  following the built-in definition upgrade pattern (v31 ASR precedent).
+  ``connection`` config_schema property (v31 ASR precedent).
 
-Idempotent: once ``cms-internal`` exists and no legacy keys remain, every
-step matches nothing. Migrations stay free of service imports so later
-edits cannot rewrite history.
+Idempotent: once the connections exist and no legacy keys remain, every step
+matches nothing. Migrations stay free of service imports so later edits
+cannot rewrite history; the credential-grouping helpers live in the sibling
+``external_connections_groups`` module (file-size budget split, equally
+frozen).
 """
 
 from __future__ import annotations
@@ -35,14 +40,17 @@ from typing import Any
 
 from cryptography.fernet import Fernet
 
+from server.app.db.migrations.external_connections_groups import (
+    _CMS_NODES,
+    _CONNECTION_KEY,
+    _decode,
+    _merge_endpoints,
+    _plan_connections,
+    _workspace_cms_state,
+)
+
 logger = logging.getLogger(__name__)
 
-_CONNECTION_KEY = "cms-internal"
-# (workflow_key, node_key) pairs that talk to the CMS.
-_CMS_NODES = (
-    ("question_comprehension_info", "fetch_questions"),
-    ("video_knowledge", "download"),
-)
 _LEGACY_NODE_KEYS = ("token", "env", "base_url", "api_url", "question_list_url", "knowledge_url")
 
 # Frozen snapshot of the v34 factory property (migrations stay free of
@@ -57,14 +65,6 @@ _CMS_CAPABILITIES = ("fetch_questions", "download_video")
 _BATCH_NODE_KEYS = ("fetch_questions", "download")
 
 
-def _env(*names: str) -> str:
-    for name in names:
-        value = os.environ.get(name, "").strip()
-        if value:
-            return value
-    return ""
-
-
 def _resolve_master_key() -> str | None:
     """Env-only master key read (migrations stay free of service imports)."""
     key = os.environ.get("AGENT_LEGION_VAULT_MASTER_KEY", "").strip()
@@ -74,14 +74,6 @@ def _resolve_master_key() -> str | None:
     if key_file:
         return Path(key_file).read_text(encoding="utf-8").strip()
     return None
-
-
-def _decode(value: Any) -> dict[str, Any]:
-    try:
-        loaded = json.loads(str(value or ""))
-    except (TypeError, json.JSONDecodeError):
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
 
 
 def _store_instance_secret(
@@ -109,130 +101,68 @@ def _store_instance_secret(
     return {"secret_ref": name}
 
 
-def _iter_cms_overrides(conn: Any):
-    """Yield (workspace_id, values) for every workspace CMS node override."""
-    rows = conn.execute("select id, node_config_json from workspaces order by id").fetchall()
-    for row in rows:
-        node_config = _decode(row["node_config_json"])
-        for workflow_key, node_key in _CMS_NODES:
-            workflow = node_config.get(workflow_key)
-            values = workflow.get(node_key) if isinstance(workflow, dict) else None
-            if isinstance(values, dict):
-                yield str(row["id"]), values
-
-
-def _collect_workspace_tokens(conn: Any, fernet: Fernet | None) -> list[str]:
-    """All distinct workspace node-config tokens, ordered by workspace id."""
-    tokens: list[str] = []
-    for workspace_id, values in _iter_cms_overrides(conn):
-        raw = values.get("token")
-        token = ""
-        if isinstance(raw, dict) and raw.get("secret_ref") and fernet is not None:
-            row = conn.execute(
-                "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
-                (workspace_id, str(raw["secret_ref"])),
-            ).fetchone()
-            if row is not None:
-                try:
-                    token = fernet.decrypt(str(row["ciphertext"]).encode("utf-8")).decode("utf-8")
-                except Exception:  # undecryptable entry: keep looking
-                    logger.warning(
-                        "external connections migration: cannot decrypt %s",
-                        raw["secret_ref"],
-                    )
-        elif isinstance(raw, str) and raw.strip():
-            token = raw.strip()
-        if token and token not in tokens:
-            tokens.append(token)
-    return tokens
-
-
-def _create_connection(conn: Any, fernet: Fernet | None) -> bool:
-    """Create the ``cms-internal`` connection from env/workspace sources."""
-    exists = conn.execute(
-        "select 1 from external_connections where key=%s", (_CONNECTION_KEY,)
-    ).fetchone()
-    if exists is not None:
-        return True
-
-    # Priority mirrors the retired runtime chain: a workspace-bound token won
-    # over the env-level default, so workspace tokens are collected first.
-    workspace_tokens = _collect_workspace_tokens(conn, fernet)
-    if len(workspace_tokens) > 1:
-        logger.warning(
-            "external connections migration: %d distinct workspace CMS tokens "
-            "collapse into the single %s connection; workspaces that need "
-            "their own credential require separate connections",
-            len(workspace_tokens),
-            _CONNECTION_KEY,
-        )
-    token = (workspace_tokens[0] if workspace_tokens else "") or _env(
-        "CMS_TOKEN", "BASECMS_TOKEN", "AGENT_LEGION_CMS_TOKEN"
+def _insert_connection(conn: Any, fernet: Fernet | None, plan: dict[str, Any]) -> None:
+    key, kind = str(plan["key"]), str(plan["kind"])
+    endpoints = _merge_endpoints(plan)
+    config: dict[str, Any] = {
+        field: endpoints[field]
+        for field in ("base_url", "api_url", "question_list_url")
+        if endpoints[field]
+    }
+    if kind == "cms_hmac":
+        config.update({k: plan[k] for k in ("app_id", "nonce", "token_url")})
+    secret_field = "token" if kind == "static_bearer" else "secret"
+    marker = _store_instance_secret(
+        conn, fernet, f"conn:{key}:{secret_field}", str(plan[secret_field])
     )
-    base_url = _env("CMS_BASE_URL", "BASECMS_BASE_URL")
-    api_url = ""
-    question_list_url = ""
-    for _, values in _iter_cms_overrides(conn):
-        base_url = base_url or str(values.get("base_url") or "").strip()
-        api_url = api_url or str(values.get("api_url") or "").strip()
-        question_list_url = question_list_url or str(values.get("question_list_url") or "").strip()
-    config: dict[str, Any] = {}
-    if base_url:
-        config["base_url"] = base_url
-    if api_url:
-        config["api_url"] = api_url
-    if question_list_url:
-        config["question_list_url"] = question_list_url
-
-    if token:
-        type_name = "static_bearer"
-        marker = _store_instance_secret(conn, fernet, f"conn:{_CONNECTION_KEY}:token", token)
-        if marker is not None:
-            config["token"] = marker
-    else:
-        app_id = _env("CMS_APP_ID", "BASECMS_APP_ID")
-        nonce = _env("CMS_NONCE", "BASECMS_NONCE")
-        secret = _env("CMS_SECRET", "BASECMS_SECRET")
-        token_url = _env("CMS_TOKEN_URL", "BASECMS_TOKEN_URL")
-        if not all((app_id, nonce, secret, token_url)):
-            logger.info(
-                "external connections migration: no CMS credentials found, skipping "
-                "connection creation"
-            )
-            return False
-        type_name = "cms_hmac"
-        config["app_id"] = app_id
-        config["nonce"] = nonce
-        config["token_url"] = token_url
-        marker = _store_instance_secret(conn, fernet, f"conn:{_CONNECTION_KEY}:secret", secret)
-        if marker is not None:
-            config["secret"] = marker
-
-    probe_url = api_url or (f"{base_url.rstrip('/')}/question/detail" if base_url else "")
+    if marker is not None:
+        config[secret_field] = marker
+    base_url = endpoints["base_url"]
+    probe_url = endpoints["api_url"] or (
+        f"{base_url.rstrip('/')}/question/detail" if base_url else ""
+    )
     if probe_url:
         config["probe_url"] = probe_url
     conn.execute(
         "insert into external_connections(key, type, display_name, config_json)"
         " values (%s, %s, %s, %s) on conflict(key) do nothing",
-        (
-            _CONNECTION_KEY,
-            type_name,
-            "CMS（内部题库）",
-            json.dumps(config, ensure_ascii=False),
-        ),
+        (key, kind, "CMS（内部题库）", json.dumps(config, ensure_ascii=False)),
     )
     logger.info(
-        "external connections migration: created connection %s (type=%s)",
-        _CONNECTION_KEY,
-        type_name,
+        "external connections migration: created connection %s (type=%s, workspaces=%d)",
+        key,
+        kind,
+        len(plan["members"]),
     )
-    return True
 
 
-def _rewrite_workspace_node_configs(conn: Any) -> None:
+def _create_connections(conn: Any, fernet: Fernet | None) -> tuple[dict[str, str], set[str]]:
+    """Create one connection per distinct credential.
+
+    Returns (workspace_id → connection key binding, undecryptable workspace
+    ids whose legacy node config must stay untouched).
+    """
+    entries, undecryptable = _workspace_cms_state(conn, fernet)
+    plans, binding = _plan_connections(entries)
+    if not plans:
+        logger.info(
+            "external connections migration: no CMS credentials found, skipping connection creation"
+        )
+    for plan in plans:
+        _insert_connection(conn, fernet, plan)
+    return binding, undecryptable
+
+
+def _rewrite_workspace_node_configs(conn: Any, binding: dict[str, str], skipped: set[str]) -> None:
     rows = conn.execute("select id, node_config_json from workspaces").fetchall()
     for row in rows:
+        workspace_id = str(row["id"])
+        if workspace_id in skipped:
+            # Credential unreadable: binding this workspace to any connection
+            # would be a guess, so its legacy node config stays as-is.
+            continue
         node_config = _decode(row["node_config_json"])
+        connection_key = binding.get(workspace_id, _CONNECTION_KEY)
         changed = False
         for workflow_key, node_key in _CMS_NODES:
             workflow = node_config.get(workflow_key)
@@ -242,8 +172,8 @@ def _rewrite_workspace_node_configs(conn: Any) -> None:
             for legacy in _LEGACY_NODE_KEYS:
                 if values.pop(legacy, None) is not None:
                     changed = True
-            if values.get("connection") != _CONNECTION_KEY:
-                values["connection"] = _CONNECTION_KEY
+            if values.get("connection") != connection_key:
+                values["connection"] = connection_key
                 changed = True
         if changed:
             conn.execute(
@@ -252,14 +182,15 @@ def _rewrite_workspace_node_configs(conn: Any) -> None:
             )
 
 
-def _rewrite_batch_payloads(conn: Any) -> None:
+def _rewrite_batch_payloads(conn: Any, binding: dict[str, str]) -> None:
     """Frozen intake configs of CMS nodes gain the connection reference.
 
     Legacy keys stay (the node ignores them once a connection is injected);
-    the workspace vault entries they may reference are deliberately kept.
+    the workspace vault entries they may reference are deliberately kept. Each
+    batch binds to its workspace's own credential group when one exists.
     """
     rows = conn.execute(
-        "select id, source_payload_json from job_batches"
+        "select id, workspace_id, source_payload_json from job_batches"
         " where workflow_key in ('question_comprehension_info', 'video_knowledge')"
     ).fetchall()
     for row in rows:
@@ -267,11 +198,12 @@ def _rewrite_batch_payloads(conn: Any) -> None:
         node_config = payload.get("node_config")
         if not isinstance(node_config, dict):
             continue
+        connection_key = binding.get(str(row["workspace_id"]), _CONNECTION_KEY)
         changed = False
         for node_key in _BATCH_NODE_KEYS:
             values = node_config.get(node_key)
-            if isinstance(values, dict) and values.get("connection") != _CONNECTION_KEY:
-                values["connection"] = _CONNECTION_KEY
+            if isinstance(values, dict) and values.get("connection") != connection_key:
+                values["connection"] = connection_key
                 changed = True
         if changed:
             conn.execute(
@@ -347,11 +279,16 @@ def _republish_executor_schema(conn: Any) -> None:
 
 
 def migrate_external_connections(conn: Any) -> None:
-    """Collect CMS credentials/config into the cms-internal connection (v34)."""
+    """Collect CMS credentials/config into per-credential connections (v34)."""
     fernet_key = _resolve_master_key()
     fernet = Fernet(fernet_key.encode("utf-8")) if fernet_key else None
-    if not _create_connection(conn, fernet):
-        return
-    _rewrite_workspace_node_configs(conn)
-    _rewrite_batch_payloads(conn)
+    binding, skipped = _create_connections(conn, fernet)
+    # The rewrites run even when no connection could be created: legacy keys
+    # would otherwise sit in node configs until the next restart and be
+    # rejected by the new config_schema whitelist. The ``connection``
+    # reference points at the default key (cms-internal) — also the
+    # config_schema default — and starts resolving as soon as the operator
+    # creates the connection in the admin UI.
+    _rewrite_workspace_node_configs(conn, binding, skipped)
+    _rewrite_batch_payloads(conn, binding)
     _republish_executor_schema(conn)

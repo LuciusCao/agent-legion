@@ -79,12 +79,18 @@ class QuestionDetailService:
                     api_url = str(
                         cms_config.get("api_url") or cms_urls.question_detail_url(cms_config)
                     )
-                    detail = fetch_question_detail(question_id, api_url, cms_config.get("token"))
+                    # Connection without base_url/api_url (e.g. a migrated
+                    # token-only connection): degrade to local data instead
+                    # of failing the page.
+                    if api_url:
+                        detail = fetch_question_detail(
+                            question_id, api_url, cms_config.get("token")
+                        )
+                        title = detail.title or question_id
+                        normalized = detail.normalized
+                        cms_payload = detail.payload
                 except CmsClientError as exc:
                     raise QuestionDetailFetchError(question_id) from exc
-                title = detail.title or question_id
-                normalized = detail.normalized
-                cms_payload = detail.payload
 
         return QuestionDetail(
             question_id=question_id,

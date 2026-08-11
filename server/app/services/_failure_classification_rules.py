@@ -17,6 +17,8 @@ Category semantics agreed with operators:
 from __future__ import annotations
 
 from server.app.services._failure_classification_markers import (
+    _CMS_TRANSPORT_PREFIX,
+    _CONNECTION_CONFIG_RE,
     _DB_POOL_MARKERS,
     _EXECUTION_ERROR_MARKERS,
     _EXECUTOR_NOT_REGISTERED_RE,
@@ -45,7 +47,8 @@ FAILURE_CATEGORIES = (CATEGORY_TECHNICAL, CATEGORY_BUSINESS, CATEGORY_UNKNOWN)
 TIMEOUT_EXIT_CODE = 124
 
 DETAIL_DB_POOL_TIMEOUT = "db_pool_timeout"
-TRANSIENT_RETRY_DETAILS = frozenset({DETAIL_DB_POOL_TIMEOUT})
+DETAIL_CMS_REQUEST = "cms_request"
+TRANSIENT_RETRY_DETAILS = frozenset({DETAIL_DB_POOL_TIMEOUT, DETAIL_CMS_REQUEST})
 
 
 def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, str]:
@@ -54,6 +57,20 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
 
     if message.startswith(_REVIEW_REJECTED_MARKERS):
         return CATEGORY_BUSINESS, "review_rejected"
+
+    # CMS transport failures (5xx/timeout/DNS) are transient: the lease
+    # finish path hands the node back to the claimable set instead of
+    # failing the job. Checked before the timeout rule — a CMS read timeout
+    # message also contains "timed out".
+    if message.startswith(_CMS_TRANSPORT_PREFIX):
+        return CATEGORY_TECHNICAL, DETAIL_CMS_REQUEST
+
+    # Dispatch-time external-connection failures (missing/disabled/token
+    # acquisition): fix the connection in admin settings, then rerun.
+    # Checked early — the wrapped cause may itself contain "timed out" or
+    # "Connection error".
+    if _CONNECTION_CONFIG_RE.match(message):
+        return CATEGORY_TECHNICAL, "connection_config"
 
     # Business: output quality / contract violations and unusable source data.
     if message.startswith("Output validation failed:"):
@@ -101,6 +118,8 @@ def classify_failure(exit_code: int | None, error_message: str) -> tuple[str, st
             return CATEGORY_TECHNICAL, "provider_stream"
         return CATEGORY_TECHNICAL, "provider_request"
 
+    # In-band CMS errors (auth/parameter, "CMS 返回错误: code=…") and token
+    # acquisition failures; transport failures classified as cms_request above.
     if "CmsClientError" in message or "CMS token" in message:
         return CATEGORY_TECHNICAL, "cms_auth"
 

@@ -213,7 +213,10 @@ class SkillManager:
 
         # Read-only fast path (issue #42). The rev-parse/status probes are
         # memoized per cache dir for the doc-cache TTL (see __init__); a
-        # commit change always misses the memo and re-probes.
+        # commit change always misses the memo and re-probes. Within the TTL
+        # window a relock+checkout by another process is invisible here, so
+        # the cache content may briefly diverge from the commit this process
+        # believes is checked out; the expiry re-probe self-heals.
         verified = self._verified_clean.get(str(cache_dir), ("", 0.0))
         now = time.monotonic()
         if verified[0] != commit or now - verified[1] >= self._repo_state_ttl:

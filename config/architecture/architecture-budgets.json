@@ -646,7 +646,8 @@
     "server/app/db/migrations/custom_node_codes.py": 36,
     "server/app/db/migrations/executor_asr_config_schema.py": 92,
     "server/app/db/migrations/executor_entity_type.py": 30,
-    "server/app/db/migrations/external_connections.py": 324,
+    "server/app/db/migrations/external_connections.py": 263,
+    "server/app/db/migrations/external_connections_groups.py": 146,
     "server/app/db/migrations/local_executor_removal.py": 33,
     "server/app/db/migrations/node_cms_config.py": 129,
     "server/app/db/migrations/versioned_entities.py": 98,
@@ -1085,6 +1086,7 @@
     "workspace_libs/cms/__init__.py": 14,
     "workspace_libs/cms/adapters.py": 84,
     "workspace_libs/cms/client.py": 64,
+    "workspace_libs/cms/errors.py": 50,
     "workspace_libs/cms/knowledge.py": 86,
     "workspace_libs/cms/question.py": 260,
     "workspace_libs/cms/urls.py": 49

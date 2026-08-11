@@ -69,10 +69,54 @@ def test_cms_auth_errors():
     assert classify_failure(
         1, "CmsClientError: CMS 返回错误: code=10015 message=JWT验证失败 (question_id=q-1)"
     ) == ("technical", "cms_auth")
-    assert classify_failure(1, "CmsClientError: CMS 响应缺少题干 (question_id=q-1)") == (
-        "technical",
-        "cms_auth",
+
+
+def test_cms_empty_stem_is_business_source_missing():
+    # 空题干是源数据本身不可用（CmsEmptyStemError）：重跑无用，也不是凭据问题。
+    assert classify_failure(1, "CmsEmptyStemError: CMS 响应缺少题干 (question_id=q-1)") == (
+        "business",
+        "source_missing",
     )
+
+
+def test_cms_transport_failures_are_transient_cms_request():
+    # 5xx/超时/DNS 等传输层失败不是凭据问题，走 lease finish 的有限次重试。
+    category, detail = classify_failure(
+        1, "CmsClientError: CMS request failed: 500 Server Error: Internal Server Error"
+    )
+    assert (category, detail) == ("technical", "cms_request")
+    assert is_transient_retryable(detail)
+
+
+def test_cms_transport_timeout_is_cms_request_not_timeout():
+    # CMS 读超时消息同时含 "timed out"：必须先命中 cms_request。
+    category, detail = classify_failure(
+        1,
+        "CmsClientError: CMS request failed: HTTPSConnectionPool(host='cms.example', "
+        "port=443): Read timed out. (read timeout=15)",
+    )
+    assert (category, detail) == ("technical", "cms_request")
+    assert is_transient_retryable(detail)
+
+
+def test_dispatch_connection_failures_are_technical_connection_config():
+    assert classify_failure(None, "connection 'cms-internal' 不存在") == (
+        "technical",
+        "connection_config",
+    )
+    assert classify_failure(None, "connection 'cms-internal' 已停用") == (
+        "technical",
+        "connection_config",
+    )
+    assert classify_failure(
+        None, "connection 'cms-internal' 获取 token 失败: CMS token request failed: down"
+    ) == ("technical", "connection_config")
+    # 包裹的原因里含 "timed out" 时也必须归 connection_config 而非 timeout。
+    assert classify_failure(
+        None,
+        "connection 'cms-internal' 获取 token 失败: CMS token request failed: "
+        "HTTPSConnectionPool(host='t.example', port=443): Read timed out.",
+    ) == ("technical", "connection_config")
 
 
 def test_resource_limit_errors():

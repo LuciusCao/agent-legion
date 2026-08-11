@@ -28,23 +28,33 @@ class InstanceVaultService:
         self._settings_config = settings_config
 
     def set(self, name: str, plaintext: str) -> None:
+        ciphertext = self.encrypt(name, plaintext)
+        with write_transaction(self._dsn) as conn:
+            self.set_in(conn, name, ciphertext)
+
+    def encrypt(self, name: str, plaintext: str) -> str:
+        """Validate and encrypt without persisting."""
+        # Transactional callers (e.g. ConnectionService) combine this with
+        # set_in / delete_in to commit vault changes in the same transaction
+        # as the rows referencing them.
         if not name or len(name) > _MAX_NAME_LENGTH:
             raise VaultError(f"invalid instance secret name {name!r}")
         if not plaintext:
             raise VaultError("instance secret value must be a non-empty string")
-        ciphertext = (
-            _fernet(self._settings_config).encrypt(plaintext.encode("utf-8")).decode("utf-8")
+        return _fernet(self._settings_config).encrypt(plaintext.encode("utf-8")).decode("utf-8")
+
+    @staticmethod
+    def set_in(conn: Any, name: str, ciphertext: str) -> None:
+        # Upsert an already-encrypted entry inside the caller's transaction.
+        conn.execute(
+            """
+            insert into instance_secrets(name, ciphertext)
+            values (%s, %s)
+            on conflict(name)
+            do update set ciphertext=excluded.ciphertext, updated_at=current_timestamp
+            """,
+            (name, ciphertext),
         )
-        with write_transaction(self._dsn) as conn:
-            conn.execute(
-                """
-                insert into instance_secrets(name, ciphertext)
-                values (%s, %s)
-                on conflict(name)
-                do update set ciphertext=excluded.ciphertext, updated_at=current_timestamp
-                """,
-                (name, ciphertext),
-            )
 
     def get(self, name: str) -> str | None:
         """Return the decrypted plaintext, or None when the entry is missing.
@@ -71,7 +81,12 @@ class InstanceVaultService:
 
     def delete(self, name: str) -> None:
         with write_transaction(self._dsn) as conn:
-            conn.execute("delete from instance_secrets where name=%s", (name,))
+            self.delete_in(conn, name)
+
+    @staticmethod
+    def delete_in(conn: Any, name: str) -> None:
+        # Delete an entry inside the caller's transaction.
+        conn.execute("delete from instance_secrets where name=%s", (name,))
 
     def resolve_secret_refs(self, config: dict[str, Any]) -> dict[str, Any]:
         """Return a copy with ``{"secret_ref": name}`` values replaced by plaintext."""

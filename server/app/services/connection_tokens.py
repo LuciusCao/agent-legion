@@ -69,16 +69,13 @@ class ConnectionTokenService:
         cached = self._read_valid(key)
         if cached is not None:
             return cached
-        # Resolve before locking: unknown/disabled connections fail fast
-        # without queuing behind the row lock.
-        adapter, config, secrets = self._connections._resolved(key)
         with write_transaction(self._dsn) as conn:
             locked = conn.execute(
                 "select key, enabled from external_connections where key=%s for update", (key,)
             ).fetchone()
-            if locked is None:  # pragma: no cover - _resolved above just read it
+            if locked is None:
                 raise NotFoundError(f"connection {key!r} 不存在")
-            if not locked["enabled"]:  # TOCTOU guard: disabled after _resolved
+            if not locked["enabled"]:
                 raise InvalidOperationError(f"connection {key!r} 已停用")
             row = conn.execute(
                 "select token_ciphertext, expires_at from connection_tokens"
@@ -88,6 +85,11 @@ class ConnectionTokenService:
             token = self._decrypt_if_valid(row)
             if token is not None:
                 return token
+            # Re-resolve config/secrets *after* taking the row lock: resolving
+            # before it would let a caller that queued behind a concurrent
+            # admin update exchange the already-replaced credentials and cache
+            # a token for them.
+            adapter, config, secrets = self._connections._resolved(key)
             try:
                 acquired = adapter.authenticate(config, secrets)
             except ConnectionAdapterError as exc:
@@ -195,7 +197,16 @@ def report_node_auth_failure(runtime: Mapping[str, Any]) -> None:
     key = (
         str(node_config.get("connection") or "").strip() if isinstance(node_config, Mapping) else ""
     )
-    dsn = str(runtime.get("_job_db_path") or "").strip()
+    # The code executors pop ``_job_db_path`` before invoking node code and
+    # hand the node a JobQueries handle instead (``runtime["job_db"]``, see
+    # server/app/executors/code.py and _code_sandbox.py): resolve the DSN from
+    # that handle first and keep ``_job_db_path`` only as a fallback for
+    # runtimes that still carry the raw path.
+    job_db = runtime.get("job_db")
+    job_db_path = getattr(job_db, "path", None)
+    dsn = str(job_db_path).strip() if job_db_path else ""
+    if not dsn:
+        dsn = str(runtime.get("_job_db_path") or "").strip()
     if not key or not dsn:
         return
     try:
