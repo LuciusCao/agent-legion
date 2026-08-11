@@ -1,12 +1,11 @@
-"""Failed-upstream guard for rerun target selection.
+"""Failed-upstream guard for rerun / run-to start-node selection.
 
-A rerun only resets the target node and its downstream; a failed ancestor
-stays failed, and the scheduler requires every upstream to be completed —
-so a target with a failed ancestor could never become ready and the job
-would sit queued forever (``queued`` job + ``failed`` node). Both the
-per-job write path (``check_rerun_eligibility``) and the bulk-data batch
-path (``rerun_ineligible_from_nodes``) reject such targets with the exact
-same error built here, keeping the two paths equivalent by construction.
+Rerun / run-to-with-start only reset the start node and its downstream; a
+failed ancestor stays failed and the scheduler requires completed upstreams,
+so the start node could never become ready — the job would sit queued
+forever with a failed node. Shared by ``check_rerun_eligibility``,
+``rerun_ineligible_from_nodes`` and run-to-with-start so every entry point
+rejects such selections with the same error.
 """
 
 from __future__ import annotations
@@ -36,12 +35,24 @@ def failed_upstream_node_keys(
     return failed
 
 
-def upstream_failed_error(job_id: str, node_key: str, failed_keys: list[str]) -> JobOperationError:
-    return JobOperationError(
-        job_id,
-        "rerun",
-        "skipped",
-        node_key,
-        "upstream_failed",
-        f"Upstream node(s) failed: {', '.join(failed_keys)}; rerun from the failed node instead",
-    )
+def upstream_failed_error(
+    job_id: str, node_key: str, failed_keys: list[str], *, operation: str = "rerun"
+) -> JobOperationError:
+    names = ", ".join(failed_keys)
+    detail = f"Upstream node(s) failed: {names}; rerun from the failed node instead"
+    return JobOperationError(job_id, operation, "skipped", node_key, "upstream_failed", detail)
+
+
+def raise_if_failed_upstream(
+    definition: Any,
+    nodes: list[dict[str, Any]],
+    start_node_key: str,
+    job_id: str,
+    operation: str,
+    error_node_key: str,
+) -> None:
+    """Raise-variant for raise-style services; ``error_node_key`` is the
+    operation's own key (run-to reports the target, not the start)."""
+    failed = failed_upstream_node_keys(definition, nodes, start_node_key)
+    if failed:
+        raise upstream_failed_error(job_id, error_node_key, failed, operation=operation)
