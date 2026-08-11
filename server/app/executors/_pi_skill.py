@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -15,8 +16,21 @@ from server.app.workflows.skills import resolve_workflow_skill
 logger = logging.getLogger(__name__)
 
 
+# Skill version strings for manifests, memoized briefly per cache dir: the
+# probes (rev-parse + describe) fork git on every call, and the value only
+# changes on relock — which the manager's doc cache already surfaces with
+# the same TTL-class delay (SkillDocCache, 5s).
+_version_memo: dict[str, tuple[float, str]] = {}
+
+
 def get_skill_version(skill_manager: SkillManager, skill: str) -> str:
-    return resolve_skill_version(skill_manager.base_dir / skill)
+    key = str(skill_manager.base_dir / skill)
+    cached = _version_memo.get(key)
+    if cached is not None and time.monotonic() - cached[0] < 5.0:
+        return cached[1]
+    version = resolve_skill_version(skill_manager.base_dir / skill)
+    _version_memo[key] = (time.monotonic(), version)
+    return version
 
 
 def prepare_execution(

@@ -7,6 +7,7 @@ import re
 import shutil
 import subprocess
 import threading
+import time
 from pathlib import Path
 from typing import Protocol
 
@@ -63,6 +64,13 @@ class SkillManager:
         # object stores are append-only under this manager (clone/fetch add
         # objects, nothing prunes), so only positive results are memoized.
         self._known_commits: set[tuple[str, str]] = set()
+        # cache_dir -> (commit, monotonic time) of the last successful
+        # cleanliness probe (rev-parse + status). The probes are re-run once
+        # the entry ages past the doc-cache TTL: relocks already become
+        # visible within that TTL, and an outside dirtying is caught on the
+        # first probe after expiry — the same staleness class.
+        self._verified_clean: dict[str, tuple[str, float]] = {}
+        self._repo_state_ttl = doc_cache_ttl_seconds
 
     def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
         self._validate_execution_id(execution_id)
@@ -164,6 +172,7 @@ class SkillManager:
             # commits detached from any ref), so drop the memoized presence
             # checks for this cache dir.
             self._known_commits = {k for k in self._known_commits if k[0] != str(cache_dir)}
+            self._verified_clean.pop(str(cache_dir), None)
         elif not (cache_dir / ".git").is_dir():
             raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
 
@@ -202,10 +211,16 @@ class SkillManager:
                     )
                     self._write_lock_unlocked(lock)
 
-        # Read-only fast path (issue #42).
-        if not cache_at_commit(self._run_git, cache_dir, commit):
-            self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
-            self._run_git(["-C", str(cache_dir), "clean", "-fd"])
+        # Read-only fast path (issue #42). The rev-parse/status probes are
+        # memoized per cache dir for the doc-cache TTL (see __init__); a
+        # commit change always misses the memo and re-probes.
+        verified = self._verified_clean.get(str(cache_dir), ("", 0.0))
+        now = time.monotonic()
+        if verified[0] != commit or now - verified[1] >= self._repo_state_ttl:
+            if not cache_at_commit(self._run_git, cache_dir, commit):
+                self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
+                self._run_git(["-C", str(cache_dir), "clean", "-fd"])
+            self._verified_clean[str(cache_dir)] = (commit, now)
 
     def _resolve_source_ref(self, cache_dir: Path, ref: str, *, in_place: bool) -> str:
         if in_place:
