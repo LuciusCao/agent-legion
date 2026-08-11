@@ -112,6 +112,22 @@ def test_rerun_from_failed_node_itself_still_works(rerun_service, job_db):
     assert str(job_db.get_job(job["id"])["status"]) == "queued"
 
 
+def test_rerun_from_failed_node_mode_unaffected_by_guard(rerun_service, job_db):
+    """from_failed_node 救援路径：失败节点的上游必然 completed（它跑过），
+    守卫不得误伤。"""
+    ws_id = _seed_workspace(job_db)
+    job = _create_job(job_db, ws_id, "Q-from-failed")
+    job_db.update_job_node(job["id"], "fetch_questions", status="completed")
+    job_db.update_job_node(job["id"], "clean_and_parse", status="failed")
+    job_db.update_job_status(job["id"], "failed", "boom")
+
+    result = rerun_service.rerun(ws_id, job["id"], from_failed_node=True)
+
+    assert result["status"] == "succeeded"
+    assert result["node_key"] == "clean_and_parse"
+    assert _node_statuses(job_db, job["id"])["clean_and_parse"] == "pending"
+
+
 def test_batch_rerun_matches_per_job_for_failed_upstream(rerun_service, job_db):
     ws_id = _seed_workspace(job_db)
     stuck = _create_job(job_db, ws_id, "Q-batch-stuck")
