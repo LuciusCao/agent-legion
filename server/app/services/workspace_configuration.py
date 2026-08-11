@@ -248,7 +248,6 @@ class WorkspaceConfigurationService:
             workspace_id,
             self._workspace(workspace_id),
             self.settings,
-            self._vault(),
         )
 
     def stats(self, workspace_id: str) -> dict[str, Any]:

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { NodeConfigCard } from './NodeConfigCard'
 import { api } from '../../api'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import type { ConfigSchema } from '../../types'
 
 vi.mock('../../api', () => ({
@@ -25,14 +26,16 @@ const schema: ConfigSchema = {
 
 function renderCard(overrides?: Partial<Parameters<typeof NodeConfigCard>[0]>) {
   return render(
-    <NodeConfigCard
-      workspaceId="ws1"
-      nodeKey="review_keywords"
-      label="审核关键词"
-      schema={schema}
-      initialValues={{ page_size: 20 }}
-      {...overrides}
-    />
+    <TestQueryProvider>
+      <NodeConfigCard
+        workspaceId="ws1"
+        nodeKey="review_keywords"
+        label="审核关键词"
+        schema={schema}
+        initialValues={{ page_size: 20 }}
+        {...overrides}
+      />
+    </TestQueryProvider>
   )
 }
 

@@ -8,9 +8,9 @@ startup-side rejections are covered by tests/test_settings.py and
 tests/test_configuration_loader.py):
 
 - the global ``cms:`` section stays retired — CMS defaults live in the
-  capability ``config_schema``; base_url/token arrive via env or workspace
-  node config (retired ``cms.token`` / ``cms.token_gen``, config governance
-  G2, can never reappear);
+  capability ``config_schema``; endpoint/credentials live on the
+  instance-level external connection (retired ``cms.token`` /
+  ``cms.token_gen``, config governance G2, can never reappear);
 - the ``asr:`` section stays retired — business parameters live in the
   transcribe_video capability ``config_schema``; machine paths arrive via the
   ``AGENT_LEGION_ASR_*`` env overrides only;
@@ -49,7 +49,7 @@ def test_tracked_config_files_have_no_cms_section():
         assert "cms" not in mapping, (
             f"{name} carries the retired global cms: section; "
             "CMS defaults live in the capability config_schema, "
-            "base_url/token arrive via env or workspace node config"
+            "endpoint/credentials live on the instance-level external connection"
         )
 
 
