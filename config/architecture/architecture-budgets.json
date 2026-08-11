@@ -849,6 +849,7 @@
     "server/app/services/_job_rerun_preview.py": 127,
     "server/app/services/_job_rerun_preview_checks.py": 114,
     "server/app/services/_job_rerun_single.py": 153,
+    "server/app/services/_job_rerun_upstream_guard.py": 49,
     "server/app/services/_ops_metrics_catchup.py": 47,
     "server/app/services/_ops_metrics_queue.py": 81,
     "server/app/services/_ops_metrics_queue_alert.py": 57,
