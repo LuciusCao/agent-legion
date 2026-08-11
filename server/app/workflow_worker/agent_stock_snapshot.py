@@ -20,6 +20,27 @@ from server.app.workflow_worker.agent_stock import (
 )
 from server.app.workflows.definition import workflow_definition_from_dict
 
+# Workflow-tier rows: which DAG node each live-or-recent request serves.
+# One branch per matching state so each hits its partial index
+# (idx_agent_requests_queued_head / _done_recent / _cancelled_recent): a
+# single `state='queued' or finished_at > ...` predicate defeats all of them
+# and seq-scans the whole table on every stock pass (same failure mode the
+# reaper split fixed). finished_at is only written alongside a terminal
+# state, so the done/cancelled branches cover the recency predicate exactly.
+# Kept as a module constant so tests can pin the exact plan of the string
+# that production runs.
+TIER_ROWS_SQL = (
+    "select distinct r.workspace_id, r.agent_id, r.node_key, wr.definition_json from ("
+    " select workspace_id, agent_id, node_key, job_id from agent_execution_requests"
+    " where state = 'queued' union all"
+    " select workspace_id, agent_id, node_key, job_id from agent_execution_requests"
+    " where state = 'done' and finished_at > now() - make_interval(secs => %s) union all"
+    " select workspace_id, agent_id, node_key, job_id from agent_execution_requests"
+    " where state = 'cancelled' and finished_at > now() - make_interval(secs => %s)"
+    " ) r join jobs j on j.id = r.job_id"
+    " join workflow_revisions wr on wr.id = j.workflow_revision_id"
+)
+
 
 def _node_depths(definition_json: str) -> dict[str, int]:
     """Topological depth per node key (0 = no upstream) from a revision snapshot.
@@ -84,13 +105,8 @@ def load_stock_snapshot(dsn: DatabaseDsn, config: AgentStockConfig) -> StockSnap
         # relevant to pool contention; jobs without a revision snapshot are
         # skipped and their buckets stay in the unknown tier.
         rows = conn.execute(
-            "select distinct r.workspace_id, r.agent_id, r.node_key, wr.definition_json"
-            " from agent_execution_requests r"
-            " join jobs j on j.id = r.job_id"
-            " join workflow_revisions wr on wr.id = j.workflow_revision_id"
-            " where r.state = 'queued'"
-            " or r.finished_at > now() - make_interval(secs => %s)",
-            (config.window_seconds,),
+            TIER_ROWS_SQL,
+            (config.window_seconds, config.window_seconds),
         ).fetchall()
     depth_cache: dict[str, dict[str, int]] = {}
     for row in rows:

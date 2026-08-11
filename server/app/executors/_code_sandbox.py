@@ -40,9 +40,11 @@ if TYPE_CHECKING:
 _SERVER_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Repo subdirectories the child must READ to import server/workflow_nodes
-# helpers and load yaml-indepedent config modules. Deliberately excludes the
-# repo root itself, `.env`, `deploy/` and `data/` (secrets and runtime data).
-_REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config")
+# helpers and load yaml-indepedent config modules. workspace_libs holds the
+# CMS client the builtin intake/download nodes use, so custom forks of those
+# nodes import it too. Deliberately excludes the repo root itself, `.env`,
+# `deploy/` and `data/` (secrets and runtime data).
+_REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config", "workspace_libs")
 
 _RESULT_BASENAME = ".custom_node_result.json"
 

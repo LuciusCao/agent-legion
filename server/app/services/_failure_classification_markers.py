@@ -19,6 +19,9 @@ _SOURCE_MISSING_MARKERS = (
     "knowledge video not found",
     "knowledge video has no source url",
     "no questions found for knowledge code",
+    # Fetched question without a usable stem: the source data itself is
+    # unusable, not a credential problem (CmsEmptyStemError).
+    "CMS 响应缺少题干",
 )
 _PI_MODEL_CALL_PREFIX = "Pi model call failed:"
 # velites provider errors (ProviderError::Call / ::Transient) share this prefix;
@@ -57,3 +60,9 @@ _PROCESS_EXITED_RE = re.compile(r"^Agent process exited (\d+)$")
 _TERMINATED_WORD_RE = re.compile(r"\bterminated\b")
 _EXECUTOR_NOT_REGISTERED_RE = re.compile(r"^Executor '.+' is not registered$")
 _INTERACTION_CONTRACT_RE = re.compile(r"^Interaction \d+.*(is missing|has unknown type)")
+# Dispatch-time external-connection failures (schedule fail-fast path):
+# "connection 'x' 不存在" / "已停用" / "获取 token 失败: …".
+_CONNECTION_CONFIG_RE = re.compile(r"^connection '.+' (不存在|已停用|获取 token 失败)")
+# CMS transport failures (5xx/timeout/DNS) as wrapped by workspace_libs
+# _fetch_json; in-band errors use a different prefix ("CMS 返回错误").
+_CMS_TRANSPORT_PREFIX = "CmsClientError: CMS request failed"

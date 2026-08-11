@@ -1,7 +1,22 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { beforeEach, describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
+import type { ReactElement } from 'react'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import { SchemaConfigForm } from './SchemaConfigForm'
 import type { ConfigSchema } from '../../types'
+import { getConnections } from '../../api/connections'
+
+vi.mock('../../api/connections', () => ({
+  getConnections: vi.fn().mockResolvedValue({ connections: [] }),
+}))
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+function renderForm(ui: ReactElement) {
+  return render(<TestQueryProvider>{ui}</TestQueryProvider>)
+}
 
 describe('SchemaConfigForm', () => {
   it('renders a TextField for string properties and emits string values', () => {
@@ -10,7 +25,9 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { endpoint: { type: 'string' } },
     }
-    render(<SchemaConfigForm schema={schema} values={{}} onChange={onChange} />)
+    renderForm(
+      <SchemaConfigForm schema={schema} values={{}} onChange={onChange} />
+    )
 
     const input = screen.getByRole('textbox', { name: 'endpoint' })
     fireEvent.change(input, { target: { value: 'http://api.test' } })
@@ -25,7 +42,7 @@ describe('SchemaConfigForm', () => {
         page_size: { type: 'integer', minimum: 1, maximum: 500 },
       },
     }
-    render(
+    renderForm(
       <SchemaConfigForm
         schema={schema}
         values={{ page_size: 20 }}
@@ -54,7 +71,9 @@ describe('SchemaConfigForm', () => {
         mode: { type: 'string', enum: ['fast', 'slow'] },
       },
     }
-    render(<SchemaConfigForm schema={schema} values={{}} onChange={onChange} />)
+    renderForm(
+      <SchemaConfigForm schema={schema} values={{}} onChange={onChange} />
+    )
 
     const select = screen.getByRole('combobox', { name: 'mode' })
     await act(async () => {
@@ -71,7 +90,9 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { api_key: { type: 'string', secret: true } },
     }
-    render(<SchemaConfigForm schema={schema} values={{}} onChange={vi.fn()} />)
+    renderForm(
+      <SchemaConfigForm schema={schema} values={{}} onChange={vi.fn()} />
+    )
 
     const input = screen.getByLabelText('api_key') as HTMLInputElement
     expect(input.type).toBe('password')
@@ -82,7 +103,7 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { token: { type: 'string', secret: true } },
     }
-    render(
+    renderForm(
       <SchemaConfigForm
         schema={schema}
         values={{ token: { secret_set: true } }}
@@ -101,7 +122,7 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { token: { type: 'string', secret: true } },
     }
-    render(
+    renderForm(
       <SchemaConfigForm
         schema={schema}
         values={{ token: { secret_set: false } }}
@@ -118,7 +139,7 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { token: { type: 'string', secret: true } },
     }
-    render(
+    renderForm(
       <SchemaConfigForm
         schema={schema}
         values={{ token: { secret_set: true } }}
@@ -138,7 +159,7 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { token: { type: 'string', secret: true } },
     }
-    render(
+    renderForm(
       <SchemaConfigForm
         schema={schema}
         values={{ token: 'typed-value' }}
@@ -155,7 +176,9 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { timeout: { type: 'integer', default: 30 } },
     }
-    render(<SchemaConfigForm schema={schema} values={{}} onChange={vi.fn()} />)
+    renderForm(
+      <SchemaConfigForm schema={schema} values={{}} onChange={vi.fn()} />
+    )
 
     expect(screen.getByPlaceholderText('30')).toBeInTheDocument()
   })
@@ -166,7 +189,9 @@ describe('SchemaConfigForm', () => {
       type: 'object',
       properties: { verbose: { type: 'boolean' } },
     }
-    render(<SchemaConfigForm schema={schema} values={{}} onChange={onChange} />)
+    renderForm(
+      <SchemaConfigForm schema={schema} values={{}} onChange={onChange} />
+    )
 
     const toggle = screen.getByRole('checkbox', { name: 'verbose' })
     fireEvent.click(toggle)
@@ -180,13 +205,97 @@ describe('SchemaConfigForm', () => {
         model: { type: 'string', description: 'LLM 模型名' },
       },
     }
-    render(<SchemaConfigForm schema={schema} values={{}} onChange={vi.fn()} />)
+    renderForm(
+      <SchemaConfigForm schema={schema} values={{}} onChange={vi.fn()} />
+    )
 
     expect(screen.getByText('LLM 模型名')).toBeInTheDocument()
   })
 
   it('renders a hint when the schema has no properties', () => {
-    render(<SchemaConfigForm schema={{}} values={{}} onChange={vi.fn()} />)
+    renderForm(<SchemaConfigForm schema={{}} values={{}} onChange={vi.fn()} />)
     expect(screen.getByText('无可配置参数')).toBeInTheDocument()
+  })
+})
+
+describe('SchemaConfigForm connection datalist', () => {
+  const connectionSchema: ConfigSchema = {
+    type: 'object',
+    properties: { connection: { type: 'string' } },
+  }
+
+  const connectionView = {
+    key: 'lark-main',
+    type: 'static_bearer',
+    display_name: '飞书主租户',
+    config: {},
+    enabled: true,
+    token: null,
+  }
+
+  it('offers connection key candidates via datalist', async () => {
+    vi.mocked(getConnections).mockResolvedValue({
+      connections: [connectionView],
+    })
+    const { container } = renderForm(
+      <SchemaConfigForm
+        schema={connectionSchema}
+        values={{}}
+        onChange={vi.fn()}
+      />
+    )
+
+    // datalist id 由 useId 按实例生成，不再是全局常量。
+    await waitFor(() => {
+      expect(container.querySelectorAll('datalist option')).toHaveLength(1)
+    })
+    const datalist = container.querySelector('datalist') as HTMLElement
+    expect(
+      screen.getByRole('combobox', { name: 'connection' })
+    ).toHaveAttribute('list', datalist.id)
+  })
+
+  it('shares one fetch and unique datalist ids across form instances', async () => {
+    vi.mocked(getConnections).mockResolvedValue({
+      connections: [connectionView],
+    })
+    const { container } = renderForm(
+      <>
+        <SchemaConfigForm
+          schema={connectionSchema}
+          values={{}}
+          onChange={vi.fn()}
+        />
+        <SchemaConfigForm
+          schema={connectionSchema}
+          values={{}}
+          onChange={vi.fn()}
+        />
+      </>
+    )
+
+    // 同一 query key：两个表单实例合并为一次请求。
+    await waitFor(() => {
+      expect(container.querySelectorAll('datalist')).toHaveLength(2)
+    })
+    expect(getConnections).toHaveBeenCalledTimes(1)
+    const ids = [...container.querySelectorAll('datalist')].map((d) => d.id)
+    expect(new Set(ids).size).toBe(2)
+  })
+
+  it('degrades to a plain text field when the connections API fails', async () => {
+    vi.mocked(getConnections).mockRejectedValue(new Error('HTTP 403'))
+    const { container } = renderForm(
+      <SchemaConfigForm
+        schema={connectionSchema}
+        values={{}}
+        onChange={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(getConnections).toHaveBeenCalled()
+    })
+    expect(container.querySelector('datalist')).toBeNull()
   })
 })

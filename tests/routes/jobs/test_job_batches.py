@@ -50,7 +50,7 @@ def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path
         raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.cms.question.fetch_question_detail",
+        "workspace_libs.cms.question.fetch_question_detail",
         spy_fetch_question_detail,
     )
     monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 2)
@@ -174,7 +174,7 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
         raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.cms.question.list_questions_by_knowledge",
+        "workspace_libs.cms.question.list_questions_by_knowledge",
         spy_list_questions_by_knowledge,
     )
 
@@ -216,7 +216,7 @@ def test_create_workspace_job_batch_from_question_ids_uses_opaque_title(tmp_path
         raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.cms.question.fetch_question_detail",
+        "workspace_libs.cms.question.fetch_question_detail",
         spy_fetch_question_detail,
     )
 
@@ -312,7 +312,7 @@ def test_question_comprehension_info_batch_by_knowledge_creates_one_job_per_code
         raise AssertionError("node-phase intake must not call the CMS")
 
     monkeypatch.setattr(
-        "server.app.cms.question.list_questions_by_knowledge",
+        "workspace_libs.cms.question.list_questions_by_knowledge",
         spy_list_questions_by_knowledge,
     )
 

@@ -14,12 +14,33 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from server.app.cms import urls as cms_urls
-from server.app.cms.client import get_token
-from server.app.cms.question import fetch_question_detail, list_questions_by_knowledge
 from server.app.executors.cancellation import check_cancellation
+from server.app.services.connection_tokens import report_node_auth_failure
+from workspace_libs.cms import urls as cms_urls
+from workspace_libs.cms.client import CmsClientError, check_in_band_error, get_token
+from workspace_libs.cms.question import fetch_question_detail, list_questions_by_knowledge
 
 logger = logging.getLogger(__name__)
+
+
+class CmsEmptyStemError(RuntimeError):
+    """Fetched question has no usable stem.
+
+    Garbage source data, not a credential problem: classified
+    business/source_missing (see _failure_classification_rules), so the node
+    neither invalidates the connection token nor looks retryable.
+    """
+
+
+def _report_if_auth_failure(context: dict[str, Any], exc: CmsClientError) -> None:
+    """Invalidate the cached connection token only for auth-semantics failures.
+
+    HTTP 401/403 and known in-band auth codes carry ``auth_failure=True``;
+    transport failures (5xx/timeout/DNS) and non-auth in-band errors leave
+    the healthy token alone (the transient retry path re-uses it).
+    """
+    if exc.auth_failure:
+        report_node_auth_failure(context)
 
 
 def _decode_json_object(value: Any) -> dict[str, Any]:
@@ -32,26 +53,37 @@ def _decode_json_object(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
-    """Effective CMS config: settings-level ``cms`` (env-injected) + node config.
+# Retired node-level connection keys (pre-connection era). They are honored
+# only when no connection was injected (legacy frozen payloads); a resolved
+# connection always wins.
+_LEGACY_CONNECTION_KEYS = ("token", "env", "base_url", "api_url", "question_list_url")
 
-    Node config carries the config_schema defaults (factory values) plus any
-    node/workspace overrides and wins over the settings-level keys. The node
-    config token arrives already resolved from the vault at dispatch
-    time; it is a workspace-scoped credential, so mark it to win over the
-    env-level global default (same precedence as the retired binding chain).
+
+def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
+    """Effective CMS config: dispatch-injected connection + node overrides.
+
+    The ``connection_config`` block arrives resolved from the instance-level
+    external connection at dispatch time (base URL/endpoint config plus the
+    plaintext token, in memory only). Node/workspace business overrides win.
+    Legacy frozen payloads without a connection fall back to their
+    vault-resolved node ``token``.
     """
-    settings_config = context.get("settings_config")
     merged: dict[str, Any] = {}
-    if isinstance(settings_config, dict):
-        cms = settings_config.get("cms")
-        if isinstance(cms, dict):
-            merged = dict(cms)
     node_config = context.get("node_config")
+    # The dispatch layer injects the resolved connection into the node config
+    # (ExecutionContext.node_config → runtime["node_config"]): non-secret
+    # endpoint config plus the plaintext token, in memory only.
+    injected = node_config.get("connection_config") if isinstance(node_config, dict) else None
+    has_connection = isinstance(injected, dict) and bool(injected)
+    if isinstance(injected, dict) and injected:
+        merged.update({key: value for key, value in injected.items() if value not in (None, "")})
     if isinstance(node_config, dict):
-        merged.update({key: value for key, value in node_config.items() if value not in (None, "")})
-    if merged.get("token"):
-        merged["token_from_binding"] = True
+        for key, value in node_config.items():
+            if key in ("connection", "connection_config") or value in (None, ""):
+                continue
+            if has_connection and key in _LEGACY_CONNECTION_KEYS:
+                continue
+            merged[key] = value
     return merged
 
 
@@ -81,6 +113,30 @@ def _detail_payload(detail: Any, fallback_id: str, fallback_title: str) -> dict[
         "normalized": detail.normalized,
         "cms_payload": detail.payload,
     }
+
+
+def _validate_fetched_detail(detail: Any, question_id: str) -> None:
+    """Fail fast on CMS error payloads and empty stems.
+
+    The CMS detail endpoint signals auth/parameter failures in-band via a
+    non-zero ``code`` with ``data: null``; treating such payloads as valid
+    questions poisons every downstream node (empty stem → empty key info →
+    business validation failures). ``check_in_band_error`` re-checks the
+    payload here because tests and forks may bypass the workspace_libs
+    fetch; its ``CmsClientError`` classifies as technical/cms_auth (see
+    _failure_classification_rules), so the job stops at fetch instead of
+    forwarding garbage. An empty stem means the source question itself is
+    unusable — a business/source_missing failure via ``CmsEmptyStemError``,
+    not an auth problem. In knowledge mode a single bad detail fails the
+    whole batch before anything is written — intentional: auth failures are
+    systemic, and a partial questions.json would silently drop the
+    remaining questions of the batch.
+    """
+    check_in_band_error(getattr(detail, "payload", None), f"question_id={question_id}")
+    normalized = getattr(detail, "normalized", None)
+    stem = normalized.get("stem") if isinstance(normalized, dict) else None
+    if not str(stem or "").strip():
+        raise CmsEmptyStemError(f"CMS 响应缺少题干 (question_id={question_id})")
 
 
 def run(
@@ -119,13 +175,22 @@ def run(
             or cms_urls.question_detail_url(cms_config)
         )
         token = get_token(str(cms_config.get("env", "")), cms_config)
-        summaries = list_questions_by_knowledge(source_id, list_url, token)
+        try:
+            summaries = list_questions_by_knowledge(source_id, list_url, token)
+        except CmsClientError as exc:
+            _report_if_auth_failure(context, exc)
+            raise
         if not summaries:
             raise RuntimeError(f"no questions found for knowledge code: {source_id}")
         logger.info("  CMS returned %d question(s) for code=%s", len(summaries), source_id)
         for summary in summaries:
             check_cancellation(context)
-            detail = fetch_question_detail(summary.question_id, detail_url, token)
+            try:
+                detail = fetch_question_detail(summary.question_id, detail_url, token)
+                _validate_fetched_detail(detail, summary.question_id)
+            except CmsClientError as exc:
+                _report_if_auth_failure(context, exc)
+                raise
             questions.append(_detail_payload(detail, summary.question_id, summary.title))
     else:
         api_url = str(
@@ -136,7 +201,12 @@ def run(
         if api_url:
             logger.info("  fetching from CMS: %s", api_url)
             token = get_token(str(cms_config.get("env", "")), cms_config)
-            detail = fetch_question_detail(source_id, str(api_url), token)
+            try:
+                detail = fetch_question_detail(source_id, str(api_url), token)
+                _validate_fetched_detail(detail, source_id)
+            except CmsClientError as exc:
+                _report_if_auth_failure(context, exc)
+                raise
             check_cancellation(context)
             questions.append(_detail_payload(detail, source_id, str(job["title"])))
         else:

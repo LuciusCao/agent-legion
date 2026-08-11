@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import logging
 import os
 from pathlib import Path
 
@@ -263,52 +262,6 @@ openclaw:
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_cms_credentials_allowed_when_no_cms_endpoint(tmp_path, monkeypatch):
-    # No CMS endpoint anywhere: neutralize the conftest-injected CMS_BASE_URL.
-    monkeypatch.setenv("CMS_BASE_URL", "")
-    binary = _make_executable(tmp_path / "whisper-cli")
-    model = tmp_path / "model.bin"
-    model.write_text("model", encoding="utf-8")
-    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\ncms:\n  env: dev\n"
-
-    _load_and_validate(tmp_path, monkeypatch, config)
-
-
-def test_cms_credentials_warning_when_cms_endpoint_configured(tmp_path, monkeypatch, caplog):
-    # Set these to empty strings so the real .env file cannot populate them.
-    for env_key in (
-        "CMS_TOKEN",
-        "CMS_APP_ID",
-        "CMS_NONCE",
-        "CMS_SECRET",
-        "CMS_TOKEN_URL",
-        "BASECMS_TOKEN",
-        "BASECMS_APP_ID",
-        "BASECMS_NONCE",
-        "BASECMS_SECRET",
-        "BASECMS_TOKEN_URL",
-    ):
-        monkeypatch.setenv(env_key, "")
-    binary = _make_executable(tmp_path / "whisper-cli")
-    model = tmp_path / "model.bin"
-    model.write_text("model", encoding="utf-8")
-    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += """
-cms:
-  base_url: http://cms.example.com
-"""
-
-    # Workspace node config tokens live in the vault and cannot be pre-checked
-    # at startup, so missing env-level credentials only log a warning instead
-    # of failing startup.
-    with caplog.at_level(logging.WARNING, logger="server.app.executors.runtime_config"):
-        _load_and_validate(tmp_path, monkeypatch, config)
-
-    messages = [record.getMessage() for record in caplog.records]
-    assert any("cms.token" in message and "vault" in message for message in messages)
-
-
 def test_aggregate_invalid_fields_in_one_exception(tmp_path, monkeypatch):
     config = """
 data_dir: data
@@ -355,58 +308,8 @@ cms:
     message = str(exc_info.value)
     assert "super-secret-token" not in message
     assert "super-secret-gen" not in message
-    # The env overrides make CMS credentials valid; the failing field is elsewhere.
+    # The failing field is unrelated to the CMS env values above.
     assert "openclaw.cwd" in message
-
-
-def test_cms_endpoint_accepts_cms_token_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("CMS_TOKEN", "cms-token")
-    binary = _make_executable(tmp_path / "whisper-cli")
-    model = tmp_path / "model.bin"
-    model.write_text("model", encoding="utf-8")
-    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += """
-cms:
-  base_url: http://cms.example.com
-"""
-
-    _load_and_validate(tmp_path, monkeypatch, config)
-
-
-def test_cms_endpoint_accepts_basecms_token_alias(tmp_path, monkeypatch):
-    # Deprecated BASECMS_* aliases still satisfy the credential check (D3);
-    # blank the CMS_* names so the worktree .env cannot add a conflicting
-    # dual assignment.
-    for env_key in ("CMS_TOKEN", "CMS_APP_ID", "CMS_NONCE", "CMS_SECRET", "CMS_TOKEN_URL"):
-        monkeypatch.setenv(env_key, "")
-    monkeypatch.setenv("BASECMS_TOKEN", "basecms-token")
-    binary = _make_executable(tmp_path / "whisper-cli")
-    model = tmp_path / "model.bin"
-    model.write_text("model", encoding="utf-8")
-    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += """
-cms:
-  base_url: http://cms.example.com
-"""
-
-    _load_and_validate(tmp_path, monkeypatch, config)
-
-
-def test_cms_endpoint_accepts_cms_token_gen_env(tmp_path, monkeypatch):
-    monkeypatch.setenv("CMS_APP_ID", "app-id")
-    monkeypatch.setenv("CMS_NONCE", "nonce")
-    monkeypatch.setenv("CMS_SECRET", "cms-secret")
-    monkeypatch.setenv("CMS_TOKEN_URL", "http://cms.example.com/token")
-    binary = _make_executable(tmp_path / "whisper-cli")
-    model = tmp_path / "model.bin"
-    model.write_text("model", encoding="utf-8")
-    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += """
-cms:
-  base_url: http://cms.example.com
-"""
-
-    _load_and_validate(tmp_path, monkeypatch, config)
 
 
 def test_validate_runtime_can_be_called_directly(tmp_path, monkeypatch):

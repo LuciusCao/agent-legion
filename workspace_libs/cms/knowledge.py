@@ -2,7 +2,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.cms.client import CmsVideoLookup, _fetch_json, require_api_url
+from workspace_libs.cms.client import (
+    CmsVideoLookup,
+    _fetch_json,
+    check_in_band_error,
+    require_api_url,
+)
 
 # ---------------------------------------------------------------------------
 # Schema helpers – strict field access matching the actual CMS API contract
@@ -87,6 +92,7 @@ def lookup_knowledge_video(
 ) -> CmsVideoLookup:
     url = require_api_url(api_url, "knowledge detail")
     payload = _fetch_json(url, {"code": code}, token)
+    check_in_band_error(payload, f"knowledge_code={code}")
     data = _parse_knowledge_payload(payload)
     if data is None:
         return CmsVideoLookup("not_found", payload=payload)

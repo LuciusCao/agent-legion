@@ -3,13 +3,16 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from server.app.cms import urls as cms_urls
-from server.app.cms.client import CmsClientError, get_token
-from server.app.cms.question import fetch_question_detail
 from server.app.jobs import JobQueries
-from server.app.services.cms_node_config import cms_node_config
-from server.app.services.vault import VaultError, VaultService
+from server.app.services.connection_tokens import ConnectionTokenService
+from server.app.services.job_errors import JobServiceError, NotFoundError
+from server.app.services.node_config import workspace_node_overrides
+from server.app.services.node_connection import workspace_node_connection_key
+from server.app.services.vault import VaultError
 from server.app.settings import Settings
+from workspace_libs.cms import urls as cms_urls
+from workspace_libs.cms.client import CmsClientError
+from workspace_libs.cms.question import fetch_question_detail
 
 
 class QuestionWorkspaceNotFoundError(LookupError):
@@ -39,36 +42,55 @@ class QuestionDetailService:
         if workspace is None:
             raise QuestionWorkspaceNotFoundError(workspace_id)
 
-        cms_config = cms_node_config(
-            self._settings.config,
+        connection_key = workspace_node_connection_key(
+            self._settings.executor_definitions,
             workspace,
             "question_comprehension_info",
             "fetch_questions",
-        )
-        api_url = str(
-            cms_config.get("api_url")
-            or cms_config.get("question_detail_url")
-            or cms_urls.question_detail_url(cms_config)
+            "fetch_questions",
         )
         title = question_id
         normalized: dict[str, Any] = {}
         cms_payload: dict[str, Any] | None = None
 
-        if api_url:
+        if connection_key:
             try:
-                # Resolve secret_ref markers in memory only (VAULT-SECRET-001).
-                cms_config = VaultService(
-                    self._job_db.path, self._settings.config
-                ).resolve_secret_refs(cms_config, workspace_id)
-                if cms_config.get("token"):
-                    cms_config["token_from_binding"] = True
-                token = get_token(str(cms_config.get("env", "")), cms_config)
-                detail = fetch_question_detail(question_id, str(api_url), token)
-            except (CmsClientError, VaultError) as exc:
+                tokens = ConnectionTokenService(self._job_db.path, self._settings.config)
+                cms_config = tokens.runtime_config(connection_key)
+            except NotFoundError:
+                # No connection on this instance (fresh/no-CMS deployment):
+                # degrade to local data instead of failing the page.
+                cms_config = None
+            except (VaultError, JobServiceError) as exc:
                 raise QuestionDetailFetchError(question_id) from exc
-            title = detail.title or question_id
-            normalized = detail.normalized
-            cms_payload = detail.payload
+            if cms_config is not None:
+                try:
+                    # Workspace business overrides (bank_version etc.) win.
+                    override = workspace_node_overrides(
+                        workspace, "question_comprehension_info"
+                    ).get("fetch_questions", {})
+                    cms_config.update(
+                        {
+                            key: value
+                            for key, value in override.items()
+                            if key not in ("connection", "token") and value not in (None, "")
+                        }
+                    )
+                    api_url = str(
+                        cms_config.get("api_url") or cms_urls.question_detail_url(cms_config)
+                    )
+                    # Connection without base_url/api_url (e.g. a migrated
+                    # token-only connection): degrade to local data instead
+                    # of failing the page.
+                    if api_url:
+                        detail = fetch_question_detail(
+                            question_id, api_url, cms_config.get("token")
+                        )
+                        title = detail.title or question_id
+                        normalized = detail.normalized
+                        cms_payload = detail.payload
+                except CmsClientError as exc:
+                    raise QuestionDetailFetchError(question_id) from exc
 
         return QuestionDetail(
             question_id=question_id,

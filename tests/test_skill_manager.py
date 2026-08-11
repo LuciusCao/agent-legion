@@ -3,6 +3,7 @@ from __future__ import annotations
 import concurrent.futures
 import os
 import subprocess
+import time
 import uuid
 from pathlib import Path
 
@@ -428,8 +429,10 @@ def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
 
 
 def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
-    repo_uri = _make_bare_repo(tmp_path)
-    manager = _make_manager(tmp_path, _single_skill(repo_uri))
+    # ttl=0 pins the legacy immediate-repair path; with the default TTL a
+    # dirtied cache is repaired on the first probe after expiry instead (see
+    # test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache).
+    manager = _make_ttl_manager(tmp_path, 0.0)
 
     first_dir = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     assert (first_dir / "SKILL.md").is_file()
@@ -673,3 +676,96 @@ def test_has_commit_memoizes_positive_results(tmp_path: Path) -> None:
     assert manager._has_commit(cache_dir, missing) is False
     assert manager._has_commit(cache_dir, missing) is False
     assert len(calls) == 2
+
+
+def _probe_counts(manager: SkillManager) -> dict[str, int]:
+    """Count rev-parse/status probes issued through manager._run_git."""
+    counts = {"status": 0, "rev-parse": 0}
+    real_run_git = manager._run_git
+
+    def spy(args: list[str], check: bool = True):  # noqa: ANN202
+        for probe in counts:
+            if probe in args:
+                counts[probe] += 1
+        return real_run_git(args, check=check)
+
+    manager._run_git = spy  # type: ignore[method-assign]
+    return counts
+
+
+def _make_ttl_manager(tmp_path: Path, ttl_seconds: float) -> SkillManager:
+    return SkillManager(
+        store=memory_skill_store(_single_skill(_make_bare_repo(tmp_path))),
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+        doc_cache_ttl_seconds=ttl_seconds,
+    )
+
+
+def test_cleanliness_probes_memoized_within_ttl(tmp_path: Path) -> None:
+    """After the first verification, dispatches skip the rev-parse/status git
+    forks until the TTL expires (the hot-path win: ~56ms per dispatch). The
+    tradeoff is explicit: a dirtied cache is served as-is within the TTL."""
+    manager = _make_ttl_manager(tmp_path, 60.0)
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))  # clone + first probes
+    counts = _probe_counts(manager)
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
+    (cache_dir / "stray.txt").write_text("junk")
+
+    served = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+
+    assert counts == {"status": 0, "rev-parse": 0}
+    assert (served / "stray.txt").is_file()  # memoized: dirt served as-is
+
+
+def test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache(tmp_path: Path) -> None:
+    """Once the memo expires, the probes rerun and a dirtied cache is repaired
+    by checkout+clean — dirty detection is TTL-bounded, never lost."""
+    manager = _make_ttl_manager(tmp_path, 0.1)
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
+    time.sleep(0.15)  # expire the memo before the cache is dirtied
+    stray = cache_dir / "stray.txt"
+    stray.write_text("junk")
+
+    counts = _probe_counts(manager)
+    repaired = manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+
+    assert counts["status"] > 0  # probes reran after expiry
+    assert not stray.exists()
+    assert not (repaired / "stray.txt").exists()
+
+
+def test_cleanliness_probes_every_call_when_ttl_zero(tmp_path: Path) -> None:
+    """ttl=0 restores the legacy per-call probing (used by tests that pin
+    cross-instance immediacy)."""
+    manager = _make_ttl_manager(tmp_path, 0.0)
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+    counts = _probe_counts(manager)
+
+    manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+
+    assert counts["status"] > 0
+    assert counts["rev-parse"] > 0
+
+
+def test_get_skill_version_memoized_within_ttl(tmp_path: Path, monkeypatch) -> None:
+    """Manifest skill versions fork git twice per call (rev-parse + describe);
+    the memo serves repeat dispatches from the first probe."""
+    from server.app.executors import _pi_skill
+
+    manager = _make_manager_with_cache(tmp_path)
+    calls = {"n": 0}
+    real = _pi_skill.resolve_skill_version
+
+    def spy(skill_dir: Path) -> str:
+        calls["n"] += 1
+        return real(skill_dir)
+
+    monkeypatch.setattr(_pi_skill, "resolve_skill_version", spy)
+    first = _pi_skill.get_skill_version(manager, _KEY)
+    second = _pi_skill.get_skill_version(manager, _KEY)
+
+    assert first == second != ""
+    assert calls["n"] == 1

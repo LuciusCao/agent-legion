@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { IconButton } from '@mui/material'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useUiStore } from '../stores/uiStore'
+import { useSettingsScrollSpy } from '../hooks/useSettingsScrollSpy'
 import { useQuery } from '@tanstack/react-query'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { toErrorMessage } from '../lib/queryError'
@@ -18,23 +19,13 @@ import type {
 } from '../api/tokenUsagePricing'
 import { InstanceSettingsSection } from './globalSettings/InstanceSettingsSection'
 import { SkillSourcesSection } from './globalSettings/SkillSourcesSection'
+import { ConnectionsSection } from './globalSettings/ConnectionsSection'
+import {
+  EMPTY_ROW,
+  ModelPricingSection,
+} from './globalSettings/ModelPricingSection'
+import type { RateRow } from './globalSettings/ModelPricingSection'
 import styles from './GlobalSettingsPage.module.css'
-
-interface RateRow {
-  provider: string
-  model: string
-  input_per_1m: string
-  output_per_1m: string
-  cache_read_per_1m: string
-}
-
-const EMPTY_ROW: RateRow = {
-  provider: '',
-  model: '',
-  input_per_1m: '',
-  output_per_1m: '',
-  cache_read_per_1m: '',
-}
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -61,136 +52,6 @@ function serialize(currency: string, rows: RateRow[]): string {
       cache_read_per_1m: Number(row.cache_read_per_1m),
     })),
   })
-}
-
-interface ModelPricingSectionProps {
-  currency: string
-  rows: RateRow[]
-  onCurrencyChange: (value: string) => void
-  onRowChange: (index: number, patch: Partial<RateRow>) => void
-  onAddRow: () => void
-  onRemoveRow: (index: number) => void
-}
-
-function ModelPricingSection({
-  currency,
-  rows,
-  onCurrencyChange,
-  onRowChange,
-  onAddRow,
-  onRemoveRow,
-}: ModelPricingSectionProps) {
-  return (
-    <div className={styles.card}>
-      <h3 className={styles.heading}>模型定价</h3>
-      <p className={styles.hint}>
-        按 provider + model 配置每百万 token 价格；历史 run 按各自使用的
-        provider + model 匹配价格分别计费，用于统计各 workspace 的成本消耗。
-      </p>
-      <div className={styles.row}>
-        <label className={styles.label} htmlFor="pricing-currency">
-          货币单位
-        </label>
-        <input
-          id="pricing-currency"
-          className={styles.currencyInput}
-          value={currency}
-          onChange={(e) => onCurrencyChange(e.target.value)}
-        />
-      </div>
-
-      <table className={styles.table}>
-        <thead>
-          <tr>
-            <th>Provider</th>
-            <th>Model</th>
-            <th>输入 / 1M</th>
-            <th>输出 / 1M</th>
-            <th>缓存读 / 1M</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((row, index) => (
-            <tr key={index} data-testid={`pricing-row-${index}`}>
-              <td>
-                <input
-                  className={styles.input}
-                  aria-label={`provider-${index}`}
-                  value={row.provider}
-                  onChange={(e) =>
-                    onRowChange(index, { provider: e.target.value })
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  className={styles.input}
-                  aria-label={`model-${index}`}
-                  value={row.model}
-                  onChange={(e) =>
-                    onRowChange(index, { model: e.target.value })
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  className={styles.input}
-                  aria-label={`input-rate-${index}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={row.input_per_1m}
-                  onChange={(e) =>
-                    onRowChange(index, { input_per_1m: e.target.value })
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  className={styles.input}
-                  aria-label={`output-rate-${index}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={row.output_per_1m}
-                  onChange={(e) =>
-                    onRowChange(index, { output_per_1m: e.target.value })
-                  }
-                />
-              </td>
-              <td>
-                <input
-                  className={styles.input}
-                  aria-label={`cache-rate-${index}`}
-                  type="number"
-                  min="0"
-                  step="any"
-                  value={row.cache_read_per_1m}
-                  onChange={(e) =>
-                    onRowChange(index, { cache_read_per_1m: e.target.value })
-                  }
-                />
-              </td>
-              <td>
-                <button
-                  type="button"
-                  className={styles.dangerButton}
-                  onClick={() => onRemoveRow(index)}
-                >
-                  删除
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-
-      <button type="button" className={styles.textButton} onClick={onAddRow}>
-        添加一行
-      </button>
-    </div>
-  )
 }
 
 function GlobalSettingsEditor({
@@ -265,6 +126,20 @@ function GlobalSettingsEditor({
     </div>
   )
 
+  const navItems = useMemo(
+    () => [
+      { id: 'model-pricing', label: '模型定价' },
+      { id: 'instance-settings', label: '实例设置' },
+      { id: 'connections', label: '外部服务连接' },
+      { id: 'skill-sources', label: 'Skill 源管理' },
+    ],
+    []
+  )
+  const { activeSection, contentRef, scrollToSection } = useSettingsScrollSpy(
+    navItems,
+    'model-pricing'
+  )
+
   return (
     <AppShell
       appBar={({ scrolled }) => (
@@ -275,29 +150,64 @@ function GlobalSettingsEditor({
           rightActions={rightActions}
         />
       )}
+      mainClassName="settings-main"
     >
-      <div className={styles.main}>
-        {error && (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
-        )}
-        <ModelPricingSection
-          currency={currency}
-          rows={rows}
-          onCurrencyChange={setCurrency}
-          onRowChange={(index, patch) =>
-            setRows((prev) =>
-              prev.map((row, i) => (i === index ? { ...row, ...patch } : row))
-            )
-          }
-          onAddRow={() => setRows((prev) => [...prev, { ...EMPTY_ROW }])}
-          onRemoveRow={(index) =>
-            setRows((prev) => prev.filter((_, i) => i !== index))
-          }
-        />
-        <InstanceSettingsSection />
-        <SkillSourcesSection />
+      <div className={styles.settingsLayout}>
+        <nav className={styles.navSidebar}>
+          <ul className={styles.navList}>
+            {navItems.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={
+                    activeSection === item.id
+                      ? styles.navItemActive
+                      : styles.navItem
+                  }
+                  aria-current={activeSection === item.id ? 'true' : undefined}
+                  onClick={() => scrollToSection(item.id)}
+                >
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className={styles.contentArea} ref={contentRef}>
+          {error && (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          )}
+          <section id="model-pricing">
+            <ModelPricingSection
+              currency={currency}
+              rows={rows}
+              onCurrencyChange={setCurrency}
+              onRowChange={(index, patch) =>
+                setRows((prev) =>
+                  prev.map((row, i) =>
+                    i === index ? { ...row, ...patch } : row
+                  )
+                )
+              }
+              onAddRow={() => setRows((prev) => [...prev, { ...EMPTY_ROW }])}
+              onRemoveRow={(index) =>
+                setRows((prev) => prev.filter((_, i) => i !== index))
+              }
+            />
+          </section>
+          <section id="instance-settings">
+            <InstanceSettingsSection />
+          </section>
+          <section id="connections">
+            <ConnectionsSection />
+          </section>
+          <section id="skill-sources">
+            <SkillSourcesSection />
+          </section>
+        </div>
       </div>
     </AppShell>
   )

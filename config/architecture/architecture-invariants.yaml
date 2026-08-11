@@ -508,7 +508,7 @@ invariants:
         gate: full
 
   - id: VAULT-SECRET-001
-    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction."
+    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens."
     owner: security
     risk: critical
     evidence:
@@ -519,11 +519,29 @@ invariants:
         target: tests/routes/test_workspace_secrets.py
         gate: quick
       - kind: integration
+        target: tests/services/test_connections.py
+        gate: quick
+      - kind: integration
         target: tests/full/test_vault_secret_freeze.py
         gate: full
 
+  - id: SECURITY-EXTERNAL-CONNECTION-001
+    statement: "External service credentials are instance-level and admin-managed: connections live in external_connections with non-sensitive config only (secret fields are diverted into the instance vault as `conn:<key>:<field>` refs), acquired tokens are cached Fernet-encrypted in connection_tokens with single-flight refresh under the parent row lock, auth-protocol semantics live in workspace packs (workspace_libs) behind the platform adapter registry (server/app carries no vendor knowledge), and connection config + tokens are injected into node runtimes in memory only at dispatch — never persisted, never in agent manifests."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_connections.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_connection_tokens.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_connections_api.py
+        gate: quick
+
   - id: CONFIG-YAML-001
-    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; base_url/token arrive via env CMS_BASE_URL / CMS_TOKEN or workspace node config), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); the `openclaw` section is retired from split yaml into the DB instance settings document (a split-file `openclaw` key fails the owned-key check; the admin API contract rejects extra keys), and `openclaw.skill_safety` refs (G3, pinned by the DB `skill_lock` document in `global_settings`) are rejected at startup validation and by the instance-settings admin API (422), and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
+    statement: "Tracked split config yaml files carry no secret values: the global `cms:` section is retired from split yaml (CMS selector defaults live in the capability config_schema; endpoint URLs and credentials live on the instance-level external connection, schema v34), so a `cms` key in any split file fails the owned-key check, while single-file explicit configs still reject the retired `cms.token` / `cms.token_gen` keys at startup (G2); the `openclaw` section is retired from split yaml into the DB instance settings document (a split-file `openclaw` key fails the owned-key check; the admin API contract rejects extra keys), and `openclaw.skill_safety` refs (G3, pinned by the DB `skill_lock` document in `global_settings`) are rejected at startup validation and by the instance-settings admin API (422), and the env-only sections `vault` / `auth` are rejected by the owned-key check when written into any split file. Secrets reach the runtime only via env overrides or the vault."
     owner: config
     risk: high
     evidence:
@@ -583,6 +601,21 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
+        gate: quick
+
+  - id: EXEC-SKILL-CLEAN-TTL-001
+    statement: "Skill cache cleanliness verification (rev-parse + status probes) is memoized per cache dir for the doc-cache TTL (SkillManager._verified_clean, deriving from doc_cache_ttl_seconds): within the TTL a dirtied or externally switched cache is served as-is, and the first probe after expiry repairs it via checkout -f + clean -fd — dirty detection is TTL-bounded, never lost. A commit change always misses the memo and re-probes, so relocks never serve a stale commit beyond the doc-cache TTL they already tolerate; doc_cache_ttl_seconds=0 restores per-call probing."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_skill_manager.py::test_cleanliness_probes_memoized_within_ttl
+        gate: quick
+      - kind: integration
+        target: tests/test_skill_manager.py::test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache
+        gate: quick
+      - kind: integration
+        target: tests/test_skill_manager.py::test_cleanliness_probes_every_call_when_ttl_zero
         gate: quick
 
   - id: EXEC-HARNESS-SANDBOX-001

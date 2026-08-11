@@ -312,10 +312,10 @@ def test_custom_sandbox_denies_reads_outside_allowlist(
 ) -> None:
     """Repo-root secrets (`.env`) and root listing fail with EPERM.
 
-    Only `<repo>/server|workflow_nodes|config` are read-allowed; the root
-    itself is list-only (Python's importer needs the listing), never its
-    files. The probe runs inside a throwaway tmp job dir and only ever
-    *reads* a repo-tracked path.
+    Only `<repo>/server|workflow_nodes|config|workspace_libs` are
+    read-allowed; the root itself is list-only (Python's importer needs the
+    listing), never its files. The probe runs inside a throwaway tmp job dir
+    and only ever *reads* a repo-tracked path.
     """
     _sandboxed(monkeypatch)
     from server.app.executors._code_sandbox import _SERVER_REPO_ROOT
@@ -405,6 +405,15 @@ def test_custom_sandbox_denies_network_by_default(
     assert allowed.status == "failed"
     # With network allowed the failure is a plain connection refusal, not EPERM.
     assert "Operation not permitted" not in allowed.error_message
+
+
+def test_repo_read_subdirs_include_workspace_libs() -> None:
+    """Custom forks of the CMS-calling builtin nodes import workspace_libs
+    inside the sandbox (regression: the CMS client moved server/app/cms →
+    workspace_libs/cms and the deny-default sandbox lost read access)."""
+    from server.app.executors._code_sandbox import _REPO_READ_SUBDIRS
+
+    assert "workspace_libs" in _REPO_READ_SUBDIRS
 
 
 def test_read_result_validates_json_schema(tmp_path: Path) -> None:

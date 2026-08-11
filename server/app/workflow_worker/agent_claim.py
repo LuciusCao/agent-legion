@@ -16,6 +16,7 @@ from server.app.services.agent_version_pins import (
     resolve_dispatch_agent_definition,
 )
 from server.app.services.node_config import batch_source_payload, dispatch_effective_config
+from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
 
@@ -143,7 +144,12 @@ def claim_agent_node(
                 node_config=node_config,
                 pinned_agent_version=int(pin["version"]) if pin is not None else None,
             )
-        except ValueError as exc:
+        except (ValueError, SkillRepoError) as exc:
+            # SkillRepoError (git clone/fetch/checkout 失败) 是 RuntimeError
+            # 而非 ValueError，但必须同样按节点失败处理，不能漏到 enqueue
+            # 线程池。有意的折衷：瞬时 git 故障会把节点直接置失败而不是下轮
+            # 重试——热路径 git 探测几乎不瞬时失败，fetch 仅在 locked commit
+            # 缺失时发生，受影响的 job 可由用户重跑。
             fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
         finally:
             worker._agent_pass.in_flight.discard(flight_key)

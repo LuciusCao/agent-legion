@@ -4,9 +4,10 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
-from server.app.cms.client import (
+from workspace_libs.cms.client import (
     CmsVideoLookup,
     _fetch_json,
+    check_in_band_error,
     require_api_url,
 )
 
@@ -218,6 +219,7 @@ def lookup_question_video(
 ) -> CmsVideoLookup:
     url = require_api_url(api_url, "question detail")
     payload = _fetch_json(url, {"uuid": uuid}, token)
+    check_in_band_error(payload, f"question_id={uuid}")
     data = _parse_question_detail_payload(payload)
     if data is None:
         return CmsVideoLookup("not_found", payload=payload)
@@ -241,6 +243,7 @@ def list_questions_by_knowledge(
 
     while True:
         payload = _fetch_json(url, {"knowledge": knowledge_code, "page": page}, token)
+        check_in_band_error(payload, f"question list knowledge={knowledge_code}")
         items = _parse_question_list_payload(payload)
         for item in items:
             question_id = _question_id_from_item(item)
@@ -272,6 +275,7 @@ def fetch_question_detail(
 ) -> CmsQuestionDetail:
     url = _strip_query_params(require_api_url(api_url, "question detail"), {"uuid"})
     payload = _fetch_json(url, {"uuid": question_id}, token)
+    check_in_band_error(payload, f"question_id={question_id}")
     data = _parse_question_detail_payload(payload)
     if data is None:
         return CmsQuestionDetail(

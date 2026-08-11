@@ -39,8 +39,6 @@
     "tests/test_auth_queries.py",
     "tests/test_check_architecture.py",
     "tests/test_check_skills_shared.py",
-    "tests/test_cms_auth.py",
-    "tests/test_cms_env.py",
     "tests/test_config_schema.py",
     "tests/test_config_yaml_hygiene.py",
     "tests/test_configuration_loader.py",

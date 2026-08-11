@@ -11,6 +11,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 from server.app.executors.scheduling.capacity import CapacitySnapshot
+from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_claim import cached_batch_payload
 from server.app.workflow_worker.agent_gate import AgentPassState
 from server.app.workflow_worker.agent_stock import AgentStockConfig, StockBucket, StockSnapshot
@@ -337,6 +338,35 @@ def test_agent_enqueue_config_error_fails_node(tmp_path: Path) -> None:
     closure = worker.agent_dispatch.enqueue_pool.submit.call_args.args[0]
     closure()
     worker.leases.fail_without_lease.assert_called_once()
+
+
+def test_agent_enqueue_skill_repo_error_fails_node(tmp_path: Path) -> None:
+    """SkillRepoError (RuntimeError) must fail the node, not leak to the pool."""
+    node = _node()
+    worker = _worker(tmp_path, NodeRoute("agent", target_id="agent-x"), node)
+    worker.agent_dispatch.enqueue_pool.submit.return_value = True
+    worker.agent_dispatch.enqueue.side_effect = SkillRepoError("git fetch failed")
+    worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
+
+    assert (
+        try_claim_and_submit(
+            worker,
+            {"id": "ws1"},
+            _definition(node),
+            {"id": "job1", "batch_id": "b1"},
+            node,
+            tmp_path,
+            None,
+            None,
+            CapacitySnapshot(),
+        )
+        is True
+    )
+    closure = worker.agent_dispatch.enqueue_pool.submit.call_args.args[0]
+    # Must not raise: the closure converts the repo error into a node failure.
+    closure()
+    worker.leases.fail_without_lease.assert_called_once()
+    assert worker._agent_pass.in_flight == set()
 
 
 def test_executor_claim_counts_pass_claim(tmp_path: Path) -> None:
