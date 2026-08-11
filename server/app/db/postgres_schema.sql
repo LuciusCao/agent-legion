@@ -631,3 +631,35 @@ alter table quality_labels add column if not exists replay_id text;
 -- check, the claim candidate join, and the definition sweepers match this
 -- immutable version row instead of the currently published one.
 alter table agent_execution_requests add column if not exists pinned_agent_version integer;
+
+-- Instance-level external service connections (schema v34): admin-managed
+-- auth integrations (e.g. CMS) shared across workspaces. config_json carries
+-- non-sensitive fields plus {"secret_ref": name} markers; secrets live in
+-- instance_secrets (Fernet-encrypted, VAULT-SECRET-001).
+create table if not exists external_connections (
+  key text primary key,
+  type text not null,
+  display_name text not null default '',
+  config_json text not null default '{}',
+  enabled integer not null default 1,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);
+
+-- Instance-scope vault (schema v34): same Fernet semantics as
+-- workspace_secrets but not bound to any workspace.
+create table if not exists instance_secrets (
+  name text primary key,
+  ciphertext text not null,
+  created_at timestamptz not null default current_timestamp,
+  updated_at timestamptz not null default current_timestamp
+);
+
+-- Acquired connection tokens (schema v34): the global runtime token store.
+-- Refresh is single-flight via a row lock on the parent connection row.
+create table if not exists connection_tokens (
+  connection_key text primary key references external_connections(key) on delete cascade,
+  token_ciphertext text not null,
+  expires_at timestamptz,
+  refreshed_at timestamptz not null default current_timestamp
+);

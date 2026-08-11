@@ -221,6 +221,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_custom_node_codes_migration.py",
         "tests/db/test_executor_asr_config_schema_migration.py",
         "tests/db/test_executor_entity_type_migration.py",
+        "tests/db/test_external_connections_migration.py",
         "tests/db/test_local_executor_removal_migration.py",
         "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",

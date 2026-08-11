@@ -2,6 +2,7 @@ import { fireEvent, render, screen } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioRightPanel } from './WorkflowStudioRightPanel'
 import { api } from '../../api'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import type { UserResponse } from '../../api/authApi'
 import { useAuthStore } from '../../stores/authStore'
 import { useSettingStore } from '../../stores/settingStore'
@@ -65,17 +66,19 @@ function renderPanel(
   overrides?: Partial<Parameters<typeof WorkflowStudioRightPanel>[0]>
 ) {
   return render(
-    <WorkflowStudioRightPanel
-      workflow={workflow}
-      executorCatalog={executorCatalog}
-      agentCatalog={[]}
-      selectedNodeKey="fetch_questions"
-      readOnly={false}
-      definitionYaml="key: video_knowledge\n"
-      setDefinitionYaml={vi.fn()}
-      onClose={vi.fn()}
-      {...overrides}
-    />
+    <TestQueryProvider>
+      <WorkflowStudioRightPanel
+        workflow={workflow}
+        executorCatalog={executorCatalog}
+        agentCatalog={[]}
+        selectedNodeKey="fetch_questions"
+        readOnly={false}
+        definitionYaml="key: video_knowledge\n"
+        setDefinitionYaml={vi.fn()}
+        onClose={vi.fn()}
+        {...overrides}
+      />
+    </TestQueryProvider>
   )
 }
 

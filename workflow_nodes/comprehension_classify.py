@@ -36,7 +36,14 @@ def run(
     question = _single_parsed_question(job_dir, source_id)
     stem = str(question.get("stem") or "")
     options = question.get("options") if isinstance(question.get("options"), list) else []
-    if _looks_like_pure_calculation(stem, options):
+    if not stem.strip():
+        payload = {
+            "question_id": source_id,
+            "eligible": False,
+            "reason_code": "empty_stem",
+            "reason": "题干为空，无有效审题内容。",
+        }
+    elif _looks_like_pure_calculation(stem, options):
         payload = {
             "question_id": source_id,
             "eligible": False,

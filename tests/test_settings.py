@@ -4,7 +4,6 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-import server.app.cms.env as cms_env
 from server.app.executors.definitions import load_executor_definitions
 from server.app.executors.kinds import UnknownExecutorKindError
 from server.app.settings import load_env_file, load_settings
@@ -12,7 +11,6 @@ from server.app.settings import load_env_file, load_settings
 
 @pytest.fixture(autouse=True)
 def _clear_agent_legion_env(monkeypatch):
-    cms_env._warned_aliases.clear()
     for key in (
         "CMS_BASE_URL",
         "CMS_TOKEN",
@@ -95,33 +93,6 @@ def test_database_url_environment_override(tmp_path, monkeypatch):
     assert settings.database_url == "postgresql://override/test"
 
 
-def test_cms_env_alias_conflict_rejected_at_startup(tmp_path, monkeypatch):
-    config_path = tmp_path / "explicit.yaml"
-    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
-    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
-    monkeypatch.setenv("CMS_TOKEN", "new-token")
-    monkeypatch.setenv("BASECMS_TOKEN", "old-token")
-
-    with pytest.raises(ValueError, match="BASECMS_TOKEN") as exc_info:
-        load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert "CMS_TOKEN" in str(exc_info.value)
-
-
-def test_cms_base_url_alias_only_applies_with_warning(tmp_path, monkeypatch, caplog):
-    config_path = tmp_path / "explicit.yaml"
-    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
-    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
-    monkeypatch.setenv("BASECMS_BASE_URL", "http://cms.alias.example/v2")
-
-    with caplog.at_level("WARNING", logger="server.app.cms.env"):
-        settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert settings.config["cms"]["base_url"] == "http://cms.alias.example/v2"
-    assert "BASECMS_BASE_URL" in caplog.text
-    assert "CMS_BASE_URL" in caplog.text
-
-
 def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
     config_path = tmp_path / "explicit.yaml"
     config_path.write_text("database: {url: data/app.sqlite}\n", encoding="utf-8")
@@ -145,9 +116,7 @@ def test_load_settings_rejects_retired_yaml_cms_token(tmp_path):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     message = str(exc_info.value)
-    assert "CMS_TOKEN" in message
-    assert "AGENT_LEGION_CMS_TOKEN" in message
-    assert "BASECMS_TOKEN" in message
+    assert "外部服务连接" in message
 
 
 def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
@@ -167,8 +136,7 @@ def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     message = str(exc_info.value)
-    for env_key in ("CMS_APP_ID", "CMS_NONCE", "CMS_SECRET", "CMS_TOKEN_URL"):
-        assert env_key in message
+    assert "外部服务连接" in message
 
 
 def test_split_layout_rejects_retired_agent_legion_yaml(tmp_path, monkeypatch):
@@ -186,61 +154,32 @@ def test_split_layout_rejects_retired_agent_legion_yaml(tmp_path, monkeypatch):
     assert "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR" in message
 
 
-def test_cms_env_takes_precedence_over_agent_legion_cms_env(tmp_path, monkeypatch):
-    from server.app.cms.auth import _token_gen_config
-    from server.app.cms.client import get_token
-
-    monkeypatch.setenv("AGENT_LEGION_CMS_TOKEN", "agent-legion-token")
-    monkeypatch.setenv("AGENT_LEGION_CMS_TOKEN_GEN_SECRET", "agent-legion-secret")
-    # Skip the worktree .env: it carries BASECMS_* aliases whose values would
-    # conflict with the CMS_* names set below.
-    monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
-    monkeypatch.setenv("CMS_TOKEN", "cms-token")
-    monkeypatch.setenv("CMS_APP_ID", "cms-app")
-    monkeypatch.setenv("CMS_NONCE", "cms-nonce")
-    monkeypatch.setenv("CMS_SECRET", "cms-secret")
-    monkeypatch.setenv("CMS_TOKEN_URL", "http://cms/token")
-    config_path = tmp_path / "workflow.yaml"
-    config_path.write_text(
-        "data_dir: data\nopenclaw:\n  cwd: .\n  command_template:\n    - openclaw\n    - agent\n",
-        encoding="utf-8",
-    )
-
-    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    # AGENT_LEGION_* still wins in the parsed config (generic YAML override).
-    assert settings.config["cms"]["token"] == "agent-legion-token"
-    assert settings.config["cms"]["token_gen"]["secret"] == "agent-legion-secret"
-    # CMS_* wins at the CMS client/auth layer.
-    assert get_token("dev", settings.config) == "cms-token"
-    token_gen = _token_gen_config(settings.config)
-    assert token_gen["app_id"] == "cms-app"
-    assert token_gen["nonce"] == "cms-nonce"
-    assert token_gen["secret"] == "cms-secret"
-    assert token_gen["url"] == "http://cms/token"
-
-
 def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
     # The split layout carries zero files (agent_legion.yaml is retired); the
     # config dict is built from code defaults plus env overrides.
-    (tmp_path / ".env").write_text("AGENT_LEGION_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("AGENT_LEGION_OPENCLAW_CWD=dotenv-cwd\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.delenv("AGENT_LEGION_SKIP_DOTENV", raising=False)
 
-    settings = load_settings()
+    try:
+        settings = load_settings()
+    finally:
+        # load_env_file writes os.environ directly (bypassing monkeypatch);
+        # keep the shared worker process clean for later tests.
+        os.environ.pop("AGENT_LEGION_OPENCLAW_CWD", None)
 
-    assert settings.config["cms"]["token"] == "dotenv-token"
+    assert settings.config["openclaw"]["cwd"] == "dotenv-cwd"
 
 
 def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
-    (tmp_path / ".env").write_text("AGENT_LEGION_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
+    (tmp_path / ".env").write_text("AGENT_LEGION_OPENCLAW_CWD=dotenv-cwd\n", encoding="utf-8")
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
 
     settings = load_settings()
 
-    # With the dotenv skipped, no env-injected CMS token exists.
-    assert "token" not in settings.config.get("cms", {})
+    # With the dotenv skipped, the env override never lands.
+    assert settings.config.get("openclaw", {}).get("cwd") != "dotenv-cwd"
 
 
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
@@ -248,16 +187,8 @@ def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
     monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
     # data_dir is env-only after the app.yaml retirement.
     monkeypatch.setenv("AGENT_LEGION_DATA_DIR", str(tmp_path / "runtime"))
-    # The global yaml cms: section is retired; base_url arrives via env.
-    monkeypatch.setenv("CMS_BASE_URL", "https://cms.example/v2")
     settings = load_settings()
     assert settings.data_dir == tmp_path / "runtime"
-    assert settings.config["cms"]["knowledge_url"].startswith("https://cms.example/v2")
-    # Question endpoint URLs derive from cms.base_url at execution time, not
-    # from settings-time derivation.
-    assert "question_url" not in settings.config["cms"]
-    assert "question_detail_url" not in settings.config["cms"]
-    assert "question_list_url" not in settings.config["cms"]
 
 
 def test_split_layout_rejects_retired_app_yaml(tmp_path, monkeypatch):
@@ -429,21 +360,6 @@ def test_unknown_executor_kind_rejected_at_definition_load() -> None:
     [
         (
             "legacy",
-            "CMS_BASE_URL",
-            ["cms", "base_url"],
-            "http://cms.internal.example.cn/v2",
-            "http://cms.internal.example.cn/v2",
-        ),
-        ("legacy", "AGENT_LEGION_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
-        (
-            "legacy",
-            "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
-            ["cms", "token_gen", "secret"],
-            "env-secret",
-            "env-secret",
-        ),
-        (
-            "legacy",
             "AGENT_LEGION_ASR_WHISPER_BINARY",
             ["asr", "whisper", "binary"],
             "/tmp/whisper-cli",
@@ -478,21 +394,6 @@ def test_unknown_executor_kind_rejected_at_definition_load() -> None:
             "/tmp/sensevoice",
         ),
         ("legacy", "AGENT_LEGION_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
-        (
-            "split",
-            "CMS_BASE_URL",
-            ["cms", "base_url"],
-            "http://cms.internal.example.cn/v2",
-            "http://cms.internal.example.cn/v2",
-        ),
-        ("split", "AGENT_LEGION_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
-        (
-            "split",
-            "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
-            ["cms", "token_gen", "secret"],
-            "env-secret",
-            "env-secret",
-        ),
         (
             "split",
             "AGENT_LEGION_ASR_WHISPER_BINARY",
@@ -534,8 +435,7 @@ def test_unknown_executor_kind_rejected_at_definition_load() -> None:
 def test_env_override_precedes_yaml(
     tmp_path, monkeypatch, layout, env_var, config_path, env_value, expected
 ):
-    # Skip the worktree .env: its BASECMS_* alias values would conflict with
-    # the CMS_* names under test.
+    # Skip the worktree .env so only the names set below are in play.
     monkeypatch.setenv("AGENT_LEGION_SKIP_DOTENV", "1")
     monkeypatch.setenv(env_var, env_value)
     if layout == "legacy":
