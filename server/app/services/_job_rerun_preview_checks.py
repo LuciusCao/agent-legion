@@ -11,6 +11,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from server.app.services._job_rerun_upstream_guard import (
+    failed_upstream_node_keys,
+    upstream_failed_error,
+)
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 
@@ -76,7 +80,7 @@ def rerun_ineligible_from_nodes(
     job_id: str,
     actual_node_key: str,
 ) -> JobOperationError | None:
-    """Bulk-data equivalent of ``check_rerun_eligibility``: same four rules,
+    """Bulk-data equivalent of ``check_rerun_eligibility``: same five rules,
     same errors, no queries."""
     if actual_node_key not in definition.nodes:
         return JobOperationError(
@@ -114,4 +118,7 @@ def rerun_ineligible_from_nodes(
             "busy",
             "Job has running nodes",
         )
+    failed_upstream = failed_upstream_node_keys(definition, nodes, actual_node_key)
+    if failed_upstream:
+        return upstream_failed_error(job_id, actual_node_key, failed_upstream)
     return None
