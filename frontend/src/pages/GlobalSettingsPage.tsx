@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { IconButton } from '@mui/material'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { useAuthStore } from '../stores/authStore'
 import { useUiStore } from '../stores/uiStore'
+import { useSettingsScrollSpy } from '../hooks/useSettingsScrollSpy'
 import { useQuery } from '@tanstack/react-query'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { toErrorMessage } from '../lib/queryError'
@@ -266,6 +267,20 @@ function GlobalSettingsEditor({
     </div>
   )
 
+  const navItems = useMemo(
+    () => [
+      { id: 'model-pricing', label: '模型定价' },
+      { id: 'instance-settings', label: '实例设置' },
+      { id: 'connections', label: '外部服务连接' },
+      { id: 'skill-sources', label: 'Skill 源管理' },
+    ],
+    []
+  )
+  const { activeSection, contentRef, scrollToSection } = useSettingsScrollSpy(
+    navItems,
+    'model-pricing'
+  )
+
   return (
     <AppShell
       appBar={({ scrolled }) => (
@@ -276,30 +291,64 @@ function GlobalSettingsEditor({
           rightActions={rightActions}
         />
       )}
+      mainClassName="settings-main"
     >
-      <div className={styles.main}>
-        {error && (
-          <p className={styles.error} role="alert">
-            {error}
-          </p>
-        )}
-        <ModelPricingSection
-          currency={currency}
-          rows={rows}
-          onCurrencyChange={setCurrency}
-          onRowChange={(index, patch) =>
-            setRows((prev) =>
-              prev.map((row, i) => (i === index ? { ...row, ...patch } : row))
-            )
-          }
-          onAddRow={() => setRows((prev) => [...prev, { ...EMPTY_ROW }])}
-          onRemoveRow={(index) =>
-            setRows((prev) => prev.filter((_, i) => i !== index))
-          }
-        />
-        <InstanceSettingsSection />
-        <ConnectionsSection />
-        <SkillSourcesSection />
+      <div className={styles.settingsLayout}>
+        <nav className={styles.navSidebar}>
+          <ul className={styles.navList}>
+            {navItems.map((item) => (
+              <li key={item.id}>
+                <button
+                  type="button"
+                  className={
+                    activeSection === item.id
+                      ? styles.navItemActive
+                      : styles.navItem
+                  }
+                  aria-current={activeSection === item.id ? 'true' : undefined}
+                  onClick={() => scrollToSection(item.id)}
+                >
+                  {item.label}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </nav>
+
+        <div className={styles.contentArea} ref={contentRef}>
+          {error && (
+            <p className={styles.error} role="alert">
+              {error}
+            </p>
+          )}
+          <section id="model-pricing">
+            <ModelPricingSection
+              currency={currency}
+              rows={rows}
+              onCurrencyChange={setCurrency}
+              onRowChange={(index, patch) =>
+                setRows((prev) =>
+                  prev.map((row, i) =>
+                    i === index ? { ...row, ...patch } : row
+                  )
+                )
+              }
+              onAddRow={() => setRows((prev) => [...prev, { ...EMPTY_ROW }])}
+              onRemoveRow={(index) =>
+                setRows((prev) => prev.filter((_, i) => i !== index))
+              }
+            />
+          </section>
+          <section id="instance-settings">
+            <InstanceSettingsSection />
+          </section>
+          <section id="connections">
+            <ConnectionsSection />
+          </section>
+          <section id="skill-sources">
+            <SkillSourcesSection />
+          </section>
+        </div>
       </div>
     </AppShell>
   )
