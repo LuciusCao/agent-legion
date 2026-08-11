@@ -7,7 +7,8 @@ import json
 import pytest
 from cryptography.fernet import Fernet
 
-from server.app.services.agent_service import published_agent_definitions
+from server.app.agent_catalog import AgentDefinition
+from server.app.services.agent_service import AgentService, published_agent_definitions
 from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.node_secrets import node_secret_name
@@ -149,6 +150,28 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     # The bare settings fixture does not hydrate executor definitions
     # (create_app does); the node config schema chain needs the seeded catalog.
     hydrate_executor_definitions(settings)
+    # fetch_questions no longer declares secret fields (CMS credentials moved
+    # to instance-level external connections); republish the generate_key_info
+    # agent with a secret field so the intake freeze chain still has a
+    # schema-declared node secret to divert into the vault.
+    agent_service = AgentService(settings.database_url)
+    agent_service.save_draft(
+        "question-key-info-v1",
+        AgentDefinition(
+            capability="generate_key_info",
+            runtime="velites",
+            skill="question_comprehension_info/generate_key_info",
+            config_schema={
+                "type": "object",
+                "properties": {
+                    "api_url": {"type": "string"},
+                    "token": {"type": "string", "secret": True},
+                },
+            },
+        ),
+        created_by="test-seed",
+    )
+    agent_service.publish("question-key-info-v1")
     workspace = job_db.create_workspace(
         "vault-freeze", default_workflow_key="question_comprehension_info"
     )
@@ -159,7 +182,14 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
         WorkflowCatalogService(settings),
         published_agent_definitions(settings.database_url),
         job_db.get_workspace(workspace["id"]),
-        {"nodeConfig": {"fetch_questions": {"token": PLAINTEXT, "bank_version": "v9"}}},
+        {
+            "nodeConfig": {
+                "generate_key_info": {
+                    "token": PLAINTEXT,
+                    "api_url": "http://cms.example.com/question/detail",
+                }
+            }
+        },
         settings.executor_definitions,
     )
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
@@ -178,9 +208,9 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     batch = job_db.get_batch(str(result["batch"]["id"]))
     payload_text = str(batch["source_payload_json"])
     payload = json.loads(payload_text)
-    frozen = payload["node_config"]["fetch_questions"]
-    name = node_secret_name("question_comprehension_info", "fetch_questions", "token")
+    frozen = payload["node_config"]["generate_key_info"]
+    name = node_secret_name("question_comprehension_info", "generate_key_info", "token")
     assert frozen["token"] == {"secret_ref": name}
-    assert frozen["bank_version"] == "v9"
+    assert frozen["api_url"] == "http://cms.example.com/question/detail"
     assert PLAINTEXT not in payload_text
     assert vault.get(workspace["id"], name) == PLAINTEXT

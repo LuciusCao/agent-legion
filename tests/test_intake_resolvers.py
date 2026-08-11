@@ -37,7 +37,7 @@ def test_node_phase_dispatch_builds_candidates_without_cms(monkeypatch) -> None:
     def fail_on_cms(*args, **kwargs):
         raise AssertionError("node-phase intake must not call the CMS")
 
-    monkeypatch.setattr("server.app.cms.knowledge.lookup_knowledge_video", fail_on_cms)
+    monkeypatch.setattr("workspace_libs.cms.knowledge.lookup_knowledge_video", fail_on_cms)
     spec = RESOLVERS[("video", "batch_by_knowledge")]
 
     candidates = resolve_candidates(

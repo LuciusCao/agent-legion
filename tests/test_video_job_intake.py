@@ -80,7 +80,7 @@ def test_video_knowledge_intake_does_not_call_cms(app, monkeypatch) -> None:
     def fail_on_cms(*args, **kwargs):
         raise AssertionError("intake must not call the CMS")
 
-    monkeypatch.setattr("server.app.cms.knowledge.lookup_knowledge_video", fail_on_cms)
+    monkeypatch.setattr("workspace_libs.cms.knowledge.lookup_knowledge_video", fail_on_cms)
 
     service = make_job_intake_service(app)
     payload = {

@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -9,13 +10,15 @@ from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
 
-def test_workspace_settings_round_trip(tmp_path):
+def test_workspace_settings_round_trip(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    app.state.settings.config["cms"] = {
-        "question_detail_url": "http://cms.example.com/question/detail",
-        "token": "global_token",
-    }
+    monkeypatch.setattr(
+        "server.app.services.workspace_connection_test.ConnectionService",
+        lambda *args, **kwargs: SimpleNamespace(
+            probe=lambda key: {"ok": True, "message": "连接成功 (HTTP 200)"}
+        ),
+    )
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -224,7 +227,8 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         settings = fetched.json()["settings"]
         assert settings["nodeConfig"] == {}
         # generate_key_info comes from the Agent catalog; fetch_questions is an
-        # executor capability whose schema is declared in workflow.yaml (D15).
+        # executor capability whose schema is declared in the built-in
+        # executor definitions (D15).
         assert set(settings["nodeConfigSchemas"]) == {"generate_key_info", "fetch_questions"}
 
         saved = c.patch(
@@ -241,8 +245,7 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         assert saved_executor.status_code == 200
         assert saved_executor.json()["settings"]["nodeConfig"] == {
             "generate_key_info": {"max_items": 5},
-            # The secret token surfaces as a write-only marker (VAULT-SECRET-001).
-            "fetch_questions": {"bank_version": "v6", "token": {"secret_set": False}},
+            "fetch_questions": {"bank_version": "v6"},
         }
 
         cleared = c.patch(
@@ -292,7 +295,7 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
     assert unknown_node.status_code == 400
 
 
-def test_workspace_settings_node_config_is_schema_validated_and_masked(tmp_path):
+def test_workspace_settings_node_config_is_schema_validated(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
@@ -306,7 +309,10 @@ def test_workspace_settings_node_config_is_schema_validated_and_masked(tmp_path)
         assert fetched.status_code == 200
         node_schemas = fetched.json()["settings"]["nodeConfigSchemas"]
         assert "page_size" in node_schemas["fetch_questions"]["properties"]
-        assert node_schemas["fetch_questions"]["properties"]["token"]["secret"] is True
+        # Credentials moved to the instance-level external connection; the
+        # node schema only carries the connection key reference.
+        connection = node_schemas["fetch_questions"]["properties"]["connection"]
+        assert connection["default"] == "cms-internal"
 
         bad_type = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
@@ -324,8 +330,4 @@ def test_workspace_settings_node_config_is_schema_validated_and_masked(tmp_path)
     assert bad_type.status_code == 400
     assert unknown_key.status_code == 400
     assert ok.status_code == 200
-    # Secret schema fields surface as write-only markers in the payload.
-    assert ok.json()["settings"]["nodeConfig"]["fetch_questions"] == {
-        "page_size": 100,
-        "token": {"secret_set": False},
-    }
+    assert ok.json()["settings"]["nodeConfig"]["fetch_questions"] == {"page_size": 100}

@@ -65,6 +65,14 @@ def test_cms_auth_errors():
         "cms_auth",
     )
     assert classify_failure(1, "CMS token expired") == ("technical", "cms_auth")
+    # question_intake fail-fast on in-band CMS error payloads (schema v34).
+    assert classify_failure(
+        1, "CmsClientError: CMS 返回错误: code=10015 message=JWT验证失败 (question_id=q-1)"
+    ) == ("technical", "cms_auth")
+    assert classify_failure(1, "CmsClientError: CMS 响应缺少题干 (question_id=q-1)") == (
+        "technical",
+        "cms_auth",
+    )
 
 
 def test_resource_limit_errors():

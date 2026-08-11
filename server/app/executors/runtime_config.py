@@ -10,7 +10,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
-from server.app.cms.auth import cms_token_available
 from server.app.executors.code_config import validate_code_config_paths
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
@@ -142,12 +141,6 @@ def _resolve_executable(value: str) -> Path | None:
     return Path(found) if found else None
 
 
-def _cms_configured(config: dict[str, Any]) -> bool:
-    """Return True when a global CMS endpoint is configured."""
-    cms = config.get("cms")
-    return isinstance(cms, dict) and bool(str(cms.get("base_url") or "").strip())
-
-
 def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
@@ -208,18 +201,6 @@ def validate_runtime(
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
-
-    if _cms_configured(config) and not cms_token_available(config.get("cms")):
-        # Workspace node config tokens live in the vault and cannot be
-        # pre-checked at startup, so missing env-level credentials are a
-        # warning, not a startup failure: vault-only deployments are valid as
-        # long as every workspace running CMS jobs sets its own token.
-        logger.warning(
-            "cms.token: no env-level CMS credentials (set env CMS_TOKEN, or "
-            "all of CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL); "
-            "each workspace must set a token in its node config (vault) "
-            "or its CMS jobs will fail"
-        )
 
     if repo_root is not None:
         errors.extend(validate_code_config_paths(executor_definitions or {}, repo_root))

@@ -2,18 +2,33 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from server.app.cms.client import CmsClientError
 from server.app.main import create_app
 from tests.helpers.auth import authenticate_client
+from workspace_libs.cms.client import CmsClientError
+
+
+class _FakeConnectionTokens:
+    """Stand-in for ConnectionTokenService: serves a fixed runtime config."""
+
+    def __init__(self, config):
+        self._config = config
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def runtime_config(self, key):
+        return dict(self._config)
+
+
+_CMS_RUNTIME_CONFIG = {
+    "api_url": "https://cms.example/question/detail",
+    "token": "token",
+}
 
 
 def test_question_detail_success(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True
-    app.state.settings.config["cms"] = {
-        "env": "prod",
-        "question_detail_url": "https://cms.example/question/detail",
-    }
 
     fake_payload = {
         "code": 0,
@@ -32,8 +47,11 @@ def test_question_detail_success(tmp_path, monkeypatch):
 
     with (
         authenticate_client(TestClient(app)) as c,
-        patch("server.app.cms.question._fetch_json", lambda url, params, token: fake_payload),
-        patch("server.app.cms.client.get_token", lambda env, config: "token"),
+        patch(
+            "server.app.services.question_detail.ConnectionTokenService",
+            _FakeConnectionTokens(_CMS_RUNTIME_CONFIG),
+        ),
+        patch("workspace_libs.cms.question._fetch_json", lambda url, params, token: fake_payload),
     ):
         c.post(
             "/api/workspaces",
@@ -73,10 +91,6 @@ def test_question_detail_workspace_not_found(tmp_path):
 def test_question_detail_cms_failure(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True
-    app.state.settings.config["cms"] = {
-        "env": "prod",
-        "question_detail_url": "https://cms.example/question/detail",
-    }
 
     def fake_fetch_question_detail(question_id, api_url, token):
         raise CmsClientError("CMS down")
@@ -84,9 +98,12 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
     with (
         authenticate_client(TestClient(app)) as c,
         patch(
+            "server.app.services.question_detail.ConnectionTokenService",
+            _FakeConnectionTokens(_CMS_RUNTIME_CONFIG),
+        ),
+        patch(
             "server.app.services.question_detail.fetch_question_detail", fake_fetch_question_detail
         ),
-        patch("server.app.services.question_detail.get_token", lambda env, config: "token"),
     ):
         c.post(
             "/api/workspaces",
@@ -100,10 +117,13 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
     assert response.status_code == 502
 
 
-def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
+def test_question_detail_without_connection_returns_empty_normalized(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True
-    app.state.settings.config["cms"] = {}
+    monkeypatch.setattr(
+        "server.app.services.question_detail.workspace_node_connection_key",
+        lambda *args, **kwargs: "",
+    )
 
     with authenticate_client(TestClient(app)) as c:
         # Intake is node-phase now: it builds opaque candidates without calling
@@ -135,10 +155,6 @@ def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
 def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True
-    app.state.settings.config["cms"] = {
-        "env": "prod",
-        "question_detail_url": "https://cms.example/question/detail",
-    }
 
     def fake_fetch_json(url, params, token):
         return {
@@ -161,12 +177,12 @@ def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch
         }
 
     monkeypatch.setattr(
-        "server.app.cms.question._fetch_json",
+        "workspace_libs.cms.question._fetch_json",
         fake_fetch_json,
     )
     monkeypatch.setattr(
-        "server.app.services.question_detail.get_token",
-        lambda env, config: "token",
+        "server.app.services.question_detail.ConnectionTokenService",
+        _FakeConnectionTokens(_CMS_RUNTIME_CONFIG),
     )
 
     with authenticate_client(TestClient(app)) as c:

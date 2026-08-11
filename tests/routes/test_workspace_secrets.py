@@ -6,8 +6,11 @@ import pytest
 from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from server.app.agent_catalog import AgentDefinition
 from server.app.main import create_app
+from server.app.services.agent_service import AgentService
 from tests.helpers.auth import authenticate_client
+from tests.postgres_support import TEST_DATABASE_URL
 
 PLAINTEXT = "super-secret-token-value"
 
@@ -18,6 +21,35 @@ def vault_key(monkeypatch):
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", key)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     return key
+
+
+@pytest.fixture
+def secret_node_schema():
+    """Publish a test agent whose capability schema declares a secret field.
+
+    The built-in fetch_questions schema no longer carries secret fields (CMS
+    credentials moved to instance-level external connections), so the generic
+    node-config vault diversion mechanism is exercised through a republished
+    generate_key_info agent declaring a ``secret: true`` field instead.
+    """
+    service = AgentService(TEST_DATABASE_URL)
+    service.save_draft(
+        "question-key-info-v1",
+        AgentDefinition(
+            capability="generate_key_info",
+            runtime="velites",
+            skill="question_comprehension_info/generate_key_info",
+            config_schema={
+                "type": "object",
+                "properties": {
+                    "api_url": {"type": "string"},
+                    "token": {"type": "string", "secret": True},
+                },
+            },
+        ),
+        created_by="test-seed",
+    )
+    service.publish("question-key-info-v1")
 
 
 @pytest.fixture
@@ -125,14 +157,16 @@ def test_secrets_non_member_gets_404(admin_client, vault_key):
     )
 
 
-def test_node_config_secret_saved_to_vault_not_settings(admin_client, app, vault_key):
+def test_node_config_secret_saved_to_vault_not_settings(
+    admin_client, app, vault_key, secret_node_schema
+):
     workspace_id = _create_workspace(admin_client)
 
     saved = admin_client.patch(
         f"/api/workspaces/{workspace_id}/settings/nodes",
         json={
             "nodeConfig": {
-                "fetch_questions": {
+                "generate_key_info": {
                     "api_url": "http://cms.example.com/question/detail",
                     "token": PLAINTEXT,
                 }
@@ -145,26 +179,28 @@ def test_node_config_secret_saved_to_vault_not_settings(admin_client, app, vault
     fetched = admin_client.get(f"/api/workspaces/{workspace_id}/settings")
     assert fetched.status_code == 200
     assert PLAINTEXT not in fetched.text
-    config = fetched.json()["settings"]["nodeConfig"]["fetch_questions"]
+    config = fetched.json()["settings"]["nodeConfig"]["generate_key_info"]
     assert config["token"] == {"secret_set": True}
     assert config["api_url"] == "http://cms.example.com/question/detail"
 
     # Persistence holds only the secret_ref marker; plaintext lives in the vault.
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
+    stored = workspace["node_config"]["question_comprehension_info"]["generate_key_info"]
     assert stored["token"] == {
-        "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+        "secret_ref": "node:question_comprehension_info:generate_key_info:token"
     }
     assert PLAINTEXT not in str(workspace["node_config"])
     listed = admin_client.get(f"/api/workspaces/{workspace_id}/secrets")
     assert [entry["name"] for entry in listed.json()["secrets"]] == [
-        "node:question_comprehension_info:fetch_questions:token"
+        "node:question_comprehension_info:generate_key_info:token"
     ]
 
 
-def test_node_config_resave_without_secret_keeps_ref(admin_client, app, vault_key):
+def test_node_config_resave_without_secret_keeps_ref(
+    admin_client, app, vault_key, secret_node_schema
+):
     workspace_id = _create_workspace(admin_client)
-    patch = {"nodeConfig": {"fetch_questions": {"token": PLAINTEXT}}}
+    patch = {"nodeConfig": {"generate_key_info": {"token": PLAINTEXT}}}
     assert (
         admin_client.patch(f"/api/workspaces/{workspace_id}/settings/nodes", json=patch).status_code
         == 200
@@ -172,22 +208,22 @@ def test_node_config_resave_without_secret_keeps_ref(admin_client, app, vault_ke
 
     resaved = admin_client.patch(
         f"/api/workspaces/{workspace_id}/settings/nodes",
-        json={"nodeConfig": {"fetch_questions": {"api_url": "http://cms.example.com/other"}}},
+        json={"nodeConfig": {"generate_key_info": {"api_url": "http://cms.example.com/other"}}},
     )
     assert resaved.status_code == 200, resaved.text
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
+    stored = workspace["node_config"]["question_comprehension_info"]["generate_key_info"]
     assert stored["token"] == {
-        "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+        "secret_ref": "node:question_comprehension_info:generate_key_info:token"
     }
 
 
-def test_node_config_masked_echo_keeps_stored_ref(admin_client, app, vault_key):
+def test_node_config_masked_echo_keeps_stored_ref(admin_client, app, vault_key, secret_node_schema):
     workspace_id = _create_workspace(admin_client)
     assert (
         admin_client.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
-            json={"nodeConfig": {"fetch_questions": {"token": PLAINTEXT}}},
+            json={"nodeConfig": {"generate_key_info": {"token": PLAINTEXT}}},
         ).status_code
         == 200
     )
@@ -201,20 +237,22 @@ def test_node_config_masked_echo_keeps_stored_ref(admin_client, app, vault_key):
     )
     assert resaved.status_code == 200, resaved.text
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
+    stored = workspace["node_config"]["question_comprehension_info"]["generate_key_info"]
     assert stored["token"] == {
-        "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+        "secret_ref": "node:question_comprehension_info:generate_key_info:token"
     }
 
 
-def test_node_config_empty_secret_clears_vault_entry(admin_client, app, vault_key):
+def test_node_config_empty_secret_clears_vault_entry(
+    admin_client, app, vault_key, secret_node_schema
+):
     workspace_id = _create_workspace(admin_client)
     assert (
         admin_client.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
             json={
                 "nodeConfig": {
-                    "fetch_questions": {
+                    "generate_key_info": {
                         "api_url": "http://cms.example.com/question/detail",
                         "token": PLAINTEXT,
                     }
@@ -228,7 +266,7 @@ def test_node_config_empty_secret_clears_vault_entry(admin_client, app, vault_ke
         f"/api/workspaces/{workspace_id}/settings/nodes",
         json={
             "nodeConfig": {
-                "fetch_questions": {
+                "generate_key_info": {
                     "api_url": "http://cms.example.com/question/detail",
                     "token": "",
                 }
@@ -237,16 +275,16 @@ def test_node_config_empty_secret_clears_vault_entry(admin_client, app, vault_ke
     )
     assert cleared.status_code == 200, cleared.text
     workspace = app.state.job_db.get_workspace(workspace_id)
-    stored = workspace["node_config"]["question_comprehension_info"]["fetch_questions"]
+    stored = workspace["node_config"]["question_comprehension_info"]["generate_key_info"]
     assert "token" not in stored
     assert stored["api_url"] == "http://cms.example.com/question/detail"
     listed = admin_client.get(f"/api/workspaces/{workspace_id}/secrets")
     assert listed.json() == {"secrets": []}
-    config = cleared.json()["settings"]["nodeConfig"]["fetch_questions"]
+    config = cleared.json()["settings"]["nodeConfig"]["generate_key_info"]
     assert config["token"] == {"secret_set": False}
 
 
-def test_node_config_save_without_master_key_fails(admin_client, monkeypatch):
+def test_node_config_save_without_master_key_fails(admin_client, monkeypatch, secret_node_schema):
     # See test_secret_put_requires_master_key: patch the resolver, not env.
     monkeypatch.setattr(
         "server.app.services.vault.resolve_master_key", lambda *_args, **_kwargs: None
@@ -255,7 +293,7 @@ def test_node_config_save_without_master_key_fails(admin_client, monkeypatch):
 
     response = admin_client.patch(
         f"/api/workspaces/{workspace_id}/settings/nodes",
-        json={"nodeConfig": {"fetch_questions": {"token": PLAINTEXT}}},
+        json={"nodeConfig": {"generate_key_info": {"token": PLAINTEXT}}},
     )
 
     assert response.status_code == 400
