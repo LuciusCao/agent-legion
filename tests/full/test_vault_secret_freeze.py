@@ -1,9 +1,10 @@
 """Full-gate evidence for VAULT-SECRET-001 over a real database.
 
-End-to-end chain: a node config secret is diverted to the vault, the stored
-config and the intake freeze carry only the ``secret_ref`` marker, and the
-dispatch-time resolve chain turns the marker back into the plaintext in
-memory.
+End-to-end chain over the instance-level external connection mechanism (the
+node-level CMS token secret was retired with it): a connection secret is
+diverted to the instance vault, the stored config and the intake freeze carry
+only the ``secret_ref`` marker / connection key, and the dispatch-time
+resolve chain turns the marker back into the plaintext in memory.
 """
 
 from __future__ import annotations
@@ -14,15 +15,16 @@ import pytest
 from cryptography.fernet import Fernet
 
 from server.app.services.agent_service import published_agent_definitions
+from server.app.services.connection_tokens import ConnectionTokenService
+from server.app.services.connections import ConnectionService, connection_secret_name
 from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.job_intake import JobIntakeService
-from server.app.services.node_secrets import node_secret_name
-from server.app.services.vault import VaultService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
 
 PLAINTEXT = "full-gate-secret-token"
+CONNECTION_KEY = "cms-full"
 
 
 @pytest.fixture
@@ -46,38 +48,46 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     definition = catalog.definition("question_comprehension_info")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
-    name = node_secret_name("question_comprehension_info", "fetch_questions", "token")
-    vault = VaultService(job_db.path, settings.config)
+    # Creating the connection also backfills the ``connection`` property on
+    # the CMS capabilities' config_schema.
+    connections = ConnectionService(job_db.path, settings.config)
+    connections.create(
+        CONNECTION_KEY,
+        "static_bearer",
+        "CMS",
+        {"base_url": "http://cms.example.com", "token": PLAINTEXT},
+    )
+    ref_name = connection_secret_name(CONNECTION_KEY, "token")
+
+    # Persistence: only ciphertext at rest, no plaintext anywhere in the DB rows.
+    with job_db.connect() as conn:
+        row = conn.execute(
+            "select ciphertext from instance_secrets where name=%s", (ref_name,)
+        ).fetchone()
+    assert row["ciphertext"] != PLAINTEXT
+    assert PLAINTEXT not in row["ciphertext"]
+    raw = connections._decode_config(connections._row(CONNECTION_KEY))
+    assert raw["token"] == {"secret_ref": ref_name}
+    assert raw["base_url"] == "http://cms.example.com"
+    assert PLAINTEXT not in json.dumps(raw)
+
+    # The node config references the connection by key only — no secret
+    # material ever enters the workspace override.
     update_workspace_node_config(
         job_db,
         catalog,
         published_agent_definitions(settings.database_url),
         job_db.get_workspace(workspace_id),
-        {
-            "nodeConfig": {
-                "fetch_questions": {
-                    "api_url": "http://cms.example.com/question/detail",
-                    "token": PLAINTEXT,
-                }
-            }
-        },
+        {"nodeConfig": {"fetch_questions": {"connection": CONNECTION_KEY}}},
         settings.executor_definitions,
     )
-
-    # Persistence: only ciphertext at rest, no plaintext anywhere in the DB rows.
-    with job_db.connect() as conn:
-        row = conn.execute(
-            "select ciphertext from workspace_secrets where workspace_id=%s and name=%s",
-            (workspace_id, name),
-        ).fetchone()
-    assert row["ciphertext"] != PLAINTEXT
-    assert PLAINTEXT not in row["ciphertext"]
     stored = job_db.get_workspace(workspace_id)["node_config"]
     stored_node = stored["question_comprehension_info"]["fetch_questions"]
-    assert stored_node["token"] == {"secret_ref": name}
+    assert stored_node["connection"] == CONNECTION_KEY
     assert PLAINTEXT not in json.dumps(stored)
 
-    # Intake freeze: the batch payload carries the ref, never the plaintext.
+    # Intake freeze: the batch payload carries the connection key, never the
+    # plaintext or a ref marker.
     service = JobIntakeService(job_db, settings, catalog)
     result = service.create_batch(
         workspace_id,
@@ -92,10 +102,11 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     batch = job_db.get_batch(str(result["batch"]["id"]))
     payload_text = str(batch["source_payload_json"])
     assert PLAINTEXT not in payload_text
+    assert ref_name not in payload_text
     frozen = json.loads(payload_text)["node_config"]["fetch_questions"]
-    assert frozen["token"] == {"secret_ref": name}
+    assert frozen["connection"] == CONNECTION_KEY
 
     # Runtime resolve: the dispatch chain sees the plaintext in memory.
-    resolved = vault.resolve_secret_refs(frozen, workspace_id)
+    resolved = ConnectionTokenService(job_db.path, settings.config).runtime_config(CONNECTION_KEY)
     assert resolved["token"] == PLAINTEXT
-    assert resolved["api_url"] == "http://cms.example.com/question/detail"
+    assert resolved["base_url"] == "http://cms.example.com"
