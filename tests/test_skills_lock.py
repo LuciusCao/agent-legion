@@ -18,12 +18,14 @@ def test_refresh_lock_passes_resolved_sources_to_write(tmp_path: Path) -> None:
         commit="abc123",
     )
 
-    with patch("server.app.skills.lock.SkillManager") as mock_manager_cls:
+    with (
+        patch("server.app.skills.lock.SkillManager") as mock_manager_cls,
+        patch("server.app.skills.lock.refresh_source", return_value=mock_source),
+    ):
         manager = MagicMock()
         manager._load_config.return_value.skills = {"wf/cap": MagicMock()}
         manager._parse_skill_key.return_value = ("wf", "cap")
         manager._resolve_cache_dir.return_value = tmp_path / "cache"
-        manager._refresh_source.return_value = mock_source
         mock_manager_cls.return_value = manager
 
         refresh_lock(store, base_dir)

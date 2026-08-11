@@ -10,6 +10,10 @@ from __future__ import annotations
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Any
 
+from server.app.services._job_rerun_upstream_guard import (
+    failed_upstream_node_keys,
+    upstream_failed_error,
+)
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.workflow_branching import upstream_nodes
@@ -35,9 +39,10 @@ def check_rerun_eligibility(
     """Read-only rerun precheck, shared by ``execute_rerun`` and the preview.
 
     Covers everything before the mutation: the node exists in the workflow
-    definition and for the job, no active executor lease, no running nodes.
-    Keeping one implementation prevents the preview count from drifting away
-    from what the real rerun would do.
+    definition and for the job, no active executor lease, no running nodes,
+    no failed upstream the rerun would leave behind. Keeping one
+    implementation prevents the preview count from drifting away from what
+    the real rerun would do.
     """
     definition = definition_from_job_snapshot(job) or service.workflows.definition(
         str(job["workflow_key"])
@@ -81,6 +86,12 @@ def check_rerun_eligibility(
             "busy",
             "Job has running nodes",
         )
+
+    failed_upstream = failed_upstream_node_keys(
+        definition, service.job_db.list_job_nodes(job_id), actual_node_key
+    )
+    if failed_upstream:
+        return upstream_failed_error(job_id, actual_node_key, failed_upstream)
     return None
 
 

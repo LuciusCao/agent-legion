@@ -16,6 +16,7 @@ from tests.executors.leases.helpers import (
     _claim_request,
     _setup_workspace,
 )
+from tests.helpers.job_dirs import make_job_dir
 
 
 def test_claim_lease_persists_relative_log_path(queries: JobQueries) -> None:
@@ -210,3 +211,90 @@ def test_finish_lease_rejects_session_dir_outside_jobs(
 def test_database_timestamp_is_utc_without_t_separator() -> None:
     now = datetime(2025, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
     assert database_timestamp(now) == "2025-01-02 03:04:05.123456"
+
+
+def test_finish_lease_derives_run_dir_via_job_storage_dir(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    """Empty result.run_dir falls back to probing only the job's known dirs."""
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-derive-storage", "code-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    data_dir = queries.jobs_dir.parent
+    token_dir = make_job_dir(data_dir, workspace_id, job_id) / "runs" / "review_keywords" / "tok-1"
+    token_dir.mkdir(parents=True)
+
+    result = ExecutionResult(status="completed", exit_code=0)
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    with queries.connect() as conn:
+        run = conn.execute(
+            "select run_dir from node_runs where id=%s", (claim.node_run_id,)
+        ).fetchone()
+    assert run is not None
+    assert run["run_dir"] == token_dir.relative_to(data_dir).as_posix()
+
+
+def test_finish_lease_derives_run_dir_via_legacy_flat_layout(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    """A pre-sharding row (storage_dir cleared) still finds flat-layout runs."""
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-derive-legacy", "code-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    data_dir = queries.jobs_dir.parent
+    with queries.connect() as conn:
+        conn.execute("update jobs set storage_dir='' where id=%s", (job_id,))
+        conn.commit()
+    token_dir = (
+        make_job_dir(data_dir, workspace_id, job_id, sharded=False)
+        / "runs"
+        / "review_keywords"
+        / "tok-legacy"
+    )
+    token_dir.mkdir(parents=True)
+
+    result = ExecutionResult(status="completed", exit_code=0)
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    with queries.connect() as conn:
+        run = conn.execute(
+            "select run_dir from node_runs where id=%s", (claim.node_run_id,)
+        ).fetchone()
+    assert run is not None
+    assert run["run_dir"] == token_dir.relative_to(data_dir).as_posix()
+
+
+def test_finish_lease_without_run_tokens_keeps_empty_run_dir(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    """Agent-style results (no run tokens on disk) stay empty without scanning."""
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-derive-empty", "code-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="code-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    make_job_dir(queries.jobs_dir.parent, workspace_id, job_id)  # no runs/
+
+    result = ExecutionResult(status="completed", exit_code=0)
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    with queries.connect() as conn:
+        run = conn.execute(
+            "select run_dir from node_runs where id=%s", (claim.node_run_id,)
+        ).fetchone()
+    assert run is not None
+    assert run["run_dir"] == ""
