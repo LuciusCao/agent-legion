@@ -11,6 +11,8 @@ production:
       extensions: [.py]
     - path: shared
       extensions: [.py]
+    - path: workspace_libs
+      extensions: [.py]
   exclude:
     - frontend/src/generated/**
   buffer_lines: 10

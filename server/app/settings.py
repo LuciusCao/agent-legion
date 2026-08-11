@@ -4,11 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
 
 from dotenv import load_dotenv
 
-from server.app.cms.env import resolve_cms_env, validate_cms_env_aliases
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
 from server.app.configuration.instance_defaults import (
@@ -87,8 +85,6 @@ def _csv_parser(value: str) -> list[str]:
 # ``_apply_database_url_env`` below, which applies the authoritative
 # AGENT_LEGION_DATABASE_URL override.
 _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
-    "AGENT_LEGION_CMS_TOKEN": (("cms", "token"), _str_parser),
-    "AGENT_LEGION_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
     "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
     "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
     "AGENT_LEGION_ASR_WHISPER_VAD_MODEL": (("asr", "whisper", "vad_model"), _path_parser),
@@ -142,46 +138,12 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
         node[path[-1]] = parser(raw)
 
 
-def _apply_cms_env_overrides(config: dict[str, Any]) -> None:
-    """Validate CMS_* alias conflicts, then apply the CMS_BASE_URL override (D3)."""
-    validate_cms_env_aliases()
-    base_url = resolve_cms_env("CMS_BASE_URL")
-    if not base_url:
-        return
-    cms = config.setdefault("cms", {})
-    if not isinstance(cms, dict):
-        return
-    cms["base_url"] = base_url
-
-
-def _normalize_cms_config(config: dict[str, Any]) -> None:
-    """Derive the legacy knowledge URL from base_url when present.
-
-    Node code derives endpoint URLs from ``cms.base_url`` (see
-    ``server.app.cms.urls``); ``knowledge_url`` stays as the legacy fallback
-    consumed by the video download node (D14).
-    """
-    cms = config.get("cms")
-    if not isinstance(cms, dict):
-        return
-    base_url = str(cms.get("base_url", "")).rstrip("/")
-    if not base_url or cms.get("knowledge_url"):
-        return
-    params: dict[str, str] = {
-        "bank_version": str(cms.get("bank_version", "v5")),
-        "country_id": str(cms.get("country_id", "1")),
-        "subject_id": str(cms.get("subject_id", "2")),
-    }
-    cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
-
-
 def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
     """Fail fast when the yaml ``cms:`` section carries retired keys.
 
-    Config governance G2 (breaking): ``cms.token`` and ``cms.token_gen`` are no
-    longer read from yaml. This check runs before env overrides so env-injected
-    in-memory values (``AGENT_LEGION_CMS_TOKEN`` et al.) are not mistaken for
-    yaml keys.
+    Config governance G2 (breaking): the CMS integration moved to
+    instance-level external connections (admin settings → 外部服务连接);
+    neither yaml nor env ``CMS_*`` keys are read at runtime anymore.
     """
     cms = config.get("cms")
     if not isinstance(cms, dict):
@@ -192,11 +154,10 @@ def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
     keys = ", ".join(f"cms.{key}" for key in retired)
     raise ValueError(
         f"Unsupported yaml keys under cms: {keys}. The yaml cms.token and "
-        "cms.token_gen sections were retired (config governance G2). Migrate: "
-        "token -> env CMS_TOKEN (or AGENT_LEGION_CMS_TOKEN; BASECMS_TOKEN is a "
-        "deprecated alias) or a vault-backed workspace resource binding; "
-        "token_gen -> env CMS_APP_ID / CMS_NONCE / CMS_SECRET / CMS_TOKEN_URL "
-        "(deprecated aliases BASECMS_*)."
+        "cms.token_gen sections were retired (config governance G2), and the "
+        "env CMS_* channel followed: CMS credentials now live on the "
+        "instance-level external connection (admin settings → 外部服务连接), "
+        "migrated automatically on first startup after upgrade."
     )
 
 
@@ -238,8 +199,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     _reject_retired_agent_yaml_keys(config)
     _apply_database_url_env(config)
     _apply_env_overrides(config)
-    _apply_cms_env_overrides(config)
-    _normalize_cms_config(config)
     apply_instance_config_defaults(config)
     if data_dir is None:
         env_data_dir = os.environ.get("AGENT_LEGION_DATA_DIR")

@@ -4,8 +4,8 @@ Boots the real backend (uvicorn factory app, no workflow worker thread) and a
 vite preview static server, then runs the Playwright smoke specs in
 ``frontend/e2e``. Deterministic and offline: the E2E PostgreSQL database is
 recreated per run, CMS question-detail lookups are served by an in-process
-stub (CMS_BASE_URL override), and jobs stay queued after intake because no
-executor/worker is started.
+stub (the ``cms-internal`` external connection is seeded to point at it), and
+jobs stay queued after intake because no executor/worker is started.
 
 Example:
     uv run python scripts/e2e/run_browser_smoke.py
@@ -13,8 +13,6 @@ Example:
 
 from __future__ import annotations
 
-import http.server
-import json
 import logging
 import os
 import shutil
@@ -22,15 +20,14 @@ import signal
 import socket
 import subprocess
 import sys
-import threading
 import time
 from pathlib import Path
-from urllib.parse import parse_qs, urlparse
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+from scripts.e2e._cms_stub import seed_cms_connection, start_cms_stub  # noqa: E402
 from scripts.e2e._database import db_dsn, e2e_database_name, reset_database  # noqa: E402
 
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
@@ -66,42 +63,7 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _start_cms_stub(port: int) -> http.server.ThreadingHTTPServer:
-    """Serve deterministic CMS question-detail responses on 127.0.0.1.
-
-    Intake resolves question candidates through the CMS question-detail API
-    (tests monkeypatch it instead); pointing CMS_BASE_URL at this stub keeps
-    the smoke run offline without touching production code.
-    """
-
-    class Handler(http.server.BaseHTTPRequestHandler):
-        def do_GET(self) -> None:  # noqa: N802 (stdlib API)
-            uuid = parse_qs(urlparse(self.path).query).get("uuid", [""])[0]
-            payload = {
-                "code": 0,
-                "message": "success",
-                "data": {
-                    "question_uuid": uuid,
-                    "question_title": f"E2E 题目 {uuid}",
-                    "body": {"content": f"E2E stub stem for {uuid}"},
-                },
-            }
-            body = json.dumps(payload).encode("utf-8")
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-
-        def log_message(self, format: str, *args: object) -> None:
-            logger.debug("cms-stub: " + format, *args)
-
-    server = http.server.ThreadingHTTPServer(("127.0.0.1", port), Handler)
-    threading.Thread(target=server.serve_forever, daemon=True).start()
-    return server
-
-
-def _backend_env(port: int, db_name: str, cms_base_url: str) -> dict[str, str]:
+def _backend_env(port: int, db_name: str, vault_key: str) -> dict[str, str]:
     env = dict(os.environ)
     for key in _CMS_ENV_KEYS:
         env[key] = ""
@@ -111,7 +73,7 @@ def _backend_env(port: int, db_name: str, cms_base_url: str) -> dict[str, str]:
             "AGENT_LEGION_DATABASE_URL": db_dsn(db_name),
             "AGENT_LEGION_DATA_DIR": str(DATA_DIR),
             "AGENT_LEGION_WORKER_REGISTER_TOKEN": "ci-only-dummy-register-token",
-            "CMS_BASE_URL": cms_base_url,
+            "AGENT_LEGION_VAULT_MASTER_KEY": vault_key,
         }
     )
     return env
@@ -218,23 +180,27 @@ def main() -> int:
     returncode = 1
 
     try:
+        from cryptography.fernet import Fernet
+
+        vault_key = Fernet.generate_key().decode("utf-8")
         reset_database(db_name)
         if DATA_DIR.exists():
             shutil.rmtree(DATA_DIR)
         DATA_DIR.mkdir(parents=True)
         RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-        cms_stub = _start_cms_stub(cms_stub_port)
+        cms_stub = start_cms_stub(cms_stub_port)
         backend_proc = _start_process(
             _backend_command(backend_port),
             cwd=PROJECT_ROOT,
-            env=_backend_env(backend_port, db_name, cms_base_url),
+            env=_backend_env(backend_port, db_name, vault_key),
             log_path=backend_log,
         )
         backend_base_url = f"http://127.0.0.1:{backend_port}"
         if not _wait_for_http(f"{backend_base_url}/api/health"):
             logger.error("Backend failed to start; log tail:\n%s", _log_tail(backend_log))
             return 1
+        seed_cms_connection(db_dsn(db_name), cms_base_url, vault_key)
 
         if not _frontend_bundle_fresh():
             _build_frontend()

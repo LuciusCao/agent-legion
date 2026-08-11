@@ -9,6 +9,7 @@ from server.app.db.migrations import (
     migrate_custom_node_codes,
     migrate_executor_asr_config_schema,
     migrate_executor_entity_type,
+    migrate_external_connections,
     migrate_local_executor_removal,
     migrate_node_cms_config,
     migrate_versioned_entities,
@@ -16,7 +17,7 @@ from server.app.db.migrations import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 33
+SCHEMA_VERSION = 35
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 # Vault (schema v16): idempotent DDL lives here because the architecture gate
@@ -71,8 +72,9 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_agent_catalog_cutover(conn)
             migrate_executor_entity_type(conn)
             migrate_executor_asr_config_schema(conn)
+            migrate_external_connections(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "agent_requests_cancelled_recent_index"),
+                (SCHEMA_VERSION, "jobs_active_marks_index"),
             )

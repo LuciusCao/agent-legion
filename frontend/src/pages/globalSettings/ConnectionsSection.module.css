@@ -1,0 +1,39 @@
+.jsonTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
+  padding: 8px 10px;
+  border: 1px solid #c3c6cf;
+  border-radius: 8px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+}
+.formRow {
+  margin-bottom: 12px;
+}
+.formLabel {
+  display: block;
+  font-size: 13px;
+  color: #43474e;
+  margin-bottom: 4px;
+}
+.subCard {
+  border: 1px dashed #c3c6cf;
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 16px;
+}
+.okText {
+  font-size: 13px;
+  color: #2e7d32;
+  margin: 4px 0;
+}
+.failText {
+  font-size: 13px;
+  color: #c62828;
+  margin: 4px 0;
+}
+.tokenCell {
+  font-size: 12px;
+  color: #74777f;
+}

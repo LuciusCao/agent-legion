@@ -1,9 +1,9 @@
 """First node of video_knowledge: resolve the input source and download the MP4.
 
 Knowledge-mode intake writes an opaque ``source_ref``; this node resolves it
-against the CMS through the node config chain (config_schema defaults and
-settings-level env-injected ``cms`` keys, overridden by the node's config;
-token resolved from the workspace vault at dispatch), writes the resolved
+against the CMS through the node config chain (config_schema defaults plus
+node/workspace overrides; the connection config and token arrive resolved
+from the instance-level external connection at dispatch), writes the resolved
 fields back to ``video_input.json`` so
 downstream nodes (assemble) see the same fields as the urls intake mode,
 then downloads ``source.mp4``.
@@ -17,11 +17,12 @@ from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
-from server.app.cms import urls as cms_urls
-from server.app.cms.client import get_token
-from server.app.cms.knowledge import lookup_knowledge_video
 from server.app.pipeline.download import download_video as legacy_download_video
+from server.app.services.connection_tokens import report_node_auth_failure
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
+from workspace_libs.cms import urls as cms_urls
+from workspace_libs.cms.client import CmsClientError, get_token
+from workspace_libs.cms.knowledge import lookup_knowledge_video
 
 logger = logging.getLogger(__name__)
 
@@ -31,26 +32,37 @@ def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
     return VideoKnowledgeInput.from_mapping(raw)
 
 
-def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
-    """Effective CMS config: settings-level ``cms`` (env-injected) + node config.
+# Retired node-level connection keys (pre-connection era). They are honored
+# only when no connection was injected (legacy frozen payloads); a resolved
+# connection always wins.
+_LEGACY_CONNECTION_KEYS = ("token", "env", "base_url", "api_url", "knowledge_url")
 
-    Node config carries the config_schema defaults (factory values) plus any
-    node/workspace overrides and wins over the settings-level keys. The node
-    config token arrives already resolved from the vault at dispatch
-    time; it is a workspace-scoped credential, so mark it to win over the
-    env-level global default (same precedence as the retired binding chain).
+
+def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
+    """Effective CMS config: dispatch-injected connection + node overrides.
+
+    The ``connection_config`` block arrives resolved from the instance-level
+    external connection at dispatch time (base URL/endpoint config plus the
+    plaintext token, in memory only). Node/workspace business overrides win.
+    Legacy frozen payloads without a connection fall back to their
+    vault-resolved node ``token``.
     """
-    settings_config = context.get("settings_config")
     merged: dict[str, Any] = {}
-    if isinstance(settings_config, dict):
-        cms = settings_config.get("cms")
-        if isinstance(cms, dict):
-            merged = dict(cms)
     node_config = context.get("node_config")
+    # The dispatch layer injects the resolved connection into the node config
+    # (ExecutionContext.node_config → runtime["node_config"]): non-secret
+    # endpoint config plus the plaintext token, in memory only.
+    injected = node_config.get("connection_config") if isinstance(node_config, dict) else None
+    has_connection = isinstance(injected, dict) and bool(injected)
+    if isinstance(injected, dict) and injected:
+        merged.update({key: value for key, value in injected.items() if value not in (None, "")})
     if isinstance(node_config, dict):
-        merged.update({key: value for key, value in node_config.items() if value not in (None, "")})
-    if merged.get("token"):
-        merged["token_from_binding"] = True
+        for key, value in node_config.items():
+            if key in ("connection", "connection_config") or value in (None, ""):
+                continue
+            if has_connection and key in _LEGACY_CONNECTION_KEYS:
+                continue
+            merged[key] = value
     return merged
 
 
@@ -70,7 +82,15 @@ def _resolve_knowledge_source(
         or cms_urls.knowledge_url(cms_config)
     )
     token = get_token(str(cms_config.get("env", "")), cms_config)
-    lookup = lookup_knowledge_video(video_input.source_ref, api_url, token)
+    try:
+        lookup = lookup_knowledge_video(video_input.source_ref, api_url, token)
+    except CmsClientError as exc:
+        # Only auth-semantics failures (HTTP 401/403, known in-band auth
+        # codes) invalidate the cached connection token; transport and
+        # non-auth in-band errors leave the healthy token alone.
+        if exc.auth_failure:
+            report_node_auth_failure(context)
+        raise
     if lookup.status == "not_found":
         raise RuntimeError(f"knowledge video not found: {video_input.source_ref}")
     source_url = str(lookup.url or "").strip()

@@ -171,15 +171,16 @@ CodeExecutor(...).execute(context)
 ## 8. Security & Data
 
 - `data/` 不提交，配置与密钥不外传。
-- Secret 值必须经 vault（Fernet 加密落 `workspace_secrets`），配置与快照只存
-  `secret_ref`，不得明文落库、出 API 或进日志（VAULT-SECRET-001）。
-- Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS token 只走 env
-  （`AGENT_LEGION_CMS_TOKEN` / `CMS_*`，`BASECMS_*` 为 deprecated alias）或
-  节点配置的 `secret: true` 字段（workspace node config + vault）；
-  全局 `cms:` 段已从 split yaml 退役（出厂默认值在 capability config_schema，
-  base_url 走 env `CMS_BASE_URL` 或节点/workspace 配置），split yaml 写 `cms:`
-  撞 owned-key 校验报错；explicit 单文件配置出现 `cms.token` / `cms.token_gen`
-  启动即报错（G2）；`openclaw` 段已从 split yaml 退役进实例设置（DB
+- Secret 值必须经 vault（Fernet 加密落 `workspace_secrets`；实例级外部服务凭据落
+  `instance_secrets`），配置与快照只存 `secret_ref`，不得明文落库、出 API 或进日志
+  （VAULT-SECRET-001）。
+- Tracked config yaml（`config/*.yaml`）不得包含 secret 值：CMS 等外部服务的凭据与
+  端点配置统一走实例级外部服务连接（admin 全局设置「外部服务连接」，DB
+  `external_connections` + 实例 vault，SECURITY-EXTERNAL-CONNECTION-001），节点/workspace 配置
+  只引用连接 key；env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 通道已退役（启动迁移收编进
+  连接后硬切）；全局 `cms:` 段已从 split yaml 退役（出厂默认值在 capability
+  config_schema），split yaml 写 `cms:` 撞 owned-key 校验报错；explicit 单文件配置出现
+  `cms.token` / `cms.token_gen` 启动即报错（G2）；`openclaw` 段已从 split yaml 退役进实例设置（DB
   `global_settings` 的 `instance` 文档，`/api/admin/instance-settings` 维护），
   split yaml 写 `openclaw:` 撞 owned-key 校验报错；`openclaw.skill_safety`
   写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以 DB
