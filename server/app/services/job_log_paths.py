@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 
 from server.app.services.job_errors import InvalidOperationError
+from server.app.services.job_run_dir_probe import derive_run_dir_from_log_path
 from server.app.settings import Settings
 from server.app.storage_paths import (
     ManagedPathError,
-    derive_run_dir_from_log_path,
     resolve_data_path,
 )
 

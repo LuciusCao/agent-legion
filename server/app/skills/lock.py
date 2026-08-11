@@ -18,6 +18,7 @@ from pathlib import Path
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.skills.config import SkillsLock
 from server.app.skills.manager import SkillManager, SkillStore
+from server.app.skills.refresh import refresh_source
 
 
 def refresh_lock(store: SkillStore, base_dir: Path) -> None:
@@ -29,8 +30,8 @@ def refresh_lock(store: SkillStore, base_dir: Path) -> None:
         workflow, capability = manager._parse_skill_key(skill_key)
         cache_dir = manager._resolve_cache_dir(workflow, capability)
         with manager._cache_lock_for(cache_dir):
-            refreshed[skill_key] = manager._refresh_source(
-                skill_key, config.skills[skill_key], cache_dir
+            refreshed[skill_key] = refresh_source(
+                manager, skill_key, config.skills[skill_key], cache_dir
             )
     with manager._lock_write_lock:
         manager._write_lock_unlocked(SkillsLock(skills=refreshed))

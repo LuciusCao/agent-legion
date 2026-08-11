@@ -50,7 +50,7 @@ def test_resolve_job_dir_candidates_sharded_first(tmp_path) -> None:
 
 
 def test_derive_run_dir_from_log_path_finds_sharded_layout(tmp_path) -> None:
-    from server.app.storage_paths import derive_run_dir_from_log_path
+    from server.app.services.job_run_dir_probe import derive_run_dir_from_log_path
 
     data_dir = tmp_path / "data"
     jobs_dir = data_dir / "jobs"
@@ -65,7 +65,7 @@ def test_derive_run_dir_from_log_path_finds_sharded_layout(tmp_path) -> None:
 
 
 def test_derive_run_dir_from_log_path_finds_legacy_layout(tmp_path) -> None:
-    from server.app.storage_paths import derive_run_dir_from_log_path
+    from server.app.services.job_run_dir_probe import derive_run_dir_from_log_path
 
     data_dir = tmp_path / "data"
     jobs_dir = data_dir / "jobs"
@@ -81,7 +81,7 @@ def test_derive_run_dir_from_log_path_finds_legacy_layout(tmp_path) -> None:
 
 def test_derive_run_dir_from_log_path_probes_past_empty_sharded_dir(tmp_path) -> None:
     """Re-intake can leave an empty sharded dir while runs live in the legacy one."""
-    from server.app.storage_paths import derive_run_dir_from_log_path
+    from server.app.services.job_run_dir_probe import derive_run_dir_from_log_path
 
     data_dir = tmp_path / "data"
     jobs_dir = data_dir / "jobs"
@@ -236,3 +236,82 @@ def test_create_jobs_bulk_resubmit_does_not_precreate_shard_dir(job_db, settings
     with job_db._connect_read() as conn:
         row = conn.execute("select storage_dir from jobs where id = %s", (job_id,)).fetchone()
     assert row["storage_dir"] == job_storage_ref("ws", job_id, sharded=False)
+
+
+def test_job_run_dir_candidates_prefers_authoritative_storage_dir(tmp_path) -> None:
+    from server.app.services.job_run_dir_probe import job_run_dir_candidates
+
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "ws_wf_cand-storage"
+    candidates = job_run_dir_candidates(jobs_dir, "ws", job_storage_ref("ws", job_id), job_id)
+    # storage_dir resolves to the sharded path; the legacy flat probe follows,
+    # and the duplicate sharded probe is deduped.
+    assert candidates == (job_storage_dir(jobs_dir, "ws", job_id), jobs_dir / "ws" / job_id)
+
+
+def test_job_run_dir_candidates_without_storage_dir(tmp_path) -> None:
+    from server.app.services.job_run_dir_probe import job_run_dir_candidates
+
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "ws_wf_cand-plain"
+    candidates = job_run_dir_candidates(jobs_dir, "ws", "", job_id)
+    assert candidates == resolve_job_dir_candidates(jobs_dir, "ws", job_id)
+
+
+def test_job_run_dir_candidates_rejects_escaping_storage_dir(tmp_path) -> None:
+    from server.app.services.job_run_dir_probe import job_run_dir_candidates
+
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    job_id = "ws_wf_cand-evil"
+    candidates = job_run_dir_candidates(jobs_dir, "ws", "../outside", job_id)
+    assert candidates == resolve_job_dir_candidates(jobs_dir, "ws", job_id)
+
+
+def test_job_run_dir_candidates_missing_jobs_dir(tmp_path) -> None:
+    from server.app.services.job_run_dir_probe import job_run_dir_candidates
+
+    jobs_dir = tmp_path / "jobs"  # not created
+    assert job_run_dir_candidates(jobs_dir, "ws", "", "ws_wf_cand-missing") == ()
+
+
+def test_derive_run_dir_from_job_dirs_picks_newest_token(tmp_path) -> None:
+    import os
+
+    from server.app.services.job_run_dir_probe import derive_run_dir_from_job_dirs
+
+    job_dir = tmp_path / "job"
+    old_token = job_dir / "runs" / "node-a" / "tok-old"
+    new_token = job_dir / "runs" / "node-a" / "tok-new"
+    old_token.mkdir(parents=True)
+    new_token.mkdir(parents=True)
+    os.utime(old_token, (1_000_000, 1_000_000))
+    os.utime(new_token, (2_000_000, 2_000_000))
+
+    assert derive_run_dir_from_job_dirs([job_dir], "node-a") == new_token
+
+
+def test_derive_run_dir_from_job_dirs_probes_past_empty_candidate(tmp_path) -> None:
+    """An empty sharded dir must not hide run tokens in the legacy flat one."""
+    from server.app.services.job_run_dir_probe import derive_run_dir_from_job_dirs
+
+    data_dir = tmp_path / "data"
+    job_id = "ws_wf_derive-both"
+    sharded_dir = make_job_dir(data_dir, "ws", job_id)  # no runs/
+    legacy_dir = make_job_dir(data_dir, "ws", job_id, sharded=False)
+    legacy_run = legacy_dir / "runs" / "node-a" / "tok-1"
+    legacy_run.mkdir(parents=True)
+
+    assert derive_run_dir_from_job_dirs([sharded_dir, legacy_dir], "node-a") == legacy_run
+
+
+def test_derive_run_dir_from_job_dirs_empty_inputs(tmp_path) -> None:
+    from server.app.services.job_run_dir_probe import derive_run_dir_from_job_dirs
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    assert derive_run_dir_from_job_dirs([], "node-a") is None
+    assert derive_run_dir_from_job_dirs([job_dir], "") is None
+    assert derive_run_dir_from_job_dirs([job_dir], "node-a") is None

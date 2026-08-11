@@ -335,6 +335,10 @@ def test_lock_source_drift_is_rejected(tmp_path: Path) -> None:
         store=store,
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
+        # No doc cache: this test pins the drift-rejection logic on immediate
+        # visibility of external writes (production instances see them within
+        # the cache TTL instead).
+        doc_cache_ttl_seconds=0,
     )
     manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     store.put_sources(SkillsConfig.model_validate({"skills": _single_skill(repo_uri, "HEAD")}))
@@ -353,6 +357,9 @@ def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
         store=store,
         base_dir=base_dir,
         runs_dir=tmp_path / "runs",
+        # No doc cache: refresh_lock writes through a separate instance, and
+        # this test asserts the new pin is read back immediately.
+        doc_cache_ttl_seconds=0,
     )
     manager.get_skill_dir(_KEY, str(uuid.uuid4()))
     first_commit = manager._load_lock().skills[_KEY].commit
@@ -559,3 +566,110 @@ def test_missing_sources_document_behaves_as_empty(tmp_path: Path) -> None:
     assert manager.load_lock().skills == {}
     with pytest.raises(SkillConfigError, match="DB skill sources"):
         manager.get_skill_dir(_KEY, str(uuid.uuid4()))
+
+
+class _CountingSkillStore:
+    """SkillStore wrapper that counts document reads/writes."""
+
+    def __init__(self, inner: InMemorySkillSourceStore) -> None:
+        self._inner = inner
+        self.get_sources_calls = 0
+        self.get_lock_calls = 0
+
+    def get_sources(self) -> SkillsConfig | None:
+        self.get_sources_calls += 1
+        return self._inner.get_sources()
+
+    def get_lock(self) -> SkillsLock | None:
+        self.get_lock_calls += 1
+        return self._inner.get_lock()
+
+    def put_lock(self, lock: SkillsLock) -> None:
+        self._inner.put_lock(lock)
+
+
+def test_source_and_lock_docs_are_cached_within_ttl(tmp_path: Path) -> None:
+    store = _CountingSkillStore(memory_skill_store(_single_skill("https://example.com/s.git")))
+    manager = SkillManager(
+        store=store,
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    manager._load_config()
+    manager._load_config()
+    manager._load_lock()
+    manager._load_lock()
+
+    assert store.get_sources_calls == 1
+    assert store.get_lock_calls == 1
+
+
+def test_doc_cache_expires_after_ttl(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    clock = [1_000.0]
+    monkeypatch.setattr("server.app.skills.doc_cache.time.monotonic", lambda: clock[0])
+    store = _CountingSkillStore(memory_skill_store(_single_skill("https://example.com/s.git")))
+    manager = SkillManager(
+        store=store,
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+        doc_cache_ttl_seconds=5.0,
+    )
+
+    manager._load_config()
+    clock[0] += 4.9
+    manager._load_config()
+    assert store.get_sources_calls == 1
+
+    clock[0] += 0.2  # now 5.1s past the cached read
+    manager._load_config()
+    assert store.get_sources_calls == 2
+
+
+def test_own_lock_write_refreshes_cached_doc(tmp_path: Path) -> None:
+    store = _CountingSkillStore(memory_skill_store(_single_skill("https://example.com/s.git")))
+    manager = SkillManager(
+        store=store,
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    manager._load_lock()
+    assert store.get_lock_calls == 1
+
+    written = SkillsLock(
+        skills={
+            _KEY: LockedSkillSource(repo="https://example.com/s.git", ref="main", commit="abc123")
+        }
+    )
+    with manager._lock_write_lock:
+        manager._write_lock_unlocked(written)
+
+    loaded = manager._load_lock()
+    assert store.get_lock_calls == 1  # served from the write-through cache
+    assert loaded.skills[_KEY].commit == "abc123"
+
+
+def test_has_commit_memoizes_positive_results(tmp_path: Path) -> None:
+    manager = _make_manager_with_cache(tmp_path)
+    commit = manager._load_lock().skills[_KEY].commit
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
+
+    calls: list[list[str]] = []
+    real_run_git = manager._run_git
+
+    def spy(args: list[str], check: bool = True):  # noqa: ANN202
+        calls.append(args)
+        return real_run_git(args, check=check)
+
+    manager._run_git = spy  # type: ignore[method-assign]
+    assert manager._has_commit(cache_dir, commit) is True
+    assert manager._has_commit(cache_dir, commit) is True
+    assert len(calls) == 1  # second call served from the in-process memo
+
+    # Negative results are never memoized: a later fetch may add the commit.
+    missing = "0" * 40
+    calls.clear()
+    assert manager._has_commit(cache_dir, missing) is False
+    assert manager._has_commit(cache_dir, missing) is False
+    assert len(calls) == 2

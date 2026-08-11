@@ -14,6 +14,7 @@ from filelock import FileLock
 
 from server.app.skills.cache_state import cache_at_commit
 from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
+from server.app.skills.doc_cache import SkillDocCache
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
 
 logger = logging.getLogger(__name__)
@@ -42,6 +43,7 @@ class SkillManager:
         base_dir: Path,
         runs_dir: Path | None = None,
         git_command: list[str] | None = None,
+        doc_cache_ttl_seconds: float = 5.0,
     ) -> None:
         self._store = store
         self.base_dir = Path(base_dir)
@@ -54,6 +56,13 @@ class SkillManager:
         # process; cross-process git concurrency stays on the runs_dir cache
         # locks (filesystem-level, see _cache_lock_for).
         self._lock_write_lock = threading.Lock()
+        # Memoizes the DB-backed source/lock documents on hot paths; see
+        # doc_cache.py for the staleness semantics.
+        self._doc_cache = SkillDocCache(doc_cache_ttl_seconds)
+        # (cache_dir, commit) pairs verified present in the local repo. Git
+        # object stores are append-only under this manager (clone/fetch add
+        # objects, nothing prunes), so only positive results are memoized.
+        self._known_commits: set[tuple[str, str]] = set()
 
     def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
         self._validate_execution_id(execution_id)
@@ -136,7 +145,7 @@ class SkillManager:
         return source
 
     def _load_config(self) -> SkillsConfig:
-        return self._store.get_sources() or SkillsConfig()
+        return self._doc_cache.read("sources", self._store.get_sources) or SkillsConfig()
 
     def _ensure_cached(
         self,
@@ -151,6 +160,10 @@ class SkillManager:
                 raise SkillRepoError(f"local skill repo not found: {cache_dir}")
             cache_dir.parent.mkdir(parents=True, exist_ok=True)
             self._run_git(["clone", repo, str(cache_dir)])
+            # A fresh clone may lack commits the old repo held (e.g. locked
+            # commits detached from any ref), so drop the memoized presence
+            # checks for this cache dir.
+            self._known_commits = {k for k in self._known_commits if k[0] != str(cache_dir)}
         elif not (cache_dir / ".git").is_dir():
             raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
 
@@ -176,7 +189,10 @@ class SkillManager:
         else:
             commit = self._resolve_source_ref(cache_dir, source.ref, in_place=in_place)
             with self._lock_write_lock:
-                lock = self._load_lock()
+                # Read-modify-write must build on a fresh read, not the cached
+                # doc: a stale base could drop entries written by the admin
+                # relock flow (which runs through other instances/processes).
+                lock = self._store.get_lock() or SkillsLock()
                 current = lock.skills.get(skill_key)
                 if current is None:
                     lock.skills[skill_key] = LockedSkillSource(
@@ -190,28 +206,6 @@ class SkillManager:
         if not cache_at_commit(self._run_git, cache_dir, commit):
             self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
             self._run_git(["-C", str(cache_dir), "clean", "-fd"])
-
-    def _refresh_source(
-        self,
-        skill_key: str,
-        source: SkillSourceConfig,
-        cache_dir: Path,
-    ) -> LockedSkillSource:
-        repo = self._normalize_repo(source.repo)
-        in_place = self._is_in_place_source(repo, cache_dir)
-        if not cache_dir.exists():
-            if in_place:
-                raise SkillRepoError(f"local skill repo not found: {cache_dir}")
-            cache_dir.parent.mkdir(parents=True, exist_ok=True)
-            self._run_git(["clone", repo, str(cache_dir)])
-        elif not (cache_dir / ".git").is_dir():
-            raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
-
-        commit = self._resolve_source_ref(cache_dir, source.ref, in_place=in_place)
-        self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
-        self._run_git(["-C", str(cache_dir), "clean", "-fd"])
-        logger.info("Refreshed Pi skill %s to %s", skill_key, commit)
-        return LockedSkillSource(repo=source.repo, ref=source.ref, commit=commit)
 
     def _resolve_source_ref(self, cache_dir: Path, ref: str, *, in_place: bool) -> str:
         if in_place:
@@ -230,8 +224,14 @@ class SkillManager:
         return Path(repo).resolve() == cache_dir.resolve()
 
     def _has_commit(self, cache_dir: Path, commit: str) -> bool:
+        key = (str(cache_dir), commit)
+        if key in self._known_commits:
+            return True
         result = self._run_git(["-C", str(cache_dir), "cat-file", "-t", commit], check=False)
-        return result.returncode == 0 and "commit" in result.stdout
+        found = result.returncode == 0 and "commit" in result.stdout
+        if found:
+            self._known_commits.add(key)
+        return found
 
     def _rev_parse(self, cache_dir: Path, rev: str) -> str:
         # Use ^{commit} to resolve annotated tags to their underlying commit.
@@ -253,7 +253,7 @@ class SkillManager:
         return self._load_lock()
 
     def _load_lock(self) -> SkillsLock:
-        return self._store.get_lock() or SkillsLock()
+        return self._doc_cache.read("lock", self._store.get_lock) or SkillsLock()
 
     def _write_lock_unlocked(self, lock: SkillsLock) -> None:
         """Persist ``lock`` through the store.
@@ -267,6 +267,7 @@ class SkillManager:
             .replace("+00:00", "Z")
         )
         self._store.put_lock(lock)
+        self._doc_cache.store("lock", lock)
 
     def _cache_lock_for(self, cache_dir: Path) -> FileLock:
         key = str(cache_dir.resolve())

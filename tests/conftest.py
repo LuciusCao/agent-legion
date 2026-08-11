@@ -265,6 +265,8 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/test_quality.py",
         "tests/routes/test_quality_replay_routes.py",
         "tests/routes/test_workspace_agent_routes.py",
+        "tests/scripts/test_backfill_comprehension_ids.py",
+        "tests/scripts/test_backfill_comprehension_jobdir_ids.py",
         "tests/services/test_agent_artifacts.py",
         "tests/services/test_agent_broker_claim_scan.py",
         "tests/services/test_agent_version_pin.py",
