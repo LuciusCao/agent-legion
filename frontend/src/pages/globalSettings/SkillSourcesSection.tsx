@@ -57,7 +57,7 @@ function SkillSourcesTable({ skills }: { skills: SkillSourceEntry[] }) {
           {error}
         </p>
       )}
-      <table className={styles.table}>
+      <table className={`${styles.table} ${styles.tableBreak}`}>
         <thead>
           <tr>
             <th>skill</th>
