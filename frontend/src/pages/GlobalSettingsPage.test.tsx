@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import GlobalSettingsPage from './GlobalSettingsPage'
 import { useAuthStore } from '../stores/authStore'
@@ -121,7 +127,51 @@ describe('GlobalSettingsPage', () => {
     expect(await screen.findByDisplayValue('gateway')).toBeInTheDocument()
     expect(screen.getByDisplayValue('model-a')).toBeInTheDocument()
     expect(screen.getByDisplayValue('CNY')).toBeInTheDocument()
-    expect(screen.getByText('模型定价')).toBeInTheDocument()
+    expect(
+      screen.getByRole('heading', { name: '模型定价' })
+    ).toBeInTheDocument()
+  })
+
+  it('renders the sidebar nav with entries for each section', async () => {
+    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+
+    renderPage()
+
+    const nav = await screen.findByRole('navigation')
+    for (const label of [
+      '模型定价',
+      '实例设置',
+      '外部服务连接',
+      'Skill 源管理',
+    ]) {
+      expect(
+        within(nav).getByRole('button', { name: label })
+      ).toBeInTheDocument()
+    }
+    // 默认高亮第一节
+    expect(
+      within(nav).getByRole('button', { name: '模型定价' })
+    ).toHaveAttribute('aria-current', 'true')
+  })
+
+  it('moves the active nav item on click', async () => {
+    vi.mocked(getTokenUsagePricing).mockResolvedValue(pricingConfig)
+    // jsdom 未实现 scrollIntoView，stub 掉以覆盖点击路径
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+
+    renderPage()
+
+    const nav = await screen.findByRole('navigation')
+    fireEvent.click(within(nav).getByRole('button', { name: '外部服务连接' }))
+
+    expect(scrollIntoView).toHaveBeenCalled()
+    expect(
+      within(nav).getByRole('button', { name: '外部服务连接' })
+    ).toHaveAttribute('aria-current', 'true')
+    expect(
+      within(nav).getByRole('button', { name: '模型定价' })
+    ).not.toHaveAttribute('aria-current')
   })
 
   it('renders the instance settings section', async () => {
@@ -130,7 +180,8 @@ describe('GlobalSettingsPage', () => {
     renderPage()
 
     expect(await screen.findByText('实例设置')).toBeInTheDocument()
-    expect(screen.getByLabelText('日志保留天数')).toHaveValue(30)
+    // 实例设置表单异步加载，label 需等待（导航按钮会提前匹配标题文本）
+    expect(await screen.findByLabelText('日志保留天数')).toHaveValue(30)
     expect(screen.getByText(/需重启服务才能生效/)).toBeInTheDocument()
   })
 
