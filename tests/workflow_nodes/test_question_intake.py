@@ -84,6 +84,69 @@ def test_by_id_fetches_detail_and_writes_questions(
     ]
 
 
+def test_by_id_cms_error_payload_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """In-band CMS errors (e.g. code=10015 auth failure) must fail the node."""
+    context = _context(monkeypatch, {"api_url": "https://cms.example.com/detail"})
+    monkeypatch.setattr(
+        question_intake,
+        "fetch_question_detail",
+        lambda qid, url, token: _FakeDetail(
+            qid, qid, {}, {"code": 10015, "message": "JWT验证失败", "data": None}
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="code=10015"):
+        question_intake.run(_job(), tmp_path, context)
+
+    assert not (tmp_path / "questions.json").exists()
+
+
+def test_by_id_blank_stem_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """A successful-looking response without a usable stem is garbage input."""
+    context = _context(monkeypatch, {"api_url": "https://cms.example.com/detail"})
+    monkeypatch.setattr(
+        question_intake,
+        "fetch_question_detail",
+        lambda qid, url, token: _FakeDetail(qid, "Title", {"stem": "  "}, {"code": 0}),
+    )
+
+    with pytest.raises(RuntimeError, match="缺少题干"):
+        question_intake.run(_job(), tmp_path, context)
+
+    assert not (tmp_path / "questions.json").exists()
+
+
+def test_by_knowledge_cms_error_payload_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    payload = {"intake_mode": {"key": "batch_by_knowledge", "input_field": "knowledge_codes"}}
+    context = _context(
+        monkeypatch,
+        {
+            "question_list_url": "https://cms.example.com/list",
+            "api_url": "https://cms.example.com/detail",
+        },
+        source_payload=payload,
+    )
+    monkeypatch.setattr(
+        question_intake,
+        "list_questions_by_knowledge",
+        lambda code, url, token: [_FakeSummary("q-1", "T1", {})],
+    )
+    monkeypatch.setattr(
+        question_intake,
+        "fetch_question_detail",
+        lambda qid, url, token: _FakeDetail(
+            qid, qid, {}, {"code": 10015, "message": "JWT验证失败", "data": None}
+        ),
+    )
+
+    with pytest.raises(RuntimeError, match="code=10015"):
+        question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
+
+    assert not (tmp_path / "questions.json").exists()
+
+
 def test_by_id_without_cms_writes_base_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

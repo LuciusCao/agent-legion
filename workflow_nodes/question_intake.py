@@ -83,6 +83,30 @@ def _detail_payload(detail: Any, fallback_id: str, fallback_title: str) -> dict[
     }
 
 
+def _validate_fetched_detail(detail: Any, question_id: str) -> None:
+    """Fail fast on CMS error payloads and empty stems.
+
+    The CMS detail endpoint signals auth/parameter failures in-band via a
+    non-zero ``code`` with ``data: null``; treating such payloads as valid
+    questions poisons every downstream node (empty stem → empty key info →
+    business validation failures). An error payload or a blank stem means the
+    fetch did not produce a usable question, so the node must fail here as a
+    technical failure instead of forwarding garbage.
+    """
+    payload = getattr(detail, "payload", None)
+    if isinstance(payload, dict):
+        code = payload.get("code")
+        if code is not None and code != 0:
+            message = payload.get("message") or ""
+            raise RuntimeError(
+                f"CMS 返回错误: code={code} message={message} (question_id={question_id})"
+            )
+    normalized = getattr(detail, "normalized", None)
+    stem = normalized.get("stem") if isinstance(normalized, dict) else None
+    if not str(stem or "").strip():
+        raise RuntimeError(f"CMS 响应缺少题干 (question_id={question_id})")
+
+
 def run(
     job: dict[str, Any],
     job_dir: Path,
@@ -126,6 +150,7 @@ def run(
         for summary in summaries:
             check_cancellation(context)
             detail = fetch_question_detail(summary.question_id, detail_url, token)
+            _validate_fetched_detail(detail, summary.question_id)
             questions.append(_detail_payload(detail, summary.question_id, summary.title))
     else:
         api_url = str(
@@ -138,6 +163,7 @@ def run(
             token = get_token(str(cms_config.get("env", "")), cms_config)
             detail = fetch_question_detail(source_id, str(api_url), token)
             check_cancellation(context)
+            _validate_fetched_detail(detail, source_id)
             questions.append(_detail_payload(detail, source_id, str(job["title"])))
         else:
             logger.info("  no CMS configured, using base payload")
