@@ -2,11 +2,10 @@
 
 Knowledge-mode intake writes an opaque ``source_ref``; the download node
 (``workflow_nodes/video_download.py``) resolves it against the CMS through
-the node config chain (config_schema defaults and settings-level env-injected
-``cms`` keys, overridden by ``runtime["node_config"]``; the dispatch layer
-already resolved any vault
-secret_ref into a plaintext token) and writes the resolved fields back to
-video_input.json before downloading.
+the node config chain (config_schema defaults, overridden by
+``runtime["node_config"]``; the dispatch layer already resolved the external
+connection token into the config in memory) and writes the resolved fields
+back to video_input.json before downloading.
 """
 
 from __future__ import annotations
@@ -16,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from server.app.cms.client import CmsVideoLookup
 from workflow_nodes.video_download import run as download_video
+from workspace_libs.cms.client import CmsVideoLookup
 
 PLAINTEXT = "knowledge-video-cms-token"
 
@@ -54,7 +53,7 @@ def test_download_urls_mode_downloads_source_url_directly(tmp_path, monkeypatch)
     def fail_on_cms(*args, **kwargs):
         raise AssertionError("urls mode must not call the CMS")
 
-    monkeypatch.setattr("server.app.cms.knowledge.lookup_knowledge_video", fail_on_cms)
+    monkeypatch.setattr("workspace_libs.cms.knowledge.lookup_knowledge_video", fail_on_cms)
     downloaded = []
     monkeypatch.setattr(
         "workflow_nodes.video_download.legacy_download_video",

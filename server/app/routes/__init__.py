@@ -27,6 +27,7 @@ from .agent_workers import create_agent_workers_router
 from .agents import create_agents_router
 from .artifacts import create_artifacts_router
 from .common import create_common_router
+from .connections import create_connections_router
 from .executor_definitions import create_executor_definitions_router
 from .instance_settings import create_instance_settings_router
 from .job_route_group import include_job_routes
@@ -84,6 +85,7 @@ def create_router(
     # require_admin themselves, so they must not go through secured().
     router.include_router(create_instance_settings_router(job_db, settings))
     router.include_router(create_skill_sources_router(settings))
+    router.include_router(create_connections_router(settings))
     router.include_router(create_workflow_node_files_router(settings))
     secured(create_packages_router(job_db, settings, job_packages))
     secured(create_worker_router(workspace_worker_control))

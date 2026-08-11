@@ -16,17 +16,15 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.executors.config import CodeExecutorConfig
 from server.app.executors.scheduling.capacity import CapacitySnapshot
+from server.app.services.job_errors import JobServiceError
 from server.app.services.node_codes import resolve_dispatch_node_code
-from server.app.services.node_config import (
-    dispatch_effective_config,
-    executor_definition_capability_schema,
-)
-from server.app.services.vault import VaultError, VaultService
+from server.app.services.vault import VaultError
 from server.app.workflow_worker.agent_claim import (
     cached_batch_payload,
     claim_agent_node,
     fail_node_config,
 )
+from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.executor_claim import claim_executor_node
 from server.app.workflow_worker.routing import resolve_node_route
 from server.app.workflow_worker.shards import assemble_reduce_inputs, claim_shard_node
@@ -154,19 +152,12 @@ def try_claim_and_submit(
 
     try:
         batch_payload = cached_batch_payload(worker, job)
-        node_config = dispatch_effective_config(
-            executor_definition_capability_schema(
-                worker.settings.executor_definitions, executor_id, node.capability
-            ),
-            node,
-            workflow_key,
-            workspace,
-            batch_payload,
+        # Frozen snapshot → vault secret_refs → connection config + token;
+        # all in-memory only (VAULT-SECRET-001, CONFIG-MANIFEST-001).
+        node_config = resolve_dispatch_node_config(
+            worker, executor_id, node, workflow_key, workspace_id, workspace, batch_payload
         )
-        # Resolve vault secret_refs in memory only; frozen payloads keep refs (VAULT-SECRET-001).
-        vault = VaultService(worker.job_db.path, worker.settings.config)
-        node_config = vault.resolve_secret_refs(node_config, workspace_id)
-    except (ValueError, VaultError) as exc:
+    except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
     # Custom node code (EXEC-CODE-002): only code-kind executors can carry

@@ -55,16 +55,16 @@ exemptions:
     explicit environment override. Agent Worker secret-file configuration is
     resolved at the same trusted boundary. The retired yaml cms
     credential keys are rejected at this boundary with migration guidance
-    (config governance G2), as are the retired yaml agents catalog and
+    (config governance G2; CMS credentials themselves moved to instance-level
+    external connections, schema v34), as are the retired yaml agents catalog and
     workflows.pi block (agent config governance phase 3, schema v27). The
     AGENT_LEGION_DATABASE_URL
     environment override lives here too (config
-    governance G4), as does the CMS_* / BASECMS_* alias validation hook
-    (de-identification D3). Extract database settings into the configuration
+    governance G4). Extract database settings into the configuration
     package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 240
+  ceiling: 207
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router, the artifact
