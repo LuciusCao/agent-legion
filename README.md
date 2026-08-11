@@ -49,9 +49,12 @@ It ships with two production workflows:
   statistics, and failure-category batch rerun.
 - **Local ASR.** Subtitle transcription via whisper.cpp with automatic
   fallback to SenseVoice when the result is missing, too short, or degenerate.
-- **Secrets vault.** Workspace secrets (CMS tokens, `secret: true` binding
-  fields) are Fernet-encrypted at rest; configs and snapshots carry only
-  `secret_ref` — never plaintext.
+- **Secrets vault.** Workspace secrets (`secret: true` binding fields) are
+  Fernet-encrypted at rest; configs and snapshots carry only `secret_ref` —
+  never plaintext. Instance-level external service credentials (e.g. CMS)
+  live on admin-managed connections (admin settings → 外部服务连接),
+  Fernet-encrypted in `instance_secrets` with acquired tokens cached in
+  `connection_tokens`.
 - **Multi-user with workspace ACL.** Cookie sessions + CSRF guard, admin user
   management, per-workspace editor/viewer membership.
 - **PostgreSQL control plane.** One authoritative database coordinates
@@ -180,8 +183,9 @@ provider's `FileNotFoundError` at transcription time.
 Secrets are never written to yaml: database URL comes from
 `AGENT_LEGION_DATABASE_URL`, the vault master key from
 `AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`, the bootstrap admin password from
-`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`, and CMS tokens from `CMS_*` env vars
-or the workspace vault. Full reference:
+`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`, and external service credentials
+(e.g. CMS) live on instance-level connections (admin settings → 外部服务连接,
+Fernet-encrypted in `instance_secrets`). Full reference:
 [docs/architecture/backend.md](docs/architecture/backend.md).
 
 ## Agent Runtimes

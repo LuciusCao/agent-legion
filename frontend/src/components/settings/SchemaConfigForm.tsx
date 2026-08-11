@@ -5,6 +5,11 @@ import {
   configHelperText,
   configPlaceholder,
 } from './SecretConfigField'
+import {
+  ConnectionKeyDatalist,
+  connectionListProp,
+  useConnectionOptions,
+} from './connectionOptions'
 
 interface Props {
   schema: ConfigSchema
@@ -21,6 +26,9 @@ export function SchemaConfigForm({
 }: Props) {
   const properties = schema.properties ?? {}
   const keys = Object.keys(properties)
+  const { datalistId, options: connectionOptions } = useConnectionOptions(
+    properties['connection']
+  )
   if (keys.length === 0) {
     return <div style={{ fontSize: 12, color: '#616161' }}>无可配置参数</div>
   }
@@ -135,6 +143,7 @@ export function SchemaConfigForm({
         value={value ?? ''}
         onChange={(event) => setValue(key, event.target.value)}
         helperText={configHelperText(prop)}
+        inputProps={connectionListProp(key, datalistId)}
         fullWidth
       />
     )
@@ -143,6 +152,7 @@ export function SchemaConfigForm({
   return (
     <div style={{ display: 'grid', gap: 8 }}>
       {keys.map((key) => renderField(key, properties[key]))}
+      <ConnectionKeyDatalist id={datalistId} options={connectionOptions} />
     </div>
   )
 }

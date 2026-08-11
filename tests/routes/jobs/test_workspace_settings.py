@@ -1,5 +1,20 @@
-import requests
-from cryptography.fernet import Fernet
+from server.app.services.job_errors import InvalidOperationError
+
+
+class _FakeConnectionService:
+    """Stand-in for ConnectionService: canned probe result or failure."""
+
+    def __init__(self, probe_result=None, probe_error=None):
+        self._probe_result = probe_result
+        self._probe_error = probe_error
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def probe(self, key):
+        if self._probe_error is not None:
+            raise self._probe_error
+        return self._probe_result
 
 
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
@@ -99,72 +114,38 @@ def test_patch_settings_nodes_saves_node_config(client_factory):
     assert fetched.json()["settings"]["nodeConfig"]["fetch_questions"]["subject_id"] == "7"
 
 
-def test_test_connection_uses_global_cms_url(client_factory, monkeypatch):
-    monkeypatch.setenv("CMS_TOKEN", "env-token")
+def test_test_connection_probes_workspace_connection(client_factory, monkeypatch):
+    monkeypatch.setattr(
+        "server.app.services.workspace_connection_test.ConnectionService",
+        _FakeConnectionService(probe_result={"ok": True, "message": "连接成功 (HTTP 200)"}),
+    )
 
-    def configure(app):
-        app.state.settings.config["cms"] = {
-            "question_detail_url": "http://cms.example.com/question/detail",
-        }
-
-    with client_factory(workflows_enabled=True, configure=configure) as c:
+    with client_factory(workflows_enabled=True) as c:
         ws_id = _create_workspace(c)
         response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
-    assert "全局 env" in response.json()["message"]
+    # The workspace resolves to the capability's default connection key.
+    assert "cms-internal" in response.json()["message"]
 
 
-def test_test_connection_fails_when_cms_url_missing(client_factory):
-    def configure(app):
-        app.state.settings.config["cms"] = {}
-
-    with client_factory(workflows_enabled=True, configure=configure) as c:
+def test_test_connection_fails_when_connection_missing(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         ws_id = _create_workspace(c)
         response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
 
-    assert response.status_code == 400
-    assert "CMS URL 未配置" in response.json()["detail"]
+    assert response.status_code == 404
+    assert "cms-internal" in response.json()["detail"]
 
 
-def test_test_connection_node_config_token_overrides_env(client_factory, monkeypatch):
-    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    monkeypatch.setenv("CMS_TOKEN", "env-token")
+def test_test_connection_reports_probe_failure(client_factory, monkeypatch):
+    monkeypatch.setattr(
+        "server.app.services.workspace_connection_test.ConnectionService",
+        _FakeConnectionService(probe_error=InvalidOperationError("服务可达但鉴权失败 (HTTP 401)")),
+    )
 
-    def configure(app):
-        app.state.settings.config["cms"] = {
-            "question_detail_url": "http://cms.example.com/question/detail",
-        }
-
-    with client_factory(workflows_enabled=True, configure=configure) as c:
-        ws_id = _create_workspace(c)
-        patch = c.patch(
-            f"/api/workspaces/{ws_id}/settings/nodes",
-            json={"nodeConfig": {"fetch_questions": {"token": "node-token"}}},
-        )
-        assert patch.status_code == 200, patch.text
-        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
-
-    assert response.status_code == 200
-    assert response.json()["ok"] is True
-    assert "workspace node config" in response.json()["message"]
-
-
-def test_test_connection_reports_auth_failure(client_factory, monkeypatch):
-    class _Unauthorized:
-        status_code = 401
-
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: _Unauthorized())
-
-    def configure(app):
-        app.state.settings.config["cms"] = {
-            "question_detail_url": "http://cms.internal/question/detail",
-            "token": "global_token",
-        }
-
-    with client_factory(workflows_enabled=True, configure=configure) as c:
+    with client_factory(workflows_enabled=True) as c:
         ws_id = _create_workspace(c)
         response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
 

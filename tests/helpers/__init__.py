@@ -43,12 +43,6 @@ def make_workflow_worker(
     # Executor definitions are DB-backed: hydrate the seeded catalog (the app
     # does this in create_app; this helper builds the registry directly).
     app_main.hydrate_executor_definitions(settings)
-    # Avoid real CMS/network calls in tests: strip the env-injected global cms
-    # config (conftest points CMS_BASE_URL at the fake CMS host) so the node
-    # resolves no api_url and writes the base payload. The settings travel
-    # with the executor context into isolated child processes (which do not
-    # inherit parent monkeypatches).
-    settings.config["cms"] = {}
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {

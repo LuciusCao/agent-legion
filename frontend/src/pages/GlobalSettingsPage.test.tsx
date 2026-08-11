@@ -28,6 +28,15 @@ vi.mock('../api/skillSources', () => ({
   relockSkillSources: vi.fn(),
 }))
 
+vi.mock('../api/connections', () => ({
+  getConnections: vi.fn().mockResolvedValue({ connections: [] }),
+  getConnectionTypes: vi.fn().mockResolvedValue({ types: [] }),
+  createConnection: vi.fn(),
+  updateConnection: vi.fn(),
+  deleteConnection: vi.fn(),
+  testConnection: vi.fn(),
+}))
+
 const adminUser: UserResponse = {
   id: 'u1',
   username: 'admin',

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Any
 from urllib.parse import parse_qs, parse_qsl, urlencode, urlparse, urlunparse
 
-from server.app.cms.client import (
+from workspace_libs.cms.client import (
     CmsVideoLookup,
     _fetch_json,
     require_api_url,

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.cms.client import CmsVideoLookup, _fetch_json, require_api_url
+from workspace_libs.cms.client import CmsVideoLookup, _fetch_json, require_api_url
 
 # ---------------------------------------------------------------------------
 # Schema helpers – strict field access matching the actual CMS API contract

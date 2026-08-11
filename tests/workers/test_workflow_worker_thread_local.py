@@ -4,7 +4,10 @@ import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
+from cryptography.fernet import Fernet
+
 from server.app.jobs import JobQueries
+from server.app.services.connections import ConnectionService
 from server.app.services.workflow_revision_format import serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
@@ -344,12 +347,19 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
 
 def test_make_workflow_worker_runs_question_comprehension_info_local_node(
-    tmp_path: Path,
+    tmp_path: Path, monkeypatch
 ) -> None:
     # fetch_questions runs on the code-default executor in an isolated child
-    # process, which does not inherit parent monkeypatches. make_workflow_worker
-    # blanks the settings-level cms config, so the node resolves no CMS api_url
-    # and writes the base payload without any network call.
+    # process, which does not inherit parent monkeypatches. The dispatch layer
+    # resolves the node's connection (schema default "cms-internal") in the
+    # parent and injects it, so the test seeds a static_bearer connection
+    # without a base_url: the node derives no CMS api_url and writes the base
+    # payload without any network call.
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    ConnectionService(TEST_DATABASE_URL, {}).create(
+        "cms-internal", "static_bearer", "CMS", {"token": "tok-123"}
+    )
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
     workspace = queries.create_workspace(

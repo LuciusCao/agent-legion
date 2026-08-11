@@ -28,6 +28,7 @@ SCHEDULER_FORBIDDEN = (
     "subprocess",
 )
 ROUTE_FORBIDDEN = (
+    "workspace_libs.cms",
     "server.app.cms",
     "cms",
 )

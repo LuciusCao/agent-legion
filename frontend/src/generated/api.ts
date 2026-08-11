@@ -4,6 +4,76 @@
  */
 
 export interface paths {
+  '/api/admin/connection-types': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Connection Types */
+    get: operations['list_connection_types_api_admin_connection_types_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/connections': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Connections */
+    get: operations['list_connections_api_admin_connections_get']
+    put?: never
+    /** Create Connection */
+    post: operations['create_connection_api_admin_connections_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/connections/{key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Update Connection */
+    put: operations['update_connection_api_admin_connections__key__put']
+    post?: never
+    /** Delete Connection */
+    delete: operations['delete_connection_api_admin_connections__key__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/admin/connections/{key}/test': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Test Connection */
+    post: operations['test_connection_api_admin_connections__key__test_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/instance-settings': {
     parameters: {
       query?: never
@@ -2402,6 +2472,91 @@ export interface components {
       max_concurrency?: number | null
       /** Worker Id */
       worker_id: string
+    }
+    /** ConnectionCreate */
+    ConnectionCreate: {
+      /**
+       * Config
+       * @default {}
+       */
+      config: {
+        [key: string]: unknown
+      }
+      /**
+       * Display Name
+       * @default
+       */
+      display_name: string
+      /** Key */
+      key: string
+      /** Type */
+      type: string
+    }
+    /** ConnectionListResponse */
+    ConnectionListResponse: {
+      /** Connections */
+      connections: components['schemas']['ConnectionView'][]
+    }
+    /** ConnectionTestResponse */
+    ConnectionTestResponse: {
+      /** Message */
+      message: string
+      /** Ok */
+      ok: boolean
+    }
+    /** ConnectionTokenStatus */
+    ConnectionTokenStatus: {
+      /** Expires At */
+      expires_at?: string | null
+      /** Refreshed At */
+      refreshed_at?: string | null
+    }
+    /** ConnectionTypeView */
+    ConnectionTypeView: {
+      /** Description */
+      description: string
+      /** Required Config Keys */
+      required_config_keys: string[]
+      /** Secret Keys */
+      secret_keys: string[]
+      /** Type */
+      type: string
+    }
+    /** ConnectionTypesResponse */
+    ConnectionTypesResponse: {
+      /** Types */
+      types: components['schemas']['ConnectionTypeView'][]
+    }
+    /** ConnectionUpdate */
+    ConnectionUpdate: {
+      /** Config */
+      config?: {
+        [key: string]: unknown
+      } | null
+      /** Display Name */
+      display_name?: string | null
+      /** Enabled */
+      enabled?: boolean | null
+    }
+    /** ConnectionView */
+    ConnectionView: {
+      /** Config */
+      config: {
+        [key: string]: unknown
+      }
+      /** Created At */
+      created_at?: string | null
+      /** Display Name */
+      display_name: string
+      /** Enabled */
+      enabled: boolean
+      /** Key */
+      key: string
+      token?: components['schemas']['ConnectionTokenStatus'] | null
+      /** Type */
+      type: string
+      /** Updated At */
+      updated_at?: string | null
     }
     /** ContinueJobRequest */
     ContinueJobRequest: Record<string, never>
@@ -5029,6 +5184,176 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
+  list_connection_types_api_admin_connection_types_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionTypesResponse']
+        }
+      }
+    }
+  }
+  list_connections_api_admin_connections_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionListResponse']
+        }
+      }
+    }
+  }
+  create_connection_api_admin_connections_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConnectionCreate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionView']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_connection_api_admin_connections__key__put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ConnectionUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionView']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_connection_api_admin_connections__key__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionTestResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  test_connection_api_admin_connections__key__test_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ConnectionTestResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_instance_settings_api_admin_instance_settings_get: {
     parameters: {
       query?: never
