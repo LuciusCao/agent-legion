@@ -262,3 +262,22 @@ def test_worker_delta_picks_up_new_job(tmp_path: Path) -> None:
 
     block_event.set()
     worker.stop()
+
+
+def test_full_marks_query_never_seq_scans(job_db: JobQueries) -> None:
+    """Pin the performance property: the periodic full rescan must stay index
+    driven. Without the schema v34 partial index the planner seq-scans and
+    sorts the whole jobs table once per rescan window (production: 138k rows,
+    ~0.9s idle / 1-3s under load, flushing the page cache each time)."""
+    from server.app.jobs.queries.job_scan_marks import _ACTIVE_MARK_COLUMNS
+
+    query = (
+        f"select {_ACTIVE_MARK_COLUMNS} from jobs"
+        " where workflow_key=%s and status not in ('completed','failed')"
+        " order by created_at desc"
+    )
+    with job_db.connect() as conn:
+        rows = conn.execute(f"explain {query}", ("questions",)).fetchall()
+
+    plan = "\n".join(str(row[0]) for row in rows)
+    assert "Seq Scan on jobs" not in plan
