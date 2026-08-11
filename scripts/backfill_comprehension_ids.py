@@ -137,8 +137,7 @@ def scan(dsn: DatabaseDsn, artifacts_dir: Path) -> ScanResult:
     result = ScanResult()
     with read_connection(dsn) as conn:
         rows = conn.execute(
-            "select job_id, name, hash from artifact_refs where name = any(%s)"
-            " order by hash, name",
+            "select job_id, name, hash from artifact_refs where name = any(%s) order by hash, name",
             (list(SCAN_NAMES),),
         ).fetchall()
     last_key: tuple[str, str] | None = None
