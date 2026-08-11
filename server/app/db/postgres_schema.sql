@@ -353,7 +353,7 @@ create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status
 -- Workflow worker incremental scan (list_changed_job_marks) filters by
 -- workflow_key and updated_at > watermark on every poll pass.
 create index if not exists idx_jobs_workflow_updated on jobs(workflow_key, updated_at);
--- Workflow worker periodic full rescan (list_active_job_marks, schema v34):
+-- Workflow worker periodic full rescan (list_active_job_marks, schema v35):
 -- filters active rows of one workflow ordered by created_at desc. Partial so
 -- terminal rows (the overwhelming majority on a busy instance) neither bloat
 -- the index nor force a seq scan + sort of the whole jobs table every pass.

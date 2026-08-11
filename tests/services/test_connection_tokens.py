@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 import time
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 from cryptography.fernet import Fernet
@@ -205,18 +207,45 @@ def test_inject_connection_config_legacy_token_passthrough(services) -> None:
 
 
 def test_report_node_auth_failure_invalidates_cached_token(services, job_db) -> None:
+    """Pin the real executor wiring: code.py pops ``_job_db_path``/``_jobs_dir``
+    and injects ``runtime["job_db"]`` (a JobQueries instance) before invoking
+    node code, so the hook must resolve the DSN from that handle."""
     connections, tokens = services
     connections.create("c1", "static_bearer", "", {"token": "tok-abc"})
     assert tokens.get_token("c1") == "tok-abc"
     assert connections.get("c1")["token"] is not None
 
-    report_node_auth_failure(
-        {"node_config": {"connection": "c1"}, "_job_db_path": str(job_db.path)}
-    )
+    # Reproduce the runtime shape server/app/executors/code.py builds.
+    runtime: dict = {
+        "node_config": {"connection": "c1"},
+        "_job_db_path": str(job_db.path),
+        "_jobs_dir": str(job_db.jobs_dir),
+    }
+    job_db_path = runtime.pop("_job_db_path", None)
+    jobs_dir = runtime.pop("_jobs_dir", None)
+    if job_db_path and jobs_dir:
+        from server.app.jobs import JobQueries
+
+        runtime["job_db"] = JobQueries(str(job_db_path), Path(jobs_dir))
+
+    report_node_auth_failure(runtime)
 
     # The cached token row is gone; the next get_token re-acquires.
     assert connections.get("c1")["token"] is None
     assert tokens.get_token("c1") == "tok-abc"
+
+
+def test_report_node_auth_failure_job_db_path_fallback(services, job_db) -> None:
+    """Runtimes that still carry the raw ``_job_db_path`` keep working."""
+    connections, tokens = services
+    connections.create("c1", "static_bearer", "", {"token": "tok-abc"})
+    assert tokens.get_token("c1") == "tok-abc"
+
+    report_node_auth_failure(
+        {"node_config": {"connection": "c1"}, "_job_db_path": str(job_db.path)}
+    )
+
+    assert connections.get("c1")["token"] is None
 
 
 def test_report_node_auth_failure_silent_without_context(job_db) -> None:
@@ -224,6 +253,7 @@ def test_report_node_auth_failure_silent_without_context(job_db) -> None:
     report_node_auth_failure({})
     report_node_auth_failure({"node_config": {"connection": "c1"}})
     report_node_auth_failure({"node_config": "not-a-mapping", "_job_db_path": "x"})
+    report_node_auth_failure({"node_config": {"connection": "c1"}, "job_db": object()})
     report_node_auth_failure({"_job_db_path": str(job_db.path)})
     # Reporting must never mask the original failure: an unreachable DB is
     # swallowed (logged), not raised.
@@ -233,3 +263,58 @@ def test_report_node_auth_failure_silent_without_context(job_db) -> None:
             "_job_db_path": "postgresql://127.0.0.1:1/unreachable",
         }
     )
+
+
+def test_get_token_single_flight_under_concurrency(services, monkeypatch) -> None:
+    """Concurrent get_token calls on one connection trigger exactly one
+    credential exchange; every caller gets the same token."""
+    calls: list[str] = []
+    release = threading.Event()
+
+    def _authenticate(config: dict, secrets: dict) -> AcquiredToken:
+        # Hold the exchange open until every caller is queued behind the row
+        # lock, so a missing single-flight guard would show up as extra calls.
+        calls.append("exchange")
+        release.wait(timeout=10)
+        return AcquiredToken(token="tok-shared", expires_at=None)
+
+    monkeypatch.setitem(
+        connection_adapters._REGISTRY,
+        "blocking_refresh",
+        ConnectionAdapter(
+            type="blocking_refresh",
+            description="test adapter blocking inside authenticate",
+            required_config_keys=(),
+            secret_keys=("token",),
+            authenticate=_authenticate,
+            probe=lambda config, secrets: "ok",
+        ),
+    )
+    connections, tokens = services
+    connections.create("c1", "blocking_refresh", "", {"token": "seed"})
+
+    results: list[str] = []
+    errors: list[BaseException] = []
+    barrier = threading.Barrier(5)
+
+    def _worker() -> None:
+        try:
+            barrier.wait(timeout=10)
+            results.append(tokens.get_token("c1"))
+        except BaseException as exc:  # noqa: BLE001 - surfaced by the assertion
+            errors.append(exc)
+
+    threads = [threading.Thread(target=_worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    barrier.wait(timeout=10)  # all workers are now racing get_token
+    deadline = time.time() + 10
+    while not calls and time.time() < deadline:
+        time.sleep(0.01)
+    release.set()
+    for thread in threads:
+        thread.join(timeout=10)
+
+    assert not errors
+    assert results == ["tok-shared"] * 4
+    assert calls == ["exchange"]

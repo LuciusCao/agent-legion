@@ -4,6 +4,14 @@ Resolves which instance-level external connection the workspace's
 fetch_questions node points at and delegates to that connection's adapter
 probe, so the UI can distinguish "misconfigured" from "unreachable" from
 "bad token". Secret resolution happens in memory only (VAULT-SECRET-001).
+
+Intentional security boundary: this runs under the workspace settings route,
+which any authenticated workspace member may call, so members can probe an
+admin-managed instance-level connection. That is accepted by design — the
+probe URL is fixed by the admin-owned connection config (the caller cannot
+aim it elsewhere) and the result is only a classified ok/message string, so
+the information leak is limited to "is this connection healthy right now".
+Do not widen the surface (no caller-supplied URLs, no response bodies).
 """
 
 from typing import Any

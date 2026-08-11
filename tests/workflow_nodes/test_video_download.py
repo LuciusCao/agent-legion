@@ -72,8 +72,9 @@ def test_knowledge_lookup_prefers_injected_connection_config(
 def test_knowledge_lookup_cms_error_reports_auth_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An auth-class CMS failure must invalidate the cached connection token
-    via report_node_auth_failure before the error propagates."""
+    """An auth-class CMS failure (HTTP 401/403 or a known in-band auth code)
+    must invalidate the cached connection token via report_node_auth_failure
+    before the error propagates."""
     _write_video_input(tmp_path)
     context = {
         "node_config": {
@@ -83,7 +84,7 @@ def test_knowledge_lookup_cms_error_reports_auth_failure(
     }
 
     def _lookup(code: str, url: str, token: str) -> CmsVideoLookup:
-        raise CmsClientError("auth failed")
+        raise CmsClientError("CMS 返回错误: code=10015 message=JWT验证失败", auth_failure=True)
 
     monkeypatch.setattr(video_download, "lookup_knowledge_video", _lookup)
     reported: list[dict[str, Any]] = []
@@ -91,7 +92,35 @@ def test_knowledge_lookup_cms_error_reports_auth_failure(
         video_download, "report_node_auth_failure", lambda ctx: reported.append(ctx)
     )
 
-    with pytest.raises(CmsClientError, match="auth failed"):
+    with pytest.raises(CmsClientError, match="code=10015"):
         video_download.run({}, tmp_path, context)
 
     assert reported == [context]
+
+
+def test_knowledge_lookup_transport_error_keeps_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Transport/non-auth failures (5xx/timeout/DNS, non-auth in-band codes)
+    must NOT invalidate the healthy cached token."""
+    _write_video_input(tmp_path)
+    context = {
+        "node_config": {
+            "connection": "cms-internal",
+            "connection_config": {"token": "conn-token", "api_url": "https://x.example.com"},
+        }
+    }
+
+    def _lookup(code: str, url: str, token: str) -> CmsVideoLookup:
+        raise CmsClientError("CMS request failed: 500 Server Error")
+
+    monkeypatch.setattr(video_download, "lookup_knowledge_video", _lookup)
+    reported: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        video_download, "report_node_auth_failure", lambda ctx: reported.append(ctx)
+    )
+
+    with pytest.raises(CmsClientError, match="CMS request failed"):
+        video_download.run({}, tmp_path, context)
+
+    assert reported == []

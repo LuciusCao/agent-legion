@@ -74,6 +74,49 @@ def test_update_secret_echo_keeps_stored_value(service, job_db, settings) -> Non
     assert vault.get(connection_secret_name("cms-internal", "token")) == "tok-123"
 
 
+def test_update_omitted_secret_is_inherited(service, job_db, settings) -> None:
+    """A secret field left out of the update payload keeps its stored value
+    (省略即保留, mirroring workspace node config semantics)."""
+    _create_static(service)
+    view = service.update("cms-internal", config={"base_url": "http://y"})
+
+    assert view["config"]["base_url"] == "http://y"
+    assert view["config"]["token"] == {"secret_set": True}
+    raw = service._decode_config(service._row("cms-internal"))
+    assert raw["token"] == {"secret_ref": "conn:cms-internal:token"}
+    vault = InstanceVaultService(job_db.path, settings.config)
+    assert vault.get(connection_secret_name("cms-internal", "token")) == "tok-123"
+
+
+def test_update_empty_secret_clears_vault_entry(service, job_db, settings) -> None:
+    """An explicit empty string clears the credential and removes the vault
+    entry with the same commit (no orphans)."""
+    _create_static(service)
+    view = service.update("cms-internal", config={"base_url": "http://y", "token": ""})
+
+    assert "token" not in view["config"]
+    raw = service._decode_config(service._row("cms-internal"))
+    assert "token" not in raw
+    vault = InstanceVaultService(job_db.path, settings.config)
+    assert vault.get(connection_secret_name("cms-internal", "token")) is None
+
+
+def test_create_rolls_back_row_and_vault_on_failure(service, job_db, settings, monkeypatch) -> None:
+    """A failure mid-create leaves neither the connection row nor vault entries."""
+
+    def _boom(conn, name, ciphertext) -> None:
+        raise RuntimeError("simulated vault failure")
+
+    monkeypatch.setattr(InstanceVaultService, "set_in", _boom)
+    with pytest.raises(RuntimeError, match="simulated vault failure"):
+        _create_static(service)
+
+    with pytest.raises(NotFoundError):
+        service.get("cms-internal")
+    vault = InstanceVaultService(job_db.path, settings.config)
+    assert vault.get(connection_secret_name("cms-internal", "token")) is None
+
+
 def test_update_config_invalidates_cached_token(service, job_db, settings) -> None:
     _create_static(service)
     tokens = ConnectionTokenService(job_db.path, settings.config)

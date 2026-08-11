@@ -80,12 +80,19 @@ def bearer_probe(config: dict[str, Any], token: str) -> str:
             probe_url,
             headers={"Accept": "*/*", "Authorization": f"Bearer {token}"},
             timeout=10,
+            # Do not follow redirects: a redirect target is not the configured
+            # endpoint (and cross-host redirects would drop/leak the bearer).
+            allow_redirects=False,
         )
     except requests.RequestException as exc:
         raise ConnectionAdapterError(f"无法连接: {exc}") from exc
     if resp.status_code in (401, 403):
         raise ConnectionAdapterError(f"服务可达但鉴权失败 (HTTP {resp.status_code})")
-    return f"连接成功 (HTTP {resp.status_code})"
+    if 200 <= resp.status_code < 300:
+        return f"连接成功 (HTTP {resp.status_code})"
+    # Anything else (5xx, 404, 3xx, …) means the endpoint answered but is not
+    # serving the probed resource correctly — reachable, not "connected".
+    raise ConnectionAdapterError(f"服务可达但端点响应异常 (HTTP {resp.status_code})")
 
 
 def _static_bearer_authenticate(config: dict[str, Any], secrets: dict[str, str]) -> AcquiredToken:

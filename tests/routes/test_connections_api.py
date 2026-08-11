@@ -44,12 +44,30 @@ def _member_client(client, username="conn_member", password="pw1"):
 def test_requires_auth(anon_client) -> None:
     assert anon_client.get(CONNECTIONS_URL).status_code == 401
     assert anon_client.get(TYPES_URL).status_code == 401
+    assert anon_client.post(CONNECTIONS_URL, json=_payload(), headers=CSRF).status_code == 401
+    assert (
+        anon_client.put(
+            f"{CONNECTIONS_URL}/cms-internal", json={"enabled": False}, headers=CSRF
+        ).status_code
+        == 401
+    )
+    assert anon_client.delete(f"{CONNECTIONS_URL}/cms-internal", headers=CSRF).status_code == 401
+    assert anon_client.post(f"{CONNECTIONS_URL}/cms-internal/test", headers=CSRF).status_code == 401
 
 
 def test_member_forbidden(client) -> None:
     member = _member_client(client)
     assert member.get(CONNECTIONS_URL).status_code == 403
+    assert member.get(TYPES_URL).status_code == 403
     assert member.post(CONNECTIONS_URL, json=_payload(), headers=CSRF).status_code == 403
+    assert (
+        member.put(
+            f"{CONNECTIONS_URL}/cms-internal", json={"enabled": False}, headers=CSRF
+        ).status_code
+        == 403
+    )
+    assert member.delete(f"{CONNECTIONS_URL}/cms-internal", headers=CSRF).status_code == 403
+    assert member.post(f"{CONNECTIONS_URL}/cms-internal/test", headers=CSRF).status_code == 403
 
 
 def test_types_listed(client) -> None:

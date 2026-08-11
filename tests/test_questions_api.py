@@ -152,6 +152,43 @@ def test_question_detail_without_connection_returns_empty_normalized(tmp_path, m
     assert len(body["jobs"]) == 1
 
 
+def test_question_detail_token_only_connection_degrades_to_local(tmp_path, monkeypatch):
+    """Connection without base_url/api_url must not 502 the detail page."""
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("workflows", {})["enabled"] = True
+
+    def fail_fetch(*args, **kwargs):  # must not be called without a URL
+        raise AssertionError("fetch_question_detail called without an api_url")
+
+    with (
+        authenticate_client(TestClient(app)) as c,
+        patch(
+            "server.app.services.question_detail.ConnectionTokenService",
+            _FakeConnectionTokens({"token": "token"}),
+        ),
+        patch("server.app.services.question_detail.fetch_question_detail", fail_fetch),
+    ):
+        c.post(
+            "/api/workspaces",
+            json={"name": "Math", "default_workflow_key": "question_comprehension_info"},
+        )
+        c.post(
+            "/api/workspaces/math/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q001"],
+                "knowledge_codes": [],
+            },
+        )
+        response = c.get("/api/workspaces/math/questions/Q001")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["title"] == "Q001"
+    assert body["normalized"]["stem"] is None
+
+
 def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("workflows", {})["enabled"] = True

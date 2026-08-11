@@ -38,8 +38,8 @@ const types: ConnectionTypesResponse = {
     {
       type: 'cms_hmac',
       description: 'CMS HMAC 签名',
-      required_config_keys: ['base_url'],
-      secret_keys: ['token'],
+      required_config_keys: ['app_id', 'nonce', 'token_url'],
+      secret_keys: ['secret'],
     },
   ],
 }
@@ -63,7 +63,11 @@ const connections: ConnectionListResponse = {
       key: 'cms-main',
       type: 'cms_hmac',
       display_name: 'CMS',
-      config: { base_url: 'https://cms.example.com' },
+      config: {
+        app_id: 'app-1',
+        nonce: 'nonce-1',
+        token_url: 'https://cms.example.com/token',
+      },
       enabled: false,
       token: null,
       created_at: '2026-08-01T00:00:00Z',

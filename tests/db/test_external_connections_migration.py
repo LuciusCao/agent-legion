@@ -188,11 +188,170 @@ def test_batch_payloads_gain_connection(monkeypatch) -> None:
         assert values["connection"] == "cms-internal"
 
 
-def test_no_credentials_skips_everything() -> None:
+def test_no_credentials_still_rewrites_legacy_keys() -> None:
+    """No credentials anywhere: no connection is created, but the rewrites
+    still run — legacy keys would otherwise be rejected by the new
+    config_schema whitelist until the next restart. The connection reference
+    points at the default key and resolves once the operator creates it."""
     with write_transaction(TEST_DATABASE_URL) as conn:
-        _insert_workspace(conn, "ws-mig-none", {})
+        _insert_workspace(
+            conn,
+            "ws-mig-none",
+            {
+                "question_comprehension_info": {
+                    "fetch_questions": {"base_url": "http://cms-ws", "bank_version": "v5"}
+                }
+            },
+        )
         migrate_external_connections(conn)
         assert _connection_row(conn) is None
+        values = _node_config(conn, "ws-mig-none")["question_comprehension_info"]["fetch_questions"]
+        assert values == {"bank_version": "v5", "connection": "cms-internal"}
+
+
+def test_distinct_workspace_tokens_get_separate_connections(monkeypatch) -> None:
+    """Two workspaces with different CMS tokens must not collapse into one
+    connection: each gets its own (deterministic key order) and its node
+    config binds to its own credential."""
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", key)
+    fernet = Fernet(key.encode())
+
+    def _ws_node_config(token: str, base_url: str) -> dict:
+        return {
+            "question_comprehension_info": {
+                "fetch_questions": {
+                    "token": {
+                        "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+                    },
+                    "base_url": base_url,
+                }
+            }
+        }
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for workspace_id, token, base_url in (
+            ("ws-mig-a", "token-a", "http://cms-a"),
+            ("ws-mig-b", "token-b", "http://cms-b"),
+        ):
+            _insert_workspace(conn, workspace_id, _ws_node_config(token, base_url))
+            conn.execute(
+                "insert into workspace_secrets(workspace_id, name, ciphertext) values (%s, %s, %s)",
+                (
+                    workspace_id,
+                    "node:question_comprehension_info:fetch_questions:token",
+                    fernet.encrypt(token.encode()).decode(),
+                ),
+            )
+        migrate_external_connections(conn)
+
+        rows = conn.execute(
+            "select key, type, config_json from external_connections order by key"
+        ).fetchall()
+        assert [row["key"] for row in rows] == ["cms-internal", "cms-internal-2"]
+        first = json.loads(rows[0]["config_json"])
+        second = json.loads(rows[1]["config_json"])
+        assert rows[0]["type"] == rows[1]["type"] == "static_bearer"
+        assert first["token"] == {"secret_ref": "conn:cms-internal:token"}
+        assert second["token"] == {"secret_ref": "conn:cms-internal-2:token"}
+        # Each connection carries its own group's endpoint.
+        assert first["base_url"] == "http://cms-a"
+        assert second["base_url"] == "http://cms-b"
+        # Each stored credential decrypts to its own workspace's token.
+        for name, expected in (
+            ("conn:cms-internal:token", b"token-a"),
+            ("conn:cms-internal-2:token", b"token-b"),
+        ):
+            secret_row = conn.execute(
+                "select ciphertext from instance_secrets where name=%s", (name,)
+            ).fetchone()
+            assert fernet.decrypt(secret_row["ciphertext"].encode()) == expected
+        # Each workspace binds to its own connection.
+        assert _node_config(conn, "ws-mig-a")["question_comprehension_info"]["fetch_questions"] == {
+            "connection": "cms-internal"
+        }
+        assert _node_config(conn, "ws-mig-b")["question_comprehension_info"]["fetch_questions"] == {
+            "connection": "cms-internal-2"
+        }
+
+
+def test_shared_workspace_token_gets_one_connection(monkeypatch) -> None:
+    """Workspaces sharing the same token share one connection."""
+    key = Fernet.generate_key().decode()
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", key)
+    fernet = Fernet(key.encode())
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        for workspace_id in ("ws-mig-s1", "ws-mig-s2"):
+            _insert_workspace(
+                conn,
+                workspace_id,
+                {
+                    "question_comprehension_info": {
+                        "fetch_questions": {
+                            "token": {
+                                "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+                            }
+                        }
+                    }
+                },
+            )
+            conn.execute(
+                "insert into workspace_secrets(workspace_id, name, ciphertext) values (%s, %s, %s)",
+                (
+                    workspace_id,
+                    "node:question_comprehension_info:fetch_questions:token",
+                    fernet.encrypt(b"shared-token").decode(),
+                ),
+            )
+        migrate_external_connections(conn)
+
+        rows = conn.execute("select key from external_connections order by key").fetchall()
+        assert [row["key"] for row in rows] == ["cms-internal"]
+        for workspace_id in ("ws-mig-s1", "ws-mig-s2"):
+            values = _node_config(conn, workspace_id)["question_comprehension_info"][
+                "fetch_questions"
+            ]
+            assert values == {"connection": "cms-internal"}
+
+
+def test_undecryptable_workspace_token_left_untouched(monkeypatch) -> None:
+    """A workspace whose vault token cannot be decrypted keeps its legacy
+    node config: binding it to another workspace's connection would leak the
+    wrong credential."""
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    other_key = Fernet.generate_key().decode()
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        _insert_workspace(
+            conn,
+            "ws-mig-bad",
+            {
+                "question_comprehension_info": {
+                    "fetch_questions": {
+                        "token": {
+                            "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+                        },
+                        "bank_version": "v5",
+                    }
+                }
+            },
+        )
+        # Ciphertext encrypted with a different key: undecryptable here.
+        conn.execute(
+            "insert into workspace_secrets(workspace_id, name, ciphertext) values (%s, %s, %s)",
+            (
+                "ws-mig-bad",
+                "node:question_comprehension_info:fetch_questions:token",
+                Fernet(other_key.encode()).encrypt(b"alien-token").decode(),
+            ),
+        )
+        migrate_external_connections(conn)
+
+        assert _connection_row(conn) is None
+        values = _node_config(conn, "ws-mig-bad")["question_comprehension_info"]["fetch_questions"]
+        assert values["token"] == {
+            "secret_ref": "node:question_comprehension_info:fetch_questions:token"
+        }
+        assert "connection" not in values
 
 
 def test_idempotent_replay(monkeypatch) -> None:

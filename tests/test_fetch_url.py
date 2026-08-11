@@ -1,5 +1,9 @@
-import pytest
+"""Tests for workspace_libs CMS fetch helpers (URL handling, parsing, errors)."""
 
+import pytest
+import requests
+
+from workspace_libs.cms import client as cms_client
 from workspace_libs.cms.client import CmsClientError, get_token
 from workspace_libs.cms.knowledge import lookup_knowledge_video
 from workspace_libs.cms.question import (
@@ -297,3 +301,103 @@ def test_fetch_question_detail_returns_structured_context(monkeypatch):
     assert result.normalized["stem"] == "1 + 1 = ?"
     assert result.normalized["options"] == [{"key": "A", "content": "2"}]
     assert result.payload == payload
+
+
+# ---------------------------------------------------------------------------
+# In-band error codes: the CMS signals auth/parameter failures as
+# HTTP 200 + code != 0 + data: null — every endpoint must fail on them
+# instead of parsing the payload as an empty result.
+# ---------------------------------------------------------------------------
+
+
+def test_fetch_question_detail_in_band_auth_code_raises(monkeypatch):
+    payload = {"code": 10015, "message": "JWT验证失败", "data": None}
+    monkeypatch.setattr("workspace_libs.cms.question._fetch_json", lambda *a, **k: payload)
+
+    with pytest.raises(CmsClientError, match="code=10015") as excinfo:
+        fetch_question_detail("Q001", "https://cms.example/question/detail", "token")
+
+    assert excinfo.value.auth_failure is True
+
+
+def test_lookup_question_video_in_band_auth_code_raises(monkeypatch):
+    payload = {"code": 10015, "message": "JWT验证失败", "data": None}
+    monkeypatch.setattr("workspace_libs.cms.question._fetch_json", lambda *a, **k: payload)
+
+    with pytest.raises(CmsClientError, match="code=10015") as excinfo:
+        lookup_question_video("Q001", "https://cms.example/question", "token")
+
+    assert excinfo.value.auth_failure is True
+
+
+def test_list_questions_by_knowledge_in_band_auth_code_raises(monkeypatch):
+    payload = {"code": 10015, "message": "JWT验证失败", "data": None}
+    monkeypatch.setattr("workspace_libs.cms.question._fetch_json", lambda *a, **k: payload)
+
+    with pytest.raises(CmsClientError, match="code=10015") as excinfo:
+        list_questions_by_knowledge("K001", "https://cms.example/question/list", "token")
+
+    assert excinfo.value.auth_failure is True
+
+
+def test_lookup_knowledge_video_in_band_auth_code_raises(monkeypatch):
+    payload = {"code": 10015, "message": "JWT验证失败", "data": None}
+    monkeypatch.setattr("workspace_libs.cms.knowledge._fetch_json", lambda *a, **k: payload)
+
+    with pytest.raises(CmsClientError, match="code=10015") as excinfo:
+        lookup_knowledge_video("K001", "https://cms.example/knowledge", "token")
+
+    assert excinfo.value.auth_failure is True
+
+
+def test_in_band_non_auth_code_is_not_auth_failure(monkeypatch):
+    # Parameter errors fail the call but must not invalidate the token.
+    payload = {"code": 40001, "message": "参数错误", "data": None}
+    monkeypatch.setattr("workspace_libs.cms.knowledge._fetch_json", lambda *a, **k: payload)
+
+    with pytest.raises(CmsClientError, match="code=40001") as excinfo:
+        lookup_knowledge_video("K001", "https://cms.example/knowledge", "token")
+
+    assert excinfo.value.auth_failure is False
+
+
+class _HttpErrorResponse:
+    def __init__(self, status_code: int) -> None:
+        self.status_code = status_code
+
+    def raise_for_status(self) -> None:
+        raise requests.HTTPError(f"{self.status_code} Error", response=self)
+
+    def json(self) -> dict:
+        return {}
+
+
+@pytest.mark.parametrize("status_code", [401, 403])
+def test_fetch_json_http_auth_status_flags_auth_failure(monkeypatch, status_code):
+    monkeypatch.setattr(cms_client.requests, "get", lambda *a, **k: _HttpErrorResponse(status_code))
+
+    with pytest.raises(CmsClientError, match="CMS request failed") as excinfo:
+        cms_client._fetch_json("https://cms.example/x", {}, "token")
+
+    assert excinfo.value.auth_failure is True
+
+
+def test_fetch_json_http_500_is_not_auth_failure(monkeypatch):
+    monkeypatch.setattr(cms_client.requests, "get", lambda *a, **k: _HttpErrorResponse(500))
+
+    with pytest.raises(CmsClientError, match="CMS request failed") as excinfo:
+        cms_client._fetch_json("https://cms.example/x", {}, "token")
+
+    assert excinfo.value.auth_failure is False
+
+
+def test_fetch_json_transport_error_is_not_auth_failure(monkeypatch):
+    def _down(*args, **kwargs):
+        raise requests.ConnectionError("down")
+
+    monkeypatch.setattr(cms_client.requests, "get", _down)
+
+    with pytest.raises(CmsClientError, match="CMS request failed") as excinfo:
+        cms_client._fetch_json("https://cms.example/x", {}, "token")
+
+    assert excinfo.value.auth_failure is False

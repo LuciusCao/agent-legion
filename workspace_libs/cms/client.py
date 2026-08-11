@@ -11,9 +11,8 @@ from typing import Any
 
 import requests
 
-
-class CmsClientError(RuntimeError):
-    pass
+from workspace_libs.cms.errors import CmsClientError as CmsClientError
+from workspace_libs.cms.errors import check_in_band_error as check_in_band_error
 
 
 def require_api_url(api_url: str | None, resource: str) -> str:
@@ -46,6 +45,11 @@ def _fetch_json(url: str, params: dict[str, Any], token: str | None, timeout: in
         resp = requests.get(url, params=params, headers=_build_headers(token), timeout=timeout)
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
+    except requests.HTTPError as exc:
+        status = exc.response.status_code if exc.response is not None else None
+        raise CmsClientError(
+            f"CMS request failed: {exc}", auth_failure=status in (401, 403)
+        ) from exc
     except (requests.RequestException, ValueError) as exc:
         raise CmsClientError(f"CMS request failed: {exc}") from exc
 

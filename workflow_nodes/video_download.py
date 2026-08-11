@@ -84,10 +84,12 @@ def _resolve_knowledge_source(
     token = get_token(str(cms_config.get("env", "")), cms_config)
     try:
         lookup = lookup_knowledge_video(video_input.source_ref, api_url, token)
-    except CmsClientError:
-        # Auth-class failure: invalidate the cached connection token so the
-        # next dispatch re-acquires instead of reusing a dead one.
-        report_node_auth_failure(context)
+    except CmsClientError as exc:
+        # Only auth-semantics failures (HTTP 401/403, known in-band auth
+        # codes) invalidate the cached connection token; transport and
+        # non-auth in-band errors leave the healthy token alone.
+        if exc.auth_failure:
+            report_node_auth_failure(context)
         raise
     if lookup.status == "not_found":
         raise RuntimeError(f"knowledge video not found: {video_input.source_ref}")

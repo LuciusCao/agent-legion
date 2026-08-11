@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from workflow_nodes import question_intake
+from workspace_libs.cms.client import CmsClientError
 
 
 @dataclass(frozen=True)
@@ -102,7 +103,8 @@ def test_by_id_cms_error_payload_raises(tmp_path: Path, monkeypatch: pytest.Monk
 
 
 def test_by_id_blank_stem_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A successful-looking response without a usable stem is garbage input."""
+    """A successful-looking response without a usable stem is garbage input:
+    business/source_missing via CmsEmptyStemError, not an auth failure."""
     context = _context(monkeypatch, {"api_url": "https://cms.example.com/detail"})
     monkeypatch.setattr(
         question_intake,
@@ -110,7 +112,7 @@ def test_by_id_blank_stem_raises(tmp_path: Path, monkeypatch: pytest.MonkeyPatch
         lambda qid, url, token: _FakeDetail(qid, "Title", {"stem": "  "}, {"code": 0}),
     )
 
-    with pytest.raises(RuntimeError, match="缺少题干"):
+    with pytest.raises(question_intake.CmsEmptyStemError, match="缺少题干"):
         question_intake.run(_job(), tmp_path, context)
 
     assert not (tmp_path / "questions.json").exists()
@@ -294,6 +296,89 @@ def test_by_knowledge_cms_error_reports_auth_failure(
         question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
 
     assert reported == [context]
+
+
+def test_by_knowledge_list_in_band_auth_reports_and_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The list endpoint's in-band auth code must fail the node and invalidate
+    the cached token — not be parsed as an empty list (business/source_missing)."""
+    payload = {"intake_mode": {"key": "batch_by_knowledge", "input_field": "knowledge_codes"}}
+    context = _context(
+        monkeypatch,
+        {
+            "question_list_url": "https://cms.example.com/list",
+            "api_url": "https://cms.example.com/detail",
+        },
+        source_payload=payload,
+    )
+
+    def _list(code: str, url: str, token: str) -> list[Any]:
+        raise CmsClientError(
+            "CMS 返回错误: code=10015 message=JWT验证失败 (question list knowledge=K001)",
+            auth_failure=True,
+        )
+
+    monkeypatch.setattr(question_intake, "list_questions_by_knowledge", _list)
+    reported: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
+    )
+
+    with pytest.raises(CmsClientError, match="code=10015"):
+        question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
+
+    assert reported == [context]
+    assert not (tmp_path / "questions.json").exists()
+
+
+def test_by_knowledge_list_transport_error_keeps_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Transport/non-auth list failures (5xx/timeout/DNS, non-auth in-band
+    codes) must NOT invalidate the healthy cached token."""
+    payload = {"intake_mode": {"key": "batch_by_knowledge", "input_field": "knowledge_codes"}}
+    context = _context(
+        monkeypatch,
+        {
+            "question_list_url": "https://cms.example.com/list",
+            "api_url": "https://cms.example.com/detail",
+        },
+        source_payload=payload,
+    )
+
+    def _list(code: str, url: str, token: str) -> list[Any]:
+        raise CmsClientError("CMS request failed: 500 Server Error")
+
+    monkeypatch.setattr(question_intake, "list_questions_by_knowledge", _list)
+    reported: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
+    )
+
+    with pytest.raises(CmsClientError, match="CMS request failed"):
+        question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
+
+    assert reported == []
+
+
+def test_by_id_transport_error_keeps_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Detail-endpoint transport failures must NOT invalidate the token."""
+    context = _context(monkeypatch, {"api_url": "https://cms.example.com/detail"})
+
+    def _fetch(qid: str, url: str, token: str) -> Any:
+        raise CmsClientError("CMS request failed: 503 Server Error")
+
+    monkeypatch.setattr(question_intake, "fetch_question_detail", _fetch)
+    reported: list[dict[str, Any]] = []
+    monkeypatch.setattr(
+        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
+    )
+
+    with pytest.raises(CmsClientError, match="CMS request failed"):
+        question_intake.run(_job(), tmp_path, context)
+
+    assert reported == []
 
 
 def test_by_knowledge_expands_code_into_multiple_questions(

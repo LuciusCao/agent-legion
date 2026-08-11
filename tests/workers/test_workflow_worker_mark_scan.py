@@ -266,18 +266,15 @@ def test_worker_delta_picks_up_new_job(tmp_path: Path) -> None:
 
 def test_full_marks_query_never_seq_scans(job_db: JobQueries) -> None:
     """Pin the performance property: the periodic full rescan must stay index
-    driven. Without the schema v34 partial index the planner seq-scans and
-    sorts the whole jobs table once per rescan window (production: 138k rows,
-    ~0.9s idle / 1-3s under load, flushing the page cache each time)."""
-    from server.app.jobs.queries.job_scan_marks import _ACTIVE_MARK_COLUMNS
+    driven. EXPLAIN runs the production query string itself (not a hand-copied
+    predicate) so a drift in ``ACTIVE_MARKS_SQL`` fails here. Without the
+    schema v35 partial index the planner seq-scans and sorts the whole jobs
+    table once per rescan window (production: 138k rows, ~0.9s idle / 1-3s
+    under load, flushing the page cache each time)."""
+    from server.app.jobs.queries.job_scan_marks import ACTIVE_MARKS_SQL
 
-    query = (
-        f"select {_ACTIVE_MARK_COLUMNS} from jobs"
-        " where workflow_key=%s and status not in ('completed','failed')"
-        " order by created_at desc"
-    )
     with job_db.connect() as conn:
-        rows = conn.execute(f"explain {query}", ("questions",)).fetchall()
+        rows = conn.execute(f"explain {ACTIVE_MARKS_SQL}", ("questions",)).fetchall()
 
     plan = "\n".join(str(row[0]) for row in rows)
     assert "Seq Scan on jobs" not in plan
