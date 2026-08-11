@@ -16,6 +16,7 @@ from server.app.executors._lease_transient_retry import try_return_node_to_pendi
 from server.app.executors._path_canonicalization import canonicalize_finish_paths
 from server.app.executors.models import ExecutionResult
 from server.app.services import failure_classification
+from server.app.services.job_run_dir_probe import finish_job_dir_candidates
 from server.app.workflows.sharding import (
     failed_shard_error,
     on_shard_finished,
@@ -58,7 +59,10 @@ def finish_lease(
     conn.execute("update executor_leases set status='released' where id=%s", (lease_id,))
 
     node_run = conn.execute(
-        "select log_path from node_runs where id=%s", (lease["node_run_id"],)
+        "select n.log_path, j.workspace_id as job_workspace_id,"
+        " j.storage_dir as job_storage_dir"
+        " from node_runs n left join jobs j on j.id = n.job_id where n.id=%s",
+        (lease["node_run_id"],),
     ).fetchone()
     effective_log_path, run_dir, session_dir = canonicalize_finish_paths(
         result,
@@ -66,6 +70,7 @@ def finish_lease(
         node_run["log_path"] if node_run is not None else "",
         lease["node_key"],
         lease["job_id"],
+        finish_job_dir_candidates(data_dir, node_run, str(lease["job_id"])),
     )
     failure_category, failure_detail = failure_classification.classify_execution_result(result)
     conn.execute(
