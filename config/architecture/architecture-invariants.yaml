@@ -603,6 +603,21 @@ invariants:
         target: tests/test_skill_manager.py::test_cache_lock_files_live_under_runs_dir
         gate: quick
 
+  - id: EXEC-SKILL-CLEAN-TTL-001
+    statement: "Skill cache cleanliness verification (rev-parse + status probes) is memoized per cache dir for the doc-cache TTL (SkillManager._verified_clean, deriving from doc_cache_ttl_seconds): within the TTL a dirtied or externally switched cache is served as-is, and the first probe after expiry repairs it via checkout -f + clean -fd — dirty detection is TTL-bounded, never lost. A commit change always misses the memo and re-probes, so relocks never serve a stale commit beyond the doc-cache TTL they already tolerate; doc_cache_ttl_seconds=0 restores per-call probing."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_skill_manager.py::test_cleanliness_probes_memoized_within_ttl
+        gate: quick
+      - kind: integration
+        target: tests/test_skill_manager.py::test_cleanliness_probes_rerun_after_ttl_and_repair_dirty_cache
+        gate: quick
+      - kind: integration
+        target: tests/test_skill_manager.py::test_cleanliness_probes_every_call_when_ttl_zero
+        gate: quick
+
   - id: EXEC-HARNESS-SANDBOX-001
     statement: "velites confines the bash tool in a default-on OS-level filesystem sandbox (macOS seatbelt via sandbox-exec deny-default profile, Linux bubblewrap with selective read-only binds — system paths + --skill dirs + probed python3 interpreter roots, never a blanket `--ro-bind / /`): reads are limited to the working directory, the session dir, explicit --skill dirs, the probed python3 roots and system paths, plus list-only (readdir without content access) grants on the ancestor directories of those roots so sandboxed listings are not misleadingly empty; writes are limited to the working directory, the session dir and $TMPDIR//tmp — escapes surface as tool_execution_end{isError: true}. When the sandbox backend is unavailable the harness fails closed (non-zero exit before the agent loop) and never degrades to an unsandboxed run; --no-sandbox is the only escape hatch."
     owner: workspace-executor

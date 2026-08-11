@@ -9,7 +9,7 @@ from server.app.workflow_worker.agent_stock import (
     StockBucket,
     StockSnapshot,
 )
-from server.app.workflow_worker.agent_stock_snapshot import load_stock_snapshot
+from server.app.workflow_worker.agent_stock_snapshot import TIER_ROWS_SQL, load_stock_snapshot
 from tests.postgres_support import TEST_DATABASE_URL
 
 WS_AGENT = ("ws1", "agent-x")
@@ -294,3 +294,15 @@ def test_load_stock_snapshot_capacity_counts_only_live_workers(job_db) -> None:
 def test_load_stock_snapshot_empty_allows_everything(job_db) -> None:
     snapshot = load_stock_snapshot(TEST_DATABASE_URL, AgentStockConfig())
     assert snapshot.allows("ws1", "agent-x") is True
+
+
+def test_tier_rows_query_never_seq_scans(job_db) -> None:
+    """Pin the performance property: the tier query must stay index driven.
+    The old `state='queued' or finished_at > ...` predicate defeated every
+    partial index and seq-scanned the whole agent_execution_requests table
+    on every stock pass (production: 630k rows, once per workflow pass)."""
+    with job_db.connect() as conn:
+        rows = conn.execute(f"explain {TIER_ROWS_SQL}", (1800, 1800)).fetchall()
+
+    plan = "\n".join(str(row[0]) for row in rows)
+    assert "Seq Scan on agent_execution_requests" not in plan
