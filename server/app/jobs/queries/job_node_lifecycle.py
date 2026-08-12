@@ -9,22 +9,29 @@ from server.app.workflows.definition import WorkflowDefinition
 
 class JobNodeLifecycleQueriesMixin(JobQueriesBase):
     def mark_nodes_not_applicable(self, job_id: str, node_keys: list[str], reason: str) -> None:
-        if not node_keys:
+        self.mark_nodes_not_applicable_many([(job_id, node_keys, reason)])
+
+    def mark_nodes_not_applicable_many(self, entries: list[tuple[str, list[str], str]]) -> None:
+        """Batch mark nodes not applicable across many jobs in one connection."""
+        if not entries:
             return
-        placeholders = ",".join("%s" for _ in node_keys)
         with self.connect() as conn:
-            conn.execute(
-                f"""
-                update job_nodes
-                set status='not_applicable',
-                    stale_reason=%s,
-                    error_message='',
-                    finished_at=current_timestamp
-                where job_id=%s and node_key in ({placeholders})
-                  and status in ('pending', 'ready', 'stale')
-                """,
-                [reason, job_id, *node_keys],
-            )
+            for job_id, node_keys, reason in entries:
+                if not node_keys:
+                    continue
+                placeholders = ",".join("%s" for _ in node_keys)
+                conn.execute(
+                    f"""
+                    update job_nodes
+                    set status='not_applicable',
+                        stale_reason=%s,
+                        error_message='',
+                        finished_at=current_timestamp
+                    where job_id=%s and node_key in ({placeholders})
+                      and status in ('pending', 'ready', 'stale')
+                    """,
+                    [reason, job_id, *node_keys],
+                )
 
     def mark_node_for_rerun(self, job_id: str, node_key: str, downstream: list[str]) -> None:
         with self.connect() as conn:

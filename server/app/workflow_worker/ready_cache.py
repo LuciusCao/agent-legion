@@ -19,8 +19,7 @@ from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
 from server.app.workflows.scheduler import find_ready_nodes
-from server.app.workflows.sharding import has_pending_shards
-from server.app.workflows.workflow_branching import RUNNABLE_STATUSES, evaluate_branches
+from server.app.workflows.workflow_branching import RUNNABLE_STATUSES
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -73,16 +72,14 @@ def evaluate_job_ready(
     definition: WorkflowDefinition,
     job: dict[str, Any],
     statuses: dict[str, str],
+    *,
+    branch_not_applicable: set[str],
+    pending_shard_nodes: set[str],
 ) -> list[ReadyCandidate]:
     """Evaluate one changed job and return its ready nodes.
 
-    Semantics match the historical per-round evaluation: same branch
-    evaluation, same ``allowed_nodes`` filtering and ``find_ready_nodes``
-    ordering. ``mark_nodes_not_applicable`` still runs per evaluation; its
-    effect is mirrored into the in-memory statuses instead of re-querying
-    them. The multi-KB snapshot column is stripped from the stored candidate
-    job dict: nothing on the claim path reads it, and thousands of cached
-    candidates would otherwise pin it in memory.
+    Branch and shard-pending inputs are precomputed by the caller so this
+    function needs no database round trips.
     """
     job_dir = resolve_job_dir(job, worker.settings.jobs_dir)
     control_snapshot = {
@@ -91,16 +88,7 @@ def evaluate_job_ready(
         "execution_paused": bool(job.get("execution_paused")),
         "pause_reason": job.get("pause_reason", ""),
     }
-    branch_evaluation = evaluate_branches(definition, statuses, job_dir)
-    worker.job_db.mark_nodes_not_applicable(
-        job["id"],
-        sorted(branch_evaluation.not_applicable),
-        "unselected workflow branch",
-    )
-    # Mirror the update in memory instead of re-querying statuses:
-    # mark_nodes_not_applicable only rewrites rows whose status is still
-    # runnable, so only those keys flip to not_applicable.
-    for key in branch_evaluation.not_applicable:
+    for key in branch_not_applicable:
         if statuses.get(key) in RUNNABLE_STATUSES:
             statuses[key] = "not_applicable"
     try:
@@ -108,13 +96,13 @@ def evaluate_job_ready(
     except Exception:
         logger.exception("failed to compute allowed nodes for job %s", job["id"])
         return []
-    # A shard node whose aggregate row sits in 'running' may still hold
-    # pending shards; mirror it as runnable so the rest of them dispatch.
     for node in definition.nodes.values():
-        if node.shard is not None and statuses.get(node.key) == "running":
-            with worker.job_db._connect_read() as conn:
-                if has_pending_shards(conn, job["id"], node.key):
-                    statuses[node.key] = "pending"
+        if (
+            node.shard is not None
+            and statuses.get(node.key) == "running"
+            and node.key in pending_shard_nodes
+        ):
+            statuses[node.key] = "pending"
     lean_job = {**job, "workflow_definition_snapshot_json": ""}
     candidates: list[ReadyCandidate] = []
     for node in find_ready_nodes(definition, statuses, job_dir):

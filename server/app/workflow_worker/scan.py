@@ -13,11 +13,8 @@ from __future__ import annotations
 from time import monotonic
 from typing import TYPE_CHECKING, Any
 
-from server.app.workflow_worker.ready_cache import (
-    ReadyCandidate,
-    evaluate_job_ready,
-    resolve_cached_definition,
-)
+from server.app.workflow_worker.eval_batch import evaluate_changed_jobs
+from server.app.workflow_worker.ready_cache import ReadyCandidate
 from server.app.workflows.definition import WorkflowDefinition
 
 if TYPE_CHECKING:
@@ -75,16 +72,9 @@ def collect_ready_candidates(
         phases = worker._scan_phases
         phases["miss_fetch"] = phases.get("miss_fetch", 0.0) + monotonic() - fetch_started
         eval_started = monotonic()
-        for definition, mark in changed:
-            job = fat_rows.get(mark["id"])
-            if job is None:
-                continue  # deleted between the marks query and now
-            definition_to_run = resolve_cached_definition(worker, definition, job)
-            statuses = {
-                node["node_key"]: node["status"] for node in nodes_by_job.get(job["id"], [])
-            }
-            evaluated = evaluate_job_ready(worker, definition_to_run, job, statuses)
-            worker._job_evals[job["id"]] = (mark_key(mark), evaluated)
+        worker._job_evals.update(
+            evaluate_changed_jobs(worker, changed, fat_rows, nodes_by_job, mark_key)
+        )
         phases["eval"] = phases.get("eval", 0.0) + monotonic() - eval_started
     candidates: list[ReadyCandidate] = []
     for _, mark in runnable:
