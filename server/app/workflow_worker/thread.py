@@ -68,6 +68,11 @@ class WorkflowWorkerThread:
         self._job_evals: dict[str, tuple[tuple[Any, ...], list[Any]]] = {}
         self._mark_store = MarkStore()
         self._last_ready_stats: dict[str, int] = {"hit": 0, "miss": 0}
+        # Per-pass scan-phase wall times (seconds), reset in _poll and rendered
+        # into the pass log: marks (mark store refresh + pause probes),
+        # ws_query (per-workspace row fetch), miss_fetch (batched fat-row/node
+        # reads for changed jobs), eval (per-changed-job ready evaluation).
+        self._scan_phases: dict[str, float] = {}
         # Short-TTL route cache; see server.app.workflow_worker.routing.
         self._route_cache: dict[tuple[str, str, str], tuple[float, NodeRoute]] = {}
         # Per-pass state (cleared in _poll).
@@ -115,6 +120,7 @@ class WorkflowWorkerThread:
 
     def _poll(self) -> bool:
         self._batch_payload_cache, self._pass_claim_counts, self._pending_claims = {}, {}, []
+        self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
         if not self._definitions:
@@ -132,6 +138,7 @@ class WorkflowWorkerThread:
 
         scan_started = time.monotonic()
         runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
+        self._scan_phases["marks"] = time.monotonic() - scan_started
         workspaces, queues = build_ready_queues(self, runnable_workspaces, jobs_by_workspace)
         scan_seconds = time.monotonic() - scan_started
         total_candidates = sum(len(queue) for queue in queues.values())
@@ -163,6 +170,7 @@ class WorkflowWorkerThread:
             claim_seconds=claim_seconds,
             claim_counts=self._pass_claim_counts,
             stock_gated=self._agent_pass.stock_gated,
+            scan_phases=self._scan_phases,
         )
         if scan_seconds > 15:
             logger.warning("slow workflow worker pass: " + pass_stats[0], *pass_stats[1:])
