@@ -7,14 +7,11 @@ workflow short-circuits to the finalize node.
 
 from __future__ import annotations
 
-import json
-import logging
 from pathlib import Path
 from typing import Any
 
 from server.app.workflows.comprehension_common import _single_parsed_question
-
-logger = logging.getLogger(__name__)
+from workspace_libs.node_sdk import NodeContext
 
 
 def _looks_like_pure_calculation(stem: str, options: list[Any] | None = None) -> bool:
@@ -32,6 +29,7 @@ def run(
     job_dir: Path,
     runtime: dict[str, Any] | None = None,
 ) -> None:
+    ctx = NodeContext(job, job_dir, runtime)
     source_id = str(job["source_id"])
     question = _single_parsed_question(job_dir, source_id)
     stem = str(question.get("stem") or "")
@@ -57,7 +55,4 @@ def run(
             "reason_code": "eligible",
             "reason": "题目可能包含独立审题信息，继续生成。",
         }
-    job_dir.joinpath("comprehension_eligibility.json").write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    ctx.artifacts.write_json("comprehension_eligibility.json", payload)

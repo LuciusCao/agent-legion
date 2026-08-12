@@ -10,6 +10,7 @@ import pytest
 
 from workflow_nodes import video_download
 from workspace_libs.cms.client import CmsClientError, CmsVideoLookup
+from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
 
 
 def _write_video_input(job_dir: Path, **overrides: Any) -> None:
@@ -73,8 +74,8 @@ def test_knowledge_lookup_cms_error_reports_auth_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """An auth-class CMS failure (HTTP 401/403 or a known in-band auth code)
-    must invalidate the cached connection token via report_node_auth_failure
-    before the error propagates."""
+    must record the auth-failure marker (the parent executor invalidates the
+    cached connection token) before the error propagates."""
     _write_video_input(tmp_path)
     context = {
         "node_config": {
@@ -87,15 +88,13 @@ def test_knowledge_lookup_cms_error_reports_auth_failure(
         raise CmsClientError("CMS 返回错误: code=10015 message=JWT验证失败", auth_failure=True)
 
     monkeypatch.setattr(video_download, "lookup_knowledge_video", _lookup)
-    reported: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        video_download, "report_node_auth_failure", lambda ctx: reported.append(ctx)
-    )
 
     with pytest.raises(CmsClientError, match="code=10015"):
         video_download.run({}, tmp_path, context)
 
-    assert reported == [context]
+    marker = tmp_path / AUTH_FAILURE_MARKER_PATH
+    assert marker.is_file()
+    assert marker.read_text(encoding="utf-8") == "cms-internal"
 
 
 def test_knowledge_lookup_transport_error_keeps_token(
@@ -115,12 +114,8 @@ def test_knowledge_lookup_transport_error_keeps_token(
         raise CmsClientError("CMS request failed: 500 Server Error")
 
     monkeypatch.setattr(video_download, "lookup_knowledge_video", _lookup)
-    reported: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        video_download, "report_node_auth_failure", lambda ctx: reported.append(ctx)
-    )
 
     with pytest.raises(CmsClientError, match="CMS request failed"):
         video_download.run({}, tmp_path, context)
 
-    assert reported == []
+    assert not (tmp_path / AUTH_FAILURE_MARKER_PATH).exists()

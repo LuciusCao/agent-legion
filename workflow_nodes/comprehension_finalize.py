@@ -7,19 +7,14 @@ completes without generating comprehension info.
 
 from __future__ import annotations
 
-import json
-import logging
 from pathlib import Path
 from typing import Any
 
 from server.app.workflows.comprehension_common import (
     _assert_artifact_question_id,
-    _load_json_object,
     _single_parsed_question,
 )
-from server.app.workflows.skill_version_collection import collect_skill_versions
-
-logger = logging.getLogger(__name__)
+from workspace_libs.node_sdk import NodeContext
 
 
 def run(
@@ -27,10 +22,10 @@ def run(
     job_dir: Path,
     runtime: dict[str, Any] | None = None,
 ) -> None:
-    context = runtime or {}
+    ctx = NodeContext(job, job_dir, runtime)
     source_id = str(job["source_id"])
     question = _single_parsed_question(job_dir, source_id)
-    eligibility = _load_json_object(job_dir / "comprehension_eligibility.json")
+    eligibility = ctx.artifacts.read_json_object("comprehension_eligibility.json")
     _assert_artifact_question_id("comprehension_eligibility.json", eligibility, source_id)
     fingerprint = question.get("fingerprint")
     manifest = {
@@ -47,9 +42,6 @@ def run(
         "artifacts": {
             "comprehension_info.json": {"present": False},
         },
-        "skill_versions": collect_skill_versions(str(job.get("id", "")), context, job),
+        "skill_versions": ctx.skill_versions,
     }
-    job_dir.joinpath("manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    ctx.artifacts.write_json("manifest.json", manifest)

@@ -7,12 +7,10 @@ packaging/upload sees a stable file inventory.
 
 from __future__ import annotations
 
-import json
-import logging
 from pathlib import Path
 from typing import Any
 
-logger = logging.getLogger(__name__)
+from workspace_libs.node_sdk import NodeContext
 
 
 def run(
@@ -20,6 +18,7 @@ def run(
     job_dir: Path,
     runtime: dict[str, Any] | None = None,
 ) -> None:
+    ctx = NodeContext(job, job_dir, runtime)
     files = sorted(
         path.name
         for path in job_dir.iterdir()
@@ -30,7 +29,4 @@ def run(
         "job_id": str(job.get("id") or ""),
         "files": files,
     }
-    (job_dir / "package_manifest.json").write_text(
-        json.dumps(manifest, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    ctx.artifacts.write_json("package_manifest.json", manifest)

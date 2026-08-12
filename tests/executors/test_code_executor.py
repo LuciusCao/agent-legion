@@ -481,3 +481,203 @@ def test_custom_cancel_kills_whole_process_group(
     assert result.status == "cancelled"
     time.sleep(2.5)
     assert not (tmp_path / "grandchild-survived").exists()
+
+
+# ---------------------------------------------------------------------------
+# Unified runtime contract (node-sdk-and-worker-execution design §3/§5)
+
+
+class _FakeJobDb:
+    """Minimal JobQueries stand-in for parent-side prefetch tests."""
+
+    def __init__(self, *, runs_error: bool = False) -> None:
+        self.path = "postgresql://fake"
+        self.jobs_dir = "/fake"
+        self._runs_error = runs_error
+
+    def get_batch(self, batch_id: str) -> dict | None:
+        if not batch_id:
+            return None
+        return {"id": batch_id, "source_payload_json": "{}"}
+
+    def list_node_runs(self, job_id: str) -> list[dict]:
+        if self._runs_error:
+            raise RuntimeError("db down")
+        return [
+            {"node_key": "fetch_questions", "skill_version": "abc123"},
+            {"node_key": "review", "skill_version": None},
+        ]
+
+
+def test_build_runtime_prefetches_inputs_and_hides_db(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    """Builtin and sandboxed children share one runtime: DB-derived inputs are
+    prefetched by the parent; no ``job_db`` handle or DSN leaks into it."""
+    from server.app.executors._code_runtime import build_runtime
+    from server.app.executors.cancellation import CancellationToken
+
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    executor.job_db = _FakeJobDb()
+    ctx = replace(context, job={**context.job, "batch_id": "b-1"})
+
+    runtime = build_runtime(executor, ctx, CancellationToken())
+
+    assert "_job_db_path" not in runtime
+    assert "_jobs_dir" not in runtime
+    assert "job_db" not in runtime
+    assert runtime["job_batch"] == {"id": "b-1", "source_payload_json": "{}"}
+    assert runtime["skill_versions"] == {"fetch_questions": "abc123"}
+
+
+def test_build_runtime_skill_versions_degrade_on_db_error(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    from server.app.executors._code_runtime import build_runtime
+    from server.app.executors.cancellation import CancellationToken
+
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    executor.job_db = _FakeJobDb(runs_error=True)
+
+    runtime = build_runtime(executor, context, CancellationToken())
+
+    assert runtime["skill_versions"] == {}
+
+
+def _capture_token_service(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, str]]:
+    from types import SimpleNamespace
+
+    calls: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "server.app.executors._code_runtime.ConnectionTokenService",
+        lambda dsn: SimpleNamespace(report_auth_failure=lambda key: calls.append((dsn, key))),
+    )
+    return calls
+
+
+def test_consume_auth_failure_marker_invalidates_cached_token(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The node records the fact; the parent performs the privileged
+    invalidation and removes the marker (design §5.3)."""
+    from types import SimpleNamespace
+
+    from server.app.executors._code_runtime import consume_auth_failure_marker
+    from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
+
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    calls = _capture_token_service(monkeypatch)
+    marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("cms-internal", encoding="utf-8")
+
+    consume_auth_failure_marker(executor, context)
+
+    assert calls == [("postgresql://fake", "cms-internal")]
+    assert not marker.exists()
+
+
+def test_consume_auth_failure_marker_falls_back_to_node_config_connection(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from server.app.executors._code_runtime import consume_auth_failure_marker
+    from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH
+
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    calls = _capture_token_service(monkeypatch)
+    marker = context.job_dir / AUTH_FAILURE_MARKER_PATH
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("", encoding="utf-8")
+    ctx = replace(context, node_config={"connection": "cms-fallback"})
+
+    consume_auth_failure_marker(executor, ctx)
+
+    assert calls == [("postgresql://fake", "cms-fallback")]
+
+
+def test_consume_auth_failure_marker_noop_without_marker(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from types import SimpleNamespace
+
+    from server.app.executors._code_runtime import consume_auth_failure_marker
+
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    calls = _capture_token_service(monkeypatch)
+
+    consume_auth_failure_marker(executor, context)
+
+    assert calls == []
+
+
+def test_builtin_child_auth_failure_marker_reaches_parent(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """End to end: a builtin node reporting via the SDK marker triggers the
+    parent's token invalidation after the child exits."""
+    from types import SimpleNamespace
+
+    path = _write_node(
+        tmp_path,
+        "node_auth.py",
+        """
+        from workspace_libs.node_sdk import NodeContext
+
+        def run(job, job_dir, runtime):
+            NodeContext(job, job_dir, runtime).report_auth_failure()
+            (job_dir / "out.json").write_text("{}", encoding="utf-8")
+        """,
+    )
+    executor = _executor(tmp_path, path)
+    executor.job_db = SimpleNamespace(path="postgresql://fake")
+    calls = _capture_token_service(monkeypatch)
+    ctx = replace(context, node_config={"connection": "cms-internal"})
+
+    result = executor.execute(ctx)
+
+    assert result.status == "completed"
+    assert calls == [("postgresql://fake", "cms-internal")]
+
+
+def test_sandboxed_custom_node_can_use_node_sdk(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Distribution contract: the SDK is importable inside the velites sandbox
+    and prefetched inputs (batch, skill versions) reach custom nodes."""
+    _sandboxed(monkeypatch)
+    custom_source = textwrap.dedent(
+        """
+        import json
+
+        from workspace_libs.node_sdk import NodeContext
+
+        def run(job, job_dir, runtime):
+            ctx = NodeContext(job, job_dir, runtime)
+            payload = {"batch": ctx.batch, "skill_versions": ctx.skill_versions}
+            (job_dir / "out.json").write_text(json.dumps(payload), encoding="utf-8")
+        """
+    )
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    executor.job_db = _FakeJobDb()
+
+    result = executor.execute(
+        replace(context, node_code=custom_source, job={**context.job, "batch_id": "b-1"})
+    )
+
+    assert result.status == "completed"
+    import json
+
+    data = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
+    assert data["batch"] == {"id": "b-1", "source_payload_json": "{}"}
+    assert data["skill_versions"] == {"fetch_questions": "abc123"}
