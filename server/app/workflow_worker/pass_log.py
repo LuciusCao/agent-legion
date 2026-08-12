@@ -63,11 +63,23 @@ def log_pass_end(
     claim_seconds: float,
     claim_counts: dict[str, int],
     stock_gated: int = 0,
+    scan_phases: dict[str, float] | None = None,
 ) -> None:
+    # Phase attribution for the scan segment; "py" is the unaccounted
+    # remainder (pure-Python mark filtering / candidate assembly / pruning).
+    phases = scan_phases or {}
+    accounted = sum(phases.get(key, 0.0) for key in ("marks", "ws_query", "miss_fetch", "eval"))
+    py_seconds = max(scan_seconds - accounted, 0.0)
     logger.info(
-        "pass end: scan=%.2fs jobs=%d ready_cache hit=%d miss=%d running_jobs=%d"
+        "pass end: scan=%.2fs (marks=%.2f ws=%.2f fetch=%.2f eval=%.2f py=%.2f)"
+        " jobs=%d ready_cache hit=%d miss=%d running_jobs=%d"
         " claims=%d candidates=%d claim_loop=%.2fs stock_gated=%d by_target=%s",
         scan_seconds,
+        phases.get("marks", 0.0),
+        phases.get("ws_query", 0.0),
+        phases.get("miss_fetch", 0.0),
+        phases.get("eval", 0.0),
+        py_seconds,
         jobs,
         ready_stats.get("hit", 0),
         ready_stats.get("miss", 0),
