@@ -23,6 +23,8 @@ echo "构建前端…"
 (cd frontend && npm run build)
 echo "同步 Python 依赖…"
 UV_CACHE_DIR=.uv-cache uv sync --frozen
+echo "检测 velites 二进制新鲜度…"
+./scripts/ensure-velites.sh
 
 port_listening() {
     lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
