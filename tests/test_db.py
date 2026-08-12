@@ -17,6 +17,7 @@ _EXPECTED_INDEXES = {
     "idx_executor_leases_job_status",
     "idx_node_runs_run_dir",
     "idx_node_run_token_usage_job_id",
+    "idx_agent_requests_node_run",
 }
 
 
