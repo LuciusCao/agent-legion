@@ -10,6 +10,7 @@ shards without any row change.
 
 from __future__ import annotations
 
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from server.app.workflow_worker.ready_cache import (
@@ -63,6 +64,7 @@ def collect_ready_candidates(
         changed.append((definition, mark))
     if changed:
         workspace_id = str(changed[0][1]["workspace_id"])
+        fetch_started = monotonic()
         fat_rows = {
             str(job["id"]): job
             for job in worker.job_db.list_jobs_by_ids(
@@ -70,6 +72,9 @@ def collect_ready_candidates(
             )
         }
         nodes_by_job = worker.job_db.list_job_nodes_for_jobs([mark["id"] for _, mark in changed])
+        phases = worker._scan_phases
+        phases["miss_fetch"] = phases.get("miss_fetch", 0.0) + monotonic() - fetch_started
+        eval_started = monotonic()
         for definition, mark in changed:
             job = fat_rows.get(mark["id"])
             if job is None:
@@ -80,6 +85,7 @@ def collect_ready_candidates(
             }
             evaluated = evaluate_job_ready(worker, definition_to_run, job, statuses)
             worker._job_evals[job["id"]] = (mark_key(mark), evaluated)
+        phases["eval"] = phases.get("eval", 0.0) + monotonic() - eval_started
     candidates: list[ReadyCandidate] = []
     for _, mark in runnable:
         cached = worker._job_evals.get(mark["id"])

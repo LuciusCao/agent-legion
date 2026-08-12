@@ -10,6 +10,7 @@ runnable set.
 from __future__ import annotations
 
 from collections import deque
+from time import monotonic
 from typing import TYPE_CHECKING, Any
 
 from server.app.workflow_worker.ready_cache import (
@@ -32,7 +33,10 @@ def build_ready_queues(
     queues: dict[str, deque[ReadyCandidate]] = {}
     worker._last_ready_stats = {"hit": 0, "miss": 0}
     for workspace_id in workspace_ids:
+        query_started = monotonic()
         workspace = worker.job_db.get_workspace(workspace_id)
+        phases = worker._scan_phases
+        phases["ws_query"] = phases.get("ws_query", 0.0) + monotonic() - query_started
         if workspace is None:
             continue
         candidates = collect_ready_candidates(worker, jobs_by_workspace[workspace_id])
