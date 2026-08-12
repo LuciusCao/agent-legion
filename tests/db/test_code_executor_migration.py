@@ -30,14 +30,14 @@ def _seed_workspace(conn, workspace_id: str, concurrency: int = 4) -> None:
         )
 
 
-def test_schema_v36_recorded() -> None:
-    assert SCHEMA_VERSION == 36
+def test_schema_v37_recorded() -> None:
+    assert SCHEMA_VERSION == 37
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "workspace_job_status_counts"
+    assert row["name"] == "agent_requests_node_run_index"
 
 
 def test_migration_rebinds_first_nodes_and_copies_concurrency() -> None:
