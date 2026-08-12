@@ -14,9 +14,9 @@ class CmsClientError(RuntimeError):
 
     ``auth_failure`` marks auth-semantics failures only (HTTP 401/403 or a
     known in-band auth error code): just those justify invalidating the
-    cached connection token via ``report_node_auth_failure``. Transport
-    failures (5xx/timeout/DNS) and non-auth in-band errors (parameter
-    errors) leave the healthy token alone.
+    cached connection token via ``NodeContext.report_auth_failure`` (the
+    node SDK marker channel). Transport failures (5xx/timeout/DNS) and
+    non-auth in-band errors (parameter errors) leave the healthy token alone.
     """
 
     def __init__(self, message: str, *, auth_failure: bool = False) -> None:

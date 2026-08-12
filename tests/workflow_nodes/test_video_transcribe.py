@@ -13,43 +13,8 @@ from workflow_nodes import video_transcribe
 
 pytestmark = pytest.mark.no_db
 
-
-def test_asr_config_merges_settings_and_node_config() -> None:
-    runtime = {
-        "settings_config": {
-            "asr": {
-                "provider": "auto",
-                "timeout_seconds": 900,
-                "whisper": {"binary": "/env/whisper-cli"},
-            }
-        },
-        "node_config": {"provider": "whisper", "timeout_seconds": 120},
-    }
-
-    merged = video_transcribe._asr_config(runtime)
-
-    # node_config 业务参数覆盖 settings 级（env 注入）值。
-    assert merged["provider"] == "whisper"
-    assert merged["timeout_seconds"] == 120
-    # env 注入的机器路径保留。
-    assert merged["whisper"] == {"binary": "/env/whisper-cli"}
-
-
-def test_asr_config_ignores_empty_node_config_values() -> None:
-    runtime = {
-        "settings_config": {"asr": {"provider": "sensevoice"}},
-        "node_config": {"provider": "", "timeout_seconds": None},
-    }
-
-    merged = video_transcribe._asr_config(runtime)
-
-    assert merged["provider"] == "sensevoice"
-    assert "timeout_seconds" not in merged
-
-
-def test_asr_config_without_runtime_is_empty() -> None:
-    assert video_transcribe._asr_config(None) == {}
-    assert video_transcribe._asr_config({}) == {}
+# The settings-section + node-config merge semantics moved into the node SDK
+# (NodeContext.service_config); they are covered by test_node_sdk.py.
 
 
 def _write_video_input(job_dir: Path) -> None:

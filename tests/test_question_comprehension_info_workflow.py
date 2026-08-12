@@ -316,7 +316,14 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
     empty_run = queries.start_node_run(job["id"], "clean_and_parse", ["code"], "", skill_version="")
     queries.finish_node_run(empty_run["id"], "completed", 0, "")
 
-    assemble_comprehension_info(job, artifact_dir, {"job_db": queries})
+    # The executor prefetches skill versions into the runtime (nodes hold no
+    # database handle); reproduce that prefetch shape here.
+    prefetched = {
+        str(r["node_key"]): str(r["skill_version"])
+        for r in queries.list_node_runs(job["id"])
+        if r.get("node_key") and r.get("skill_version")
+    }
+    assemble_comprehension_info(job, artifact_dir, {"skill_versions": prefetched})
 
     manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["skill_versions"] == {

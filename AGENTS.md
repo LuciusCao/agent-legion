@@ -91,6 +91,12 @@
   出厂 executor 目录钉在 `server/app/executors/builtin_definitions.py`，经种子流发布为 DB
   `versioned_entities`（Studio 可改，admin 编辑不被种子覆盖）。path 禁止绝对路径与 `..`
   （EXEC-CODE-001），内置节点代码变更必须入库经 git review 与 CI。
+  节点内部的通用脚手架统一走节点 SDK `workspace_libs/node_sdk.py` 的 `NodeContext`
+  （artifact 读写、service_config 合并、checkpoint、auth 上报），不要在新节点里手写
+  JSON 读写/配置合并/取消检查；节点运行时不含 DB 句柄或 DSN——batch、skill_versions 等
+  DB 派生输入由父进程预取进 runtime，特权动作（连接 token 失效）由节点写 marker、
+  父进程执行（EXEC-CODE-004，设计见
+  `docs/architecture/node-sdk-and-worker-execution-design.md`）。
 - 节点代码变更只有两条通道：内置节点走 git（EXEC-CODE-001）；自定义节点代码只存
   `workflow_node_codes` 表、经发布流生效、版本不可变、job intake 冻结代码版本
   （EXEC-CODE-002），禁止任何运行时 API 增删改 repo `workflow_nodes/` 文件。

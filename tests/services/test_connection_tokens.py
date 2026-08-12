@@ -12,6 +12,7 @@ from pathlib import Path
 import pytest
 from cryptography.fernet import Fernet
 
+from server.app.jobs import JobQueries
 from server.app.services import connection_adapters
 from server.app.services.connection_adapters import (
     AcquiredToken,
@@ -207,26 +208,20 @@ def test_inject_connection_config_legacy_token_passthrough(services) -> None:
 
 
 def test_report_node_auth_failure_invalidates_cached_token(services, job_db) -> None:
-    """Pin the real executor wiring: code.py pops ``_job_db_path``/``_jobs_dir``
-    and injects ``runtime["job_db"]`` (a JobQueries instance) before invoking
-    node code, so the hook must resolve the DSN from that handle."""
+    """Legacy runtime shape: runtimes that still carry a ``job_db`` handle
+    (legacy frozen node code calling the hook directly) resolve the DSN from
+    that handle. Current nodes use the SDK marker channel instead, with the
+    parent executor performing the invalidation (test_code_executor.py)."""
     connections, tokens = services
     connections.create("c1", "static_bearer", "", {"token": "tok-abc"})
     assert tokens.get_token("c1") == "tok-abc"
     assert connections.get("c1")["token"] is not None
 
-    # Reproduce the runtime shape server/app/executors/code.py builds.
+    # Reproduce the legacy runtime shape (DB handle carried into node code).
     runtime: dict = {
         "node_config": {"connection": "c1"},
-        "_job_db_path": str(job_db.path),
-        "_jobs_dir": str(job_db.jobs_dir),
+        "job_db": JobQueries(str(job_db.path), Path(job_db.jobs_dir)),
     }
-    job_db_path = runtime.pop("_job_db_path", None)
-    jobs_dir = runtime.pop("_jobs_dir", None)
-    if job_db_path and jobs_dir:
-        from server.app.jobs import JobQueries
-
-        runtime["job_db"] = JobQueries(str(job_db_path), Path(jobs_dir))
 
     report_node_auth_failure(runtime)
 

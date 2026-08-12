@@ -668,6 +668,7 @@
     "server/app/events/sse.py": 88,
     "server/app/executors/__init__.py": 14,
     "server/app/executors/_code_child.py": 68,
+    "server/app/executors/_code_runtime.py": 110,
     "server/app/executors/_code_sandbox.py": 235,
     "server/app/executors/_failed_node_recording.py": 70,
     "server/app/executors/_lease_claims.py": 202,
@@ -686,7 +687,7 @@
     "server/app/executors/agent_workspace.py": 42,
     "server/app/executors/builtin_definitions.py": 124,
     "server/app/executors/cancellation.py": 112,
-    "server/app/executors/code.py": 367,
+    "server/app/executors/code.py": 348,
     "server/app/executors/code_config.py": 73,
     "server/app/executors/config.py": 67,
     "server/app/executors/definitions.py": 45,
@@ -1033,7 +1034,6 @@
     "server/app/workflows/sharding.py": 204,
     "server/app/workflows/sharding_batch.py": 32,
     "server/app/workflows/skill_version.py": 43,
-    "server/app/workflows/skill_version_collection.py": 35,
     "server/app/workflows/skill_version_fallbacks.py": 43,
     "server/app/workflows/skills.py": 32,
     "server/app/workflows/validator.py": 30,
@@ -1092,6 +1092,7 @@
     "workspace_libs/cms/errors.py": 50,
     "workspace_libs/cms/knowledge.py": 86,
     "workspace_libs/cms/question.py": 260,
-    "workspace_libs/cms/urls.py": 49
+    "workspace_libs/cms/urls.py": 49,
+    "workspace_libs/node_sdk.py": 176
   }
 }
