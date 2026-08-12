@@ -293,6 +293,13 @@ create index if not exists idx_agent_requests_done_recent
 create index if not exists idx_agent_requests_cancelled_recent
   on agent_execution_requests(finished_at)
   where state = 'cancelled';
+-- Ops-metrics recent-hour run stats (schema v37,
+-- server.app.services._ops_metrics_runs): the semi join attributing a run to
+-- an Agent execution matches on r.node_run_id; without this index Postgres
+-- hashes the whole requests table (660k rows, ~0.9s measured) on every
+-- /api/metrics/overview poll.
+create index if not exists idx_agent_requests_node_run
+  on agent_execution_requests(node_run_id);
 
 create table if not exists job_event_seq (
   id integer primary key check(id = 1),
