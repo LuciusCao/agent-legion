@@ -5,9 +5,12 @@ from server.app.jobs.queries.base import JobQueriesBase
 
 class JobStatusQueriesMixin(JobQueriesBase):
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
+        # Reads the trigger-maintained counter table (DB-JOB-STATUS-COUNTS-001)
+        # instead of a group-by over the workspace's whole jobs slice.
         with self._connect_read() as conn:
             rows = conn.execute(
-                "select status, count(*) as cnt from jobs where workspace_id = %s group by status",
+                "select status, cnt from workspace_job_status_counts"
+                " where workspace_id = %s and cnt <> 0",
                 (workspace_id,),
             )
             result: dict[str, int] = {}
@@ -15,7 +18,7 @@ class JobStatusQueriesMixin(JobQueriesBase):
                 status = row["status"]
                 if status == "queued":
                     status = "pending"
-                result[status] = result.get(status, 0) + row["cnt"]
+                result[status] = result.get(status, 0) + int(row["cnt"])
             return result
 
     def count_workspace_job_nodes_by_status(
