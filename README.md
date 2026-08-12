@@ -204,6 +204,10 @@ Two harness runtimes run them:
 - **velites** (production default): a single static Rust binary built from
   `velites/` (`cargo build --release`), emitting the same event stream the host
   consumes. Enable per agent with `runtime: velites` in the Agent definition.
+  `make native-prod-up` runs `scripts/ensure-velites.sh` before starting
+  services: it fingerprints the `velites/` source tree (git tree hash) against
+  a stamp next to the PATH binary and rebuilds + atomically reinstalls when
+  stale, so a pulled-but-never-rebuilt binary cannot drift from the code.
   The retired `workflows.pi` yaml block (provider/model/timeout/flavor) no
   longer exists: execution provider/model/thinking come from the workspace
   Settings「Agent 默认配置」or per-node Studio overrides, and the manifest
