@@ -736,3 +736,12 @@ invariants:
       - kind: integration
         target: tests/workers/test_workflow_worker_ready_queue.py
         gate: quick
+
+  - id: DB-JOB-STATUS-COUNTS-001
+    statement: "workspace_job_status_counts is the read source for count_jobs_by_status (event aggregator flush, job list snapshot, intake/deletion broadcasts); a group-by over the workspace's whole jobs slice is O(workspace jobs) per call and does not scale to 200k-job workspaces. Row triggers on jobs (insert/delete/update of status, workspace_id) keep the counter table transactionally in sync with every write path regardless of caller; the v36 backfill rebuilds it from jobs and is idempotent. The read path preserves the legacy queued → pending merge and omits zero-count statuses, so results are identical to the group-by it replaced."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/db/test_job_status_counts_migration.py
+        gate: quick
