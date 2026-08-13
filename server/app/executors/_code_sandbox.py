@@ -39,9 +39,10 @@ from server.app.executors.models import ExecutionContext, ExecutionResult
 if TYPE_CHECKING:
     from server.app.executors.code import CodeExecutor
 
-# Real repository root hosting the ``server`` package (the sandboxed child
-# imports ``server.app.*`` from here); differs from the executor's configured
-# ``repo_root`` only in tests, where capabilities point into tmp dirs.
+# Real repository root hosting the ``workspace_libs`` package (the sandboxed
+# child imports ``workspace_libs.*`` from here); differs from the executor's
+# configured ``repo_root`` only in tests, where capabilities point into tmp
+# dirs.
 _SERVER_REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Repo subdirectories the child must READ to import server/workflow_nodes
@@ -192,9 +193,12 @@ def execute_custom_sandboxed(
         "--",
         sys.executable,
         "-m",
-        "server.app.executors._code_child",
+        "workspace_libs.code_child",
         str(result_path),
     ]
+    # worker/code_runner.py 的 build_sandbox_argv/child_env/_read_roots 从本
+    # 文件复制适配（Worker 上全部 code 执行统一过沙箱，批次 2）——改 argv/
+    # 环境/payload 契约时两边同步。
 
     log_fd = os.open(str(context.log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
     try:

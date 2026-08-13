@@ -34,6 +34,13 @@ def prepare_result(task: UploadTask) -> tuple[dict[str, Any], Path, list[str]]:
         metadata.setdefault("output_artifacts", {})
         write_empty_archive(archive)
         return metadata, archive, []
+    if task.exec_kind == "code":
+        # 批次 2：code 归档（expected_outputs + 根部 node.log）与 metadata
+        # 由 code_runner 负责（含 auth_failure_connection）。延迟导入：
+        # code_runner 依赖 upload_queue.UploadTask，顶层导入会成环。
+        from worker.code_runner import prepare_code_result
+
+        return prepare_code_result(task)
     job_dir = task.execution_dir / "job"
     run_dir = job_dir / "runs" / task.node_key / "worker"
     events = run_dir / "events.jsonl"

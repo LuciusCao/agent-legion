@@ -156,6 +156,7 @@
                     <label>Worker ID<input name="worker_id" pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,63}" title="以字母或数字开头，只能包含字母、数字、_、-，最长 64 字符" required /></label>
                     <label>显示名称<input name="name" /></label>
                     <label>最大并发<input name="max_concurrency" type="number" min="1" max="1024" required /></label>
+                    <label>代码并发 <span class="hint">code 节点沙箱执行，0 = 不领取</span><input name="max_code_concurrency" type="number" min="0" max="1024" required /></label>
                     <label>上传并发<input name="upload_max_concurrency" type="number" min="1" max="1024" required /></label>
                     <fieldset>
                       <legend>运行时</legend>
