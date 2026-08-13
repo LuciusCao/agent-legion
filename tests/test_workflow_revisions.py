@@ -22,6 +22,7 @@ from server.app.services.workflow_revision_format import (
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import (
     WorkflowDefinition,
+    WorkflowDefinitionError,
     workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
@@ -318,6 +319,18 @@ def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
     assert job["workflow_version"] == revision["version"]
     assert job["workflow_definition_hash"] == revision["definition_hash"]
     assert "fetch_questions" in job["workflow_definition_snapshot_json"]
+
+
+def test_validate_workflow_definition_reports_malformed_yaml() -> None:
+    errors = validate_workflow_definition("nodes: [broken")
+
+    assert len(errors) == 1
+    assert "not valid YAML" in errors[0]
+
+
+def test_workflow_definition_from_yaml_string_raises_definition_error_on_bad_yaml() -> None:
+    with pytest.raises(WorkflowDefinitionError, match="not valid YAML"):
+        workflow_definition_from_yaml_string("nodes: [broken")
 
 
 def test_validate_workflow_definition_rejects_terminal_without_outcome(tmp_path: Path) -> None:

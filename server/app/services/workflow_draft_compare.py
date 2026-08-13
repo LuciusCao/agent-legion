@@ -21,7 +21,7 @@ from server.app.services.workflow_draft_compare_support import (
 )
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.services.workflow_revision_change import structural_revision_changed
-from server.app.workflows.definition import workflow_definition_from_dict
+from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 from server.app.workflows.schema import (
     WorkflowDefinition,
     WorkflowEdge,
@@ -403,13 +403,19 @@ def compare_workflow_draft(
 ) -> dict[str, Any]:
     try:
         draft = workflow_definition_from_yaml_string(definition_yaml)
-    except yaml.YAMLError as exc:
+    except WorkflowDefinitionError as exc:
+        # YAML parse failures arrive wrapped (see workflow_drafts); keep the
+        # yaml error category so callers can distinguish syntax vs schema issues.
+        if isinstance(exc.__cause__, yaml.YAMLError):
+            error = yaml_error_to_dict(exc.__cause__)
+        else:
+            error = {"category": "schema", "message": str(exc)}
         return {
             "valid": False,
             "base_revision": None,
             "draft_workflow": None,
             "summary": None,
-            "errors": [yaml_error_to_dict(exc)],
+            "errors": [error],
         }
     except Exception as exc:
         return {
