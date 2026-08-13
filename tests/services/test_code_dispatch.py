@@ -20,16 +20,19 @@ from server.app.agent_broker.agent_bundle import CODE_BUNDLE_LIBS_DIR, CODE_BUND
 from server.app.agent_broker.code_dispatch import (
     CodeDispatchService,
     PlaintextSecretError,
+    has_online_code_worker,
     resolve_code_manifest_config,
     split_manifest_config,
 )
 from server.app.agent_broker.code_eligibility import is_worker_eligible
+from server.app.agent_workers import AgentWorkerRegistry
 from server.app.executors.config import CodeCapabilityConfig
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowNode
 from tests.postgres_support import TEST_DATABASE_URL
+from worker.code_runner import build_child_payload
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -105,7 +108,7 @@ def test_resolve_code_manifest_config_injects_and_strips_secrets(job_db, monkeyp
     assert manifest["secret_config"] == {"token": {"secret_ref": "api-token"}}
 
 
-def _settings(tmp_path: Path) -> Settings:
+def _settings(tmp_path: Path, config: dict | None = None) -> Settings:
     return Settings(
         root_dir=REPO_ROOT,
         data_dir=tmp_path,
@@ -113,16 +116,17 @@ def _settings(tmp_path: Path) -> Settings:
         logs_dir=tmp_path / "logs",
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
-        config={},
+        config=config or {},
+        database_url=TEST_DATABASE_URL,
     )
 
 
-def _service(job_db, tmp_path: Path) -> CodeDispatchService:
+def _service(job_db, tmp_path: Path, config: dict | None = None) -> CodeDispatchService:
     broker = AgentExecutionBroker(
         TEST_DATABASE_URL, data_dir=tmp_path, bundle_dir=tmp_path / "bundles"
     )
     return CodeDispatchService(
-        _settings(tmp_path),
+        _settings(tmp_path, config),
         broker,
         ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL),
         job_db,
@@ -221,3 +225,104 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
         )
         is False
     )
+
+
+_SENSITIVE_CONFIG = {
+    "vault": {"master_key": "fernet-key-material"},
+    "auth": {"bootstrap_admin_password": "bootstrap-pw"},
+    "database": {"url": "postgresql://user:db-pw@db/agent_legion"},
+    "agent_workers": {"register_token": "management-secret"},
+    "server": {"cors": {"allow_origins": ["https://example.com"]}},
+    "asr": {"whisper": {"binary": "/env/whisper-cli"}},
+}
+
+
+def test_enqueue_strips_instance_settings_from_manifest_and_child_payload(job_db, tmp_path) -> None:
+    """VAULT-SECRET-001: only node-consumed settings sections may ride the
+    manifest — the vault master key, DB DSN and register token never persist
+    nor cross into the Worker sandbox stdin payload."""
+    _insert_job(job_db)
+    service = _service(job_db, tmp_path, config=_SENSITIVE_CONFIG)
+
+    assert (
+        service.enqueue(
+            capability="package",
+            capability_config=CodeCapabilityConfig(path="workflow_nodes/video_package.py"),
+            workspace={"id": "test-workspace"},
+            job={"id": "job-1"},
+            workflow_key="questions",
+            node=_node(),
+            job_dir=tmp_path / "job",
+            log_path=tmp_path / "logs" / "jobs" / "job-1-package.log",
+            inputs=(),
+            code_text=_CODE,
+            custom_code=False,
+            config={},
+            secret_config={},
+        )
+        is True
+    )
+
+    with job_db._connect_read() as conn:
+        row = conn.execute("select manifest_json from agent_execution_requests").fetchone()
+    manifest = json.loads(row["manifest_json"])
+    settings_config = manifest["runtime_context"]["settings_config"]
+    assert settings_config == {"asr": {"whisper": {"binary": "/env/whisper-cli"}}}
+    # The manifest log_path is data-dir-relative, not a Host path leak.
+    assert manifest["log_path"] == "logs/jobs/job-1-package.log"
+    for leaked in ("fernet-key-material", "bootstrap-pw", "db-pw", "management-secret"):
+        assert leaked not in row["manifest_json"]
+    # The sandbox child payload inherits the same whitelist end to end.
+    payload = build_child_payload(manifest, _CODE, tmp_path / "child")
+    assert payload["runtime"]["settings_config"] == settings_config
+
+
+def _register_probe_worker(
+    worker_id: str,
+    *,
+    capabilities: list[str] | None = None,
+    max_code_concurrency: int = 1,
+) -> None:
+    AgentWorkerRegistry(TEST_DATABASE_URL).issue_token(
+        worker_id=worker_id,
+        name="worker",
+        runtimes=["pi"],
+        capabilities=capabilities,
+        max_concurrency=10,
+        max_code_concurrency=max_code_concurrency,
+        protocol_version=2,
+    )
+
+
+def test_online_code_worker_probe_matches_capability(job_db) -> None:
+    assert has_online_code_worker(TEST_DATABASE_URL, "package") is False
+    _register_probe_worker("worker-a", capabilities=["package"])
+
+    assert has_online_code_worker(TEST_DATABASE_URL, "package") is True
+    # Code capacity but no matching declaration: the request would rot in
+    # queued (no timeout fallback), so the probe says no and the scheduler
+    # falls back to local execution.
+    assert has_online_code_worker(TEST_DATABASE_URL, "transcribe") is False
+
+
+def test_online_code_worker_probe_wildcard_zero_capacity_and_revoked(job_db) -> None:
+    _register_probe_worker("worker-wild", capabilities=None)  # legacy "*" mode
+    assert has_online_code_worker(TEST_DATABASE_URL, "anything") is True
+    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-wild")
+    assert has_online_code_worker(TEST_DATABASE_URL, "anything") is False
+    # An agent-only Worker (no code pool) never counts even on a match.
+    _register_probe_worker("worker-agent", capabilities=["anything"], max_code_concurrency=0)
+    assert has_online_code_worker(TEST_DATABASE_URL, "anything") is False
+
+
+def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None:
+    service = _service(job_db, tmp_path)
+    _register_probe_worker("worker-a", capabilities=["package"])
+
+    assert service.online_code_worker_available("package") is True
+    assert service.online_code_worker_available("transcribe") is False
+    # Within the TTL the cached answer is served even after the Worker leaves.
+    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-a")
+    assert service.online_code_worker_available("package") is True
+    service._online_probe.clear()
+    assert service.online_code_worker_available("package") is False

@@ -64,7 +64,7 @@ def try_claim_code_worker_node(
         # even if the last code Worker went away (no queued-timeout fallback,
         # batch-2 decision 3).
         return True
-    if not dispatch.online_code_worker_available():
+    if not dispatch.online_code_worker_available(node.capability):
         return False
     definition = worker.settings.executor_definitions.get(executor_id)
     capability_config = (
@@ -148,6 +148,11 @@ def try_claim_code_worker_node(
             # Same trade-off as the agent enqueue pool: a configuration error
             # fails this node instead of poisoning every later poll pass.
             fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
+        except Exception:
+            # Unexpected failure (unconfigured bundle dir, DB errors): same
+            # trade-off as the agent enqueue pool — log and leave the node
+            # pending so the next poll pass re-evaluates it.
+            logger.exception("code enqueue failed for %s.%s", job_id, node.key)
         finally:
             dispatch.discard_in_flight(job_id, node.key)
 

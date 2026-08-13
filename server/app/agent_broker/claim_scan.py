@@ -60,6 +60,10 @@ class WorkerView:
     agent_active: int = 0
     code_capacity: int = 0
     code_active: int = 0
+    # Registered protocol version: code claims additionally require v2 (a v1
+    # Worker never receives the cancel heartbeat body, so it must not hold
+    # kind='code' executions even if a stale row grants it code capacity).
+    protocol_version: int = 1
 
 
 @dataclass

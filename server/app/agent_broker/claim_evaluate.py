@@ -24,6 +24,7 @@ from server.app.agent_broker.claim_scan import (
     WorkerView,
     labels_satisfy,
 )
+from server.app.agent_workers import CODE_PROTOCOL_VERSION
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -71,6 +72,12 @@ def evaluate_candidate(
     # Dual capacity pools: a candidate whose pool is exhausted is skipped,
     # not fatal — the other pool may still have claimable candidates.
     if kind == "code":
+        # Defense in depth behind the register-time rejection: a v1 row that
+        # predates it must never hold code executions (v1 heartbeats carry no
+        # cancel body, and old binaries cannot unpack code bundles).
+        if view.protocol_version < CODE_PROTOCOL_VERSION:
+            state.skip_reasons["protocol_version_too_old"] += 1
+            return None
         if view.code_active >= view.code_capacity:
             state.skip_reasons["code_capacity_full"] += 1
             return None

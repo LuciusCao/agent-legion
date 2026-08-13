@@ -445,7 +445,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-WORKER-001
-    statement: "Code node executions reach a Worker only through the kind='code' lane of the Agent Worker protocol (protocol v2): agent_execution_requests carries kind ('agent'|'code', schema v38), Workers declare a separate max_code_concurrency pool that the Host accounts and enforces independently of the agent pool, and the code manifest ships the node code text plus its sha256 code_hash (resolved in resolve_dispatch_node_code order; the Worker refuses to run on hash mismatch) with a workspace_libs snapshot in the bundle. Worker-eligibility is a static import-closure scan (server/app/agent_broker/code_eligibility.py: closure ⊆ workspace_libs + stdlib + requests, dynamic imports forbidden, cached by code_hash); the three video pipeline nodes stay Host-local because their closure includes server.app.pipeline.*. Dispatch probes for an online code-capable Worker and falls back to the local Host executor when none exists — code requests never rot in queued waiting for a Worker."
+    statement: "Code node executions reach a Worker only through the kind='code' lane of the Agent Worker protocol (protocol v2): agent_execution_requests carries kind ('agent'|'code', schema v38), Workers declare a separate max_code_concurrency pool that the Host accounts and enforces independently of the agent pool, and the code manifest ships the node code text plus its sha256 code_hash (resolved in resolve_dispatch_node_code order; the Worker refuses to run on hash mismatch) with a workspace_libs snapshot in the bundle. Worker-eligibility is a static import-closure scan (server/app/agent_broker/code_eligibility.py: closure ⊆ workspace_libs + stdlib + requests, dynamic imports forbidden, cached by code_hash); the three video pipeline nodes stay Host-local because their closure includes server.app.pipeline.*. Dispatch probes for an online code-capable Worker declaring the node's capability (or '*') and falls back to the local Host executor when none matches — code requests never rot in queued waiting for a Worker. Code capacity requires protocol v2 (v1 heartbeats carry no cancel body): registration rejects max_code_concurrency>0 below v2, and claim evaluation re-checks the stored protocol version as defense in depth."
     owner: workspace-executor
     risk: high
     evidence:
@@ -556,7 +556,7 @@ invariants:
         gate: full
 
   - id: VAULT-SECRET-001
-    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens. The code→Worker path extends the same boundary across machines: queued code manifests and bundles are stored secret-free (secret keys are stripped at enqueue; a plaintext secret value makes the node ineligible for Worker dispatch), the Host resolves vault refs and injects plaintext only into the claim/download response over the existing HTTPS channel, and the Worker holds secrets in memory only — passed to the child via stdin, never written to disk or logs, with a defensive scrub (strip_secret_config) before any persistence."
+    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens. The code→Worker path extends the same boundary across machines: queued code manifests and bundles are stored secret-free (secret keys are stripped at enqueue; a plaintext secret value makes the node ineligible for Worker dispatch), the Host resolves vault refs and injects plaintext only into the claim/download response over the existing HTTPS channel, and the Worker holds secrets in memory only — passed to the child via stdin, never written to disk or logs, with a defensive scrub (strip_secret_config) before any persistence. The runtime settings snapshot crossing the same boundary is section-whitelisted (node_safe_settings_config in server/app/config_schema.py): only the business sections the node SDK service_config actually consumes (asr) are included — vault/auth/database/agent_workers sections never enter the manifest, the sandbox stdin payload, or the database."
     owner: security
     risk: critical
     evidence:
@@ -571,6 +571,12 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_code_dispatch.py::test_enqueue_builds_secret_free_manifest_and_bundle
+        gate: quick
+      - kind: integration
+        target: tests/services/test_code_dispatch.py::test_enqueue_strips_instance_settings_from_manifest_and_child_payload
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_build_runtime_whitelists_settings_config_sections
         gate: quick
       - kind: integration
         target: tests/services/test_code_dispatch.py::test_resolve_code_manifest_config_injects_and_strips_secrets

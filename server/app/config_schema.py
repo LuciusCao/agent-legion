@@ -8,6 +8,7 @@ and only whitelisted, non-secret keys may leave the server in a manifest.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any
 
 _SCHEMA_TYPES = ("string", "integer", "number", "boolean")
@@ -161,4 +162,21 @@ def manifest_safe_config(schema: dict[str, Any], config: dict[str, Any]) -> dict
         if name in properties
         and isinstance(properties[name], dict)
         and not properties[name].get("secret", False)
+    }
+
+
+# Settings sections node code may ever see (VAULT-SECRET-001): only the
+# business sections the node SDK's ``service_config(section=...)`` actually
+# consumes. Instance-level sections (vault/auth/database/agent_workers/...)
+# carry secrets or machine-local values and must never enter a manifest, the
+# sandbox stdin payload, or the database.
+NODE_SETTINGS_CONFIG_SECTIONS = ("asr",)
+
+
+def node_safe_settings_config(settings_config: Mapping[str, Any]) -> dict[str, Any]:
+    """Whitelist-filter a settings config to the sections node code may read."""
+    return {
+        section: dict(settings_config[section])
+        for section in NODE_SETTINGS_CONFIG_SECTIONS
+        if isinstance(settings_config.get(section), Mapping)
     }

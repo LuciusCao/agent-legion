@@ -81,6 +81,7 @@ def claim_in_transaction(
         agent_active=agent_active,
         code_capacity=max_code_concurrency,
         code_active=code_active,
+        protocol_version=int(worker["protocol_version"]),
     )
     # Both pools exhausted: nothing this Worker could claim, skip the scan.
     if agent_active >= max_concurrency and code_active >= max_code_concurrency:
