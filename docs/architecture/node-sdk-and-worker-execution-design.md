@@ -219,7 +219,8 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
   `_load_run_from_source`），随之下沉后零依赖；`workspace_libs/` 已在沙箱
   allowlist，不需要动沙箱策略。
 - velites wrap argv 构建与进程管理留在执行器层，Host/Worker 各一份（Worker
-  侧复制进 `worker/`），批次 3 时 Host 侧那份删除。
+  侧复制进 `worker/`；批次 3 已取消，Host 侧这份随本地兜底路径长期保留，
+  见 §9）。
 
 ### 7.5 取消信号
 
@@ -235,6 +236,19 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
   破坏性变更走 `NodeContext` 新方法名）。SDK 变更的契约测试
   （`tests/workflow_nodes/test_node_sdk.py` + 沙箱 import 契约测试）是兼容性的
   强制闸。
+
+### 7.7 后续规划登记（2026-08-13）
+
+- **Worker 自带沙箱**：当前 Worker 跑 code 要求机器预装 velites 二进制
+  （preflight fail-closed），对「只装 worker」的用户是多余门槛。规划：worker
+  分发时按平台携带 velites 二进制，preflight 先查自带副本再查 PATH；可复用
+  prod 侧 `scripts/ensure-velites.sh` 的源码指纹重建模式。
+- **存量脚手架代码策略**：已冻结/已发布的旧式自定义节点代码（SDK 之前的
+  手写 JSON 读写/配置合并）不做大爆炸迁移——版本不可变（EXEC-CODE-002），
+  兼容 shim 保旧 import 路径可跑，编辑即现代化（fork 的内置代码与「从模板
+  新建」均为 SDK 写法）。配套：存量盘点只读报告（哪些 published 版本仍是
+  旧式）+ 阶段 3 给 Studio agent 加「迁移到 SDK」能力（重写+校验+人确认发布）。
+  shim 退役是显式决策（删除将断老 job 冻结代码的重放），不进入任何近期批次。
 
 ## 8. 安全边界分析
 
