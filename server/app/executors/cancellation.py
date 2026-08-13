@@ -10,11 +10,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+# The token lives in workspace_libs (execution plane, zero server.app imports)
+# so the sandboxed code child and worker runners can use it; this module
+# re-exports it for Host-side callers and keeps the Host-only helpers.
+from workspace_libs.cancellation import CancellationToken, CancelledError
+
+__all__ = [
+    "CancelledError",
+    "CancellationToken",
+    "SubprocessTracker",
+    "check_cancellation",
+]
+
 logger = logging.getLogger(__name__)
-
-
-class CancelledError(Exception):
-    """Raised when code observes an active cancellation request."""
 
 
 def check_cancellation(runtime: Mapping[str, object] | None) -> None:
@@ -22,31 +30,6 @@ def check_cancellation(runtime: Mapping[str, object] | None) -> None:
     token = (runtime or {}).get("cancellation")
     if isinstance(token, CancellationToken):
         token.raise_if_cancelled()
-
-
-class CancellationToken:
-    """Thread-safe and process-safe cancellation signal.
-
-    When an optional *event* is supplied it is used as the backing primitive,
-    which allows a ``multiprocessing.Event`` to be shared with an isolated
-    child process.  Otherwise a lightweight ``threading.Event`` is used.
-    """
-
-    def __init__(self, event: Any | None = None) -> None:
-        self._event = event or threading.Event()
-
-    def is_cancelled(self) -> bool:
-        return bool(self._event.is_set())
-
-    def wait(self, timeout: float | None = None) -> bool:
-        return bool(self._event.wait(timeout))
-
-    def raise_if_cancelled(self) -> None:
-        if self.is_cancelled():
-            raise CancelledError("execution was cancelled")
-
-    def cancel(self) -> None:
-        self._event.set()
 
 
 @dataclass
