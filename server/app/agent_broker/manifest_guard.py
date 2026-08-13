@@ -19,6 +19,12 @@ PLACEHOLDER_MODELS = frozenset({"your-model"})
 
 def require_routable_execution(manifest: Mapping[str, Any]) -> None:
     """Fail fast when the frozen manifest carries no routable provider/model."""
+    if manifest.get("kind") == "code":
+        # Code payloads carry no provider/model; routability is the code text
+        # itself (hash-pinned bundle) plus the capability declaration.
+        if not str(manifest.get("capability") or "") or not str(manifest.get("code_hash") or ""):
+            raise ValueError("code request manifest requires a capability and a code_hash")
+        return
     execution = manifest.get("execution") or {}
     provider = str(execution.get("provider") or "")
     model = str(execution.get("model") or "")

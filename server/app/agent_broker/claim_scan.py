@@ -1,28 +1,19 @@
 """Candidate window scan for the Agent claim transaction.
 
 Split out of ``claim.py`` for the file-size budget: the bounded candidate
-query, the per-candidate evaluation (compatibility filters, row lock, job
-re-check, capacity enforcement, lease + run inserts) and the skip-reason
-accounting live here; ``claim.py`` keeps the Worker-level setup and the
-scan-round loop. Functions take the broker instance as their first argument
-and must run inside the caller's transaction.
+query, the fair cross-workspace ordering and the skip-reason accounting
+live here; the per-candidate evaluation lives in ``claim_evaluate.py`` and
+``claim.py`` keeps the Worker-level setup and the scan-round loop.
+Functions take the broker instance as their first argument and must run
+inside the caller's transaction.
 """
 
 from __future__ import annotations
 
-import json
-import uuid
 from collections import Counter
 from collections.abc import Iterator, Mapping
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING, Any
-
-from server.app.agent_broker import agent_claim_compatibility
-from server.app.agent_broker.claim_paths import claim_log_path
-
-if TYPE_CHECKING:
-    from server.app.agent_broker.broker import AgentExecutionBroker
+from typing import Any
 
 # Bounded claim scan rounds: (per-workspace head limit, global window). The
 # first round matches the historical fixed window, so healthy queues see no
@@ -50,6 +41,8 @@ class AgentClaim:
     lease_id: str
     node_run_id: int
     manifest: dict[str, Any]
+    # 'agent' (default) or 'code' (batch 2 self-contained code payload).
+    kind: str = "agent"
 
 
 @dataclass(frozen=True)
@@ -61,6 +54,12 @@ class WorkerView:
     models: set[tuple[str, str]]
     labels: dict[str, Any]
     allowed_workspaces: set[str]
+    # Dual capacity pools (batch 2): agent and code claims are accounted
+    # separately so a long code execution never starves agent claims.
+    agent_capacity: int = 1
+    agent_active: int = 0
+    code_capacity: int = 0
+    code_active: int = 0
 
 
 @dataclass
@@ -75,10 +74,15 @@ class ScanState:
 def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
     # Candidates are read WITHOUT row locks (a bounded per-workspace window
     # keeps small workspaces visible behind a deep queue); only the single
-    # row actually being claimed is locked below, by PK. Capacity is
-    # workspace-level (no workspace_agent_capacities row = unlimited).
+    # row actually being claimed is locked, by PK, in claim_evaluate.
+    # Workspace capacity is agent-only (no workspace_agent_capacities row =
+    # unlimited); kind='code' requests have no workspace-level cap in this
+    # phase, so queued code alone keeps a workspace eligible.
     # Eligibility is an EXISTS probe per workspaces row — a `distinct
     # workspace_id` scan would walk the entire queued index on every claim.
+    # kind='code' rows skip the versioned_entities hard join (batch 2): their
+    # payload is self-contained, runtime is the literal 'code', and the
+    # capability comes from the frozen manifest.
     rows: list[Any] = conn.execute(
         """
         with eligible_workspaces as (
@@ -86,21 +90,29 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
           from workspaces ws
           left join workspace_agent_capacities w on w.workspace_id=ws.id
           where exists (select 1 from agent_execution_requests q
-                        where q.workspace_id=ws.id and q.state='queued')
-            and (select count(*) from agent_execution_requests active
-                 where active.workspace_id=ws.id and active.state='claimed'
-                ) < coalesce(w.max_concurrency, 2147483647)
+                        where q.workspace_id=ws.id and q.state='queued'
+                          and q.kind='code')
+             or (
+               exists (select 1 from agent_execution_requests q
+                       where q.workspace_id=ws.id and q.state='queued')
+               and (select count(*) from agent_execution_requests active
+                    where active.workspace_id=ws.id and active.state='claimed'
+                      and active.kind='agent'
+                   ) < coalesce(w.max_concurrency, 2147483647)
+             )
         )
         select r.*, wr.definition_json as revision_definition_json
         from eligible_workspaces ws
         cross join lateral (
           select r2.*,
-                 d.definition_json::jsonb->>'runtime' as runtime,
-                 d.definition_json::jsonb->>'capability' as capability,
-                 d.definition_json
+                 case when r2.kind='code' then 'code'
+                      else d.definition_json::jsonb->>'runtime' end as runtime,
+                 case when r2.kind='code' then r2.manifest_json::jsonb->>'capability'
+                      else d.definition_json::jsonb->>'capability' end as capability,
+                 coalesce(d.definition_json, '{}') as definition_json
           from agent_execution_requests r2
-          join versioned_entities d
-            on d.entity_type='agent' and d.workspace_id is null
+          left join versioned_entities d
+            on r2.kind='agent' and d.entity_type='agent' and d.workspace_id is null
            and d.entity_key=r2.agent_id and d.definition_hash=r2.agent_definition_hash
            -- Quality replay pins match their immutable version row (any
            -- status); unpinned requests match the currently published row.
@@ -108,6 +120,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
                  and d.version=r2.pinned_agent_version)
                 or (r2.pinned_agent_version is null and d.status='published'))
           where r2.workspace_id=ws.workspace_id and r2.state='queued'
+            and (r2.kind='code' or d.definition_json is not null)
           order by r2.queued_at, r2.execution_id limit %s
         ) r
         join jobs j on j.id=r.job_id
@@ -129,184 +142,6 @@ def window_saturated(candidates: list[Any], per_workspace: int, window: int) -> 
         return True
     counts = Counter(str(row["workspace_id"]) for row in candidates)
     return any(count >= per_workspace for count in counts.values())
-
-
-def evaluate_candidate(
-    broker: AgentExecutionBroker,
-    conn: Any,
-    worker_id: str,
-    selected: Mapping[str, Any],
-    view: WorkerView,
-    state: ScanState,
-) -> AgentClaim | None:
-    """Try to claim one candidate; record the skip reason when it loses.
-
-    Returns the claim on success. On a skip, ``state.skip_reasons`` gains
-    exactly one entry naming the cause; skips past the compatibility filters
-    (row lock and beyond) also consume one bounded claim attempt.
-    """
-    selected_workspace = str(selected["workspace_id"])
-    if selected_workspace not in state.pause_cache:
-        check = broker.is_workspace_paused
-        state.pause_cache[selected_workspace] = (
-            bool(check(selected_workspace)) if check is not None else False
-        )
-    if state.pause_cache[selected_workspace]:
-        # Paused workspace: keep the request queued for resume.
-        state.skip_reasons["workspace_paused"] += 1
-        return None
-    manifest = agent_claim_compatibility.live_claim_manifest(selected)
-    # Workspace admission scope from the server-side registration snapshot
-    # (EXEC-WORKERACL-001): [] means all workspaces; a non-empty list
-    # restricts this Worker to those workspaces. Never trust Worker-
-    # supplied fields for this.
-    if view.allowed_workspaces and selected_workspace not in view.allowed_workspaces:
-        state.skip_reasons["workspace_not_allowed"] += 1
-        return None
-    if selected["runtime"] not in view.runtimes:
-        state.skip_reasons["runtime_mismatch"] += 1
-        return None
-    if not agent_claim_compatibility.worker_can_run(
-        selected, manifest, view.capabilities, view.models
-    ):
-        state.skip_reasons["capability_or_model_mismatch"] += 1
-        return None
-    if not labels_satisfy(
-        view.labels, json.loads(selected["definition_json"]).get("requires_labels", {})
-    ):
-        state.skip_reasons["labels_mismatch"] += 1
-        return None
-    state.attempts += 1
-    # Lock just this row; a competitor holding it (or a state change since
-    # the unlocked read) skips to the next candidate.
-    locked = conn.execute(
-        "select execution_id from agent_execution_requests"
-        " where execution_id=%s and state='queued' for update skip locked",
-        (selected["execution_id"],),
-    ).fetchone()
-    if locked is None:
-        state.skip_reasons["lock_raced"] += 1
-        return None
-    # Re-check job control state: paused jobs keep the request queued for
-    # resume; terminal jobs get their request cancelled so no zombie claims
-    # resurrect them.
-    job = conn.execute(
-        "select status, execution_paused from jobs where id=%s",
-        (selected["job_id"],),
-    ).fetchone()
-    if job is None:
-        cancel_request(conn, selected["execution_id"])
-        state.skip_reasons["job_missing"] += 1
-        return None
-    if job["execution_paused"] or job["status"] == "paused":
-        state.skip_reasons["job_paused"] += 1
-        return None
-    if job["status"] not in RUNNABLE_JOB_STATUSES:
-        cancel_request(conn, selected["execution_id"])
-        state.skip_reasons["job_terminal"] += 1
-        return None
-    # Fixed lock order across all capacity domains: the workspace-level
-    # Agent capacity domain first, then the Worker machine domain.
-    ws_domain = f"agent-ws:{selected['workspace_id']}"
-    conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (ws_domain,))
-    conn.execute("select pg_advisory_xact_lock(hashtext(%s))", (f"agent-worker:{worker_id}",))
-
-    capacity = conn.execute(
-        "select max_concurrency from workspace_agent_capacities where workspace_id=%s",
-        (selected["workspace_id"],),
-    ).fetchone()
-    if capacity is not None:
-        ws_active = conn.execute(
-            "select count(*) as cnt from agent_execution_requests"
-            " where workspace_id=%s and state='claimed'",
-            (selected["workspace_id"],),
-        ).fetchone() or {"cnt": 0}
-        if int(ws_active["cnt"]) >= int(capacity["max_concurrency"]):
-            # Lost the race for this workspace's last slot; try the next.
-            state.skip_reasons["capacity_raced"] += 1
-            return None
-
-    updated = conn.execute(
-        "update job_nodes set status='running', stale_reason='', error_message='',"
-        " started_at=current_timestamp, finished_at=null"
-        " where job_id=%s and node_key=%s and status in ('pending', 'ready', 'stale')",
-        (selected["job_id"], selected["node_key"]),
-    )
-    if updated.rowcount == 0:
-        cancel_request(conn, selected["execution_id"])
-        state.skip_reasons["node_not_pending"] += 1
-        return None
-
-    log_path = claim_log_path(manifest, broker.data_dir)
-    run = conn.execute(
-        """
-        insert into node_runs(
-          job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at
-        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp)
-        returning id
-        """,
-        (selected["job_id"], selected["node_key"], log_path),
-    ).fetchone()
-    if run is None:
-        raise RuntimeError("node run insert did not return an id")
-    lease_id = str(uuid.uuid4())
-    expires_at = datetime.now(UTC) + timedelta(seconds=broker.lease_ttl_seconds)
-    conn.execute(
-        """
-        insert into executor_leases(
-          id, execution_id, executor_id, workspace_id, job_id, workflow_key,
-          node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
-        ) values (%s, %s, %s, %s, %s, %s, %s, %s, 'active', current_timestamp, current_timestamp, %s)
-        """,
-        (
-            lease_id,
-            selected["execution_id"],
-            f"agent:{selected['agent_id']}",
-            selected["workspace_id"],
-            selected["job_id"],
-            selected["workflow_key"],
-            selected["node_key"],
-            run["id"],
-            expires_at,
-        ),
-    )
-    conn.execute(
-        """
-        update agent_execution_requests set
-          state='claimed', worker_id=%s, lease_id=%s, node_run_id=%s,
-          attempt=attempt+1, claimed_at=current_timestamp, heartbeat_at=current_timestamp
-        where execution_id=%s and state='queued'
-        """,
-        (worker_id, lease_id, run["id"], selected["execution_id"]),
-    )
-    promoted = conn.execute(
-        "update jobs set status='running', updated_at=current_timestamp"
-        " where id=%s and status in ('queued', 'running') and execution_paused=0",
-        (selected["job_id"],),
-    )
-    if promoted.rowcount == 0:
-        # Pause/failure landed mid-claim; roll the whole claim back so the
-        # request stays queued instead of resurrecting the job.
-        raise ClaimRacedError()
-    return AgentClaim(
-        execution_id=selected["execution_id"],
-        workspace_id=selected["workspace_id"],
-        job_id=selected["job_id"],
-        workflow_key=selected["workflow_key"],
-        node_key=selected["node_key"],
-        agent_id=selected["agent_id"],
-        lease_id=lease_id,
-        node_run_id=int(run["id"]),
-        manifest=manifest,
-    )
-
-
-def cancel_request(conn: Any, execution_id: str) -> None:
-    conn.execute(
-        "update agent_execution_requests set state='cancelled',"
-        " finished_at=current_timestamp where execution_id=%s",
-        (execution_id,),
-    )
 
 
 def fair_candidate_order(rows: list[dict[str, Any]], cursor: int) -> Iterator[dict[str, Any]]:

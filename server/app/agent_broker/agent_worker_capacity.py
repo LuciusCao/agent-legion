@@ -12,19 +12,29 @@ def touch_worker(conn: Any, worker_id: str) -> None:
     )
 
 
-def sync_declared_capacity(conn: Any, worker: Any, declared_max_concurrency: int | None) -> int:
-    """Return the enforced machine-wide capacity, recording re-declarations.
+def sync_declared_capacity(
+    conn: Any,
+    worker: Any,
+    declared_max_concurrency: int | None,
+    declared_max_code_concurrency: int | None = None,
+) -> tuple[int, int]:
+    """Return the enforced (agent, code) capacities, recording re-declarations.
 
-    The worker re-declares its live ``max_concurrency`` on every claim poll;
-    the Host records it so dynamic resizes take effect without a
-    re-registration. Same trust level as the registration-time declaration:
-    the value is self-reported, then Host-enforced.
-    """
-    max_concurrency = int(worker["max_concurrency"])
-    if declared_max_concurrency is not None and declared_max_concurrency != max_concurrency:
+    Workers re-declare live capacities on every claim poll; the Host records
+    them so resizes take effect without re-registration (self-reported, then
+    Host-enforced). The code pool defaults to 0 (agent-only Worker)."""
+    agent_pool = int(worker["max_concurrency"])
+    code_pool = int(worker["max_code_concurrency"])
+    if declared_max_concurrency is not None:
+        agent_pool = declared_max_concurrency
+    if declared_max_code_concurrency is not None:
+        code_pool = declared_max_code_concurrency
+    if agent_pool != int(worker["max_concurrency"]) or code_pool != int(
+        worker["max_code_concurrency"]
+    ):
         conn.execute(
-            "update agent_workers set max_concurrency=%s where worker_id=%s",
-            (declared_max_concurrency, worker["worker_id"]),
+            "update agent_workers set max_concurrency=%s, max_code_concurrency=%s"
+            " where worker_id=%s",
+            (agent_pool, code_pool, worker["worker_id"]),
         )
-        return declared_max_concurrency
-    return max_concurrency
+    return agent_pool, code_pool

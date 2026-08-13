@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from typing import Any, Literal
 
-from server.app.agent_workers import _ONLINE_THRESHOLD_SECONDS
+from server.app.agent_workers import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.services._ops_metrics_catchup import sample_catch_up as _sample_catch_up

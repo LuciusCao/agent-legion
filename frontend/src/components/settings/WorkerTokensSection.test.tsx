@@ -43,6 +43,7 @@ const sampleWorker = {
   capabilities: [],
   labels: {},
   max_concurrency: 2,
+  max_code_concurrency: 0,
   models: [],
   protocol_version: 1,
   registered_at: '2026-07-01T00:00:00Z',

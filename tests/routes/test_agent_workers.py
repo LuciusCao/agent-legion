@@ -6,10 +6,13 @@ import tarfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
+from server.app.agent_broker import AgentExecutionRequest
 from server.app.db.transaction import write_transaction
 from server.app.main import create_app
+from server.app.services.vault import VaultService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import workflow_definition_from_mapping
 from tests.test_agent_broker import _seed_request
@@ -648,3 +651,257 @@ def test_result_run_dir_promotes_events_for_logs_and_token_usage(tmp_path: Path)
     assert node_run["run_dir"] == "jobs/job-1/runs/generate/worker"
     assert usage is not None
     assert (usage["input_tokens"], usage["output_tokens"]) == (120, 34)
+
+
+# ---------------------------------------------------------------------------
+# Batch 2: kind='code' protocol surface (dual pools, secret injection,
+# heartbeat cancel body, auth-failure commit hook, node.log promotion).
+# ---------------------------------------------------------------------------
+
+_CODE = "def run(job, job_dir, runtime):\n    pass\n"
+
+
+def _seed_code_request(app, *, job_id: str = "job-code-1", with_secret: bool = False) -> None:
+    """Enqueue a self-contained kind='code' request straight into the broker."""
+    with write_transaction(app.state.job_db.path) as conn:
+        conn.execute(
+            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
+            " on conflict(id) do nothing"
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
+            " values (%s, 'test-workspace', 'questions', 'question', %s)",
+            (job_id, job_id),
+        )
+        conn.execute("insert into job_nodes(job_id, node_key) values (%s, 'package')", (job_id,))
+    manifest = {
+        "kind": "code",
+        "capability": "package",
+        "code_hash": "abc123",
+        "job_id": job_id,
+        "workspace_id": "test-workspace",
+        "log_path": f"logs/jobs/{job_id}-package.log",
+        "expected_outputs": [],
+        "config_schema": {
+            "properties": {
+                "mode": {"type": "string"},
+                "token": {"type": "string", "secret": True},
+            }
+        },
+        "config": {"mode": "fast"},
+        "secret_config": {"token": {"secret_ref": "api-token"}} if with_secret else {},
+        "bundle_name": f"{job_id}.code.tar.gz",
+    }
+    bundle_dir = Path(app.state.agent_broker.bundle_dir)
+    bundle_dir.mkdir(parents=True, exist_ok=True)
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        payload = _CODE.encode()
+        info = tarfile.TarInfo("node_code.py")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    (bundle_dir / str(manifest["bundle_name"])).write_bytes(buffer.getvalue())
+    execution_id = app.state.agent_broker.enqueue(
+        AgentExecutionRequest(
+            workspace_id="test-workspace",
+            job_id=job_id,
+            workflow_key="questions",
+            node_key="package",
+            agent_id="package",
+            agent_definition_hash="abc123",
+            manifest=manifest,
+            kind="code",
+        )
+    )
+    assert execution_id is not None
+
+
+def _register_code_worker(client: TestClient, **overrides) -> str:
+    payload = {
+        "worker_id": "code-worker",
+        "runtimes": ["pi", "velites"],
+        "capabilities": ["package"],
+        "max_concurrency": 4,
+        "max_code_concurrency": 2,
+        "protocol_version": 2,
+    }
+    payload.update(overrides)
+    response = client.post(
+        "/api/agent-workers/register",
+        headers=_MANAGEMENT,
+        json=payload,
+    )
+    assert response.status_code == 201, response.text
+    return str(response.json()["worker_token"])
+
+
+def _claim_code(client: TestClient, token: str) -> dict:
+    response = client.post(
+        "/api/agent-executions/claim",
+        headers={"X-Agent-Worker-Token": token},
+        json={"worker_id": "code-worker", "max_code_concurrency": 2},
+    )
+    assert response.status_code == 200, response.text
+    return dict(response.json())
+
+
+def test_register_roundtrips_code_capacity(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        _register_code_worker(client)
+        _register(client)  # legacy v1 registration without the field
+        _authenticate_admin(client)
+        workers = {w["worker_id"]: w for w in client.get("/api/agent-workers").json()["workers"]}
+
+    assert workers["code-worker"]["max_code_concurrency"] == 2
+    assert workers["home-mini"]["max_code_concurrency"] == 0
+
+
+def test_code_claim_injects_secrets_into_response_manifest(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
+    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
+    app = _make_app(tmp_path)
+    _seed_code_request(app, with_secret=True)
+    VaultService(app.state.job_db.path, {}).set("test-workspace", "api-token", "s3cr3t")
+
+    with TestClient(app) as client:
+        token = _register_code_worker(client)
+        claimed = _claim_code(client, token)
+
+    assert claimed["kind"] == "code"
+    manifest = claimed["manifest"]
+    assert manifest["config"] == {"mode": "fast", "token": "s3cr3t"}
+    assert "secret_config" not in manifest
+    # The persisted manifest stays secret-free (VAULT-SECRET-001).
+    with app.state.job_db._connect_read() as conn:
+        stored = conn.execute(
+            "select manifest_json from agent_execution_requests where kind='code'"
+        ).fetchone()
+    assert "s3cr3t" not in stored["manifest_json"]
+    assert json.loads(stored["manifest_json"])["secret_config"] == {
+        "token": {"secret_ref": "api-token"}
+    }
+    # The bundle endpoint serves the code bundle like any other.
+    with TestClient(app) as client:
+        bundle = client.get(
+            f"/api/agent-executions/{claimed['execution_id']}/bundle",
+            headers={"X-Agent-Worker-Token": token},
+        )
+    assert bundle.status_code == 200
+    with tarfile.open(fileobj=io.BytesIO(bundle.content), mode="r:gz") as tar:
+        assert "node_code.py" in tar.getnames()
+
+
+def test_agent_only_worker_never_claims_code(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_code_request(app)
+
+    with TestClient(app) as client:
+        token = _register_code_worker(client, max_code_concurrency=0)
+        claim = client.post(
+            "/api/agent-executions/claim",
+            headers={"X-Agent-Worker-Token": token},
+            json={"worker_id": "code-worker"},
+        )
+
+    assert claim.status_code == 204
+
+
+def test_heartbeat_v2_returns_cancel_body_for_code_executions(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_code_request(app)
+
+    with TestClient(app) as client:
+        token = _register_code_worker(client)
+        claimed = _claim_code(client, token)
+        execution_id = claimed["execution_id"]
+        auth = {"X-Agent-Worker-Token": token, "X-Agent-Lease-Id": claimed["lease_id"]}
+        url = f"/api/agent-executions/{execution_id}/heartbeat"
+
+        ok = client.post(url, headers=auth)
+        assert ok.status_code == 200
+        assert ok.json() == {"cancelled_execution_ids": []}
+
+        with write_transaction(app.state.job_db.path) as conn:
+            conn.execute("update jobs set execution_paused=1 where id='job-code-1'")
+        cancelled = client.post(url, headers=auth)
+        assert cancelled.status_code == 200
+        assert cancelled.json() == {"cancelled_execution_ids": [execution_id]}
+
+
+def test_result_auth_failure_invalidates_cached_connection_token(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_code_request(app)
+    with write_transaction(app.state.job_db.path) as conn:
+        conn.execute("insert into external_connections(key, type) values ('cms-prod', 'cms')")
+        conn.execute(
+            "insert into connection_tokens(connection_key, token_ciphertext)"
+            " values ('cms-prod', 'deadbeef')"
+        )
+
+    with TestClient(app) as client:
+        token = _register_code_worker(client)
+        claimed = _claim_code(client, token)
+        (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)
+        report = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": json.dumps(
+                    {"status": "completed", "exit_code": 0, "auth_failure_connection": "cms-prod"}
+                ),
+            },
+            content=_empty_archive(),
+        )
+        assert report.status_code == 204, report.text
+
+    with app.state.job_db._connect_read() as conn:
+        cached = conn.execute(
+            "select count(*) as c from connection_tokens where connection_key='cms-prod'"
+        ).fetchone()
+        outcome = conn.execute(
+            "select outcome_json from agent_execution_requests where kind='code'"
+        ).fetchone()
+    assert cached["c"] == 0
+    assert json.loads(outcome["outcome_json"])["auth_failure_connection"] == "cms-prod"
+
+
+def _archive_with_node_log(log_lines: list[str]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        payload = ("\n".join(log_lines) + "\n").encode()
+        info = tarfile.TarInfo("node.log")
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def test_code_result_promotes_node_log_to_canonical_log_path(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_code_request(app)
+
+    with TestClient(app) as client:
+        token = _register_code_worker(client)
+        claimed = _claim_code(client, token)
+        (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)
+        report = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": json.dumps({"status": "completed", "exit_code": 0}),
+            },
+            content=_archive_with_node_log(["line-1", "line-2"]),
+        )
+        assert report.status_code == 204, report.text
+
+    log_file = app.state.settings.data_dir / "logs" / "jobs" / "job-code-1-package.log"
+    assert log_file.read_text(encoding="utf-8") == "line-1\nline-2\n"
+    with app.state.job_db._connect_read() as conn:
+        run = conn.execute(
+            "select status, log_path from node_runs where job_id='job-code-1'"
+        ).fetchone()
+    assert run["status"] == "completed"
+    assert run["log_path"] == "logs/jobs/job-code-1-package.log"

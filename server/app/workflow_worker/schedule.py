@@ -24,6 +24,7 @@ from server.app.workflow_worker.agent_claim import (
     claim_agent_node,
     fail_node_config,
 )
+from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.executor_claim import claim_executor_node
 from server.app.workflow_worker.routing import resolve_node_route
@@ -139,6 +140,16 @@ def try_claim_and_submit(
         )
 
     executor_id = resolved.target_id
+
+    # Batch 2: a code-executor candidate with an online code-capable Worker
+    # and a Worker-eligible payload is enqueued to the broker; anything else
+    # falls through to the local executor path below (the safety net).
+    if isinstance(
+        worker.settings.executor_definitions.get(executor_id), CodeExecutorConfig
+    ) and try_claim_code_worker_node(
+        worker, workspace, job, node, job_dir, log_path, inputs, executor_id, workflow_key
+    ):
+        return True
 
     # Cheap gate before config resolution: when the pass snapshot says this
     # executor/workspace is out of capacity, the claim cannot succeed

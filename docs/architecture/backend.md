@@ -112,6 +112,8 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | POST | `/agent-definitions/{agent_id}/rollback` | `rollback_agent_definition` | routes/agent_definitions.py |
 | POST | `/agent-definitions/{agent_id}/copy` | `copy_agent_definition` | routes/agent_definitions.py |
 | DELETE | `/agent-definitions/{agent_id}` | `archive_agent_definition` | routes/agent_definitions.py |
+| POST | `/agent-executions/claim` | `claim` | routes/agent_worker_claims.py |
+| POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_worker_claims.py |
 | GET | `/agent-workers/self/metrics` | `get_worker_metrics` | routes/agent_worker_metrics.py |
 | POST | `/agent-workers/register` | `register` | routes/agent_workers.py |
 | POST | `/agent-register-tokens` | `create_register_token` | routes/agent_workers.py |
@@ -120,9 +122,7 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | GET | `/agent-workers/self` | `get_worker_self` | routes/agent_workers.py |
 | POST | `/agent-workers/{worker_id}/revoke` | `revoke_worker` | routes/agent_workers.py |
 | GET | `/agent-workers` | `list_workers` | routes/agent_workers.py |
-| POST | `/agent-executions/claim` | `claim` | routes/agent_workers.py |
 | GET | `/agent-executions/{execution_id}/bundle` | `bundle` | routes/agent_workers.py |
-| POST | `/agent-executions/{execution_id}/heartbeat` | `heartbeat` | routes/agent_workers.py |
 | POST | `/agent-executions/{execution_id}/release-slot` | `release_slot` | routes/agent_workers.py |
 | POST | `/agent-executions/{execution_id}/result` | `result` | routes/agent_workers.py |
 | GET | `/agents` | `list_agents` | routes/agents.py |
@@ -273,11 +273,12 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | AgentRegisterTokenSummary | BaseModel | token_id: str, workspace_id: str | None, label: str, created_at: str, revoked... | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokensResponse | BaseModel | tokens: list[AgentRegisterTokenSummary] | app/routes/agent_workers_contracts.py |
 | AgentRegisterTokenRevokeResponse | BaseModel | revoked: bool | app/routes/agent_workers_contracts.py |
-| ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None | app/routes/agent_workers_contracts.py |
+| ClaimAgentExecutionRequest | BaseModel | worker_id: str, max_concurrency: int | None, max_code_concurrency: int | None | app/routes/agent_workers_contracts.py |
 | AgentWorkerSummary | BaseModel | worker_id: str, name: str, runtimes: list[str], capabilities: list[str], mode... | app/routes/agent_workers_contracts.py |
 | AgentWorkersResponse | BaseModel | workers: list[AgentWorkerSummary] | app/routes/agent_workers_contracts.py |
 | AgentWorkerRevokeResponse | BaseModel | worker_id: str, revoked: bool | app/routes/agent_workers_contracts.py |
 | AgentClaimResponse | BaseModel | execution_id: str, lease_id: str, workspace_id: str, job_id: str, workflow_ke... | app/routes/agent_workers_contracts.py |
+| AgentHeartbeatResponse | BaseModel | cancelled_execution_ids: list[str] | app/routes/agent_workers_contracts.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
 | ArtifactUploadResponse | BaseModel | hash: str | app/routes/artifacts.py |

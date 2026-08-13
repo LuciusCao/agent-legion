@@ -1,17 +1,24 @@
 from __future__ import annotations
 
-import shutil
-import tempfile
+import logging
 from dataclasses import dataclass, field
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 
-from server.app.agent_broker.agent_bundle import AgentBundleError, extract_agent_result
+from server.app.agent_broker.result_unpack import (
+    code_result_log_target,
+    safe_relative_dir,
+    unpack_agent_result,
+)
+from server.app.db.connection import DatabaseDsn
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, ExecutionStatus
 from server.app.services.artifact_store import ArtifactStore
+from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.output_validation import validate_worker_outputs
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -25,46 +32,21 @@ class AgentOutcome:
     # events.jsonl is promoted for log display and token usage only — never
     # for success/failure decisions.
     run_dir: str = ""
+    # Batch 2 (design §5.3): a code node asked for this connection's cached
+    # token to be invalidated (upstream auth failure); the commit path
+    # performs the privileged invalidation. Empty = no request.
+    auth_failure_connection: str = ""
 
 
-def _safe_relative_dir(value: str) -> PurePosixPath | None:
-    if not value:
-        return None
-    relative = PurePosixPath(value)
-    if relative.is_absolute() or ".." in relative.parts:
-        return None
-    return relative
+def report_auth_failure_safe(database_dsn: DatabaseDsn, connection_key: str) -> None:
+    """Worker-reported auth failure (batch 2): invalidate the cached token.
 
-
-def _unpack_result(
-    archive_path: Path, job_dir: Path, expected: tuple[str, ...], run_dir: str = ""
-) -> None:
-    """Extract into a staging dir, then promote declared expected outputs plus
-    the Worker run dir's ``events.jsonl``.
-
-    Worker archives are untrusted: nothing outside ``expected`` and that single
-    log file lands in the job dir, so a Worker cannot clobber other nodes'
-    inputs/outputs or plant files to spoof server-side decisions (log display
-    and token parsing are read-only consumers)."""
-    with tempfile.TemporaryDirectory(prefix=".result-staging-", dir=job_dir) as staging:
-        staging_dir = Path(staging)
-        extract_agent_result(archive_path, staging_dir)
-        for name in expected:
-            relative = PurePosixPath(name)
-            if relative.is_absolute() or ".." in relative.parts:
-                raise AgentBundleError(f"unsafe expected output name: {name!r}")
-            source = staging_dir / relative
-            if source.is_file():
-                target = job_dir / relative
-                target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(source), str(target))
-        run_dir_relative = _safe_relative_dir(run_dir)
-        if run_dir_relative is not None:
-            events_source = staging_dir / run_dir_relative / "events.jsonl"
-            if events_source.is_file():
-                events_target = job_dir / run_dir_relative / "events.jsonl"
-                events_target.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(events_source), str(events_target))
+    Reporting must never mask a committed result, so failures are logged and
+    swallowed here."""
+    try:
+        ConnectionTokenService(database_dsn).report_auth_failure(connection_key)
+    except Exception:
+        logger.exception("connection %s: failed to report auth failure", connection_key)
 
 
 class AgentCompletionHandler:
@@ -102,9 +84,20 @@ class AgentCompletionHandler:
             return self.leases.finish(lease_id, result)
         job_dir = resolve_job_dir(job, self.jobs_dir)
         expected = tuple(str(name) for name in manifest.get("expected_outputs", ()))
-        if outcome.status != "cancelled" and archive_name:
+        # Batch 2 (decision 10): a kind='code' archive's node.log member is
+        # promoted to the run's canonical log path; a cancelled run delivers
+        # only its partial log, never partial outputs.
+        log_target = code_result_log_target(manifest, self.leases.data_dir or self.jobs_dir.parent)
+        if archive_name and (outcome.status != "cancelled" or log_target is not None):
+            cancelled = outcome.status == "cancelled"
             try:
-                _unpack_result(self.bundle_dir / archive_name, job_dir, expected, outcome.run_dir)
+                unpack_agent_result(
+                    self.bundle_dir / archive_name,
+                    job_dir,
+                    () if cancelled else expected,
+                    "" if cancelled else outcome.run_dir,
+                    log_target,
+                )
             except Exception as exc:
                 return self.leases.finish(
                     lease_id,
@@ -154,7 +147,7 @@ class AgentCompletionHandler:
 
         Empty when the Worker did not declare one or nothing was promoted, so
         older Workers and cancelled runs behave exactly as before."""
-        run_dir_relative = _safe_relative_dir(run_dir)
+        run_dir_relative = safe_relative_dir(run_dir)
         if run_dir_relative is None or not (job_dir / run_dir_relative).is_dir():
             return ""
         base = self.leases.data_dir or self.jobs_dir.parent
