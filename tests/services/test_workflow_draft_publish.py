@@ -2,7 +2,10 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from server.app.jobs.queries import JobQueries
-from server.app.services.workflow_draft_publish import publish_workflow_draft
+from server.app.services.workflow_draft_publish import (
+    publish_workflow_draft,
+    validate_workflow_draft_for_publish,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 _DRAFT_YAML = """
@@ -67,3 +70,50 @@ def test_publish_creates_active_revision(tmp_path: Path) -> None:
     active = queries.get_active_workflow_revision(workspace["id"], "test_publish_flow")
     assert active is not None
     assert active["status"] == "active"
+
+
+def test_validate_matches_publish_error_set(tmp_path: Path) -> None:
+    """validate returns exactly the errors publish would report (binding类错误前置)."""
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+
+    validate_errors = validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML, {})
+    ok, publish_errors = publish_workflow_draft(queries, workspace["id"], _DRAFT_YAML, {})
+
+    assert ok is False
+    assert validate_errors == publish_errors
+    assert any("missing executor binding" in error for error in validate_errors)
+    # Validation is read-only: no revision materialized.
+    assert queries.get_active_workflow_revision(workspace["id"], "test_publish_flow") is None
+
+
+def test_validate_clean_with_complete_binding(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+    queries.replace_workspace_executor_configuration(
+        workspace["id"],
+        allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
+        bindings=[
+            {
+                "workflow_key": "test_publish_flow",
+                "node_key": "do_thing",
+                "executor_id": "code-default",
+            }
+        ],
+        node_limits=[],
+    )
+    definitions = {"code-default": SimpleNamespace(capabilities=["do_thing"])}
+
+    assert (
+        validate_workflow_draft_for_publish(queries, workspace["id"], _DRAFT_YAML, definitions)
+        == []
+    )
+
+
+def test_validate_reports_structural_errors_before_bindings(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = _workspace(queries)
+
+    errors = validate_workflow_draft_for_publish(queries, workspace["id"], "key: only-key\n", {})
+
+    assert errors

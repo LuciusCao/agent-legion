@@ -40,6 +40,7 @@ from .skills import create_skills_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
+from .workflow_catalog_admin import create_workflow_catalog_admin_router
 from .workflow_node_codes import create_workflow_node_codes_router
 from .workflow_node_files import create_workflow_node_files_router
 from .workflow_revisions import create_workflow_revisions_router
@@ -107,6 +108,7 @@ def create_router(
     if quality_replays is not None:
         secured(create_quality_replays_router(quality_replays))
     secured(create_workflow_catalog_router(workflow_catalog, settings))
+    secured(create_workflow_catalog_admin_router(workflow_catalog, settings))
     workspaces_router = create_workspaces_router(
         workspace_configuration, settings, job_event_manager=job_event_manager
     )

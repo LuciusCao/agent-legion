@@ -38,7 +38,7 @@ def build_workspace_stats(
         "workspace_id": workspace_id,
         "name": workspace.get("name", ""),
         "workflow_key": workflow_key,
-        "workflow_label": workflows.definition(str(workflow_key)).label,
+        "workflow_label": workflows.label_of(str(workflow_key)),
         "job_stats": job_db.count_jobs_by_status(workspace_id),
         "executor_status": {"executors": executors},
         "latest_run": dict(latest_run) if latest_run else None,

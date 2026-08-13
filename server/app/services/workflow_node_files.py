@@ -75,7 +75,7 @@ def referencing_capabilities(
         if not isinstance(definition, CodeExecutorConfig):
             continue
         for capability, cap_config in definition.capabilities.items():
-            if PurePosixPath(cap_config.path) == target:
+            if cap_config.path is not None and PurePosixPath(cap_config.path) == target:
                 references.append({"executor_id": executor_id, "capability": capability})
     return sorted(references, key=lambda item: (item["executor_id"], item["capability"]))
 
@@ -90,12 +90,13 @@ def builtin_code_path(
     """Repo-relative path of the builtin code file serving ``capability``.
 
     Mirrors the Studio inspector's lookup: the first code executor whose
-    capability detail declares a path wins.
+    capability detail declares a path wins. Pathless (custom-code-only)
+    capabilities have no builtin file and resolve to None.
     """
     for definition in executor_definitions.values():
         if not isinstance(definition, CodeExecutorConfig):
             continue
         cap_config = definition.capabilities.get(capability)
-        if cap_config is not None:
+        if cap_config is not None and cap_config.path is not None:
             return cap_config.path
     return None

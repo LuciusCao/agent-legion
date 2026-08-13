@@ -8,6 +8,7 @@ per-job database round trips.
 
 from __future__ import annotations
 
+import logging
 from typing import TYPE_CHECKING, Any
 
 from server.app.storage_paths import resolve_job_dir
@@ -20,10 +21,12 @@ if TYPE_CHECKING:
     from server.app.workflow_worker.ready_cache import ReadyCandidate
     from server.app.workflow_worker.thread import WorkflowWorkerThread
 
+logger = logging.getLogger(__name__)
+
 
 def evaluate_changed_jobs(
     worker: WorkflowWorkerThread,
-    changed: list[tuple[WorkflowDefinition, dict[str, Any]]],
+    changed: list[tuple[WorkflowDefinition | None, dict[str, Any]]],
     fat_rows: dict[str, dict[str, Any]],
     nodes_by_job: dict[str, list[dict[str, Any]]],
     mark_key: Any,
@@ -42,6 +45,11 @@ def evaluate_changed_jobs(
         if job is None:
             continue
         definition_to_run = resolve_cached_definition(worker, definition, job)
+        if definition_to_run is None:
+            # Registered workflow without a catalog definition and a job
+            # without a snapshot: nothing to evaluate against.
+            logger.warning("skipping job %s: no workflow definition available", job["id"])
+            continue
         statuses = {node["node_key"]: node["status"] for node in nodes_by_job.get(job["id"], [])}
         job_dir = resolve_job_dir(job, worker.settings.jobs_dir)
         branch_evaluation = evaluate_branches(definition_to_run, statuses, job_dir)

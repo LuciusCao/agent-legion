@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 def build_ready_queues(
     worker: WorkflowWorkerThread,
     workspace_ids: list[str],
-    jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]],
+    jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition | None, dict[str, Any]]]],
 ) -> tuple[dict[str, dict[str, Any]], dict[str, deque[ReadyCandidate]]]:
     """Build the workspace row and ready queue per workspace with candidates."""
     workspaces: dict[str, dict[str, Any]] = {}

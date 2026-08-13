@@ -64,8 +64,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     apply_instance_settings(settings, job_db.path)
     # Executor definitions live in the DB (versioned_entities, entity_type
     # 'executor'): seed-if-absent the built-in catalog, then hydrate from the
-    # published rows (restart-effective, no hot rebuild).
+    # published rows (publish/rollback/archive hot-reload the registry).
     hydrate_executor_definitions(settings)
+    # Workflow catalog keys live in the DB (workflow_catalog, schema v40):
+    # upsert the built-in rows from the code registry; registered keys persist.
+    WorkflowCatalogService.seed_builtin(settings.database_url)
     # Skill sources/lock retired from tracked yaml into global_settings:
     # import-once the legacy files when present, else seed the built-in
     # constants; with rows present this is a no-op (DB is authoritative).
@@ -177,9 +180,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.workspace_event_aggregator = workspace_event_aggregator
     workflow_catalog = WorkflowCatalogService(settings)
     executor_catalog = ExecutorCatalogService(settings)
-    workspace_executor_configuration = WorkspaceExecutorConfigurationService(
-        job_db, settings.executor_definitions
-    )
+    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, workflow_catalog
     )

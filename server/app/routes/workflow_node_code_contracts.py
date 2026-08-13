@@ -4,7 +4,7 @@ from pydantic import BaseModel
 
 
 class WorkflowNodeCodeResponse(BaseModel):
-    origin: Literal["builtin", "custom"]
+    origin: Literal["builtin", "custom", "none"]
     code: str
     # Repo-relative path of the builtin file (origin=builtin only).
     path: str | None = None
@@ -14,6 +14,10 @@ class WorkflowNodeCodeResponse(BaseModel):
     # Current draft content, when one exists (drafts are editable user data).
     draft_code: str | None = None
     draft_version: int | None = None
+
+
+class WorkflowNodeCodeTemplateResponse(BaseModel):
+    code: str
 
 
 class WorkflowNodeCodeDraftRequest(BaseModel):

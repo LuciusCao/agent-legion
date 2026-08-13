@@ -65,7 +65,7 @@ class WorkspaceConfigurationService:
         return self.job_db.list_workspaces()
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
-        definition = self.workflows.definition(payload["default_workflow_key"])
+        definition = self.workflows.bound_definition(payload["default_workflow_key"])
         try:
             workspace = self.job_db.create_workspace(
                 payload["name"],
@@ -76,9 +76,10 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(
-            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-        ).ensure_active_revision(workspace["id"], definition)
+        if definition is not None:
+            WorkflowRevisionService(
+                self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+            ).ensure_active_revision(workspace["id"], definition)
         return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:
@@ -87,7 +88,7 @@ class WorkspaceConfigurationService:
     def update(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._workspace(workspace_id)
         if payload.get("default_workflow_key") is not None:
-            self.workflows.definition(payload["default_workflow_key"])
+            self.workflows.bound_definition(payload["default_workflow_key"])
         try:
             return self.job_db.update_workspace(
                 workspace_id,
@@ -128,19 +129,26 @@ class WorkspaceConfigurationService:
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
-        workflow = self.workflows.definition(workflow_key)
-
-        validate_workspace_executor_configuration(
-            workflow=workflow,
-            executor_definitions=self.settings.executor_definitions,
-            allocations=executor_allocations,
-            bindings=node_bindings,
-            node_limits=node_limits,
-            agent_capabilities={
-                definition.capability
-                for definition in published_agent_definitions(self.settings.database_url).values()
-            },
-        )
+        workflow = self.workflows.bound_definition(workflow_key)
+        if workflow is None and (executor_allocations or node_bindings or node_limits):
+            raise InvalidOperationError(
+                f"Workflow {workflow_key!r} has no published definition yet; "
+                "publish a draft before configuring executors"
+            )
+        if workflow is not None:
+            validate_workspace_executor_configuration(
+                workflow=workflow,
+                executor_definitions=self.settings.executor_definitions,
+                allocations=executor_allocations,
+                bindings=node_bindings,
+                node_limits=node_limits,
+                agent_capabilities={
+                    definition.capability
+                    for definition in published_agent_definitions(
+                        self.settings.database_url
+                    ).values()
+                },
+            )
         name_value = workspace_patch.get("name")
         name: str = name_value if name_value is not None else str(workspace["name"])
         description_value = workspace_patch.get("description")
@@ -175,9 +183,10 @@ class WorkspaceConfigurationService:
                 self.job_db.set_workspace_agent_capacity(workspace_id, agent_capacity)
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(
-            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-        ).ensure_active_revision(workspace_id, workflow)
+        if workflow is not None:
+            WorkflowRevisionService(
+                self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+            ).ensure_active_revision(workspace_id, workflow)
         executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,
@@ -204,12 +213,12 @@ class WorkspaceConfigurationService:
             )
         elif section == "workflow":
             if patch.get("workflowKey") is not None:
-                definition = self.workflows.definition(patch["workflowKey"])
+                definition = self.workflows.bound_definition(patch["workflowKey"])
             workspace = self.job_db.update_workspace(
                 workspace_id,
                 default_workflow_key=patch.get("workflowKey"),
             )
-            if patch.get("workflowKey") is not None:
+            if patch.get("workflowKey") is not None and definition is not None:
                 WorkflowRevisionService(
                     self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
                 ).ensure_active_revision(workspace_id, definition)

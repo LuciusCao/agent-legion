@@ -21,7 +21,10 @@ It ships with two production workflows:
 - **Workspace-scoped DAG workflows.** Built-in workflow DAGs are Python
   constants in `server/app/workflows/builtin.py`; nodes declare only a
   business `capability` and their
-  input/output artifacts — never how to run them. Rerun a single node, run to
+  input/output artifacts — never how to run them. Known workflow keys live in
+  the DB `workflow_catalog` table: built-ins are seeded from the code
+  constants at startup, and admins register new keys via
+  `POST /api/workflows`. Rerun a single node, run to
   a target node, or continue from a pause; downstream staleness is tracked
   automatically.
 - **Batch intake.** Create job batches through

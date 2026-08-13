@@ -1,9 +1,10 @@
 from typing import Annotated, Any, Never
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
 from server.app.auth.dependencies import require_user
+from server.app.executors.executor_registry_factory import reload_published_executors
 from server.app.executors.kinds import ExecutorKindError
 from server.app.jobs import JobQueries
 from server.app.routes.executor_definition_contracts import (
@@ -70,9 +71,9 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
     """DB-backed executor definition catalog: draft → publish lifecycle (v30).
 
     Mounted through ``secured()``: workspace members manage executor
-    definitions. Publishes take effect on service restart (the runtime
-    executor registry is hydrated at startup); the catalog and this API
-    reflect DB state immediately.
+    definitions. Publish/rollback/archive hot-reload the runtime executor
+    registry (``reload_published_executors``), so new definitions participate
+    in scheduling without a service restart.
     """
     router = APIRouter()
 
@@ -153,27 +154,30 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
     @router.post(
         "/executor-definitions/{executor_id}/publish", response_model=ExecutorVersionResponse
     )
-    def publish_executor_definition(executor_id: str) -> ExecutorVersionResponse:
+    def publish_executor_definition(request: Request, executor_id: str) -> ExecutorVersionResponse:
         require_workflows_enabled(settings)
         try:
             entity = _service().publish(executor_id)
         except (ValidationError, ExecutorKindError, JobServiceError) as exc:
             _raise_definition_http_error(exc)
+        reload_published_executors(settings, request.app.state.executor_registry)
         return _version_response(entity)
 
     @router.post(
         "/executor-definitions/{executor_id}/rollback", response_model=ExecutorVersionResponse
     )
     def rollback_executor_definition(
+        request: Request,
         executor_id: str,
-        request: ExecutorRollbackRequest,
+        request_body: ExecutorRollbackRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
     ) -> ExecutorVersionResponse:
         require_workflows_enabled(settings)
         try:
-            entity = _service().rollback(executor_id, request.version, f"user:{user['id']}")
+            entity = _service().rollback(executor_id, request_body.version, f"user:{user['id']}")
         except (ValidationError, ExecutorKindError, JobServiceError) as exc:
             _raise_definition_http_error(exc)
+        reload_published_executors(settings, request.app.state.executor_registry)
         return _version_response(entity)
 
     @router.post("/executor-definitions/{executor_id}/copy", response_model=ExecutorVersionResponse)
@@ -190,12 +194,13 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
         return _version_response(entity)
 
     @router.delete("/executor-definitions/{executor_id}", response_model=ExecutorArchiveResponse)
-    def archive_executor_definition(executor_id: str) -> ExecutorArchiveResponse:
+    def archive_executor_definition(request: Request, executor_id: str) -> ExecutorArchiveResponse:
         require_workflows_enabled(settings)
         try:
             archived = _service().archive_all(executor_id)
         except JobServiceError as exc:
             raise_job_http_error(exc)
+        reload_published_executors(settings, request.app.state.executor_registry)
         return ExecutorArchiveResponse(archived=archived)
 
     return router

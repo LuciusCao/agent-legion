@@ -90,10 +90,15 @@ def try_claim_code_worker_node(
         )
         if node_code is not None:
             code_text = node_code
-        else:
+        elif capability_config.path is not None:
             code_text = (Path(worker.settings.root_dir) / capability_config.path).read_text(
                 encoding="utf-8"
             )
+        else:
+            # Custom-code-only capability with no frozen/published version:
+            # nothing to ship to a Worker; the local executor reports the
+            # missing code (EXEC-CODE-002).
+            return False
     except (ValueError, OSError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
     if not is_worker_eligible(code_text, Path(worker.settings.root_dir)):

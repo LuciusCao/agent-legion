@@ -249,3 +249,15 @@ def resolve_dispatch_node_code(
         )
     row = service.get_effective_code(workspace_id, workflow_key, node_key)
     return str(row["code"]) if row is not None else None
+
+
+def require_runnable_capability(
+    capabilities: dict[str, Any], capability: str, node_code: str | None
+) -> None:
+    """Pathless capability without custom code has nothing to run: fail fast."""
+    config = capabilities.get(capability)
+    if config is not None and config.path is None and node_code is None:
+        raise ValueError(
+            f"capability {capability!r} has no builtin code path and no "
+            "published custom node code (EXEC-CODE-002)"
+        )
