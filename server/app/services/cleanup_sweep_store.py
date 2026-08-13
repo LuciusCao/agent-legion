@@ -4,8 +4,8 @@ The sweep deletes only files — ``node_runs`` rows are never removed — so
 without a cursor every hourly pass re-pages the full expired tail
 (production: 1.35M rows at ~500 rows per chunk, i.e. a near-continuous
 scan). The retention cutoff moves forward over time and newly expired
-rows have monotonically increasing ``finished_at``, so a per-status
-high-water mark lets each pass resume where the last one stopped.
+rows have monotonically increasing ``finished_at``, so a per-(status,
+action) high-water mark lets each pass resume where the last one stopped.
 
 Trade-off: the cursor advances past every row a chunk returned, including
 rows whose file deletion failed (logged as a warning at the time) — later
@@ -32,12 +32,16 @@ _EMPTY_CURSOR = (datetime.min.replace(tzinfo=UTC), 0)
 
 
 class CleanupSweepStore:
-    """Read/write the per-status sweep high-water marks in ``global_settings``."""
+    """Read/write the sweep high-water marks in ``global_settings``.
+
+    Keys are ``"<status>:<action>"`` (e.g. ``completed:log``): each artifact
+    action advances independently because log and run-dir retentions differ.
+    """
 
     def __init__(self, database_dsn: DatabaseDsn) -> None:
         self._dsn = database_dsn
 
-    def load(self, status: str) -> tuple[datetime, int]:
+    def load(self, cursor_key: str) -> tuple[datetime, int]:
         """Return the persisted ``(finished_at, id)`` mark, or the scan start."""
         with read_connection(self._dsn) as conn:
             row = conn.execute(
@@ -46,7 +50,7 @@ class CleanupSweepStore:
             ).fetchone()
         if row is None:
             return _EMPTY_CURSOR
-        entry = json.loads(str(row["value"])).get(status) or {}
+        entry = json.loads(str(row["value"])).get(cursor_key) or {}
         finished_raw = entry.get("finished_at")
         if not finished_raw:
             return _EMPTY_CURSOR
@@ -55,15 +59,15 @@ class CleanupSweepStore:
             finished = finished.replace(tzinfo=UTC)
         return finished, int(entry.get("id", 0))
 
-    def save(self, status: str, finished_at: datetime, row_id: int) -> None:
-        """Advance one status's mark; read-modify-write keeps the other status."""
+    def save(self, cursor_key: str, finished_at: datetime, row_id: int) -> None:
+        """Advance one cursor key's mark; read-modify-write keeps the other keys."""
         with write_transaction(self._dsn) as conn:
             row = conn.execute(
                 "select value from global_settings where key=%s",
                 (GLOBAL_SETTINGS_KEY,),
             ).fetchone()
             document = json.loads(str(row["value"])) if row is not None else {}
-            document[status] = {"finished_at": finished_at.isoformat(), "id": row_id}
+            document[cursor_key] = {"finished_at": finished_at.isoformat(), "id": row_id}
             conn.execute(
                 """
                 insert into global_settings(key, value) values (%s, %s)
