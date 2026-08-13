@@ -6,6 +6,7 @@ import type {
 } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+import { StudioNavContext } from './workflowStudioNav'
 
 // 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
 // 不再读 executor catalog 的 agent 条目。
@@ -166,5 +167,22 @@ describe('WorkflowNodeExecutionSection', () => {
     )
 
     expect(screen.getByText('未匹配到 executor capability')).toBeInTheDocument()
+  })
+
+  it('jumps to the agent editor from the agent card', () => {
+    const openAgent = vi.fn()
+    render(
+      <StudioNavContext.Provider value={{ openAgent, openExecutor: () => {} }}>
+        <WorkflowNodeExecutionSection
+          node={node}
+          executorCatalog={executorCatalog}
+          {...editorProps}
+        />
+      </StudioNavContext.Provider>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '在 Agent 管理中打开' }))
+
+    expect(openAgent).toHaveBeenCalledWith('question-key-info-v1')
   })
 })

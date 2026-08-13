@@ -6,11 +6,13 @@ import {
   DialogTitle,
 } from '@mui/material'
 import type { useWorkflowStudio } from './useWorkflowStudio'
-import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPanel'
+import type { StudioPanelFocus } from './useWorkflowStudioPageView'
 import { WorkflowDefinitionEditor } from './WorkflowDefinitionEditor'
-import { WorkflowValidationPanel } from './WorkflowValidationPanel'
-import { AgentsPanel } from './AgentsPanel'
-import { ExecutorsPanel } from './ExecutorsPanel'
+import { WorkflowStudioChangesView } from './WorkflowStudioChangesView'
+import {
+  ManagedAgentsPanel,
+  ManagedExecutorsPanel,
+} from './WorkflowStudioManagedPanels'
 import styles from './WorkflowStudioGlobalDialog.module.css'
 
 export type WorkflowStudioGlobalMode =
@@ -22,14 +24,12 @@ export type WorkflowStudioGlobalMode =
 type Props = {
   mode: WorkflowStudioGlobalMode | null
   studio: ReturnType<typeof useWorkflowStudio>
+  panelFocus: StudioPanelFocus
   onClose: () => void
 }
 
-export function WorkflowStudioGlobalDialog({ mode, studio, onClose }: Props) {
-  const hasValidation =
-    studio.validationMessage !== '' ||
-    studio.validationErrors.length > 0 ||
-    (studio.compareErrors?.length ?? 0) > 0
+export function WorkflowStudioGlobalDialog(props: Props) {
+  const { mode, studio, onClose } = props
 
   const selectNode = (nodeKey: string) => {
     studio.setSelectedNodeKey(nodeKey)
@@ -56,30 +56,17 @@ export function WorkflowStudioGlobalDialog({ mode, studio, onClose }: Props) {
               : '变更与校验'}
       </DialogTitle>
       <DialogContent dividers className={styles.content}>
-        {mode === 'agents' && <AgentsPanel />}
-        {mode === 'executors' && <ExecutorsPanel />}
+        {mode === 'agents' && (
+          <ManagedAgentsPanel focusId={props.panelFocus.agents} />
+        )}
+        {mode === 'executors' && (
+          <ManagedExecutorsPanel focusId={props.panelFocus.executors} />
+        )}
         {mode === 'changes' && (
-          <div className={styles.checks}>
-            <section aria-label="校验结果">
-              <h3>校验结果</h3>
-              {hasValidation ? (
-                <WorkflowValidationPanel
-                  message={studio.validationMessage}
-                  errors={studio.validationErrors}
-                  compareErrors={studio.compareErrors ?? undefined}
-                  onSelectNode={selectNode}
-                />
-              ) : (
-                <p className={styles.empty}>尚未运行校验。</p>
-              )}
-            </section>
-            <WorkflowChangeSummaryPanel
-              summary={studio.compareSummary}
-              loading={studio.compareState === 'loading'}
-              errors={studio.compareErrors}
-              onSelectNode={selectNode}
-            />
-          </div>
+          <WorkflowStudioChangesView
+            studio={studio}
+            onSelectNode={selectNode}
+          />
         )}
         {mode === 'yaml' && (
           <div className={styles.yamlEditor}>
