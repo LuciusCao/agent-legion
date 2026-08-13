@@ -798,3 +798,43 @@ def test_queue_alert_blocked_requires_workspace_queue() -> None:
     assert _service().query_summary(workspace_id="ops-ws")["queue_alert"]["kind"] == "blocked"
     # 该 workspace 没有 queued 行：fleet 级 blocked 信号不外溢到其他 workspace。
     assert _service().query_summary(workspace_id="ops-ws-2")["queue_alert"] is None
+
+
+def test_query_summary_serves_cached_result_within_ttl() -> None:
+    """UI 轮询在 TTL 内命中缓存，不重复扫库。"""
+    service = _service()
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    _insert_sample(now - timedelta(minutes=1), online_workers=1)
+
+    first = service.query_summary()
+    assert first["online_workers"] == 1
+
+    _insert_sample(now, online_workers=2)
+    second = service.query_summary()
+    assert second["online_workers"] == 1
+
+
+def test_query_summary_cache_expires_after_ttl(monkeypatch) -> None:
+    monkeypatch.setattr("server.app.services._ops_metrics_summary._SUMMARY_CACHE_TTL_SECONDS", 0)
+    service = _service()
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    _insert_sample(now - timedelta(minutes=1), online_workers=1)
+
+    first = service.query_summary()
+    assert first["online_workers"] == 1
+
+    _insert_sample(now, online_workers=2)
+    second = service.query_summary()
+    assert second["online_workers"] == 2
+
+
+def test_query_summary_cache_is_keyed_per_scope() -> None:
+    """worker 维度的缓存不得串到全局维度（反之亦然）。"""
+    service = _service()
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    _insert_sample(now - timedelta(minutes=1), online_workers=2)
+    _insert_sample(now - timedelta(minutes=1), worker_id="w-1", online_workers=1)
+
+    assert service.query_summary()["online_workers"] == 2
+    assert service.query_summary(worker_id="w-1")["online_workers"] == 1
+    assert service.query_summary()["online_workers"] == 2

@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from server.app.db.connection import DatabaseConnection
 from server.app.jobs import JobQueries
 from server.app.services import cleanup_sweep
+from server.app.services.cleanup_sweep_store import CleanupSweepStore
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
 from server.app.storage_paths import make_data_relative
 from tests.helpers.job_dirs import job_storage_ref, make_job_dir
@@ -368,3 +369,77 @@ def test_cleanup_sql_cutoff_handles_mixed_finished_at_formats(tmp_path):
     assert not (log_dir / "iso_naive_old.log").exists()
     assert not (log_dir / "iso_aware_old.log").exists()
     assert (log_dir / "space_boundary.log").exists()
+
+
+def test_sweep_cursor_store_defaults_and_roundtrip():
+    store = CleanupSweepStore(TEST_DATABASE_URL)
+    assert store.load("completed") == (datetime.min.replace(tzinfo=UTC), 0)
+    mark = datetime(2026, 1, 1, tzinfo=UTC)
+    store.save("completed", mark, 42)
+    store.save("failed", mark, 7)
+    assert store.load("completed") == (mark, 42)
+    assert store.load("failed") == (mark, 7)
+
+
+def test_cleanup_resumes_from_persisted_sweep_cursor(tmp_path):
+    data_dir, db = _make_db(tmp_path)
+    log_dir = data_dir / "logs" / "jobs"
+    log_dir.mkdir(parents=True)
+    old_finished = datetime.now(UTC) - timedelta(days=40)
+
+    old_log = log_dir / "old.log"
+    old_log.write_text("old")
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            log_path=make_data_relative(old_log, data_dir),
+            finished_at=old_finished.isoformat(),
+        )
+
+    cfg = CleanupConfig(
+        log_retention_days=30, run_dir_retention_days=30, keep_only_latest_run_per_node=False
+    )
+    logs, _dirs = cleanup_old_logs(db, data_dir, cfg)
+    assert logs == 1
+
+    store = CleanupSweepStore(TEST_DATABASE_URL)
+    finished, row_id = store.load("completed")
+    assert finished == old_finished
+    assert row_id > 0
+
+    # A late-arriving row below the cursor is never swept: cleanup is
+    # best-effort and rows are never deleted, so re-paging the whole expired
+    # tail every pass is traded away (see CleanupSweepStore docstring).
+    older_log = log_dir / "older.log"
+    older_log.write_text("older")
+    with db.connect() as conn:
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-b",
+            log_path=make_data_relative(older_log, data_dir),
+            finished_at=(old_finished - timedelta(days=1)).isoformat(),
+        )
+    logs, _dirs = cleanup_old_logs(db, data_dir, cfg)
+    assert logs == 0
+    assert older_log.exists()
+
+    # A row that expires after the cursor (retention cutoff moved forward)
+    # is picked up by the next pass.
+    newer_log = log_dir / "newer.log"
+    newer_log.write_text("newer")
+    with db.connect() as conn:
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-c",
+            log_path=make_data_relative(newer_log, data_dir),
+            finished_at=(old_finished + timedelta(days=1)).isoformat(),
+        )
+    logs, _dirs = cleanup_old_logs(db, data_dir, cfg)
+    assert logs == 1
+    assert not newer_log.exists()

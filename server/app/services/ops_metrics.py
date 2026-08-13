@@ -48,6 +48,8 @@ class OpsMetricsService:
             monitoring.get("sample_interval_seconds", _DEFAULT_SAMPLE_INTERVAL_SECONDS)
         )
         self._retention_days = int(monitoring.get("retention_days", _DEFAULT_RETENTION_DAYS))
+        # Short-TTL summary cache for UI polling; see _ops_metrics_summary.
+        self._summary_cache: dict[tuple[str, str], tuple[datetime, dict[str, Any]]] = {}
 
     @property
     def sample_interval_seconds(self) -> float:
