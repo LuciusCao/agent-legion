@@ -172,7 +172,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     )
 
     worker.start()
-    worker._definitions = [definition]
+    worker._scan_entries = ([definition], [])
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:

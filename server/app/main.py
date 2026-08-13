@@ -142,6 +142,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 agent_dispatch=agent_dispatch,
             )
             app.state.worker_startup = worker_status
+            # Routes pick the thread up here to trigger scan-list reloads
+            # (workflow registration hot refresh).
+            app.state.workflow_worker = workflow_worker_thread
             # Orphan GC shares the sweeper ownership rule: exactly one
             # replica (sweeper_enabled) reclaims, the rest stay idle.
             if settings.executor_runtime.sweeper_enabled:
