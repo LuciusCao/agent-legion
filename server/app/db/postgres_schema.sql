@@ -206,6 +206,8 @@ create table if not exists agent_workers (
   capabilities_json text not null default '[]',
   models_json text not null default '[]',
   max_concurrency integer not null check(max_concurrency > 0),
+  -- Code-execution capacity pool (schema v38): 0 = agent-only Worker.
+  max_code_concurrency integer not null default 0 check(max_code_concurrency >= 0),
   labels_json text not null default '{}',
   protocol_version integer not null,
   token_hash text not null,
@@ -221,6 +223,10 @@ create table if not exists agent_workers (
 alter table agent_workers add column if not exists allowed_workspaces_json text not null default '[]';
 alter table agent_workers add column if not exists capabilities_json text not null default '[]';
 alter table agent_workers add column if not exists models_json text not null default '[]';
+alter table agent_workers add column if not exists max_code_concurrency integer not null default 0;
+alter table agent_workers drop constraint if exists agent_workers_max_code_concurrency_check;
+alter table agent_workers add constraint agent_workers_max_code_concurrency_check
+  check(max_code_concurrency >= 0);
 
 -- Workspace-scoped Agent Worker registration tokens (EXEC-WORKERACL-001).
 -- workspace_id NULL means the token admits Workers to ALL workspaces; a
@@ -241,6 +247,11 @@ create table if not exists agent_execution_requests (
   job_id text not null references jobs(id) on delete cascade,
   workflow_key text not null,
   node_key text not null,
+  -- Request flavor (schema v38): 'agent' rows carry an Agent payload and join
+  -- versioned_entities at claim; 'code' rows carry a self-contained code
+  -- payload (code text + hash in the bundle) and skip that join.
+  kind text not null default 'agent'
+    check(kind in ('agent', 'code')),
   agent_id text not null,
   agent_definition_hash text not null,
   node_concurrency_limit integer not null check(node_concurrency_limit > 0),
@@ -259,6 +270,10 @@ create table if not exists agent_execution_requests (
 );
 alter table agent_execution_requests add column if not exists lease_id text;
 alter table agent_execution_requests add column if not exists node_run_id bigint;
+alter table agent_execution_requests add column if not exists kind text not null default 'agent';
+alter table agent_execution_requests drop constraint if exists agent_execution_requests_kind_check;
+alter table agent_execution_requests add constraint agent_execution_requests_kind_check
+  check(kind in ('agent', 'code'));
 -- State evolution: 'reporting' (result upload pending; execution slot released).
 -- Drop/re-add so databases created before this state existed pick it up.
 alter table agent_execution_requests drop constraint if exists agent_execution_requests_state_check;

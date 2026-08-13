@@ -7,6 +7,7 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import Any
 
 from server.app.agent_broker import AgentDispatchService
+from server.app.agent_broker.code_dispatch import CodeDispatchService
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
@@ -42,6 +43,7 @@ class WorkflowWorkerThread:
         workspace_worker_control: Any | None = None,
         agent_manager: Any | None = None,
         agent_dispatch: AgentDispatchService | None = None,
+        code_dispatch: CodeDispatchService | None = None,
     ):
         self.job_db = job_db
         self.leases = leases
@@ -52,6 +54,7 @@ class WorkflowWorkerThread:
         self.workspace_worker_control = workspace_worker_control
         self.agent_manager = agent_manager
         self.agent_dispatch = agent_dispatch
+        self.code_dispatch = code_dispatch
         self.stop_event = threading.Event()
         # Set when work finishes or arrives; the poll loop waits on this.
         self._wake_event = threading.Event()
