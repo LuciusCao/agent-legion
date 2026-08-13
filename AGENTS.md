@@ -102,6 +102,14 @@
   （EXEC-CODE-002），禁止任何运行时 API 增删改 repo `workflow_nodes/` 文件。
   自定义节点执行必须经 `velites sandbox wrap` OS 沙箱，沙箱不可用即拒绝执行
   （fail-closed，EXEC-CODE-003）；开关 `workflows.custom_nodes_enabled`。
+- code 节点上 Worker（批次 2，协议 v2，EXEC-CODE-WORKER-001）：worker-eligible =
+  对解析后代码文本做静态 import 闭包扫描，闭包 ⊆ `workspace_libs` + stdlib
+  （+ requests）才可上 Worker；video 三节点（`video_download` / `video_assemble` /
+  `video_transcribe`）因 import `server.app.pipeline.*` 天然留 Host 本地执行。
+  无在线 code Worker 时 dispatch 探测并回落本地 executor（兜底=本地，不做
+  queued 超时回落）。Worker 上所有 code 执行（内置与自定义）统一过 velites
+  沙箱；Worker 与 Host 的容量按 kind 分池（`max_concurrency` /
+  `max_code_concurrency`）各自记账各自强制。
 - 节点可调参数经 `AgentDefinition.config_schema` 声明（`server/app/config_schema.py`
   子集）；executor 节点经 capability 的 `config_schema`
   声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
