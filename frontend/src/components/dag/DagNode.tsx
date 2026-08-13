@@ -23,6 +23,7 @@ export interface DagNodeData extends Record<string, unknown> {
   workerId?: string | null
   nodeKey?: string
   capability?: string
+  executorUnbound?: boolean
   topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
   inputs: string[]
@@ -61,6 +62,14 @@ export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
           <span className={styles.executorTag}>{data.executorKind}</span>
         )}
         <DagNodeExecutorBadge data={data} />
+        {data.executorUnbound && (
+          <span
+            className={styles.unboundTag}
+            title="该节点没有 executor 绑定，调度将失败"
+          >
+            未绑定
+          </span>
+        )}
         {data.terminalOutcome && (
           <span className={styles.terminalTag}>{data.terminalOutcome}</span>
         )}

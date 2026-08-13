@@ -127,6 +127,17 @@ describe('DagNode', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('renders an unbound warning chip when the node has no executor binding', () => {
+    renderWithProvider({
+      ...baseData,
+      agentId: null,
+      executorId: null,
+      workerId: null,
+      executorUnbound: true,
+    })
+    expect(screen.getByText('未绑定')).toBeInTheDocument()
+  })
+
   it('renders not applicable node status', () => {
     renderWithProvider({
       label: '生成关键信息',

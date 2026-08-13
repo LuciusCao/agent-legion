@@ -1,10 +1,13 @@
+import { Button } from '@mui/material'
 import type { AgentDefinition } from '../../types/executorTypes'
+import { useStudioNav } from './workflowStudioNav'
 import styles from './WorkflowExecutorBindingList.module.css'
 
 export function WorkflowAgentDefinitionCard(props: {
   definition: AgentDefinition
 }) {
   const { definition } = props
+  const nav = useStudioNav()
   const tools = definition.tools ?? []
   return (
     <article className={styles.binding}>
@@ -26,6 +29,11 @@ export function WorkflowAgentDefinitionCard(props: {
             ` · ${definition.skill_commit.slice(0, 7)}`}
         </div>
       )}
+      <div>
+        <Button size="small" onClick={() => nav.openAgent(definition.id)}>
+          在 Agent 管理中打开
+        </Button>
+      </div>
     </article>
   )
 }

@@ -37,6 +37,7 @@ export interface DagGraphNode {
   agentId?: string | null
   workerId?: string | null
   capability?: string
+  executorUnbound?: boolean
   topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
   inputs?: string[]
@@ -119,6 +120,7 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         workerId: node.workerId ?? null,
         nodeKey: node.capability ? node.key : undefined,
         capability: node.capability,
+        executorUnbound: node.executorUnbound ?? false,
         topologyBadges: node.topologyBadges,
         terminalOutcome: node.terminalOutcome,
         inputs: node.inputs || [],

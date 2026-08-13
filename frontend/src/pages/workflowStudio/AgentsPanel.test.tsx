@@ -63,10 +63,10 @@ const publishedVersion: AgentVersion = {
   published_at: '2026-08-01T01:00:00Z',
 }
 
-function renderPanel() {
+function renderPanel(initialSelectedId: string | null = null) {
   return render(
     <TestQueryProvider>
-      <AgentsPanel />
+      <AgentsPanel initialSelectedId={initialSelectedId} />
     </TestQueryProvider>
   )
 }
@@ -109,6 +109,15 @@ describe('AgentsPanel', () => {
     expect(screen.getByLabelText('Skill')).toHaveValue('ns/skill')
     // 无草稿时不可直接发布
     expect(screen.getByRole('button', { name: '发布' })).toBeDisabled()
+  })
+
+  it('opens the focused agent directly when initialSelectedId is given', async () => {
+    renderPanel('key-info-v1')
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Agent ID')).toHaveValue('key-info-v1')
+    )
+    expect(mockDetail).toHaveBeenCalledWith('key-info-v1')
   })
 
   it('creates a new agent draft after skill validation', async () => {

@@ -60,10 +60,10 @@ const publishedVersion: ExecutorVersion = {
   published_at: '2026-08-01T01:00:00Z',
 }
 
-function renderPanel() {
+function renderPanel(initialSelectedId: string | null = null) {
   return render(
     <TestQueryProvider>
-      <ExecutorsPanel />
+      <ExecutorsPanel initialSelectedId={initialSelectedId} />
     </TestQueryProvider>
   )
 }
@@ -184,5 +184,14 @@ describe('ExecutorsPanel', () => {
     await waitFor(() =>
       expect(mockRollback).toHaveBeenCalledWith('code-default', 1)
     )
+  })
+
+  it('opens the focused executor directly when initialSelectedId is given', async () => {
+    renderPanel('code-default')
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Global Capacity')).toHaveValue(16)
+    )
+    expect(mockDetail).toHaveBeenCalledWith('code-default')
   })
 })

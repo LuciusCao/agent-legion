@@ -1,15 +1,16 @@
 import { Close } from '@mui/icons-material'
 import { Dialog, IconButton, Toolbar, Tooltip, Typography } from '@mui/material'
-import type { WorkflowDefinitionRecord } from '../../../types'
-import type { ExecutorDefinition } from '../../../types/executorTypes'
 import { DagGraph } from '../../../components/dag/DagGraph'
-import { buildDagEdges, buildDagNodes } from '../workflowStudioDag'
+import type {
+  DagGraphEdge,
+  DagGraphNode,
+} from '../../../components/dag/DagGraph'
 import styles from './WorkflowDagFullscreenDialog.module.css'
 
 type Props = {
   open: boolean
-  workflow: WorkflowDefinitionRecord | null
-  executorCatalog: ExecutorDefinition[]
+  nodes: DagGraphNode[]
+  edges: DagGraphEdge[]
   selectedNode: string | null
   onSelectedNodeChange: (key: string | null) => void
   onClose: () => void
@@ -17,15 +18,12 @@ type Props = {
 
 export function WorkflowDagFullscreenDialog({
   open,
-  workflow,
-  executorCatalog,
+  nodes,
+  edges,
   selectedNode,
   onSelectedNodeChange,
   onClose,
 }: Props) {
-  const nodes = buildDagNodes(workflow, executorCatalog)
-  const edges = buildDagEdges(workflow)
-
   return (
     <Dialog
       open={open}
@@ -53,7 +51,7 @@ export function WorkflowDagFullscreenDialog({
         </Tooltip>
       </Toolbar>
       <div className={styles.canvas}>
-        {workflow && (
+        {nodes.length > 0 && (
           <DagGraph
             nodes={nodes}
             edges={edges}

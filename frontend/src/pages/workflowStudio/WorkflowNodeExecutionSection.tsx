@@ -5,10 +5,8 @@ import type {
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowAgentDefinitionCard } from './WorkflowAgentDefinitionCard'
 import { WorkflowAgentExecutionDetails } from './WorkflowAgentExecutionDetails'
-import {
-  findCapabilityBindings,
-  WorkflowExecutorBindingList,
-} from './WorkflowExecutorBindingList'
+import { WorkflowNodeBindingEditor } from './WorkflowNodeBindingEditor'
+import { findCapabilityBindings } from './WorkflowExecutorBindingList'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 
 type Props = {
@@ -34,12 +32,13 @@ export function WorkflowNodeExecutionSection(props: Props) {
       </div>
       {agent ? (
         <WorkflowAgentDefinitionCard definition={agent} />
-      ) : bindings.length === 0 ? (
-        <div className={inspectorStyles.empty}>
-          未匹配到 executor capability
-        </div>
       ) : (
-        <WorkflowExecutorBindingList bindings={bindings} />
+        <WorkflowNodeBindingEditor
+          node={props.node}
+          bindings={bindings}
+          executorCatalog={props.executorCatalog}
+          readOnly={props.readOnly}
+        />
       )}
       {agent && (
         <WorkflowAgentExecutionDetails

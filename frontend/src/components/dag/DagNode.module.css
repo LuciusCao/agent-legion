@@ -102,6 +102,14 @@
   color: #166534;
 }
 
+.unboundTag {
+  font-size: 10px;
+  padding: 2px 6px;
+  border-radius: 10px;
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 .duration,
 .statusText {
   font-size: 12px;
