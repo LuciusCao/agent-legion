@@ -13,10 +13,11 @@ from server.app.workflows.definition import (
 )
 
 
-def workflow_definition_from_yaml_string(
-    raw_yaml: str,
-) -> WorkflowDefinition:
-    raw = yaml.safe_load(raw_yaml)
+def workflow_definition_from_yaml_string(raw_yaml: str) -> WorkflowDefinition:
+    try:
+        raw = yaml.safe_load(raw_yaml)
+    except yaml.YAMLError as exc:
+        raise WorkflowDefinitionError(f"Workflow definition is not valid YAML: {exc}") from exc
     if not isinstance(raw, dict):
         raise WorkflowDefinitionError("Workflow definition must be a mapping")
     return workflow_definition_from_mapping(raw)
