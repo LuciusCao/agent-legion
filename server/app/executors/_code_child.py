@@ -9,8 +9,9 @@ secrets never touch the sandboxed filesystem; the result at ``<result>`` is
 because the file sits in a sandbox-writable directory and the parent must not
 deserialize anything the child tree could have replaced.
 
-Custom children get no database handle: the only builtin node that read one
-(``question_intake``) now takes a prefetched ``runtime["job_batch"]`` instead.
+Custom children get no database handle: DB-derived inputs (batch payload,
+skill versions) are prefetched by the parent into ``runtime["job_batch"]`` /
+``runtime["skill_versions"]`` — the same contract builtin children run under.
 
 Cancellation is best-effort cooperative: the parent kills the process group
 on timeout/cancel, and the SIGTERM handler cancels the runtime token first so

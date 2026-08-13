@@ -12,8 +12,9 @@ never touch the lock. Adapters must use bounded network timeouts so a hung
 upstream cannot hold the row lock indefinitely.
 
 Call sites that receive an upstream auth failure (HTTP 401/403 or an in-band
-auth error code) should report it via :func:`report_node_auth_failure` (nodes)
-or :meth:`report_auth_failure` and retry once via :meth:`get_token`;
+auth error code) should report it via ``NodeContext.report_auth_failure``
+(nodes, marker channel — see workspace_libs.node_sdk) or
+:meth:`report_auth_failure` and retry once via :meth:`get_token`;
 persistent failure surfaces as a technical node failure.
 
 Note: DB rows render datetimes as ISO strings (string_dict_row), so expiry
@@ -187,11 +188,13 @@ def inject_connection_config(
 
 
 def report_node_auth_failure(runtime: Mapping[str, Any]) -> None:
-    """Node-side hook: invalidate the connection's cached token on auth failure.
+    """Legacy in-runtime hook: invalidate the connection's cached token.
 
-    Nodes call this when the upstream rejects the injected token (in-band
-    auth error or HTTP 401/403); the next dispatch re-acquires. Silent no-op
-    when the runtime carries no connection or no DB handle.
+    Superseded by the marker channel (``NodeContext.report_auth_failure`` in
+    ``workspace_libs.node_sdk``): current nodes hold no database handle, so
+    the parent executor performs the invalidation after the child exits. This
+    function stays for legacy frozen node code that still calls it; it is a
+    silent no-op when the runtime carries no connection or no DB handle.
     """
     node_config = runtime.get("node_config")
     key = (

@@ -7,37 +7,25 @@ fallback ``report.md``.
 
 from __future__ import annotations
 
-import json
-import logging
 from pathlib import Path
 from typing import Any
 
 from server.app.pipeline.assemble import assemble_video
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
-
-logger = logging.getLogger(__name__)
-
-
-def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
-    raw = json.loads((job_dir / "video_input.json").read_text(encoding="utf-8"))
-    return VideoKnowledgeInput.from_mapping(raw)
+from workspace_libs.node_sdk import NodeContext
 
 
 def _video_id(video_input: VideoKnowledgeInput, job: dict[str, Any]) -> str:
     return video_input.legacy_video_id or str(job.get("id") or "") or video_input.external_id
 
 
-def _normalize_interactions(video_dir: Path) -> None:
+def _normalize_interactions(ctx: NodeContext) -> None:
     """Ensure interactions.json uses the dict shape legacy assemble_video expects."""
-    interactions_path = video_dir / "interactions.json"
-    if not interactions_path.exists():
+    if not ctx.artifacts.path("interactions.json").exists():
         return
-    data = json.loads(interactions_path.read_text(encoding="utf-8"))
+    data = ctx.artifacts.read_json("interactions.json")
     if isinstance(data, list):
-        interactions_path.write_text(
-            json.dumps({"version": "1.0", "interactions": data}, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        ctx.artifacts.write_json("interactions.json", {"version": "1.0", "interactions": data})
 
 
 def run(
@@ -45,7 +33,8 @@ def run(
     job_dir: Path,
     runtime: dict[str, Any] | None = None,
 ) -> None:
-    video_input = _load_video_input(job_dir)
+    ctx = NodeContext(job, job_dir, runtime)
+    video_input = VideoKnowledgeInput.from_mapping(ctx.artifacts.read_json("video_input.json"))
     legacy_video = {
         "id": _video_id(video_input, job),
         "title": video_input.title,
@@ -54,9 +43,7 @@ def run(
         "external_id": video_input.external_id,
         "source_uuid": video_input.source_uuid,
     }
-    _normalize_interactions(job_dir)
+    _normalize_interactions(ctx)
     assemble_video(legacy_video, job_dir)
     if not (job_dir / "report.md").exists():
-        (job_dir / "report.md").write_text(
-            f"# {video_input.title or legacy_video['id']}\n", encoding="utf-8"
-        )
+        ctx.artifacts.write_text("report.md", f"# {video_input.title or legacy_video['id']}\n")

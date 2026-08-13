@@ -33,6 +33,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from server.app.executors._code_runtime import (
+    build_runtime,
+    clear_auth_failure_marker,
+    consume_auth_failure_marker,
+)
 from server.app.executors._code_sandbox import execute_custom_sandboxed
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
@@ -107,12 +112,6 @@ def _run_code_node(
             if code_source is not None
             else _load_run_callable(file_path, repo_root)
         )
-        job_db_path = runtime.pop("_job_db_path", None)
-        jobs_dir = runtime.pop("_jobs_dir", None)
-        if job_db_path and jobs_dir:
-            from server.app.jobs import JobQueries
-
-            runtime["job_db"] = JobQueries(str(job_db_path), Path(jobs_dir))
         job_dir = Path(job_dir_str)
         run(job, job_dir, runtime)
         logger.info("%s completed", prefix)
@@ -208,39 +207,18 @@ class CodeExecutor:
         if token is not None:
             token.cancel()
 
-    def _build_runtime(self, context: ExecutionContext, token: CancellationToken) -> dict[str, Any]:
-        runtime: dict[str, Any] = {
-            "job_dir": context.job_dir,
-            "log_path": context.log_path,
-            "inputs": context.inputs,
-            "expected_outputs": context.expected_outputs,
-            "capability": context.capability,
-            "node_key": context.node_key,
-            "workflow_key": context.workflow_key,
-            "execution_id": context.execution_id,
-            "workspace_id": context.workspace_id,
-            "workspace": dict(context.workspace),
-            "job": dict(context.job),
-            "settings_config": self.settings_config,
-            "node_config": dict(context.node_config),
-            "cancellation": token,
-        }
-        if self.job_db is not None:
-            runtime["_job_db_path"] = str(getattr(self.job_db, "path", ""))
-            runtime["_jobs_dir"] = str(getattr(self.job_db, "jobs_dir", ""))
-        return runtime
-
     def _execute_isolated(
         self, context: ExecutionContext, path: Path, timeout_seconds: int
     ) -> ExecutionResult:
         context.job_dir.mkdir(parents=True, exist_ok=True)
         context.log_path.parent.mkdir(parents=True, exist_ok=True)
+        clear_auth_failure_marker(context)
 
         parent_conn, child_conn = multiprocessing.Pipe()
         child_token = CancellationToken(multiprocessing.Event())
         self._tokens[context.execution_id] = child_token
 
-        runtime = self._build_runtime(context, child_token)
+        runtime = build_runtime(self, context, child_token)
         process = multiprocessing.Process(
             target=_run_code_node,
             args=(
@@ -334,6 +312,7 @@ class CodeExecutor:
         finally:
             if process.is_alive():
                 self._terminate_child(process)
+            consume_auth_failure_marker(self, context)
             if watcher is not None:
                 child_token.cancel()
                 watcher.join(timeout=0.5)
