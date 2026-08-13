@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.workflows.comprehension_common import (
+from workspace_libs.comprehension_common import (
     _assert_artifact_question_id,
     _single_parsed_question,
 )
