@@ -3,7 +3,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from server.app.auth.dependencies import require_user
+from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.workflow_node_code_contracts import (
@@ -129,6 +129,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     @router.post(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish",
         response_model=WorkflowNodeCodeVersionResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def publish_node_code(
         workspace_id: str, workflow_key: str, node_key: str
@@ -175,6 +176,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     @router.post(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback",
         response_model=WorkflowNodeCodeVersionResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def rollback_node_code(
         workspace_id: str,
@@ -199,6 +201,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     @router.delete(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",
         response_model=WorkflowNodeCodeArchiveResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def archive_node_code(
         workspace_id: str, workflow_key: str, node_key: str

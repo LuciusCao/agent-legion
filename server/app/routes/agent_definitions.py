@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import ValidationError
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.auth.dependencies import require_user
+from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.jobs import JobQueries
 from server.app.routes.agent_definition_contracts import (
     AgentArchiveResponse,
@@ -147,7 +147,9 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
         return _version_response(entity)
 
     @router.post("/agent-definitions/{agent_id}/publish", response_model=AgentVersionResponse)
-    def publish_agent_definition(agent_id: str) -> AgentVersionResponse:
+    def publish_agent_definition(
+        agent_id: str, _guard: Annotated[None, Depends(reject_studio_agent_scope)] = None
+    ) -> AgentVersionResponse:
         require_workflows_enabled(settings)
         try:
             entity = _service().publish(agent_id)
@@ -160,6 +162,7 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
         agent_id: str,
         request: AgentRollbackRequest,
         user: Annotated[dict[str, Any], Depends(require_user)],
+        _guard: Annotated[None, Depends(reject_studio_agent_scope)] = None,
     ) -> AgentVersionResponse:
         require_workflows_enabled(settings)
         try:
@@ -182,7 +185,9 @@ def create_agent_definitions_router(job_db: JobQueries, settings: Settings) -> A
         return _version_response(entity)
 
     @router.delete("/agent-definitions/{agent_id}", response_model=AgentArchiveResponse)
-    def archive_agent_definition(agent_id: str) -> AgentArchiveResponse:
+    def archive_agent_definition(
+        agent_id: str, _guard: Annotated[None, Depends(reject_studio_agent_scope)] = None
+    ) -> AgentArchiveResponse:
         require_workflows_enabled(settings)
         try:
             archived = _service().archive_all(agent_id)

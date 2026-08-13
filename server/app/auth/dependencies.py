@@ -5,6 +5,8 @@ from typing import Annotated, Any
 from fastapi import Depends, Request
 from fastapi.exceptions import HTTPException
 
+from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
+
 SESSION_COOKIE = "agent_legion_session"
 CSRF_HEADER = "x-agent-legion-request"
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -35,6 +37,9 @@ def get_current_user(request: Request) -> dict[str, Any]:
     if token is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     user: dict[str, Any] | None = request.app.state.auth_service.authenticate(token)
+    if user is None and channel == "bearer":
+        # Scoped tokens (studio agent runs) authenticate via Bearer only.
+        user = request.app.state.auth_service.authenticate_scoped(token)
     if user is None:
         raise HTTPException(status_code=401, detail="Session expired or revoked")
     if (
@@ -54,6 +59,15 @@ def require_user(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> 
 def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> dict[str, Any]:
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
+    return user
+
+
+def reject_studio_agent_scope(
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Effecting-endpoint guard: studio-agent scoped tokens get 403 (STUDIO-AGENT-001)."""
+    if user.get("actor_scope") == STUDIO_AGENT_SCOPE:
+        raise HTTPException(status_code=403, detail="Studio agent scope cannot take effect")
     return user
 
 
