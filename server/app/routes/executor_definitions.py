@@ -3,7 +3,7 @@ from typing import Annotated, Any, Never
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import ValidationError
 
-from server.app.auth.dependencies import require_user
+from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.executors.executor_registry_factory import reload_published_executors
 from server.app.executors.kinds import ExecutorKindError
 from server.app.jobs import JobQueries
@@ -152,7 +152,9 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
         return _version_response(entity)
 
     @router.post(
-        "/executor-definitions/{executor_id}/publish", response_model=ExecutorVersionResponse
+        "/executor-definitions/{executor_id}/publish",
+        response_model=ExecutorVersionResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def publish_executor_definition(request: Request, executor_id: str) -> ExecutorVersionResponse:
         require_workflows_enabled(settings)
@@ -164,7 +166,9 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
         return _version_response(entity)
 
     @router.post(
-        "/executor-definitions/{executor_id}/rollback", response_model=ExecutorVersionResponse
+        "/executor-definitions/{executor_id}/rollback",
+        response_model=ExecutorVersionResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def rollback_executor_definition(
         request: Request,
@@ -193,7 +197,11 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
             _raise_definition_http_error(exc)
         return _version_response(entity)
 
-    @router.delete("/executor-definitions/{executor_id}", response_model=ExecutorArchiveResponse)
+    @router.delete(
+        "/executor-definitions/{executor_id}",
+        response_model=ExecutorArchiveResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
+    )
     def archive_executor_definition(request: Request, executor_id: str) -> ExecutorArchiveResponse:
         require_workflows_enabled(settings)
         try:
