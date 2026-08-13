@@ -1141,6 +1141,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workflow-node-code-template': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Node Code Template */
+    get: operations['get_node_code_template_api_workflow_node_code_template_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workflow-nodes/files/{file_path}': {
     parameters: {
       query?: never
@@ -4634,7 +4651,7 @@ export interface components {
        * Origin
        * @enum {string}
        */
-      origin: 'builtin' | 'custom'
+      origin: 'builtin' | 'custom' | 'none'
       /** Path */
       path?: string | null
       /** Version */
@@ -4644,6 +4661,11 @@ export interface components {
     WorkflowNodeCodeRollbackRequest: {
       /** Version */
       version: number
+    }
+    /** WorkflowNodeCodeTemplateResponse */
+    WorkflowNodeCodeTemplateResponse: {
+      /** Code */
+      code: string
     }
     /** WorkflowNodeCodeVersionResponse */
     WorkflowNodeCodeVersionResponse: {
@@ -7456,6 +7478,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_node_code_template_api_workflow_node_code_template_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeTemplateResponse']
         }
       }
     }
