@@ -115,7 +115,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._definitions = definitions
+    worker._scan_entries = (definitions, [])
     return worker
 
 
@@ -196,7 +196,7 @@ def _make_pi_worker(
         settings=settings,
         agent_manager=agent_manager,
     )
-    worker._definitions = definitions
+    worker._scan_entries = (definitions, [])
     return worker
 
 

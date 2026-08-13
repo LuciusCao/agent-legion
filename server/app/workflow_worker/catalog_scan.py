@@ -5,7 +5,9 @@ The scan list comes from the DB-backed workflow catalog
 ``WorkflowDefinition`` as the fallback for jobs without a snapshot, while
 registered workflows without a catalog definition still scan (their jobs run
 off the published revision snapshot frozen at intake). The catalog is loaded
-once at worker start; a backend restart picks up newly registered keys.
+at worker start and hot-reloaded when a workflow registers
+(``WorkflowWorkerThread.reload_scan_entries``); newly registered keys are
+scanned without a backend restart.
 """
 
 from __future__ import annotations
@@ -56,7 +58,10 @@ def collect_runnable_workspace_jobs(
     workspace_ids: list[str] = []
     jobs_by_workspace: WorkspaceJobs = {}
     paused: dict[str, bool] = {}
-    for key, definition in iter_scan_entries(worker._definitions, worker._definitionless_keys):
+    # Take the snapshot tuple once so the pair is consistent even when a
+    # registration reload swaps it mid-iteration.
+    definitions, definitionless_keys = worker._scan_entries
+    for key, definition in iter_scan_entries(definitions, definitionless_keys):
         for job in worker._mark_store.refresh(worker.job_db, key):
             if not (workspace_id := job.get("workspace_id")):
                 continue
