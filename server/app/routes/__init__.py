@@ -37,6 +37,7 @@ from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
 from .skill_sources import create_skill_sources_router
 from .skills import create_skills_router
+from .studio_agent_tools import create_studio_agent_tools_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
@@ -125,6 +126,7 @@ def create_router(
     )
     secured(executors_router)
     secured(create_workspace_agent_routes_router(job_db, settings))
+    secured(create_studio_agent_tools_router(job_db, settings))
     job_group = APIRouter(dependencies=[Depends(require_workspace_access)])
     include_job_routes(
         job_group,

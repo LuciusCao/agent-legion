@@ -552,6 +552,9 @@ invariants:
         target: tests/routes/test_studio_agent_scope.py
         gate: quick
       - kind: integration
+        target: tests/routes/test_studio_agent_tools.py
+        gate: quick
+      - kind: integration
         target: tests/services/test_scoped_tokens.py
         gate: quick
       - kind: integration

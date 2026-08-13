@@ -65,11 +65,12 @@ exemptions:
   reason: Composition adds the Agent Worker control-plane router, the artifact
     authentication dependency, the workspace-scoped custom node code
     router (EXEC-CODE-002), the DB-backed Agent definition catalog +
-    skill validation routers (agent config governance, schema v26), and the
-    quality replay router (schema v29, EXEC-QUALITY-REPLAY-001).
+    skill validation routers (agent config governance, schema v26), the
+    quality replay router (schema v29, EXEC-QUALITY-REPLAY-001), and the
+    studio-agent tool surface router (STUDIO-AGENT-001, phase 3 chunk 3).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 132
+  ceiling: 134
 - check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
