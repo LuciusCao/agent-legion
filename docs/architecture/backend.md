@@ -202,6 +202,7 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | POST | `/worker/resume` | `resume_worker` | routes/worker.py |
 | GET | `/workflows` | `list_workflows` | routes/workflow_catalog.py |
 | GET | `/workflows/{workflow_key}` | `get_workflow` | routes/workflow_catalog.py |
+| POST | `/workflows` | `register_workflow` | routes/workflow_catalog_admin.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/compare` | `compare_workflow_draft_route` | routes/workflow_draft_compare.py |
 | GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
@@ -434,7 +435,9 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | TokenUsageRunResponse | BaseModel | job_id: str, run_id: int, usage: RunUsage | None, reason: str | None | app/routes/token_usage_run_contracts.py |
 | TokenUsageWorkspaceGroup | BaseModel | group_key: str, node_key: str, provider: str, model: str, skill_version: str,... | app/routes/token_usage_workspace_group_contract.py |
 | WorkerStatusResponse | BaseModel | paused: bool | app/routes/worker.py |
+| WorkflowRegisterRequest | BaseModel | key: str, label: str, description: str | app/routes/workflow_catalog_admin.py |
 | WorkflowSummaryResponse | BaseModel | key: str, label: str | app/routes/workflow_contracts.py |
+| WorkflowRegisteredResponse | BaseModel | key: str, label: str, description: str, origin: str | app/routes/workflow_contracts.py |
 | WorkflowIntakeModeResponse | BaseModel | key: str, label: str, input_field: str | app/routes/workflow_contracts.py |
 | WorkflowIntakeResponse | BaseModel | modes: list[WorkflowIntakeModeResponse] | app/routes/workflow_contracts.py |
 | WorkflowConditionResponse | BaseModel | artifact: str, path: str, equals: Any | app/routes/workflow_contracts.py |
@@ -645,7 +648,7 @@ Agent 定义不再经 yaml 配置（`agents:` 段与 `workflows.pi` 块已在 sc
 其他配置文件：
 
 - 外部 Pi skill 仓库源与固定 commit 已产品化：声明（`{repo, ref}`）与解析后的 commit 锁存 DB `global_settings`（`skill_sources` / `skill_lock` 文档），lock 是 skill ref 的唯一权威（G3）；经 admin API（`GET/PUT /api/admin/skill-sources`、`POST /api/admin/skill-sources/relock`）与 /admin/settings「Skill 源管理」维护，CLI `make skills-lock`（`uv run python -m server.app.skills.lock`）刷新锁。tracked `config/skills.yaml` / `config/skills.lock` 已退役：DB 无记录且文件存在时启动一次性导入并 warning，否则用内置常量（`server/app/skills/builtin_sources.py`）seed，此后文件不再读取。
-- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；workspace 绑定时发布为 per-workspace DB revision。
+- 内置 workflow DAG 定义在 `server/app/workflows/builtin.py`（Python 常量，随代码走 git review），Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`；workspace 绑定时发布为 per-workspace DB revision。已知 workflow key 的目录存 DB `workflow_catalog` 表（schema v39，DB-WORKFLOW-CATALOG-001）：内置行启动时从代码常量 upsert（代码仍是种子权威），新 key 经 admin API `POST /api/workflows` 注册（`require_admin`，origin='registered'，注册时无定义，首个 workspace draft publish 生成 revision v1）；路由、workspace 绑定校验与 worker 扫描列表都读该表。
 - `config/agent-worker.example.yaml`：Worker Service 引导配置样例（`host_url` / `worker_id` / `runtimes` / `capabilities` / `max_concurrency` 等），Worker 侧独立加载，不经 server 的 owned-key 校验。
 - `config/architecture/*`：架构不变量、豁免、源文件体积预算。
 

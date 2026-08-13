@@ -15,7 +15,7 @@ from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 
 
-def _create_settings(tmp_path: Path) -> Settings:
+def _create_settings(tmp_path: Path, database_url: str) -> Settings:
     # Match the paths produced by the job_db fixture.
     data_dir = tmp_path
     jobs_dir = data_dir / "jobs"
@@ -32,6 +32,9 @@ def _create_settings(tmp_path: Path) -> Settings:
         packages_dir=packages_dir,
         jobs_dir=jobs_dir,
         config={},
+        # The workflow catalog is DB-backed (schema v39): point at the test
+        # database, not the shared dev default.
+        database_url=database_url,
     )
 
 
@@ -67,7 +70,7 @@ def _write_artifact(job: dict[str, Any], settings: Settings) -> None:
 def test_package_returns_ordered_results_with_reason_codes(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
-    settings = _create_settings(tmp_path)
+    settings = _create_settings(tmp_path, str(job_db.path))
     service = JobPackageService(job_db, settings)
 
     workspace_id = "pkg-ws"
@@ -120,7 +123,7 @@ def test_package_returns_ordered_results_with_reason_codes(
 
 
 def test_package_requires_at_least_one_eligible_job(job_db: JobQueries, tmp_path: Path) -> None:
-    settings = _create_settings(tmp_path)
+    settings = _create_settings(tmp_path, str(job_db.path))
     service = JobPackageService(job_db, settings)
 
     workspace_id = "empty-pkg-ws"
@@ -140,7 +143,7 @@ def test_package_requires_at_least_one_eligible_job(job_db: JobQueries, tmp_path
 def test_package_creates_workspace_package_record_and_marks_jobs_packed(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
-    settings = _create_settings(tmp_path)
+    settings = _create_settings(tmp_path, str(job_db.path))
     service = JobPackageService(job_db, settings)
 
     workspace_id = "pkg-ws-record"
@@ -168,7 +171,7 @@ def test_package_creates_workspace_package_record_and_marks_jobs_packed(
 
 
 def test_clear_packed_status_keeps_package_history(job_db: JobQueries, tmp_path: Path) -> None:
-    settings = _create_settings(tmp_path)
+    settings = _create_settings(tmp_path, str(job_db.path))
     service = JobPackageService(job_db, settings)
 
     workspace_id = "pkg-ws-clear-status"
@@ -194,7 +197,7 @@ def test_clear_packed_status_keeps_package_history(job_db: JobQueries, tmp_path:
 def test_clear_packed_status_rejects_jobs_outside_workspace(
     job_db: JobQueries, tmp_path: Path
 ) -> None:
-    settings = _create_settings(tmp_path)
+    settings = _create_settings(tmp_path, str(job_db.path))
     service = JobPackageService(job_db, settings)
     job = _create_job(job_db, "other-workspace", "Q351", status="completed")
     job_db.set_jobs_packed([job["id"]], packed=1)
@@ -209,7 +212,7 @@ def test_clear_packed_status_rejects_jobs_outside_workspace(
 
 
 def test_workspace_package_lifecycle_respects_locked(job_db: JobQueries, tmp_path: Path) -> None:
-    settings = _create_settings(tmp_path)
+    settings = _create_settings(tmp_path, str(job_db.path))
     service = JobPackageService(job_db, settings)
 
     workspace_id = "pkg-ws-lifecycle"
@@ -231,7 +234,7 @@ def test_workspace_package_lifecycle_respects_locked(job_db: JobQueries, tmp_pat
 
 
 def test_rerun_resets_packed_flag(job_db: JobQueries, tmp_path: Path) -> None:
-    settings = _create_settings(tmp_path)
+    settings = _create_settings(tmp_path, str(job_db.path))
     service = JobPackageService(job_db, settings)
 
     workspace_id = "pkg-ws-rerun"

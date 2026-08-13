@@ -1185,7 +1185,8 @@ export interface paths {
     /** List Workflows */
     get: operations['list_workflows_api_workflows_get']
     put?: never
-    post?: never
+    /** Register Workflow */
+    post: operations['register_workflow_api_workflows_post']
     delete?: never
     options?: never
     head?: never
@@ -4761,6 +4762,32 @@ export interface components {
       outputs: string[]
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
     }
+    /** WorkflowRegisterRequest */
+    WorkflowRegisterRequest: {
+      /**
+       * Description
+       * @default
+       */
+      description: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+    }
+    /**
+     * WorkflowRegisteredResponse
+     * @description Registration result: the full catalog entry, provenance included.
+     */
+    WorkflowRegisteredResponse: {
+      /** Description */
+      description: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Origin */
+      origin: string
+    }
     /** WorkflowResponse */
     WorkflowResponse: {
       workflow: components['schemas']['WorkflowDefinitionResponse']
@@ -7549,6 +7576,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowsListResponse']
+        }
+      }
+    }
+  }
+  register_workflow_api_workflows_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowRegisterRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRegisteredResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

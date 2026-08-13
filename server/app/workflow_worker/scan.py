@@ -41,7 +41,7 @@ def is_runnable(mark: dict[str, Any]) -> bool:
 
 def collect_ready_candidates(
     worker: WorkflowWorkerThread,
-    jobs: list[tuple[WorkflowDefinition, dict[str, Any]]],
+    jobs: list[tuple[WorkflowDefinition | None, dict[str, Any]]],
 ) -> list[ReadyCandidate]:
     """Evaluate changed jobs, reuse cached candidates for unchanged ones.
 
@@ -51,7 +51,7 @@ def collect_ready_candidates(
     Results are stored in ``worker._job_evals`` keyed by job id.
     """
     runnable = [(definition, mark) for definition, mark in jobs if is_runnable(mark)]
-    changed: list[tuple[WorkflowDefinition, dict[str, Any]]] = []
+    changed: list[tuple[WorkflowDefinition | None, dict[str, Any]]] = []
     for definition, mark in runnable:
         cached = worker._job_evals.get(mark["id"])
         if cached is not None and cached[0] == mark_key(mark) and mark.get("status") != "running":
