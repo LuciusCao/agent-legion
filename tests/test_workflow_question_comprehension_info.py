@@ -251,7 +251,7 @@ def test_load_json_object_rejects_non_dict(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     artifact_dir.mkdir()
     (artifact_dir / "bad.json").write_text("[1, 2, 3]", encoding="utf-8")
-    from server.app.workflows.comprehension_common import _load_json_object
+    from workspace_libs.comprehension_common import _load_json_object
 
     with pytest.raises(ValueError, match="Invalid content"):
         _load_json_object(artifact_dir / "bad.json")
@@ -267,7 +267,7 @@ def _write_parsed_json(artifact_dir: Path, questions: list) -> None:
 
 def test_single_parsed_question_rejects_multiple_questions(tmp_path):
     artifact_dir = tmp_path / "artifacts"
-    from server.app.workflows.comprehension_common import _single_parsed_question
+    from workspace_libs.comprehension_common import _single_parsed_question
 
     _write_parsed_json(artifact_dir, [{"question_id": "q1"}, {"question_id": "q2"}])
     with pytest.raises(ValueError, match="exactly one question"):
@@ -276,7 +276,7 @@ def test_single_parsed_question_rejects_multiple_questions(tmp_path):
 
 def test_single_parsed_question_rejects_non_dict_question(tmp_path):
     artifact_dir = tmp_path / "artifacts"
-    from server.app.workflows.comprehension_common import _single_parsed_question
+    from workspace_libs.comprehension_common import _single_parsed_question
 
     _write_parsed_json(artifact_dir, ["not-a-dict"])
     with pytest.raises(ValueError, match="invalid question"):

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -36,6 +37,7 @@ def start_lease_heartbeat(
     lease_id: str,
     interval: float,
     ownership_lost: threading.Event,
+    on_cancelled: Callable[[list[str]], Any] | None = None,
 ) -> ExecutionHeartbeat:
     """Start the daemon heartbeat thread for one execution's lease."""
     stop = threading.Event()
@@ -50,6 +52,7 @@ def start_lease_heartbeat(
         ownership_lost=ownership_lost,
         proc_ref=proc_ref,
         adopted=adopted,
+        on_cancelled=on_cancelled,
     )
     thread = threading.Thread(target=heartbeat_loop, args=(config,), daemon=True)
     thread.start()

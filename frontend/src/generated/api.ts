@@ -2095,6 +2095,11 @@ export interface components {
       execution_id: string
       /** Job Id */
       job_id: string
+      /**
+       * Kind
+       * @default agent
+       */
+      kind: string
       /** Lease Id */
       lease_id: string
       /** Manifest */
@@ -2198,6 +2203,17 @@ export interface components {
       agent_id: string
       latest?: components['schemas']['AgentVersionResponse'] | null
       published?: components['schemas']['AgentVersionResponse'] | null
+    }
+    /**
+     * AgentHeartbeatResponse
+     * @description Protocol v2 heartbeat body: explicit cancellations for this Worker.
+     *
+     *     Only kind='code' executions are listed (batch 2 decision 6); v1 Workers
+     *     get the legacy empty 204 instead.
+     */
+    AgentHeartbeatResponse: {
+      /** Cancelled Execution Ids */
+      cancelled_execution_ids: string[]
     }
     /** AgentListItem */
     AgentListItem: {
@@ -2374,6 +2390,8 @@ export interface components {
       }
       /** Last Seen At */
       last_seen_at: string
+      /** Max Code Concurrency */
+      max_code_concurrency: number
       /** Max Concurrency */
       max_concurrency: number
       /** Models */
@@ -2468,6 +2486,8 @@ export interface components {
     }
     /** ClaimAgentExecutionRequest */
     ClaimAgentExecutionRequest: {
+      /** Max Code Concurrency */
+      max_code_concurrency?: number | null
       /** Max Concurrency */
       max_concurrency?: number | null
       /** Worker Id */
@@ -3899,6 +3919,11 @@ export interface components {
       labels?: {
         [key: string]: unknown
       }
+      /**
+       * Max Code Concurrency
+       * @default 0
+       */
+      max_code_concurrency: number
       /** Max Concurrency */
       max_concurrency: number
       /** Models */
@@ -5893,11 +5918,13 @@ export interface operations {
     requestBody?: never
     responses: {
       /** @description Successful Response */
-      204: {
+      200: {
         headers: {
           [name: string]: unknown
         }
-        content?: never
+        content: {
+          'application/json': components['schemas']['AgentHeartbeatResponse']
+        }
       }
       /** @description Validation Error */
       422: {

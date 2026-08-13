@@ -13,17 +13,16 @@ from server.app.agent_broker.agent_result_commit import commit_agent_result
 from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
+from server.app.routes.agent_worker_claims import create_agent_worker_claim_router
 from server.app.routes.agent_worker_metrics import create_agent_worker_metrics_router
 from server.app.routes.agent_worker_results import parse_result_metadata
 from server.app.routes.agent_workers_contracts import (
-    AgentClaimResponse,
     AgentRegisterTokenCreatedResponse,
     AgentRegisterTokenRevokeResponse,
     AgentRegisterTokensResponse,
     AgentWorkerRevokeResponse,
     AgentWorkersResponse,
     AgentWorkerSummary,
-    ClaimAgentExecutionRequest,
     CreateAgentRegisterTokenRequest,
     RegisterAgentWorkerRequest,
     RegisterAgentWorkerResponse,
@@ -89,6 +88,9 @@ def create_agent_workers_router(
 
     if ops_metrics is not None:
         router.include_router(create_agent_worker_metrics_router(ops_metrics, authorize_worker))
+    router.include_router(
+        create_agent_worker_claim_router(broker, settings, authorize_worker, require_lease_id)
+    )
 
     @router.post(
         "/agent-workers/register",
@@ -172,29 +174,6 @@ def create_agent_workers_router(
     ) -> AgentWorkersResponse:
         return AgentWorkersResponse.model_validate({"workers": registry.list_workers()})
 
-    @router.post("/agent-executions/claim", response_model=AgentClaimResponse)
-    def claim(
-        payload: ClaimAgentExecutionRequest, request: Request
-    ) -> Response | AgentClaimResponse:
-        authorize_worker(request, payload.worker_id)
-        try:
-            claimed = broker.claim(payload.worker_id, payload.max_concurrency)
-        except ValueError as exc:
-            raise HTTPException(status_code=409, detail=str(exc)) from exc
-        if claimed is None:
-            return Response(status_code=204)
-        return AgentClaimResponse(
-            execution_id=claimed.execution_id,
-            lease_id=claimed.lease_id,
-            workspace_id=claimed.workspace_id,
-            job_id=claimed.job_id,
-            workflow_key=claimed.workflow_key,
-            node_key=claimed.node_key,
-            agent_id=claimed.agent_id,
-            manifest=claimed.manifest,
-            bundle_url=f"/api/agent-executions/{claimed.execution_id}/bundle",
-        )
-
     @router.get("/agent-executions/{execution_id}/bundle")
     def bundle(execution_id: str, request: Request) -> FileResponse:
         worker = authorize_worker(request)
@@ -208,14 +187,6 @@ def create_agent_workers_router(
         if not path.is_file():
             raise HTTPException(status_code=404, detail="Agent bundle not found")
         return FileResponse(path, media_type="application/gzip", filename=bundle_name)
-
-    @router.post("/agent-executions/{execution_id}/heartbeat", status_code=204)
-    def heartbeat(execution_id: str, request: Request) -> Response:
-        worker = authorize_worker(request)
-        lease_id = require_lease_id(request)
-        if not broker.heartbeat(execution_id, str(worker["worker_id"]), lease_id):
-            raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
-        return Response(status_code=204)
 
     @router.post("/agent-executions/{execution_id}/release-slot", status_code=204)
     def release_slot(execution_id: str, request: Request) -> Response:

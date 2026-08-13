@@ -531,6 +531,27 @@ def test_build_runtime_prefetches_inputs_and_hides_db(
     assert runtime["skill_versions"] == {"fetch_questions": "abc123"}
 
 
+def test_build_runtime_whitelists_settings_config_sections(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    """VAULT-SECRET-001: the sandboxed child is user code, so instance-level
+    settings sections (vault/auth/database/...) never cross into it."""
+    from server.app.executors._code_runtime import build_runtime
+    from server.app.executors.cancellation import CancellationToken
+
+    path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
+    executor = _executor(tmp_path, path)
+    executor.settings_config = {
+        "vault": {"master_key": "fernet-key-material"},
+        "database": {"url": "postgresql://user:db-pw@db/agent_legion"},
+        "asr": {"whisper": {"binary": "/env/whisper-cli"}},
+    }
+
+    runtime = build_runtime(executor, context, CancellationToken())
+
+    assert runtime["settings_config"] == {"asr": {"whisper": {"binary": "/env/whisper-cli"}}}
+
+
 def test_build_runtime_skill_versions_degrade_on_db_error(
     tmp_path: Path, context: ExecutionContext
 ) -> None:

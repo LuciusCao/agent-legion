@@ -25,6 +25,7 @@ _EDITABLE_FIELDS = {
     "name",
     "runtimes",
     "max_concurrency",
+    "max_code_concurrency",
     "upload_max_concurrency",
     "models",
     "labels",
@@ -40,6 +41,7 @@ _DEFAULTS: dict[str, Any] = {
     "name": "",
     "runtimes": ["velites"],
     "max_concurrency": 1,
+    "max_code_concurrency": 0,
     "upload_max_concurrency": 4,
     "models": [],
     "labels": {},
@@ -84,6 +86,14 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
     concurrency = config.get("max_concurrency")
     claim_enabled = config.get("claim_enabled")
     validate_claim_controls(concurrency, claim_enabled)
+    # 批次 2 code 执行池；0 = 仅 agent。上限与 Host 注册契约（le=1024）一致。
+    code_concurrency = config.get("max_code_concurrency", 0)
+    if (
+        isinstance(code_concurrency, bool)
+        or not isinstance(code_concurrency, int)
+        or not 0 <= code_concurrency <= MAX_DYNAMIC_CONCURRENCY
+    ):
+        raise ValueError(f"code 并发数必须是 0 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     upload_concurrency = config.get("upload_max_concurrency")
     if (
         isinstance(upload_concurrency, bool)
@@ -116,6 +126,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         "name": name,
         "runtimes": runtimes,
         "max_concurrency": concurrency,
+        "max_code_concurrency": code_concurrency,
         "upload_max_concurrency": upload_concurrency,
         "claim_enabled": claim_enabled,
         "capabilities": capabilities,

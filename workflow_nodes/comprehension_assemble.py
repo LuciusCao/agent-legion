@@ -10,11 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.workflows.comprehension_common import (
+from workspace_libs.comprehension_common import (
     _assert_artifact_question_id,
     _single_parsed_question,
 )
-from server.app.workflows.comprehension_contract import assert_comprehension_lists_contract
+from workspace_libs.comprehension_contract import assert_comprehension_lists_contract
 from workspace_libs.node_sdk import NodeContext
 
 

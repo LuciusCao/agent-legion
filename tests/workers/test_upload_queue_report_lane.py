@@ -52,8 +52,8 @@ class LaneFakeClient:
         self.events.append(f"report:{execution_id}")
         return 204, b""
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> int:
-        return 204
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+        return 204, []
 
 
 def _execution_dir(work_root: Path, execution_id: str, output_name: str) -> None:
@@ -169,8 +169,8 @@ class GatedUploadClient:
         self.reports.append(execution_id)
         return 204, b""
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> int:
-        return 204
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+        return 204, []
 
 
 def test_lower_max_concurrency_waits_for_in_flight_drain(tmp_path: Path) -> None:

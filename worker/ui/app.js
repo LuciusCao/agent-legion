@@ -21,7 +21,7 @@ if (!CONTROL_TOKEN && hasDom) {
 }
 const TOKEN_MISSING = !CONTROL_TOKEN;
 // 与 worker/config_store.py 的 _DEFAULTS 对齐：数字字段留空时回退到后端默认值。
-export const NUMBER_DEFAULTS = { max_concurrency: 1, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
+export const NUMBER_DEFAULTS = { max_concurrency: 1, max_code_concurrency: 0, upload_max_concurrency: 4, poll_interval_seconds: 2, heartbeat_interval_seconds: 15, shutdown_grace_seconds: 25 };
 
 async function api(path, options = {}) {
   const headers = { Authorization: `Bearer ${CONTROL_TOKEN}`, ...(options.headers || {}) };
@@ -619,7 +619,7 @@ if (hasDom) {
       const data = new FormData(form);
       const payload = {
         host_url: data.get("host_url"), worker_id: data.get("worker_id"), name: data.get("name"),
-        max_concurrency: numberField(data, "max_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"),
+        max_concurrency: numberField(data, "max_concurrency"), max_code_concurrency: numberField(data, "max_code_concurrency"), upload_max_concurrency: numberField(data, "upload_max_concurrency"),
         runtimes: data.getAll("runtimes"), capabilities: linesFromText(data.get("capabilities")),
         models: modelsFromText(data.get("models")), labels: labelsFromText(data.get("labels")),
         poll_interval_seconds: numberField(data, "poll_interval_seconds"),

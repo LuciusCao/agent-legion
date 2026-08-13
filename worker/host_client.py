@@ -5,6 +5,7 @@ heartbeat/metrics) live here; retried bulk transfers come from the
 
 from __future__ import annotations
 
+import contextlib
 import json
 import urllib.parse
 from pathlib import Path
@@ -14,7 +15,13 @@ import requests
 
 from worker.host_transfer import DEFAULT_TRANSFER_TIMEOUT, TransferOperations
 
-PROTOCOL_VERSION = 1
+# Batch-2 protocol: kind='code' claims, dual capacity pools, heartbeat
+# cancel bodies. Mirrors AGENT_WORKER_PROTOCOL_VERSION in
+# server/app/routes/agent_workers_contracts.py — bump both together.
+# Compatibility is field-default based: an old Host never returns
+# kind='code' claims and keeps answering 204 heartbeats (parsed as no
+# cancellations), so this Worker degrades to agent-only.
+PROTOCOL_VERSION = 2
 
 DEFAULT_TIMEOUT = 30
 
@@ -81,6 +88,8 @@ class Client(TransferOperations):
             "capabilities": config.get("capabilities", []),
             "models": config.get("models", []),
             "max_concurrency": config["max_concurrency"],
+            # Code-execution capacity pool (batch 2); 0/absent = agent-only.
+            "max_code_concurrency": int(config.get("max_code_concurrency", 0) or 0),
             "labels": config.get("labels", {}),
             "protocol_version": PROTOCOL_VERSION,
         }
@@ -121,10 +130,17 @@ class Client(TransferOperations):
             raise RuntimeError(f"Agent Worker status failed: HTTP {status}: {body[:300]!r}")
         return dict(json.loads(body))
 
-    def claim(self, worker_id: str, max_concurrency: int | None = None) -> dict[str, Any] | None:
+    def claim(
+        self,
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict[str, Any] | None:
         payload: dict[str, Any] = {"worker_id": worker_id}
         if max_concurrency is not None:
             payload["max_concurrency"] = max_concurrency
+        if max_code_concurrency is not None:
+            payload["max_code_concurrency"] = max_code_concurrency
         status, body = self.request(
             "POST",
             "/api/agent-executions/claim",
@@ -149,10 +165,20 @@ class Client(TransferOperations):
             raise RuntimeError(f"ops metrics failed: HTTP {status}: {body[:300]!r}")
         return json.loads(body)
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> int:
-        status, _ = self.request(
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+        """Beat once; returns (status, cancelled_execution_ids).
+
+        Protocol v2 Hosts answer 200 with a body listing this Worker's
+        cancelled kind='code' executions; v1 answers 204 (no body)."""
+        status, body = self.request(
             "POST",
             f"/api/agent-executions/{execution_id}/heartbeat",
             headers={"X-Agent-Lease-Id": lease_id},
         )
-        return status
+        cancelled: list[str] = []
+        if status == 200:
+            with contextlib.suppress(ValueError, TypeError, AttributeError):
+                cancelled = [
+                    str(value) for value in json.loads(body).get("cancelled_execution_ids", [])
+                ]
+        return status, cancelled

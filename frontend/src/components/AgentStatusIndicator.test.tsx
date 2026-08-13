@@ -33,6 +33,7 @@ function makeWorker(overrides: Partial<WorkerSummary> = {}): WorkerSummary {
     capabilities: ['review_subtitles'],
     models: [{ provider: 'openai', model: 'gpt-5.2' }],
     max_concurrency: 10,
+    max_code_concurrency: 0,
     labels: {},
     protocol_version: 1,
     registered_at: '2026-07-22 02:13:04',

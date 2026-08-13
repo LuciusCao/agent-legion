@@ -23,14 +23,14 @@ from comprehension_uploader.question_source import JSONFileQuestionSource
 from comprehension_uploader.scanner import Scanner
 from comprehension_uploader.uploader import Uploader
 
-from server.app.workflows.question_fingerprint import (
-    compute_question_fingerprint as server_compute_question_fingerprint,
-)
 from tests.tools.comprehension_uploader_fixtures import (
     FakeAPIClient,
     make_config,
     make_record,
     make_valid_comprehension_data,
+)
+from workspace_libs.question_fingerprint import (
+    compute_question_fingerprint as canonical_compute_question_fingerprint,
 )
 
 
@@ -40,7 +40,7 @@ def test_fingerprint_matches_existing_algorithm() -> None:
         {"label": "B", "text": " False ", "extra": 1},
         {"label": "A", "text": " True"},
     ]
-    assert compute_question_fingerprint(stem, options) == server_compute_question_fingerprint(
+    assert compute_question_fingerprint(stem, options) == canonical_compute_question_fingerprint(
         stem, options
     )
 

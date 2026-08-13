@@ -4,6 +4,7 @@ import logging
 from functools import partial
 
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
+from server.app.agent_broker.code_dispatch import CodeDispatchService
 from server.app.events.agents import AgentStatusManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry
@@ -78,6 +79,11 @@ def start_worker_threads(
         workspace_worker_control=workspace_worker_control,
         agent_manager=agent_manager,
         agent_dispatch=agent_dispatch,
+        # The code dispatch shares the agent dispatch's broker and artifact
+        # store (same instances, same composition root).
+        code_dispatch=CodeDispatchService(
+            settings, agent_broker, agent_dispatch.artifact_store, job_db
+        ),
     )
     try:
         workflow_worker_thread.start()

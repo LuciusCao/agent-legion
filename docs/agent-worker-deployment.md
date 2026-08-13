@@ -127,6 +127,19 @@ make stack-logs STACK=worker
 
 Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capability 与 workflow 节点已有的 `capability` 是同一个值，不存在额外的 `required_worker_capabilities` 字段；只有 runtime、capability、provider 和 model 都匹配时，Host 才会把该节点任务交给 Worker。没有兼容 Worker 时任务保持排队，不会被不兼容的机器领取。
 
+### code 节点执行池（协议 v2）
+
+自足的 workflow code 节点（question/comprehension 链路 6 个节点与 `video_package`；依赖 `server.app.pipeline` 的 3 个 video 重节点留在 Host 本地执行）可以被分派到 Worker：Host 把节点代码文本 + sha256 `code_hash` 与 `workspace_libs` 快照打进 bundle 下发，Worker 在 `velites sandbox wrap` OS 沙箱内执行（内置与自定义节点同一条沙箱路径）。接入方式：
+
+- **code capability 声明**：与 agent 一样写在 `capabilities` 列表里（同一通道，Host 按 capability 匹配，不看 model）；
+- **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限；
+- **刻意不做热更**：`max_code_concurrency` 不在热更新字段里——经控制台或 `PUT /api/config` 修改后执行进程会重启，让启动预检重新生效；预检发现 code 容量 >0 而 PATH 上没有 `velites` 二进制时拒绝启动（退出码 2，不自动重启），避免热开后 code 任务在 Host 侧空转重试；
+- **回落语义**：没有声明该 capability 的在线 code Worker 时（探测按 capability 匹配，含 `"*"` 通配），dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
+
+**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程，任何持久化前强制剔除（`strip_secret_config`），secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`），只含节点 SDK 实际消费的业务 section（当前仅 `asr`）——vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
+
+**协议兼容**：当前协议版本为 v2（新增 `kind: "code"` claim 与 heartbeat 取消 body）。注册时声明 `max_code_concurrency > 0` 必须是 v2（v1 注册带 code 容量会被 400 拒绝；claim 评估对存量行再查一次协议版本兜底）；v1 Worker 在 v2 Host 上保持 agent-only（收不到 code claim，heartbeat 仍是空 204）；v2 Worker 对 v1 Host 自动降级为 agent-only。Host 的 `min_protocol_version` 仍为 1。
+
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 
 ### 控制面鉴权
@@ -207,7 +220,7 @@ curl -b <登录 cookie> -H 'X-CSRF-Token: <csrf-token>' http://192.0.2.1:8000/ap
 
 响应中应同时看到 `company-local-1` 和 `home-mac-mini-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示用全局 token 注册、可承接所有 workspace 的任务；否则列出 scoped token 授权的唯一 workspace。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
 
-并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。
+并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。code 节点任务是独立的第二个池：只受 Worker 本机 `max_code_concurrency` 约束（不占 workspace 级 Agent 上限），且刻意不热更——修改后执行进程重启并经启动预检（见 §5「code 节点执行池」）。
 
 ## 7. Tailnet 冒烟验证（上线前必须执行）
 

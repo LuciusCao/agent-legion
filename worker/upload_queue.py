@@ -62,6 +62,12 @@ class UploadTask:
     # "process": run post-processing (scan/compress/archive) then report.
     # "prebuilt": metadata is final (pre-process failure / pre-start cancel).
     kind: str
+    # "agent"（缺省）或 "code"（批次 2）：上面的 kind 已被
+    # "process"/"prebuilt" 占用，agent/code 维度用 exec_kind 表达（勿复用）。
+    exec_kind: str = "agent"
+    # code 执行的结果（status/error_message/auth_failure_connection），由
+    # code_runner 在进程退出后填入；随 pending marker 持久化供崩溃恢复。
+    code_result: dict[str, Any] | None = None
     exit_code: int = 1
     expected_outputs: tuple[str, ...] = ()
     command: tuple[str, ...] = ()
@@ -81,6 +87,8 @@ class UploadTask:
             "node_key": self.node_key,
             "status_fields": self.status_fields,
             "kind": self.kind,
+            "exec_kind": self.exec_kind,
+            "code_result": self.code_result,
             "exit_code": self.exit_code,
             "expected_outputs": list(self.expected_outputs),
             "command": list(self.command),
@@ -99,6 +107,8 @@ class UploadTask:
             node_key=str(payload["node_key"]),
             status_fields={str(k): str(v) for k, v in dict(payload["status_fields"]).items()},
             kind=str(payload["kind"]),
+            exec_kind=str(payload.get("exec_kind") or "agent"),
+            code_result=payload.get("code_result"),
             exit_code=int(payload.get("exit_code", 1)),
             expected_outputs=tuple(str(name) for name in payload.get("expected_outputs", [])),
             command=tuple(str(part) for part in payload.get("command", [])),
