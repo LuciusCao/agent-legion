@@ -1,10 +1,5 @@
 exemptions:
 - check: architecture.route_response_model
-  path: server/app/routes/agent_workers.py:heartbeat
-  reason: Agent Worker heartbeat returns an empty 204 response by protocol.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-- check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor

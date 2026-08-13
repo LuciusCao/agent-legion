@@ -1,6 +1,7 @@
 # 节点 SDK 与 code 节点执行迁移 Worker（合并设计）
 
-状态：批次 0/1 已实现（批次 2/3 为后续 PR）
+状态：批次 0/1 已实现；批次 2 已实施（§7，协议 v2 + schema v38，2026-08 落地）；
+批次 3 已取消（§9）
 日期：2026-08-12
 关联：Issue #30（code 节点 Host→Worker）、Issue #82（节点 SDK）、
 EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、
@@ -162,33 +163,74 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
 业务逻辑零改动；迁移前后节点输入输出 artifact 逐字节等价（统一 JSON 序列化参数
 本就与现状一致）。
 
-## 7. 批次 2 方案：Worker code 执行协议（后续 PR）
+## 7. 批次 2 方案：Worker code 执行协议（2026-08-12 已定案，2026-08 已实施）
 
-### 7.1 协议扩展
+实施记录见各 chunk（C1–C5）交接报告与 git 历史；本节保留定案方案，落地细节
+以代码与 `config/architecture/architecture-invariants.yaml` 为准。
 
-复用 agent 执行通道的骨架，新增 code 执行种类：
+### 7.1 协议形态：复用 agent claim 通道 + 按 kind 分容量池
 
-- manifest 增加 code 负载：`capability`、解析后 `node_config`（含连接注入——
-  secret 随任务下发属「任务所需最小输入」，仅内存传输/驻留，不落 Worker 磁盘，
-  传输走既有 HTTPS 通道，边界见 §8）、自定义代码文本 + hash pin（frozen 优先，
-  与 Host 侧 `resolve_dispatch_node_code` 同一解析序）、`inputs` 经 artifact
-  staging（复用 `agent_artifacts.py` / `/api/artifacts`）、`expected_outputs`；
-- 内置节点代码取 Worker 本地 repo checkout（Worker 本就要求同 repo + velites
-  二进制）；Host/Worker 版本一致性经注册握手交换 git 指纹，不匹配拒绝 claim
-  code 任务；
-- Worker 侧执行复用 `_code_sandbox.py` 的 velites wrap 逻辑。前置重构：把
-  sandbox child 入口（`_code_child` 等价物）与 SDK 这类执行面代码收敛到
-  Host/Worker 共享位置（`workspace_libs/` 或 Worker 自带），Worker 不 import
-  `server.app`；
-- `routing.py` 增加 code → Worker 的路由（`workspace_node_bindings` 指向 Worker
-  声明的 code executor）；输出 artifacts 上传与状态回报复用 agent 通道；
-- 取消信号：Worker 轮询/回报通道携带取消请求，Worker 侧 kill 进程组（沙箱
-  child 的 SIGTERM → token 语义保持不变）。
+- 在同一 claim 协议里加 `kind: "code"`，复用 bundle 分发、artifact staging、
+  状态回报、心跳与取消通道。manifest 的 code 负载为独立 section（与 agent
+  负载构成 tagged union）：`capability`、解析后 `node_config`、代码文本 +
+  内容哈希、`expected_outputs`；inputs 走 artifact staging，不进 manifest 本体。
+- 并发隔离靠**容量池**而非通道数量：Worker 声明容量时按 kind 分开（agent/code
+  各自上限），Host 分开记账、分开强制（机制同现有 `max_concurrency` 的 claim
+  检查，`server/app/agent_broker/claim.py`）。长 code 任务（如转录）只占 code
+  池，不拖慢 agent；code 池内部快慢细分留待后续。
 
-### 7.2 SDK 版本兼容策略
+### 7.2 节点代码分发：Host 发送，放弃 git 指纹
 
-- SDK 与 repo 同版本演进，不单独发版。内置节点代码（git）与 SDK（git）天然
-  同版本；Worker 用 git 指纹握手保证与 Host 一致。
+- 内置与自定义节点统一走「代码文本 + 内容哈希随任务下发」：Host 在 dispatch
+  时解析代码（内置读 repo 文件，自定义读 DB frozen 版本，解析序同
+  `resolve_dispatch_node_code`）。Worker 零 repo 依赖，只需 Python + velites
+  二进制。原 git 指纹握手方案（Worker 本地 checkout + 漂移拒领）已放弃。
+- 前提：节点自足——只能 import `workspace_libs` + stdlib（外加 Worker 镜像预装、
+  沙箱内可 import 的 `requests`），与自定义节点沙箱规则对齐，可用静态检查强制
+  （`server/app/agent_broker/code_eligibility.py`，按 code_hash 缓存）。
+  EXEC-CODE-001 不变：内置代码源头仍是
+  Host 的 git 仓库，评审链不变，仅运输方式从「Worker 读本地 repo」变为
+  「Host 读了发过去」。
+- 批次 2a 前置：把节点依赖的轻量 helper（`comprehension_common`、
+  `comprehension_contract`、`question_fingerprint`，均为纯 stdlib）下沉到
+  `workspace_libs`。下沉后 6 个节点自足（`question_intake`、`question_clean_parse`、
+  `comprehension_classify` / `comprehension_assemble` / `comprehension_finalize`、
+  `video_package`），走 Host 发送上 Worker。
+- 3 个 video 重节点（`video_download` / `video_assemble` / `video_transcribe`，
+  依赖 `server.app.pipeline.*`：ffmpeg 子进程、ASR provider、第三方库
+  `requests`/`srt`）批次 2 暂缓上 Worker，留 Host 本地执行（routing 不绑定
+  Worker 即可）。后续单独决策：`pipeline` 下沉 vs 视频处理专用 Worker——
+  其依赖（ffmpeg、ASR 模型路径）与机器环境强绑定，值得独立设计。
+- 安全加分：Worker 上所有 code 执行统一过 velites 沙箱（内置节点在 Host
+  本地本不沙箱，远程化后反而更规范）。
+
+### 7.3 secret 下发边界（VAULT-SECRET-001 的延伸）
+
+- 传输仅走既有 HTTPS 通道，不开明文旁路。
+- Worker 侧仅内存驻留：不落盘、不进日志。落地时必须检查 Worker 的
+  manifest/bundle 持久化路径，必要时在落盘前剔除 secret 键。
+- 一期不做按节点白名单：节点只能拿到自身 config_schema 声明的连接键，已是
+  事实上的最小下发；白名单收束留二期。
+
+### 7.4 执行面共享包位置
+
+- sandbox child（`_code_child` 等价物）与 SDK 收敛到 `workspace_libs/`：
+  `_code_child` 对 `server.app` 仅两个依赖（`CancellationToken`、
+  `_load_run_from_source`），随之下沉后零依赖；`workspace_libs/` 已在沙箱
+  allowlist，不需要动沙箱策略。
+- velites wrap argv 构建与进程管理留在执行器层，Host/Worker 各一份（Worker
+  侧复制进 `worker/`），批次 3 时 Host 侧那份删除。
+
+### 7.5 取消信号
+
+- 复用 Worker 轮询/回报通道，Host 回复中携带显式取消字段，不设独立通道；
+  Worker 收到后 kill 进程组（SIGTERM），沙箱 child 的 token 语义不变。
+- 时延目标一个轮询周期（秒级），对分钟级 code 节点足够。
+
+### 7.6 SDK 版本兼容策略
+
+- SDK 随任务从 Host 下发（`workspace_libs` 快照 + 内容哈希），Worker 不需要
+  本地副本，SDK 版本始终与 Host 一致。
 - 自定义节点冻结的是代码文本，不冻结 SDK 版本：SDK 承诺向后兼容（只加不减，
   破坏性变更走 `NodeContext` 新方法名）。SDK 变更的契约测试
   （`tests/workflow_nodes/test_node_sdk.py` + 沙箱 import 契约测试）是兼容性的
@@ -206,13 +248,22 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
   「子进程伪造标记失效他人连接」的越权面（节点本就知道自己用的 connection
   key，失效自己的缓存 token 不产生新权限）。
 
-## 9. 批次 3 方案：Host 内嵌 Worker（后续 PR）
+## 9. 批次 3：已取消（2026-08-12 决策）
 
-- 「本地跑」= Host 与 Worker 同机部署（Host 内嵌 Worker 进程），执行代码路径
-  与分布式完全一致，区别只是传输从网络变本机；
-- Host 侧现有 code executor 演进为内嵌 Worker 模式的实现，消除双实现漂移；
-- Host 摘掉 velites 二进制依赖（回到 Worker 侧）；部署文档与
-  `remote-execution-runbook.md` 更新。
+原设想「Host 内嵌 Worker 进程、本地执行也走 claim 协议、Host 摘 velites 依赖」，
+经评审后取消，理由：
+
+- 批次 2 已把漂移大头解决：SDK、sandbox child、节点代码全部共享（
+  `workspace_libs` 收敛 + Host 发送代码文本），剩下的「双实现」只是编排胶水
+  （本地直接调用 vs claim 协议），漂移空间很小；
+- 批次 2 决定 3 个 video 重节点留在 Host 本地执行，Host 的本地执行路径
+  无论如何删不掉，「Host executor 整个删除、摘 velites」不可能全量达成；
+- 「单机全功能」部署用同机独立 Worker 进程指向 localhost 即可，是纯部署
+  拓扑，由现有部署文档/runbook 覆盖，不需要开发「Host 内嵌进程管理」。
+
+终局定位：Host 本地 code executor = video 三节点专用 + 无 Worker 时的兜底。
+若将来 video 节点找到归宿（如视频处理专用 Worker），再重新评估 Host 是否
+彻底退出执行。
 
 ## 10. Quality Impact
 

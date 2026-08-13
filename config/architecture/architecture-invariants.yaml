@@ -406,7 +406,7 @@ invariants:
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
   # velites/tests/sandbox_wrap.rs; registry targets allow only tests//scripts/.
   - id: EXEC-CODE-003
-    statement: "Custom (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend custom code never runs unsandboxed. Builtin repo-tracked nodes keep the bare multiprocessing child (EXEC-CODE-001)."
+    statement: "Custom (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend custom code never runs unsandboxed. Builtin repo-tracked nodes keep the bare multiprocessing child on the Host (EXEC-CODE-001), but on a Worker ALL code execution (builtin and custom alike, worker/code_runner.py) goes through the same velites sandbox wrap — the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a velites binary on PATH (fail-closed)."
     owner: workspace-executor
     risk: high
     evidence:
@@ -418,6 +418,12 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/executors/test_code_executor.py::test_custom_sandbox_denies_writes_outside_job_dir
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_code_runner.py::test_build_sandbox_argv_structure
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_runtime_preflight.py::test_preflight_code_capacity_requires_velites
         gate: quick
 
   - id: EXEC-CODE-004
@@ -436,6 +442,30 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/workflow_nodes/test_node_sdk.py
+        gate: quick
+
+  - id: EXEC-CODE-WORKER-001
+    statement: "Code node executions reach a Worker only through the kind='code' lane of the Agent Worker protocol (protocol v2): agent_execution_requests carries kind ('agent'|'code', schema v38), Workers declare a separate max_code_concurrency pool that the Host accounts and enforces independently of the agent pool, and the code manifest ships the node code text plus its sha256 code_hash (resolved in resolve_dispatch_node_code order; the Worker refuses to run on hash mismatch) with a workspace_libs snapshot in the bundle. Worker-eligibility is a static import-closure scan (server/app/agent_broker/code_eligibility.py: closure ⊆ workspace_libs + stdlib + requests, dynamic imports forbidden, cached by code_hash); the three video pipeline nodes stay Host-local because their closure includes server.app.pipeline.*. Dispatch probes for an online code-capable Worker and falls back to the local Host executor when none exists — code requests never rot in queued waiting for a Worker."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_code_claim.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_code_dispatch.py
+        gate: quick
+      - kind: contract
+        target: tests/workflow_nodes/test_node_self_containment.py
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_code_runner.py::test_execute_code_hash_mismatch_refuses_before_spawn
+        gate: quick
+      - kind: integration
+        target: tests/db/test_agent_request_kind_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py
         gate: quick
 
   - id: SECURITY-WORKER-001
@@ -526,7 +556,7 @@ invariants:
         gate: full
 
   - id: VAULT-SECRET-001
-    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens."
+    statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens. The code→Worker path extends the same boundary across machines: queued code manifests and bundles are stored secret-free (secret keys are stripped at enqueue; a plaintext secret value makes the node ineligible for Worker dispatch), the Host resolves vault refs and injects plaintext only into the claim/download response over the existing HTTPS channel, and the Worker holds secrets in memory only — passed to the child via stdin, never written to disk or logs, with a defensive scrub (strip_secret_config) before any persistence."
     owner: security
     risk: critical
     evidence:
@@ -538,6 +568,18 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_connections.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_code_dispatch.py::test_enqueue_builds_secret_free_manifest_and_bundle
+        gate: quick
+      - kind: integration
+        target: tests/services/test_code_dispatch.py::test_resolve_code_manifest_config_injects_and_strips_secrets
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_code_runner.py::test_secrets_stay_off_disk
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_code_runner.py::test_strip_secret_config_drops_secret_keys_and_connection_block
         gate: quick
       - kind: integration
         target: tests/full/test_vault_secret_freeze.py
