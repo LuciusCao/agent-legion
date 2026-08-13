@@ -485,6 +485,41 @@ def test_classify_comprehension_eligibility_marks_pure_calculation_non_uploadabl
     assert payload["reason_code"] == "pure_calculation"
 
 
+def test_classify_comprehension_eligibility_marks_multiple_choice_non_uploadable(tmp_path):
+    job = {"source_id": "Q201"}
+    tmp_path.joinpath("questions_parsed.json").write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question_id": "Q201",
+                        "stem": "下列关于三角形内角和的说法正确的是（ ）",
+                        "options": [
+                            {"label": "A", "text": "90°"},
+                            {"label": "B", "text": "180°"},
+                            {"label": "C", "text": "270°"},
+                            {"label": "D", "text": "360°"},
+                        ],
+                        "answer": "B",
+                        "analysis": "",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    classify_comprehension_eligibility(job, tmp_path, {})
+
+    payload = json.loads(
+        tmp_path.joinpath("comprehension_eligibility.json").read_text(encoding="utf-8")
+    )
+    assert payload["question_id"] == "Q201"
+    assert payload["eligible"] is False
+    assert payload["reason_code"] == "multiple_choice"
+
+
 def test_finalize_non_uploadable_writes_non_uploadable_manifest(tmp_path):
     job = {
         "id": "job1",
