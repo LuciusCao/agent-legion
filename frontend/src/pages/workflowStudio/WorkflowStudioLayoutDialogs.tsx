@@ -22,8 +22,8 @@ export function WorkflowStudioLayoutDialogs(props: StudioLayoutProps) {
       />
       <WorkflowDagFullscreenDialog
         open={props.dagFullscreenOpen}
-        workflow={props.workflow}
-        executorCatalog={props.executorCatalog}
+        nodes={props.nodes}
+        edges={props.edges}
         selectedNode={props.selectedNodeKey}
         onSelectedNodeChange={props.setSelectedNodeKey}
         onClose={() => props.setDagFullscreenOpen(false)}
