@@ -90,8 +90,8 @@ describe('ExecutorsPanel', () => {
     expect(screen.getByText('容量 16')).toBeInTheDocument()
     expect(screen.getByText('2 个 capability')).toBeInTheDocument()
     expect(screen.getByText('已发布')).toBeInTheDocument()
-    // 重启生效提示显著可见
-    expect(screen.getByRole('note')).toHaveTextContent('重启服务')
+    // 热生效提示显著可见
+    expect(screen.getByRole('note')).toHaveTextContent('热生效')
   })
 
   it('saves a draft via PUT with edited capacity', async () => {

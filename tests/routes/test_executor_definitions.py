@@ -170,3 +170,37 @@ def test_endpoints_require_auth(anon_client) -> None:
     assert anon_client.put(f"{BASE}/code-default/draft", json=PAYLOAD_V1).status_code == 401
     assert anon_client.post(f"{BASE}/code-default/publish").status_code == 401
     assert anon_client.delete(f"{BASE}/code-default").status_code == 401
+
+
+def test_publish_hot_reloads_runtime_registry(client) -> None:
+    """Publish takes effect without a restart: the running registry swaps."""
+    registry = client.app.state.executor_registry
+    assert registry.get("code-extra") is None
+
+    client.post(BASE, json={"executor_id": "code-extra", **PAYLOAD_V1})
+    published = client.post(f"{BASE}/code-extra/publish")
+    assert published.status_code == 200
+
+    executor = registry.require("code-extra", "clean_and_parse")
+    assert executor.supports("clean_and_parse")
+    assert registry.global_capacity("code-extra") == 2
+    settings_definitions = client.app.state.settings.executor_definitions
+    assert settings_definitions["code-extra"].global_capacity == 2
+
+
+def test_rollback_and_archive_hot_reload_runtime_registry(client) -> None:
+    client.post(BASE, json={"executor_id": "code-extra", **PAYLOAD_V1})
+    client.post(f"{BASE}/code-extra/publish")
+    client.put(f"{BASE}/code-extra/draft", json=PAYLOAD_V2)
+    client.post(f"{BASE}/code-extra/publish")
+    registry = client.app.state.executor_registry
+    assert registry.global_capacity("code-extra") == 4
+
+    rolled = client.post(f"{BASE}/code-extra/rollback", json={"version": 1})
+    assert rolled.status_code == 200
+    assert registry.global_capacity("code-extra") == 2
+
+    archived = client.delete(f"{BASE}/code-extra")
+    assert archived.status_code == 200
+    assert registry.get("code-extra") is None
+    assert "code-extra" not in client.app.state.settings.executor_definitions

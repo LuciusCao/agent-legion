@@ -37,7 +37,7 @@ type ExecutorDefinitionShape = {
  * Executor 定义编辑器。发布后的 definition 不可变：编辑已发布 Executor 就是
  * 保存一份新草稿再发布。capabilities 用 JSON 文本域编辑（path /
  * timeout_seconds / sandbox_network / config_schema 都在其中），非法 JSON
- * 在提交前拦截。发布只写 DB，重启服务后才影响调度。
+ * 在提交前拦截。发布/回滚/归档后调度 registry 热刷新，无需重启。
  */
 export function ExecutorEditor({
   executorId,
@@ -154,7 +154,7 @@ export function ExecutorEditor({
     try {
       await publishExecutor(executorId)
       setHasDraft(false)
-      showToast('已发布（重启服务后生效）', 'success')
+      showToast('已发布，调度立即生效', 'success')
       onChanged()
     } catch (err) {
       setError(errorMessage(err))
