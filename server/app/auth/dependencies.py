@@ -71,6 +71,17 @@ def reject_studio_agent_scope(
     return user
 
 
+def require_studio_agent_scope(
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Tool-surface guard: only studio-agent scoped tokens may call the
+    ``/api/studio-agent/tools/*`` endpoints; full user sessions get 403
+    (STUDIO-AGENT-001)."""
+    if user.get("actor_scope") != STUDIO_AGENT_SCOPE:
+        raise HTTPException(status_code=403, detail="Studio agent scoped token required")
+    return user
+
+
 def require_workspace_access(
     request: Request,
     user: Annotated[dict[str, Any], Depends(get_current_user)],
