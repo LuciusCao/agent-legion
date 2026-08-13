@@ -552,6 +552,21 @@ invariants:
         target: tests/full/test_auth_control_plane.py
         gate: full
 
+  - id: STUDIO-AGENT-001
+    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a fixed non-sliding TTL, and is revocable). Scoped tokens resolve only through the Bearer channel, and every effecting endpoint (workflow draft publish; node code publish/rollback/archive; agent and executor definition publish/rollback/archive) mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/routes/test_studio_agent_scope.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_scoped_tokens.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_auth_scoped_tokens_migration.py
+        gate: quick
+
   - id: CONFIG-MANIFEST-001
     statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload."
     owner: security

@@ -574,6 +574,22 @@ create table if not exists sessions (
 create index if not exists idx_sessions_user_id on sessions(user_id);
 create index if not exists idx_sessions_expires_at on sessions(expires_at);
 
+-- Scoped tokens (schema v41): short-lived bearer tokens minted by the server
+-- for built-in agents (studio chat runs, STUDIO-AGENT-001). Each token binds
+-- the initiating user and an actor_scope, carries a fixed TTL (no sliding
+-- expiry), and is revocable. Like sessions, only the sha256 of the raw token
+-- is persisted.
+create table if not exists auth_scoped_tokens (
+  token_hash text primary key,
+  user_id text not null references users(id) on delete cascade,
+  scope text not null,
+  expires_at timestamptz not null,
+  revoked_at timestamptz,
+  created_at timestamptz not null default current_timestamp
+);
+create index if not exists idx_auth_scoped_tokens_user_id on auth_scoped_tokens(user_id);
+create index if not exists idx_auth_scoped_tokens_expires_at on auth_scoped_tokens(expires_at);
+
 create table if not exists workspace_members (
   workspace_id text not null references workspaces(id) on delete cascade,
   user_id text not null references users(id) on delete cascade,
