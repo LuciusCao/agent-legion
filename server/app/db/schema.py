@@ -20,7 +20,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 38
+SCHEMA_VERSION = 39
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 # Vault (schema v16): idempotent DDL lives here because the architecture gate
@@ -80,5 +80,5 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "monitoring_hotpath_indexes"),
+                (SCHEMA_VERSION, "workflow_catalog"),
             )

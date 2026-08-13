@@ -79,3 +79,69 @@ def test_update_workspace_rejects_invalid_workflow_key(tmp_path):
 
     assert resp.status_code == 404
     assert "Unknown workflow" in resp.json()["detail"]
+
+
+def test_register_workflow_via_admin_api(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        response = c.post(
+            "/api/workflows",
+            json={"key": "acme_quiz_flow", "label": "Acme Quiz", "description": "custom"},
+        )
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["key"] == "acme_quiz_flow"
+        assert body["origin"] == "registered"
+
+        listing = c.get("/api/workflows")
+        assert listing.status_code == 200
+        keys = {item["key"] for item in listing.json()["workflows"]}
+        assert {"question_comprehension_info", "video_knowledge", "acme_quiz_flow"} <= keys
+
+        # A registered key binds to new workspaces immediately.
+        create_resp = c.post(
+            "/api/workspaces",
+            json={"name": "Acme", "default_workflow_key": "acme_quiz_flow"},
+        )
+        assert create_resp.status_code == 200, create_resp.text
+
+
+def test_register_workflow_conflict_and_invalid_key(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        first = c.post("/api/workflows", json={"key": "acme_quiz_flow", "label": "Acme"})
+        assert first.status_code == 200, first.text
+
+        duplicate = c.post("/api/workflows", json={"key": "acme_quiz_flow", "label": "Again"})
+        assert duplicate.status_code == 409
+
+        builtin = c.post(
+            "/api/workflows", json={"key": "question_comprehension_info", "label": "Hijack"}
+        )
+        assert builtin.status_code == 409
+
+        invalid = c.post("/api/workflows", json={"key": "Has Space", "label": "Nope"})
+        assert invalid.status_code == 400
+
+
+def test_register_workflow_requires_authentication(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as c:
+        response = c.post("/api/workflows", json={"key": "acme_quiz_flow", "label": "Acme"})
+
+    assert response.status_code == 401

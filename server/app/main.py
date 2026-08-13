@@ -66,6 +66,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # 'executor'): seed-if-absent the built-in catalog, then hydrate from the
     # published rows (publish/rollback/archive hot-reload the registry).
     hydrate_executor_definitions(settings)
+    # Workflow catalog keys live in the DB (workflow_catalog, schema v39):
+    # upsert the built-in rows from the code registry; registered keys persist.
+    WorkflowCatalogService.seed_builtin(settings.database_url)
     # Skill sources/lock retired from tracked yaml into global_settings:
     # import-once the legacy files when present, else seed the built-in
     # constants; with rows present this is a no-op (DB is authoritative).

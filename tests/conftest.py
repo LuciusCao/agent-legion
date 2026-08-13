@@ -33,6 +33,7 @@ from server.app.services.executor_definition_service import (
     seed_builtin_executor_definitions,
 )
 from server.app.services.skill_source_store import SkillSourceStore
+from server.app.services.workflow_catalog import seed_builtin_workflow_catalog
 from server.app.settings import load_settings
 from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
@@ -125,6 +126,14 @@ def _seed_skill_sources() -> None:
     store = SkillSourceStore(TEST_DATABASE_URL)
     store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))
     store.put_lock(BUILTIN_SKILL_LOCK.model_copy(deep=True))
+
+
+# Test workflow catalog: the built-in workflow registry (workflow_catalog
+# table, schema v39) re-seeded after every TRUNCATE, mirroring the app startup
+# seed so catalog reads (routes, workspace binding, worker scan) see the two
+# built-in workflows.
+def _seed_workflow_catalog() -> None:
+    seed_builtin_workflow_catalog(TEST_DATABASE_URL)
 
 
 # Deterministic pricing seeded into global_settings after every TRUNCATE (see
@@ -229,6 +238,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_postgres_runtime.py",
         "tests/db/test_quality_loop_schema.py",
         "tests/db/test_versioned_entities_migration.py",
+        "tests/db/test_workflow_catalog_migration.py",
         "tests/db/test_workspace_cms_migration.py",
         "tests/db/test_workspace_secrets_migration.py",
         "tests/executors/leases/test_expire_race.py",
@@ -283,6 +293,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_quality_sampling.py",
         "tests/services/test_quality_stats.py",
         "tests/services/test_skill_source_store.py",
+        "tests/services/test_workflow_catalog_store.py",
         "tests/services/test_token_usage.py",
         "tests/test_export_openapi.py",
         "tests/test_jobs_route_contracts.py",
@@ -313,11 +324,13 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_run_dir_cleanup.py",
         "tests/test_skill_catalog_service.py",
         "tests/test_worker_control_db.py",
+        "tests/test_workflow_catalog_service.py",
         "tests/test_workflow_execution_control.py",
         "tests/test_workflow_revisions.py",
         "tests/test_workflow_worker_concurrency.py",
         "tests/test_workspace_executor_queries.py",
         "tests/workers/test_scheduler_wakeup.py",
+        "tests/workers/test_workflow_catalog_scan.py",
         "tests/workers/test_workflow_worker_capacity.py",
         "tests/workers/test_workflow_worker_mark_scan.py",
         "tests/workers/test_workflow_worker_node_code.py",
@@ -462,6 +475,7 @@ def _isolate_postgres_database(request):
     reset_published_executor_cache()
     _seed_executor_definitions()
     _seed_skill_sources()
+    _seed_workflow_catalog()
     yield
     if fresh:
         # Erase any DDL drift the test left behind so later TRUNCATE-isolated
