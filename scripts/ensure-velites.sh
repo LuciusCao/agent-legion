@@ -4,18 +4,45 @@
 # 源码树的 git tree hash 做指纹，与二进制旁的 stamp 文件对比，不一致（或
 # 二进制缺失）时重新 cargo build --release 并原子替换安装。velites/ 有未
 # 提交改动时指纹不可靠，强制重建。native-prod-up 每次启动前调用本脚本。
+#
+# 用法：
+#   scripts/ensure-velites.sh              安装/刷新 PATH 上的 velites（默认）
+#   scripts/ensure-velites.sh --dest DIR   安装/刷新 DIR/velites（跳过 PATH 探测）
+#
+# --dest 用于 Worker 自带沙箱副本：--dest data/bin 把二进制安置到
+# data/bin/velites（Worker 解析顺序：自带副本优先于 PATH，见
+# worker/binary_resolution.py resolve_binary）。二进制按平台构建——给哪台
+# Worker 用就在同 OS/架构的机器上执行本脚本。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
+DEST_DIR=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --dest)
+            DEST_DIR="${2:?--dest 需要目录参数}"
+            shift 2
+            ;;
+        *)
+            echo "未知参数：$1（仅支持 --dest DIR）" >&2
+            exit 2
+            ;;
+    esac
+done
+
 SRC_ID="$(git rev-parse HEAD:velites)"
 DIRTY="$(git status --porcelain -- velites)"
 
-# 测试可用 VELITES_INSTALL_DIR 覆盖默认安装目录（PATH 上无 velites 时生效）。
-VELITES_BIN="$(command -v velites || true)"
-if [[ -z "$VELITES_BIN" ]]; then
-    VELITES_BIN="${VELITES_INSTALL_DIR:-$HOME/.local/bin}/velites"
+if [[ -n "$DEST_DIR" ]]; then
+    VELITES_BIN="${DEST_DIR%/}/velites"
+else
+    # 测试可用 VELITES_INSTALL_DIR 覆盖默认安装目录（PATH 上无 velites 时生效）。
+    VELITES_BIN="$(command -v velites || true)"
+    if [[ -z "$VELITES_BIN" ]]; then
+        VELITES_BIN="${VELITES_INSTALL_DIR:-$HOME/.local/bin}/velites"
+    fi
 fi
 STAMP="${VELITES_BIN}.src-stamp"
 

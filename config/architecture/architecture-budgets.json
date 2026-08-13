@@ -1061,6 +1061,7 @@
     "worker/__init__.py": 11,
     "worker/_atomic.py": 32,
     "worker/_retry.py": 56,
+    "worker/binary_resolution.py": 30,
     "worker/bundle_io.py": 60,
     "worker/claim_manifest.py": 21,
     "worker/cleanup.py": 28,

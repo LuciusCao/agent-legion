@@ -189,8 +189,18 @@ in:
   default). This field is **deliberately not hot-reloaded**: changing it via
   the console / `PUT /api/config` restarts the execution process, so the
   startup preflight re-runs — and refuses to start (exit code 2) when code
-  capacity is declared without a `velites` binary on PATH. Never bypass this
-  by editing the state-copy YAML under a running process.
+  capacity is declared without a resolvable `velites` binary. Never bypass
+  this by editing the state-copy YAML under a running process.
+
+The Worker does **not** require a preinstalled velites: binary resolution is
+shared between the startup preflight and the code runner
+(`worker/binary_resolution.py::resolve_binary`) and checks the bundled copy
+`<repo>/data/bin/velites` before PATH. Docker worker images already ship
+velites; bare-metal deployments install the bundled copy with
+`./scripts/ensure-velites.sh --dest data/bin` (fingerprint-gated rebuild, run
+on a machine with the same OS/arch as the Worker; ship per-platform binaries
+when packaging). Only when neither location yields a binary does the
+fail-closed semantics trigger.
 
 When no online code-capable Worker exists, dispatch falls back to the local
 Host executor — code tasks never rot in a queue waiting for a Worker.
@@ -218,9 +228,10 @@ flipping the field:
   whose runtime no non-revoked Worker declares is failed by the unclaimable
   sweeper with an explicit runtime reason. Declare `velites` in the Worker
   fleet (`runtimes` in the Worker console/config) first; the Worker startup
-  preflight refuses to start (exit code 2) when a declared runtime's binary is
-  missing from PATH, so a fleet that claims velites without the binary fails
-  loudly at boot instead of stranding claimed executions.
+  preflight refuses to start (exit code 2) when a declared runtime's binary
+  is missing (neither the bundled `data/bin/<binary>` copy nor PATH), so a
+  fleet that claims velites without the binary fails loudly at boot instead
+  of stranding claimed executions.
 - **Changing `runtime` changes `definition_hash`.** Queued requests pinned to
   the old hash are failed as stale by the stale-definition sweeper. Migrate
   off-peak with the queue drained; re-submit staled jobs under the normal
@@ -249,7 +260,7 @@ flipping the field:
 | --- | --- | --- |
 | Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
 | Worker becomes unhealthy with registration rejected | Registration token mismatch or Worker revoked | `make stack-logs STACK=worker`; verify the token file and registration status |
-| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary is not on PATH (e.g. `velites` declared but not installed), or `max_code_concurrency > 0` without `velites` on PATH | Install the binary (`cargo build --release` in `velites/`, on PATH), drop the runtime from the Worker's `runtimes`, or set `max_code_concurrency: 0`, then restart |
+| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary cannot be resolved (e.g. `velites` declared but not installed), or `max_code_concurrency > 0` without `velites` | Install the binary — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — drop the runtime from the Worker's `runtimes`, or set `max_code_concurrency: 0`, then restart |
 | Registration returns 401 | `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` on the Host does not match the worker's token file | Re-copy `deploy/secrets/agent_worker_register_token` to the worker machine (deployment doc §4) |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's declared `runtimes` / `labels` |
