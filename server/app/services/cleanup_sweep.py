@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from server.app.services.cleanup_sweep_store import CleanupSweepStore
 from server.app.services.job_dir_index import iter_job_dirs
 from server.app.services.job_run_dir_lookup import derive_run_dir_from_index
 from server.app.services.run_dir_cleanup import find_extra_run_dirs, remove_path
@@ -87,11 +88,11 @@ def cleanup_extra_runs_per_node(db: JobQueries, data_dir: Path) -> int:
 def _remove_row_artifacts(
     row,
     data_dir: Path,
-    log_cutoff: datetime,
-    run_dir_cutoff: datetime,
+    action: str,
+    cutoff: datetime,
     job_dir_index: dict[str, Path],
-) -> tuple[int, int]:
-    """Remove the log file and run dir for one expired row, if past retention."""
+) -> int:
+    """Remove one expired artifact (``log`` or ``run_dir``) for a row past retention."""
     try:
         raw_finished = row["finished_at"]
         finished = (
@@ -102,29 +103,32 @@ def _remove_row_artifacts(
         if finished.tzinfo is None:
             finished = finished.replace(tzinfo=UTC)
     except ValueError:
-        return 0, 0
-    logs_removed = 0
-    run_dirs_removed = 0
-    log_path_str = row["log_path"]
-    if log_path_str and finished <= log_cutoff:
+        return 0
+    if finished > cutoff:
+        return 0
+    if action == "log":
+        log_path_str = row["log_path"]
+        if not log_path_str:
+            return 0
         try:
             remove_path(resolve_data_path(log_path_str, data_dir, allow_missing=True))
-            logs_removed += 1
+            return 1
         except Exception as exc:
             logger.warning("Failed to remove log %s: %s", log_path_str, exc)
+            return 0
     run_dir_str = row["run_dir"]
-    if finished <= run_dir_cutoff:
-        if not run_dir_str:
-            run_dir = derive_run_dir_from_index(row["job_id"], row["node_key"], job_dir_index)
-            if run_dir is not None:
-                run_dir_str = str(run_dir)
-        if run_dir_str:
-            try:
-                remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
-                run_dirs_removed += 1
-            except Exception as exc:
-                logger.warning("Failed to remove run_dir %s: %s", run_dir_str, exc)
-    return logs_removed, run_dirs_removed
+    if not run_dir_str:
+        run_dir = derive_run_dir_from_index(row["job_id"], row["node_key"], job_dir_index)
+        if run_dir is not None:
+            run_dir_str = str(run_dir)
+    if not run_dir_str:
+        return 0
+    try:
+        remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
+        return 1
+    except Exception as exc:
+        logger.warning("Failed to remove run_dir %s: %s", run_dir_str, exc)
+        return 0
 
 
 def sweep_expired_node_runs(
@@ -136,47 +140,54 @@ def sweep_expired_node_runs(
 ) -> tuple[int, int]:
     """Remove expired node-run log files and run directories in bounded chunks.
 
-    Rows are paged per terminal status with a ``(finished_at, id)`` keyset so
-    ``idx_node_runs_status_finished_at`` serves every chunk read without
-    sorting. Each chunk is fetched on its own short-lived read connection, so
-    no transaction is held while files are deleted. The SQL cutoff is a
-    coarse superset filter; the exact per-row retention check in
-    ``_remove_row_artifacts`` is unchanged.
+    Rows are paged per (terminal status, artifact action) with a
+    ``(finished_at, id)`` keyset so ``idx_node_runs_status_finished_at_id``
+    serves every chunk read without sorting. Each chunk is fetched on its own
+    short-lived read connection, so no transaction is held while files are
+    deleted. The SQL cutoff is a coarse superset filter; the exact per-row
+    retention check in ``_remove_row_artifacts`` is unchanged.
+
+    Rows are never deleted, so each pass starts from the persisted
+    high-water mark (``CleanupSweepStore``) instead of re-paging the whole
+    expired tail; the mark advances after every processed chunk, past rows
+    whose deletion failed as well (best-effort, see the store docstring).
+    Each action gets its own cursor: log and run-dir retentions differ (7d
+    vs 3d by default), and a shared cursor would skip log deletion for rows
+    the run-dir pass already advanced past.
     """
-    cutoff = max(log_cutoff, run_dir_cutoff)
-    logs_removed = 0
-    run_dirs_removed = 0
+    sweep_store = CleanupSweepStore(db.path)
+    totals = {"log": 0, "run_dir": 0}
     for status in ("completed", "failed"):
-        last_finished_at = datetime.min.replace(tzinfo=UTC)
-        last_id = 0
-        while True:
-            with db._connect_read() as conn:
-                rows = conn.execute(
-                    _EXPIRED_NODE_RUNS_SQL,
-                    (
-                        status,
-                        cutoff,
-                        last_finished_at,
-                        last_finished_at,
-                        last_id,
-                        LOG_CLEANUP_CHUNK_SIZE,
-                    ),
-                ).fetchall()
-            if not rows:
-                break
-            for row in rows:
-                logs, run_dirs = _remove_row_artifacts(
-                    row, data_dir, log_cutoff, run_dir_cutoff, job_dir_index
+        for action, cutoff in (("log", log_cutoff), ("run_dir", run_dir_cutoff)):
+            cursor_key = f"{status}:{action}"
+            last_finished_at, last_id = sweep_store.load(cursor_key)
+            while True:
+                with db._connect_read() as conn:
+                    rows = conn.execute(
+                        _EXPIRED_NODE_RUNS_SQL,
+                        (
+                            status,
+                            cutoff,
+                            last_finished_at,
+                            last_finished_at,
+                            last_id,
+                            LOG_CLEANUP_CHUNK_SIZE,
+                        ),
+                    ).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    totals[action] += _remove_row_artifacts(
+                        row, data_dir, action, cutoff, job_dir_index
+                    )
+                raw_last_finished_at = rows[-1]["finished_at"]
+                last_finished_at = (
+                    raw_last_finished_at
+                    if isinstance(raw_last_finished_at, datetime)
+                    else datetime.fromisoformat(raw_last_finished_at).replace(tzinfo=UTC)
                 )
-                logs_removed += logs
-                run_dirs_removed += run_dirs
-            raw_last_finished_at = rows[-1]["finished_at"]
-            last_finished_at = (
-                raw_last_finished_at
-                if isinstance(raw_last_finished_at, datetime)
-                else datetime.fromisoformat(raw_last_finished_at).replace(tzinfo=UTC)
-            )
-            last_id = rows[-1]["id"]
-            if len(rows) < LOG_CLEANUP_CHUNK_SIZE:
-                break
-    return logs_removed, run_dirs_removed
+                last_id = rows[-1]["id"]
+                sweep_store.save(cursor_key, last_finished_at, last_id)
+                if len(rows) < LOG_CLEANUP_CHUNK_SIZE:
+                    break
+    return totals["log"], totals["run_dir"]

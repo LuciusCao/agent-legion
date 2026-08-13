@@ -11,6 +11,7 @@ import pytest
 
 from workflow_nodes import question_intake
 from workspace_libs.cms.client import CmsClientError
+from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH, NodeContext
 
 
 @dataclass(frozen=True)
@@ -26,16 +27,6 @@ class _FakeSummary:
     question_id: str
     title: str
     payload: dict[str, Any]
-
-
-class _FakeJobDb:
-    def __init__(self, source_payload: dict[str, Any]) -> None:
-        self._source_payload = source_payload
-
-    def get_batch(self, batch_id: str) -> dict[str, Any] | None:
-        if not batch_id:
-            return None
-        return {"source_payload_json": json.dumps(self._source_payload)}
 
 
 def _job(source_id: str = "q-1", batch_id: str = "") -> dict[str, Any]:
@@ -58,8 +49,13 @@ def _context(
     monkeypatch.setattr(question_intake, "get_token", lambda env, cfg: "token")
     context: dict[str, Any] = {"node_config": cms_config}
     if source_payload is not None:
-        context["job_db"] = _FakeJobDb(source_payload)
+        # The executor prefetches the batch row; nodes hold no database handle.
+        context["job_batch"] = {"source_payload_json": json.dumps(source_payload)}
     return context
+
+
+def _auth_marker(job_dir: Path) -> Path:
+    return job_dir / AUTH_FAILURE_MARKER_PATH
 
 
 def test_by_id_fetches_detail_and_writes_questions(
@@ -242,8 +238,8 @@ def test_by_id_prefers_injected_connection_config(
 def test_by_id_cms_error_reports_auth_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """An auth-class CMS failure must invalidate the cached connection token
-    via report_node_auth_failure before the error propagates."""
+    """An auth-class CMS failure must record the auth-failure marker (the
+    parent executor invalidates the cached token) before the error propagates."""
     context = _context(monkeypatch, {"api_url": "https://cms.example.com/detail"})
     monkeypatch.setattr(
         question_intake,
@@ -252,15 +248,11 @@ def test_by_id_cms_error_reports_auth_failure(
             qid, qid, {}, {"code": 10015, "message": "JWT验证失败"}
         ),
     )
-    reported: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
-    )
 
     with pytest.raises(RuntimeError, match="code=10015"):
         question_intake.run(_job(), tmp_path, context)
 
-    assert reported == [context]
+    assert _auth_marker(tmp_path).is_file()
 
 
 def test_by_knowledge_cms_error_reports_auth_failure(
@@ -287,15 +279,11 @@ def test_by_knowledge_cms_error_reports_auth_failure(
             qid, qid, {}, {"code": 10015, "message": "JWT验证失败"}
         ),
     )
-    reported: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
-    )
 
     with pytest.raises(RuntimeError, match="code=10015"):
         question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
 
-    assert reported == [context]
+    assert _auth_marker(tmp_path).is_file()
 
 
 def test_by_knowledge_list_in_band_auth_reports_and_raises(
@@ -320,15 +308,11 @@ def test_by_knowledge_list_in_band_auth_reports_and_raises(
         )
 
     monkeypatch.setattr(question_intake, "list_questions_by_knowledge", _list)
-    reported: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
-    )
 
     with pytest.raises(CmsClientError, match="code=10015"):
         question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
 
-    assert reported == [context]
+    assert _auth_marker(tmp_path).is_file()
     assert not (tmp_path / "questions.json").exists()
 
 
@@ -351,15 +335,11 @@ def test_by_knowledge_list_transport_error_keeps_token(
         raise CmsClientError("CMS request failed: 500 Server Error")
 
     monkeypatch.setattr(question_intake, "list_questions_by_knowledge", _list)
-    reported: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
-    )
 
     with pytest.raises(CmsClientError, match="CMS request failed"):
         question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
 
-    assert reported == []
+    assert not _auth_marker(tmp_path).exists()
 
 
 def test_by_id_transport_error_keeps_token(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -370,15 +350,11 @@ def test_by_id_transport_error_keeps_token(tmp_path: Path, monkeypatch: pytest.M
         raise CmsClientError("CMS request failed: 503 Server Error")
 
     monkeypatch.setattr(question_intake, "fetch_question_detail", _fetch)
-    reported: list[dict[str, Any]] = []
-    monkeypatch.setattr(
-        question_intake, "report_node_auth_failure", lambda ctx: reported.append(ctx)
-    )
 
     with pytest.raises(CmsClientError, match="CMS request failed"):
         question_intake.run(_job(), tmp_path, context)
 
-    assert reported == []
+    assert not _auth_marker(tmp_path).exists()
 
 
 def test_by_knowledge_expands_code_into_multiple_questions(
@@ -437,12 +413,10 @@ def test_by_knowledge_empty_list_raises(tmp_path: Path, monkeypatch: pytest.Monk
         question_intake.run(_job(source_id="K001", batch_id="batch-1"), tmp_path, context)
 
 
-def test_intake_input_field_prefers_prefetched_batch() -> None:
-    """Custom sandboxed children have no job_db; the prefetched batch row wins."""
+def test_intake_input_field_prefers_prefetched_batch(tmp_path: Path) -> None:
+    """Nodes hold no database handle; the prefetched batch row is the source."""
     batch = {"source_payload_json": json.dumps({"intake_mode": {"input_field": "question_ids"}})}
-    assert (
-        question_intake._intake_input_field({"batch_id": "b1"}, {"job_batch": batch})
-        == "question_ids"
-    )
-    # No batch and no job_db → empty (builtin fallback path unchanged).
-    assert question_intake._intake_input_field({"batch_id": "b1"}, {}) == ""
+    ctx = NodeContext(_job(batch_id="b1"), tmp_path, {"job_batch": batch})
+    assert question_intake._intake_input_field(ctx) == "question_ids"
+    # No prefetched batch → empty.
+    assert question_intake._intake_input_field(NodeContext(_job(batch_id="b1"), tmp_path, {})) == ""

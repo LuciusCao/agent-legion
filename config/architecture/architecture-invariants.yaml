@@ -420,6 +420,24 @@ invariants:
         target: tests/executors/test_code_executor.py::test_custom_sandbox_denies_writes_outside_job_dir
         gate: quick
 
+  - id: EXEC-CODE-004
+    statement: "Code node runtimes never carry a database handle or DSN: builtin and sandboxed children share one runtime key set, and every DB-derived input (job_batch, skill_versions) is prefetched by the parent executor (server/app/executors/_code_runtime.py). Privileged actions stay in the parent: nodes report upstream auth failures only by dropping a marker file under job_dir (NodeContext.report_auth_failure, workspace_libs/node_sdk.py); the parent re-validates the connection key and performs the token invalidation after the child exits. Design: docs/architecture/node-sdk-and-worker-execution-design.md."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_build_runtime_prefetches_inputs_and_hides_db
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_builtin_child_auth_failure_marker_reaches_parent
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_sandboxed_custom_node_can_use_node_sdk
+        gate: quick
+      - kind: contract
+        target: tests/workflow_nodes/test_node_sdk.py
+        gate: quick
+
   - id: SECURITY-WORKER-001
     statement: "Agent Worker credentials are per-worker and revocable, persisted only as sha256 hashes; registration alone accepts the management token and execution endpoints require the per-worker token."
     owner: security

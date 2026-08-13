@@ -11,26 +11,16 @@ then downloads ``source.mp4``.
 
 from __future__ import annotations
 
-import json
-import logging
 from dataclasses import asdict, replace
 from pathlib import Path
 from typing import Any
 
 from server.app.pipeline.download import download_video as legacy_download_video
-from server.app.services.connection_tokens import report_node_auth_failure
 from server.app.video_capabilities.contracts import VideoKnowledgeInput
 from workspace_libs.cms import urls as cms_urls
 from workspace_libs.cms.client import CmsClientError, get_token
 from workspace_libs.cms.knowledge import lookup_knowledge_video
-
-logger = logging.getLogger(__name__)
-
-
-def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
-    raw = json.loads((job_dir / "video_input.json").read_text(encoding="utf-8"))
-    return VideoKnowledgeInput.from_mapping(raw)
-
+from workspace_libs.node_sdk import NodeContext
 
 # Retired node-level connection keys (pre-connection era). They are honored
 # only when no connection was injected (legacy frozen payloads); a resolved
@@ -38,44 +28,18 @@ def _load_video_input(job_dir: Path) -> VideoKnowledgeInput:
 _LEGACY_CONNECTION_KEYS = ("token", "env", "base_url", "api_url", "knowledge_url")
 
 
-def _cms_config(context: dict[str, Any]) -> dict[str, Any]:
-    """Effective CMS config: dispatch-injected connection + node overrides.
-
-    The ``connection_config`` block arrives resolved from the instance-level
-    external connection at dispatch time (base URL/endpoint config plus the
-    plaintext token, in memory only). Node/workspace business overrides win.
-    Legacy frozen payloads without a connection fall back to their
-    vault-resolved node ``token``.
-    """
-    merged: dict[str, Any] = {}
-    node_config = context.get("node_config")
-    # The dispatch layer injects the resolved connection into the node config
-    # (ExecutionContext.node_config → runtime["node_config"]): non-secret
-    # endpoint config plus the plaintext token, in memory only.
-    injected = node_config.get("connection_config") if isinstance(node_config, dict) else None
-    has_connection = isinstance(injected, dict) and bool(injected)
-    if isinstance(injected, dict) and injected:
-        merged.update({key: value for key, value in injected.items() if value not in (None, "")})
-    if isinstance(node_config, dict):
-        for key, value in node_config.items():
-            if key in ("connection", "connection_config") or value in (None, ""):
-                continue
-            if has_connection and key in _LEGACY_CONNECTION_KEYS:
-                continue
-            merged[key] = value
-    return merged
+def _load_video_input(ctx: NodeContext) -> VideoKnowledgeInput:
+    return VideoKnowledgeInput.from_mapping(ctx.artifacts.read_json("video_input.json"))
 
 
 def _resolve_knowledge_source(
-    job: dict[str, Any],
-    job_dir: Path,
+    ctx: NodeContext,
     video_input: VideoKnowledgeInput,
-    context: dict[str, Any],
 ) -> VideoKnowledgeInput:
     """Resolve an opaque knowledge ``source_ref`` against the CMS."""
     if not video_input.source_ref:
         raise RuntimeError("video source_url is empty and no source_ref is set")
-    cms_config = _cms_config(context)
+    cms_config = ctx.service_config(legacy_keys=_LEGACY_CONNECTION_KEYS)
     api_url = str(
         cms_config.get("api_url")
         or cms_config.get("knowledge_url")
@@ -87,9 +51,10 @@ def _resolve_knowledge_source(
     except CmsClientError as exc:
         # Only auth-semantics failures (HTTP 401/403, known in-band auth
         # codes) invalidate the cached connection token; transport and
-        # non-auth in-band errors leave the healthy token alone.
+        # non-auth in-band errors leave the healthy token alone. The node
+        # only records the fact; the parent executor invalidates.
         if exc.auth_failure:
-            report_node_auth_failure(context)
+            ctx.report_auth_failure()
         raise
     if lookup.status == "not_found":
         raise RuntimeError(f"knowledge video not found: {video_input.source_ref}")
@@ -102,10 +67,7 @@ def _resolve_knowledge_source(
         source_uuid=str(lookup.source_uuid or ""),
         title=lookup.title or video_input.title,
     )
-    (job_dir / "video_input.json").write_text(
-        json.dumps(asdict(resolved), ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    ctx.artifacts.write_json("video_input.json", asdict(resolved))
     return resolved
 
 
@@ -114,8 +76,10 @@ def run(
     job_dir: Path,
     runtime: dict[str, Any] | None = None,
 ) -> None:
-    video_input = _load_video_input(job_dir)
+    ctx = NodeContext(job, job_dir, runtime)
+    video_input = _load_video_input(ctx)
     if not video_input.source_url:
-        video_input = _resolve_knowledge_source(job, job_dir, video_input, runtime or {})
+        video_input = _resolve_knowledge_source(ctx, video_input)
+    ctx.checkpoint()
     output_path = job_dir / "source.mp4"
     legacy_download_video(video_input.source_url, output_path)

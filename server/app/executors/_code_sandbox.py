@@ -28,6 +28,11 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from server.app.executors._code_runtime import (
+    build_runtime,
+    clear_auth_failure_marker,
+    consume_auth_failure_marker,
+)
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext, ExecutionResult
 
@@ -159,18 +164,14 @@ def execute_custom_sandboxed(
     result_path = context.job_dir / _RESULT_BASENAME
     # A leftover result from a previous attempt must never fake a success.
     result_path.unlink(missing_ok=True)
+    # Same for a stale auth-failure marker (the parent consumes it post-run).
+    clear_auth_failure_marker(context)
     # The exec'd child builds its own cancellation token; the parent's
     # multiprocessing token cannot cross an exec boundary and is dropped.
-    runtime = executor._build_runtime(context, CancellationToken(threading.Event()))
+    # DB-derived inputs (job_batch, skill_versions) are prefetched inside
+    # build_runtime: children never get a database handle (EXEC-CODE-003).
+    runtime = build_runtime(executor, context, CancellationToken(threading.Event()))
     runtime.pop("cancellation", None)
-    # Custom children get no database handle (EXEC-CODE-003): the one builtin
-    # read point (question_intake's batch payload) is prefetched here.
-    runtime.pop("_job_db_path", None)
-    runtime.pop("_jobs_dir", None)
-    if executor.job_db is not None and context.job.get("batch_id"):
-        batch = executor.job_db.get_batch(str(context.job["batch_id"]))
-        if batch:
-            runtime["job_batch"] = dict(batch)
     # The payload rides stdin: node_config may hold resolved secrets, and
     # those must never touch the (job-dir) filesystem (VAULT-SECRET-001).
     payload_bytes = pickle.dumps(
@@ -272,6 +273,7 @@ def execute_custom_sandboxed(
     finally:
         if process.poll() is None:
             executor._terminate_child(process)
+        consume_auth_failure_marker(executor, context)
         feeder.join(timeout=1)
         with contextlib.suppress(OSError):
             result_path.unlink(missing_ok=True)
