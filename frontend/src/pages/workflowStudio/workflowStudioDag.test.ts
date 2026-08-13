@@ -61,4 +61,61 @@ describe('buildDagNodes', () => {
       topologyBadges: ['terminal'],
     })
   })
+
+  it('resolves agent, executor binding and unbound state per node', () => {
+    const nodes = buildDagNodes(
+      workflow,
+      [
+        {
+          id: 'code-default',
+          kind: 'code',
+          capabilities: ['fetch'],
+          global_capacity: 4,
+        },
+      ],
+      {
+        bindings: [
+          {
+            workflow_key: 'wf',
+            node_key: 'start',
+            executor_id: 'code-default',
+          },
+        ],
+        agents: [
+          {
+            id: 'classifier-v1',
+            runtime: 'pi',
+            capability: 'classify',
+            skill: 'ns/classify',
+            tools: [],
+            requires_labels: {},
+            provider: 'deepseek',
+            model: 'm',
+            thinking: 'low',
+            skill_ref: null,
+            skill_commit: null,
+          },
+        ],
+      }
+    )
+
+    expect(nodes[0]).toMatchObject({
+      key: 'start',
+      executorId: 'code-default',
+      agentId: null,
+      executorUnbound: false,
+    })
+    expect(nodes[1]).toMatchObject({
+      key: 'branch',
+      agentId: 'classifier-v1',
+      executorId: null,
+      executorUnbound: false,
+    })
+    expect(nodes[2]).toMatchObject({
+      key: 'done',
+      agentId: null,
+      executorId: null,
+      executorUnbound: true,
+    })
+  })
 })

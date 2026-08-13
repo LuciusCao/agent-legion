@@ -26,7 +26,7 @@ const statusLabels: Record<ExecutorListItem['status'], string> = {
  * ExecutorEditor 负责草稿编辑、发布、归档与版本回滚。
  * 发布/回滚/归档写 DB 后调度 registry 热刷新，无需重启服务。
  */
-export function ExecutorsPanel() {
+export function ExecutorsPanel(props: { initialSelectedId?: string | null }) {
   const queryClient = useQueryClient()
   const {
     data,
@@ -38,7 +38,9 @@ export function ExecutorsPanel() {
   })
   const error = toErrorMessage(queryError)
   const executors = data?.executors ?? []
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(
+    props.initialSelectedId ?? null
+  )
   const [creating, setCreating] = useState(false)
   const [copySource, setCopySource] = useState<ExecutorListItem | null>(null)
   const [copyTarget, setCopyTarget] = useState('')

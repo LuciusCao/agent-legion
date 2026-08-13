@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { WorkflowDagFullscreenButton } from './WorkflowDagFullscreenButton'
 import { WorkflowDagFullscreenDialog } from './WorkflowDagFullscreenDialog'
+import { buildDagEdges, buildDagNodes } from '../workflowStudioDag'
 import type { WorkflowDefinitionRecord } from '../../../types'
 
 const workflow: WorkflowDefinitionRecord = {
@@ -31,6 +32,9 @@ const executorCatalog = [
   },
 ]
 
+const nodes = buildDagNodes(workflow, executorCatalog)
+const edges = buildDagEdges(workflow)
+
 describe('WorkflowDagFullscreenDialog', () => {
   it('opens fullscreen dialog when button is clicked', async () => {
     const onOpen = vi.fn()
@@ -47,8 +51,8 @@ describe('WorkflowDagFullscreenDialog', () => {
     render(
       <WorkflowDagFullscreenDialog
         open
-        workflow={workflow}
-        executorCatalog={executorCatalog}
+        nodes={nodes}
+        edges={edges}
         selectedNode={null}
         onSelectedNodeChange={vi.fn()}
         onClose={vi.fn()}
@@ -71,8 +75,8 @@ describe('WorkflowDagFullscreenDialog', () => {
     render(
       <WorkflowDagFullscreenDialog
         open
-        workflow={workflow}
-        executorCatalog={executorCatalog}
+        nodes={nodes}
+        edges={edges}
         selectedNode="a"
         onSelectedNodeChange={onSelectedNodeChange}
         onClose={onClose}
@@ -94,8 +98,8 @@ describe('WorkflowDagFullscreenDialog', () => {
     const { container } = render(
       <WorkflowDagFullscreenDialog
         open={false}
-        workflow={workflow}
-        executorCatalog={executorCatalog}
+        nodes={nodes}
+        edges={edges}
         selectedNode={null}
         onSelectedNodeChange={vi.fn()}
         onClose={vi.fn()}

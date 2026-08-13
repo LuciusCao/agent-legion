@@ -25,7 +25,7 @@ const statusLabels: Record<AgentListItem['status'], string> = {
  * Agent 定义管理面板（Studio 全局对话框）：左侧列表 + 新建/复制，右侧
  * AgentEditor 负责草稿编辑、发布、归档与版本回滚。
  */
-export function AgentsPanel() {
+export function AgentsPanel(props: { initialSelectedId?: string | null }) {
   const queryClient = useQueryClient()
   const {
     data,
@@ -37,7 +37,9 @@ export function AgentsPanel() {
   })
   const error = toErrorMessage(queryError)
   const agents = data?.agents ?? []
-  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(
+    props.initialSelectedId ?? null
+  )
   const [creating, setCreating] = useState(false)
   const [copySource, setCopySource] = useState<AgentListItem | null>(null)
   const [copyTarget, setCopyTarget] = useState('')
