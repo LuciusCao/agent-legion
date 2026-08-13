@@ -102,6 +102,45 @@ def test_publish_rejects_path_outside_repo(service) -> None:
     assert service.get_published("code-bad") is None
 
 
+def test_publish_accepts_pathless_custom_code_capability(service) -> None:
+    """A capability without a repo path is custom-code only (EXEC-CODE-002)."""
+    payload = {
+        "kind": "code",
+        "global_capacity": 1,
+        "capabilities": {"custom_only": {"timeout_seconds": 60}},
+    }
+    service.save_draft("code-custom", payload, "user:u1")
+
+    published = service.publish("code-custom")
+
+    assert published.status == "published"
+    config = service.list_published_definitions()["code-custom"]
+    assert config.capabilities["custom_only"].path is None
+
+
+def test_rollback_accepts_pathless_custom_code_capability(service) -> None:
+    payload = {
+        "kind": "code",
+        "global_capacity": 1,
+        "capabilities": {"custom_only": {}},
+    }
+    service.save_draft("code-custom", payload, "user:u1")
+    service.publish("code-custom")
+    edited = {
+        "kind": "code",
+        "global_capacity": 2,
+        "capabilities": {"custom_only": {}},
+    }
+    service.save_draft("code-custom", edited, "user:u1")
+    service.publish("code-custom")
+
+    rolled = service.rollback("code-custom", 1, "user:u1")
+
+    assert rolled.status == "published"
+    config = service.list_published_definitions()["code-custom"]
+    assert config.capabilities["custom_only"].path is None
+
+
 def test_publish_invalidates_cached_catalog(service) -> None:
     before = service.list_published_definitions()
     assert "code-extra" not in before
