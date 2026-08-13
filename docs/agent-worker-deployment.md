@@ -134,11 +134,11 @@ Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capab
 - **code capability 声明**：与 agent 一样写在 `capabilities` 列表里（同一通道，Host 按 capability 匹配，不看 model）；
 - **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限；
 - **刻意不做热更**：`max_code_concurrency` 不在热更新字段里——经控制台或 `PUT /api/config` 修改后执行进程会重启，让启动预检重新生效；预检发现 code 容量 >0 而 PATH 上没有 `velites` 二进制时拒绝启动（退出码 2，不自动重启），避免热开后 code 任务在 Host 侧空转重试；
-- **回落语义**：没有在线 code Worker 时，dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
+- **回落语义**：没有声明该 capability 的在线 code Worker 时（探测按 capability 匹配，含 `"*"` 通配），dispatch 直接回落 Host 本地 executor 执行，code 任务不会滞留在队列里等 Worker。
 
-**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程，任何持久化前强制剔除（`strip_secret_config`），secret 不接触 Worker 文件系统与日志。
+**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程，任何持久化前强制剔除（`strip_secret_config`），secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`），只含节点 SDK 实际消费的业务 section（当前仅 `asr`）——vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
 
-**协议兼容**：当前协议版本为 v2（新增 `kind: "code"` claim 与 heartbeat 取消 body）。v1 Worker 在 v2 Host 上保持 agent-only（收不到 code claim，heartbeat 仍是空 204）；v2 Worker 对 v1 Host 自动降级为 agent-only。Host 的 `min_protocol_version` 仍为 1。
+**协议兼容**：当前协议版本为 v2（新增 `kind: "code"` claim 与 heartbeat 取消 body）。注册时声明 `max_code_concurrency > 0` 必须是 v2（v1 注册带 code 容量会被 400 拒绝；claim 评估对存量行再查一次协议版本兜底）；v1 Worker 在 v2 Host 上保持 agent-only（收不到 code claim，heartbeat 仍是空 204）；v2 Worker 对 v1 Host 自动降级为 agent-only。Host 的 `min_protocol_version` 仍为 1。
 
 节点的 provider、model、thinking 和 prompt 可以继续在 workflow 编辑器中修改。只修改这些运行配置会更新当前 revision，而不会创建新版本；已创建但尚未领取的 Job 会在领取时使用其 revision 的最新运行配置。任务一旦领取，就固定使用领取时下发的配置。
 

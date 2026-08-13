@@ -85,8 +85,10 @@ class AgentCompletionHandler:
         job_dir = resolve_job_dir(job, self.jobs_dir)
         expected = tuple(str(name) for name in manifest.get("expected_outputs", ()))
         # Batch 2 (decision 10): a kind='code' archive's node.log member is
-        # promoted to the run's canonical log path; a cancelled run delivers
-        # only its partial log, never partial outputs.
+        # promoted to the run's canonical log path. For a cancelled run the
+        # archive's partial outputs are still uploaded and registered as
+        # artifact refs below (parity with the agent path); they are just
+        # never promoted into the job dir — only the partial log is.
         log_target = code_result_log_target(manifest, self.leases.data_dir or self.jobs_dir.parent)
         if archive_name and (outcome.status != "cancelled" or log_target is not None):
             cancelled = outcome.status == "cancelled"

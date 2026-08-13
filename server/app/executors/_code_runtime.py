@@ -18,6 +18,7 @@ import logging
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
+from server.app.config_schema import node_safe_settings_config
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.models import ExecutionContext
 from server.app.services.connection_tokens import ConnectionTokenService
@@ -45,7 +46,9 @@ def build_runtime(
         "workspace_id": context.workspace_id,
         "workspace": dict(context.workspace),
         "job": dict(context.job),
-        "settings_config": executor.settings_config,
+        # Section-whitelisted (VAULT-SECRET-001): the sandboxed child is user
+        # code, so vault/auth/database/agent_workers sections never cross.
+        "settings_config": node_safe_settings_config(executor.settings_config),
         "node_config": dict(context.node_config),
         "cancellation": token,
     }

@@ -30,8 +30,10 @@ from server.app.agent_broker.agent_bundle import (
     cleanup_bundle_on_error,
 )
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
+from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_workers import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
+from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
 from server.app.executors.config import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
@@ -147,18 +149,21 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
         tar.addfile(info, io.BytesIO(data))
 
 
-def has_online_code_worker(database_dsn: Any) -> bool:
-    """True when a non-revoked code-capable Worker is inside the online window.
+def has_online_code_worker(database_dsn: Any, capability: str) -> bool:
+    """True when an online non-revoked code Worker declares *capability*.
 
-    Drives the code→Worker routing probe at dispatch (batch 2, design §7):
-    with no online code-capable Worker the scheduler falls back to local
-    execution instead of enqueueing a request nobody can claim."""
+    Capability matching mirrors the claim-side filter (claim_evaluate.py);
+    without it a mismatched Worker would let the request rot in queued —
+    there is no queued-timeout fallback (batch 2 decision 3)."""
     with read_connection(database_dsn) as conn:
         row = conn.execute(
             "select 1 from agent_workers where revoked_at is null"
             " and max_code_concurrency > 0"
-            " and last_seen_at > now() - make_interval(secs => %s) limit 1",
-            (_ONLINE_THRESHOLD_SECONDS,),
+            " and last_seen_at > now() - make_interval(secs => %s)"
+            " and (capabilities_json::jsonb @> jsonb_build_array(%s::text)"
+            " or capabilities_json::jsonb @> '[\"*\"]'::jsonb)"
+            " limit 1",
+            (_ONLINE_THRESHOLD_SECONDS, capability),
         ).fetchone()
     return row is not None
 
@@ -183,17 +188,16 @@ class CodeDispatchService:
         )
         self._in_flight: set[tuple[str, str]] = set()
         self._in_flight_lock = threading.Lock()
-        self._online_probe_at = 0.0
-        self._online_probe_result = False
+        self._online_probe: dict[str, tuple[float, bool]] = {}
 
-    def online_code_worker_available(self) -> bool:
-        """TTL-cached probe: any non-revoked code-capable Worker checked in?"""
+    def online_code_worker_available(self, capability: str) -> bool:
+        """TTL-cached probe (per capability): an online Worker can claim it?"""
         now = time.monotonic()
-        if now - self._online_probe_at < _ONLINE_PROBE_TTL_SECONDS:
-            return self._online_probe_result
-        self._online_probe_at = now
-        self._online_probe_result = has_online_code_worker(self.settings.database_url)
-        return self._online_probe_result
+        probed_at, result = self._online_probe.get(capability, (0.0, False))
+        if now - probed_at >= _ONLINE_PROBE_TTL_SECONDS:
+            result = has_online_code_worker(self.settings.database_url, capability)
+            self._online_probe[capability] = (now, result)
+        return result
 
     def is_in_flight(self, job_id: str, node_key: str) -> bool:
         with self._in_flight_lock:
@@ -252,14 +256,17 @@ class CodeDispatchService:
             "expected_outputs": list(node.outputs),
             "timeout_seconds": capability_config.timeout_seconds,
             "sandbox_network": capability_config.sandbox_network,
-            "log_path": str(log_path),
+            "log_path": claim_log_path({"log_path": str(log_path)}, self.settings.data_dir),
             # Runtime context the Worker uses to rebuild the same runtime
             # dict the local executor hands to node code (design §3); DB
             # rows cross as JSON-safe copies (datetimes become ISO strings).
+            # settings_config is section-whitelisted (VAULT-SECRET-001): the
+            # full settings carry the vault master key, DB DSN and register
+            # token, which must never persist or leave the Host.
             "runtime_context": {
                 "job": _json_safe(dict(job)),
                 "workspace": _json_safe(dict(workspace)),
-                "settings_config": _json_safe(dict(self.settings.config)),
+                "settings_config": _json_safe(node_safe_settings_config(self.settings.config)),
                 "job_batch": self._prefetch_job_batch(job),
                 "skill_versions": self._prefetch_skill_versions(str(job["id"])),
             },

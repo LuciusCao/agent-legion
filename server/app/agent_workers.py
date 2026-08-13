@@ -25,6 +25,9 @@ _MAX_TOKEN_LABEL_LENGTH = 128
 # A Worker is "online" while its last authenticated call (claim poll every few
 # seconds, or an execution heartbeat) is fresher than this threshold.
 ONLINE_THRESHOLD_SECONDS = 30
+# Minimum protocol version that may hold kind='code' executions (batch 2):
+# v1 Workers keep the legacy 204 heartbeat and never receive code claims.
+CODE_PROTOCOL_VERSION = 2
 
 
 class AgentWorkerRegistry:
@@ -56,6 +59,8 @@ class AgentWorkerRegistry:
             raise ValueError(f"max_concurrency must be between 1 and {_MAX_CONCURRENCY}")
         if not 0 <= max_code_concurrency <= _MAX_CONCURRENCY:
             raise ValueError(f"max_code_concurrency must be between 0 and {_MAX_CONCURRENCY}")
+        if max_code_concurrency > 0 and protocol_version < CODE_PROTOCOL_VERSION:
+            raise ValueError(f"code capacity requires protocol_version >= {CODE_PROTOCOL_VERSION}")
         normalized_runtimes = sorted(set(runtimes))
         if not normalized_runtimes or any(
             runtime not in {"pi", "openclaw", "velites"} for runtime in normalized_runtimes

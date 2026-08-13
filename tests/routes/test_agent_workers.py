@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import io
 import json
 import tarfile
@@ -661,7 +662,13 @@ def test_result_run_dir_promotes_events_for_logs_and_token_usage(tmp_path: Path)
 _CODE = "def run(job, job_dir, runtime):\n    pass\n"
 
 
-def _seed_code_request(app, *, job_id: str = "job-code-1", with_secret: bool = False) -> None:
+def _seed_code_request(
+    app,
+    *,
+    job_id: str = "job-code-1",
+    with_secret: bool = False,
+    expected_outputs: list[str] | None = None,
+) -> None:
     """Enqueue a self-contained kind='code' request straight into the broker."""
     with write_transaction(app.state.job_db.path) as conn:
         conn.execute(
@@ -681,7 +688,7 @@ def _seed_code_request(app, *, job_id: str = "job-code-1", with_secret: bool = F
         "job_id": job_id,
         "workspace_id": "test-workspace",
         "log_path": f"logs/jobs/{job_id}-package.log",
-        "expected_outputs": [],
+        "expected_outputs": list(expected_outputs or []),
         "config_schema": {
             "properties": {
                 "mode": {"type": "string"},
@@ -756,6 +763,28 @@ def test_register_roundtrips_code_capacity(tmp_path: Path) -> None:
 
     assert workers["code-worker"]["max_code_concurrency"] == 2
     assert workers["home-mini"]["max_code_concurrency"] == 0
+
+
+def test_register_rejects_code_capacity_on_protocol_v1(tmp_path: Path) -> None:
+    """v1 heartbeats carry no cancel body, so code capacity requires v2."""
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/agent-workers/register",
+            headers=_MANAGEMENT,
+            json={
+                "worker_id": "legacy-code",
+                "runtimes": ["pi"],
+                "capabilities": ["package"],
+                "max_concurrency": 4,
+                "max_code_concurrency": 2,
+                "protocol_version": 1,
+            },
+        )
+
+    assert response.status_code == 400
+    assert "protocol_version" in response.json()["detail"]
 
 
 def test_code_claim_injects_secrets_into_response_manifest(tmp_path: Path, monkeypatch) -> None:
@@ -905,3 +934,64 @@ def test_code_result_promotes_node_log_to_canonical_log_path(tmp_path: Path) -> 
         ).fetchone()
     assert run["status"] == "completed"
     assert run["log_path"] == "logs/jobs/job-code-1-package.log"
+
+
+def _archive_with_files(files: dict[str, str]) -> bytes:
+    buffer = io.BytesIO()
+    with tarfile.open(fileobj=buffer, mode="w:gz") as tar:
+        for name, content in files.items():
+            payload = content.encode()
+            info = tarfile.TarInfo(name)
+            info.size = len(payload)
+            tar.addfile(info, io.BytesIO(payload))
+    return buffer.getvalue()
+
+
+def test_code_result_with_expected_outputs_commits_completed(tmp_path: Path) -> None:
+    """Cross-end contract: a completed code result with non-empty
+    expected_outputs commits as completed — the Worker-side upload queue fills
+    the output_artifacts refs (worker/upload_queue.py) that the Host commit
+    requires before promoting outputs (agent_completion.py)."""
+    app = _make_app(tmp_path)
+    _seed_code_request(app, expected_outputs=["out.json"])
+
+    with TestClient(app) as client:
+        token = _register_code_worker(client)
+        claimed = _claim_code(client, token)
+        (app.state.settings.jobs_dir / "job-code-1").mkdir(parents=True, exist_ok=True)
+        # The Worker upload queue pushes each output first (POST /api/artifacts)
+        # and reports the returned ref in output_artifacts.
+        upload = client.post(
+            "/api/artifacts",
+            headers={"X-Agent-Worker-Token": token},
+            content=b"{}\n",
+        )
+        assert upload.status_code == 201, upload.text
+        digest = upload.json()["hash"]
+        assert digest == hashlib.sha256(b"{}\n").hexdigest()
+        report = client.post(
+            f"/api/agent-executions/{claimed['execution_id']}/result",
+            headers={
+                "X-Agent-Worker-Token": token,
+                "X-Agent-Lease-Id": claimed["lease_id"],
+                "X-Agent-Result": json.dumps(
+                    {
+                        "status": "completed",
+                        "exit_code": 0,
+                        "output_artifacts": {"out.json": f"sha256:{digest}"},
+                    }
+                ),
+            },
+            content=_archive_with_files({"out.json": "{}\n", "node.log": "done\n"}),
+        )
+        assert report.status_code == 204, report.text
+
+    job_dir = app.state.settings.jobs_dir / "job-code-1"
+    assert (job_dir / "out.json").read_text(encoding="utf-8") == "{}\n"
+    with app.state.job_db._connect_read() as conn:
+        run = conn.execute("select status from node_runs where job_id='job-code-1'").fetchone()
+        ref = conn.execute(
+            "select hash from artifact_refs where job_id='job-code-1' and name='out.json'"
+        ).fetchone()
+    assert run["status"] == "completed"
+    assert ref["hash"] == digest

@@ -7,6 +7,8 @@ Worker capacity is enforced as two independent pools (agent / code).
 
 from __future__ import annotations
 
+import pytest
+
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_workers import AgentWorkerRegistry
 from tests.postgres_support import TEST_DATABASE_URL
@@ -72,6 +74,7 @@ def _register_code_worker(
         max_concurrency=max_concurrency,
         max_code_concurrency=max_code_concurrency,
         labels={"arch": "arm64"},
+        protocol_version=2,
     )
 
 
@@ -202,3 +205,39 @@ def test_cancelled_code_executions_follows_job_control_state(job_db) -> None:
     # Only the kind='code' execution is reported; the claimed agent execution
     # keeps the lease-expiry semantics (batch 2 decision 6).
     assert cancelled == [claims["code"].execution_id]
+
+
+def test_register_rejects_code_capacity_below_protocol_v2(job_db) -> None:
+    """v1 heartbeats carry no cancel body: code capacity requires v2."""
+    with pytest.raises(ValueError, match="protocol_version"):
+        AgentWorkerRegistry(TEST_DATABASE_URL).issue_token(
+            worker_id="worker-v1-code",
+            name="worker",
+            runtimes=["pi"],
+            capabilities=["package"],
+            max_concurrency=10,
+            max_code_concurrency=1,
+            protocol_version=1,
+        )
+
+
+def test_code_claim_skips_worker_below_protocol_v2(job_db) -> None:
+    """Defense in depth: a v1 row predating the register gate never claims code."""
+    broker = _broker(job_db.jobs_dir.parent)
+    _insert_code_job_rows(job_db, job_id="job-1")
+    _enqueue_code(broker, job_id="job-1")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into agent_workers(worker_id, runtimes_json, max_concurrency,"
+            " max_code_concurrency, capabilities_json, protocol_version, token_hash,"
+            " registered_at, last_seen_at)"
+            " values ('worker-v1', '[\"pi\"]', 10, 1, '[\"package\"]', 1, 'x',"
+            " current_timestamp, current_timestamp)"
+        )
+
+    assert broker.claim("worker-v1") is None
+    with job_db._connect_read() as conn:
+        row = conn.execute(
+            "select state from agent_execution_requests where job_id='job-1'"
+        ).fetchone()
+    assert row["state"] == "queued"

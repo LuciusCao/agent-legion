@@ -9,6 +9,14 @@ nodes) are not eligible and stay on Host-local execution.
 
 Results are cached by content hash: dispatch re-scans the same builtin file
 on every poll pass otherwise.
+
+Known limitations (this is a routing aid, not a security boundary — the
+velites sandbox is): the dynamic-import scan only catches literal
+``importlib`` imports and direct ``__import__(...)`` calls; ``eval``/``exec``
+wrappers and ``getattr(builtins, ...)`` variants escape it. And
+``sys.stdlib_module_names`` reflects the HOST interpreter version, so a
+Host/Worker version skew can misjudge (e.g. Host 3.12 admits ``tomllib``,
+which a Worker on 3.10 does not have).
 """
 
 from __future__ import annotations
