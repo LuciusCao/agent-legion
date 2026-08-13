@@ -90,9 +90,21 @@ class WorkflowWorkerThread:
         self._wake_event.set()
 
     def _ensure_pools(self) -> None:
-        for executor_id in self.registry.definitions():
-            if executor_id not in self._pools:
-                capacity = self.registry.global_capacity(executor_id) or 1
+        # Reconcile with the live registry (hot-reloaded on executor
+        # publish/rollback/archive): drop removed executors, add new ones,
+        # resize on capacity change. The lease claim transaction stays the
+        # authoritative capacity enforcement, so a mid-swap pool never
+        # over-admits work.
+        capacities = self._executor_capacities()
+        for executor_id in list(self._pools):
+            if executor_id not in capacities:
+                self._pools.pop(executor_id).shutdown(wait=False, cancel_futures=True)
+        for executor_id, capacity in capacities.items():
+            pool = self._pools.get(executor_id)
+            # ThreadPoolExecutor exposes no public max_workers getter.
+            if pool is None or pool._max_workers != capacity:
+                if pool is not None:
+                    pool.shutdown(wait=False)
                 self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
 
     def _pool_for(self, executor_id: str) -> ThreadPoolExecutor:
@@ -103,7 +115,6 @@ class WorkflowWorkerThread:
 
     def start(self) -> None:
         self._definitions = list_registered_workflows()
-        self._ensure_pools()
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -126,8 +137,7 @@ class WorkflowWorkerThread:
         if not self._definitions:
             return False
 
-        if not self._pools:
-            self._ensure_pools()
+        self._ensure_pools()
         reap_futures(self)
 
         snapshot = load_capacity_snapshot(self.leases.path, self._executor_capacities())

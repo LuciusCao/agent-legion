@@ -24,7 +24,7 @@ const statusLabels: Record<ExecutorListItem['status'], string> = {
 /**
  * Executor 定义管理面板（Studio 全局对话框）：左侧列表 + 新建/复制，右侧
  * ExecutorEditor 负责草稿编辑、发布、归档与版本回滚。
- * 发布只写 DB：运行时 executor registry 在启动时 hydrate，发布后需重启服务生效。
+ * 发布/回滚/归档写 DB 后调度 registry 热刷新，无需重启服务。
  */
 export function ExecutorsPanel() {
   const queryClient = useQueryClient()
@@ -74,8 +74,7 @@ export function ExecutorsPanel() {
   return (
     <div>
       <p className={styles.hint} role="note">
-        Executor 定义发布后需重启服务才会影响调度；列表与目录即时反映 DB
-        已发布内容。
+        Executor 定义发布后调度立即热生效；列表与目录即时反映 DB 已发布内容。
       </p>
       <div className={styles.layout}>
         <div className={styles.list}>

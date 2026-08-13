@@ -203,6 +203,7 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | GET | `/workflows` | `list_workflows` | routes/workflow_catalog.py |
 | GET | `/workflows/{workflow_key}` | `get_workflow` | routes/workflow_catalog.py |
 | POST | `/workspaces/{workspace_id}/workflow-drafts/compare` | `compare_workflow_draft_route` | routes/workflow_draft_compare.py |
+| GET | `/workflow-node-code-template` | `get_node_code_template` | routes/workflow_node_codes.py |
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code` | routes/workflow_node_codes.py |
 | PUT | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `save_node_code_draft` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/publish` | `publish_node_code` | routes/workflow_node_codes.py |
@@ -242,7 +243,7 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 |------|------|------|------|
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/agent_broker/dispatch_pool.py |
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
-| CodeCapabilityConfig | BaseModel | path: str, timeout_seconds: int, sandbox_network: bool, config_schema: dict[s... | app/executors/code_config.py |
+| CodeCapabilityConfig | BaseModel | path: str | None, timeout_seconds: int, sandbox_network: bool, config_schema:... | app/executors/code_config.py |
 | CodeExecutorConfig | BaseModel | kind: Literal['code'], global_capacity: int, capabilities: dict[str, CodeCapa... | app/executors/code_config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
 | OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
@@ -451,7 +452,8 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | WorkflowCompareSummary | BaseModel | risk_level: WorkflowRiskLevel, node_changes: list[WorkflowNodeChange], edge_c... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
-| WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom'], code: str, path: str | None, version: i... | app/routes/workflow_node_code_contracts.py |
+| WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, path: str | None, ve... | app/routes/workflow_node_code_contracts.py |
+| WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionResponse | BaseModel | id: str, version: int, status: str, code: str, code_hash: str, created_by: st... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionSummary | BaseModel | id: str, version: int, status: str, code_hash: str, created_by: str, change_n... | app/routes/workflow_node_code_contracts.py |
@@ -632,7 +634,7 @@ env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不�
 
 CMS 集成走实例级外部服务连接（EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段（token / token_gen secret）转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。CMS 鉴权协议（`static_bearer` / `cms_hmac`）实现在 workspace pack `workspace_libs/cms/adapters.py`，平台只认 adapter 协议（`server/app/services/connection_adapters.py`），不携带厂商知识。节点 config 只写 `connection: "cms-internal"` 引用连接 + 业务参数（`bank_version` / `country_id` / `subject_id` / `page_size`，出厂默认值声明在 `fetch_questions` / `download_video` capability 的 `config_schema`——内置 executor 工厂定义，DB `versioned_entities` 承载——沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）；capability `config_schema` 里的 `token` / `env` / `base_url` / `api_url` / `question_list_url` 键已退役。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN`（`BASECMS_*` 为 deprecated alias）运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进 `cms-internal` 连接（凭据入实例 vault、节点 `node_config_json` CMS 键改写为 `connection`、冻结 intake payload 补 `connection`、executor 定义重发布为 `connection` schema），此后 env 不再被读取；新部署直接在 admin 设置里配置连接。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
 
-`config/workflow.yaml` 的 `executors` 段已退役进 DB：executor 定义（code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约），另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键）存于 `versioned_entities` 表，内置工厂目录（`server/app/executors/builtin_definitions.py`）在启动时 seed-if-absent，Studio 管理发布，重启生效。
+`config/workflow.yaml` 的 `executors` 段已退役进 DB：executor 定义（code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约）；`path` 可省略 = 纯自定义代码 capability（EXEC-CODE-002），dispatch 时要求该节点存在已发布/冻结的自定义代码，否则报配置错误。另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键）存于 `versioned_entities` 表，内置工厂目录（`server/app/executors/builtin_definitions.py`）在启动时 seed-if-absent，Studio 管理发布；publish/rollback/archive 后调度 registry 热刷新（`reload_published_executors`），无需重启。
 
 实例级运行时设置（`agent_workers` 限额、`workflows.enabled`、lease/heartbeat/sweeper 时序）不再出现在 yaml，见上文「DB 实例设置」。
 
