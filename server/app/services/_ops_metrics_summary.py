@@ -1,13 +1,13 @@
 """Window-independent summary for the Host operations metrics panel.
 
-Split out of ``ops_metrics.py`` to respect that module's size budget. The
-summary feeds the monitoring cards, which must stay stable while the chart
-window switches: token and gauge values always come from minute-resolution
-samples (``bucket_start >= now - 1h`` for tokens, latest minute row for
-gauges), and run stats are aggregated on demand from ``node_runs`` (see
-``_ops_metrics_runs``). ``worker_id`` scopes gauges/tokens to one Worker;
-``workspace_id`` scopes gauges/tokens/runs/queue to one workspace (schema
-v23 per-workspace rows) — the two scopes are not combined.
+Token and gauge values always come from minute-resolution samples
+(``bucket_start >= now - 1h`` for tokens, latest minute row for gauges);
+run stats aggregate ``node_runs`` on demand (see ``_ops_metrics_runs``).
+The UI polls this endpoint, so results are cached for a few seconds per
+(worker, workspace) scope on the service instance — the run aggregate would
+otherwise rescan ``node_runs`` on every poll. ``worker_id`` scopes
+gauges/tokens to one Worker; ``workspace_id`` scopes gauges/tokens/runs/
+queue to one workspace (schema v23 rows) — the two scopes are not combined.
 """
 
 from __future__ import annotations
@@ -22,6 +22,12 @@ from server.app.services._ops_metrics_runs import query_recent_hour_runs
 if TYPE_CHECKING:
     from server.app.services.ops_metrics import OpsMetricsService
 
+_SUMMARY_CACHE_TTL_SECONDS = 5.0
+# Distinct (worker, workspace) scopes keep the dict naturally small; the cap
+# guards against clients enumerating many ids. Dict get/set are atomic
+# enough here — a lost race just recomputes one summary.
+_SUMMARY_CACHE_MAX_ENTRIES = 128
+
 
 def query_summary(
     service: OpsMetricsService,
@@ -31,7 +37,11 @@ def query_summary(
     """Compute the summary carried by ``/api/metrics/overview`` responses."""
     worker_key = worker_id if worker_id is not None else ""
     workspace_key = workspace_id if workspace_id is not None else ""
-    cutoff = datetime.now(UTC) - timedelta(hours=1)
+    now = datetime.now(UTC)
+    cached = service._summary_cache.get((worker_key, workspace_key))
+    if cached is not None and (now - cached[0]).total_seconds() < _SUMMARY_CACHE_TTL_SECONDS:
+        return cached[1]
+    cutoff = now - timedelta(hours=1)
     with read_connection(service._database_dsn) as conn:
         gauges_row = conn.execute(
             "select online_workers, active_executions from ops_metric_samples"
@@ -52,7 +62,7 @@ def query_summary(
         ).fetchone()
         assert tokens is not None  # aggregate queries always return one row
         runs = query_recent_hour_runs(conn, cutoff, workspace_id)
-    return {
+    summary = {
         "online_workers": (int(gauges_row["online_workers"]) if gauges_row is not None else None),
         "active_executions": (
             int(gauges_row["active_executions"]) if gauges_row is not None else None
@@ -66,3 +76,7 @@ def query_summary(
         "recent_hour_runs": runs,
         **query_queue_summary(service, workspace_id),
     }
+    if len(service._summary_cache) >= _SUMMARY_CACHE_MAX_ENTRIES:
+        service._summary_cache.clear()
+    service._summary_cache[(worker_key, workspace_key)] = (now, summary)
+    return summary
