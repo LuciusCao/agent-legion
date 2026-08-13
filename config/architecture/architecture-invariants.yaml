@@ -409,7 +409,7 @@ invariants:
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
   # velites/tests/sandbox_wrap.rs; registry targets allow only tests//scripts/.
   - id: EXEC-CODE-003
-    statement: "Custom (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend custom code never runs unsandboxed. Builtin repo-tracked nodes keep the bare multiprocessing child on the Host (EXEC-CODE-001), but on a Worker ALL code execution (builtin and custom alike, worker/code_runner.py) goes through the same velites sandbox wrap — the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a velites binary on PATH (fail-closed)."
+    statement: "Custom (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend custom code never runs unsandboxed. Builtin repo-tracked nodes keep the bare multiprocessing child on the Host (EXEC-CODE-001), but on a Worker ALL code execution (builtin and custom alike, worker/code_runner.py) goes through the same velites sandbox wrap — the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites."
     owner: workspace-executor
     risk: high
     evidence:
@@ -427,6 +427,15 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/workers/test_runtime_preflight.py::test_preflight_code_capacity_requires_velites
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_runtime_preflight.py::test_resolve_binary_prefers_bundled_over_path
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_code_runner.py::test_execute_code_uses_bundled_velites_when_path_missing
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_code_runner.py::test_execute_code_fails_closed_without_any_velites
         gate: quick
 
   - id: EXEC-CODE-004

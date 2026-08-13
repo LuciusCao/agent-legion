@@ -21,12 +21,13 @@
 
 ## 2. Worker 侧目录
 
-Worker 不读写 Host 的 `data/`，它持有自己的两个根：
+Worker 不读写 Host 的 `data/`，它持有自己的目录：
 
 | 目录 | 持有者 | 内容 | 生命周期 |
 |------|--------|------|----------|
 | work root | Worker 执行进程 | 每次执行一个 execution dir，内含解包的 bundle、执行产物与结果 | 可删除缓存/在途状态。配置项 `work_root`，默认 `/var/lib/agent-legion-worker`（`worker/executor.py:234`、`config/agent-worker.example.yaml:29`）。supervisor 启动时 `clean_work_root` 清掉崩溃残留目录，但带 `upload_pending.json` 标记的目录保留到结果上报完成（`worker/cleanup.py:16-25`、`worker/upload_queue.py:38`） |
 | 状态目录 | Worker Service（控制面） | 导入后的可写 `worker.yaml`、`control_token`（0600）、`register_token`、运行状态与指标缓存（`worker/config_store.py:118-167`） | 持久配置状态，不可随意删除。容器内为 `--state-dir /var/lib/agent-legion-worker-control`（`Dockerfile:72`）；本地运行默认 `data/agent-worker-service`（`worker/cli_args.py:34`、`worker/service.py:149`），即落在仓库 `data/` 下 |
+| `bin/` | Worker 自带二进制（裸机/开发部署） | 按平台构建的 velites 副本 `bin/velites` + `bin/velites.src-stamp` 指纹文件（`scripts/ensure-velites.sh --dest data/bin` 安置） | 部署产物，可由脚本按指纹重建。Worker 二进制解析顺序：自带副本优先、PATH 兜底（`worker/binary_resolution.py::resolve_binary`）；Docker worker 镜像内置 velites，不需要此目录 |
 
 `upload_pending.json` 是 UploadQueue 的持久化标记：任务入队前写入 execution dir，Host 接受结果后才删除；Worker 重启时按标记恢复未上报的结果（`worker/upload_queue.py:1-17`）。
 

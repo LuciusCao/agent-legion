@@ -55,8 +55,8 @@ def main() -> int:
     if error := preflight_error(
         config.get("runtimes") or [], code_concurrency=max_code_concurrency
     ):
-        # 退出码 2（supervisor 不自动重启）：声明了 PATH 上没有二进制的
-        # runtime 是部署缺口，重试无意义，必须人工修复后重启。
+        # 退出码 2（supervisor 不自动重启）：声明了无法解析二进制的 runtime
+        # （自带副本与 PATH 都没有）是部署缺口，重试无意义，必须人工修复后重启。
         print(error, flush=True)
         return 2
     transfer = load_transfer_controls(args.config)

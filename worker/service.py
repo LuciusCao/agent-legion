@@ -24,9 +24,9 @@ from worker.supervisor import WorkerConfigStore, WorkerSupervisor, public_config
 logger = logging.getLogger(__name__)
 
 
-# max_code_concurrency 刻意不做热更：开启 code 容量要求 velites 二进制在
-# PATH（runtime_preflight 启动预检），走重启路径才能让预检拦截缺失部署，
-# 避免热开后 code 任务在 Host 侧空转重试。
+# max_code_concurrency 刻意不做热更：开启 code 容量要求 velites 二进制可解析
+# （自带副本 data/bin 优先、PATH 兜底，runtime_preflight 启动预检），走重启
+# 路径才能让预检拦截缺失部署，避免热开后 code 任务在 Host 侧空转重试。
 _HOT_CONFIG_FIELDS = {"claim_enabled", "max_concurrency", "upload_max_concurrency"}
 
 
