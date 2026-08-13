@@ -10,11 +10,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.workflows.question_fingerprint import (
+from workspace_libs.node_sdk import NodeContext
+from workspace_libs.question_fingerprint import (
     compute_question_fingerprint,
     extract_cms_fingerprint,
 )
-from workspace_libs.node_sdk import NodeContext
 
 
 def _strip_analysis(parsed_questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
