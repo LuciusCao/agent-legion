@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.auth import scoped_tokens
 from server.app.auth.passwords import hash_password, verify_password
 from server.app.auth.rate_limit import LoginLockedError, LoginRateLimiter
 from server.app.auth.sessions import hash_token, issue_token
@@ -57,6 +58,18 @@ class AuthService:
     def authenticate(self, token: str) -> dict[str, Any] | None:
         """Resolve a raw bearer token to its user (sliding expiry), or None."""
         return self._queries.get_session_user(hash_token(token))
+
+    # --- scoped tokens (STUDIO-AGENT-001) ------------------------------------
+
+    def mint_scoped_token(
+        self, user_id: str, *, scope: str = scoped_tokens.STUDIO_AGENT_SCOPE
+    ) -> str:
+        """Mint a short-lived scoped token for a server-side agent run."""
+        return scoped_tokens.mint_scoped_token(self._queries, user_id, scope=scope)
+
+    def authenticate_scoped(self, token: str) -> dict[str, Any] | None:
+        """Resolve a scoped bearer token to its user plus actor_scope, or None."""
+        return scoped_tokens.authenticate_scoped_token(self._queries, token)
 
     # --- bootstrap -----------------------------------------------------------
 

@@ -1,8 +1,9 @@
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 import server.app.routes.workflow_contracts as workflow_contracts
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.workflow_draft_compare import create_workflow_draft_compare_router
@@ -108,6 +109,7 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
     @router.post(
         "/workspaces/{workspace_id}/workflow-drafts/publish",
         response_model=WorkflowDraftValidationResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def publish_draft(
         workspace_id: str,
