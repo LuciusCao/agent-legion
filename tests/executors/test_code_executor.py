@@ -681,3 +681,45 @@ def test_sandboxed_custom_node_can_use_node_sdk(
     data = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     assert data["batch"] == {"id": "b-1", "source_payload_json": "{}"}
     assert data["skill_versions"] == {"fetch_questions": "abc123"}
+
+
+def test_pathless_capability_requires_custom_code(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    """Pathless (custom-code-only) capability: supported, but nothing to run
+    without custom node code — a clear config error, not "not supported"."""
+    executor = CodeExecutor(
+        "code-default",
+        {"fetch_questions": CodeCapabilityConfig()},
+        repo_root=tmp_path,
+    )
+    assert executor.supports("fetch_questions")
+
+    result = executor.execute(context)
+
+    assert result.status == "failed"
+    assert "no builtin code path" in result.error_message
+
+
+def test_pathless_capability_runs_custom_code_sandboxed(
+    tmp_path: Path, context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A pathless capability executes its custom code in the velites sandbox
+    (EXEC-CODE-003), exactly like a builtin-path capability with custom code."""
+    _sandboxed(monkeypatch)
+    executor = CodeExecutor(
+        "code-default",
+        {"fetch_questions": CodeCapabilityConfig()},
+        repo_root=tmp_path,
+    )
+    custom_source = textwrap.dedent(
+        """
+        def run(job, job_dir, runtime):
+            (job_dir / "out.json").write_text('{"origin": "custom"}', encoding="utf-8")
+        """
+    )
+
+    result = executor.execute(replace(context, node_code=custom_source))
+
+    assert result.status == "completed"
+    assert (tmp_path / "out.json").read_text(encoding="utf-8") == '{"origin": "custom"}'

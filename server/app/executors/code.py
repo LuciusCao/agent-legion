@@ -1,11 +1,13 @@
 """Code executor kind: run repo-tracked Python files as DAG nodes.
 
-Each capability binds to a repository-relative ``path`` pointing at a tracked
+A capability may bind a repository-relative ``path`` pointing at a tracked
 Python file that exposes a module-level ``run(job, job_dir, runtime)`` with the
 same contract as local handlers. Execution uses the same isolated
 multiprocessing child pattern as the local executor, plus a per-capability
-timeout. Paths must stay inside the repository root (EXEC-CODE-001) so node
-code is always git-reviewed and CI-gated.
+timeout. Declared paths must stay inside the repository root (EXEC-CODE-001)
+so node code is always git-reviewed and CI-gated. A capability without a
+``path`` is custom-code only: it has no builtin file and dispatches purely
+from DB-backed custom code.
 
 Custom node code (EXEC-CODE-002) arrives as text on ``ExecutionContext.
 node_code`` — resolved at dispatch from the frozen job version or the
@@ -75,6 +77,12 @@ def _load_run_from_source(source: str):
     if not callable(run):
         raise ValueError("Custom node code does not expose a callable 'run'")
     return run
+
+
+def _failed(context: ExecutionContext, message: str) -> ExecutionResult:
+    return ExecutionResult(
+        status="failed", exit_code=1, error_message=message, log_path=str(context.log_path)
+    )
 
 
 def _run_code_node(
@@ -154,6 +162,10 @@ class CodeExecutor:
         self._paths: dict[str, Path] = {}
         invalid: list[str] = []
         for capability, cap_config in capabilities.items():
+            if cap_config.path is None:
+                # Custom-code-only capability (EXEC-CODE-002): no repo file to
+                # resolve; dispatch requires a published custom code version.
+                continue
             resolved = (self._repo_root / cap_config.path).resolve()
             if not resolved.is_relative_to(self._repo_root) or not resolved.is_file():
                 invalid.append(f"{capability} ({cap_config.path})")
@@ -175,7 +187,7 @@ class CodeExecutor:
         self._velites_path: str | None = None
 
     def supports(self, capability: str) -> bool:
-        return capability in self._paths
+        return capability in self._capabilities
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         if context.execution_id in self._cancelled:
@@ -187,18 +199,20 @@ class CodeExecutor:
                 log_path=str(context.log_path),
             )
 
-        path = self._paths.get(context.capability)
-        if path is None:
-            return ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message=f"capability {context.capability!r} is not supported",
-                log_path=str(context.log_path),
-            )
+        cap_config = self._capabilities.get(context.capability)
+        if cap_config is None:
+            return _failed(context, f"capability {context.capability!r} is not supported")
 
-        timeout = self._capabilities[context.capability].timeout_seconds
+        timeout = cap_config.timeout_seconds
         if context.node_code is not None:
             return execute_custom_sandboxed(self, context, timeout)
+        path = self._paths.get(context.capability)
+        if path is None:
+            return _failed(
+                context,
+                f"capability {context.capability!r} has no builtin code path "
+                "and no custom node code (EXEC-CODE-002)",
+            )
         return self._execute_isolated(context, path, timeout)
 
     def cancel(self, execution_id: str) -> None:

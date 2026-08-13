@@ -7,12 +7,12 @@ definitions. The definition payload is the raw executor config shape
 (``kind``/``global_capacity``/``capabilities``) that
 ``load_executor_definitions`` parses into the typed ``ExecutorConfig`` models.
 
-Runtime semantics are hydrate-at-startup, effective-on-restart: ``create_app``
-seeds the built-in catalog when absent and hydrates
-``settings.executor_definitions`` from the published rows; there is no TTL
-hot-rebuild of the executor registry. The short-TTL module cache below only
-serves read paths that hit the catalog outside startup (Studio display,
-executor catalog route).
+Runtime semantics: ``create_app`` seeds the built-in catalog when absent and
+hydrates ``settings.executor_definitions`` from the published rows;
+publish/rollback/archive then hot-reload the runtime registry in place
+(``executor_registry_factory.reload_published_executors``), no restart
+needed. The short-TTL module cache below only serves read paths that hit the
+catalog outside startup (Studio display, executor catalog route).
 
 Validation runs at two points (EXEC-CODE-001): ``save_draft`` fully parses the
 payload (path safety, ``config_schema`` contract) and ``publish`` additionally
@@ -122,9 +122,10 @@ class ExecutorDefinitionService:
     def publish(self, executor_id: str) -> VersionedEntity:
         """Publish the current draft; the previously published version archives.
 
-        Beyond the save_draft parse, every code capability path must resolve
-        to a real file inside the repository root (EXEC-CODE-001) — the same
-        check startup runs on the hydrated definitions.
+        Beyond the save_draft parse, every declared code capability path must
+        resolve to a real file inside the repository root (EXEC-CODE-001) —
+        the same check startup runs on the hydrated definitions. Pathless
+        (custom-code-only, EXEC-CODE-002) capabilities have nothing to check.
         """
         versions = self._store.list_versions(executor_id, None)
         draft = next((v for v in versions if v.status == "draft"), None)
@@ -193,7 +194,7 @@ def hydrate_executor_definitions(settings: Settings) -> None:
     """Seed-if-absent, then hydrate ``settings.executor_definitions`` from the DB.
 
     Runs once at startup (``create_app``, right after instance settings
-    hydration); publishes take effect on restart.
+    hydration); later publishes hot-reload the registry without a restart.
     """
     service = ExecutorDefinitionService(settings.database_url, settings.root_dir)
     seed_builtin_executor_definitions(service)

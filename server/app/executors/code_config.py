@@ -19,7 +19,9 @@ from server.app.config_schema import validate_config_schema
 class CodeCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     # Repo-relative path to a tracked Python file exposing ``run(job, job_dir, runtime)``.
-    path: str = Field(min_length=1)
+    # None means the capability is custom-code only (EXEC-CODE-002): dispatch
+    # then requires a published custom node code version.
+    path: str | None = Field(default=None, min_length=1)
     timeout_seconds: int = Field(default=600, ge=1)
     # Custom (DB-backed) code for this capability runs inside the velites OS
     # sandbox (EXEC-CODE-003), which denies network by default; flip this on
@@ -31,7 +33,9 @@ class CodeCapabilityConfig(BaseModel):
 
     @field_validator("path", mode="after")
     @classmethod
-    def _reject_unsafe_path(cls, value: str) -> str:
+    def _reject_unsafe_path(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
         if value.startswith("/"):
             raise ValueError("code path must not be absolute")
         if ".." in Path(value).parts:
@@ -64,13 +68,19 @@ class CodeExecutorConfig(BaseModel):
 def validate_code_config_paths(
     executor_definitions: Mapping[str, Any], repo_root: Path
 ) -> list[tuple[str, str]]:
-    """Startup check: every code capability path must stay inside the repo root."""
+    """Startup check: declared code capability paths stay inside the repo root.
+
+    Capabilities without a path are custom-code only (EXEC-CODE-002) and have
+    nothing to check here; dispatch requires their published custom code.
+    """
     root = repo_root.resolve()
     problems: list[tuple[str, str]] = []
     for executor_id, definition in executor_definitions.items():
         if not isinstance(definition, CodeExecutorConfig):
             continue
         for capability, cap_config in definition.capabilities.items():
+            if cap_config.path is None:
+                continue
             resolved = (root / cap_config.path).resolve()
             if not resolved.is_relative_to(root) or not resolved.is_file():
                 problems.append(

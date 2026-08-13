@@ -17,7 +17,10 @@ from typing import TYPE_CHECKING, Any
 from server.app.executors.config import CodeExecutorConfig
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.job_errors import JobServiceError
-from server.app.services.node_codes import resolve_dispatch_node_code
+from server.app.services.node_codes import (
+    require_runnable_capability,
+    resolve_dispatch_node_code,
+)
 from server.app.services.vault import VaultError
 from server.app.workflow_worker.agent_claim import (
     cached_batch_payload,
@@ -165,7 +168,8 @@ def try_claim_and_submit(
     # version wins over the current published version; None keeps builtin.
     # A frozen-pin hash mismatch fails the node (fail closed, EXEC-CODE-003).
     node_code = None
-    if isinstance(worker.settings.executor_definitions.get(executor_id), CodeExecutorConfig):
+    executor_definition = worker.settings.executor_definitions.get(executor_id)
+    if isinstance(executor_definition, CodeExecutorConfig):
         frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
         try:
             node_code = resolve_dispatch_node_code(
@@ -175,6 +179,11 @@ def try_claim_and_submit(
                 workflow_key,
                 node_key,
                 frozen_pins.get(node_key),
+            )
+            # A pathless capability has no builtin fallback: no custom code,
+            # nothing to run — fail as a config error here, not at execution.
+            require_runnable_capability(
+                executor_definition.capabilities, node.capability, node_code
             )
         except ValueError as exc:
             return fail_node_config(
