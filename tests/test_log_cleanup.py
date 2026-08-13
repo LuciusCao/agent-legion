@@ -373,12 +373,12 @@ def test_cleanup_sql_cutoff_handles_mixed_finished_at_formats(tmp_path):
 
 def test_sweep_cursor_store_defaults_and_roundtrip():
     store = CleanupSweepStore(TEST_DATABASE_URL)
-    assert store.load("completed") == (datetime.min.replace(tzinfo=UTC), 0)
+    assert store.load("completed:log") == (datetime.min.replace(tzinfo=UTC), 0)
     mark = datetime(2026, 1, 1, tzinfo=UTC)
-    store.save("completed", mark, 42)
-    store.save("failed", mark, 7)
-    assert store.load("completed") == (mark, 42)
-    assert store.load("failed") == (mark, 7)
+    store.save("completed:log", mark, 42)
+    store.save("failed:run_dir", mark, 7)
+    assert store.load("completed:log") == (mark, 42)
+    assert store.load("failed:run_dir") == (mark, 7)
 
 
 def test_cleanup_resumes_from_persisted_sweep_cursor(tmp_path):
@@ -407,7 +407,7 @@ def test_cleanup_resumes_from_persisted_sweep_cursor(tmp_path):
     assert logs == 1
 
     store = CleanupSweepStore(TEST_DATABASE_URL)
-    finished, row_id = store.load("completed")
+    finished, row_id = store.load("completed:log")
     assert finished == old_finished
     assert row_id > 0
 
@@ -443,3 +443,42 @@ def test_cleanup_resumes_from_persisted_sweep_cursor(tmp_path):
     logs, _dirs = cleanup_old_logs(db, data_dir, cfg)
     assert logs == 1
     assert not newer_log.exists()
+
+
+def test_cleanup_sweep_cursors_track_log_and_run_dir_retentions_independently(tmp_path):
+    """Regression: the run-dir pass must not advance the log cursor past a row
+    whose log is not yet expired (log_retention 7d > run_dir_retention 3d)."""
+    data_dir, db = _make_db(tmp_path)
+    log_dir = data_dir / "logs" / "jobs"
+    log_dir.mkdir(parents=True)
+    run_dir = make_job_dir(data_dir, "ws1", "job-1") / "runs" / "node-a" / "tok-1"
+    run_dir.mkdir(parents=True)
+    log_path = log_dir / "job-1-node-a.log"
+    log_path.write_text("log")
+
+    now = datetime.now(UTC)
+    with db.connect() as conn:
+        _seed_workspace(conn)
+        _insert_job(conn, "job-1")
+        _insert_node_run(
+            conn,
+            "job-1",
+            "node-a",
+            log_path=make_data_relative(log_path, data_dir),
+            run_dir=make_data_relative(run_dir, data_dir),
+            finished_at=(now - timedelta(days=5)).isoformat(),
+        )
+
+    cfg = CleanupConfig(
+        log_retention_days=7, run_dir_retention_days=3, keep_only_latest_run_per_node=False
+    )
+    logs, dirs = cleanup_old_logs(db, data_dir, cfg, now=now)
+    assert (logs, dirs) == (0, 1)
+    assert log_path.exists()
+    assert not run_dir.exists()
+
+    # Three days later the log crosses its own retention; the log cursor was
+    # never advanced by the run-dir pass, so the log is still swept.
+    logs, _dirs = cleanup_old_logs(db, data_dir, cfg, now=now + timedelta(days=3))
+    assert logs == 1
+    assert not log_path.exists()
