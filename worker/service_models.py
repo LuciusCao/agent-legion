@@ -15,6 +15,7 @@ class WorkerConfigPayload(BaseModel):
     name: str | None = None
     runtimes: list[str] | None = None
     max_concurrency: int | None = None
+    max_code_concurrency: int | None = None
     upload_max_concurrency: int | None = None
     models: list[dict[str, str]] | None = None
     labels: dict[str, str] | None = None

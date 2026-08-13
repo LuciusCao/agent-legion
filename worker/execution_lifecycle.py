@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -13,7 +14,8 @@ class HeartbeatConfig:
     """One lease-heartbeat loop's inputs.
 
     ``ownership_lost`` / ``proc_ref`` / ``adopted`` track the agent process;
-    the upload side leaves them as inert defaults."""
+    the upload side leaves them as inert defaults. ``on_cancelled`` receives
+    the protocol-v2 heartbeat body's cancelled execution ids (batch 2)."""
 
     client: Any
     execution_id: str
@@ -25,6 +27,7 @@ class HeartbeatConfig:
         default_factory=lambda: {"proc": None}
     )
     adopted: threading.Event = field(default_factory=threading.Event)
+    on_cancelled: Callable[[list[str]], Any] | None = None
 
 
 def heartbeat_loop(config: HeartbeatConfig) -> None:
@@ -39,13 +42,16 @@ def heartbeat_loop(config: HeartbeatConfig) -> None:
             )
             return
         try:
-            status = config.client.heartbeat(execution_id, config.lease_id)
+            status, cancelled = config.client.heartbeat(execution_id, config.lease_id)
         except Exception as exc:  # transient network error: keep beating
             print(f"heartbeat error for {execution_id}: {exc}", flush=True)
             continue
+        if cancelled and config.on_cancelled is not None:
+            config.on_cancelled(cancelled)
         if status in (401, 409):
             print(f"heartbeat lost ownership for {execution_id}: HTTP {status}", flush=True)
             config.ownership_lost.set()
             return
-        if status != 204:
+        # 200 = protocol v2 (cancel body, possibly empty); 204 = legacy v1.
+        if status not in (200, 204):
             print(f"heartbeat unexpected status for {execution_id}: HTTP {status}", flush=True)

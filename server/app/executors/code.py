@@ -20,7 +20,6 @@ sandbox backend the executor refuses to run custom code at all.
 from __future__ import annotations
 
 import contextlib
-import importlib.util
 import logging
 import multiprocessing
 import os
@@ -43,38 +42,9 @@ from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from workspace_libs.code_loader import _load_run_callable, _load_run_from_source
 
 logger = logging.getLogger(__name__)
-
-
-def _load_run_callable(file_path: str, repo_root: str):
-    """Import a code file by path and return its module-level ``run`` callable."""
-    if repo_root not in sys.path:
-        sys.path.insert(0, repo_root)
-    path = Path(file_path)
-    module_name = f"_code_node_{path.stem}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise ValueError(f"Cannot load code node module from {file_path!r}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    run = getattr(module, "run", None)
-    if not callable(run):
-        raise ValueError(f"Code node {file_path!r} does not expose a callable 'run'")
-    return run
-
-
-def _load_run_from_source(source: str):
-    """Build a module from custom code text and return its ``run`` callable."""
-    spec = importlib.util.spec_from_loader("_code_node_custom", loader=None)
-    if spec is None:
-        raise ValueError("Cannot build module spec for custom node code")
-    module = importlib.util.module_from_spec(spec)
-    exec(compile(source, "<custom_node>", "exec"), module.__dict__)
-    run = getattr(module, "run", None)
-    if not callable(run):
-        raise ValueError("Custom node code does not expose a callable 'run'")
-    return run
 
 
 def _run_code_node(

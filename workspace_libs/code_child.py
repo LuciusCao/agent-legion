@@ -1,6 +1,6 @@
 """Sandboxed custom code node child entry (EXEC-CODE-003).
 
-Spawned as ``python -m server.app.executors._code_child <result>`` inside
+Spawned as ``python -m workspace_libs.code_child <result>`` inside
 the velites ``sandbox wrap`` confinement: custom node code is user-supplied
 (EXEC-CODE-002) and must never run with the server process's full privileges.
 The payload pickle arrives on **stdin** (job, job_dir, runtime) so resolved
@@ -17,6 +17,10 @@ Cancellation is best-effort cooperative: the parent kills the process group
 on timeout/cancel, and the SIGTERM handler cancels the runtime token first so
 code nodes calling ``check_cancellation`` unwind cleanly before the kill
 lands.
+
+This module lives in ``workspace_libs`` (zero ``server.app`` imports) so the
+same entry can run on a Worker from a bare bundle snapshot without a repo
+checkout.
 """
 
 from __future__ import annotations
@@ -29,8 +33,8 @@ import sys
 import threading
 from pathlib import Path
 
-from server.app.executors.cancellation import CancellationToken
-from server.app.executors.code import _load_run_from_source
+from workspace_libs.cancellation import CancellationToken
+from workspace_libs.code_loader import _load_run_from_source
 
 logger = logging.getLogger(__name__)
 

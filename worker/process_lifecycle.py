@@ -33,13 +33,21 @@ def wait_for_exit(
     shutdown: threading.Event,
     shutdown_grace: float,
     ownership_lost: threading.Event,
+    cancelled: threading.Event | None = None,
 ) -> tuple[int, bool]:
-    """Poll the child, reacting to shutdown/ownership loss. Returns (exit_code, report)."""
+    """Poll the child, reacting to shutdown/ownership loss/Host cancel.
+
+    Returns (exit_code, report). ``cancelled`` is the batch-2 code path's
+    Host-driven cancel (heartbeat body): SIGTERM the process group like a
+    shutdown, but report the run as cancelled instead of discarding it."""
     deadline = time.monotonic() + timeout
     while True:
         if ownership_lost.is_set():
             terminate(proc, 5)
             return 1, False
+        if cancelled is not None and cancelled.is_set():
+            terminate(proc, 5)
+            return 130, True
         if shutdown.is_set():
             terminate(proc, shutdown_grace)
             return 130, True

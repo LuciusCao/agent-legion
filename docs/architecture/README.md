@@ -21,4 +21,4 @@
 | 视频迁移 | [video-knowledge-workspace-migration.md](video-knowledge-workspace-migration.md) | 知识视频从旧版视频运行时迁移到 Agent Legion Workspace runtime |
 | 证据矩阵 | [workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md) | Phase 1-5 Workspace Executor 架构承诺的反向审计证据矩阵 |
 | 节点 SDK / Worker 执行 | [node-sdk-and-worker-execution-design.md](node-sdk-and-worker-execution-design.md) | 节点 SDK（NodeContext）与 code 节点执行迁移 Worker 的合并设计（Issue #30/#82） |
-| 节点 SDK 交接 | [node-sdk-and-worker-execution-handoff.md](node-sdk-and-worker-execution-handoff.md) | 批次 0/1 交接：批次 2/3 决策点与 Studio 节点骨架问题 |
+| Studio 演进 | [workflow-studio-evolution-design.md](workflow-studio-evolution-design.md) | Studio 定位（agent authoring + 可视化调优发布台）、阶段路线与已拍板决策 |

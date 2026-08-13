@@ -14,6 +14,7 @@ _MAX_COMMAND_PARTS = 64
 _MAX_OUTPUT_ARTIFACTS = 128
 _MAX_ERROR_MESSAGE_CHARS = 4000
 _MAX_RUN_DIR_CHARS = 256
+_MAX_CONNECTION_KEY_CHARS = 128
 
 
 def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
@@ -50,6 +51,11 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         if run_dir_relative.is_absolute() or ".." in run_dir_relative.parts:
             raise ValueError("invalid run_dir")
         run_dir = run_dir_relative.as_posix()
+    # Batch 2: a code node reports the connection key whose cached token the
+    # Host must invalidate (design §5.3); bounded, plain string.
+    auth_failure_raw = metadata.get("auth_failure_connection", "")
+    if not isinstance(auth_failure_raw, str) or len(auth_failure_raw) > _MAX_CONNECTION_KEY_CHARS:
+        raise ValueError("invalid auth_failure_connection")
     outcome = AgentOutcome(
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
@@ -57,6 +63,7 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         command=tuple(str(part) for part in command_raw),
         output_artifacts=output_artifacts,
         run_dir=run_dir,
+        auth_failure_connection=auth_failure_raw.strip(),
     )
     record = {
         "status": status,
@@ -64,5 +71,6 @@ def parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
         "error_message": error_message,
         "output_artifacts": output_artifacts,
         "run_dir": run_dir,
+        "auth_failure_connection": auth_failure_raw.strip(),
     }
     return outcome, record

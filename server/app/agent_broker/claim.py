@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.agent_worker_capacity import sync_declared_capacity, touch_worker
+from server.app.agent_broker.claim_evaluate import cancel_request, evaluate_candidate
 from server.app.agent_broker.claim_scan import (
     MAX_CLAIM_ATTEMPTS,
     SCAN_ROUNDS,
@@ -23,8 +24,6 @@ from server.app.agent_broker.claim_scan import (
     ClaimRacedError,
     ScanState,
     WorkerView,
-    cancel_request,
-    evaluate_candidate,
     fair_candidate_order,
     fetch_candidates,
     window_saturated,
@@ -47,6 +46,7 @@ def claim_in_transaction(
     conn: Any,
     worker_id: str,
     declared_max_concurrency: int | None = None,
+    declared_max_code_concurrency: int | None = None,
 ) -> tuple[AgentClaim | None, Counter[str]]:
     """Claim at most one request; also report why skipped candidates lost.
 
@@ -59,21 +59,32 @@ def claim_in_transaction(
     ).fetchone()
     if worker is None or worker["revoked_at"] is not None:
         raise ValueError("unknown or revoked Agent Worker")
-    max_concurrency = sync_declared_capacity(conn, worker, declared_max_concurrency)
+    max_concurrency, max_code_concurrency = sync_declared_capacity(
+        conn, worker, declared_max_concurrency, declared_max_code_concurrency
+    )
     capabilities, models = agent_claim_compatibility.worker_declarations(worker)
+    active_rows = conn.execute(
+        "select kind, count(*) as cnt from agent_execution_requests"
+        " where worker_id=%s and state='claimed' group by kind",
+        (worker_id,),
+    ).fetchall()
+    active_by_kind = {str(row["kind"]): int(row["cnt"]) for row in active_rows}
+    agent_active = active_by_kind.get("agent", 0)
+    code_active = active_by_kind.get("code", 0)
     view = WorkerView(
         runtimes=set(json.loads(worker["runtimes_json"])),
         capabilities=capabilities,
         models=models,
         labels=json.loads(worker["labels_json"]),
         allowed_workspaces=set(json.loads(worker["allowed_workspaces_json"] or "[]")),
+        agent_capacity=max_concurrency,
+        agent_active=agent_active,
+        code_capacity=max_code_concurrency,
+        code_active=code_active,
+        protocol_version=int(worker["protocol_version"]),
     )
-    worker_active = conn.execute(
-        "select count(*) as cnt from agent_execution_requests"
-        " where worker_id=%s and state='claimed'",
-        (worker_id,),
-    ).fetchone() or {"cnt": 0}
-    if int(worker_active["cnt"]) >= max_concurrency:
+    # Both pools exhausted: nothing this Worker could claim, skip the scan.
+    if agent_active >= max_concurrency and code_active >= max_code_concurrency:
         touch_worker(conn, worker_id)
         return None, Counter()
     cursor = next(broker._fairness_counter)

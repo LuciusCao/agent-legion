@@ -217,6 +217,7 @@ _POSTGRES_TEST_FILES = frozenset(
     {
         "tests/ci/test_executor_worker_stress.py",
         "tests/db/test_agent_catalog_cutover_migration.py",
+        "tests/db/test_agent_request_kind_schema.py",
         "tests/db/test_code_executor_migration.py",
         "tests/db/test_custom_node_codes_migration.py",
         "tests/db/test_executor_asr_config_schema_migration.py",
@@ -274,6 +275,9 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_agent_broker_claim_scan.py",
         "tests/services/test_agent_version_pin.py",
         "tests/services/test_artifact_orphan_gc.py",
+        "tests/services/test_code_claim.py",
+        "tests/services/test_code_claim_sweeper.py",
+        "tests/services/test_code_dispatch.py",
         "tests/services/test_artifact_store.py",
         "tests/services/test_job_rerun_batch.py",
         "tests/services/test_job_rerun_preview.py",

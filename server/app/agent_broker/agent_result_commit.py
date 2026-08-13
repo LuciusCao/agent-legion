@@ -14,7 +14,11 @@ from typing import Any
 from fastapi import HTTPException
 
 from server.app.agent_broker import AgentExecutionBroker
-from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
+from server.app.agent_completion import (
+    AgentCompletionHandler,
+    AgentOutcome,
+    report_auth_failure_safe,
+)
 
 
 def commit_agent_result(
@@ -57,6 +61,10 @@ def commit_agent_result(
         if broker.mark_done(execution_id, worker_id, lease_id, record) is None:
             raise HTTPException(status_code=409, detail="execution is no longer owned")
         succeeded = True
+        if outcome.auth_failure_connection:
+            # Batch 2 (design §5.3): the node recorded an upstream auth
+            # failure; the Host performs the privileged invalidation.
+            report_auth_failure_safe(broker.database_dsn, outcome.auth_failure_connection)
     finally:
         # The archive name is unique to this attempt — always reclaim it.
         broker.discard_result_archive(archive_name)

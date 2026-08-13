@@ -40,9 +40,9 @@ class QueueFakeClient:
         self.reports.append(metadata)
         return self.report_status, b""
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> int:
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
         self.heartbeats += 1
-        return 204
+        return 204, []
 
 
 def _execution_dir(work_root: Path, execution_id: str = "exec-1") -> Path:
