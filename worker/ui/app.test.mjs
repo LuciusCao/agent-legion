@@ -44,6 +44,8 @@ const formDataLike = (values) => ({ get: (key) => (key in values ? values[key] :
 test("numberField 留空或缺失时回退到后端默认值", () => {
   assert.equal(numberField(formDataLike({ max_concurrency: "" }), "max_concurrency"), NUMBER_DEFAULTS.max_concurrency);
   assert.equal(numberField(formDataLike({}), "poll_interval_seconds"), NUMBER_DEFAULTS.poll_interval_seconds);
+  // 批次 2：code 执行池默认 0（仅 agent），与 config_store._DEFAULTS 对齐。
+  assert.equal(numberField(formDataLike({ max_code_concurrency: "" }), "max_code_concurrency"), 0);
 });
 
 test("numberField 有值时转成数字", () => {

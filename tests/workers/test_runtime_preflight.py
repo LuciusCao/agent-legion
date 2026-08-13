@@ -111,6 +111,31 @@ def test_main_refuses_start_when_declared_runtime_binary_missing(
 
 
 @pytest.mark.no_db
+def test_preflight_code_capacity_requires_velites(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 批次 2：max_code_concurrency > 0 时 code 任务统一经 velites sandbox
+    # wrap 执行（fail-closed），即使未声明 velites runtime 也必须有二进制。
+    monkeypatch.setattr(
+        shutil, "which", lambda binary: "/usr/local/bin/pi" if binary == "pi" else None
+    )
+    error = preflight_error(["pi"], code_concurrency=2)
+    assert error is not None
+    assert "max_code_concurrency" in error
+    assert "'velites'" in error
+    assert "PATH" in error
+
+
+@pytest.mark.no_db
+def test_preflight_code_capacity_passes_with_velites(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(shutil, "which", lambda binary: f"/usr/local/bin/{binary}")
+    assert preflight_error(["pi"], code_concurrency=2) is None
+    # 0 = 仅 agent，不要求 velites。
+    monkeypatch.setattr(
+        shutil, "which", lambda binary: "/usr/local/bin/pi" if binary == "pi" else None
+    )
+    assert preflight_error(["pi"], code_concurrency=0) is None
+
+
+@pytest.mark.no_db
 def test_shipped_ui_offers_checkbox_for_every_supported_runtime() -> None:
     """worker/ui 的 runtime checkbox 集合与 validate_config 白名单一致。"""
     html = (ROOT / "worker" / "ui" / "index.html").read_text(encoding="utf-8")

@@ -13,9 +13,9 @@ class FakeClient:
     def __init__(self) -> None:
         self.heartbeats = 0
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> int:
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
         self.heartbeats += 1
-        return 204
+        return 204, []
 
 
 def _exited_process() -> subprocess.Popen[bytes]:

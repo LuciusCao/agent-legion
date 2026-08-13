@@ -30,17 +30,29 @@ def missing_runtime_binaries(runtimes: Iterable[str]) -> dict[str, tuple[str, ..
     return missing
 
 
-def preflight_error(runtimes: Iterable[str]) -> str | None:
-    """Human-readable startup error when a declared runtime lacks its binary."""
+def preflight_error(runtimes: Iterable[str], *, code_concurrency: int = 0) -> str | None:
+    """Human-readable startup error when a declared runtime lacks its binary.
+
+    ``code_concurrency`` > 0 additionally requires velites: every code
+    execution runs through ``velites sandbox wrap`` (EXEC-CODE-003,
+    fail-closed), even when the Worker declares no velites *agent* runtime."""
     missing = missing_runtime_binaries(runtimes)
-    if not missing:
-        return None
-    details = "；".join(
+    reasons = [
         f"运行时 {runtime!r} 需要可执行文件 {' 或 '.join(repr(b) for b in candidates)}，"
-        "但 PATH 上找不到"
+        "但 PATH 上找不到；请安装对应二进制并确认其在 PATH 上，"
+        "或从 runtimes 配置移除该运行时后重启"
         for runtime, candidates in missing.items()
-    )
-    return (
-        f"Agent Worker 启动预检失败：{details}；"
-        "请安装对应二进制并确认其在 PATH 上，或从 runtimes 配置移除该运行时后重启"
-    )
+    ]
+    if (
+        code_concurrency > 0
+        and "velites" not in missing
+        and not any(shutil.which(binary) for binary in RUNTIME_BINARY_CANDIDATES["velites"])
+    ):
+        reasons.append(
+            "声明了 code 执行容量（max_code_concurrency > 0）需要可执行文件 'velites'"
+            "（code 任务统一经 velites sandbox wrap 沙箱执行），但 PATH 上找不到；"
+            "请安装 velites 或将 max_code_concurrency 设为 0 后重启"
+        )
+    if not reasons:
+        return None
+    return f"Agent Worker 启动预检失败：{'；'.join(reasons)}"
