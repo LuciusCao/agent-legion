@@ -14,8 +14,10 @@ from server.app.routes.workflow_revisions_contracts import (
     WorkflowRevisionsResponse,
     WorkflowRevisionSummary,
 )
-from server.app.services.workflow_draft_publish import publish_workflow_draft
-from server.app.services.workflow_drafts import validate_workflow_definition
+from server.app.services.workflow_draft_publish import (
+    publish_workflow_draft,
+    validate_workflow_draft_for_publish,
+)
 from server.app.services.workflow_revision_format import (
     definition_to_yaml,
     workflow_definition_to_response_payload,
@@ -96,7 +98,11 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         request: WorkflowDraftRequest,
     ) -> WorkflowDraftValidationResponse:
         require_workflows_enabled(settings)
-        errors = validate_workflow_definition(request.definition_yaml)
+        # Same validation set as publish (structure + executor bindings), so
+        # binding/config errors surface here instead of only at publish time.
+        errors = validate_workflow_draft_for_publish(
+            job_db, workspace_id, request.definition_yaml, settings.executor_definitions
+        )
         return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
 
     @router.post(
