@@ -62,8 +62,12 @@ class WorkflowWorkerThread:
         # Set when work finishes or arrives; the poll loop waits on this.
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._definitions: list[WorkflowDefinition] = []
-        self._definitionless_keys: list[str] = []
+        # Scan-list snapshot (definitions, definitionless_keys), swapped
+        # atomically by reload_scan_entries; never mutated in place (the
+        # ExecutorRegistry.replace_definitions pattern). Readers take the
+        # tuple first, then unpack, so a mid-swap pass never sees a
+        # half-applied pair.
+        self._scan_entries: tuple[list[WorkflowDefinition], list[str]] = ([], [])
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
         self._round_robin = WorkspaceRoundRobin()
@@ -96,6 +100,15 @@ class WorkflowWorkerThread:
         """Wake the poll loop immediately; registered via scheduler_wakeup."""
         self._wake_event.set()
 
+    def reload_scan_entries(self) -> None:
+        """Rebuild the scan list from the catalog, then swap it in one step.
+
+        Called outside the poll thread: at start, and after a workflow
+        registration commits. The pair is fully built before the swap, so
+        a failed reload leaves the previous snapshot untouched.
+        """
+        self._scan_entries = load_workflow_scan_entries(self.settings)
+
     def _ensure_pools(self) -> None:
         # Reconcile with the live registry (hot-reloaded on executor
         # publish/rollback/archive): drop removed executors, add new ones,
@@ -121,7 +134,7 @@ class WorkflowWorkerThread:
         return {eid: self.registry.global_capacity(eid) or 0 for eid in self.registry.definitions()}
 
     def start(self) -> None:
-        self._definitions, self._definitionless_keys = load_workflow_scan_entries(self.settings)
+        self.reload_scan_entries()
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -141,7 +154,7 @@ class WorkflowWorkerThread:
         self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
-        if not (self._definitions or self._definitionless_keys):
+        if not any(self._scan_entries):
             return False
 
         self._ensure_pools()

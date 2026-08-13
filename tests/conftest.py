@@ -334,6 +334,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_workflow_worker_concurrency.py",
         "tests/test_workspace_executor_queries.py",
         "tests/workers/test_scheduler_wakeup.py",
+        "tests/workers/test_scan_hot_reload.py",
         "tests/workers/test_workflow_catalog_scan.py",
         "tests/workers/test_workflow_worker_capacity.py",
         "tests/workers/test_workflow_worker_mark_scan.py",
