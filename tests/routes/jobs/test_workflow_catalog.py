@@ -145,3 +145,62 @@ def test_register_workflow_requires_authentication(tmp_path):
         response = c.post("/api/workflows", json={"key": "acme_quiz_flow", "label": "Acme"})
 
     assert response.status_code == 401
+
+
+class _RecordingWorker:
+    def __init__(self):
+        self.reload_calls = 0
+
+    def reload_scan_entries(self):
+        self.reload_calls += 1
+
+
+def test_register_workflow_triggers_scan_reload_and_wakeup(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    worker = _RecordingWorker()
+    app.state.workflow_worker = worker
+    wakeups = []
+    monkeypatch.setattr(
+        "server.app.routes.workflow_catalog_admin.notify_schedulable_work",
+        lambda: wakeups.append(None),
+    )
+    with authenticate_client(TestClient(app)) as c:
+        response = c.post("/api/workflows", json={"key": "acme_quiz_flow", "label": "Acme Quiz"})
+
+    assert response.status_code == 200, response.text
+    assert worker.reload_calls == 1
+    assert len(wakeups) == 1
+
+
+def test_register_workflow_failure_skips_scan_reload(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    worker = _RecordingWorker()
+    app.state.workflow_worker = worker
+    wakeups = []
+    monkeypatch.setattr(
+        "server.app.routes.workflow_catalog_admin.notify_schedulable_work",
+        lambda: wakeups.append(None),
+    )
+    with authenticate_client(TestClient(app)) as c:
+        first = c.post("/api/workflows", json={"key": "acme_quiz_flow", "label": "Acme"})
+        assert first.status_code == 200, first.text
+        assert worker.reload_calls == 1
+        assert len(wakeups) == 1
+
+        duplicate = c.post("/api/workflows", json={"key": "acme_quiz_flow", "label": "Again"})
+        assert duplicate.status_code == 409
+        invalid = c.post("/api/workflows", json={"key": "Has Space", "label": "Nope"})
+        assert invalid.status_code == 400
+
+    assert worker.reload_calls == 1
+    assert len(wakeups) == 1

@@ -71,7 +71,7 @@ def make_workflow_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._definitions = [definition]
+    worker._scan_entries = ([definition], [])
     return worker, definition
 
 

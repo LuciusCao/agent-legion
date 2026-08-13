@@ -172,7 +172,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._definitions = [definition]
+    worker._scan_entries = ([definition], [])
     worker._ensure_pools()
     return worker
 
