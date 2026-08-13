@@ -308,4 +308,109 @@ describe('WorkflowNodeCodeSection', () => {
     ).not.toBeInTheDocument()
     expect(screen.getByText(/历史版本查看模式/)).toBeInTheDocument()
   })
+
+  it('offers 从模板新建 alongside fork for a builtin node', async () => {
+    renderSection()
+    await screen.findByText(/内置/)
+
+    expect(
+      screen.getByRole('button', { name: 'fork 为自定义节点' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '从模板新建' })
+    ).toBeInTheDocument()
+  })
+
+  it('creates a draft from the backend template for a pathless capability', async () => {
+    const pathlessExecutor: ExecutorDefinition = {
+      id: 'code-custom',
+      kind: 'code',
+      global_capacity: 1,
+      capabilities: ['custom_only'],
+      capability_details: [{ name: 'custom_only' }],
+    }
+    const pathlessNode: WorkflowNodeRecord = {
+      ...node,
+      key: 'do_custom',
+      capability: 'custom_only',
+    }
+    const noneResponse = {
+      origin: 'none',
+      code: '',
+      path: null,
+      version: null,
+      has_draft: false,
+      draft_code: null,
+      draft_version: null,
+    }
+    const templateCode = 'from workspace_libs.node_sdk import NodeContext\n'
+    mockApi.mockResolvedValue(noneResponse)
+    render(
+      <WorkflowNodeCodeSection
+        node={pathlessNode}
+        executorCatalog={[pathlessExecutor]}
+      />
+    )
+
+    await screen.findByText(/无内置代码/)
+    expect(
+      screen.queryByRole('button', { name: 'fork 为自定义节点' })
+    ).not.toBeInTheDocument()
+
+    mockApi.mockResolvedValueOnce({ code: templateCode })
+    mockApi.mockResolvedValueOnce(versionRow(1, 'draft'))
+    fireEvent.click(screen.getByRole('button', { name: '从模板新建' }))
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('已从模板创建草稿')
+    )
+    const customBase =
+      '/api/workspaces/default/workflows/question_comprehension_info/nodes/do_custom/code'
+    expect(mockApi.mock.calls[1][0]).toBe('/api/workflow-node-code-template')
+    expect(mockApi.mock.calls[2][0]).toBe(customBase)
+    expect(mockApi.mock.calls[2][1]?.method).toBe('PUT')
+    expect(JSON.parse(String(mockApi.mock.calls[2][1]?.body))).toEqual({
+      code: templateCode,
+      change_note: null,
+    })
+  })
+
+  it('lets a pathless node edit its existing draft', async () => {
+    const pathlessExecutor: ExecutorDefinition = {
+      id: 'code-custom',
+      kind: 'code',
+      global_capacity: 1,
+      capabilities: ['custom_only'],
+      capability_details: [{ name: 'custom_only' }],
+    }
+    const pathlessNode: WorkflowNodeRecord = {
+      ...node,
+      key: 'do_custom',
+      capability: 'custom_only',
+    }
+    const templateCode = 'from workspace_libs.node_sdk import NodeContext\n'
+    mockApi.mockResolvedValue({
+      origin: 'none',
+      code: '',
+      path: null,
+      version: null,
+      has_draft: true,
+      draft_code: templateCode,
+      draft_version: 1,
+    })
+    render(
+      <WorkflowNodeCodeSection
+        node={pathlessNode}
+        executorCatalog={[pathlessExecutor]}
+      />
+    )
+
+    await screen.findByText(/有未发布草稿/)
+    expect(
+      screen.queryByRole('button', { name: '从模板新建' })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+
+    expect(screen.getByLabelText('节点代码内容')).toHaveValue(templateCode)
+  })
 })
