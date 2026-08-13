@@ -379,7 +379,13 @@ create index if not exists idx_node_runs_job_id on node_runs(job_id);
 -- get_latest_node_run_for_workspace orders by started_at desc with limit 1;
 -- the index lets Postgres walk runs newest-first instead of sorting them all.
 create index if not exists idx_node_runs_started_at on node_runs(started_at desc);
-create index if not exists idx_node_runs_status_finished_at on node_runs(status, finished_at);
+-- Cleanup sweep keyset pagination (schema v38): sweep_expired_node_runs
+-- pages expired rows by (finished_at, id); the composite index serves the
+-- id tie-break without rescanning rows that share a finished_at, and covers
+-- the old two-column index as a leftmost prefix.
+drop index if exists idx_node_runs_status_finished_at;
+create index if not exists idx_node_runs_status_finished_at_id
+  on node_runs(status, finished_at, id);
 create index if not exists idx_jobs_status on jobs(status);
 -- Workspace job status counters (schema v36, DB-JOB-STATUS-COUNTS-001):
 -- count_jobs_by_status serves the event aggregator flush (every 0.5s per
@@ -440,6 +446,11 @@ create index if not exists idx_node_run_token_usage_model on node_run_token_usag
 create index if not exists idx_node_run_token_usage_skill_version on node_run_token_usage(skill_version);
 create index if not exists idx_node_runs_run_dir on node_runs(run_dir);
 create index if not exists idx_node_run_token_usage_job_id on node_run_token_usage(job_id);
+-- Ops metrics token samplers (schema v38): the minute sampler aggregates
+-- node_run_token_usage by created_at range (global sum, per-worker join,
+-- per-workspace group-by); without this index every minute bucket
+-- seq-scans the whole table.
+create index if not exists idx_node_run_token_usage_created_at on node_run_token_usage(created_at);
 create index if not exists idx_artifact_refs_hash on artifact_refs(hash);
 
 -- One-time seed (schema v6): the legacy per-workspace `pi` executor

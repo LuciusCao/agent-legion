@@ -14,6 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from server.app.services.cleanup_sweep_store import CleanupSweepStore
 from server.app.services.job_dir_index import iter_job_dirs
 from server.app.services.job_run_dir_lookup import derive_run_dir_from_index
 from server.app.services.run_dir_cleanup import find_extra_run_dirs, remove_path
@@ -137,18 +138,23 @@ def sweep_expired_node_runs(
     """Remove expired node-run log files and run directories in bounded chunks.
 
     Rows are paged per terminal status with a ``(finished_at, id)`` keyset so
-    ``idx_node_runs_status_finished_at`` serves every chunk read without
+    ``idx_node_runs_status_finished_at_id`` serves every chunk read without
     sorting. Each chunk is fetched on its own short-lived read connection, so
     no transaction is held while files are deleted. The SQL cutoff is a
     coarse superset filter; the exact per-row retention check in
     ``_remove_row_artifacts`` is unchanged.
+
+    Rows are never deleted, so each pass starts from the persisted
+    high-water mark (``CleanupSweepStore``) instead of re-paging the whole
+    expired tail; the mark advances after every processed chunk, past rows
+    whose deletion failed as well (best-effort, see the store docstring).
     """
     cutoff = max(log_cutoff, run_dir_cutoff)
+    sweep_store = CleanupSweepStore(db.path)
     logs_removed = 0
     run_dirs_removed = 0
     for status in ("completed", "failed"):
-        last_finished_at = datetime.min.replace(tzinfo=UTC)
-        last_id = 0
+        last_finished_at, last_id = sweep_store.load(status)
         while True:
             with db._connect_read() as conn:
                 rows = conn.execute(
@@ -177,6 +183,7 @@ def sweep_expired_node_runs(
                 else datetime.fromisoformat(raw_last_finished_at).replace(tzinfo=UTC)
             )
             last_id = rows[-1]["id"]
+            sweep_store.save(status, last_finished_at, last_id)
             if len(rows) < LOG_CLEANUP_CHUNK_SIZE:
                 break
     return logs_removed, run_dirs_removed
