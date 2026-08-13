@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from worker.binary_resolution import resolve_binary
 from worker.bundle_io import download_input_artifacts, safe_extract
 from worker.claim_manifest import apply_live_manifest
 from worker.host_client import Client
@@ -67,4 +68,8 @@ def prepare_execution(
     }
     prompt_file.write_text(substitute(str(command_spec["prompt"]), paths), encoding="utf-8")
     command = [substitute(str(part), paths) for part in command_spec["command"]]
+    if command and "/" not in command[0]:
+        # 与启动预检同一解析（自带副本 data/bin 优先、PATH 兜底）：预检放行
+        # 的 runtime 必须在 spawn 时解析到同一个二进制。
+        command[0] = resolve_binary(command[0]) or command[0]
     return PreparedExecution(manifest=manifest, command=command)

@@ -21,6 +21,7 @@ from typing import Any
 
 import pytest
 
+from worker import binary_resolution
 from worker.code_runner import (
     build_sandbox_argv,
     cancel_executions,
@@ -227,6 +228,8 @@ def _fake_velites(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
         encoding="utf-8",
     )
     script.chmod(script.stat().st_mode | stat.S_IXUSR)
+    # 自带目录指向不存在的位置：测试不依赖开发机 data/bin 的真实状态。
+    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
     monkeypatch.setattr(
         shutil, "which", lambda binary: str(script) if binary == "velites" else None
     )
@@ -306,6 +309,62 @@ def test_execute_code_hash_mismatch_refuses_before_spawn(
         execute_code(
             client,
             _code_claim(code_hash="0" * 64),
+            tmp_path / "work" / "exec-code-1",
+            {"node_key": "node_a"},
+            threading.Semaphore(2),
+            threading.Event(),
+            1,
+            threading.Event(),
+            SimpleNamespace(proc_ref={}),  # type: ignore[arg-type]
+            ExecutionStatusReporter(None),
+        )
+
+
+def test_execute_code_uses_bundled_velites_when_path_missing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """自带副本优先且不依赖 PATH：PATH 全空时执行走 data/bin 的 velites。"""
+    bundled_dir = tmp_path / "data" / "bin"
+    bundled_dir.mkdir(parents=True)
+    stub = bundled_dir / "velites"
+    stub.write_text(
+        '#!/usr/bin/env bash\nwhile [ "$1" != "--" ]; do shift; done\nshift\nexec "$@"\n',
+        encoding="utf-8",
+    )
+    stub.chmod(stub.stat().st_mode | stat.S_IXUSR)
+    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", bundled_dir)
+    monkeypatch.setattr(shutil, "which", lambda _binary: None)
+
+    client = FakeClient(_code_bundle(tmp_path))
+    task = execute_code(
+        client,
+        _code_claim(),
+        tmp_path / "work" / "exec-code-1",
+        {"node_key": "node_a"},
+        threading.Semaphore(2),
+        threading.Event(),
+        1,
+        threading.Event(),
+        SimpleNamespace(proc_ref={}),  # type: ignore[arg-type]
+        ExecutionStatusReporter(None),
+    )
+
+    assert task is not None and task.code_result is not None
+    assert task.code_result["status"] == "completed"
+    assert task.command[0] == str(stub)
+
+
+def test_execute_code_fails_closed_without_any_velites(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """自带副本与 PATH 都找不到 velites → 拒绝执行（EXEC-CODE-003 fail-closed）。"""
+    monkeypatch.setattr(binary_resolution, "BUNDLED_BINARY_DIR", tmp_path / "no-bundled-bin")
+    monkeypatch.setattr(shutil, "which", lambda _binary: None)
+    client = FakeClient(_code_bundle(tmp_path))
+    with pytest.raises(RuntimeError, match="refusing to run unsandboxed"):
+        execute_code(
+            client,
+            _code_claim(),
             tmp_path / "work" / "exec-code-1",
             {"node_key": "node_a"},
             threading.Semaphore(2),
