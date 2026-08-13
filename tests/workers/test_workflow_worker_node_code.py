@@ -31,11 +31,12 @@ def _make_worker(
     definitions: list[WorkflowDefinition],
     *,
     custom_nodes_enabled: bool = True,
+    capability_path: str | None = "workflow_nodes/question_intake.py",
 ) -> WorkflowWorkerThread:
     executor_def = CodeExecutorConfig(
         kind="code",
         global_capacity=2,
-        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
+        capabilities={"fetch": CodeCapabilityConfig(path=capability_path)},
     )
     registry = ExecutorRegistry(
         executors={"code-default": executor},
@@ -167,4 +168,43 @@ def test_dispatch_falls_back_to_builtin_when_gate_disabled(tmp_path: Path) -> No
 
     # Gate off: dispatch never consults custom codes and nothing breaks.
     assert executor.contexts[0].node_code is None
+    worker.stop()
+
+
+def test_dispatch_pathless_capability_requires_custom_code(tmp_path: Path) -> None:
+    """Pathless capability without published custom code: clear config error."""
+    node = _local_node("fetch")
+    job_db, ws = _prepare_job(tmp_path, node)
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(
+        tmp_path, job_db, executor, [_make_definition([node])], capability_path=None
+    )
+    executor.block_event.set()
+
+    worker._poll()
+
+    assert executor.contexts == []
+    job = job_db.list_jobs(workspace_id=ws["id"])[0]
+    node_row = job_db.get_job_node(job["id"], "fetch")
+    assert node_row["status"] == "failed"
+    assert "no builtin code path" in node_row["error_message"]
+    worker.stop()
+
+
+def test_dispatch_pathless_capability_with_custom_code(tmp_path: Path) -> None:
+    """Pathless capability with a published custom version dispatches it."""
+    node = _local_node("fetch")
+    job_db, ws = _prepare_job(tmp_path, node)
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(
+        tmp_path, job_db, executor, [_make_definition([node])], capability_path=None
+    )
+    executor.block_event.set()
+
+    _dispatch(tmp_path, worker)
+
+    assert executor.contexts[0].node_code == CUSTOM_V1
     worker.stop()

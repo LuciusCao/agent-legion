@@ -482,3 +482,45 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
 
     executor.block_event.set()
     worker.stop()
+
+
+def test_ensure_pools_reconciles_with_reloaded_registry(tmp_path: Path) -> None:
+    """Executor publish hot reload: pools follow the swapped registry state."""
+    from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
+    from server.app.executors.kinds import RuntimeDependencies
+
+    db_path = TEST_DATABASE_URL
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
+    worker._poll()
+    assert worker._pools["code-default"]._max_workers == 2
+
+    # Simulate a publish hot reload on the shared registry object.
+    definitions = {
+        "code-default": CodeExecutorConfig(
+            kind="code",
+            global_capacity=4,
+            capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
+        ),
+        "code-extra": CodeExecutorConfig(
+            kind="code",
+            global_capacity=1,
+            capabilities={
+                "other": CodeCapabilityConfig(path="workflow_nodes/question_clean_parse.py")
+            },
+        ),
+    }
+    worker.registry._runtime = RuntimeDependencies()
+    worker.registry.replace_definitions(definitions)
+    worker._ensure_pools()
+
+    assert worker._pools["code-default"]._max_workers == 4
+    assert worker._pools["code-extra"]._max_workers == 1
+
+    # The archive path: a removed executor loses its pool.
+    worker.registry.replace_definitions({"code-extra": definitions["code-extra"]})
+    worker._ensure_pools()
+
+    assert "code-default" not in worker._pools
+    assert "code-extra" in worker._pools
+    worker.stop()

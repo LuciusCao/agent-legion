@@ -2,14 +2,17 @@ import { Button } from '@mui/material'
 import styles from './WorkflowNodeCodeSection.module.css'
 
 // Action row for the node code card: fork (builtin) or edit/publish/reset
-// (custom), plus the version-history toggle. The reset to builtin is a
-// two-step inline confirm.
+// (custom), plus「从模板新建」(no custom draft yet) and the version-history
+// toggle. A pathless node with a draft gets a plain 编辑 entry. The reset to
+// builtin is a two-step inline confirm.
 export function WorkflowNodeCodeActions(props: {
   isCustom: boolean
+  hasBuiltin: boolean
   hasDraft: boolean
   busy: boolean
   confirmingReset: boolean
   onEdit: () => void
+  onCreateFromTemplate: () => void
   onPublish: () => void
   onToggleVersions: () => void
   onRequestReset: () => void
@@ -18,24 +21,24 @@ export function WorkflowNodeCodeActions(props: {
 }) {
   return (
     <div className={styles.actions}>
-      {!props.isCustom && (
+      {(props.isCustom || props.hasBuiltin || props.hasDraft) && (
         <Button
           variant="outlined"
           size="small"
           onClick={props.onEdit}
           disabled={props.busy}
         >
-          fork 为自定义节点
+          {props.isCustom || !props.hasBuiltin ? '编辑' : 'fork 为自定义节点'}
         </Button>
       )}
-      {props.isCustom && (
+      {!props.isCustom && !props.hasDraft && (
         <Button
           variant="outlined"
           size="small"
-          onClick={props.onEdit}
+          onClick={props.onCreateFromTemplate}
           disabled={props.busy}
         >
-          编辑
+          从模板新建
         </Button>
       )}
       {props.hasDraft && (

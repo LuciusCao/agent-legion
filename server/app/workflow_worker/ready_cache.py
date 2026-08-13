@@ -41,16 +41,17 @@ class ReadyCandidate:
 
 def resolve_cached_definition(
     worker: WorkflowWorkerThread,
-    fallback: WorkflowDefinition,
+    fallback: WorkflowDefinition | None,
     job: dict[str, Any],
-) -> WorkflowDefinition:
+) -> WorkflowDefinition | None:
     """The job's snapshot definition, parsed once per definition hash.
 
     Snapshot JSON is immutable per hash, so the cache never needs
     invalidation; with thousands of queued jobs sharing a handful of
     revisions this avoids re-parsing the same multi-KB definition on every
     poll pass. Falls back to the registered definition when the job carries
-    no snapshot.
+    no snapshot; None when neither exists (registered workflow without a
+    catalog definition).
     """
     key = str(job.get("workflow_definition_hash") or "")
     if not key:

@@ -5,26 +5,18 @@ import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../types'
 import type { ExecutorDefinition } from '../../types/executorTypes'
-import { findCapabilityBindings } from './WorkflowExecutorBindingList'
 import { WorkflowNodeCodeActions } from './WorkflowNodeCodeActions'
 import { WorkflowNodeCodeEditor } from './WorkflowNodeCodeEditor'
 import { WorkflowNodeCodeVersions } from './WorkflowNodeCodeVersions'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 import styles from './WorkflowNodeCodeSection.module.css'
+import {
+  fetchNodeCodeTemplate,
+  findNodeCodePath,
+  hasCodeCapability,
+} from './workflowNodeCodeLookup'
 
 type NodeCodeResponse = components['schemas']['WorkflowNodeCodeResponse']
-
-// A node has viewable code only when its capability is bound to a kind="code"
-// executor whose capability detail declares a module path.
-export function findNodeCodePath(
-  executorCatalog: ExecutorDefinition[],
-  capability: string
-): string | null {
-  const binding = findCapabilityBindings(executorCatalog, capability).find(
-    ({ executor, detail }) => executor.kind === 'code' && Boolean(detail.path)
-  )
-  return binding?.detail.path ?? null
-}
 
 function codeUrl(workspaceId: string, workflowKey: string, nodeKey: string) {
   return `/api/workspaces/${encodeURIComponent(workspaceId)}/workflows/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeKey)}/code`
@@ -39,6 +31,10 @@ export function WorkflowNodeCodeSection(props: {
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
   const workflowKey = useSettingStore((s) => s.settings.workflowKey)
+  const codeBound = hasCodeCapability(
+    props.executorCatalog,
+    props.node.capability
+  )
   const codePath = findNodeCodePath(
     props.executorCatalog,
     props.node.capability
@@ -61,7 +57,7 @@ export function WorkflowNodeCodeSection(props: {
   // WorkflowNodeCodeSection is keyed by node in the inspector, so this effect
   // only runs on mount (and after explicit reloads via its own calls).
   const reload = useCallback(() => {
-    if (!url || !codePath) return undefined
+    if (!url || !codeBound) return undefined
     let cancelled = false
     api<NodeCodeResponse>(url)
       .then((result) => {
@@ -77,10 +73,10 @@ export function WorkflowNodeCodeSection(props: {
     return () => {
       cancelled = true
     }
-  }, [url, codePath])
+  }, [url, codeBound])
   useEffect(() => reload(), [reload])
 
-  if (!url || !codePath) return null
+  if (!url || !codeBound) return null
 
   const toast = useUiStore.getState().showToast
   const run = async (action: () => Promise<unknown>, success: string) => {
@@ -100,14 +96,17 @@ export function WorkflowNodeCodeSection(props: {
     }
   }
 
+  const putDraft = (code: string, changeNote: string | null = null) =>
+    api(url, {
+      method: 'PUT',
+      body: JSON.stringify({ code, change_note: changeNote }),
+    })
   const saveDraft = (code: string, changeNote: string) =>
+    run(() => putDraft(code, changeNote || null), '草稿已保存')
+  const createFromTemplate = () =>
     run(
-      () =>
-        api(url, {
-          method: 'PUT',
-          body: JSON.stringify({ code, change_note: changeNote || null }),
-        }),
-      '草稿已保存'
+      async () => putDraft((await fetchNodeCodeTemplate()).code),
+      '已从模板创建草稿'
     )
   const publish = () =>
     run(
@@ -133,7 +132,11 @@ export function WorkflowNodeCodeSection(props: {
     <section className={inspectorStyles.section} aria-label="节点代码">
       <div className={inspectorStyles.sectionTitle}>节点代码</div>
       <div className={styles.path}>
-        {isCustom ? `自定义 v${data?.version}` : `内置 ${codePath}`}
+        {isCustom
+          ? `自定义 v${data?.version}`
+          : codePath
+            ? `内置 ${codePath}`
+            : '无内置代码'}
         {data?.has_draft && <span className={styles.badge}>有未发布草稿</span>}
       </div>
       {props.readOnly && (
@@ -161,7 +164,9 @@ export function WorkflowNodeCodeSection(props: {
               onCancel={() => setEditing(false)}
             />
           ) : (
-            <pre className={styles.code}>{data.code}</pre>
+            <pre className={styles.code}>
+              {data.origin === 'none' ? data.draft_code : data.code}
+            </pre>
           )}
           {error && (
             <div role="alert" className={styles.error}>
@@ -171,10 +176,12 @@ export function WorkflowNodeCodeSection(props: {
           {writable && !editing && (
             <WorkflowNodeCodeActions
               isCustom={isCustom}
+              hasBuiltin={codePath !== null}
               hasDraft={data.has_draft}
               busy={busy}
               confirmingReset={confirmingReset}
               onEdit={() => setEditing(true)}
+              onCreateFromTemplate={() => void createFromTemplate()}
               onPublish={() => void publish()}
               onToggleVersions={() => setShowVersions((value) => !value)}
               onRequestReset={() => setConfirmingReset(true)}

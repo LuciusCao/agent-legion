@@ -11,12 +11,14 @@ from server.app.routes.workflow_node_code_contracts import (
     WorkflowNodeCodeDraftRequest,
     WorkflowNodeCodeResponse,
     WorkflowNodeCodeRollbackRequest,
+    WorkflowNodeCodeTemplateResponse,
     WorkflowNodeCodeVersionResponse,
     WorkflowNodeCodeVersionsResponse,
     WorkflowNodeCodeVersionSummary,
 )
 from server.app.services import workflow_node_files
 from server.app.services.job_errors import JobServiceError
+from server.app.services.node_code_template import NODE_CODE_TEMPLATE
 from server.app.services.node_codes import NodeCodeService
 from server.app.settings import Settings
 from server.app.workflows.definition import workflow_definition_from_dict
@@ -45,18 +47,23 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
             raise HTTPException(status_code=404, detail=f"Unknown workflow node: {node_key}")
         return node.capability
 
-    def _read_builtin_code(capability: str) -> tuple[str, str]:
+    def _read_builtin_code(capability: str) -> tuple[str, str] | None:
+        """Builtin file (path, content); None when the capability is pathless."""
         path = workflow_node_files.builtin_code_path(settings.executor_definitions, capability)
         if path is None:
-            raise HTTPException(
-                status_code=404,
-                detail=f"No builtin code file for capability: {capability}",
-            )
+            return None
         nodes_dir = workflow_node_files.workflow_nodes_dir(settings.root_dir)
         try:
             return workflow_node_files.read_node_file(nodes_dir, path)
         except (FileNotFoundError, workflow_node_files.NodeFileError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @router.get(
+        "/workflow-node-code-template",
+        response_model=WorkflowNodeCodeTemplateResponse,
+    )
+    def get_node_code_template() -> WorkflowNodeCodeTemplateResponse:
+        return WorkflowNodeCodeTemplateResponse(code=NODE_CODE_TEMPLATE)
 
     @router.get(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",
@@ -76,24 +83,23 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
         has_draft = draft is not None
         draft_code = str(draft["code"]) if draft is not None else None
         draft_version = int(draft["version"]) if draft is not None else None
-        if published is not None:
+
+        def _response(**kwargs: Any) -> WorkflowNodeCodeResponse:
             return WorkflowNodeCodeResponse(
-                origin="custom",
-                code=str(published["code"]),
-                version=int(published["version"]),
-                has_draft=has_draft,
-                draft_code=draft_code,
-                draft_version=draft_version,
+                has_draft=has_draft, draft_code=draft_code, draft_version=draft_version, **kwargs
             )
-        path, content = _read_builtin_code(capability)
-        return WorkflowNodeCodeResponse(
-            origin="builtin",
-            code=content,
-            path=path,
-            has_draft=has_draft,
-            draft_code=draft_code,
-            draft_version=draft_version,
-        )
+
+        if published is not None:
+            return _response(
+                origin="custom", code=str(published["code"]), version=int(published["version"])
+            )
+        builtin = _read_builtin_code(capability)
+        if builtin is None:
+            # Pathless (custom-code-only) capability: no builtin file to show;
+            # the section starts from the SDK template instead.
+            return _response(origin="none", code="")
+        path, content = builtin
+        return _response(origin="builtin", code=content, path=path)
 
     @router.put(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",

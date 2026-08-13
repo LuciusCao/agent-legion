@@ -1141,6 +1141,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workflow-node-code-template': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Node Code Template */
+    get: operations['get_node_code_template_api_workflow_node_code_template_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workflow-nodes/files/{file_path}': {
     parameters: {
       query?: never
@@ -1168,7 +1185,8 @@ export interface paths {
     /** List Workflows */
     get: operations['list_workflows_api_workflows_get']
     put?: never
-    post?: never
+    /** Register Workflow */
+    post: operations['register_workflow_api_workflows_post']
     delete?: never
     options?: never
     head?: never
@@ -4659,7 +4677,7 @@ export interface components {
        * Origin
        * @enum {string}
        */
-      origin: 'builtin' | 'custom'
+      origin: 'builtin' | 'custom' | 'none'
       /** Path */
       path?: string | null
       /** Version */
@@ -4669,6 +4687,11 @@ export interface components {
     WorkflowNodeCodeRollbackRequest: {
       /** Version */
       version: number
+    }
+    /** WorkflowNodeCodeTemplateResponse */
+    WorkflowNodeCodeTemplateResponse: {
+      /** Code */
+      code: string
     }
     /** WorkflowNodeCodeVersionResponse */
     WorkflowNodeCodeVersionResponse: {
@@ -4763,6 +4786,32 @@ export interface components {
       /** Outputs */
       outputs: string[]
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+    }
+    /** WorkflowRegisterRequest */
+    WorkflowRegisterRequest: {
+      /**
+       * Description
+       * @default
+       */
+      description: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+    }
+    /**
+     * WorkflowRegisteredResponse
+     * @description Registration result: the full catalog entry, provenance included.
+     */
+    WorkflowRegisteredResponse: {
+      /** Description */
+      description: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Origin */
+      origin: string
     }
     /** WorkflowResponse */
     WorkflowResponse: {
@@ -7487,6 +7536,26 @@ export interface operations {
       }
     }
   }
+  get_node_code_template_api_workflow_node_code_template_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeTemplateResponse']
+        }
+      }
+    }
+  }
   read_workflow_node_file_api_workflow_nodes_files__file_path__get: {
     parameters: {
       query?: never
@@ -7534,6 +7603,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowsListResponse']
+        }
+      }
+    }
+  }
+  register_workflow_api_workflows_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowRegisterRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRegisteredResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

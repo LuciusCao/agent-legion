@@ -10,6 +10,15 @@ class WorkflowSummaryResponse(BaseModel):
     label: str
 
 
+class WorkflowRegisteredResponse(BaseModel):
+    """Registration result: the full catalog entry, provenance included."""
+
+    key: str
+    label: str
+    description: str
+    origin: str
+
+
 class WorkflowIntakeModeResponse(BaseModel):
     key: str
     label: str

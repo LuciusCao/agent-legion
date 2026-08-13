@@ -71,6 +71,36 @@ def _write_test_workflow(tmp_path: Path) -> Path:
     return path
 
 
+def _patch_workflow(monkeypatch, workflow_path: Path) -> None:
+    """Inject the synthetic test workflow into the catalog service.
+
+    The DB-backed catalog gates workspace binding through ``bound_definition``
+    while runtime fallbacks call ``definition``; both resolve WORKFLOW_KEY to
+    the synthetic file-backed definition here.
+    """
+    _original_definition = WorkflowCatalogService.definition
+    _original_bound = WorkflowCatalogService.bound_definition
+
+    def _patched_definition(self, workflow_key: str):
+        if workflow_key == WORKFLOW_KEY:
+            return load_workflow_definition(workflow_path)
+        return _original_definition(self, workflow_key)
+
+    def _patched_bound(self, workflow_key: str):
+        if workflow_key == WORKFLOW_KEY:
+            return load_workflow_definition(workflow_path)
+        return _original_bound(self, workflow_key)
+
+    monkeypatch.setattr(
+        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
+        _patched_definition,
+    )
+    monkeypatch.setattr(
+        "server.app.services.workflow_catalog.WorkflowCatalogService.bound_definition",
+        _patched_bound,
+    )
+
+
 class _RecordingExecutor:
     kind = "code"
     id = "code-test"
@@ -194,17 +224,7 @@ def _node_statuses(detail: dict[str, Any]) -> dict[str, str]:
 
 def test_workspace_job_control_flow(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _original_definition = WorkflowCatalogService.definition
-
-    def _patched_definition(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_definition(self, workflow_key)
-
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
-        _patched_definition,
-    )
+    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -351,17 +371,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
 def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _original_definition = WorkflowCatalogService.definition
-
-    def _patched_definition(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_definition(self, workflow_key)
-
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
-        _patched_definition,
-    )
+    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -404,17 +414,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
 
 def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _original_definition = WorkflowCatalogService.definition
-
-    def _patched_definition(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_definition(self, workflow_key)
-
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
-        _patched_definition,
-    )
+    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True

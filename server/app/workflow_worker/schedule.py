@@ -17,7 +17,6 @@ from typing import TYPE_CHECKING, Any
 from server.app.executors.config import CodeExecutorConfig
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.job_errors import JobServiceError
-from server.app.services.node_codes import resolve_dispatch_node_code
 from server.app.services.vault import VaultError
 from server.app.workflow_worker.agent_claim import (
     cached_batch_payload,
@@ -25,6 +24,7 @@ from server.app.workflow_worker.agent_claim import (
     fail_node_config,
 )
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
+from server.app.workflow_worker.code_dispatch import resolve_code_node_dispatch
 from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.executor_claim import claim_executor_node
 from server.app.workflow_worker.routing import resolve_node_route
@@ -175,22 +175,12 @@ def try_claim_and_submit(
     # custom code, so other kinds skip the DB read entirely. Frozen job
     # version wins over the current published version; None keeps builtin.
     # A frozen-pin hash mismatch fails the node (fail closed, EXEC-CODE-003).
-    node_code = None
-    if isinstance(worker.settings.executor_definitions.get(executor_id), CodeExecutorConfig):
-        frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
-        try:
-            node_code = resolve_dispatch_node_code(
-                worker.job_db.path,
-                worker.settings.executor_runtime.workflows.custom_nodes_enabled,
-                workspace_id,
-                workflow_key,
-                node_key,
-                frozen_pins.get(node_key),
-            )
-        except ValueError as exc:
-            return fail_node_config(
-                worker, workspace_id, job, workflow_key, node, log_path, str(exc)
-            )
+    try:
+        node_code = resolve_code_node_dispatch(
+            worker, workspace_id, workflow_key, node, executor_id, batch_payload
+        )
+    except ValueError as exc:
+        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
     claimed = claim_executor_node(
         worker,

@@ -380,7 +380,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-002
-    statement: "Custom workflow node code lives only in the DB (workflow_node_codes), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and jobs freeze the code version they started with; no runtime path may write repo workflow_nodes/ files. The feature is gated by workflows.custom_nodes_enabled."
+    statement: "Custom workflow node code lives only in the DB (workflow_node_codes), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and jobs freeze the code version they started with; no runtime path may write repo workflow_nodes/ files. A code capability may omit path entirely (custom-code only): dispatch then requires a published custom code version and otherwise fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
     owner: workspace-executor
     risk: high
     evidence:
@@ -395,6 +395,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/executors/test_code_executor.py::test_execute_custom_node_code_from_source
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_code_executor.py::test_pathless_capability_runs_custom_code_sandboxed
         gate: quick
       - kind: integration
         target: tests/test_workflow_revisions.py::test_publish_revision_records_node_code_pins
@@ -810,4 +813,22 @@ invariants:
     evidence:
       - kind: integration
         target: tests/db/test_job_status_counts_migration.py
+        gate: quick
+
+  - id: DB-WORKFLOW-CATALOG-001
+    statement: "The set of known workflow keys lives in the DB workflow_catalog table (schema v40), not the code registry: routes, workspace default_workflow_key validation, and the workflow worker scan list all read it. Built-in rows (origin='builtin') are upserted from workflows.builtin on every startup (the repo stays the seed source of truth; seeding never touches origin='registered' rows); new keys are registered only through the admin API (POST /api/workflows, require_admin) with a strict key format and conflict rejection. A registered entry starts without a definition: workspace binding is allowed, the first workspace draft publish creates revision v1 via the existing publish channel, and the worker scans the key with a None fallback definition (jobs run off the intake-frozen revision snapshot; the scan list itself refreshes on backend restart)."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/services/test_workflow_catalog_store.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/jobs/test_workflow_catalog.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_workflow_catalog_migration.py
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_catalog_scan.py
         gate: quick

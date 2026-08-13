@@ -18,6 +18,10 @@ from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_pass
+from server.app.workflow_worker.catalog_scan import (
+    collect_runnable_workspace_jobs,
+    load_workflow_scan_entries,
+)
 from server.app.workflow_worker.claim_flush import PreparedClaim, flush_prepared_claims
 from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
@@ -27,7 +31,6 @@ from server.app.workflow_worker.ready import build_ready_queues
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflow_worker.schedule import claim_ready_queues
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.registry import list_registered_workflows
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +63,7 @@ class WorkflowWorkerThread:
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
         self._definitions: list[WorkflowDefinition] = []
+        self._definitionless_keys: list[str] = []
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
         self._round_robin = WorkspaceRoundRobin()
@@ -93,9 +97,21 @@ class WorkflowWorkerThread:
         self._wake_event.set()
 
     def _ensure_pools(self) -> None:
-        for executor_id in self.registry.definitions():
-            if executor_id not in self._pools:
-                capacity = self.registry.global_capacity(executor_id) or 1
+        # Reconcile with the live registry (hot-reloaded on executor
+        # publish/rollback/archive): drop removed executors, add new ones,
+        # resize on capacity change. The lease claim transaction stays the
+        # authoritative capacity enforcement, so a mid-swap pool never
+        # over-admits work.
+        capacities = self._executor_capacities()
+        for executor_id in list(self._pools):
+            if executor_id not in capacities:
+                self._pools.pop(executor_id).shutdown(wait=False, cancel_futures=True)
+        for executor_id, capacity in capacities.items():
+            pool = self._pools.get(executor_id)
+            # ThreadPoolExecutor exposes no public max_workers getter.
+            if pool is None or pool._max_workers != capacity:
+                if pool is not None:
+                    pool.shutdown(wait=False)
                 self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
 
     def _pool_for(self, executor_id: str) -> ThreadPoolExecutor:
@@ -105,8 +121,7 @@ class WorkflowWorkerThread:
         return {eid: self.registry.global_capacity(eid) or 0 for eid in self.registry.definitions()}
 
     def start(self) -> None:
-        self._definitions = list_registered_workflows()
-        self._ensure_pools()
+        self._definitions, self._definitionless_keys = load_workflow_scan_entries(self.settings)
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -126,11 +141,10 @@ class WorkflowWorkerThread:
         self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
-        if not self._definitions:
+        if not (self._definitions or self._definitionless_keys):
             return False
 
-        if not self._pools:
-            self._ensure_pools()
+        self._ensure_pools()
         reap_futures(self)
 
         snapshot = load_capacity_snapshot(self.leases.path, self._executor_capacities())
@@ -185,26 +199,8 @@ class WorkflowWorkerThread:
 
     def _runnable_workspaces(
         self,
-    ) -> tuple[list[str], dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]]]:
-        workspace_ids: list[str] = []
-        jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]] = {}
-        # is_paused opens a DB connection per call; memoize per pass instead
-        # of paying it once per job.
-        paused: dict[str, bool] = {}
-        for definition in self._definitions:
-            for job in self._mark_store.refresh(self.job_db, definition.key):
-                if not (workspace_id := job.get("workspace_id")):
-                    continue
-                workspace_id = str(workspace_id)
-                if workspace_id not in paused:
-                    paused[workspace_id] = self._is_paused(workspace_id)
-                if paused[workspace_id]:
-                    continue
-                if workspace_id not in jobs_by_workspace:
-                    workspace_ids.append(workspace_id)
-                    jobs_by_workspace[workspace_id] = []
-                jobs_by_workspace[workspace_id].append((definition, job))
-        return workspace_ids, jobs_by_workspace
+    ) -> tuple[list[str], dict[str, list[tuple[WorkflowDefinition | None, dict[str, Any]]]]]:
+        return collect_runnable_workspace_jobs(self)
 
     def stop(self, timeout: float = 3) -> None:
         self.stop_event.set()
