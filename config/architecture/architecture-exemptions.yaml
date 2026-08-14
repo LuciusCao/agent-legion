@@ -109,3 +109,19 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
   ceiling: 135
+- check: architecture.file_budget
+  path: server/app/db/schema.py
+  reason: Schema v42 (scoped_token_origin) adds one migration import and one
+    migrate call to the version chain; the module is the single wiring point
+    for the idempotent DDL replay and grows by two lines per schema version.
+  owner: workspace-executor
+  remove_when: docs/studio-agent-mcp.md
+  ceiling: 74
+- check: architecture.file_budget
+  path: server/app/routes/__init__.py
+  reason: The studio-agent self-service token router adds one import and one
+    secured() registration line; the module is the central router composition
+    point and grows by two lines per new router.
+  owner: workspace-executor
+  remove_when: docs/studio-agent-mcp.md
+  ceiling: 137

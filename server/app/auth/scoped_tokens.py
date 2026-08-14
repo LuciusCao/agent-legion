@@ -29,12 +29,18 @@ def mint_scoped_token(
     *,
     scope: str = STUDIO_AGENT_SCOPE,
     ttl: timedelta = SCOPED_TOKEN_TTL,
+    origin: str = "run",
     now: datetime | None = None,
 ) -> str:
-    """Mint a scoped bearer token for user_id; the raw token is returned once."""
+    """Mint a scoped bearer token for user_id; the raw token is returned once.
+
+    origin records who minted the token: 'run' for per-run tokens (the
+    default, unchanged for existing callers) and 'user' for self-service
+    tokens minted via /api/studio-agent-tokens.
+    """
     token = issue_token()
     expires_at = (now or datetime.now(UTC)) + ttl
-    queries.create_scoped_token(hash_token(token), user_id, scope, expires_at)
+    queries.create_scoped_token(hash_token(token), user_id, scope, expires_at, origin=origin)
     return token
 
 

@@ -1055,6 +1055,41 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent-tokens': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Tokens */
+    get: operations['list_tokens_api_studio_agent_tokens_get']
+    put?: never
+    /** Mint Token */
+    post: operations['mint_token_api_studio_agent_tokens_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent-tokens/{token_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** Revoke Token */
+    delete: operations['revoke_token_api_studio_agent_tokens__token_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/agent-definitions/{agent_id}/draft': {
     parameters: {
       query?: never
@@ -4243,6 +4278,52 @@ export interface components {
       tags?: string[]
       /** Valid */
       valid: boolean
+    }
+    /**
+     * StudioAgentTokenEntry
+     * @description Management view of one token — never carries digest or plaintext.
+     */
+    StudioAgentTokenEntry: {
+      /** Created At */
+      created_at: string
+      /** Expires At */
+      expires_at: string
+      /** Id */
+      id: string
+      /** Revoked At */
+      revoked_at: string | null
+    }
+    /** StudioAgentTokenMintRequest */
+    StudioAgentTokenMintRequest: {
+      /**
+       * Ttl Hours
+       * @default 168
+       */
+      ttl_hours: number
+    }
+    /**
+     * StudioAgentTokenMintResponse
+     * @description Mint result; the raw token is returned exactly once, here.
+     */
+    StudioAgentTokenMintResponse: {
+      /** Expires At */
+      expires_at: string
+      /** Id */
+      id: string
+      /** Token */
+      token: string
+    }
+    /** StudioAgentTokenRevokeResponse */
+    StudioAgentTokenRevokeResponse: {
+      /** Id */
+      id: string
+      /** Revoked */
+      revoked: boolean
+    }
+    /** StudioAgentTokensResponse */
+    StudioAgentTokensResponse: {
+      /** Tokens */
+      tokens: components['schemas']['StudioAgentTokenEntry'][]
     }
     /** StudioAgentWorkflowRegisterRequest */
     StudioAgentWorkflowRegisterRequest: {
@@ -7490,6 +7571,90 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['SkillValidateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_tokens_api_studio_agent_tokens_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentTokensResponse']
+        }
+      }
+    }
+  }
+  mint_token_api_studio_agent_tokens_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentTokenMintRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentTokenMintResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  revoke_token_api_studio_agent_tokens__token_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        token_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentTokenRevokeResponse']
         }
       }
       /** @description Validation Error */
