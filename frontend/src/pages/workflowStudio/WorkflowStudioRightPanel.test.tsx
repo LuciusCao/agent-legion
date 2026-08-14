@@ -16,6 +16,10 @@ vi.mock('../../api/executorApi', () => ({
   getExecutorCatalog: vi.fn().mockResolvedValue({ executors: [], agents: [] }),
 }))
 
+vi.mock('./chat/StudioChatPanel', () => ({
+  StudioChatPanel: () => <div>chat panel stub</div>,
+}))
+
 const mockApi = vi.mocked(api)
 
 const adminUser: UserResponse = {
@@ -79,6 +83,8 @@ function renderPanel(
         readOnly={false}
         definitionYaml="key: video_knowledge\n"
         setDefinitionYaml={vi.fn()}
+        activeTab="inspector"
+        onTabChange={vi.fn()}
         onClose={vi.fn()}
         {...overrides}
       />
@@ -104,13 +110,18 @@ describe('WorkflowStudioRightPanel', () => {
     const onClose = vi.fn()
     renderPanel({ onClose })
 
-    expect(screen.getByRole('region', { name: '节点配置' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('region', { name: 'Studio 侧栏' })
+    ).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: '节点配置' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
     expect(screen.getByText('基本设置')).toBeInTheDocument()
     expect(screen.getByText('code-default')).toBeInTheDocument()
     expect(
       screen.getByText('workflow_nodes/fetch_questions.py')
     ).toBeInTheDocument()
-    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
     expect(screen.queryByText('YAML 源码')).not.toBeInTheDocument()
     expect(
       screen.queryByLabelText('输入产物，每行一个')
@@ -121,6 +132,33 @@ describe('WorkflowStudioRightPanel', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '关闭节点配置' }))
     expect(onClose).toHaveBeenCalledOnce()
+  })
+
+  it('switches to the Agent 助手 tab', () => {
+    const onTabChange = vi.fn()
+    const { rerender } = renderPanel({ onTabChange })
+
+    fireEvent.click(screen.getByRole('tab', { name: 'Agent 助手' }))
+    expect(onTabChange).toHaveBeenCalledWith('chat')
+
+    rerender(
+      <TestQueryProvider>
+        <WorkflowStudioRightPanel
+          workflow={workflow}
+          executorCatalog={executorCatalog}
+          agentCatalog={[]}
+          selectedNodeKey="fetch_questions"
+          readOnly={false}
+          definitionYaml="key: video_knowledge\n"
+          setDefinitionYaml={vi.fn()}
+          activeTab="chat"
+          onTabChange={onTabChange}
+          onClose={vi.fn()}
+        />
+      </TestQueryProvider>
+    )
+    expect(screen.getByText('chat panel stub')).toBeInTheDocument()
+    expect(screen.queryByText('基本设置')).not.toBeInTheDocument()
   })
 
   it('shows code and config cards for a code-bound node with a config schema', async () => {

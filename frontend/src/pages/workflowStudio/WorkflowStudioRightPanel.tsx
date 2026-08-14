@@ -1,36 +1,22 @@
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
-import type { WorkflowDefinitionRecord } from '../../types'
-import { WorkflowNodeInspector } from './WorkflowNodeInspector'
+import {
+  StudioRightPanelBody,
+  type WorkflowStudioRightPanelProps,
+} from './chat/StudioRightPanelBody'
+import { StudioRightPanelTabs } from './chat/StudioRightPanelTabs'
 import styles from './WorkflowStudioRightPanel.module.css'
 
-type Props = {
-  workflow: WorkflowDefinitionRecord | null
-  executorCatalog: ExecutorDefinition[]
-  agentCatalog: AgentDefinition[]
-  selectedNodeKey: string | null
-  readOnly: boolean
-  definitionYaml: string
-  setDefinitionYaml: (value: string) => void
-  onClose: () => void
-}
+export type { WorkflowStudioRightPanelProps }
 
-export function WorkflowStudioRightPanel(props: Props) {
+export function WorkflowStudioRightPanel(props: WorkflowStudioRightPanelProps) {
   return (
-    <section className={styles.panel} aria-label="节点配置">
+    <section className={styles.panel} aria-label="Studio 侧栏">
+      <StudioRightPanelTabs
+        value={props.activeTab}
+        onChange={props.onTabChange}
+        onClose={props.onClose}
+      />
       <div className={styles.body}>
-        <WorkflowNodeInspector
-          workflow={props.workflow}
-          executorCatalog={props.executorCatalog}
-          agentCatalog={props.agentCatalog}
-          selectedNodeKey={props.selectedNodeKey}
-          definitionYaml={props.definitionYaml}
-          setDefinitionYaml={props.setDefinitionYaml}
-          readOnly={props.readOnly}
-          onClose={props.onClose}
-        />
+        <StudioRightPanelBody {...props} />
       </div>
     </section>
   )
