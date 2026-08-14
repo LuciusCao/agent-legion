@@ -12,6 +12,7 @@ from server.app.db.migrations.external_connections import migrate_external_conne
 from server.app.db.migrations.local_executor_removal import migrate_local_executor_removal
 from server.app.db.migrations.node_cms_config import migrate_node_cms_config
 from server.app.db.migrations.scoped_token_origin import migrate_scoped_token_origin
+from server.app.db.migrations.studio_chat import migrate_studio_chat_tables
 from server.app.db.migrations.versioned_entities import migrate_versioned_entities
 
 __all__ = [
@@ -24,6 +25,7 @@ __all__ = [
     "migrate_local_executor_removal",
     "migrate_node_cms_config",
     "migrate_scoped_token_origin",
+    "migrate_studio_chat_tables",
     "migrate_versioned_entities",
     "migrate_workspace_cms_config",
 ]
