@@ -119,6 +119,16 @@ ACP 生态验证（哪些 agent 支持、协议成熟度）是 chunk 4 改造的
   每 session 首个 prompt 前缀注入。
 - v1 不做：前端面板（chunk 5）、loadSession 持久恢复（进程内 session）。
 
+### Chunk 4 Quality Impact
+
+- 新 invariant STUDIO-AGENT-002（注册表唯一命令源、token 边界、permission 策略），
+  证据：tests/routes/test_studio_chat.py、test_studio_agents_admin.py、
+  tests/services/test_studio_chat_service.py、tests/db/test_studio_chat_schema.py。
+- file_budget 豁免（schema.py / migrations/__init__.py / main.py /
+  routes/__init__.py）为按设计增长的组合点，ceiling 随 schema 版本滚动登记。
+- DDL 变更测试 `@pytest.mark.fresh_schema`，覆盖 v42 旧库升级 v43 路径。
+- 真机 agent 冒烟不进 CI：手动脚本 scripts/studio_chat_smoke.py。
+
 原方案要点（备查）：`services/studio_chat.py` 会话持久化、后台线程 run、
 无状态 transcript 重放、env 注入 scoped token——ACP 化后 transcript/进程
 管理由 ACP 协议接管，会话持久化与 run 状态机仍是我们的责任。
