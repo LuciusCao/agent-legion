@@ -4,8 +4,10 @@ A studio chat run mints one scoped token per run — bound to the initiating
 user and ``actor_scope='studio_agent'`` with a TTL of roughly run duration
 plus grace — instead of handing the agent a full user session
 (STUDIO-AGENT-001). Scoped tokens authenticate only through the Bearer
-channel; effecting endpoints (publish/rollback/archive) mount
-``reject_studio_agent_scope`` to refuse them explicitly, while draft/validate
+channel; effecting endpoints (publish/rollback/archive, job lifecycle and
+execution triggers, workspace/secret/package/member/settings writes, worker
+pause/resume) mount ``reject_studio_agent_scope`` to refuse them explicitly,
+``require_admin`` refuses scoped identities outright, and draft/validate
 endpoints stay reachable. Like sessions, only the sha256 digest is persisted.
 """
 

@@ -64,7 +64,7 @@ def try_claim_code_worker_node(
         # even if the last code Worker went away (no queued-timeout fallback,
         # batch-2 decision 3).
         return True
-    if not dispatch.online_code_worker_available(node.capability):
+    if not dispatch.online_code_worker_available(node.capability, workspace_id):
         return False
     definition = worker.settings.executor_definitions.get(executor_id)
     capability_config = (

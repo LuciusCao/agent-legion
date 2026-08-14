@@ -2,7 +2,7 @@
 
 把平台的 studio-agent 工具面（`/api/studio-agent/tools/*`）以 MCP stdio server 的形式暴露给任意外部 agent（Kimi Code、Claude Code 等）。外部 agent 拿到 8 个工具：列 workflow 目录、读激活 revision、校验/对比草稿、存节点代码草稿、存 Agent 定义草稿、注册 workflow key。
 
-**权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/注册/读取），发布、回滚、归档等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。token 只存 sha256 digest，明文只在铸造时返回一次。
+**权限边界**：MCP server 只是薄转发，真正的约束在后端——scoped token 只能走工具面（草稿/校验/注册/读取），发布、回滚、归档等生效操作永远由人在 Studio 里完成（STUDIO-AGENT-001）。其中注册 workflow key 是平台全局动作，与人类侧 `POST /api/workflows` 的 `require_admin` 对齐：只有 admin 用户铸造的 scoped token 能注册，非 admin 一律 403。token 只存 sha256 digest，明文只在铸造时返回一次。
 
 ## 1. 铸造 token
 

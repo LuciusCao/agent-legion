@@ -4,9 +4,10 @@ Write-only endpoints: PUT/DELETE manage secrets, GET returns names and
 metadata only. Neither plaintext nor ciphertext ever appears in a response.
 """
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_secrets import WorkspaceSecretsService
@@ -55,6 +56,7 @@ def create_workspace_secrets_router(
     @router.put(
         "/workspaces/{workspace_id}/secrets/{name}",
         response_model=WorkspaceSecretResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def put_workspace_secret(
         workspace_id: str, name: str, payload: WorkspaceSecretSetRequest
@@ -69,6 +71,7 @@ def create_workspace_secrets_router(
     @router.delete(
         "/workspaces/{workspace_id}/secrets/{name}",
         response_model=WorkspaceSecretDeleteResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def delete_workspace_secret(workspace_id: str, name: str) -> WorkspaceSecretDeleteResponse:
         require_workflows_enabled(settings)
