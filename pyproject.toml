@@ -4,6 +4,10 @@ version = "0.1.0"
 description = "Local processing console for educational videos and Agent Legion workflows"
 requires-python = ">=3.11"
 dependencies = [
+  # ACP (Agent Client Protocol) SDK for the Studio chat backend
+  # (server/app/studio_chat): asyncio client/agent schemas + stdio transport.
+  # Not to be confused with the unrelated `acp-sdk` package (IBM/BeeAI ACP).
+  "agent-client-protocol>=0.12,<1",
   "cryptography",
   "fastapi",
   "filelock",

@@ -11,10 +11,23 @@ resolution-markers = [
 ]
 
 [[package]]
+name = "agent-client-protocol"
+version = "0.12.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/f8/50/65bfb4e3e13f350a52c368cbfc4bc36a1b3b3f34a6b3f5a2e3551e1bd63b/agent_client_protocol-0.12.0.tar.gz", hash = "sha256:4d42ac680388556b038cb6dd58dbbbd1561f9e545a334c1a352cc055f98b1c79", size = 135037, upload-time = "2026-08-01T15:58:22.35Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9c/c7/b84b8698879464bd8f869551bac31454bed14a3a22910f65d9693f3701bd/agent_client_protocol-0.12.0-py3-none-any.whl", hash = "sha256:233626748034896214de118f5cf5a319484ad2186705fd595219afee92237ccc", size = 92992, upload-time = "2026-08-01T15:58:21.216Z" },
+]
+
+[[package]]
 name = "agent-legion"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "agent-client-protocol" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "filelock" },
@@ -46,6 +59,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "agent-client-protocol", specifier = ">=0.12,<1" },
     { name = "cryptography" },
     { name = "fastapi" },
     { name = "filelock" },
