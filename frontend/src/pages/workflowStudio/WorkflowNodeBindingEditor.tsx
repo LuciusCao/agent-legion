@@ -9,6 +9,8 @@ import {
 import { useSettingStore } from '../../stores/settingStore'
 import type { WorkflowNodeRecord } from '../../types'
 import type { ExecutorDefinition } from '../../types/executorTypes'
+import { useExecutorCatalog } from './useExecutorCatalog'
+import { WorkflowCatalogLoadError } from './WorkflowCatalogLoadError'
 import { hasCodeCapability } from './workflowNodeCodeLookup'
 import { useStudioNav } from './workflowStudioNav'
 import {
@@ -30,6 +32,7 @@ type Props = {
 export function WorkflowNodeBindingEditor(props: Props) {
   const { node } = props
   const workflowKey = useSettingStore((s) => s.settings.workflowKey)
+  const catalog = useExecutorCatalog()
   const executorConfiguration = useSettingStore((s) => s.executorConfiguration)
   const isSaving = useSettingStore((s) => s.isSaving)
   const setNodeBinding = useSettingStore((s) => s.setNodeBinding)
@@ -61,6 +64,9 @@ export function WorkflowNodeBindingEditor(props: Props) {
       .querySelector('[aria-label="节点代码"]')
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
+  if (catalog.loadError) {
+    return <WorkflowCatalogLoadError onRetry={() => void catalog.retry()} />
+  }
   if (props.bindings.length === 0) {
     return (
       <div className={inspectorStyles.empty}>未匹配到 executor capability</div>

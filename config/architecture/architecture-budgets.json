@@ -340,6 +340,7 @@
     "frontend/src/pages/workflowStudio/WorkflowAgentDefinitionCard.tsx": 48,
     "frontend/src/pages/workflowStudio/WorkflowAgentExecutionDetails.module.css": 16,
     "frontend/src/pages/workflowStudio/WorkflowAgentExecutionDetails.tsx": 78,
+    "frontend/src/pages/workflowStudio/WorkflowCatalogLoadError.tsx": 22,
     "frontend/src/pages/workflowStudio/WorkflowDefinitionEditor.module.css": 36,
     "frontend/src/pages/workflowStudio/WorkflowDefinitionEditor.tsx": 26,
     "frontend/src/pages/workflowStudio/WorkflowDefinitionEditor.types.ts": 11,
