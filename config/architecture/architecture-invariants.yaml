@@ -570,6 +570,24 @@ invariants:
         target: tests/db/test_auth_scoped_tokens_migration.py
         gate: quick
 
+  - id: STUDIO-AGENT-002
+    statement: "Studio chat sessions (phase 3 chunk 4) run user-selected ACP agents whose command lines come only from the admin-maintained instance-level registry (global_settings key 'studio_agents'); non-admin users pick an agent by id and the picker API never exposes command/args. Each session mints one scoped token (origin='run', fixed TTL) that crosses the process boundary only as an MCP env entry inside the ACP session/new request — never persisted, never logged, never present in message or SSE payloads — and is revoked when the session closes. Permission requests for agent-legion MCP tools auto-approve (the scoped token is the authority boundary); all other tool calls default to human confirmation with a per-session allow-all switch, and cancelling a turn settles every pending permission as denied."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/routes/test_studio_chat.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_studio_agents_admin.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_studio_chat_service.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_studio_chat_schema.py
+        gate: quick
+
   - id: CONFIG-MANIFEST-001
     statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload."
     owner: security
