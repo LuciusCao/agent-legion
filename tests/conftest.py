@@ -295,6 +295,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_job_rerun_preview.py",
         "tests/services/test_ops_metrics.py",
         "tests/services/test_studio_chat_service.py",
+        "tests/services/test_studio_chat_availability.py",
         "tests/services/test_quality_labels.py",
         "tests/services/test_quality_replays.py",
         "tests/services/test_quality_sampling.py",

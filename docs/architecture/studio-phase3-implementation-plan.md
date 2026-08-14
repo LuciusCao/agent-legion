@@ -100,8 +100,11 @@ ACP 生态验证（哪些 agent 支持、协议成熟度）是 chunk 4 改造的
   `loop.call_soon_threadsafe` 直发，close 先优雅排水再 kill 并重新校验进程身份）。
 - agent 注册表：实例级 `global_settings` key `studio_agents`（{api_base, agents[]），
   admin 经 `GET/PUT /api/admin/studio-agents` 维护；非 admin 只能按 id 选，
-  picker API 不出 command/args（防 RCE）。注册表独立成文档而非并入 `instance`
-  大文档：后者是整体替换语义且前端按字段重建 payload，并入会被无关保存冲掉。
+  picker API 不出 command/args（防 RCE），且只列本机可用的 agent——可用性探测
+  为 PATH 级（shutil.which，不做 ACP 握手），60s TTL 缓存，后端启动时预热并
+  对缺失项告警；用不可用 agent 建 session 在 spawn 前明确报错、不留孤儿行。
+  注册表独立成文档而非并入 `instance` 大文档：后者是整体替换语义且前端按字段
+  重建 payload，并入会被无关保存冲掉。
 - session/new 现铸 scoped token（origin='run'，TTL 2h 固定）经 MCP env 注入，
   只出现在 session/new 请求里；session 关闭即吊销；不落库/日志/消息/SSE。
 - schema v43：`studio_chat_sessions`（capability 快照、allow_all_permissions、

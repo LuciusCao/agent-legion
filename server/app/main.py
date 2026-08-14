@@ -111,6 +111,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # Studio chat (phase 3 chunk 4): ACP conversation sessions, one agent
     # subprocess per session; in-process only, reaped in the lifespan finally.
     studio_chat_service = StudioChatService(job_db, settings, job_event_manager.bus)
+    # PATH-level availability of every registered chat agent: warms the probe
+    # cache and logs the entries the picker will hide on this host.
+    studio_chat_service.warm_availability_probe()
     agent_completion = AgentCompletionHandler(
         executor_leases,
         artifact_store,
