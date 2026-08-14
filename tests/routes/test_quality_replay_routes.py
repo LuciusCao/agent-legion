@@ -14,6 +14,16 @@ from tests.postgres_support import TEST_DATABASE_URL
 pytestmark = pytest.mark.fresh_schema
 
 
+@pytest.fixture
+def client(client_factory):
+    """Private app per test: these tests write frozen inputs into the app
+    data_dir derived from the function-scoped tmp_path; the worker-session
+    shared app has its own session data_dir, so the replay route would not
+    find the files there."""
+    with client_factory(fresh=True) as c:
+        yield c
+
+
 def _seed(client_tmp_path):
     """Seed a workspace with one completed job + sample item; returns ids."""
     job_db = JobQueries(TEST_DATABASE_URL, client_tmp_path / "jobs")

@@ -388,6 +388,7 @@ def pytest_collection_modifyitems(config, items):
 
 def _rebuild_schema() -> None:
     """Drop and recreate the per-xdist-worker schema, then apply full DDL."""
+    global _SEED_SNAPSHOT
     close_database_pools()
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
@@ -401,17 +402,102 @@ def _rebuild_schema() -> None:
             f"test database: {exc}"
         )
     init_db(TEST_DATABASE_URL)
+    _SEED_SNAPSHOT = None
 
 
-def _reset_schema_data() -> None:
-    """Empty every table without touching DDL (~50ms vs ~2.3s for a rebuild).
+# Tables re-seeded after every reset (see _isolate_postgres_database). After
+# the first full service-layer seed of a session their rows are snapshotted;
+# later resets replay the snapshot with plain multi-row INSERTs instead of
+# re-running the service-layer seed (~70ms/test) per test. The snapshot is
+# invalidated by every schema rebuild, so DDL drift can never stale it.
+_SEEDED_TABLES = ("job_event_seq", "global_settings", "versioned_entities", "workflow_catalog")
+_SEED_SNAPSHOT: dict[str, tuple[list[str], list[tuple]]] | None = None
 
-    schema_migrations keeps its row: it is constant after init_db, and tests
-    that re-run init_db rely on it for idempotency. DDL-seeded rows must be
-    restored after the truncate: job_event_seq carries a singleton counter
-    row (postgres_schema.sql) that job intake bumps on every batch.
-    global_settings is re-seeded with a fixed token_usage pricing document so
-    cost-calculation tests have deterministic rates to assert against.
+
+def _capture_seed_snapshot() -> None:
+    global _SEED_SNAPSHOT
+    snapshot: dict[str, tuple[list[str], list[tuple]]] = {}
+    with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
+        for table in _SEEDED_TABLES:
+            cursor = conn.execute(
+                sql.SQL("select * from {}").format(sql.Identifier(TEST_SCHEMA, table))
+            )
+            columns = [col.name for col in cursor.description]
+            snapshot[table] = (columns, cursor.fetchall())
+    _SEED_SNAPSHOT = snapshot
+
+
+def _restore_seed_rows(conn, tables: list[str]) -> None:
+    for table in tables:
+        columns, rows = _SEED_SNAPSHOT[table]
+        if not rows:
+            continue
+        row_sql = (
+            sql.SQL("(") + sql.SQL(", ").join(sql.Placeholder() for _ in columns) + sql.SQL(")")
+        )
+        conn.execute(
+            sql.SQL("insert into {} ({}) values {}").format(
+                sql.Identifier(TEST_SCHEMA, table),
+                sql.SQL(", ").join(sql.Identifier(c) for c in columns),
+                sql.SQL(", ").join(row_sql for _ in rows),
+            ),
+            [value for row in rows for value in row],
+        )
+
+
+def _dirty_tables(conn, tables: list[str]) -> set[str]:
+    """Tables holding rows or owning an advanced identity sequence.
+
+    Row existence is an exact per-table EXISTS probe (one round trip), not a
+    stats-estimator read, so a freshly written table can never be misjudged as
+    clean. Sequence state matters because a table can be empty while its
+    identity sequence advanced (rows inserted, then deleted); only TRUNCATE
+    ... RESTART IDENTITY rewinds that, so such tables stay in the truncate
+    set. Any detection error falls back to "everything dirty" — missing a
+    dirty table would leak data between tests, which is worse than slow.
+    """
+    try:
+        probes = sql.SQL(", ").join(
+            sql.SQL("exists(select 1 from {}) as {}").format(
+                sql.Identifier(TEST_SCHEMA, table), sql.Identifier(table)
+            )
+            for table in tables
+        )
+        row = conn.execute(sql.SQL("select {}").format(probes)).fetchone()
+        dirty = {table for table, has_rows in zip(tables, row, strict=True) if has_rows}
+        sequence_rows = conn.execute(
+            """
+            select t.relname
+            from pg_class s
+            join pg_namespace n on n.oid = s.relnamespace
+            join pg_depend d on d.objid = s.oid and d.deptype in ('a', 'i')
+            join pg_class t on t.oid = d.refobjid
+            join pg_sequences ps
+              on ps.schemaname = n.nspname and ps.sequencename = s.relname
+            where s.relkind = 'S' and n.nspname = %s and ps.last_value is not null
+            """,
+            (TEST_SCHEMA,),
+        ).fetchall()
+        dirty.update(seq_row[0] for seq_row in sequence_rows)
+        return dirty
+    except psycopg.Error:
+        return set(tables)
+
+
+def _reset_schema_data() -> bool:
+    """Empty dirty tables without touching DDL, then restore seeded rows.
+
+    Returns True when the reset replayed the seed snapshot (seeded tables
+    restored inline); False when a full service-layer seed must run (first
+    reset after a schema build, snapshot not captured yet).
+
+    Only tables that actually hold rows (or own an advanced identity
+    sequence) are truncated; clean tables are left alone. Seeded tables are
+    effectively always dirty, so their per-test restoration is certain; the
+    seeded content itself is bit-identical to the service-layer seed because
+    the snapshot was captured from it. schema_migrations keeps its rows: it
+    is constant after init_db, and tests that re-run init_db rely on it for
+    idempotency.
     """
     try:
         with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
@@ -422,12 +508,34 @@ def _reset_schema_data() -> None:
                 ).fetchall()
                 if row[0] != "schema_migrations"
             ]
-            if tables:
+            if _SEED_SNAPSHOT is None:
+                dirty = set(tables)
+            else:
+                dirty = _dirty_tables(conn, tables)
+                # Seeded tables are always re-truncated and replayed: a test
+                # that deleted seed rows without adding new ones would
+                # otherwise look "clean" to the row probe and lose its seeds.
+                dirty.update(t for t in _SEEDED_TABLES if t in tables)
+            if dirty:
                 conn.execute(
                     sql.SQL("truncate {} restart identity cascade").format(
-                        sql.SQL(", ").join(sql.Identifier(TEST_SCHEMA, t) for t in tables)
+                        sql.SQL(", ").join(sql.Identifier(TEST_SCHEMA, t) for t in dirty)
                     )
                 )
+            if _SEED_SNAPSHOT is not None:
+                _restore_seed_rows(conn, [t for t in _SEEDED_TABLES if t in dirty])
+                return True
+    except psycopg.Error as exc:
+        pytest.fail(
+            "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
+            f"test database: {exc}"
+        )
+    # First reset after a (re)build: keep the historical full-seed path. The
+    # job_event_seq singleton counter row (postgres_schema.sql) is bumped by
+    # job intake on every batch, and global_settings gets a fixed token_usage
+    # pricing document so cost-calculation tests have deterministic rates.
+    try:
+        with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
             conn.execute(
                 sql.SQL(
                     "insert into {}(id, value) values (1, 0) on conflict(id) do nothing"
@@ -445,6 +553,7 @@ def _reset_schema_data() -> None:
             "PostgreSQL is required for tests. Set AGENT_LEGION_TEST_DATABASE_URL to a reachable "
             f"test database: {exc}"
         )
+    return False
 
 
 @pytest.fixture(scope="session")
@@ -477,15 +586,24 @@ def _isolate_postgres_database(request):
     fresh = request.node.get_closest_marker("fresh_schema") is not None
     if fresh:
         _rebuild_schema()
+        reset_published_agent_cache()
+        _seed_agent_definitions()
+        reset_published_executor_cache()
+        _seed_executor_definitions()
+        _seed_skill_sources()
+        _seed_workflow_catalog()
+        _capture_seed_snapshot()
     else:
         close_database_pools()
-        _reset_schema_data()
-    reset_published_agent_cache()
-    _seed_agent_definitions()
-    reset_published_executor_cache()
-    _seed_executor_definitions()
-    _seed_skill_sources()
-    _seed_workflow_catalog()
+        replayed = _reset_schema_data()
+        reset_published_agent_cache()
+        reset_published_executor_cache()
+        if not replayed:
+            _seed_agent_definitions()
+            _seed_executor_definitions()
+            _seed_skill_sources()
+            _seed_workflow_catalog()
+            _capture_seed_snapshot()
     yield
     if fresh:
         # Erase any DDL drift the test left behind so later TRUNCATE-isolated
@@ -610,34 +728,148 @@ def app_factory(tmp_path):
     return factory
 
 
+# Shared session-scoped apps: create_app costs 0.5-1.2s (FastAPI route
+# registration + pydantic schema generation), so the default client fixtures
+# reuse one long-lived app per xdist worker instead of rebuilding it per test.
+# The lifespan runs once per worker session (per-test lifespan would trip
+# shutdown hooks that are not re-armable, e.g. agent_dispatch.enqueue_pool
+# and StudioChatService._shutdown).
+#
+# Isolation contract: anything DB-backed (users, workspaces, broker claims,
+# worker control state) is still reset per test by the TRUNCATE in
+# _isolate_postgres_database; cookies/headers are reset per test below.
+# In-memory app.state, however, now survives across tests. Tests that mutate
+# it must either scope the mutation with monkeypatch (auto-restored) or opt
+# out to a private app via client_factory(fresh=True) / app options. Known
+# in-memory mutable points: settings (incl. executor_runtime flags),
+# agent_manager.agents, executor_registry (publish/rollback/archive hot
+# reload), app.state.workflow_worker. And a test must never re-enter the
+# shared client's context manager (`with client as c`): that would run the
+# app lifespan a second time, and its exit would fire the shutdown hooks
+# (cancel background tasks, close the enqueue pool, shut down studio chat)
+# on the still-shared app.
+def _build_shared_client(tmp_path_factory, dir_name: str):
+    from server.app.main import create_app
+
+    data_dir = tmp_path_factory.mktemp(dir_name)
+    return create_app(data_dir=data_dir, start_worker=False)
+
+
+@contextmanager
+def _no_background_tasks():
+    """Dormant BackgroundTasks.start for the worker-session shared apps.
+
+    The shared apps' background loops would outlive individual tests and act
+    on the shared per-worker schema *between* tests: the intake consumer could
+    claim batches enqueued by a fresh-app test (processing them against the
+    wrong data_dir), and the ops-metrics/aggregator loops could write rows a
+    later test does not expect. Function-scoped apps keep the full production
+    behavior; only the two session apps run with the loops disabled. Tests
+    that need a background loop (e.g. the agent-status broadcast flush) must
+    use a private app via client_factory(fresh=True).
+    """
+    from unittest import mock
+
+    from server.app.startup_tasks import BackgroundTasks
+
+    with mock.patch.object(BackgroundTasks, "start", lambda self, app: None):
+        yield
+
+
+@pytest.fixture(scope="session")
+def _shared_authed_client(tmp_path_factory, _session_test_schema):
+    # _session_test_schema is an explicit dependency: session fixtures run
+    # before the function-scoped autouse isolation fixture, and create_app
+    # needs the worker schema to already exist (JobQueries runs init_db).
+    app = _build_shared_client(tmp_path_factory, "shared-app")
+    # The patch must cover only __enter__ (the lifespan start): keeping it
+    # active across the yield would neuter background tasks on every
+    # function-scoped app in this worker too.
+    client = TestClient(app)
+    with _no_background_tasks():
+        client.__enter__()
+    try:
+        yield client, dict(client.headers)
+    finally:
+        client.__exit__(None, None, None)
+
+
+@pytest.fixture(scope="session")
+def _shared_anon_client(tmp_path_factory, _session_test_schema):
+    # A second app (not a second client on the same app): entering two
+    # TestClients on one app would run the lifespan twice and re-attach the
+    # event bus to the wrong loop.
+    app = _build_shared_client(tmp_path_factory, "shared-anon-app")
+    client = TestClient(app)
+    with _no_background_tasks():
+        client.__enter__()
+    try:
+        yield client, dict(client.headers)
+    finally:
+        client.__exit__(None, None, None)
+
+
+def _reset_client_state(client: TestClient, default_headers: dict[str, str]) -> None:
+    client.cookies.clear()
+    client.headers.clear()
+    client.headers.update(default_headers)
+    # The login lockout table is in-process (LoginRateLimiter, not DB-backed),
+    # so the per-test TRUNCATE cannot reach it; a fresh app starts with an
+    # empty table, and the shared app must be restored to the same condition
+    # or a lockout test poisons every later login/bootstrap on this worker.
+    rate_limiter = getattr(client.app.state.auth_service, "_rate_limiter", None)
+    if rate_limiter is not None:
+        rate_limiter._entries.clear()
+
+
+def _bootstrap_admin(client: TestClient) -> None:
+    # Every test schema starts empty; bootstrap the first admin and keep its
+    # session cookie so existing tests stay authenticated.
+    response = client.post(
+        "/api/auth/bootstrap",
+        json={"username": "admin", "password": "admin-pw"},
+    )
+    assert response.status_code == 200, response.text
+    client.headers["x-agent-legion-request"] = "1"
+
+
 @pytest.fixture
-def client_factory(app_factory):
+def client_factory(app_factory, request):
     @contextmanager
-    def factory(authenticated: bool = True, **app_options):
+    def factory(authenticated: bool = True, fresh: bool = False, **app_options):
+        if not fresh and not app_options:
+            # Default path: reuse the worker-session app (see isolation
+            # contract above). fresh=True or any app option builds a private
+            # function-scoped app instead.
+            fixture_name = "_shared_authed_client" if authenticated else "_shared_anon_client"
+            client, default_headers = request.getfixturevalue(fixture_name)
+            _reset_client_state(client, default_headers)
+            if authenticated:
+                _bootstrap_admin(client)
+            yield client
+            return
         app = app_factory(**app_options)
         with TestClient(app) as client:
             if authenticated:
-                # Every test schema starts empty; bootstrap the first admin and
-                # keep its session cookie so existing tests stay authenticated.
-                response = client.post(
-                    "/api/auth/bootstrap",
-                    json={"username": "admin", "password": "admin-pw"},
-                )
-                assert response.status_code == 200, response.text
-                client.headers["x-agent-legion-request"] = "1"
+                _bootstrap_admin(client)
             yield client
 
     return factory
 
 
 @pytest.fixture
-def client(client_factory):
-    with client_factory() as c:
-        yield c
+def client(_shared_authed_client):
+    client, default_headers = _shared_authed_client
+    _reset_client_state(client, default_headers)
+    _bootstrap_admin(client)
+    yield client
+    _reset_client_state(client, default_headers)
 
 
 @pytest.fixture
-def anon_client(client_factory):
+def anon_client(_shared_anon_client):
     """Unauthenticated client for auth-matrix tests (no session cookie)."""
-    with client_factory(authenticated=False) as c:
-        yield c
+    client, default_headers = _shared_anon_client
+    _reset_client_state(client, default_headers)
+    yield client
+    _reset_client_state(client, default_headers)

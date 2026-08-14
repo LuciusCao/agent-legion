@@ -2,8 +2,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from server.app.db.transaction import write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
+
+
+@pytest.fixture
+def client(client_factory):
+    """Private app per test: OpsMetricsService keeps a 5s in-memory summary
+    cache; on the worker-session shared app it survives across tests and
+    serves stale summaries."""
+    with client_factory(fresh=True) as c:
+        yield c
 
 
 def test_metrics_overview_empty_response_shape(client) -> None:

@@ -9,10 +9,17 @@ from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.fixture
-def workspace_client(client):
+def workspace_client(client_factory, monkeypatch):
     """Ensure workflows are enabled and provide a helper to create workspaces/jobs."""
-    client.app.state.settings.config.setdefault("workflows", {})["enabled"] = True
-    return client
+    # Private app per test: these tests assert on exact file counts under the
+    # app data_dir, and workspace ids are name-derived, so the worker-session
+    # shared app's data_dir residue would leak between identically-named
+    # workspaces across tests/files.
+    with client_factory(fresh=True) as client:
+        monkeypatch.setitem(
+            client.app.state.settings.config.setdefault("workflows", {}), "enabled", True
+        )
+        yield client
 
 
 def _create_completed_job(client: TestClient, workspace_id: str, question_id: str = "Q001"):
