@@ -593,6 +593,14 @@ create table if not exists auth_scoped_tokens (
   revoked_at timestamptz,
   created_at timestamptz not null default current_timestamp
 );
+-- Upgrade path for pre-v42 databases: create table if not exists skips the
+-- existing v41 table, so the columns must be added here before the unique
+-- index below can be built on id.
+alter table auth_scoped_tokens add column if not exists origin text not null default 'run';
+alter table auth_scoped_tokens add column if not exists id text;
+update auth_scoped_tokens set id = gen_random_uuid()::text where id is null;
+alter table auth_scoped_tokens alter column id set not null;
+alter table auth_scoped_tokens alter column id set default gen_random_uuid()::text;
 create unique index if not exists idx_auth_scoped_tokens_id on auth_scoped_tokens(id);
 create index if not exists idx_auth_scoped_tokens_user_id on auth_scoped_tokens(user_id);
 create index if not exists idx_auth_scoped_tokens_expires_at on auth_scoped_tokens(expires_at);
