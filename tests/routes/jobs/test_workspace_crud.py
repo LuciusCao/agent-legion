@@ -3,8 +3,11 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_startup_does_not_seed_any_workspace(client):
-    with client as c:
-        response = c.get("/api/workspaces")
+    # Do not use `with client as c`: the fixture's client is the
+    # worker-session shared TestClient whose lifespan is already running;
+    # re-entering it would run the app lifespan a second time and its exit
+    # would cancel the session's background tasks.
+    response = client.get("/api/workspaces")
 
     assert response.status_code == 200
     assert response.json()["workspaces"] == []

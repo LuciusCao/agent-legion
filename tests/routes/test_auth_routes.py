@@ -176,7 +176,9 @@ def test_workspace_member_management(anon_client, job_db) -> None:
 
 def test_bootstrap_admin_env_seed(client_factory, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD", "seeded-pw")
-    with client_factory(authenticated=False) as seeded_client:
+    # fresh=True: the env seed runs in build_auth_service at app creation, so
+    # this test needs an app built after the monkeypatch, not the shared one.
+    with client_factory(authenticated=False, fresh=True) as seeded_client:
         assert seeded_client.get("/api/auth/bootstrap").json() == {"available": False}
         assert _login(seeded_client, password="seeded-pw").status_code == 200
 
