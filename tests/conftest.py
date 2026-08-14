@@ -228,6 +228,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_agent_catalog_cutover_migration.py",
         "tests/db/test_agent_request_kind_schema.py",
         "tests/db/test_auth_scoped_tokens_migration.py",
+        "tests/db/test_studio_chat_schema.py",
         "tests/db/test_code_executor_migration.py",
         "tests/db/test_custom_node_codes_migration.py",
         "tests/db/test_executor_asr_config_schema_migration.py",
