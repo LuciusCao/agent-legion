@@ -118,7 +118,7 @@ exemptions:
     migrate call to the version chain; the module is the single wiring point
     for the idempotent DDL replay and grows by two lines per schema version.
   owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
   ceiling: 76
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
@@ -126,7 +126,7 @@ exemptions:
     entry to the migration export list; the module is the flat export point
     for the idempotent migration chain and grows by two lines per version.
   owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
   ceiling: 30
 - check: architecture.file_budget
   path: server/app/main.py
@@ -134,5 +134,5 @@ exemptions:
     state, lifespan shutdown, router parameter) into the application
     composition root, the single assembly point for app services.
   owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
   ceiling: 204
