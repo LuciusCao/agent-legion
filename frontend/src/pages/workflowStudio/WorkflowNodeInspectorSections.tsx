@@ -16,6 +16,7 @@ export type InspectorSectionProps = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
+  workflowKey: string
   readOnly?: boolean
 }
 
@@ -38,6 +39,7 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
         agentCatalog={props.agentCatalog}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
+        workflowKey={props.workflowKey}
         readOnly={props.readOnly}
       />
       <WorkflowNodeCodeSection

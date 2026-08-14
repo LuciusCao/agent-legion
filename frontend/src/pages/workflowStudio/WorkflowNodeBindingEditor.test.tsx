@@ -1,11 +1,17 @@
-import { act, fireEvent, render, screen } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { getExecutorCatalog } from '../../api/executorApi'
 import { useSettingStore } from '../../stores/settingStore'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import type { WorkflowNodeRecord } from '../../types'
 import type { ExecutorDefinition } from '../../types/executorTypes'
 import { findCapabilityBindings } from './WorkflowExecutorBindingList'
 import { WorkflowNodeBindingEditor } from './WorkflowNodeBindingEditor'
 import { StudioNavContext, type StudioNav } from './workflowStudioNav'
+
+vi.mock('../../api/executorApi', () => ({ getExecutorCatalog: vi.fn() }))
+
+const mockGetCatalog = vi.mocked(getExecutorCatalog)
 
 const node: WorkflowNodeRecord = {
   key: 'build',
@@ -52,18 +58,22 @@ const navMock = vi.hoisted(() => ({
 function renderEditor(props?: {
   node?: WorkflowNodeRecord
   readOnly?: boolean
+  workflowKey?: string
   nav?: StudioNav
 }) {
   const target = props?.node ?? node
   return render(
-    <StudioNavContext.Provider value={props?.nav ?? navMock}>
-      <WorkflowNodeBindingEditor
-        node={target}
-        bindings={findCapabilityBindings(executorCatalog, target.capability)}
-        executorCatalog={executorCatalog}
-        readOnly={props?.readOnly}
-      />
-    </StudioNavContext.Provider>
+    <TestQueryProvider>
+      <StudioNavContext.Provider value={props?.nav ?? navMock}>
+        <WorkflowNodeBindingEditor
+          node={target}
+          bindings={findCapabilityBindings(executorCatalog, target.capability)}
+          executorCatalog={executorCatalog}
+          workflowKey={props?.workflowKey ?? 'wf'}
+          readOnly={props?.readOnly}
+        />
+      </StudioNavContext.Provider>
+    </TestQueryProvider>
   )
 }
 
@@ -93,6 +103,7 @@ function changeSelectValue(nodeKey: string, value: string) {
 describe('WorkflowNodeBindingEditor', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    mockGetCatalog.mockResolvedValue({ executors: [], agents: [] })
     useSettingStore.setState({
       workspaceId: 'ws1',
       settings: {
@@ -217,5 +228,57 @@ describe('WorkflowNodeBindingEditor', () => {
     expect(
       screen.queryByTestId('studio-binding-select-build')
     ).not.toBeInTheDocument()
+  })
+
+  it('reads and writes bindings under the visible workflow key, not settings.workflowKey', () => {
+    // settings 快照与 DAG 展示的 workflow 分叉（如草稿改 key 发布后）时，
+    // 绑定编辑器必须与 DAG 口径（visible workflow key）一致。
+    useSettingStore.setState({
+      settings: {
+        entityType: 'question',
+        intakeModes: [],
+        labelOverrides: {},
+        workflowKey: 'legacy-wf',
+      },
+    })
+    renderEditor({ workflowKey: 'wf' })
+
+    expect(getSelectInput('build').value).toBe('code-default')
+    changeSelectValue('build', 'pi-runner')
+
+    expect(
+      useSettingStore.getState().executorConfiguration.bindings
+    ).toContainEqual({
+      workflow_key: 'wf',
+      node_key: 'build',
+      executor_id: 'pi-runner',
+    })
+    expect(saveAllMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows a retryable load error instead of the empty-binding hint when the catalog fails', async () => {
+    mockGetCatalog.mockRejectedValue(new Error('boom'))
+    const orphan: WorkflowNodeRecord = {
+      ...node,
+      key: 'orphan',
+      capability: 'unknown_cap',
+    }
+    renderEditor({ node: orphan })
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'executor 目录加载失败'
+    )
+    expect(
+      screen.queryByText('未匹配到 executor capability')
+    ).not.toBeInTheDocument()
+
+    mockGetCatalog.mockResolvedValue({ executors: [], agents: [] })
+    fireEvent.click(screen.getByRole('button', { name: '重试' }))
+
+    await waitFor(() =>
+      expect(screen.queryByRole('alert')).not.toBeInTheDocument()
+    )
+    expect(mockGetCatalog).toHaveBeenCalledTimes(2)
+    expect(screen.getByText('未匹配到 executor capability')).toBeInTheDocument()
   })
 })

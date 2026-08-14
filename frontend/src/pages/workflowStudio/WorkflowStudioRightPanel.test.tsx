@@ -12,6 +12,10 @@ vi.mock('../../api', () => ({
   api: vi.fn(),
 }))
 
+vi.mock('../../api/executorApi', () => ({
+  getExecutorCatalog: vi.fn().mockResolvedValue({ executors: [], agents: [] }),
+}))
+
 const mockApi = vi.mocked(api)
 
 const adminUser: UserResponse = {

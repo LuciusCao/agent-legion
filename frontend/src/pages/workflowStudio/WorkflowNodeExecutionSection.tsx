@@ -15,6 +15,7 @@ type Props = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
+  workflowKey: string
   readOnly?: boolean
 }
 export function WorkflowNodeExecutionSection(props: Props) {
@@ -37,6 +38,7 @@ export function WorkflowNodeExecutionSection(props: Props) {
           node={props.node}
           bindings={bindings}
           executorCatalog={props.executorCatalog}
+          workflowKey={props.workflowKey}
           readOnly={props.readOnly}
         />
       )}
