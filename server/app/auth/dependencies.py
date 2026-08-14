@@ -57,6 +57,17 @@ def require_user(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> 
 
 
 def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> dict[str, Any]:
+    # A scoped token inherits the initiating user's role; without this check a
+    # token minted for an admin would pass require_admin and reach every admin
+    # endpoint (STUDIO-AGENT-001: scoped identities never take effect).
+    scope = user.get("actor_scope")
+    if scope:
+        detail = (
+            "Studio agent scope cannot use admin endpoints"
+            if scope == STUDIO_AGENT_SCOPE
+            else "Scoped tokens cannot use admin endpoints"
+        )
+        raise HTTPException(status_code=403, detail=detail)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
     return user
