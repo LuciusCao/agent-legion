@@ -93,16 +93,48 @@ ACP 生态验证（哪些 agent 支持、协议成熟度）是 chunk 4 改造的
 
 ## Chunk 4 · 对话后端（ACP client 化，方向修正后）
 
-- 按「方向修正（2026-08-14）」重写本 chunk：不再内嵌 pi/velites 运行时，
-  后端作为 **ACP client** 接用户配置的任意 ACP agent；agent 的工具面走已落地的
-  MCP server（`server.app.mcp_server` + 用户自助签发的 scoped token）。
-- 第一步：ACP 生态验证（协议成熟度、Claude Code/Gemini CLI/Kimi Code 等的
-  ACP 支持现状），再定 client 实现选型。
-- 保留自原方案：chat session/message 持久化（schema 版本顺延）、run 状态机、
-  取消、token 不落日志/命令行；`require_workspace_access`。
-- 原方案要点（备查）：`services/studio_chat.py` 会话持久化、后台线程 run、
-  无状态 transcript 重放、env 注入 scoped token——ACP 化后 transcript/进程
-  管理由 ACP 协议接管，会话持久化与 run 状态机仍是我们的责任。
+**已落地（studio-acp 分支，schema v43）**：
+
+- ACP client 化：每对话 session 一个 ACP 子进程（`server/app/studio_chat/acp_session.py`，
+  acp SDK + 专属 asyncio loop 线程，生命周期对齐 WorkflowWorkerThread 模式；cancel 经
+  `loop.call_soon_threadsafe` 直发，close 先优雅排水再 kill 并重新校验进程身份）。
+- agent 注册表：实例级 `global_settings` key `studio_agents`（{api_base, agents[]），
+  admin 经 `GET/PUT /api/admin/studio-agents` 维护；非 admin 只能按 id 选，
+  picker API 不出 command/args（防 RCE），且只列本机可用的 agent——可用性探测
+  为 PATH 级（shutil.which，不做 ACP 握手），60s TTL 缓存，后端启动时预热并
+  对缺失项告警；用不可用 agent 建 session 在 spawn 前明确报错、不留孤儿行。
+  注册表独立成文档而非并入 `instance` 大文档：后者是整体替换语义且前端按字段
+  重建 payload，并入会被无关保存冲掉。
+- session/new 现铸 scoped token（origin='run'，TTL 2h 固定）经 MCP env 注入，
+  只出现在 session/new 请求里；session 关闭即吊销；不落库/日志/消息/SSE。
+- schema v43：`studio_chat_sessions`（capability 快照、allow_all_permissions、
+  mcp_status）+ `studio_chat_messages`（kind: text/tool_call/plan/permission/status，
+  identity seq 排序）；升级语句在 schema 文件 + migrations 幂等兜底。
+- 路由（workspace 下，`require_workspace_access`）：sessions CRUD、POST/GET messages、
+  SSE `/events`（复用 JobEventManager，channel `studio-chat:{session_id}`，
+  事件类型 message/session）、POST cancel、POST permissions/{request_id}、
+  POST permissions/allow-all。
+- permission 策略：agent-legion MCP 工具 auto-approve；其余默认转发人确认，
+  session 级 allow-all 开关；cancel 以 denied 结清挂起 permission。
+- MCP 可见性冒烟：run 结束未观察到 agent-legion 工具调用 → mcp_status=unverified
+  + status 消息警告，不静默。
+- 内置 prompt 引导：`studio_chat/prompts.py` STUDIO_AUTHORING_BOOTSTRAP，
+  每 session 首个 prompt 前缀注入。
+- v1 不做：前端面板（chunk 5）、loadSession 持久恢复（进程内 session）。
+
+### Chunk 4 Quality Impact
+
+- 新 invariant STUDIO-AGENT-002（注册表唯一命令源、token 边界、permission 策略），
+  证据：tests/routes/test_studio_chat.py、test_studio_agents_admin.py、
+  tests/services/test_studio_chat_service.py、tests/db/test_studio_chat_schema.py。
+- file_budget 豁免（schema.py / migrations/__init__.py / main.py /
+  routes/__init__.py）为按设计增长的组合点，ceiling 随 schema 版本滚动登记。
+- DDL 变更测试 `@pytest.mark.fresh_schema`，覆盖 v42 旧库升级 v43 路径。
+- 真机 agent 冒烟不进 CI：手动脚本 scripts/studio_chat_smoke.py。
+
+原方案要点（备查）：`services/studio_chat.py` 会话持久化、后台线程 run、
+无状态 transcript 重放、env 注入 scoped token——ACP 化后 transcript/进程
+管理由 ACP 协议接管，会话持久化与 run 状态机仍是我们的责任。
 
 ## Chunk 5 · 前端对话面板 + 收尾
 

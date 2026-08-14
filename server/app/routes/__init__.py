@@ -21,6 +21,7 @@ from ..services.workflow_catalog import WorkflowCatalogService
 from ..services.workspace_configuration import WorkspaceConfigurationService
 from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
 from ..settings import Settings
+from ..studio_chat.service import StudioChatService
 from ..worker_control import WorkspaceWorkerControl
 from .agent_definitions import create_agent_definitions_router
 from .agent_workers import create_agent_workers_router
@@ -39,6 +40,8 @@ from .skill_sources import create_skill_sources_router
 from .skills import create_skills_router
 from .studio_agent_tokens import create_studio_agent_tokens_router
 from .studio_agent_tools import create_studio_agent_tools_router
+from .studio_agents_admin import create_studio_agents_admin_router
+from .studio_chat import create_studio_chat_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
@@ -75,6 +78,7 @@ def create_router(
     quality_labels: QualityLabelService | None = None,
     quality_stats: QualityStatsService | None = None,
     quality_replays: QualityReplayService | None = None,
+    studio_chat_service: StudioChatService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -129,6 +133,9 @@ def create_router(
     secured(create_workspace_agent_routes_router(job_db, settings))
     secured(create_studio_agent_tools_router(job_db, settings))
     secured(create_studio_agent_tokens_router(job_db))
+    if studio_chat_service is not None:
+        router.include_router(create_studio_agents_admin_router(job_db))
+        secured(create_studio_chat_router(studio_chat_service, job_event_manager=job_event_manager))
     job_group = APIRouter(dependencies=[Depends(require_workspace_access)])
     include_job_routes(
         job_group,

@@ -143,6 +143,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/admin/studio-agents': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Studio Agents */
+    get: operations['get_studio_agents_api_admin_studio_agents_get']
+    /** Put Studio Agents */
+    put: operations['put_studio_agents_api_admin_studio_agents_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/token-usage-pricing': {
     parameters: {
       query?: never
@@ -2046,6 +2064,145 @@ export interface paths {
     get: operations['get_workspace_stats_api_workspaces__workspace_id__stats_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/agents': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Agents */
+    get: operations['list_agents_api_workspaces__workspace_id__studio_chat_agents_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Sessions */
+    get: operations['list_sessions_api_workspaces__workspace_id__studio_chat_sessions_get']
+    put?: never
+    /** Create Session */
+    post: operations['create_session_api_workspaces__workspace_id__studio_chat_sessions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Session */
+    get: operations['get_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__get']
+    put?: never
+    post?: never
+    /** Close Session */
+    delete: operations['close_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Turn */
+    post: operations['cancel_turn_api_workspaces__workspace_id__studio_chat_sessions__session_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Session Events */
+    get: operations['session_events_api_workspaces__workspace_id__studio_chat_sessions__session_id__events_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Messages */
+    get: operations['list_messages_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_get']
+    put?: never
+    /** Send Message */
+    post: operations['send_message_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Set Allow All */
+    post: operations['set_allow_all_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions_allow_all_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Answer Permission */
+    post: operations['answer_permission_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions__request_id__post']
     delete?: never
     options?: never
     head?: never
@@ -4279,6 +4436,31 @@ export interface components {
       /** Valid */
       valid: boolean
     }
+    /** StudioAgentRegistryEntry */
+    StudioAgentRegistryEntry: {
+      /** Args */
+      args?: string[]
+      /** Command */
+      command: string
+      /** Id */
+      id: string
+      /** Label */
+      label: string
+    }
+    /** StudioAgentRegistryResponse */
+    StudioAgentRegistryResponse: {
+      /** Agents */
+      agents?: components['schemas']['StudioAgentRegistryEntry'][]
+      /** Api Base */
+      api_base: string
+    }
+    /** StudioAgentRegistryUpdate */
+    StudioAgentRegistryUpdate: {
+      /** Agents */
+      agents?: components['schemas']['StudioAgentRegistryEntry'][]
+      /** Api Base */
+      api_base: string
+    }
     /**
      * StudioAgentTokenEntry
      * @description Management view of one token — never carries digest or plaintext.
@@ -4336,6 +4518,156 @@ export interface components {
       key: string
       /** Label */
       label: string
+    }
+    /**
+     * StudioChatAgentOption
+     * @description Picker view of a registry agent: never exposes command/args.
+     */
+    StudioChatAgentOption: {
+      /** Id */
+      id: string
+      /** Label */
+      label: string
+    }
+    /** StudioChatAgentsResponse */
+    StudioChatAgentsResponse: {
+      /** Agents */
+      agents: components['schemas']['StudioChatAgentOption'][]
+    }
+    /** StudioChatAllowAllRequest */
+    StudioChatAllowAllRequest: {
+      /** Enabled */
+      enabled: boolean
+    }
+    /** StudioChatMessageCreateRequest */
+    StudioChatMessageCreateRequest: {
+      /** Text */
+      text: string
+    }
+    /** StudioChatMessageRecord */
+    StudioChatMessageRecord: {
+      /** Content */
+      content: {
+        [key: string]: unknown
+      }
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status'
+      /**
+       * Role
+       * @enum {string}
+       */
+      role: 'user' | 'agent' | 'system'
+      /** Seq */
+      seq: number
+      /** Session Id */
+      session_id: string
+    }
+    /** StudioChatMessageResponse */
+    StudioChatMessageResponse: {
+      message: components['schemas']['StudioChatMessageRecord']
+    }
+    /** StudioChatMessagesResponse */
+    StudioChatMessagesResponse: {
+      /** Messages */
+      messages: components['schemas']['StudioChatMessageRecord'][]
+    }
+    /**
+     * StudioChatPermissionAnswerRequest
+     * @description Human answer to a forwarded permission prompt: pick an option or deny.
+     */
+    StudioChatPermissionAnswerRequest: {
+      /**
+       * Deny
+       * @default false
+       */
+      deny: boolean
+      /** Option Id */
+      option_id?: string | null
+    }
+    /** StudioChatPermissionAnswerResponse */
+    StudioChatPermissionAnswerResponse: {
+      /** Resolved */
+      resolved: string
+    }
+    /** StudioChatSessionCreateRequest */
+    StudioChatSessionCreateRequest: {
+      /** Agent Id */
+      agent_id: string
+      /**
+       * Title
+       * @default
+       */
+      title: string
+    }
+    /** StudioChatSessionRecord */
+    StudioChatSessionRecord: {
+      /** Acp Session Id */
+      acp_session_id: string | null
+      /** Agent Id */
+      agent_id: string
+      /** Allow All Permissions */
+      allow_all_permissions: boolean
+      /** Capability Snapshot */
+      capability_snapshot: {
+        [key: string]: unknown
+      }
+      /** Closed At */
+      closed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Error Detail */
+      error_detail: string
+      /** Id */
+      id: string
+      /**
+       * Mcp Status
+       * @enum {string}
+       */
+      mcp_status: 'unknown' | 'verified' | 'unverified'
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'starting'
+        | 'idle'
+        | 'running'
+        | 'awaiting_permission'
+        | 'closed'
+        | 'error'
+      /** Title */
+      title: string
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string
+      /** User Id */
+      user_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** StudioChatSessionResponse */
+    StudioChatSessionResponse: {
+      session: components['schemas']['StudioChatSessionRecord']
+    }
+    /** StudioChatSessionsResponse */
+    StudioChatSessionsResponse: {
+      /** Sessions */
+      sessions: components['schemas']['StudioChatSessionRecord'][]
     }
     /** TokenUsageCostBreakdown */
     TokenUsageCostBreakdown: {
@@ -5772,6 +6104,59 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['SkillSourcesResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_studio_agents_api_admin_studio_agents_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentRegistryResponse']
+        }
+      }
+    }
+  }
+  put_studio_agents_api_admin_studio_agents_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentRegistryUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentRegistryResponse']
         }
       }
       /** @description Validation Error */
@@ -9793,6 +10178,374 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceStatsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_agents_api_workspaces__workspace_id__studio_chat_agents_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatAgentsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_sessions_api_workspaces__workspace_id__studio_chat_sessions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_session_api_workspaces__workspace_id__studio_chat_sessions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatSessionCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  close_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_turn_api_workspaces__workspace_id__studio_chat_sessions__session_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  session_events_api_workspaces__workspace_id__studio_chat_sessions__session_id__events_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/event-stream': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_messages_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_get: {
+    parameters: {
+      query?: {
+        after_seq?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatMessagesResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  send_message_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatMessageCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatMessageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  set_allow_all_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions_allow_all_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatAllowAllRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  answer_permission_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions__request_id__post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+        request_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatPermissionAnswerRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatPermissionAnswerResponse']
         }
       }
       /** @description Validation Error */

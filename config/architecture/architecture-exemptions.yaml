@@ -1,5 +1,12 @@
 exemptions:
 - check: architecture.route_response_model
+  path: server/app/routes/studio_chat.py:session_events
+  reason: Studio chat session events are a Server-Sent Events stream
+    (StreamingResponse, text/event-stream), same shape as the workspace job
+    events route; there is no JSON response model to name.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
+- check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
@@ -68,10 +75,12 @@ exemptions:
     skill validation routers (agent config governance, schema v26), the
     quality replay router (schema v29, EXEC-QUALITY-REPLAY-001), the
     studio-agent tool surface router (STUDIO-AGENT-001, phase 3 chunk 3),
-    and the studio-agent self-service token router (schema v42).
+    the studio-agent self-service token router (schema v42), and the Studio
+    chat conversation + ACP agent registry routers (phase 3 chunk 4, schema
+    v43).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 137
+  ceiling: 146
 - check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
@@ -112,9 +121,25 @@ exemptions:
   ceiling: 135
 - check: architecture.file_budget
   path: server/app/db/schema.py
-  reason: Schema v42 (scoped_token_origin) adds one migration import and one
+  reason: Schema v43 (studio_chat_tables) adds one migration import and one
     migrate call to the version chain; the module is the single wiring point
     for the idempotent DDL replay and grows by two lines per schema version.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-08-13-studio-agent-mcp-server.md
-  ceiling: 74
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
+  ceiling: 76
+- check: architecture.file_budget
+  path: server/app/db/migrations/__init__.py
+  reason: Schema v43 (studio_chat_tables) adds one import and one __all__
+    entry to the migration export list; the module is the flat export point
+    for the idempotent migration chain and grows by two lines per version.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
+  ceiling: 30
+- check: architecture.file_budget
+  path: server/app/main.py
+  reason: Phase 3 chunk 4 wires the StudioChatService (construction, app
+    state, lifespan shutdown, router parameter) into the application
+    composition root, the single assembly point for app services.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
+  ceiling: 204

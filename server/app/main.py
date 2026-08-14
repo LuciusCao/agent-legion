@@ -46,6 +46,7 @@ from server.app.settings import load_settings, validate_settings
 from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
+from server.app.studio_chat.service import StudioChatService
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -107,6 +108,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     )
     agent_worker_registry = AgentWorkerRegistry(job_db.path)
     ops_metrics = OpsMetricsService(job_db.path, settings.config)
+    # Studio chat (phase 3 chunk 4): ACP conversation sessions, one agent
+    # subprocess per session; in-process only, reaped in the lifespan finally.
+    studio_chat_service = StudioChatService(job_db, settings, job_event_manager.bus)
+    # PATH-level availability of every registered chat agent: warms the probe
+    # cache and logs the entries the picker will hide on this host.
+    studio_chat_service.warm_availability_probe()
     agent_completion = AgentCompletionHandler(
         executor_leases,
         artifact_store,
@@ -155,6 +162,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             yield
         finally:
             await background_tasks.stop(app)
+            # Reap chat sessions before closing DB pools: teardown revokes
+            # scoped tokens and settles permission waiters via the DB.
+            studio_chat_service.shutdown()
             for thread in (sweeper_thread, artifact_gc_thread):
                 if thread is not None:
                     thread.stop()
@@ -178,6 +188,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
     app.state.job_event_manager = job_event_manager
+    app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
     app.state.workspace_event_aggregator = workspace_event_aggregator
@@ -211,6 +222,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             quality_labels=QualityLabelService(job_db.path, artifact_store),
             quality_stats=QualityStatsService(job_db.path),
             quality_replays=QualityReplayService(job_db, artifact_store),
+            studio_chat_service=studio_chat_service,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")
