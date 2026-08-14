@@ -129,7 +129,9 @@ def create_studio_chat_router(
         response_class=StreamingResponse,
         responses={200: {"content": {"text/event-stream": {}}}},
     )
-    async def session_events(request: Request, workspace_id: str, session_id: str):
+    async def session_events(
+        request: Request, workspace_id: str, session_id: str
+    ) -> StreamingResponse:
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")
         try:

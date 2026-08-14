@@ -53,7 +53,7 @@ AGENT_LEGION_MCP_SERVER_NAME = "agent-legion-studio"
 
 
 def looks_like_agent_legion_tool_call(text: str) -> bool:
-    """Heuristic: does this tool-call title/payload reference our MCP tools?
+    """Heuristic: whether this tool-call title/payload references our MCP tools.
 
     ACP gives the client no direct view into the agent's MCP wiring, so MCP
     visibility and permission auto-approve both key off the tool-call text the

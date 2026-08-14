@@ -1,5 +1,12 @@
 exemptions:
 - check: architecture.route_response_model
+  path: server/app/routes/studio_chat.py:session_events
+  reason: Studio chat session events are a Server-Sent Events stream
+    (StreamingResponse, text/event-stream), same shape as the workspace job
+    events route; there is no JSON response model to name.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
+- check: architecture.route_response_model
   path: server/app/routes/agent_workers.py:result
   reason: Agent Worker result acknowledgement returns an empty 204 response by protocol.
   owner: workspace-executor
