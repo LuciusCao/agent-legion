@@ -14,6 +14,7 @@ type Props = {
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
+  workflowKey: string
   readOnly?: boolean
   onClose: () => void
 }

@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   fetchExecutorDefinition,
@@ -8,8 +9,12 @@ import {
   rollbackExecutor,
   saveExecutorDraft,
 } from '../../api'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import {
+  createTestQueryClient,
+  TestQueryProvider,
+} from '../../testing/testQueryClient'
 import type { ExecutorListItem, ExecutorVersion } from '../../types'
-import { TestQueryProvider } from '../../testing/testQueryClient'
 import { ExecutorsPanel } from './ExecutorsPanel'
 
 vi.mock('../../api', () => ({
@@ -137,6 +142,38 @@ describe('ExecutorsPanel', () => {
 
     await waitFor(() =>
       expect(mockPublish).toHaveBeenCalledWith('code-default')
+    )
+  })
+
+  it('invalidates the studio executor catalog when executor definitions refresh', async () => {
+    mockDetail.mockResolvedValue({
+      executor_id: 'code-default',
+      latest: { ...publishedVersion, version: 2, status: 'draft' },
+      published: publishedVersion,
+    })
+    mockPublish.mockResolvedValue({
+      ...publishedVersion,
+      version: 2,
+      status: 'published',
+    })
+    const client = createTestQueryClient()
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    render(
+      <QueryClientProvider client={client}>
+        <ExecutorsPanel />
+      </QueryClientProvider>
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /code-default/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '发布' }))
+
+    await waitFor(() =>
+      expect(mockPublish).toHaveBeenCalledWith('code-default')
+    )
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: extraQueryKeys.studioExecutorCatalog(),
+      })
     )
   })
 

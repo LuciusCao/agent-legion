@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
+import { TestQueryProvider } from '../../testing/testQueryClient'
 import type {
   AgentDefinition,
   ExecutorDefinition,
@@ -7,6 +8,10 @@ import type {
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 import { StudioNavContext } from './workflowStudioNav'
+
+vi.mock('../../api/executorApi', () => ({
+  getExecutorCatalog: vi.fn().mockResolvedValue({ executors: [], agents: [] }),
+}))
 
 // 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
 // 不再读 executor catalog 的 agent 条目。
@@ -63,6 +68,7 @@ const editorProps = {
   definitionYaml: `nodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
   setDefinitionYaml: () => {},
   agentCatalog,
+  workflowKey: 'demo-wf',
 }
 
 describe('WorkflowNodeExecutionSection', () => {
@@ -103,6 +109,7 @@ describe('WorkflowNodeExecutionSection', () => {
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
 
@@ -134,6 +141,7 @@ describe('WorkflowNodeExecutionSection', () => {
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
 
@@ -151,6 +159,7 @@ describe('WorkflowNodeExecutionSection', () => {
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
     expect(screen.getByLabelText('Provider')).toHaveValue('')
@@ -159,11 +168,13 @@ describe('WorkflowNodeExecutionSection', () => {
 
   it('shows an empty state when no executor supports the capability', () => {
     render(
-      <WorkflowNodeExecutionSection
-        node={{ ...node, capability: 'missing' }}
-        executorCatalog={executorCatalog}
-        {...editorProps}
-      />
+      <TestQueryProvider>
+        <WorkflowNodeExecutionSection
+          node={{ ...node, capability: 'missing' }}
+          executorCatalog={executorCatalog}
+          {...editorProps}
+        />
+      </TestQueryProvider>
     )
 
     expect(screen.getByText('未匹配到 executor capability')).toBeInTheDocument()

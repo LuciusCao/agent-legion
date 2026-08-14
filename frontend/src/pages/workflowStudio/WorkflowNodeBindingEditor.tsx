@@ -9,6 +9,8 @@ import {
 import { useSettingStore } from '../../stores/settingStore'
 import type { WorkflowNodeRecord } from '../../types'
 import type { ExecutorDefinition } from '../../types/executorTypes'
+import { useExecutorCatalog } from './useExecutorCatalog'
+import { WorkflowCatalogLoadError } from './WorkflowCatalogLoadError'
 import { hasCodeCapability } from './workflowNodeCodeLookup'
 import { useStudioNav } from './workflowStudioNav'
 import {
@@ -22,6 +24,9 @@ type Props = {
   node: WorkflowNodeRecord
   bindings: CapabilityBinding[]
   executorCatalog: ExecutorDefinition[]
+  // 与 DAG 展示口径一致：取 visible workflow 的 key，而非 settings 快照里的
+  // workflowKey（YAML 草稿改 key 发布后两者会分叉，见 workflowStudioDag）。
+  workflowKey: string
   readOnly?: boolean
 }
 
@@ -29,7 +34,8 @@ type Props = {
 // （后端 PUT configuration 为整体替换语义，服务端校验失败经 toast 即时报出）。
 export function WorkflowNodeBindingEditor(props: Props) {
   const { node } = props
-  const workflowKey = useSettingStore((s) => s.settings.workflowKey)
+  const workflowKey = props.workflowKey
+  const catalog = useExecutorCatalog()
   const executorConfiguration = useSettingStore((s) => s.executorConfiguration)
   const isSaving = useSettingStore((s) => s.isSaving)
   const setNodeBinding = useSettingStore((s) => s.setNodeBinding)
@@ -61,6 +67,9 @@ export function WorkflowNodeBindingEditor(props: Props) {
       .querySelector('[aria-label="节点代码"]')
       ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
 
+  if (catalog.loadError) {
+    return <WorkflowCatalogLoadError onRetry={() => void catalog.retry()} />
+  }
   if (props.bindings.length === 0) {
     return (
       <div className={inspectorStyles.empty}>未匹配到 executor capability</div>
