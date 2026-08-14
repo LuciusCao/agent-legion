@@ -42,8 +42,11 @@
   agent/executor/节点代码管理入口收进 Studio 或从 DAG 节点一键跳转。
 - **阶段 2 · dry-run**：单节点试跑（详见 §6，待设计）。是打磨闭环与 code 节点
   agent 调优的前提。
-- **阶段 3 · Studio 内置 agent**：对话生成草稿 + 节点调优。配工具面：workflow
-  草稿/校验/发布 API、节点代码 API、dry-run API（阶段 2 后）。**agent 只能产
+- **阶段 3 · Studio 内置 agent**：对话生成草稿 + 节点调优。工具面已落地为
+  **MCP server**（2026-08-14 方向修正：MCP 管工具、ACP 管对话、前端面板管
+  交互，agent 不限定为内嵌运行时；见
+  `studio-phase3-implementation-plan.md` 方向修正节与 `docs/studio-agent-mcp.md`）。
+  **agent 只能产
   草稿 + validate，发布永远由人点**（已定案，§4）；发布流与
   PublishReviewDialog 正好卡在这个边界上。
 - **阶段 4 · skill**：已缩减——skill 维持外部仓库 + git 评审链（已定案，§4），
