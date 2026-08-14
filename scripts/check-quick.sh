@@ -119,6 +119,14 @@ echo "=== Parallel Quick Gate ==="
 echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
+# Shared per-lane job cap: min(4, core count) keeps parallel lanes polite on
+# machines running several worktrees (per-lane envs override; CI 4-vCPU
+# runners are unaffected).
+default_gate_jobs="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
+if [[ "$default_gate_jobs" -gt 4 ]]; then
+  default_gate_jobs=4
+fi
+
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]
 }
@@ -135,11 +143,15 @@ run_rust_round() {
     return 0
   fi
   cd "$ROOT_DIR/velites"
+  # Cargo defaults to one rustc job per core; keep the gate polite on machines
+  # running several worktrees (AGENT_LEGION_RUST_WORKERS overrides; CI 4-vCPU
+  # runners are unaffected).
+  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$default_gate_jobs}"
   if [[ "$round" == "static-check" ]]; then
     cargo fmt --all -- --check
-    cargo clippy --all-targets --locked -- -D warnings
+    cargo clippy --all-targets --locked -j "$rust_jobs" -- -D warnings
   else
-    cargo test --locked
+    cargo test --locked -j "$rust_jobs"
   fi
 }
 
