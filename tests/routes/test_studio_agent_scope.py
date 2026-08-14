@@ -167,6 +167,25 @@ def test_scoped_token_rejected_on_admin_endpoints(client, job_db) -> None:
         assert admin_response.status_code == 200, f"{method} {url}"
 
 
+def test_workflow_register_tool_requires_admin_user(client, job_db) -> None:
+    """The studio-agent register tool creates a platform-global workflow key,
+    so it aligns with the human-facing POST /api/workflows (require_admin):
+    scoped tokens minted for non-admin users get 403, admin tokens pass."""
+    member_id = str(job_db.create_user("scope-member", password_hash=None)["id"])
+    member_token = scoped_tokens.mint_scoped_token(job_db, member_id)
+    member_scoped = client.__class__(client.app)
+    member_scoped.headers["authorization"] = f"Bearer {member_token}"
+    url = "/api/studio-agent/tools/workflows/register"
+    payload = {"key": "scope_register_flow", "label": "Scope Register Flow"}
+
+    denied = member_scoped.post(url, json=payload)
+    assert denied.status_code == 403
+
+    scoped = _scoped_client(client, job_db)
+    allowed = scoped.post(url, json=payload)
+    assert allowed.status_code == 200, allowed.text
+
+
 def test_expired_scoped_token_gets_401(client, job_db) -> None:
     scoped = _scoped_client(client, job_db, ttl=timedelta(seconds=-1))
     assert scoped.get("/api/workspaces").status_code == 401
