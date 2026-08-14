@@ -2,22 +2,32 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from uuid import uuid4
 
 from server.app.jobs.queries.base import JobQueriesBase
 
 
 class ScopedTokenQueriesMixin(JobQueriesBase):
-    """Persistence for auth_scoped_tokens (schema v41, STUDIO-AGENT-001)."""
+    """Persistence for auth_scoped_tokens (schema v41/v42, STUDIO-AGENT-001)."""
 
     def create_scoped_token(
-        self, token_hash: str, user_id: str, scope: str, expires_at: datetime
-    ) -> None:
+        self,
+        token_hash: str,
+        user_id: str,
+        scope: str,
+        expires_at: datetime,
+        *,
+        origin: str = "run",
+    ) -> str:
+        """Insert a scoped token row and return its public (non-digest) id."""
+        token_id = uuid4().hex
         with self.connect() as conn:
             conn.execute(
-                "insert into auth_scoped_tokens(token_hash, user_id, scope, expires_at)"
-                " values (%s, %s, %s, %s)",
-                (token_hash, user_id, scope, expires_at),
+                "insert into auth_scoped_tokens(id, token_hash, user_id, scope, origin,"
+                " expires_at) values (%s, %s, %s, %s, %s, %s)",
+                (token_id, token_hash, user_id, scope, origin, expires_at),
             )
+        return token_id
 
     def get_scoped_token_user(self, token_hash: str) -> dict[str, Any] | None:
         """Resolve a scoped token digest to its user row plus scope, or None.
