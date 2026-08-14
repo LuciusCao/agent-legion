@@ -249,3 +249,5 @@ browser runs).
   worker deployment
 - [docs/remote-execution-runbook.md](docs/remote-execution-runbook.md) —
   remote execution operations
+- [docs/studio-agent-mcp.md](docs/studio-agent-mcp.md) — MCP server for
+  external agents (token minting, client setup, permission boundary)

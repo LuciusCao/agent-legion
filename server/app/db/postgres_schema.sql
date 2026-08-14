@@ -580,13 +580,20 @@ create index if not exists idx_sessions_expires_at on sessions(expires_at);
 -- expiry), and is revocable. Like sessions, only the sha256 of the raw token
 -- is persisted.
 create table if not exists auth_scoped_tokens (
+  -- Public, non-sensitive identifier for self-service management (v42); the
+  -- token_hash digest is never exposed by the API.
+  id text not null default gen_random_uuid()::text,
   token_hash text primary key,
   user_id text not null references users(id) on delete cascade,
   scope text not null,
+  -- 'run' = minted per studio chat run (short TTL); 'user' = self-service
+  -- token minted via /api/studio-agent-tokens for external agents (v42).
+  origin text not null default 'run',
   expires_at timestamptz not null,
   revoked_at timestamptz,
   created_at timestamptz not null default current_timestamp
 );
+create unique index if not exists idx_auth_scoped_tokens_id on auth_scoped_tokens(id);
 create index if not exists idx_auth_scoped_tokens_user_id on auth_scoped_tokens(user_id);
 create index if not exists idx_auth_scoped_tokens_expires_at on auth_scoped_tokens(expires_at);
 
