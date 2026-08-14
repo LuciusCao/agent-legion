@@ -1,12 +1,15 @@
 """Scope enforcement contract for studio-agent scoped tokens (STUDIO-AGENT-001).
 
 A scoped token minted for a studio chat run authenticates as the initiating
-user through the Bearer channel, but every effecting endpoint (workflow
+user through the Bearer channel, but every effecting endpoint — workflow
 publish; node code publish/rollback/archive; agent and executor definition
-publish/rollback/archive) mounts reject_studio_agent_scope and must refuse it
-with 403. Draft/validate endpoints stay reachable. The endpoint inventory
-below is the enumeration backstop: new effecting endpoints must be added here
-together with their guard.
+publish/rollback/archive; job lifecycle and execution triggers (delete,
+rerun, run-to, continue, batch intake, workflow upgrade, replay); workspace,
+secret, package, member and settings writes; worker pause/resume — mounts
+reject_studio_agent_scope and must refuse it with 403, and require_admin
+refuses scoped identities outright. Draft/validate endpoints stay reachable.
+The endpoint inventory below is the enumeration backstop: new effecting
+endpoints must be added here together with their guard.
 """
 
 from __future__ import annotations
@@ -41,6 +44,37 @@ def _effecting_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]
         ("POST", "/api/executor-definitions/exec-x/publish", None),
         ("POST", "/api/executor-definitions/exec-x/rollback", {"version": 1}),
         ("DELETE", "/api/executor-definitions/exec-x", None),
+        # Job lifecycle and execution triggers (P0-1/P1-1).
+        ("DELETE", "/api/jobs/job-x", None),
+        ("DELETE", f"/api/workspaces/{workspace_id}/jobs/batch", None),
+        ("POST", "/api/jobs/job-x/nodes/node-x/rerun", None),
+        ("POST", "/api/jobs/job-x/run-to", None),
+        ("POST", "/api/jobs/job-x/continue", None),
+        ("POST", f"/api/workspaces/{workspace_id}/jobs/batch-rerun", None),
+        ("POST", f"/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
+        ("POST", f"/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
+        ("POST", f"/api/workspaces/{workspace_id}/job-batches", None),
+        ("POST", "/api/jobs/job-x/upgrade-workflow", None),
+        # Workspace, secret, package, member and settings writes.
+        ("POST", "/api/workspaces", None),
+        ("PATCH", f"/api/workspaces/{workspace_id}", None),
+        ("DELETE", f"/api/workspaces/{workspace_id}", None),
+        ("PUT", f"/api/workspaces/{workspace_id}/secrets/secret-x", None),
+        ("DELETE", f"/api/workspaces/{workspace_id}/secrets/secret-x", None),
+        ("DELETE", f"/api/workspaces/{workspace_id}/packages/1", None),
+        ("PATCH", f"/api/workspaces/{workspace_id}/packages/1", None),
+        ("POST", f"/api/workspaces/{workspace_id}/jobs/package", None),
+        ("POST", f"/api/workspaces/{workspace_id}/jobs/clear-packed", None),
+        ("DELETE", f"/api/workspaces/{workspace_id}/members/user-x", None),
+        ("PATCH", f"/api/workspaces/{workspace_id}/settings/agent", None),
+        ("PUT", f"/api/workspaces/{workspace_id}/configuration", None),
+        # Quality review writes and replays.
+        ("POST", f"/api/workspaces/{workspace_id}/quality/sample-batches", None),
+        ("POST", f"/api/workspaces/{workspace_id}/quality/sample-items/item-x/labels", None),
+        ("POST", f"/api/workspaces/{workspace_id}/quality/sample-items/item-x/replays", None),
+        # Worker scheduling control.
+        ("POST", "/api/worker/pause", None),
+        ("POST", "/api/worker/resume", None),
     ]
 
 

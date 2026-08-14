@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.routes.job_contracts import (
     WorkspaceSettingsResponse,
     WorkspaceSettingsSectionRequest,
@@ -29,6 +30,7 @@ def create_workspace_settings_router(
     @router.patch(
         "/workspaces/{workspace_id}/settings/{section}",
         response_model=WorkspaceSettingsResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def update_workspace_settings_section(
         workspace_id: str,

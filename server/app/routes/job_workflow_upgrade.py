@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.job_operation_contracts import JobMutationResultResponse
 from server.app.services.job_queries import JobQueryService
@@ -16,7 +17,11 @@ def create_job_workflow_upgrade_router(
 ) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/jobs/{job_id}/upgrade-workflow", response_model=JobMutationResultResponse)
+    @router.post(
+        "/jobs/{job_id}/upgrade-workflow",
+        response_model=JobMutationResultResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
+    )
     def upgrade_job_workflow(job_id: str) -> JobMutationResultResponse:
         require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
