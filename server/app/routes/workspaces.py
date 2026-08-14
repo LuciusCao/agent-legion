@@ -26,6 +26,9 @@ def create_workspaces_router(
     job_event_manager: JobEventManager | None = None,
 ) -> APIRouter:
     router = APIRouter()
+    # Effecting mutations refuse studio-agent scoped tokens (STUDIO-AGENT-001);
+    # reads stay reachable.
+    guarded = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
 
     @router.get("/workspaces", response_model=WorkspacesResponse)
     def list_workspaces() -> WorkspacesResponse:
@@ -36,11 +39,7 @@ def create_workspaces_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.post(
-        "/workspaces",
-        response_model=WorkspaceResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
-    )
+    @guarded.post("/workspaces", response_model=WorkspaceResponse)
     def create_workspace(payload: WorkspaceCreateRequest) -> WorkspaceResponse:
         require_workflows_enabled(settings)
         try:
@@ -58,11 +57,7 @@ def create_workspaces_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.patch(
-        "/workspaces/{workspace_id}",
-        response_model=WorkspaceResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
-    )
+    @guarded.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def update_workspace(workspace_id: str, payload: WorkspaceUpdateRequest) -> WorkspaceResponse:
         require_workflows_enabled(settings)
         try:
@@ -71,11 +66,7 @@ def create_workspaces_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.delete(
-        "/workspaces/{workspace_id}",
-        response_model=DeleteWorkspaceResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
-    )
+    @guarded.delete("/workspaces/{workspace_id}", response_model=DeleteWorkspaceResponse)
     def delete_workspace(workspace_id: str) -> DeleteWorkspaceResponse:
         require_workflows_enabled(settings)
         try:
@@ -106,5 +97,6 @@ def create_workspaces_router(
     router.include_router(
         create_dashboard_events_router(settings, job_event_manager=job_event_manager)
     )
+    router.include_router(guarded)
 
     return router

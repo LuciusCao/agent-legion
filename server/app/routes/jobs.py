@@ -44,6 +44,9 @@ def create_jobs_router(
     settings: Settings,
 ) -> APIRouter:
     router = APIRouter()
+    # Effecting mutations refuse studio-agent scoped tokens (STUDIO-AGENT-001);
+    # reads stay reachable.
+    guarded = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
 
     @router.get("/workspaces/{workspace_id}/jobs", response_model=JobsResponse)
     def list_workspace_jobs(
@@ -62,10 +65,9 @@ def create_jobs_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.post(
+    @guarded.post(
         "/workspaces/{workspace_id}/jobs/batch-rerun",
         response_model=BatchJobMutationResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def batch_rerun_workspace_jobs(
         workspace_id: str,
@@ -84,10 +86,8 @@ def create_jobs_router(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
         )
 
-    @router.delete(
-        "/workspaces/{workspace_id}/jobs/batch",
-        response_model=BatchJobMutationResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
+    @guarded.delete(
+        "/workspaces/{workspace_id}/jobs/batch", response_model=BatchJobMutationResponse
     )
     def batch_delete_workspace_jobs(
         workspace_id: str,
@@ -112,11 +112,7 @@ def create_jobs_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.post(
-        "/jobs/{job_id}/nodes/{node_key}/rerun",
-        response_model=JobMutationResultResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
-    )
+    @guarded.post("/jobs/{job_id}/nodes/{node_key}/rerun", response_model=JobMutationResultResponse)
     def rerun_node(job_id: str, node_key: str) -> JobMutationResultResponse:
         require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
@@ -128,11 +124,7 @@ def create_jobs_router(
             raise_job_operation_error(exc)
         return JobMutationResultResponse.model_validate(result)
 
-    @router.delete(
-        "/jobs/{job_id}",
-        response_model=DeleteJobResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
-    )
+    @guarded.delete("/jobs/{job_id}", response_model=DeleteJobResponse)
     def delete_job(job_id: str) -> DeleteJobResponse:
         require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
@@ -144,11 +136,7 @@ def create_jobs_router(
             raise_job_operation_error(exc)
         return DeleteJobResponse(deleted=job_id)
 
-    @router.post(
-        "/jobs/{job_id}/run-to",
-        response_model=JobMutationResultResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
-    )
+    @guarded.post("/jobs/{job_id}/run-to", response_model=JobMutationResultResponse)
     def run_to(job_id: str, payload: RunToRequest) -> JobMutationResultResponse:
         require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
@@ -165,10 +153,9 @@ def create_jobs_router(
             raise_job_operation_error(exc)
         return JobMutationResultResponse.model_validate(result)
 
-    @router.post(
+    @guarded.post(
         "/jobs/{job_id}/continue",
         response_model=JobMutationResultResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def continue_job(
         job_id: str,
@@ -184,10 +171,9 @@ def create_jobs_router(
             raise_job_operation_error(exc)
         return JobMutationResultResponse.model_validate(result)
 
-    @router.post(
+    @guarded.post(
         "/workspaces/{workspace_id}/jobs/batch-run-to",
         response_model=BatchJobMutationResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def batch_run_to(
         workspace_id: str,
@@ -206,4 +192,5 @@ def create_jobs_router(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
         )
 
+    router.include_router(guarded)
     return router

@@ -151,25 +151,19 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
 
 
 def has_online_code_worker(database_dsn: Any, capability: str, workspace_id: str) -> bool:
-    """True when an online non-revoked code Worker can claim *capability* here.
+    """True when an online Worker can claim *capability* in *workspace_id*.
 
-    The filter mirrors the claim-side evaluation (claim_evaluate.py):
-    capability matching alone is not enough — the Worker must also speak
-    protocol v2 and admit *workspace_id* (an empty allowed_workspaces list
-    admits all). Without this alignment an inadmissible Worker would let the
-    request rot in queued with no one ever claiming it — there is no
-    queued-timeout fallback (batch 2 decision 3) — while has_active_request
-    blocks the local fallback, wedging the job for good."""
+    Mirrors the claim-side filters (capability, protocol v2, allowed_workspaces
+    admission) — an inadmissible Worker would wedge the job in queued for good
+    (no queued-timeout fallback, batch 2 decision 3)."""
     with read_connection(database_dsn) as conn:
         row = conn.execute(
             "select 1 from agent_workers where revoked_at is null"
-            " and max_code_concurrency > 0"
-            " and protocol_version >= %s"
+            " and max_code_concurrency > 0 and protocol_version >= %s"
             " and last_seen_at > now() - make_interval(secs => %s)"
             " and (capabilities_json::jsonb @> jsonb_build_array(%s::text)"
             " or capabilities_json::jsonb @> '[\"*\"]'::jsonb)"
-            " and (allowed_workspaces_json::jsonb = '[]'::jsonb"
-            " or allowed_workspaces_json::jsonb @> jsonb_build_array(%s::text))"
+            " and (allowed_workspaces_json::jsonb = '[]'::jsonb or allowed_workspaces_json::jsonb @> jsonb_build_array(%s::text))"
             " limit 1",
             (_CODE_PROTOCOL_VERSION, _ONLINE_THRESHOLD_SECONDS, capability, workspace_id),
         ).fetchone()
@@ -201,11 +195,10 @@ class CodeDispatchService:
     def online_code_worker_available(self, capability: str, workspace_id: str) -> bool:
         """TTL-cached probe (per capability+workspace): an online Worker can claim it?"""
         now = time.monotonic()
-        key = (capability, workspace_id)
-        probed_at, result = self._online_probe.get(key, (0.0, False))
+        probed_at, result = self._online_probe.get((capability, workspace_id), (0.0, False))
         if now - probed_at >= _ONLINE_PROBE_TTL_SECONDS:
             result = has_online_code_worker(self.settings.database_url, capability, workspace_id)
-            self._online_probe[key] = (now, result)
+            self._online_probe[(capability, workspace_id)] = (now, result)
         return result
 
     def is_in_flight(self, job_id: str, node_key: str) -> bool:
