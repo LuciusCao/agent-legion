@@ -1,0 +1,343 @@
+"""Studio chat service lifecycle tests against the scriptable fake ACP agent."""
+
+from __future__ import annotations
+
+import json
+import sys
+import time
+from pathlib import Path
+
+import pytest
+
+from server.app.auth.scoped_tokens import authenticate_scoped_token
+from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
+from server.app.studio_chat.registry import StudioAgentRegistryStore
+from server.app.studio_chat.service import StudioChatService
+from tests.postgres_support import TEST_DATABASE_URL
+
+FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
+
+TEXT_SCRIPT = {
+    "capabilities": {"loadSession": False, "mcpCapabilities": {"http": False, "sse": False}},
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "Hello"},
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": " world"},
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "tool_call",
+                "toolCallId": "tc-1",
+                "title": "agent-legion-studio__list_workflows",
+                "kind": "other",
+                "status": "completed",
+            }
+        },
+    ],
+}
+
+MCP_PERMISSION_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {
+                    "toolCallId": "tc-mcp",
+                    "title": "agent-legion-studio__validate_workflow",
+                },
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
+HUMAN_PERMISSION_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {"toolCallId": "tc-bash", "title": "Bash: ls"},
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
+WAIT_CANCEL_SCRIPT = {"wait_for_cancel": True, "on_prompt": []}
+
+
+class RecordingBus:
+    """EventBus stand-in capturing published (channel, payload) pairs."""
+
+    def __init__(self) -> None:
+        self.events: list[tuple[str, dict]] = []
+
+    def attach_loop(self, loop) -> None:
+        del loop
+
+    def publish(self, channel: str, payload: str) -> None:
+        self.events.append((channel, json.loads(payload)))
+
+    def subscribe(self, channel: str):
+        raise NotImplementedError
+
+    def unsubscribe(self, channel: str, queue) -> None:
+        del channel, queue
+
+
+def _wait_for(condition, timeout: float = 20.0, interval: float = 0.05) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return
+        time.sleep(interval)
+    raise AssertionError("condition not met within timeout")
+
+
+@pytest.fixture
+def chat(job_db, settings, tmp_path):
+    bus = RecordingBus()
+    service = StudioChatService(job_db, settings, bus)
+    store = StudioAgentRegistryStore(TEST_DATABASE_URL)
+
+    def register(script: dict, agent_id: str = "fake-agent") -> Path:
+        script_path = tmp_path / f"{agent_id}-script.json"
+        script_path.write_text(json.dumps(script), encoding="utf-8")
+        store.put(
+            {
+                "api_base": "http://127.0.0.1:8000",
+                "agents": [
+                    {
+                        "id": agent_id,
+                        "label": "Fake Agent",
+                        "command": sys.executable,
+                        "args": [str(FAKE_AGENT), str(script_path)],
+                    }
+                ],
+            }
+        )
+        return script_path
+
+    workspace_id = job_db.create_workspace("Chat WS")["id"]
+    user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
+    yield service, bus, register, workspace_id, user_id
+    service.shutdown()
+
+
+def _read_sink(script_path: Path) -> list[dict]:
+    sink = Path(str(script_path) + ".sink.jsonl")
+    if not sink.exists():
+        return []
+    return [json.loads(line) for line in sink.read_text(encoding="utf-8").splitlines()]
+
+
+def _prompt_texts(sink: list[dict]) -> list[str]:
+    texts = []
+    for entry in sink:
+        message = entry.get("received", {})
+        if message.get("method") == "session/prompt":
+            texts.extend(block.get("text", "") for block in message["params"].get("prompt", []))
+    return texts
+
+
+def _new_session_mcp_env(sink: list[dict]) -> dict[str, str]:
+    for entry in sink:
+        message = entry.get("received", {})
+        if message.get("method") == "session/new":
+            servers = message["params"].get("mcpServers", [])
+            assert servers, "session/new carried no MCP servers"
+            return {item["name"]: item["value"] for item in servers[0].get("env", [])}
+    raise AssertionError("session/new never reached the fake agent")
+
+
+def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
+    service, bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    assert session["status"] == "idle"
+    assert session["acp_session_id"] == "fake-session-1"
+    assert session["capability_snapshot"]["loadSession"] is False
+
+    service.send_message(session["id"], workspace_id, "list my workflows")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    _wait_for(
+        lambda: any(
+            m["kind"] == "text" and m["role"] == "agent"
+            for m in service.list_messages(session["id"], workspace_id)
+        )
+    )
+
+    messages = service.list_messages(session["id"], workspace_id)
+    agent_texts = [m for m in messages if m["kind"] == "text" and m["role"] == "agent"]
+    # Chunks are coalesced into one persisted agent message per turn.
+    assert len(agent_texts) == 1
+    assert agent_texts[0]["content"]["text"] == "Hello world"
+    tool_calls = [m for m in messages if m["kind"] == "tool_call"]
+    assert tool_calls and tool_calls[0]["content"]["toolCallId"] == "tc-1"
+
+    session = service.get_session(session["id"])
+    assert session["mcp_status"] == "verified"
+
+    sink = _read_sink(script_path)
+    # First prompt carries the built-in authoring bootstrap (decision 8).
+    assert _prompt_texts(sink)[0].startswith(STUDIO_AUTHORING_BOOTSTRAP)
+    token = _new_session_mcp_env(sink)["AGENT_LEGION_STUDIO_AGENT_TOKEN"]
+    # The minted scoped token is live for the session's lifetime...
+    assert authenticate_scoped_token(job_db, token) is not None
+
+    # SSE payload stream saw persisted messages and session snapshots.
+    types = [payload["type"] for _, payload in bus.events]
+    assert "message" in types and "session" in types
+    assert all(token not in json.dumps(payload) for _, payload in bus.events)
+
+    closed = service.close_session(session["id"], workspace_id)
+    assert closed["status"] == "closed"
+    # ...and closing the session revokes it (token never persists anywhere).
+    assert authenticate_scoped_token(job_db, token) is None
+    with pytest.raises(ConflictError):
+        service.send_message(session["id"], workspace_id, "again")
+
+
+def test_run_without_mcp_tool_call_is_flagged_unverified(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register({"on_prompt": []})
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "hello")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    session = service.get_session(session["id"])
+    assert session["mcp_status"] == "unverified"
+    events = [
+        m["content"].get("event")
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "status"
+    ]
+    assert "mcp_unverified" in events
+
+
+def test_agent_legion_tool_permission_auto_approves(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(MCP_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "validate this")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "selected", "optionId": "allow"}]
+    assert service.get_session(session["id"])["mcp_status"] == "verified"
+    # Auto-approvals never park the session in awaiting_permission.
+    assert "awaiting_permission" not in [
+        service.get_session(session["id"])["status"],
+    ]
+
+
+def test_human_permission_forward_answer_and_allow_all(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(HUMAN_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run ls")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    pending = [
+        m
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "pending"
+    ]
+    assert len(pending) == 1
+    request_id = pending[0]["content"]["request_id"]
+    service.respond_permission(session["id"], workspace_id, request_id, option_id="deny", deny=True)
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "cancelled"}]
+
+    # The session-level allow-all switch approves the next non-MCP prompt
+    # without a human roundtrip.
+    service.set_allow_all_permissions(session["id"], workspace_id, True)
+    service.send_message(session["id"], workspace_id, "run ls again")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes[-1] == {"outcome": "selected", "optionId": "allow"}
+
+
+def test_cancel_settles_pending_permission(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(HUMAN_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run ls")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    service.cancel(session["id"], workspace_id)
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "cancelled"}]
+
+
+def test_busy_session_rejects_second_message_and_cancel_frees_it(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(WAIT_CANCEL_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "long turn")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "running")
+
+    with pytest.raises(ConflictError):
+        service.send_message(session["id"], workspace_id, "second")
+
+    service.cancel(session["id"], workspace_id)
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    stop_events = [
+        m["content"]
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "status" and m["content"].get("event") == "turn_end"
+    ]
+    assert stop_events and stop_events[-1]["stop_reason"] == "cancelled"
+
+
+def test_unknown_agent_id_is_rejected(chat) -> None:
+    service, _bus, _register, workspace_id, user_id = chat
+    with pytest.raises(InvalidOperationError):
+        service.create_session(workspace_id, user_id, "no-such-agent")
+
+
+def test_agent_startup_failure_marks_session_error(chat, tmp_path) -> None:
+    service, _bus, _register, workspace_id, user_id = chat
+    StudioAgentRegistryStore(TEST_DATABASE_URL).put(
+        {
+            "api_base": "http://127.0.0.1:8000",
+            "agents": [
+                {
+                    "id": "broken-agent",
+                    "label": "Broken",
+                    "command": "/nonexistent/acp-agent-binary",
+                    "args": [],
+                }
+            ],
+        }
+    )
+    with pytest.raises(InvalidOperationError):
+        service.create_session(workspace_id, user_id, "broken-agent")
+    sessions = service.list_sessions(workspace_id)
+    assert sessions and sessions[0]["status"] == "error"
