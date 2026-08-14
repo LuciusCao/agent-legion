@@ -201,6 +201,19 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/active` | `get_active_revision` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workflows` | `list_workflow_catalog` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `get_node_code_state` | routes/studio_agent_tools.py |
+| GET | `/admin/studio-agents` | `get_studio_agents` | routes/studio_agents_admin.py |
+| PUT | `/admin/studio-agents` | `put_studio_agents` | routes/studio_agents_admin.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/agents` | `list_agents` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions` | `create_session` | routes/studio_chat.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/sessions` | `list_sessions` | routes/studio_chat.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `get_session` | routes/studio_chat.py |
+| DELETE | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}` | `close_session` | routes/studio_chat.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `list_messages` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages` | `send_message` | routes/studio_chat.py |
+| GET | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events` | `session_events` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel` | `cancel_turn` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all` | `set_allow_all` | routes/studio_chat.py |
+| POST | `/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}` | `answer_permission` | routes/studio_chat.py |
 | GET | `/jobs/{job_id}/runs/{run_id}/token-usage` | `get_run_token_usage` | routes/token_usage.py |
 | GET | `/jobs/{job_id}/token-usage` | `get_job_token_usage` | routes/token_usage.py |
 | GET | `/workspaces/{workspace_id}/token-usage` | `get_workspace_token_usage` | routes/token_usage.py |
@@ -440,6 +453,21 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | StudioAgentTokensResponse | BaseModel | tokens: list[StudioAgentTokenEntry] | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenRevokeResponse | BaseModel | id: str, revoked: bool | app/routes/studio_agent_token_contracts.py |
 | StudioAgentWorkflowRegisterRequest | BaseModel | key: str, label: str, description: str | app/routes/studio_agent_tool_contracts.py |
+| StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str] | app/routes/studio_agents_admin_contracts.py |
+| StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
+| StudioChatAgentOption | BaseModel | id: str, label: str | app/routes/studio_chat_contracts.py |
+| StudioChatAgentsResponse | BaseModel | agents: list[StudioChatAgentOption] | app/routes/studio_chat_contracts.py |
+| StudioChatSessionCreateRequest | BaseModel | agent_id: str, title: str | app/routes/studio_chat_contracts.py |
+| StudioChatSessionRecord | BaseModel | id: str, workspace_id: str, user_id: str, agent_id: str, title: str, status: ... | app/routes/studio_chat_contracts.py |
+| StudioChatSessionResponse | BaseModel | session: StudioChatSessionRecord | app/routes/studio_chat_contracts.py |
+| StudioChatSessionsResponse | BaseModel | sessions: list[StudioChatSessionRecord] | app/routes/studio_chat_contracts.py |
+| StudioChatMessageCreateRequest | BaseModel | text: str | app/routes/studio_chat_contracts.py |
+| StudioChatMessageRecord | BaseModel | id: str, session_id: str, kind: MessageKind, role: MessageRole, content: dict... | app/routes/studio_chat_contracts.py |
+| StudioChatMessageResponse | BaseModel | message: StudioChatMessageRecord | app/routes/studio_chat_contracts.py |
+| StudioChatMessagesResponse | BaseModel | messages: list[StudioChatMessageRecord] | app/routes/studio_chat_contracts.py |
+| StudioChatAllowAllRequest | BaseModel | enabled: bool | app/routes/studio_chat_contracts.py |
+| StudioChatPermissionAnswerRequest | BaseModel | option_id: str | None, deny: bool | app/routes/studio_chat_contracts.py |
+| StudioChatPermissionAnswerResponse | BaseModel | resolved: str | app/routes/studio_chat_contracts.py |
 | TokenUsageRunItem | BaseModel | run_id: int, node_key: str, status: str, usage: RunUsage | None, reason: str ... | app/routes/token_usage_contracts.py |
 | TokenUsageTotal | BaseModel | message_count: int, input_tokens: int, output_tokens: int, cache_read_tokens:... | app/routes/token_usage_contracts.py |
 | TokenUsageJobResponse | BaseModel | job_id: str, runs: list[TokenUsageRunItem], total: TokenUsageTotal, runs_with... | app/routes/token_usage_contracts.py |
