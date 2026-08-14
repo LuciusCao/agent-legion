@@ -1,4 +1,5 @@
 import { WorkflowStudioRightPanel } from './WorkflowStudioRightPanel'
+import type { StudioRightPanelTab } from './chat/StudioRightPanelTabs'
 import type { StudioLayoutProps } from './workflowStudioLayoutProps'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'
 import sidePanelStyles from '../WorkflowStudioPageSidePanel.module.css'
@@ -6,17 +7,22 @@ import sidePanelStyles from '../WorkflowStudioPageSidePanel.module.css'
 type Props = {
   props: StudioLayoutProps
   active: boolean
+  rightPanelTab: StudioRightPanelTab
+  onRightPanelTabChange: (tab: StudioRightPanelTab) => void
   onClose: () => void
 }
 
-export function WorkflowStudioInspectorPanel({
-  props,
-  active,
-  onClose,
-}: Props) {
+export function WorkflowStudioInspectorPanel(p: Props) {
   return (
-    <aside className={panelClass(active)} data-mobile-panel="inspector">
-      <WorkflowStudioRightPanel {...props} onClose={onClose} />
+    <aside className={panelClass(p.active)} data-mobile-panel="inspector">
+      <WorkflowStudioRightPanel
+        {...p.props}
+        activeTab={p.rightPanelTab}
+        onTabChange={p.onRightPanelTabChange}
+        onBackToDraft={p.props.backToDraft}
+        onSelectNode={p.props.setSelectedNodeKey}
+        onClose={p.onClose}
+      />
     </aside>
   )
 }
