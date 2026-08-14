@@ -328,6 +328,28 @@ def test_register_workflow_triggers_scan_reload_and_wakeup(client, job_db, monke
     assert "studio_agent_flow" in {entry["key"] for entry in catalog.json()["workflows"]}
 
 
+def test_register_workflow_requires_admin_scoped_token(client, job_db) -> None:
+    """Platform-global registration aligns with POST /api/workflows
+    (require_admin): a scoped token minted for a non-admin user gets 403."""
+    member_id = str(job_db.create_user("studio-member", password_hash=None)["id"])
+    member_token = scoped_tokens.mint_scoped_token(job_db, member_id)
+    member_scoped = client.__class__(client.app)
+    member_scoped.headers["authorization"] = f"Bearer {member_token}"
+
+    denied = member_scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "member_flow", "label": "Member Flow"},
+    )
+    assert denied.status_code == 403
+
+    scoped, _ = _scoped_client(client, job_db)
+    allowed = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "member_flow", "label": "Member Flow"},
+    )
+    assert allowed.status_code == 200, allowed.text
+
+
 def test_register_workflow_conflict_and_invalid_key(client, job_db) -> None:
     scoped, _ = _scoped_client(client, job_db)
     url = "/api/studio-agent/tools/workflows/register"
