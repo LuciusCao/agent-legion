@@ -17,7 +17,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     reload,
     fetchRevisionDetail,
   } = useWorkflowStudioData(workspaceId)
-  const [executorCatalog, agentCatalog] = useExecutorCatalog()
+  const { executors: executorCatalog, agents: agentCatalog } =
+    useExecutorCatalog()
   const draft = useWorkflowStudioDraft(
     workspaceId,
     originalYaml,
