@@ -350,7 +350,7 @@ def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8")
-    assert "run test -- --reporter=default --reporter=junit" in calls
+    assert "run test -- --maxWorkers=4 --reporter=default --reporter=junit" in calls
     assert f"--outputFile.junit={results / 'vitest-junit.xml'}" in calls
     assert "--reporter=json" in calls
     assert f"--outputFile.json={results / 'vitest-results.json'}" in calls
@@ -389,7 +389,7 @@ def test_frontend_gate_shards_project_and_defers_coverage_enforcement(tmp_path: 
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8")
-    assert "run test:coverage -- --project logic" in calls
+    assert "run test:coverage -- --maxWorkers=4 --project logic" in calls
     assert "--reporter=blob" in calls
     assert f"--outputFile.blob={blobs / 'vitest-blob-logic.json'}" in calls
     # A shard's partial coverage cannot meet the global thresholds; the merge

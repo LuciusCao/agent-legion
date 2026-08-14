@@ -13,7 +13,7 @@
 - 开发实例两个默认关闭的开关（刻意设计，防失控自跑）：后端每次启动把全部 workspace 重置为暂停，需恢复调度（init 脚本已做，但**必须在后端首次启动建表之后**执行才生效，否则启动后重跑一次脚本）；worker 的 `claim_enabled` 默认 false，启动后经 worker 控制台或 `PUT /api/config` 打开。worker 生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 `config/agent-worker.yaml` 不生效。
 - 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（`database.url` 为 env-only，代码默认库是共享库，不要依赖默认值）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
 - 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并在首次测试运行时自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
-- 多 worktree 并行开发时，必须在每个 worktree 的 shell 里 `export AGENT_LEGION_TEST_WORKERS=4`（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。不设置时 pytest `-n auto` 会让每个 worktree 吃满所有核，互相拖慢并打满共享 Postgres。
+- 测试并行度默认克制：后端 pytest-xdist 默认 min(4, 核数)（`AGENT_LEGION_TEST_WORKERS` 覆盖），前端 vitest 默认 `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖）；CI 4 核 runner 不受影响。多 worktree 并行开发时如仍抢 CPU，把两个 env 再调低（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化（后来者等待，崩溃残留自动回收）；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist worker schema 固定为 gw0..gwN，两个进程并发会互相 TRUNCATE（现场症状：随机测试报 "Bootstrap is only available before the first user exists" 等 setup 错误，单跑必过）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
 - 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 拿正式代码与 `make native-prod-up/down` 启停服务（prod-up 启动前会经 `scripts/ensure-velites.sh` 按 velites/ 源码指纹检测并自动重建过期的 velites 二进制）。所有修复与调试（含 Docker 容器调试）必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令（`native-prod-*` / `stack-prod-*`）只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
@@ -58,8 +58,8 @@
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试
   清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema`
   走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由
-  CI 与 `./scripts/check.sh` 强制）。多 worktree 并行时用 `AGENT_LEGION_TEST_WORKERS`
-  限制 pytest worker 数（默认 `-n auto` 吃满所有核）。
+  CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 min(4, 核数)，用
+  `AGENT_LEGION_TEST_WORKERS` 覆盖。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增
   `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线
   `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加
