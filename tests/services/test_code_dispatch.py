@@ -282,6 +282,7 @@ def _register_probe_worker(
     *,
     capabilities: list[str] | None = None,
     max_code_concurrency: int = 1,
+    allowed_workspaces: list[str] | None = None,
 ) -> None:
     AgentWorkerRegistry(TEST_DATABASE_URL).issue_token(
         worker_id=worker_id,
@@ -291,38 +292,71 @@ def _register_probe_worker(
         max_concurrency=10,
         max_code_concurrency=max_code_concurrency,
         protocol_version=2,
+        allowed_workspaces=allowed_workspaces,
     )
 
 
 def test_online_code_worker_probe_matches_capability(job_db) -> None:
-    assert has_online_code_worker(TEST_DATABASE_URL, "package") is False
+    assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is False
     _register_probe_worker("worker-a", capabilities=["package"])
 
-    assert has_online_code_worker(TEST_DATABASE_URL, "package") is True
+    assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is True
     # Code capacity but no matching declaration: the request would rot in
     # queued (no timeout fallback), so the probe says no and the scheduler
     # falls back to local execution.
-    assert has_online_code_worker(TEST_DATABASE_URL, "transcribe") is False
+    assert has_online_code_worker(TEST_DATABASE_URL, "transcribe", "test-workspace") is False
 
 
 def test_online_code_worker_probe_wildcard_zero_capacity_and_revoked(job_db) -> None:
     _register_probe_worker("worker-wild", capabilities=None)  # legacy "*" mode
-    assert has_online_code_worker(TEST_DATABASE_URL, "anything") is True
+    assert has_online_code_worker(TEST_DATABASE_URL, "anything", "test-workspace") is True
     AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-wild")
-    assert has_online_code_worker(TEST_DATABASE_URL, "anything") is False
+    assert has_online_code_worker(TEST_DATABASE_URL, "anything", "test-workspace") is False
     # An agent-only Worker (no code pool) never counts even on a match.
     _register_probe_worker("worker-agent", capabilities=["anything"], max_code_concurrency=0)
-    assert has_online_code_worker(TEST_DATABASE_URL, "anything") is False
+    assert has_online_code_worker(TEST_DATABASE_URL, "anything", "test-workspace") is False
+
+
+def test_online_code_worker_probe_matches_claim_side_filters(job_db) -> None:
+    """The probe must mirror claim_evaluate.py: a Worker outside the
+    workspace's admission scope (or below protocol v2) can never claim the
+    request, and with no queued-timeout fallback the request would wedge the
+    job — so the probe says no and the node falls back to local execution."""
+    with job_db.connect() as conn:
+        conn.execute("insert into workspaces(id, name) values ('other-workspace', 'Other')")
+    _register_probe_worker(
+        "worker-scoped",
+        capabilities=["package"],
+        allowed_workspaces=["other-workspace"],
+    )
+    assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is False
+    assert has_online_code_worker(TEST_DATABASE_URL, "package", "other-workspace") is True
+    # An unrestricted Worker (empty allowed_workspaces) admits any workspace.
+    _register_probe_worker("worker-open", capabilities=["package"])
+    assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is True
+
+    # A v1 row predating the register-time gate never counts either.
+    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-scoped")
+    AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-open")
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into agent_workers(worker_id, runtimes_json, max_concurrency,"
+            " max_code_concurrency, capabilities_json, protocol_version, token_hash,"
+            " registered_at, last_seen_at)"
+            " values ('worker-v1', '[\"pi\"]', 10, 1, '[\"package\"]', 1, 'x',"
+            " current_timestamp, current_timestamp)"
+        )
+    assert has_online_code_worker(TEST_DATABASE_URL, "package", "test-workspace") is False
 
 
 def test_online_probe_caches_per_capability_within_ttl(job_db, tmp_path) -> None:
     service = _service(job_db, tmp_path)
     _register_probe_worker("worker-a", capabilities=["package"])
 
-    assert service.online_code_worker_available("package") is True
-    assert service.online_code_worker_available("transcribe") is False
+    assert service.online_code_worker_available("package", "test-workspace") is True
+    assert service.online_code_worker_available("transcribe", "test-workspace") is False
     # Within the TTL the cached answer is served even after the Worker leaves.
     AgentWorkerRegistry(TEST_DATABASE_URL).revoke("worker-a")
-    assert service.online_code_worker_available("package") is True
+    assert service.online_code_worker_available("package", "test-workspace") is True
     service._online_probe.clear()
-    assert service.online_code_worker_available("package") is False
+    assert service.online_code_worker_available("package", "test-workspace") is False
