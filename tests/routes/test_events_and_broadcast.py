@@ -3,6 +3,18 @@ import json
 import subprocess
 from types import SimpleNamespace
 
+import pytest
+
+
+@pytest.fixture
+def client(client_factory):
+    """Private app per test: the websocket broadcast tests need the app's
+    background agent-status flush loop, and the worker-session shared app runs
+    with background tasks disabled (see tests/conftest.py), so broadcasts
+    would never be delivered there."""
+    with client_factory(fresh=True) as c:
+        yield c
+
 
 class _FakeAuthService:
     def authenticate(self, token):

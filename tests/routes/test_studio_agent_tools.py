@@ -305,7 +305,10 @@ class _RecordingWorker:
 def test_register_workflow_triggers_scan_reload_and_wakeup(client, job_db, monkeypatch) -> None:
     scoped, _ = _scoped_client(client, job_db)
     worker = _RecordingWorker()
-    client.app.state.workflow_worker = worker
+    # client is the worker-session shared app: monkeypatch restores the missing
+    # workflow_worker attribute after the test (raising=False: the default app
+    # runs with start_worker=False and has no such attribute).
+    monkeypatch.setattr(client.app.state, "workflow_worker", worker, raising=False)
     wakeups: list[int] = []
     monkeypatch.setattr(
         "server.app.routes.studio_agent_tools.notify_schedulable_work",
