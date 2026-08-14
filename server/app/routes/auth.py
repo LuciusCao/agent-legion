@@ -5,7 +5,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Request, Response
 from fastapi.exceptions import HTTPException
 
-from ..auth.dependencies import SESSION_COOKIE, extract_session_token, require_admin, require_user
+from ..auth.dependencies import (
+    SESSION_COOKIE,
+    extract_session_token,
+    reject_studio_agent_scope,
+    require_admin,
+    require_user,
+)
 from ..auth.service import AuthError, AuthService
 from ..auth.sessions import SESSION_TTL
 from .auth_contracts import (
@@ -145,7 +151,11 @@ def _build_users_router(auth_service: AuthService) -> APIRouter:
             raise _auth_error(exc) from exc
         return list_members(workspace_id)
 
-    @router.delete("/workspaces/{workspace_id}/members/{user_id}", response_model=MembersResponse)
+    @router.delete(
+        "/workspaces/{workspace_id}/members/{user_id}",
+        response_model=MembersResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
+    )
     def delete_member(workspace_id: str, user_id: str) -> MembersResponse:
         try:
             auth_service.remove_workspace_member(workspace_id, user_id)

@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.events import JobEventManager
 from server.app.events.bus import workspace_channel
 from server.app.routes.dashboard_events import create_dashboard_events_router
@@ -35,7 +36,11 @@ def create_workspaces_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.post("/workspaces", response_model=WorkspaceResponse)
+    @router.post(
+        "/workspaces",
+        response_model=WorkspaceResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
+    )
     def create_workspace(payload: WorkspaceCreateRequest) -> WorkspaceResponse:
         require_workflows_enabled(settings)
         try:
@@ -53,7 +58,11 @@ def create_workspaces_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+    @router.patch(
+        "/workspaces/{workspace_id}",
+        response_model=WorkspaceResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
+    )
     def update_workspace(workspace_id: str, payload: WorkspaceUpdateRequest) -> WorkspaceResponse:
         require_workflows_enabled(settings)
         try:
@@ -62,7 +71,11 @@ def create_workspaces_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.delete("/workspaces/{workspace_id}", response_model=DeleteWorkspaceResponse)
+    @router.delete(
+        "/workspaces/{workspace_id}",
+        response_model=DeleteWorkspaceResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
+    )
     def delete_workspace(workspace_id: str) -> DeleteWorkspaceResponse:
         require_workflows_enabled(settings)
         try:

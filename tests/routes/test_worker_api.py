@@ -1,10 +1,3 @@
-from fastapi import FastAPI
-from fastapi.testclient import TestClient
-
-from server.app.routes.worker import create_worker_router
-from server.app.worker_control import WorkspaceWorkerControl
-
-
 def test_worker_status_with_workspace_defaults_to_paused(client):
     status = client.get("/api/worker/status", params={"workspace_id": "ws-1"})
     assert status.status_code == 200
@@ -44,20 +37,10 @@ def test_worker_with_agent_legion_workspace_uses_workspace_worker(client):
     assert client.app.state.workspace_worker_control.is_paused("agent-legion") is True
 
 
-def test_worker_without_workspace_id_is_required():
-    workspace_worker_control = WorkspaceWorkerControl()
-    workspace_worker_control.resume("ws-1")
-    router = create_worker_router(workspace_worker_control)
-
-    app = FastAPI()
-    app.include_router(router, prefix="/api")
-
-    with TestClient(app) as client:
-        status = client.get("/api/worker/status")
-        assert status.status_code == 422
-
-        paused = client.post("/api/worker/pause")
-        assert paused.status_code == 422
-
-        resumed = client.post("/api/worker/resume")
-        assert resumed.status_code == 422
+def test_worker_without_workspace_id_is_required(client):
+    # pause/resume additionally mount reject_studio_agent_scope (STUDIO-AGENT-001),
+    # so they can no longer be exercised on a bare app without auth; through the
+    # real router the missing workspace_id query still fails validation with 422.
+    assert client.get("/api/worker/status").status_code == 422
+    assert client.post("/api/worker/pause").status_code == 422
+    assert client.post("/api/worker/resume").status_code == 422

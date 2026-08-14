@@ -4,7 +4,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
-from server.app.auth.dependencies import require_user
+from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.quality_contracts import (
     QualityBatchStatsResponse,
@@ -33,6 +33,7 @@ def create_quality_router(
     @router.post(
         "/workspaces/{workspace_id}/quality/sample-batches",
         response_model=QualitySampleBatchCreateResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def create_sample_batch(
         workspace_id: str,
@@ -111,6 +112,7 @@ def create_quality_router(
     @router.post(
         "/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels",
         response_model=QualityLabelResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def add_sample_item_label(
         workspace_id: str,
