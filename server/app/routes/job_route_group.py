@@ -10,6 +10,7 @@ from server.app.routes.failed_node_runs import create_failed_node_runs_router
 from server.app.routes.job_artifacts import create_job_artifacts_router
 from server.app.routes.job_batches import create_job_batches_router
 from server.app.routes.job_invalid_paths import create_job_invalid_paths_router
+from server.app.routes.job_mutations import create_job_mutations_router
 from server.app.routes.job_rerun_preview import create_batch_rerun_preview_router
 from server.app.routes.job_snapshot import create_job_snapshot_router
 from server.app.routes.job_stress_events import create_job_stress_events_router
@@ -49,8 +50,9 @@ def include_job_routes(
     )
 
     router.include_router(create_job_batches_router(services.intake, settings))
+    router.include_router(create_jobs_router(services.queries, settings))
     router.include_router(
-        create_jobs_router(
+        create_job_mutations_router(
             services.queries,
             services.rerun,
             services.deletion,
