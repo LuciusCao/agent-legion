@@ -103,6 +103,36 @@ def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
         assert scoped_response.status_code == 403, f"{method} {url}"
 
 
+_ADMIN_ENDPOINTS: list[tuple[str, str, dict | None]] = [
+    ("GET", "/api/users", None),
+    ("GET", "/api/admin/connections", None),
+    ("GET", "/api/admin/instance-settings", None),
+    ("GET", "/api/admin/token-usage-pricing", None),
+    ("PUT", "/api/admin/skill-sources/some/skill", {"ref": "main"}),
+    ("POST", "/api/admin/skill-sources/relock", None),
+    ("DELETE", "/api/admin/connections/conn-x", None),
+]
+
+
+def test_scoped_token_rejected_on_admin_endpoints(client, job_db) -> None:
+    """require_admin refuses scoped identities even though the scoped token
+    inherits role=admin from the initiating user's row (P0: without the
+    actor_scope check the token would pass every admin endpoint)."""
+    workspace_id = str(job_db.create_workspace("scope-admin-guard-ws")["id"])
+    scoped = _scoped_client(client, job_db)
+    endpoints = [
+        *_ADMIN_ENDPOINTS,
+        ("DELETE", f"/api/workspaces/{workspace_id}/members/user-x", None),
+    ]
+    for method, url, payload in endpoints:
+        response = scoped.request(method, url, json=payload)
+        assert response.status_code == 403, f"{method} {url} -> {response.status_code}"
+    # Full admin sessions keep working.
+    for method, url, payload in _ADMIN_ENDPOINTS[:4]:
+        admin_response = client.request(method, url, json=payload)
+        assert admin_response.status_code == 200, f"{method} {url}"
+
+
 def test_expired_scoped_token_gets_401(client, job_db) -> None:
     scoped = _scoped_client(client, job_db, ttl=timedelta(seconds=-1))
     assert scoped.get("/api/workspaces").status_code == 401
