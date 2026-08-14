@@ -3,6 +3,26 @@
 状态：实施中（2026-08-13 启动）。chunk 1→5 顺序执行，每 chunk 质量门全绿后进入下一个。
 上游设计：`workflow-studio-evolution-design.md`（§1 定位、§4 已定案决策）。
 
+## 方向修正（2026-08-14，用户拍板）
+
+chunk 4/5 的「内嵌 pi/velites 运行时 + transcript 重放」方案被 **MCP/ACP 三层分离**
+取代，职责拆开：
+
+1. **MCP server（工具面）**：平台自带 stdio MCP server（`server.app.mcp_server`），
+   薄包装 chunk 3 的 8 个工具端点，任何支持 MCP 的 agent 配上 scoped token 即可
+   authoring。**已落地**：merge `19a4d4f8`（token 自助签发 API + schema v42
+   `auth_scoped_tokens.origin/id` + MCP server + 接入文档 `docs/studio-agent-mcp.md`）。
+   token 管理端点叠加 `reject_studio_agent_scope`，run 级短 token 不能铸 user 级
+   长 token（权限延长通道已堵）。
+2. **ACP（对话面）**：Studio 对话后端改为 ACP client，接任何支持 ACP 的 agent
+   （用户可选），替代原内嵌运行时的 chunk 4。`studio_authoring` skill 不再是
+   硬前置（authoring 规范经 MCP instructions/prompt 注入）。
+3. **对话前端（交互面）**：chunk 5 不变（Studio 右栏面板）。
+
+原 §0 决策 1（内置 agent 定义 seed）与 6（PiRunner run 执行）据此作废；
+决策 2/3/4（工具面形态、scoped token、草稿落库）继续有效且已被 MCP server 复用。
+ACP 生态验证（哪些 agent 支持、协议成熟度）是 chunk 4 改造的第一步。
+
 ## 0. 主会话已拍板的缺口决策（不得重开）
 
 1. **内置 agent 定义存储**：builtin seed 进 `versioned_entities`（参照 executor
@@ -71,20 +91,18 @@
 - 测试：`tests/routes/test_studio_agent_tools.py` 全端点行为 + 身份归属 + 冲突。
 - api.ts 重新生成（api:check 必须过）。
 
-## Chunk 4 · 内置 agent 运行时 + 对话 API
+## Chunk 4 · 对话后端（ACP client 化，方向修正后）
 
-- 外部前置（非本 repo，需用户在 skill repo 配合）：`studio_authoring` skill +
-  tag + relock。
-- 新建 `services/studio_chat.py`（session/message 持久化）、
-  `services/studio_agent_runner.py`（后台线程 PiRunner.run(persist_run=False)，
-  transcript 重放拼 prompt，env 注入 scoped token + API base URL，工具脚本经
-  skill_dir 提供；取消复用 SubprocessTracker；token 不落日志/命令行）。
-- 新建 `routes/studio_chat.py`：sessions CRUD、POST message 启动 run、GET 状态/
-  消息；`require_workspace_access`。
-- 内置 agent 定义启动 seed（runtime 建议 velites）。
-- DDL：schema v42，`studio_chat_sessions` / `studio_chat_messages`（tool_events
-  jsonb、token usage 列）。
-- 测试：transcript 拼装、run 状态机（fake PiRunner）、对话 API。
+- 按「方向修正（2026-08-14）」重写本 chunk：不再内嵌 pi/velites 运行时，
+  后端作为 **ACP client** 接用户配置的任意 ACP agent；agent 的工具面走已落地的
+  MCP server（`server.app.mcp_server` + 用户自助签发的 scoped token）。
+- 第一步：ACP 生态验证（协议成熟度、Claude Code/Gemini CLI/Kimi Code 等的
+  ACP 支持现状），再定 client 实现选型。
+- 保留自原方案：chat session/message 持久化（schema 版本顺延）、run 状态机、
+  取消、token 不落日志/命令行；`require_workspace_access`。
+- 原方案要点（备查）：`services/studio_chat.py` 会话持久化、后台线程 run、
+  无状态 transcript 重放、env 注入 scoped token——ACP 化后 transcript/进程
+  管理由 ACP 协议接管，会话持久化与 run 状态机仍是我们的责任。
 
 ## Chunk 5 · 前端对话面板 + 收尾
 
