@@ -24,6 +24,9 @@ type Props = {
   node: WorkflowNodeRecord
   bindings: CapabilityBinding[]
   executorCatalog: ExecutorDefinition[]
+  // 与 DAG 展示口径一致：取 visible workflow 的 key，而非 settings 快照里的
+  // workflowKey（YAML 草稿改 key 发布后两者会分叉，见 workflowStudioDag）。
+  workflowKey: string
   readOnly?: boolean
 }
 
@@ -31,7 +34,7 @@ type Props = {
 // （后端 PUT configuration 为整体替换语义，服务端校验失败经 toast 即时报出）。
 export function WorkflowNodeBindingEditor(props: Props) {
   const { node } = props
-  const workflowKey = useSettingStore((s) => s.settings.workflowKey)
+  const workflowKey = props.workflowKey
   const catalog = useExecutorCatalog()
   const executorConfiguration = useSettingStore((s) => s.executorConfiguration)
   const isSaving = useSettingStore((s) => s.isSaving)
