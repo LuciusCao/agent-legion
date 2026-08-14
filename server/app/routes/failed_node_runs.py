@@ -2,8 +2,9 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.failed_node_run_contracts import (
     FailedNodeRunItem,
@@ -56,6 +57,7 @@ def create_failed_node_runs_router(
     @router.post(
         "/workspaces/{workspace_id}/jobs/rerun-by-failure",
         response_model=JobRerunByFailureResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def rerun_jobs_by_failure_category(
         workspace_id: str,

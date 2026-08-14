@@ -146,7 +146,13 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
     def register_workflow(
         request: Request,
         payload: StudioAgentWorkflowRegisterRequest,
+        user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
     ) -> workflow_contracts.WorkflowRegisteredResponse:
+        # Registering a workflow key is platform-global, so it aligns with the
+        # human-facing POST /api/workflows (require_admin): only a scoped
+        # token minted for an admin may register.
+        if user.get("role") != "admin":
+            raise HTTPException(status_code=403, detail="Admin role required")
         require_workflows_enabled(settings)
         try:
             entry = _service().register_workflow(payload.key, payload.label, payload.description)

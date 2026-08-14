@@ -20,7 +20,8 @@ class ScopedTokenQueriesMixin(JobQueriesBase):
         origin: str = "run",
     ) -> str:
         """Insert a scoped token row and return its public (non-digest) id."""
-        token_id = uuid4().hex
+        # str(uuid4()) matches the DB default gen_random_uuid()::text format.
+        token_id = str(uuid4())
         with self.connect() as conn:
             conn.execute(
                 "insert into auth_scoped_tokens(id, token_hash, user_id, scope, origin,"

@@ -83,7 +83,8 @@ def test_scoped_token_passes_scope_guard_on_all_tool_endpoints(client, job_db) -
     scoped, _ = _scoped_client(client, job_db)
     for method, url, payload in _tool_endpoints(workspace_id):
         response = scoped.request(method, url, json=payload)
-        assert response.status_code not in (401, 403), (
+        # < 500 too: a 5xx here would be a server bug masquerading as a pass.
+        assert response.status_code not in (401, 403) and response.status_code < 500, (
             f"{method} {url} -> {response.status_code}: {response.text}"
         )
 
@@ -106,8 +107,11 @@ def test_get_active_revision_returns_definition_and_yaml(client, job_db) -> None
 def test_get_active_revision_404_for_unknown_workspace(client, job_db) -> None:
     scoped, _ = _scoped_client(client, job_db)
     response = scoped.get("/api/studio-agent/tools/workspaces/ws-missing/workflow/active")
-    # require_workspace_access hides unknown workspaces from non-members, but
-    # the scoped token belongs to the admin, so the service-level 404 shows.
+    # The tools router is wrapped by secured() (routes/__init__.py), which
+    # mounts require_workspace_access: non-members get 404 there so workspace
+    # existence cannot be enumerated. This scoped token belongs to the admin,
+    # who bypasses the membership check, so the 404 here surfaces from the
+    # service layer for the unknown workspace.
     assert response.status_code == 404
 
 
@@ -322,6 +326,28 @@ def test_register_workflow_triggers_scan_reload_and_wakeup(client, job_db, monke
 
     catalog = scoped.get("/api/studio-agent/tools/workflows")
     assert "studio_agent_flow" in {entry["key"] for entry in catalog.json()["workflows"]}
+
+
+def test_register_workflow_requires_admin_scoped_token(client, job_db) -> None:
+    """Platform-global registration aligns with POST /api/workflows
+    (require_admin): a scoped token minted for a non-admin user gets 403."""
+    member_id = str(job_db.create_user("studio-member", password_hash=None)["id"])
+    member_token = scoped_tokens.mint_scoped_token(job_db, member_id)
+    member_scoped = client.__class__(client.app)
+    member_scoped.headers["authorization"] = f"Bearer {member_token}"
+
+    denied = member_scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "member_flow", "label": "Member Flow"},
+    )
+    assert denied.status_code == 403
+
+    scoped, _ = _scoped_client(client, job_db)
+    allowed = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "member_flow", "label": "Member Flow"},
+    )
+    assert allowed.status_code == 200, allowed.text
 
 
 def test_register_workflow_conflict_and_invalid_key(client, job_db) -> None:

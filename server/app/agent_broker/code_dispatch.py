@@ -32,6 +32,7 @@ from server.app.agent_broker.agent_bundle import (
 from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionRequest
 from server.app.agent_broker.claim_paths import claim_log_path
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
+from server.app.agent_workers import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VERSION
 from server.app.agent_workers import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
 from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
@@ -149,21 +150,22 @@ def build_code_bundle(bundle_path: Path, *, code_text: str, workspace_libs_dir: 
         tar.addfile(info, io.BytesIO(data))
 
 
-def has_online_code_worker(database_dsn: Any, capability: str) -> bool:
-    """True when an online non-revoked code Worker declares *capability*.
+def has_online_code_worker(database_dsn: Any, capability: str, workspace_id: str) -> bool:
+    """True when an online Worker can claim *capability* in *workspace_id*.
 
-    Capability matching mirrors the claim-side filter (claim_evaluate.py);
-    without it a mismatched Worker would let the request rot in queued —
-    there is no queued-timeout fallback (batch 2 decision 3)."""
+    Mirrors the claim-side filters (capability, protocol v2, allowed_workspaces
+    admission) — an inadmissible Worker would wedge the job in queued for good
+    (no queued-timeout fallback, batch 2 decision 3)."""
     with read_connection(database_dsn) as conn:
         row = conn.execute(
             "select 1 from agent_workers where revoked_at is null"
-            " and max_code_concurrency > 0"
+            " and max_code_concurrency > 0 and protocol_version >= %s"
             " and last_seen_at > now() - make_interval(secs => %s)"
             " and (capabilities_json::jsonb @> jsonb_build_array(%s::text)"
             " or capabilities_json::jsonb @> '[\"*\"]'::jsonb)"
+            " and (allowed_workspaces_json::jsonb = '[]'::jsonb or allowed_workspaces_json::jsonb @> jsonb_build_array(%s::text))"
             " limit 1",
-            (_ONLINE_THRESHOLD_SECONDS, capability),
+            (_CODE_PROTOCOL_VERSION, _ONLINE_THRESHOLD_SECONDS, capability, workspace_id),
         ).fetchone()
     return row is not None
 
@@ -188,15 +190,15 @@ class CodeDispatchService:
         )
         self._in_flight: set[tuple[str, str]] = set()
         self._in_flight_lock = threading.Lock()
-        self._online_probe: dict[str, tuple[float, bool]] = {}
+        self._online_probe: dict[tuple[str, str], tuple[float, bool]] = {}
 
-    def online_code_worker_available(self, capability: str) -> bool:
-        """TTL-cached probe (per capability): an online Worker can claim it?"""
+    def online_code_worker_available(self, capability: str, workspace_id: str) -> bool:
+        """TTL-cached probe (per capability+workspace): an online Worker can claim it?"""
         now = time.monotonic()
-        probed_at, result = self._online_probe.get(capability, (0.0, False))
+        probed_at, result = self._online_probe.get((capability, workspace_id), (0.0, False))
         if now - probed_at >= _ONLINE_PROBE_TTL_SECONDS:
-            result = has_online_code_worker(self.settings.database_url, capability)
-            self._online_probe[capability] = (now, result)
+            result = has_online_code_worker(self.settings.database_url, capability, workspace_id)
+            self._online_probe[(capability, workspace_id)] = (now, result)
         return result
 
     def is_in_flight(self, job_id: str, node_key: str) -> bool:
