@@ -1,0 +1,358 @@
+.chatPanel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.sessionBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid #f0f0f0;
+  font-size: 12px;
+  color: #616161;
+}
+.pickerLabel {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.picker {
+  max-width: 140px;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #424242;
+  background: #fff;
+}
+.newChat {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: #1565c0;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.newChat:disabled {
+  color: #9e9e9e;
+  cursor: default;
+}
+.scopeNote {
+  margin: 8px 12px 0;
+  padding: 8px 10px;
+  background: #fff8e1;
+  border: 1px solid #ffecb3;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #7a5d00;
+}
+.messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.bubbleUser {
+  align-self: flex-end;
+  max-width: 92%;
+  background: #1976d2;
+  color: #fff;
+  border-radius: 12px 12px 4px 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.bubbleAgent {
+  align-self: flex-start;
+  max-width: 92%;
+  font-size: 13px;
+  line-height: 1.6;
+  color: #1a1c1e;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.toolCallGroup {
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.toolCall {
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  background: #fafafa;
+}
+.toolCallTrigger {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: none;
+  padding: 5px 9px;
+  font-size: 12px;
+  color: #424242;
+  cursor: pointer;
+  text-align: left;
+}
+.toolCallTrigger code {
+  color: #1565c0;
+}
+.toolCallOk {
+  color: #2e7d32;
+}
+.toolCallFailed {
+  color: #c62828;
+}
+.toolCallSummary {
+  margin-left: auto;
+  color: #9e9e9e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 50%;
+}
+.toolCallDetail {
+  border-top: 1px solid #f0f0f0;
+  padding: 6px 9px;
+}
+.toolCallDetail pre {
+  margin: 0;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: #616161;
+  max-height: 200px;
+  overflow: auto;
+}
+.plan {
+  align-self: stretch;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 12px;
+  color: #424242;
+}
+.planTitle {
+  font-weight: 600;
+  margin-bottom: 4px;
+}
+.plan ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.plan li[data-status='completed'] {
+  color: #2e7d32;
+}
+.permission {
+  align-self: stretch;
+  border: 1px solid #ffe082;
+  background: #fffde7;
+  border-radius: 8px;
+  padding: 10px 12px;
+  font-size: 12px;
+  color: #424242;
+}
+.permissionTitle {
+  margin-bottom: 8px;
+}
+.permissionActions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.permissionAllow {
+  border: 1px solid #1976d2;
+  background: #1976d2;
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.permissionDeny {
+  border: 1px solid #ffcdd2;
+  background: #fff;
+  color: #c62828;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.permissionAllow:disabled,
+.permissionDeny:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.permissionResolved {
+  color: #616161;
+}
+.allowAll {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  color: #616161;
+}
+.draftCard {
+  border: 1px solid #bbdefb;
+  background: #e3f2fd;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+.draftTitle {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0d47a1;
+}
+.draftMeta {
+  font-size: 12px;
+  color: #455a64;
+  margin: 4px 0 8px;
+}
+.draftActions {
+  display: flex;
+  gap: 8px;
+}
+.draftButton {
+  font-size: 12px;
+  border-radius: 6px;
+  padding: 5px 12px;
+  cursor: pointer;
+  border: 1px solid #cfcfcf;
+  background: #fff;
+  color: #424242;
+}
+.draftPrimary {
+  background: #1976d2;
+  border-color: #1976d2;
+  color: #fff;
+}
+.statusWarning {
+  margin: 0 12px;
+  padding: 8px 10px;
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #b71c1c;
+}
+.statusLine {
+  align-self: center;
+  font-size: 11px;
+  color: #9e9e9e;
+}
+.runBar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-top: 1px solid #f0f0f0;
+  font-size: 12px;
+  color: #616161;
+}
+.runDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.runDotBusy {
+  background: #1976d2;
+}
+.runDotDone {
+  background: #43a047;
+}
+.runDotError {
+  background: #c62828;
+}
+.cancelButton {
+  margin-left: auto;
+  border: 1px solid #ffcdd2;
+  background: #fff;
+  color: #c62828;
+  border-radius: 6px;
+  padding: 3px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.inputArea {
+  border-top: 1px solid #e0e0e0;
+  padding: 10px 12px;
+}
+.inputBox {
+  display: flex;
+  gap: 8px;
+  align-items: flex-end;
+  border: 1px solid #cfcfcf;
+  border-radius: 10px;
+  padding: 8px 10px;
+}
+.inputBox textarea {
+  flex: 1;
+  border: none;
+  outline: none;
+  resize: none;
+  font-size: 13px;
+  font-family: inherit;
+}
+.sendButton {
+  background: #1976d2;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 14px;
+  font-size: 13px;
+  cursor: pointer;
+}
+.sendButton:disabled {
+  background: #bbdefb;
+  cursor: default;
+}
+.inputHint {
+  font-size: 11px;
+  color: #9e9e9e;
+  margin-top: 6px;
+}
+.emptyState {
+  padding: 24px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #757575;
+}
+.tabBar {
+  display: flex;
+  align-items: center;
+  border-bottom: 1px solid #e0e0e0;
+}
+.tab {
+  padding: 10px 16px;
+  font-size: 13px;
+  color: #757575;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+}
+.tabActive {
+  color: #1565c0;
+  border-bottom-color: #1976d2;
+  font-weight: 600;
+}
+.tabClose {
+  margin-left: auto;
+  margin-right: 8px;
+  border: 0;
+  background: none;
+  color: #9e9e9e;
+  cursor: pointer;
+  font-size: 14px;
+}
