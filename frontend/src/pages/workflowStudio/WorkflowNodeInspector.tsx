@@ -31,6 +31,7 @@ export function WorkflowNodeInspector(props: Props) {
       agentCatalog={props.agentCatalog}
       definitionYaml={props.definitionYaml}
       setDefinitionYaml={props.setDefinitionYaml}
+      workflowKey={workflow.key}
       readOnly={props.readOnly}
       onClose={props.onClose}
     />

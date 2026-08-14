@@ -58,6 +58,7 @@ const navMock = vi.hoisted(() => ({
 function renderEditor(props?: {
   node?: WorkflowNodeRecord
   readOnly?: boolean
+  workflowKey?: string
   nav?: StudioNav
 }) {
   const target = props?.node ?? node
@@ -68,6 +69,7 @@ function renderEditor(props?: {
           node={target}
           bindings={findCapabilityBindings(executorCatalog, target.capability)}
           executorCatalog={executorCatalog}
+          workflowKey={props?.workflowKey ?? 'wf'}
           readOnly={props?.readOnly}
         />
       </StudioNavContext.Provider>
@@ -226,6 +228,32 @@ describe('WorkflowNodeBindingEditor', () => {
     expect(
       screen.queryByTestId('studio-binding-select-build')
     ).not.toBeInTheDocument()
+  })
+
+  it('reads and writes bindings under the visible workflow key, not settings.workflowKey', () => {
+    // settings 快照与 DAG 展示的 workflow 分叉（如草稿改 key 发布后）时，
+    // 绑定编辑器必须与 DAG 口径（visible workflow key）一致。
+    useSettingStore.setState({
+      settings: {
+        entityType: 'question',
+        intakeModes: [],
+        labelOverrides: {},
+        workflowKey: 'legacy-wf',
+      },
+    })
+    renderEditor({ workflowKey: 'wf' })
+
+    expect(getSelectInput('build').value).toBe('code-default')
+    changeSelectValue('build', 'pi-runner')
+
+    expect(
+      useSettingStore.getState().executorConfiguration.bindings
+    ).toContainEqual({
+      workflow_key: 'wf',
+      node_key: 'build',
+      executor_id: 'pi-runner',
+    })
+    expect(saveAllMock).toHaveBeenCalledTimes(1)
   })
 
   it('shows a retryable load error instead of the empty-binding hint when the catalog fails', async () => {

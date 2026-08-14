@@ -68,6 +68,7 @@ const editorProps = {
   definitionYaml: `nodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
   setDefinitionYaml: () => {},
   agentCatalog,
+  workflowKey: 'demo-wf',
 }
 
 describe('WorkflowNodeExecutionSection', () => {
@@ -108,6 +109,7 @@ describe('WorkflowNodeExecutionSection', () => {
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
 
@@ -139,6 +141,7 @@ describe('WorkflowNodeExecutionSection', () => {
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
 
@@ -156,6 +159,7 @@ describe('WorkflowNodeExecutionSection', () => {
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
     expect(screen.getByLabelText('Provider')).toHaveValue('')
