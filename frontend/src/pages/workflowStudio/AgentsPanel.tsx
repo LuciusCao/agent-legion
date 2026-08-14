@@ -49,6 +49,10 @@ export function AgentsPanel(props: { initialSelectedId?: string | null }) {
     void queryClient.invalidateQueries({
       queryKey: extraQueryKeys.agentDefinitions(),
     })
+    // Agent 发布/归档/回滚改变 capability 路由，Studio 目录同会话失效重取。
+    void queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.studioExecutorCatalog(),
+    })
   }
 
   function handleSelect(agentId: string) {

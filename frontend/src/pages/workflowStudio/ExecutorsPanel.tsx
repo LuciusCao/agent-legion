@@ -50,6 +50,10 @@ export function ExecutorsPanel(props: { initialSelectedId?: string | null }) {
     void queryClient.invalidateQueries({
       queryKey: extraQueryKeys.executorDefinitions(),
     })
+    // Executor capability 变更影响绑定候选，Studio 目录同会话失效重取。
+    void queryClient.invalidateQueries({
+      queryKey: extraQueryKeys.studioExecutorCatalog(),
+    })
   }
 
   function handleSelect(executorId: string) {

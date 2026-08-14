@@ -39,6 +39,8 @@ export const extraQueryKeys = {
   workflowStudioData: (workspaceId: string) =>
     ['workflowStudioData', workspaceId] as const,
   agentDefinitions: () => ['agentDefinitions'] as const,
+  // Studio DAG/绑定编辑器共享的 executor+agent 目录；面板发布/归档后失效重取。
+  studioExecutorCatalog: () => ['studioExecutorCatalog'] as const,
   agentVersions: (agentId: string) => ['agentVersions', agentId] as const,
   executorDefinitions: () => ['executorDefinitions'] as const,
   executorVersions: (executorId: string) =>
