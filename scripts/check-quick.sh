@@ -187,6 +187,21 @@ run_round() {
   frontend_status=0
   rust_status=0
   set +e
+  # Heartbeat: lane output goes to log files and is only cat'ed at round end,
+  # so a long round looks silent. Print elapsed time plus each running lane's
+  # latest log line every GATE_HEARTBEAT_SECONDS (default 30).
+  while true; do
+    running=()
+    [[ -n "$backend_pid" ]] && kill -0 "$backend_pid" 2>/dev/null && running+=("backend")
+    [[ -n "$frontend_pid" ]] && kill -0 "$frontend_pid" 2>/dev/null && running+=("frontend")
+    [[ -n "$rust_pid" ]] && kill -0 "$rust_pid" 2>/dev/null && running+=("rust")
+    [[ ${#running[@]} -eq 0 ]] && break
+    sleep "${GATE_HEARTBEAT_SECONDS:-30}"
+    for lane in "${running[@]}"; do
+      last_line="$(tail -n 1 "$log_dir/${lane}-${round}.log" 2>/dev/null | cut -c1-120)"
+      echo "[gate:${round}] $((SECONDS - lanes_started_at))s ${lane}: ${last_line}"
+    done
+  done
   if [[ -n "$backend_pid" ]]; then
     wait "$backend_pid"
     backend_status=$?

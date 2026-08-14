@@ -56,13 +56,18 @@ run_tests() {
   # database URL; this is marker-based membership rather than a file
   # allowlist, and proves the pure layer remains independently runnable.
   #
-  # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism (default: auto =
-  # all cores). Machines running several worktrees at once should set it
-  # (e.g. 3-4) to avoid oversubscribing CPU and the shared Postgres.
+  # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism. Default:
+  # min(4, core count) — enough for a fast gate without oversubscribing
+  # machines that run several worktrees or a frontend lane at the same time
+  # (raise it on a dedicated box; CI 4-vCPU runners are unaffected).
   #
   # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
   # regression still fails after the single retry (visible as RERUN in output).
-  workers="${AGENT_LEGION_TEST_WORKERS:-auto}"
+  default_workers="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
+  if [[ "$default_workers" -gt 4 ]]; then
+    default_workers=4
+  fi
+  workers="${AGENT_LEGION_TEST_WORKERS:-$default_workers}"
   telemetry_args=()
   if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
     result_name="${AGENT_LEGION_TEST_RESULT_NAME:-backend}"
