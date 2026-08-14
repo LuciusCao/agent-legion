@@ -4,6 +4,7 @@ import os
 import shutil
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -140,6 +141,41 @@ def _init_git_repo(path: Path) -> None:
         check=True,
         capture_output=True,
     )
+
+
+def test_quick_gate_fast_lanes_are_not_padded_by_heartbeat_sleep(tmp_path: Path) -> None:
+    """A lane that finishes in seconds must end the round within ~1s: the
+    heartbeat loop polls in 1s steps instead of sleeping the whole interval."""
+    quick_gate = _quick_gate_fixture(tmp_path / "scripts")
+
+    started = time.monotonic()
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_HEARTBEAT_SECONDS": "20"})
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The old sleep-then-check loop would pad each of the two rounds by the
+    # full 20s heartbeat interval; the polling loop stays well under one.
+    assert elapsed < 20
+    assert "[gate:" not in result.stdout
+
+
+def test_quick_gate_heartbeat_prints_running_lane_progress(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    _write_executable(
+        scripts / "check-quick-backend.sh",
+        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 6\n',
+    )
+    _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_HEARTBEAT_SECONDS": "2"})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    heartbeat_lines = [line for line in result.stdout.splitlines() if line.startswith("[gate:")]
+    assert heartbeat_lines
+    assert any("backend: backend lane working" in line for line in heartbeat_lines)
 
 
 def test_quick_gate_derives_backend_lane_from_worktree_changes(tmp_path: Path) -> None:
