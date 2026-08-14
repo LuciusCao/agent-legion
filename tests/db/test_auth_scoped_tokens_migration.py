@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from server.app.db.migrations import migrate_scoped_token_origin
+from server.app.db.schema import SCHEMA_VERSION, init_db
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -32,12 +32,16 @@ def test_auth_scoped_tokens_table_exists() -> None:
 
 
 @pytest.mark.fresh_schema
-def test_v41_to_v42_upgrade_backfills_origin_and_id() -> None:
-    # Simulate a v41 table: drop the v42 columns, insert a legacy row, then
-    # replay the migration. Existing rows must survive with origin='run' and
-    # a backfilled public id.
+def test_v41_database_upgrades_via_init_db() -> None:
+    # Reproduce the real upgrade path: a database that applied v41 has an
+    # auth_scoped_tokens table without id/origin and no v42 schema_migrations
+    # row, so init_db replays the whole schema file — create table if not
+    # exists skips the old table, and the file's own alter statements must add
+    # the columns before the unique index on id can be built.
     with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
         conn.execute("alter table auth_scoped_tokens drop column origin")
+        # Dropping the column also drops the idx_auth_scoped_tokens_id index.
         conn.execute("alter table auth_scoped_tokens drop column id")
         conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
         conn.execute(
@@ -45,8 +49,7 @@ def test_v41_to_v42_upgrade_backfills_origin_and_id() -> None:
             " values ('legacy-hash', 'u-legacy', 'studio_agent', current_timestamp)"
         )
 
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        migrate_scoped_token_origin(conn)
+    init_db(TEST_DATABASE_URL)
 
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
@@ -59,11 +62,16 @@ def test_v41_to_v42_upgrade_backfills_origin_and_id() -> None:
                 " where schemaname=current_schema() and tablename='auth_scoped_tokens'"
             ).fetchall()
         }
+        migration = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    # Existing rows survive with origin='run' and a backfilled public id.
     assert row is not None
     assert row["origin"] == "run"
     assert row["id"]
     assert "idx_auth_scoped_tokens_id" in indexes
+    assert migration is not None
+    assert migration["name"] == "scoped_token_origin"
 
-    # Idempotent on replay (init_db replays all migrations on every version bump).
-    with write_transaction(TEST_DATABASE_URL) as conn:
-        migrate_scoped_token_origin(conn)
+    # Idempotent on replay (init_db runs at every backend startup).
+    init_db(TEST_DATABASE_URL)
