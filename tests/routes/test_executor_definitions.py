@@ -2,6 +2,19 @@
 
 from __future__ import annotations
 
+import pytest
+
+
+@pytest.fixture
+def client(client_factory):
+    """Private app per test: publish/rollback/archive hot-reload the running
+    executor registry and settings.executor_definitions in-process, which must
+    not leak into the worker-session shared app used by the default client
+    fixture."""
+    with client_factory(fresh=True) as c:
+        yield c
+
+
 BASE = "/api/executor-definitions"
 PAYLOAD_V1 = {
     "kind": "code",

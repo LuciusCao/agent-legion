@@ -112,9 +112,13 @@ def test_unknown_node_is_404(workspace_with_revision) -> None:
     assert workspace_with_revision.get(url).status_code == 404
 
 
-def test_gate_disabled_is_403(workspace_with_revision) -> None:
-    workspace_with_revision.app.state.settings.executor_runtime.workflows.custom_nodes_enabled = (
-        False
+def test_gate_disabled_is_403(workspace_with_revision, monkeypatch) -> None:
+    # client is the worker-session shared app: monkeypatch restores the flag
+    # after the test instead of leaking custom_nodes_enabled=False into it.
+    monkeypatch.setattr(
+        workspace_with_revision.app.state.settings.executor_runtime.workflows,
+        "custom_nodes_enabled",
+        False,
     )
 
     assert workspace_with_revision.get(BASE).status_code == 403
