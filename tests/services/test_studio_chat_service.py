@@ -324,6 +324,8 @@ def test_unknown_agent_id_is_rejected(chat) -> None:
 
 def test_agent_startup_failure_marks_session_error(chat, tmp_path) -> None:
     service, _bus, _register, workspace_id, user_id = chat
+    # The command resolves on PATH (passes the availability probe) but the
+    # process exits immediately: python with a missing script path.
     StudioAgentRegistryStore(TEST_DATABASE_URL).put(
         {
             "api_base": "http://127.0.0.1:8000",
@@ -331,8 +333,8 @@ def test_agent_startup_failure_marks_session_error(chat, tmp_path) -> None:
                 {
                     "id": "broken-agent",
                     "label": "Broken",
-                    "command": "/nonexistent/acp-agent-binary",
-                    "args": [],
+                    "command": sys.executable,
+                    "args": ["/nonexistent/fake-agent-script.py"],
                 }
             ],
         }

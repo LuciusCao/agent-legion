@@ -30,6 +30,13 @@ from server.app.jobs import JobQueries
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.settings import Settings
 from server.app.studio_chat.acp_session import AcpSessionHandle, build_mcp_server_spec
+from server.app.studio_chat.availability import AgentAvailabilityProbe
+from server.app.studio_chat.callbacks import ServiceCallbacks
+from server.app.studio_chat.payloads import (
+    pick_allow_option,
+    serialize_message,
+    serialize_session,
+)
 from server.app.studio_chat.prompts import (
     STUDIO_AUTHORING_BOOTSTRAP,
     looks_like_agent_legion_tool_call,
@@ -73,23 +80,44 @@ class _SessionRuntime:
 
 
 class StudioChatService:
-    def __init__(self, job_db: JobQueries, settings: Settings, bus: EventBus | None) -> None:
+    def __init__(
+        self,
+        job_db: JobQueries,
+        settings: Settings,
+        bus: EventBus | None,
+        probe: AgentAvailabilityProbe | None = None,
+    ) -> None:
         self._db = job_db
         self._settings = settings
         self._bus = bus
         self._registry = StudioAgentRegistryStore(job_db.path)
+        self._probe = probe if probe is not None else AgentAvailabilityProbe()
         self._runtimes: dict[str, _SessionRuntime] = {}
         self._runtimes_lock = threading.Lock()
         self._shutdown = False
 
     # -- registry (agent catalog) ----------------------------------------
 
+    def warm_availability_probe(self) -> None:
+        """Startup probe of every registered agent command (log-only)."""
+        agents = self._registry.get()["agents"]
+        results = self._probe.probe_all([str(agent["command"]) for agent in agents])
+        for agent in agents:
+            if not results.get(str(agent["command"])):
+                logger.warning(
+                    "studio agent %s command not found on this host: %s",
+                    agent.get("id"),
+                    agent["command"],
+                )
+
     def list_available_agents(self) -> list[dict[str, Any]]:
-        """Picker view for non-admin users: id/label only, never the command."""
+        """Picker view for non-admin users: id/label of agents whose command
+        resolves on this host — never the command line, never missing agents."""
         document = self._registry.get()
         return [
             {"id": str(agent["id"]), "label": str(agent.get("label") or agent["id"])}
             for agent in document["agents"]
+            if self._probe.available(str(agent["command"]))
         ]
 
     # -- session lifecycle ------------------------------------------------
@@ -100,10 +128,16 @@ class StudioChatService:
         agent = self._registry.find_agent(agent_id)
         if agent is None:
             raise InvalidOperationError(f"Unknown studio agent: {agent_id}")
+        command = str(agent["command"])
+        if not self._probe.available(command):
+            raise InvalidOperationError(
+                f"Studio agent '{agent_id}' is not available on this host"
+                f" (command not found: {command})"
+            )
         session_id = self._db.create_studio_chat_session(workspace_id, user_id, agent_id)
         token = mint_scoped_token(self._db, user_id, origin="run")
         handle = AcpSessionHandle(
-            command=str(agent["command"]),
+            command=command,
             args=[str(arg) for arg in agent.get("args", [])],
             cwd=str(self._settings.root_dir),
             mcp_server=build_mcp_server_spec(
@@ -112,7 +146,7 @@ class StudioChatService:
                 python_executable=sys.executable,
             ),
             env=None,
-            callbacks=_ServiceCallbacks(self, session_id),
+            callbacks=ServiceCallbacks(self, session_id),
         )
         runtime = _SessionRuntime(handle, token)
         with self._runtimes_lock:
@@ -335,7 +369,7 @@ class StudioChatService:
         *,
         decision: str,
     ) -> dict[str, Any]:
-        option = _pick_allow_option(options)
+        option = pick_allow_option(options)
         if option is None:
             outcome: dict[str, Any] = {"deny": True}
         else:
@@ -475,13 +509,13 @@ class StudioChatService:
         self, session_id: str, kind: str, role: str, content: dict[str, Any]
     ) -> dict[str, Any]:
         message = self._db.append_studio_chat_message(session_id, kind, role, content)
-        self._publish(session_id, {"type": "message", "message": _serialize_message(message)})
+        self._publish(session_id, {"type": "message", "message": serialize_message(message)})
         return message
 
     def _publish_session(self, session_id: str) -> None:
         session = self._db.get_studio_chat_session(session_id)
         if session is not None:
-            self._publish(session_id, {"type": "session", "session": _serialize_session(session)})
+            self._publish(session_id, {"type": "session", "session": serialize_session(session)})
 
     def _publish(self, session_id: str, payload: dict[str, Any]) -> None:
         if self._bus is None:
@@ -491,53 +525,3 @@ class StudioChatService:
             self._bus.publish(studio_chat_channel(session_id), json.dumps(payload, default=str))
         except Exception:
             logger.warning("failed to publish studio chat event for %s", session_id)
-
-
-def _pick_allow_option(options: list[dict[str, Any]]) -> dict[str, Any] | None:
-    for preferred in ("allow_always", "allow_once"):
-        for option in options:
-            if option.get("kind") == preferred:
-                return option
-    return options[0] if options else None
-
-
-def _serialize_message(message: dict[str, Any]) -> dict[str, Any]:
-    return {**message, "created_at": str(message.get("created_at"))}
-
-
-def _serialize_session(session: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: (str(value) if key.endswith("_at") and value is not None else value)
-        for key, value in session.items()
-    }
-
-
-class _ServiceCallbacks:
-    """AcpSessionCallbacks bridge binding the service to one session id."""
-
-    def __init__(self, service: StudioChatService, session_id: str) -> None:
-        self._service = service
-        self._session_id = session_id
-
-    def on_ready(self, capabilities: dict[str, Any], acp_session_id: str) -> None:
-        self._service._on_ready(self._session_id, capabilities, acp_session_id)
-
-    def on_update(self, update: dict[str, Any]) -> None:
-        self._service._on_update(self._session_id, update)
-
-    def on_permission_request(
-        self, tool_call: dict[str, Any], options: list[dict[str, Any]]
-    ) -> dict[str, Any]:
-        return self._service._on_permission_request(self._session_id, tool_call, options)
-
-    def on_turn_end(self, stop_reason: str) -> None:
-        self._service._on_turn_end(self._session_id, stop_reason)
-
-    def on_turn_error(self, detail: str) -> None:
-        self._service._on_error(self._session_id, detail, fatal=False)
-
-    def on_error(self, detail: str) -> None:
-        self._service._on_error(self._session_id, detail, fatal=True)
-
-    def on_exit(self) -> None:
-        self._service._on_exit(self._session_id)
