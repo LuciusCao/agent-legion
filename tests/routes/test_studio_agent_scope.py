@@ -7,13 +7,21 @@ publish/rollback/archive; job lifecycle and execution triggers (delete,
 rerun, run-to, continue, batch intake, workflow upgrade, replay); workspace,
 secret, package, member and settings writes; worker pause/resume — mounts
 reject_studio_agent_scope and must refuse it with 403, and require_admin
-refuses scoped identities outright. Draft/validate endpoints stay reachable.
-The endpoint inventory below is the enumeration backstop: new effecting
-endpoints must be added here together with their guard.
+refuses scoped identities outright. Studio chat effecting endpoints (session
+create/close, message send/cancel, permission answers) are likewise guarded:
+a scoped token must not mint fresh run tokens nor self-approve permission
+prompts. Draft/validate endpoints stay reachable.
+
+_ENDPOINT_INVENTORY below is the single source of truth, enforced two ways:
+the HTTP-level tests assert 403 for every enumerated endpoint, and
+test_every_write_endpoint_guarded_or_explicitly_exempt walks the app's route
+table so a new non-GET endpoint turns red until it is either added here with
+its guard or explicitly exempted with a reason.
 """
 
 from __future__ import annotations
 
+import re
 from datetime import timedelta
 
 from server.app.auth import scoped_tokens
@@ -26,55 +34,175 @@ nodes:
     capability: clean_and_parse
 """
 
+_NODE_CODE = "/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
+_CHAT = "/api/workspaces/{workspace_id}/studio-chat"
+
+# Effecting write routes (path templates as they appear in the app's route
+# table). Every entry must mount reject_studio_agent_scope — the mechanical
+# inventory test at the bottom asserts exactly that, in both directions.
+_EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/workflow-drafts/publish",
+        {"definition_yaml": _DRAFT_YAML},
+    ),
+    ("POST", f"{_NODE_CODE}/publish", None),
+    ("POST", f"{_NODE_CODE}/rollback", {"version": 1}),
+    ("DELETE", _NODE_CODE, None),
+    ("POST", "/api/agent-definitions/{agent_id}/publish", None),
+    ("POST", "/api/agent-definitions/{agent_id}/rollback", {"version": 1}),
+    ("DELETE", "/api/agent-definitions/{agent_id}", None),
+    ("POST", "/api/executor-definitions/{executor_id}/publish", None),
+    ("POST", "/api/executor-definitions/{executor_id}/rollback", {"version": 1}),
+    ("DELETE", "/api/executor-definitions/{executor_id}", None),
+    # Job lifecycle and execution triggers (P0-1/P1-1).
+    ("DELETE", "/api/jobs/{job_id}", None),
+    ("DELETE", "/api/workspaces/{workspace_id}/jobs/batch", None),
+    ("POST", "/api/jobs/{job_id}/nodes/{node_key}/rerun", None),
+    ("POST", "/api/jobs/{job_id}/run-to", None),
+    ("POST", "/api/jobs/{job_id}/continue", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
+    ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
+    ("POST", "/api/jobs/{job_id}/upgrade-workflow", None),
+    # Workspace, secret, package, member and settings writes.
+    ("POST", "/api/workspaces", None),
+    ("PATCH", "/api/workspaces/{workspace_id}", None),
+    ("DELETE", "/api/workspaces/{workspace_id}", None),
+    ("PUT", "/api/workspaces/{workspace_id}/secrets/{name}", None),
+    ("DELETE", "/api/workspaces/{workspace_id}/secrets/{name}", None),
+    ("DELETE", "/api/workspaces/{workspace_id}/packages/{package_id:int}", None),
+    ("PATCH", "/api/workspaces/{workspace_id}/packages/{package_id:int}", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/package", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/clear-packed", None),
+    ("DELETE", "/api/workspaces/{workspace_id}/members/{user_id}", None),
+    ("PATCH", "/api/workspaces/{workspace_id}/settings/{section}", None),
+    ("PUT", "/api/workspaces/{workspace_id}/configuration", None),
+    # Quality review writes and replays.
+    ("POST", "/api/workspaces/{workspace_id}/quality/sample-batches", None),
+    ("POST", "/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/labels", None),
+    ("POST", "/api/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays", None),
+    # Worker scheduling control.
+    ("POST", "/api/worker/pause", None),
+    ("POST", "/api/worker/resume", None),
+    # Studio agent token lifecycle: minting/revoking automation tokens is an
+    # effecting write (a scoped token must not mint itself a sibling token).
+    ("POST", "/api/studio-agent-tokens", None),
+    ("DELETE", "/api/studio-agent-tokens/{token_id}", None),
+    # Studio chat effecting endpoints: session lifecycle (create mints a
+    # fresh scoped token), message send/cancel, and permission answers
+    # (self-approval would void the human-confirmation boundary).
+    ("POST", f"{_CHAT}/sessions", {"agent_id": "agent-x"}),
+    ("DELETE", f"{_CHAT}/sessions/{{session_id}}", None),
+    ("POST", f"{_CHAT}/sessions/{{session_id}}/messages", {"text": "hi"}),
+    ("POST", f"{_CHAT}/sessions/{{session_id}}/cancel", None),
+    ("POST", f"{_CHAT}/sessions/{{session_id}}/permissions/allow-all", {"enabled": True}),
+    ("POST", f"{_CHAT}/sessions/{{session_id}}/permissions/{{request_id}}", {"deny": True}),
+]
+
+# Unguarded non-GET routes, each with the reason a scoped token may reach it.
+# A new write endpoint that is neither in _EFFECTING_WRITE_ROUTES nor here
+# fails the inventory test — classify it explicitly.
+_EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
+    # Public auth lifecycle (AGENTS.md: only health/login/bootstrap are public).
+    ("POST", "/api/auth/login"): "public login",
+    ("POST", "/api/auth/bootstrap"): "public bootstrap",
+    ("POST", "/api/auth/logout"): "session teardown, no platform effect",
+    # require_admin refuses scoped identities outright (actor_scope check).
+    ("POST", "/api/users"): "require_admin",
+    ("PATCH", "/api/users/{user_id}"): "require_admin",
+    ("PUT", "/api/workspaces/{workspace_id}/members"): "require_admin",
+    ("POST", "/api/workflows"): "require_admin",
+    ("PUT", "/api/admin/token-usage-pricing"): "require_admin",
+    ("PUT", "/api/admin/instance-settings"): "require_admin",
+    ("PUT", "/api/admin/skill-sources/{skill_key:path}"): "require_admin",
+    ("POST", "/api/admin/skill-sources/relock"): "require_admin",
+    ("POST", "/api/admin/connections"): "require_admin",
+    ("PUT", "/api/admin/connections/{key}"): "require_admin",
+    ("DELETE", "/api/admin/connections/{key}"): "require_admin",
+    ("POST", "/api/admin/connections/{key}/test"): "require_admin",
+    ("PUT", "/api/admin/studio-agents"): "require_admin",
+    ("POST", "/api/agent-register-tokens"): "require_admin",
+    ("POST", "/api/agent-register-tokens/{token_id}/revoke"): "require_admin",
+    ("POST", "/api/agent-workers/{worker_id}/revoke"): "require_admin",
+    # Worker credential channel (x-agent-worker-token / register token, not a
+    # user session; scoped Bearer tokens never authenticate here).
+    ("POST", "/api/agent-workers/register"): "worker register-token channel",
+    ("POST", "/api/agent-executions/claim"): "worker credential channel",
+    ("POST", "/api/agent-executions/{execution_id}/heartbeat"): "worker credential channel",
+    ("POST", "/api/agent-executions/{execution_id}/release-slot"): "worker credential channel",
+    ("POST", "/api/agent-executions/{execution_id}/result"): "worker credential channel",
+    ("POST", "/api/artifacts"): "worker credential channel",
+    # Draft/validate/compare: no production effect; explicitly reachable for
+    # scoped tokens per STUDIO-AGENT-001.
+    (
+        "POST",
+        "/api/workspaces/{workspace_id}/settings/test-connection",
+    ): "probe only, no persistent effect",
+    ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/validate"): "validate only",
+    ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/compare"): "read-only compare",
+    ("PUT", f"{_NODE_CODE}"): "node code draft write",
+    ("POST", "/api/agent-definitions"): "creates a draft",
+    ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
+    ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
+    ("POST", "/api/executor-definitions"): "creates a draft",
+    ("PUT", "/api/executor-definitions/{executor_id}/draft"): "draft write",
+    ("POST", "/api/executor-definitions/{executor_id}/copy"): "creates a draft",
+    ("POST", "/api/skills/validate"): "validate only",
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview"): "preview only",
+    # Scoped-only tool surface (require_studio_agent_scope): these endpoints
+    # exist FOR the scoped token and are draft/validate/register-by-design.
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/workflow/validate",
+    ): "scoped-only tool surface",
+    (
+        "POST",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/workflow/compare",
+    ): "scoped-only tool surface",
+    (
+        "PUT",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
+    ): "scoped-only tool surface",
+    (
+        "PUT",
+        "/api/studio-agent/tools/agent-definitions/{agent_id}/draft",
+    ): "scoped-only tool surface",
+    ("POST", "/api/studio-agent/tools/workflows/register"): "scoped-only tool surface",
+    # SPA mount's API 404 catch-all (server/app/spa.py).
+    ("POST", "/api/{path:path}"): "API 404 catch-all",
+    ("PUT", "/api/{path:path}"): "API 404 catch-all",
+    ("PATCH", "/api/{path:path}"): "API 404 catch-all",
+    ("DELETE", "/api/{path:path}"): "API 404 catch-all",
+}
+
+_PATH_PARAM_VALUES = {
+    "workflow_key": "wf",
+    "node_key": "node",
+    "agent_id": "agent-x",
+    "executor_id": "exec-x",
+    "job_id": "job-x",
+    "item_id": "item-x",
+    "user_id": "user-x",
+    "name": "secret-x",
+    "package_id": "1",
+    "section": "agent",
+    "token_id": "token-x",
+    "session_id": "session-x",
+    "request_id": "request-x",
+}
+
 
 def _effecting_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
-    node_base = f"/api/workspaces/{workspace_id}/workflows/wf/nodes/node/code"
+    values = {**_PATH_PARAM_VALUES, "workspace_id": workspace_id}
     return [
         (
-            "POST",
-            f"/api/workspaces/{workspace_id}/workflow-drafts/publish",
-            {"definition_yaml": _DRAFT_YAML},
-        ),
-        ("POST", f"{node_base}/publish", None),
-        ("POST", f"{node_base}/rollback", {"version": 1}),
-        ("DELETE", node_base, None),
-        ("POST", "/api/agent-definitions/agent-x/publish", None),
-        ("POST", "/api/agent-definitions/agent-x/rollback", {"version": 1}),
-        ("DELETE", "/api/agent-definitions/agent-x", None),
-        ("POST", "/api/executor-definitions/exec-x/publish", None),
-        ("POST", "/api/executor-definitions/exec-x/rollback", {"version": 1}),
-        ("DELETE", "/api/executor-definitions/exec-x", None),
-        # Job lifecycle and execution triggers (P0-1/P1-1).
-        ("DELETE", "/api/jobs/job-x", None),
-        ("DELETE", f"/api/workspaces/{workspace_id}/jobs/batch", None),
-        ("POST", "/api/jobs/job-x/nodes/node-x/rerun", None),
-        ("POST", "/api/jobs/job-x/run-to", None),
-        ("POST", "/api/jobs/job-x/continue", None),
-        ("POST", f"/api/workspaces/{workspace_id}/jobs/batch-rerun", None),
-        ("POST", f"/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
-        ("POST", f"/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
-        ("POST", f"/api/workspaces/{workspace_id}/job-batches", None),
-        ("POST", "/api/jobs/job-x/upgrade-workflow", None),
-        # Workspace, secret, package, member and settings writes.
-        ("POST", "/api/workspaces", None),
-        ("PATCH", f"/api/workspaces/{workspace_id}", None),
-        ("DELETE", f"/api/workspaces/{workspace_id}", None),
-        ("PUT", f"/api/workspaces/{workspace_id}/secrets/secret-x", None),
-        ("DELETE", f"/api/workspaces/{workspace_id}/secrets/secret-x", None),
-        ("DELETE", f"/api/workspaces/{workspace_id}/packages/1", None),
-        ("PATCH", f"/api/workspaces/{workspace_id}/packages/1", None),
-        ("POST", f"/api/workspaces/{workspace_id}/jobs/package", None),
-        ("POST", f"/api/workspaces/{workspace_id}/jobs/clear-packed", None),
-        ("DELETE", f"/api/workspaces/{workspace_id}/members/user-x", None),
-        ("PATCH", f"/api/workspaces/{workspace_id}/settings/agent", None),
-        ("PUT", f"/api/workspaces/{workspace_id}/configuration", None),
-        # Quality review writes and replays.
-        ("POST", f"/api/workspaces/{workspace_id}/quality/sample-batches", None),
-        ("POST", f"/api/workspaces/{workspace_id}/quality/sample-items/item-x/labels", None),
-        ("POST", f"/api/workspaces/{workspace_id}/quality/sample-items/item-x/replays", None),
-        # Worker scheduling control.
-        ("POST", "/api/worker/pause", None),
-        ("POST", "/api/worker/resume", None),
+            method,
+            re.sub(r"\{(\w+)(?::\w+)?\}", lambda match: values[match.group(1)], template),
+            payload,
+        )
+        for method, template, payload in _EFFECTING_WRITE_ROUTES
     ]
 
 
@@ -205,3 +333,41 @@ def test_revoked_scoped_token_gets_401(client, job_db) -> None:
     scoped = client.__class__(client.app)
     scoped.headers["authorization"] = f"Bearer {token}"
     assert scoped.get("/api/workspaces").status_code == 401
+
+
+def _write_route_dependencies(app) -> dict[tuple[str, str], list[str]]:
+    """{(method, path_template): dependency names} for every non-GET route.
+
+    The dependant tree is flattened so endpoint-signature Depends (e.g.
+    ``_guard: Depends(reject_studio_agent_scope)``) count exactly like
+    router-level mounts.
+    """
+    routes: dict[tuple[str, str], list[str]] = {}
+    for route in app.routes:
+        methods = getattr(route, "methods", None) or set()
+        dependant = getattr(route, "dependant", None)
+        if dependant is None:
+            continue
+        names: list[str] = []
+        stack = [dependant]
+        while stack:
+            node = stack.pop()
+            if node.call is not None:
+                names.append(getattr(node.call, "__name__", str(node.call)))
+            stack.extend(node.dependencies)
+        for method in methods - {"GET", "HEAD", "OPTIONS"}:
+            routes[(method, route.path)] = names
+    return routes
+
+
+def test_every_write_endpoint_guarded_or_explicitly_exempt(client) -> None:
+    """Mechanical backstop for the enumeration above: a new non-GET endpoint
+    turns this red until it is classified — either it mounts
+    reject_studio_agent_scope and joins _EFFECTING_WRITE_ROUTES, or it is
+    added to _EXEMPT_WRITE_ROUTES with a reason. Both assertions are exact
+    set equalities, so a dropped guard or a stale entry also fails."""
+    routes = _write_route_dependencies(client.app)
+    guarded = {key for key, names in routes.items() if "reject_studio_agent_scope" in names}
+    effecting = {(method, template) for method, template, _ in _EFFECTING_WRITE_ROUTES}
+    assert guarded == effecting
+    assert set(routes) - guarded == set(_EXEMPT_WRITE_ROUTES)
