@@ -133,6 +133,10 @@ audit: ## 依赖漏洞审计 (pip-audit + npm audit)
 	./scripts/check-deps-audit.sh
 
 # Skill 维护
+.PHONY: import-demo
+import-demo: ## 导入示例 workflow 的 4 个示例 skill 到本机 skill 源目录并初始化 git/tag（幂等）
+	./scripts/import-demo.sh
+
 .PHONY: skills-lock
 skills-lock: ## 刷新 DB skill lock（global_settings skill_lock 文档）
 	PYTHONPATH=. $(UV) run python -m server.app.skills.lock
