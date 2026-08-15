@@ -27,10 +27,12 @@ type LoadState = 'loading' | 'ready' | 'error'
 export function WorkflowNodeCodeSection(props: {
   node: WorkflowNodeRecord
   executorCatalog: ExecutorDefinition[]
+  // 与 binding editor 同一口径：visible workflow 的 key 由 Inspector 逐层
+  // 下传，不取 settings 快照（草稿改 key 发布后两者会分叉）。
+  workflowKey: string
   readOnly?: boolean
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
-  const workflowKey = useSettingStore((s) => s.settings.workflowKey)
   const codeBound = hasCodeCapability(
     props.executorCatalog,
     props.node.capability
@@ -50,8 +52,8 @@ export function WorkflowNodeCodeSection(props: {
   const [confirmingReset, setConfirmingReset] = useState(false)
 
   const url =
-    workspaceId && workflowKey
-      ? codeUrl(workspaceId, workflowKey, props.node.key)
+    workspaceId && props.workflowKey
+      ? codeUrl(workspaceId, props.workflowKey, props.node.key)
       : null
 
   // WorkflowNodeCodeSection is keyed by node in the inspector, so this effect

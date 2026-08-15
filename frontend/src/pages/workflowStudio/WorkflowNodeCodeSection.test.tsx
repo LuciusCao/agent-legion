@@ -88,6 +88,7 @@ function renderSection(
     <WorkflowNodeCodeSection
       node={node}
       executorCatalog={[codeExecutor]}
+      workflowKey="question_comprehension_info"
       {...overrides}
     />
   )
@@ -115,6 +116,18 @@ describe('WorkflowNodeCodeSection', () => {
     const { container } = renderSection({ executorCatalog: [piExecutor] })
     expect(container.firstChild).toBeNull()
     expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('uses the visible workflow key prop over the settings snapshot', async () => {
+    // 草稿改 key 发布后 settings 快照与 visible workflow 分叉；代码区必须
+    // 跟 binding editor 一样用 Inspector 下传的 key。
+    useSettingStore.getState().setSettings({ workflowKey: 'stale_snapshot' })
+    renderSection({ workflowKey: 'visible_wf' })
+
+    await screen.findByText(/内置/)
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/workspaces/default/workflows/visible_wf/nodes/fetch_questions/code'
+    )
   })
 
   it('loads builtin code read-only with a fork entry', async () => {
@@ -349,6 +362,7 @@ describe('WorkflowNodeCodeSection', () => {
       <WorkflowNodeCodeSection
         node={pathlessNode}
         executorCatalog={[pathlessExecutor]}
+        workflowKey="question_comprehension_info"
       />
     )
 
@@ -402,6 +416,7 @@ describe('WorkflowNodeCodeSection', () => {
       <WorkflowNodeCodeSection
         node={pathlessNode}
         executorCatalog={[pathlessExecutor]}
+        workflowKey="question_comprehension_info"
       />
     )
 
