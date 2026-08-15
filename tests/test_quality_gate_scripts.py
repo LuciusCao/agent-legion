@@ -24,7 +24,9 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         # simulated GATE_TIER=smoke run inherits it and the curated tier's
         # contract (never offline-pinned) cannot be verified on CI.
         "AGENT_LEGION_TEST_DATABASE_URL",
+        "AGENT_LEGION_COV",
         "BACKEND_GATE_PHASE",
+        "COVERAGE_FILE",
         "FRONTEND_API_CHECK",
         "FRONTEND_COVERAGE_BLOB_DIR",
         "FRONTEND_GATE_PHASE",
@@ -33,6 +35,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "GATE_LANES",
         "GATE_SHARD",
         "GATE_TIER",
+        "KEEP_COVERAGE",
     ):
         process_env.pop(key, None)
     process_env.update(env)
@@ -227,7 +230,10 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
 
     _write_executable(
         scripts / "check-quick.sh",
-        '#!/usr/bin/env bash\nprintf "quick:%s\\n" "${FRONTEND_TEST_MODE:-unset}" >>"$GATE_LOG"\n',
+        "#!/usr/bin/env bash\n"
+        'printf "quick:lanes=%s,cov=%s,mode=%s\\n" '
+        '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
+        '"${FRONTEND_TEST_MODE:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -244,11 +250,38 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8").splitlines()
-    assert calls.count("quick:coverage") == 1
+    quick_calls = [call for call in calls if call.startswith("quick:")]
+    # Issue #92: the coverage-instrumented backend lane runs alone first —
+    # racing the frontend/rust lanes makes pytest-cov/xdist silently lose a
+    # whole worker's coverage data. Frontend/rust follow without backend
+    # coverage (frontend still runs in coverage mode for the partition report).
+    assert quick_calls == [
+        "quick:lanes=backend,cov=1,mode=unset",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage",
+    ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)
     assert any("pytest -q tests/full" in call for call in calls)
     assert any("coverage report" in call for call in calls)
+
+
+def test_quick_gate_cleanup_only_removes_coverage_data_files(tmp_path: Path) -> None:
+    """The cleanup glob must match coverage's parallel suffix
+    (.<host>.<pid>.<random>) only — not every same-prefix sibling."""
+    quick_gate = _quick_gate_fixture(tmp_path / "scripts")
+    cov = tmp_path / ".coverage.fixture"
+    cov.write_text("combined", encoding="utf-8")
+    worker_data = tmp_path / ".coverage.fixture.host.1234.000042"
+    worker_data.write_text("worker", encoding="utf-8")
+    sibling = tmp_path / ".coverage.fixture.log"
+    sibling.write_text("keep", encoding="utf-8")
+
+    result = _run(quick_gate, cwd=tmp_path, env={"COVERAGE_FILE": str(cov)})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not cov.exists()
+    assert not worker_data.exists()
+    assert sibling.exists()
 
 
 def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> None:

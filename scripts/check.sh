@@ -9,17 +9,38 @@ KEEP_COVERAGE=1
 export KEEP_COVERAGE
 
 cleanup_coverage() {
-  rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*
+  # xdist workers write "$COVERAGE_FILE".<host>.<pid>.<random>; require the
+  # two extra dots so an unrelated same-prefix file (e.g. .log) survives.
+  rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*.*.*
 }
 trap cleanup_coverage EXIT
 
-echo "=== Quick Gate ==="
+echo "=== Quick Gate (segmented) ==="
 # The full local gate keeps coverage semantics: check-quick.sh skips backend
 # coverage by default, so re-enable it here for the combined report below.
 # GATE_LANES is pinned explicitly: without it check-quick.sh derives lanes
 # from the dirty worktree, but check.sh is the local full-gate substitute and
 # must always run every lane.
-GATE_LANES="backend frontend rust" AGENT_LEGION_COV=1 FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
+#
+# Segmentation (issue #92): when the coverage-instrumented backend suite races
+# the frontend/rust lanes for CPU, pytest-cov/xdist intermittently loses one
+# whole worker's coverage data (TOTAL drops ~15-30 points even though every
+# test passes, then the 85% floor below cannot be met). The backend coverage
+# run therefore gets the machine to itself first; the frontend and rust lanes
+# run afterwards without backend coverage. Trade-off: +2-4 minutes wall clock
+# (static rounds no longer overlap, frontend/rust tests no longer hide behind
+# the backend suite).
+#
+# Splitting one invocation into two keeps every check exactly once: segment 1
+# runs backend static + backend tests with coverage; the hoisted api-contract
+# step only fires when both backend and frontend lanes are enabled in a single
+# invocation, so segment 2's frontend static lane runs api:check inline
+# (FRONTEND_API_CHECK defaults to 1 when the backend lane is absent).
+# Standalone ./scripts/check-quick.sh usage is unaffected.
+echo "--- Segment 1: backend lane with coverage (exclusive machine) ---"
+GATE_LANES="backend" AGENT_LEGION_COV=1 "$ROOT_DIR/scripts/check-quick.sh"
+echo "--- Segment 2: frontend + rust lanes (no backend coverage) ---"
+GATE_LANES="frontend rust" FRONTEND_TEST_MODE=coverage "$ROOT_DIR/scripts/check-quick.sh"
 
 log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-full.XXXXXX")"
 cleanup_logs() {
