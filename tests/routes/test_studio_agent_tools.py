@@ -365,3 +365,67 @@ def test_register_workflow_conflict_and_invalid_key(client, job_db) -> None:
 
     invalid = scoped.post(url, json={"key": "Bad Key", "label": "Nope"})
     assert invalid.status_code == 400
+
+
+def test_validate_workflow_unknown_workspace_reports_binding_errors(client, job_db) -> None:
+    """validate 语义与 Studio 端点一致：未知 workspace 没有 executor 绑定，
+    草稿校验失败（valid=False），而不是 404。"""
+    scoped, _ = _scoped_client(client, job_db)
+    draft_yaml = """
+key: studio_validate_flow
+label: Studio Validate Flow
+nodes:
+  clean_and_parse:
+    capability: clean_and_parse
+"""
+    response = scoped.post(
+        "/api/studio-agent/tools/workspaces/ws-missing/workflow/validate",
+        json={"definition_yaml": draft_yaml},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["valid"] is False
+    assert any("missing executor binding" in error for error in response.json()["errors"])
+
+
+def test_compare_workflow_404_for_unknown_workspace(client, job_db) -> None:
+    scoped, _ = _scoped_client(client, job_db)
+    response = scoped.post(
+        "/api/studio-agent/tools/workspaces/ws-missing/workflow/compare",
+        json={"definition_yaml": "key: x\nnodes: {}\n"},
+    )
+    assert response.status_code == 404
+
+
+def test_save_node_code_draft_404_for_unknown_node(client, job_db) -> None:
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    response = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/workflows/{_WORKFLOW_KEY}/nodes/no_such_node/code/draft",
+        json={"code": _NODE_CODE},
+    )
+    assert response.status_code == 404
+
+
+class _FailingReloadWorker:
+    def reload_scan_entries(self) -> None:
+        raise RuntimeError("catalog read failed")
+
+
+def test_register_workflow_reload_failure_keeps_committed_write(
+    client, job_db, monkeypatch
+) -> None:
+    """注册提交后热刷新失败的半应用语义：catalog 行已提交，路由不得 500，
+    由 poll loop 的周期对账收敛扫描表。"""
+    scoped, _ = _scoped_client(client, job_db)
+    monkeypatch.setattr(client.app.state, "workflow_worker", _FailingReloadWorker(), raising=False)
+
+    response = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "reload_failure_flow", "label": "Reload Failure Flow"},
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["key"] == "reload_failure_flow"
+    catalog = scoped.get("/api/studio-agent/tools/workflows")
+    assert "reload_failure_flow" in {entry["key"] for entry in catalog.json()["workflows"]}

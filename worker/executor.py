@@ -108,6 +108,7 @@ def main() -> int:
     next_sweep = time.monotonic()
     next_host_status = time.monotonic() + interval
     control_error: str | None = None
+    code_hot_reject_logged = False
     try:
         while not stop.is_set():
             if time.monotonic() >= next_host_status:
@@ -152,7 +153,16 @@ def main() -> int:
                 # 全部加载成功才统一生效：半应用会让 "keeping previous values"
                 # 撒谎（claim 控制已覆盖、transfer 控制还是旧值）。
                 max_concurrency, claim_enabled = new_controls
-                max_code_concurrency = new_code_concurrency
+                max_code_concurrency, code_rejected = runtime_controls.hot_code_concurrency(
+                    max_code_concurrency, new_code_concurrency
+                )
+                if code_rejected and not code_hot_reject_logged:
+                    print(
+                        "max_code_concurrency 0→>0 需要可执行的 velites 二进制"
+                        "（启动预检项），热更拒绝生效；请安装 velites 后重启 worker",
+                        flush=True,
+                    )
+                code_hot_reject_logged = code_rejected
                 transfer = new_transfer
                 uploads.set_max_concurrency(transfer.upload_max_concurrency)
                 control_error = None

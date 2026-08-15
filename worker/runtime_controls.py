@@ -7,6 +7,8 @@ from typing import Any
 
 import yaml
 
+from worker.binary_resolution import resolve_binary
+
 MAX_DYNAMIC_CONCURRENCY = 1024
 
 
@@ -51,3 +53,15 @@ def load_code_concurrency(path: Path) -> int:
     ):
         raise ValueError(f"code 并发数必须是 0 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     return value
+
+
+def hot_code_concurrency(current: int, loaded: int) -> tuple[int, bool]:
+    """Hot-applied code pool capacity; returns (effective, rejected).
+
+    Hot-opening code capacity (0 -> >0) requires a resolvable velites binary
+    (EXEC-CODE-003 fail-closed), enforced at startup by preflight_error; a
+    direct config-file edit must not bypass that guard. Resizing stays hot.
+    """
+    if loaded > 0 and current == 0 and resolve_binary("velites") is None:
+        return current, True
+    return loaded, False

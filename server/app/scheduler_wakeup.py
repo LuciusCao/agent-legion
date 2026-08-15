@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 import threading
 from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -43,3 +44,15 @@ def notify_schedulable_work() -> None:
             callback()
         except Exception:
             logger.exception("scheduler wakeup callback %r failed", callback)
+
+
+def reload_scan_entries_best_effort(worker: Any) -> None:
+    """Hot-reload the worker scan list; log instead of raising.
+
+    Routes call this after the catalog row commits; a transient failure must
+    not 500 the write — the poll loop's catalog reconcile converges the list.
+    """
+    try:
+        worker.reload_scan_entries()
+    except Exception:
+        logger.exception("workflow scan-list hot reload failed")

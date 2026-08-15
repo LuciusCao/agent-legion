@@ -18,6 +18,7 @@ from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_pass
+from server.app.workflow_worker.catalog_reconcile import maybe_reconcile_catalogs
 from server.app.workflow_worker.catalog_scan import (
     collect_runnable_workspace_jobs,
     load_workflow_scan_entries,
@@ -27,6 +28,7 @@ from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
 from server.app.workflow_worker.mark_scan import MarkStore
 from server.app.workflow_worker.pass_log import log_pass_end, log_pass_start, pass_logger
+from server.app.workflow_worker.pools import ensure_pools, executor_capacities
 from server.app.workflow_worker.ready import build_ready_queues
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflow_worker.schedule import claim_ready_queues
@@ -70,6 +72,14 @@ class WorkflowWorkerThread:
         self._scan_entries: tuple[list[WorkflowDefinition], list[str]] = ([], [])
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
+        # execution_id -> (executor_id, lease_id) for in-flight claims, so a
+        # pool dropped by hot archive can finish leases of futures that never
+        # started (pools.finish_unstarted_claims).
+        self._future_claims: dict[str, tuple[str, str]] = {}
+        # Monotonic timestamp of the last low-frequency catalog reconcile
+        # (catalog_reconcile.maybe_reconcile_catalogs); starts "just ran" so
+        # the first reconcile happens one interval after start.
+        self._last_catalog_reconcile = time.monotonic()
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
         # Cross-pass caches: parsed workflow definitions by definition hash,
@@ -110,28 +120,13 @@ class WorkflowWorkerThread:
         self._scan_entries = load_workflow_scan_entries(self.settings)
 
     def _ensure_pools(self) -> None:
-        # Reconcile with the live registry (hot-reloaded on executor
-        # publish/rollback/archive): drop removed executors, add new ones,
-        # resize on capacity change. The lease claim transaction stays the
-        # authoritative capacity enforcement, so a mid-swap pool never
-        # over-admits work.
-        capacities = self._executor_capacities()
-        for executor_id in list(self._pools):
-            if executor_id not in capacities:
-                self._pools.pop(executor_id).shutdown(wait=False, cancel_futures=True)
-        for executor_id, capacity in capacities.items():
-            pool = self._pools.get(executor_id)
-            # ThreadPoolExecutor exposes no public max_workers getter.
-            if pool is None or pool._max_workers != capacity:
-                if pool is not None:
-                    pool.shutdown(wait=False)
-                self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
+        ensure_pools(self)
 
     def _pool_for(self, executor_id: str) -> ThreadPoolExecutor:
         return self._pools[executor_id]
 
     def _executor_capacities(self) -> dict[str, int]:
-        return {eid: self.registry.global_capacity(eid) or 0 for eid in self.registry.definitions()}
+        return executor_capacities(self)
 
     def start(self) -> None:
         self.reload_scan_entries()
@@ -154,6 +149,7 @@ class WorkflowWorkerThread:
         self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
+        maybe_reconcile_catalogs(self)
         if not any(self._scan_entries):
             return False
 
@@ -240,6 +236,7 @@ class WorkflowWorkerThread:
                 "%s workflow future(s) still active after shutdown timeout", len(pending)
             )
         self._futures.clear()
+        self._future_claims.clear()
         for pool in self._pools.values():
             pool.shutdown(wait=False, cancel_futures=True)
         self._pools.clear()

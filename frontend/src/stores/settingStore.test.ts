@@ -515,6 +515,53 @@ describe('settingStore', () => {
     expect(mockShowToast).toHaveBeenCalledWith('Server Error', 'error')
   })
 
+  it('saveAll reports success/failure via its return value', async () => {
+    mockApi.mockResolvedValueOnce({
+      workspace: { name: 'Test', description: '' },
+      settings: defaultSettings,
+      executor_configuration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: null,
+      },
+    })
+    await expect(useSettingStore.getState().saveAll()).resolves.toBe(true)
+
+    mockApi.mockRejectedValueOnce(new Error('boom'))
+    await expect(useSettingStore.getState().saveAll()).resolves.toBe(false)
+  })
+
+  it('saveAll refuses reentry while a save is in flight', async () => {
+    // 重入守卫：并发 PUT 乱序会让先发的旧响应回写覆盖新快照。
+    let release!: (value: unknown) => void
+    mockApi.mockReturnValueOnce(
+      new Promise((resolve) => {
+        release = resolve
+      })
+    )
+    const first = useSettingStore.getState().saveAll()
+    expect(useSettingStore.getState().isSaving).toBe(true)
+
+    await expect(useSettingStore.getState().saveAll()).resolves.toBe(false)
+    expect(mockApi).toHaveBeenCalledTimes(1)
+
+    release({
+      workspace: { name: 'Test', description: '' },
+      settings: defaultSettings,
+      executor_configuration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: null,
+      },
+    })
+    await expect(first).resolves.toBe(true)
+    expect(useSettingStore.getState().isSaving).toBe(false)
+  })
+
   it('setExecutorAllocation updates or creates an allocation', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,

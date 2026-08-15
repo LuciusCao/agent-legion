@@ -19,7 +19,10 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
         settings,
         executorConfiguration,
       } = get()
-      if (!workspaceId) return
+      // 重入守卫：并发 PUT 乱序会让先发的旧响应回写覆盖新快照；调用方靠
+      // isDirty 仍为 true 感知未保存状态。返回值告知保存是否成功（绑定编辑
+      // 器据此回滚草稿）。
+      if (!workspaceId || get().isSaving) return false
       set({ isSaving: true, saveError: null })
       try {
         const result = await api<WorkspaceConfigurationResponse>(
@@ -64,10 +67,12 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
         void queryClient.invalidateQueries({
           queryKey: extraQueryKeys.workspaceSettings(workspaceId),
         })
+        return true
       } catch (err) {
         const message = err instanceof Error ? err.message : '保存失败'
         set({ saveError: message })
         useUiStore.getState().showToast(message, 'error')
+        return false
       } finally {
         set({ isSaving: false })
       }

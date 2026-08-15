@@ -39,8 +39,12 @@ def resolve_dispatch_node_config(
     batch_payload: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
     """Effective node config with secrets and connection config resolved."""
+    # Definitions come from the registry (atomically swapped on hot reload),
+    # not settings.executor_definitions: the worker mixes definitions with
+    # registry capacities/pools in one pass, so reading both from the one
+    # authority keeps the pass consistent.
     config_schema = executor_definition_capability_schema(
-        worker.settings.executor_definitions, executor_id, node.capability
+        worker.registry.definitions(), executor_id, node.capability
     )
     node_config = dispatch_effective_config(
         config_schema,
@@ -54,7 +58,7 @@ def resolve_dispatch_node_config(
     # Only code executors receive the injected connection: agent-runtimes
     # build a manifest, and plaintext tokens must never enter it
     # (CONFIG-MANIFEST-001).
-    definition = worker.settings.executor_definitions.get(executor_id)
+    definition = worker.registry.definitions().get(executor_id)
     if not isinstance(definition, CodeExecutorConfig):
         return node_config
     return inject_connection_config(

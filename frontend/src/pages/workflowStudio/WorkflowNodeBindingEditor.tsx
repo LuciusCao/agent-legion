@@ -56,9 +56,13 @@ export function WorkflowNodeBindingEditor(props: Props) {
   const codeBound = hasCodeCapability(props.executorCatalog, node.capability)
 
   const handleChange = (event: SelectChangeEvent) => {
-    const value = event.target.value
-    setNodeBinding(workflowKey, node.key, value === '' ? null : value)
-    void saveAll()
+    const previous = current?.executor_id ?? null
+    setNodeBinding(workflowKey, node.key, event.target.value || null)
+    // 保存失败回滚草稿绑定：服务端快照未变，Select 不能长期与 DAG 分叉
+    // （失败 toast 已在 saveAll 里弹出）。
+    void saveAll().then((saved) => {
+      if (!saved) setNodeBinding(workflowKey, node.key, previous)
+    })
   }
   // 节点代码区与绑定编辑器同属一个 Inspector；经 aria-label 锚点滚动定位，
   // 避免给已在体积预算上限的 WorkflowNodeCodeSection 增加行数。
