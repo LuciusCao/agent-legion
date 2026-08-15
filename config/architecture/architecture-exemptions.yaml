@@ -66,7 +66,7 @@ exemptions:
     package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 207
+  ceiling: 202
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router, the artifact

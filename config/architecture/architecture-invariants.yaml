@@ -196,7 +196,7 @@ invariants:
         gate: quick
 
   - id: BOUNDARY-VIDEO-001
-    statement: "video_capabilities modules must not import orchestration or runtime modules such as server.app.db, server.app.jobs, server.app.routes, server.app.worker, or server.app.worker_thread."
+    statement: "The legacy server.app.video_capabilities package was removed with the business workflow extraction; the guard remains as a reintroduction tripwire: any future server/app/video_capabilities module must not import orchestration or runtime modules such as server.app.db, server.app.jobs, server.app.routes, server.app.worker, or server.app.worker_thread."
     owner: agent-legion
     risk: high
     evidence:
@@ -220,7 +220,7 @@ invariants:
         gate: quick
 
   - id: BOUNDARY-VIDEO-003
-    statement: "Legacy server.app.pipeline.phases and phase executor modules have been removed; new Workspace code must not reintroduce imports of these legacy modules and must use workflow capabilities instead."
+    statement: "The legacy server.app.pipeline package has been removed entirely (business extraction); new Workspace code must not reintroduce imports of server.app.pipeline.* and must use workflow capabilities instead."
     owner: workspace-executor
     risk: high
     evidence:
@@ -457,7 +457,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-WORKER-001
-    statement: "Code node executions reach a Worker only through the kind='code' lane of the Agent Worker protocol (protocol v2): agent_execution_requests carries kind ('agent'|'code', schema v39), Workers declare a separate max_code_concurrency pool that the Host accounts and enforces independently of the agent pool, and the code manifest ships the node code text plus its sha256 code_hash (resolved in resolve_dispatch_node_code order; the Worker refuses to run on hash mismatch) with a workspace_libs snapshot in the bundle. Worker-eligibility is a static import-closure scan (server/app/agent_broker/code_eligibility.py: closure ⊆ workspace_libs + stdlib + requests, dynamic imports forbidden, cached by code_hash); the three video pipeline nodes stay Host-local because their closure includes server.app.pipeline.*. Dispatch probes for an online code-capable Worker declaring the node's capability (or '*') and falls back to the local Host executor when none matches — code requests never rot in queued waiting for a Worker; the probe mirrors the claim-side filters exactly (protocol v2 and the workspace's allowed_workspaces admission in addition to capability and code capacity), so a Worker that could never claim the request does not count as online. Code capacity requires protocol v2 (v1 heartbeats carry no cancel body): registration rejects max_code_concurrency>0 below v2, and claim evaluation re-checks the stored protocol version as defense in depth."
+    statement: "Code node executions reach a Worker only through the kind='code' lane of the Agent Worker protocol (protocol v2): agent_execution_requests carries kind ('agent'|'code', schema v39), Workers declare a separate max_code_concurrency pool that the Host accounts and enforces independently of the agent pool, and the code manifest ships the node code text plus its sha256 code_hash (resolved in resolve_dispatch_node_code order; the Worker refuses to run on hash mismatch) with a workspace_libs snapshot in the bundle. Worker-eligibility is a static import-closure scan (server/app/agent_broker/code_eligibility.py: closure ⊆ workspace_libs + stdlib + requests, dynamic imports forbidden, cached by code_hash); any node whose closure escapes the allowlist stays Host-local (no in-repo node does — the legacy video pipeline nodes that required server.app.pipeline.* were extracted from the repo with the business workflows). Dispatch probes for an online code-capable Worker declaring the node's capability (or '*') and falls back to the local Host executor when none matches — code requests never rot in queued waiting for a Worker; the probe mirrors the claim-side filters exactly (protocol v2 and the workspace's allowed_workspaces admission in addition to capability and code capacity), so a Worker that could never claim the request does not count as online. Code capacity requires protocol v2 (v1 heartbeats carry no cancel body): registration rejects max_code_concurrency>0 below v2, and claim evaluation re-checks the stored protocol version as defense in depth."
     owner: workspace-executor
     risk: high
     evidence:

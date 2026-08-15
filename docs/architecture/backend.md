@@ -5,8 +5,7 @@
 Agent Legion 后端基于 FastAPI，提供 REST API、SSE 事件推送和 WebSocket Agent 状态。核心职责包括：
 
 - Agent Legion DAG 工作流执行（Workspace / Job / Node）
-- 视频流水线（ intake → 下载 → 转录 → Agent 阶段 → 打包）
-- CMS 集成（知识库与题库查询）
+- 实例级外部服务连接（endpoint/凭据注入节点 dispatch）
 - PostgreSQL 持久化与本地文件系统管理
 
 ## Directory Structure
@@ -23,41 +22,30 @@ server/app/
 │   ├── job_*.py            # Job 相关路由与合约
 │   ├── jobs.py             # Agent Legion Job API
 │   ├── packages.py         # 打包管理
-│   ├── questions.py        # 题目详情查询
 │   ├── skill_catalog_route.py # Skill 目录查询
 │   ├── token_usage.py      # Token 用量统计
-│   ├── video_jobs*.py      # 视频 Job 详情与源文件
 │   ├── worker.py           # Worker 控制（暂停/恢复）
 │   ├── workflow_*.py       # 工作流目录、修订、草稿对比
 │   ├── workspace_*.py      # Workspace、执行器、设置
 │   └── __init__.py         # 路由组装
 ├── services/               # 业务逻辑服务层
 │   ├── job_*.py            # Job 查询、执行、重跑、删除、打包
-│   ├── question_detail.py  # Question CMS 集成与关联 Job 聚合
 │   ├── token_usage*.py     # Token 用量统计与定价
 │   ├── workflow_*.py       # 工作流草稿、修订、格式转换
 │   ├── workspace_*.py      # Workspace 配置与执行器配置
 │   └── ...
-├── pipeline/               # 视频处理流水线阶段
-│   ├── download.py         # HTTP 下载
-│   ├── transcribe.py       # ASR 转录
-│   ├── assemble.py         # 元数据组装
-│   └── package.py          # ZIP 打包
 ├── workflows/              # Agent Legion DAG 定义与执行
 │   ├── definition.py       # 工作流定义解析
 │   ├── scheduler.py        # DAG 调度
 │   ├── workflow_node_execution.py # 节点执行
 │   ├── pi_runner.py        # Pi Agent 运行器
 │   ├── skills.py           # Skill 路径解析 / 契约检查
-│   ├── question_comprehension_info.py
-│   ├── video_knowledge.py
 │   └── ...
 ├── db/                     # 数据库层
 │   └── schema.py           # 表结构定义
 ├── jobs/                   # Job 领域查询与类型
 │   └── queries/            # JobQueries（含 WorkspaceQueriesMixin）等
 ├── configuration/          # 配置加载与 owned-keys 校验
-├── video_capabilities/     # 视频能力合约与投影
 ├── executors/              # Executor 配置、Runtime、租赁调度、registry factory
 ├── events/                 # 事件总线、Agent 发现与状态跟踪（agents.py）、WS 广播
 ├── workflow_worker/      # DAG workflow worker：thread.py 线程、ready.py 每 pass
@@ -65,32 +53,29 @@ server/app/
 │                         # agent_stock.py 产能库存配置
 ```
 
-CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓库根的
-`workspace_libs/cms/`（`client.py` HTTP 客户端、`question.py` 题库查询、
-`knowledge.py` 知识库查询、`urls.py` 端点推导、`adapters.py` 连接 adapter），
-经平台 adapter registry 接入实例级外部服务连接。
+平台本身不携带任何外部服务的协议实现：实例级外部服务连接只内置
+`static_bearer` adapter（`server/app/services/connection_adapters.py`），
+具体业务系统的鉴权协议由业务侧以自定义节点代码承载。
 
 ## Data Flow
 
 ```
-客户端请求 → FastAPI Router → Service Layer → DB / Pipeline / CMS / Pi
+客户端请求 → FastAPI Router → Service Layer → DB / Executors
                      ↓
          SSE Events / WebSocket ← DB Notifications
                      ↓
                前端实时更新
 ```
 
-`WorkflowWorkerThread` 定期轮询数据库，驱动 Agent Legion DAG Job 从 `queued` 向 `completed` 状态推进；视频 Job 由 workflow 中的 `video_knowledge` handler 执行下载、转录、Agent 阶段与打包。
+`WorkflowWorkerThread` 定期轮询数据库，驱动 Agent Legion DAG Job 从 `queued` 向 `completed` 状态推进；每个节点按其 capability 分发到对应 executor 执行。
 
 ## Key Decisions
 
 - PostgreSQL 是唯一运行时数据库，通过连接池支撑多进程、多设备并发协调。
-- Agent Legion DAG 是主要的执行模型；视频流水线作为 `video_knowledge` workflow 运行。
+- Agent Legion DAG 是唯一的执行模型；示例 workflow（`education_video_problems_generation`）随仓库内置，业务 workflow 经 DB catalog 注册 + 自定义节点发布承载。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
-- CMS 客户端（`workspace_libs/cms/`）将网络、响应解析和鉴权失败统一为 `CmsClientError`；业务层只降级明确的
-  集成错误，不吞掉编程异常。CMS 凭据与端点配置走实例级外部服务连接（admin 全局设置「外部服务连接」），
-  见下文 Configuration Reference。
+- 外部服务凭据与端点配置走实例级外部服务连接（admin 全局设置「外部服务连接」），见下文 Configuration Reference。
 - CORS 来源由 env `AGENT_LEGION_CORS_ALLOW_ORIGINS` / `AGENT_LEGION_CORS_ALLOW_CREDENTIALS` 显式配置；默认仅允许本机 Vite 开发源。
 
 ## API Surface / Interface
@@ -183,7 +168,6 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | POST | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `create_replay` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays` | `list_replays` | routes/quality_replays.py |
 | GET | `/workspaces/{workspace_id}/quality/replays/{replay_id}` | `get_replay` | routes/quality_replays.py |
-| GET | `/workspaces/{workspace_id}/questions/{question_id}` | `get_question_detail` | routes/questions.py |
 | GET | `/executors/skills/{skill_key:path}` | `get_skill` | routes/skill_catalog_route.py |
 | GET | `/admin/skill-sources` | `get_skill_sources` | routes/skill_sources.py |
 | PUT | `/admin/skill-sources/{skill_key:path}` | `put_skill_source` | routes/skill_sources.py |
@@ -219,8 +203,6 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | GET | `/workspaces/{workspace_id}/token-usage` | `get_workspace_token_usage` | routes/token_usage.py |
 | GET | `/admin/token-usage-pricing` | `get_token_usage_pricing` | routes/token_usage_pricing.py |
 | PUT | `/admin/token-usage-pricing` | `put_token_usage_pricing` | routes/token_usage_pricing.py |
-| GET | `/jobs/{job_id}/video` | `get_video_job_detail` | routes/video_jobs_detail.py |
-| GET | `/jobs/{job_id}/video/source` | `get_video_job_source` | routes/video_jobs_source.py |
 | GET | `/worker/status` | `worker_status` | routes/worker.py |
 | POST | `/worker/pause` | `pause_worker` | routes/worker.py |
 | POST | `/worker/resume` | `resume_worker` | routes/worker.py |
@@ -435,8 +417,6 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | QualityConfusionMatrix | BaseModel | tp: int, fp: int, fn: int, tn: int, precision: float | None, recall: float | ... | app/routes/quality_contracts.py |
 | QualityStatsGroup | BaseModel | node_key: str, skill_version: str, provider: str, model: str, runs: int, succ... | app/routes/quality_contracts.py |
 | QualityBatchStatsResponse | BaseModel | batch_id: str, groups: list[QualityStatsGroup] | app/routes/quality_contracts.py |
-| QuestionNormalized | BaseModel | stem: str | None, options: list[dict[str, Any]] | None, answer: Any | None, a... | app/routes/questions.py |
-| QuestionDetailResponse | BaseModel | question_id: str, title: str, normalized: QuestionNormalized, cms_payload: di... | app/routes/questions.py |
 | SkillFileResponse | BaseModel | path: str, size: int, content: str, truncated: bool | app/routes/skill_contracts.py |
 | SkillDetailResponse | BaseModel | key: str, ref: str, commit: str, available: bool, files: list[SkillFileRespon... | app/routes/skill_contracts.py |
 | SkillValidateRequest | BaseModel | path: str | app/routes/skill_contracts.py |
@@ -534,10 +514,6 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | SkillsConfig | BaseModel | skills: dict[str, SkillSourceConfig] | app/skills/config.py |
 | LockedSkillSource | BaseModel | repo: str, ref: str, commit: str | app/skills/config.py |
 | SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkillSource] | app/skills/config.py |
-| VideoJobInputResponse | BaseModel | schema_version: int, entity_type: str, content_type: str, legacy_video_id: st... | app/video_capabilities/response_contracts.py |
-| VideoSubtitleResponse | BaseModel | index: int, start: float, end: float, text: str | app/video_capabilities/response_contracts.py |
-| VideoJobArtifactsResponse | BaseModel | subtitles: list[VideoSubtitleResponse], chapters: list[dict[str, Any]], inter... | app/video_capabilities/response_contracts.py |
-| VideoJobDetailResponse | BaseModel | input: VideoJobInputResponse, artifacts: VideoJobArtifactsResponse | app/video_capabilities/response_contracts.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/workflow_worker/agent_stock.py |
 
 <!-- END AUTO-GENERATED -->
@@ -569,42 +545,33 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 - `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
-  - 视频 Job 由 `video_knowledge` workflow 的节点（`download_video`（code executor）、`transcribe_video`、Agent 阶段、`assemble_video_metadata`、`package_video_job`）处理。
+  - 节点按 capability 分发：内置 code 节点（`workflow_nodes/`，EXEC-CODE-001）、DB 发布的自定义代码节点（EXEC-CODE-002/003）、或 agent 节点（pi / velites runtime）。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
-- 视频 Job 的 `content_type` 固定为 `knowledge`（`video_capabilities/contracts.py` 强制校验），pipeline 节点序列：
+- 内置示例 workflow `education_video_problems_generation` 的节点序列：
 
-  **Knowledge videos (`knowledge`):**
-  1. `download_video` — 下载 MP4（`code` executor，代码在 `workflow_nodes/video_download.py`）；`batch_by_knowledge` 模式下先经节点 config + vault 把 `knowledge_code` 解析为播放地址（见下文 Job Intake 资源解析）
-  2. `transcribe_video` — 生成 `subtitles.srt` 与 `transcription.json`
-  3. `subtitle_review` — openclaw agent
-  4. `chapter_generate` — openclaw agent
-  5. `interaction_generate` — openclaw agent
-  6. `content_review` — openclaw agent
-  7. `assemble_video_metadata` — 生成 `metadata.json`、`report.md`
-  8. `package_video_job` — 创建 ZIP package
+  1. `intake_knowledge_points` — code 节点，读取知识点目录并展开 job 输入
+  2. `write_script` — agent 节点，生成教学视频脚本
+  3. `review_script` — agent 节点，评审脚本
+  4. `generate_questions` — agent 节点，生成练习题
+  5. `review_questions` — agent 节点，评审题目
+  6. `publish_content` — code 节点，汇总产物为 `publish_payload.json`
 
-- direct URL intake 会校验 URL，非法即拒绝；knowledge 模式空 URL 在 `download_video` 节点执行期报错失败（`server/app/workflows/video_knowledge_source.py`）。
 - 任一 node 失败会把 Job 置为 `failed`，错误写入数据库与日志文件。
 - 支持从任意 node 重跑；重跑会清除该 node 及下游所有 artifacts。
 - `DELETE /api/jobs/{job_id}` 会级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
 
 ### Job Intake 资源解析（resolve phase）
 
-Intake 模式的 CMS 解析时机由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）：
+Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）。平台只内置 direct resolver（`phase=None`，不访问外部资源，按输入值直接 fan-out）；需要访问外部系统的解析一律下沉到 DAG 首节点执行期（节点 config + 实例级外部服务连接注入，见下文 Secrets Vault 的运行时解析），intake 本身不感知业务实体类型。
 
-- `phase="node"`：intake 只做无外部调用的 fan-out，candidate 只携带 opaque `source_ref`（question 为题目 id / 知识点 code，video 为知识点 code）；解析下沉到首节点执行期，经节点 config（capability `config_schema` 出厂默认值 ← 节点/workspace 覆盖）+ vault `secret_ref` 解析 + dispatch 期按 `connection` 键注入连接配置与 token 完成（见下文 Secrets Vault 的运行时解析）。两个 workflow 的首节点都是 `code` executor 节点：`question_comprehension_info.fetch_questions`（`workflow_nodes/question_intake.py`，按冻结 payload 的 `intake_mode.input_field` 兼容 by-id 与 by-knowledge 输入）与 `video_knowledge.download_video`（`workflow_nodes/video_download.py`，`knowledge_code → 播放地址` 解析并回写 `video_input.json`）。
-- `phase=None`：direct 模式，不访问外部资源。
-
-`phase="intake"`（intake 期调 CMS 做 1:N fan-out）已从 question resolver 退役：intake 不再调用 CMS，非法 id/code 在执行期以 job 失败暴露。
-
-接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 `connection` 键（实例级外部服务连接 key，出厂默认 `cms-internal`）与业务参数（`bank_version` / `country_id` / `subject_id` / `page_size` 等）。Intake 快照只冻结 `node_config` 与 `secret_ref`。
+接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 `connection` 键（实例级外部服务连接 key）与业务参数。Intake 快照只冻结 `node_config` 与 `secret_ref`。
 
 ## Database
 
-- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
+- PostgreSQL 服务 Agent Legion workflow 与平台状态（当前版本见 `server/app/db/schema.py` 的 `SCHEMA_VERSION`）：
   - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `node_config_json`, `default_entity`, `intake_config_json`）。`node_config_json` 里 schema 标记 `secret: true` 的字段只存 `{"secret_ref": "<name>"}` 引用，明文不落库（见下文 Secrets Vault）；旧 `resource_config_json`（resource binding）已在 v24 迁移为节点覆盖并清空
   - `workspace_secrets` — vault 加密存储的 workspace 密钥（Fernet 密文，`(workspace_id, name)` 唯一，v16 新增）
-  - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文 CMS 集成段）
+  - `external_connections` / `instance_secrets` / `connection_tokens` — 实例级外部服务连接：连接只存非敏感配置，敏感字段 Fernet 加密入 `instance_secrets`（`conn:<key>:<field>` 引用），鉴权 token 加密缓存在 `connection_tokens`（v34 新增，见下文外部服务连接段）
   - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
   - `workflow_revisions` — workflow 版本修订历史
   - `workspace_packages` — 已创建 package 路径
@@ -649,10 +616,6 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `exemptions.py`: 读取 `config/architecture/architecture-exemptions.yaml` 并校验。
 - 对应脚本：`scripts/check_invariants.py`。
 
-### Video Capabilities
-
-`server/app/video_capabilities/` 为视频 Job 提供统一的输入/产物合约与响应投影。
-
 - `contracts.py`, `response_contracts.py`: 视频详情与产物响应模型。
 - `projection.py`: 将底层 artifacts 投影为 API 响应。
 
@@ -664,7 +627,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - **Service**: `VaultService`（Fernet 加解密 + `workspace_secrets` 持久化，明文不跨越服务层边界落盘或出 API）与 `WorkspaceSecretsService`（API 门面）。
 - **Master key**: env `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`（映射到 `vault.master_key` / `vault.master_key_file`）；缺 key 时 server 可启动，但 vault 写操作与 `secret_ref` 解析报错。
 - **写入链**: 节点配置保存时，capability `config_schema` 标记 `secret: true` 的字段值转存 vault，节点覆盖只留 `{"secret_ref": "node:{workflow_key}:{node_key}:{field}"}`；settings payload 中 secret 字段只返回 `{"secret_set": bool}`。
-- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口），消费点为 dispatch 执行注入与 question detail 两处；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。CMS 侧消费已切到实例级外部服务连接：dispatch 在 vault 解析之后经 `inject_connection_config`（`server/app/workflow_worker/dispatch_config.py`）按节点 `connection` 键把连接端点配置与缓存 token 注入节点 config（仅内存，不落库、不进 agent manifest）；question detail 改为解析节点引用的连接 key，经连接层（`ConnectionTokenService.runtime_config`）取运行时配置，不回显 token。
+- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口），消费点为 dispatch 执行注入；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。外部服务连接的消费同样在 dispatch 期：vault 解析之后经 `inject_connection_config`（`server/app/workflow_worker/dispatch_config.py`）按节点 `connection` 键把连接端点配置与缓存 token 注入节点 config（仅内存，不落库、不进 agent manifest）。
 
 ## Configuration Reference
 
@@ -677,9 +640,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 
 env-only 段：`vault`（master key）与 `auth`（bootstrap admin 密码）不属于任何 split 文件的 owned keys，只能经环境变量注入（`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`、`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`）；写进 yaml 会触发 owned-key 校验报错。数据库 URL 同样由 env 治理：`AGENT_LEGION_DATABASE_URL` 为唯一权威变量（G4）。
 
-`config/agent_legion.yaml` 的 `asr:` 段已退役（文件整体存在即报错）：业务参数 `provider`（`auto` / `whisper` / `sensevoice`，默认 `auto`）与 `timeout_seconds`（默认 900）声明在 `transcribe_video` capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析（Studio 节点配置可改）；机器路径转 env-only：`AGENT_LEGION_ASR_WHISPER_BINARY` / `AGENT_LEGION_ASR_WHISPER_MODEL` / `AGENT_LEGION_ASR_WHISPER_VAD_MODEL`（可选 VAD 模型）/ `AGENT_LEGION_ASR_SENSEVOICE_SCRIPT` / `AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR`。启动预检只在 env 显式注入时校验所给路径存在（配错即 fail-fast）；未配置时 server 正常启动，缺二进制在转写时由 provider 的 FileNotFoundError 报错。
-
-CMS 集成走实例级外部服务连接（EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段（token / token_gen secret）转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。CMS 鉴权协议（`static_bearer` / `cms_hmac`）实现在 workspace pack `workspace_libs/cms/adapters.py`，平台只认 adapter 协议（`server/app/services/connection_adapters.py`），不携带厂商知识。节点 config 只写 `connection: "cms-internal"` 引用连接 + 业务参数（`bank_version` / `country_id` / `subject_id` / `page_size`，出厂默认值声明在 `fetch_questions` / `download_video` capability 的 `config_schema`——内置 executor 工厂定义，DB `versioned_entities` 承载——沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）；capability `config_schema` 里的 `token` / `env` / `base_url` / `api_url` / `question_list_url` 键已退役。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN`（`BASECMS_*` 为 deprecated alias）运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进 `cms-internal` 连接（凭据入实例 vault、节点 `node_config_json` CMS 键改写为 `connection`、冻结 intake payload 补 `connection`、executor 定义重发布为 `connection` schema），此后 env 不再被读取；新部署直接在 admin 设置里配置连接。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
+外部服务集成走实例级外部服务连接（EXTERNAL-CONNECTION-001），不经全局 yaml 段配置（全局 `cms:` 段已退役，写进任何 split yaml 会撞退役文件校验报错）：连接由 admin 在全局设置「外部服务连接」或 admin API（`GET/POST /api/admin/connections`、`PUT/DELETE /api/admin/connections/{key}`、`POST /api/admin/connections/{key}/test`、`GET /api/admin/connection-types`）维护，存 DB `external_connections`（只存非敏感配置）；敏感字段转入实例 vault（`instance_secrets`，Fernet 加密，连接配置里只留 `conn:<key>:<field>` 引用），鉴权换来的 token 加密缓存在 `connection_tokens`，过期在父连接行锁下单飞刷新（`server/app/services/connection_tokens.py`）。平台内置 `static_bearer` adapter（`server/app/services/connection_adapters.py`）；业务专属鉴权协议随业务节点迁出，不再由平台携带。节点 config 只写 `connection: "<key>"` 引用连接 + 业务参数（出厂默认值声明在 capability 的 `config_schema`，沿「schema defaults → 节点 config → workspace 覆盖」链解析，Settings UI 可改）。env `CMS_*` / `AGENT_LEGION_CMS_TOKEN` 运行时通道已退役：升级后首次启动由 schema v34 迁移（`server/app/db/migrations/external_connections.py`）把 env 凭据与 workspace 节点旧配置收编进连接，此后 env 不再被读取。explicit 单文件配置里出现 `cms.token` / `cms.token_gen` 启动即报错（config 治理 G2）。
 
 `config/workflow.yaml` 的 `executors` 段已退役进 DB：executor 定义（code capability 以 `path` 指向 `workflow_nodes/` 下的仓库内 Python 文件（模块级 `run(job, job_dir, runtime)` 契约）；`path` 可省略 = 纯自定义代码 capability（EXEC-CODE-002），dispatch 时要求该节点存在已发布/冻结的自定义代码，否则报配置错误。另可声明 `config_schema`（与 `AgentDefinition.config_schema` 同一子集），节点可调参数经 node_config 解析链注入节点 runtime 的 `node_config` 键）存于 `versioned_entities` 表，内置工厂目录（`server/app/executors/builtin_definitions.py`）在启动时 seed-if-absent，Studio 管理发布；publish/rollback/archive 后调度 registry 热刷新（`reload_published_executors`），无需重启。
 
@@ -715,6 +676,6 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 
 - 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
 - OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自 DB 实例设置文档（`/api/admin/instance-settings`，仅管理员可写）；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量。
-- PostgreSQL 与视频存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的 User Authentication 章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
+- PostgreSQL 与文件存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的 User Authentication 章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；实例级外部服务连接凭据与鉴权 token 同样 Fernet 加密落 `instance_secrets` / `connection_tokens`（实例 vault），只在 dispatch 注入与连接探测时于内存解析；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

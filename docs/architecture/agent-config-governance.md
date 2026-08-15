@@ -70,10 +70,10 @@ if not model:
 class AgentDefinition(BaseModel):
     """Agent 的能力定义，不含执行配置。"""
 
-    agent_id: str                    # 如 "question-key-info-v1"
-    capability: str                  # 如 "generate_key_info"
+    agent_id: str                    # 如 "demo-review-questions-v1"
+    capability: str                  # 如 "review_questions"
     runtime: Literal["pi", "openclaw", "velites"]
-    skill: str                       # 如 "question_comprehension_info/generate_key_info"
+    skill: str                       # 如 "education-video-problems-generation/review-questions"
     tools: tuple[str, ...] = ("read", "write", "bash")
     config_schema: dict[str, Any] = {}  # 节点可调参数 schema
     enabled: bool = True
@@ -147,12 +147,12 @@ manifest = {
     "agent_id": "...",
     "agent_definition_hash": "...",
     "runtime": "velites",
-    "capability": "generate_key_info",
+    "capability": "review_questions",
     "inputs": [...],
     "expected_outputs": [...],
     "config": {...},
     "tools": ["read", "write", "bash"],
-    "skill": "question_comprehension_info/generate_key_info",
+    "skill": "education-video-problems-generation/review-questions",
     "skill_version": "abc123",
     "log_path": "...",
     "execution": {
@@ -231,13 +231,13 @@ Studio
 
 **方式 A：Folder Picker**
 1. 点击"选择技能目录"
-2. 打开系统 folder picker，选中 skill 目录（如 `~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info/`）
+2. 打开系统 folder picker，选中 skill 目录（如 `~/.agents/skills/agent-legion/education-video-problems-generation/review-questions/`）
 3. App 校验目录包含 `SKILL.md`
 4. 校验通过后，显示该 skill 的 tags（从 SKILL.md frontmatter 读取）
 5. 用户从 tag 下拉选择（最新 tag 置顶）
 
 **方式 B：绝对路径输入**
-1. 用户输入绝对路径（如 `/Users/xxx/.agents/skills/agent-legion/question_comprehension_info/generate_key_info`）
+1. 用户输入绝对路径（如 `/Users/xxx/.agents/skills/agent-legion/education-video-problems-generation/review-questions`）
 2. App 实时校验路径存在且包含 `SKILL.md`
 3. 校验通过后，同样显示 tag 下拉选择
 
