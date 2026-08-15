@@ -59,14 +59,11 @@ def main() -> int:
             return fail(f"exercises[{index}].id must be {expected_id!r}")
         if exercise["difficulty"] not in EXPECTED_DIFFICULTIES:
             return fail(
-                f"exercises[{index}].difficulty must be one of "
-                f"{sorted(EXPECTED_DIFFICULTIES)}"
+                f"exercises[{index}].difficulty must be one of {sorted(EXPECTED_DIFFICULTIES)}"
             )
         difficulties[exercise["difficulty"]] += 1
     if dict(difficulties) != EXPECTED_DIFFICULTIES:
-        return fail(
-            f"difficulty distribution {dict(difficulties)} != {EXPECTED_DIFFICULTIES}"
-        )
+        return fail(f"difficulty distribution {dict(difficulties)} != {EXPECTED_DIFFICULTIES}")
 
     knowledge_path = job_dir / "knowledge_point.json"
     if knowledge_path.is_file():
@@ -77,8 +74,7 @@ def main() -> int:
         expected_kp = str(knowledge.get("knowledge_point", {}).get("id") or "")
         if expected_kp and payload.get("knowledge_point_id") != expected_kp:
             return fail(
-                f"knowledge_point_id {payload.get('knowledge_point_id')!r} "
-                f"!= input {expected_kp!r}"
+                f"knowledge_point_id {payload.get('knowledge_point_id')!r} != input {expected_kp!r}"
             )
     return 0
 
