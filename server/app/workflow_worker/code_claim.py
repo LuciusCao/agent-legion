@@ -66,7 +66,7 @@ def try_claim_code_worker_node(
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
         return False
-    definition = worker.settings.executor_definitions.get(executor_id)
+    definition = worker.registry.definitions().get(executor_id)
     capability_config = (
         definition.capabilities.get(node.capability)
         if isinstance(definition, CodeExecutorConfig)

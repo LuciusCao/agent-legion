@@ -1,3 +1,4 @@
+import logging
 from typing import Annotated, Any, Never
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -25,6 +26,8 @@ from server.app.services.executor_definition_service import ExecutorDefinitionSe
 from server.app.services.job_errors import JobServiceError
 from server.app.services.versioned_entities import VersionedEntity
 from server.app.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def _version_response(entity: VersionedEntity) -> ExecutorVersionResponse:
@@ -79,6 +82,16 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
 
     def _service() -> ExecutorDefinitionService:
         return ExecutorDefinitionService(job_db.path, settings.root_dir)
+
+    def _reload_registry_best_effort(request: Request) -> None:
+        # The publish/rollback/archive write is already committed when this
+        # runs; a failed registry rebuild must not 500 the committed write.
+        # The worker's poll loop reconciles the catalog periodically
+        # (workflow_worker.catalog_reconcile), so the registry self-heals.
+        try:
+            reload_published_executors(settings, request.app.state.executor_registry)
+        except Exception:
+            logger.exception("executor registry hot reload failed for committed write")
 
     @router.get("/executor-definitions", response_model=ExecutorListResponse)
     def list_executor_definitions() -> ExecutorListResponse:
@@ -162,7 +175,7 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
             entity = _service().publish(executor_id)
         except (ValidationError, ExecutorKindError, JobServiceError) as exc:
             _raise_definition_http_error(exc)
-        reload_published_executors(settings, request.app.state.executor_registry)
+        _reload_registry_best_effort(request)
         return _version_response(entity)
 
     @router.post(
@@ -181,7 +194,7 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
             entity = _service().rollback(executor_id, request_body.version, f"user:{user['id']}")
         except (ValidationError, ExecutorKindError, JobServiceError) as exc:
             _raise_definition_http_error(exc)
-        reload_published_executors(settings, request.app.state.executor_registry)
+        _reload_registry_best_effort(request)
         return _version_response(entity)
 
     @router.post("/executor-definitions/{executor_id}/copy", response_model=ExecutorVersionResponse)
@@ -208,7 +221,7 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
             archived = _service().archive_all(executor_id)
         except JobServiceError as exc:
             raise_job_http_error(exc)
-        reload_published_executors(settings, request.app.state.executor_registry)
+        _reload_registry_best_effort(request)
         return ExecutorArchiveResponse(archived=archived)
 
     return router

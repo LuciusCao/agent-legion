@@ -40,3 +40,15 @@ class ScopedTokenManagementQueriesMixin(JobQueriesBase):
                 (token_id, user_id, origin),
             )
             return bool(cursor.rowcount)
+
+    def delete_expired_scoped_tokens(self) -> int:
+        """Batch-delete expired rows (revoked or not); lookups never match them.
+
+        Called from the hourly maintenance sweep; without it expired rows
+        accumulate forever and idx_auth_scoped_tokens_expires_at has no consumer.
+        """
+        with self.connect() as conn:
+            cursor = conn.execute(
+                "delete from auth_scoped_tokens where expires_at <= current_timestamp"
+            )
+            return cursor.rowcount
