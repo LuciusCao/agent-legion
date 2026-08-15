@@ -20,6 +20,9 @@ from server.app.executors.definitions import load_executor_definitions
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 EXPECTED_CAPABILITIES = {
+    # Demo workflow code capabilities (example nodes).
+    "intake_knowledge_points",
+    "publish_content",
     "fetch_questions",
     "download_video",
     "clean_and_parse",

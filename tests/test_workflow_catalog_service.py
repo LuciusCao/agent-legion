@@ -7,6 +7,7 @@ def test_workflow_catalog_lists_registered_workflows(settings):
     result = service.list_workflows()
     assert result[0].keys() == {"key", "label", "description", "origin"}
     assert {entry["key"] for entry in result} == {
+        "education_video_problems_generation",
         "question_comprehension_info",
         "video_knowledge",
     }

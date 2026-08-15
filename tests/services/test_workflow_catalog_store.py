@@ -52,6 +52,7 @@ def test_seed_is_idempotent_and_refreshes_builtin_rows() -> None:
     seed_builtin_workflow_catalog(TEST_DATABASE_URL)
     entries = WorkflowCatalogStore(TEST_DATABASE_URL).list_entries()
     assert {entry["key"] for entry in entries} == {
+        "education_video_problems_generation",
         "question_comprehension_info",
         "video_knowledge",
     }

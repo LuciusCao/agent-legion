@@ -21,7 +21,9 @@ def test_list_executors_endpoint(client):
         "download_video",
         "fetch_questions",
         "finalize_non_uploadable",
+        "intake_knowledge_points",
         "package_video_job",
+        "publish_content",
         "transcribe_video",
     ]
     assert {
