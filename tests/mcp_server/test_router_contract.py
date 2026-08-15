@@ -1,0 +1,73 @@
+"""MCP 工具 → 真实路由表的契约测试（防止 stub 对 stub 漂移）。
+
+tests/mcp_server/test_tools.py 用假 HTTP 层验证转发语义；这里把每个 MCP 工具
+实际发出的 (method, path) 与 create_studio_agent_tools_router 的真实路由表
+做双向比对：工具参数一律填 "{参数名}" 占位，记录到的 path 即路由模板本身，
+任何一边改名/改路径都会在这里炸出来。
+"""
+
+from __future__ import annotations
+
+import asyncio
+
+import pytest
+
+from server.app.mcp_server.config import McpServerConfig
+from server.app.mcp_server.server import create_mcp_server
+from server.app.routes.studio_agent_tools import create_studio_agent_tools_router
+from server.app.settings import Settings
+
+pytestmark = pytest.mark.no_db
+
+_CONFIG = McpServerConfig(api_base="http://backend.test:9000", token="scoped-token-1")
+_ROUTE_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH"}
+
+
+class _FakeResponse:
+    status_code = 200
+    text = "{}"
+
+
+def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
+    calls: list[dict] = []
+
+    def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
+        calls.append({"method": method, "url": url})
+        return _FakeResponse()
+
+    monkeypatch.setattr("server.app.mcp_server.server.requests.request", fake_request)
+    server = create_mcp_server(_CONFIG)
+
+    tools = asyncio.run(server.list_tools())
+    # 工具面清单变化时同步这里与工具文档（server/app/mcp_server/server.py）。
+    assert len(tools) == 8
+    for tool in tools:
+        schema = tool.inputSchema
+        args = {
+            name: f"{{{name}}}"
+            for name in (schema.get("properties") or {})
+            if name in (schema.get("required") or [])
+        }
+        asyncio.run(server.call_tool(tool.name, args))
+
+    settings = Settings(
+        root_dir=tmp_path,
+        data_dir=tmp_path,
+        videos_dir=tmp_path,
+        logs_dir=tmp_path,
+        packages_dir=tmp_path,
+        jobs_dir=tmp_path,
+        config={},
+    )
+    router = create_studio_agent_tools_router(None, settings)  # 枚举路由不触 DB
+    table = {
+        (method, route.path)
+        for route in router.routes
+        for method in (route.methods or set()) & _ROUTE_METHODS
+    }
+
+    recorded = {
+        (call["method"], call["url"].removeprefix(_CONFIG.api_base).removeprefix("/api"))
+        for call in calls
+    }
+    assert recorded == table
