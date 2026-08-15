@@ -45,6 +45,12 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `verify_specs.py` | 检查 design specs 的引用健康，自动分类到 `specs/`、`completed/`、`archive/`，并生成 `SPEC_HEALTH.md`。 |
 | `check-skills-shared.py` | 校验外部 Pi skill 仓库与项目共享引用文件的一致性。 |
 
+## 示例 workflow
+
+| 脚本 | 用途 |
+|------|------|
+| `import-demo.sh` | 导入示例 workflow（`education_video_problems_generation`）的 4 个示例 skill：复制 `examples/skills/*` 到本机 skill 源目录并逐目录 `git init` + 初始 commit + 打 tag `v1.0.0`（幂等，已有 tag 的 skill 跳过不覆盖）。由 `make import-demo` 调用；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖目标根目录。 |
+
 ## 迁移与工具
 
 | 脚本 | 用途 |
