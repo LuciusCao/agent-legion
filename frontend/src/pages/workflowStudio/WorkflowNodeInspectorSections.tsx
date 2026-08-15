@@ -46,6 +46,7 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
         key={`code-${node.key}`}
         node={node}
         executorCatalog={props.executorCatalog}
+        workflowKey={props.workflowKey}
         readOnly={props.readOnly}
       />
       <WorkflowNodeConfigSection

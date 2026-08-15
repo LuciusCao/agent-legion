@@ -39,6 +39,15 @@ export function fetchStudioChatSessions(
   )
 }
 
+export function fetchStudioChatSession(
+  workspaceId: string,
+  sessionId: string
+): Promise<StudioChatSessionRecord> {
+  return api<SessionResponse>(base(workspaceId, sessionId)).then(
+    (response) => response.session
+  )
+}
+
 export function createStudioChatSession(
   workspaceId: string,
   agentId: string
