@@ -2,8 +2,10 @@
 
 Thin HTTP shell over StudioChatService — no business logic here. Mounted via
 ``secured()`` so every endpoint passes ``require_workspace_access`` (viewers
-read, editors write, non-members 404). The SSE stream reuses the shared
-JobEventManager machinery on a per-session channel.
+read, editors write, non-members 404). Effecting endpoints additionally mount
+``reject_studio_agent_scope`` (STUDIO-AGENT-001) via the ``guarded``
+sub-router. The SSE stream reuses the shared JobEventManager machinery on a
+per-session channel.
 """
 
 from typing import Annotated, Any
@@ -11,7 +13,7 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from server.app.auth.dependencies import require_workspace_access
+from server.app.auth.dependencies import reject_studio_agent_scope, require_workspace_access
 from server.app.events import JobEventManager
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_chat_contracts import (
@@ -37,6 +39,11 @@ def create_studio_chat_router(
     job_event_manager: JobEventManager | None = None,
 ) -> APIRouter:
     router = APIRouter()
+    # Effecting endpoints (session lifecycle, message send, permission
+    # answers) refuse studio-agent scoped tokens (STUDIO-AGENT-001): a scoped
+    # token must not mint fresh tokens via create_session nor self-approve
+    # its own permission prompts. Reads stay on the plain router.
+    guarded = APIRouter(dependencies=[Depends(reject_studio_agent_scope)])
 
     @router.get(
         "/workspaces/{workspace_id}/studio-chat/agents",
@@ -45,7 +52,7 @@ def create_studio_chat_router(
     def list_agents(workspace_id: str) -> StudioChatAgentsResponse:
         return StudioChatAgentsResponse.model_validate({"agents": service.list_available_agents()})
 
-    @router.post(
+    @guarded.post(
         "/workspaces/{workspace_id}/studio-chat/sessions",
         response_model=StudioChatSessionResponse,
     )
@@ -85,7 +92,7 @@ def create_studio_chat_router(
             raise_job_http_error(exc)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
-    @router.delete(
+    @guarded.delete(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}",
         response_model=StudioChatSessionResponse,
     )
@@ -111,7 +118,7 @@ def create_studio_chat_router(
             messages=[StudioChatMessageRecord.model_validate(row) for row in messages]
         )
 
-    @router.post(
+    @guarded.post(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages",
         response_model=StudioChatMessageResponse,
     )
@@ -140,7 +147,7 @@ def create_studio_chat_router(
             raise_job_http_error(exc)
         return await job_event_manager.connect(request, studio_chat_channel(session_id))
 
-    @router.post(
+    @guarded.post(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel",
         response_model=StudioChatSessionResponse,
     )
@@ -151,7 +158,7 @@ def create_studio_chat_router(
             raise_job_http_error(exc)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
-    @router.post(
+    @guarded.post(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all",
         response_model=StudioChatSessionResponse,
     )
@@ -164,7 +171,7 @@ def create_studio_chat_router(
             raise_job_http_error(exc)
         return StudioChatSessionResponse(session=StudioChatSessionRecord.model_validate(session))
 
-    @router.post(
+    @guarded.post(
         "/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}",
         response_model=StudioChatPermissionAnswerResponse,
     )
@@ -188,4 +195,5 @@ def create_studio_chat_router(
             raise_job_http_error(exc)
         return StudioChatPermissionAnswerResponse(resolved=request_id)
 
+    router.include_router(guarded)
     return router

@@ -8,6 +8,7 @@ import {
   createStudioChatSession,
   fetchStudioChatAgents,
   fetchStudioChatMessages,
+  fetchStudioChatSession,
   fetchStudioChatSessions,
   sendStudioChatMessage,
   setStudioChatAllowAll,
@@ -166,7 +167,16 @@ export function useStudioChat(workspaceId: string | undefined) {
         }
       },
       onStatus: (status) => {
-        if (status === 'open') void refillMessages()
+        if (status !== 'open') return
+        void refillMessages()
+        // 断连期间的会话状态翻转（如 agent 抛权限请求置
+        // awaiting_permission）不补发 SSE；重连必须重拉会话快照，否则本地
+        // status 滞留 running，approve/deny 永远 disabled。刷新失败不阻断
+        // 消息补齐：sessions 列表兜底与后续 SSE 会再校准。
+        void fetchStudioChatSession(workspaceId, activeSessionId).then(
+          applySession,
+          () => undefined
+        )
       },
     })
     return () => channel.close()

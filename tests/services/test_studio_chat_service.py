@@ -76,6 +76,32 @@ HUMAN_PERMISSION_SCRIPT = {
     ],
 }
 
+# A local Bash call whose rawInput merely mentions platform tool names; the
+# identity fields (title/kind) carry no MCP reference, so this must take the
+# human-confirmation path instead of an MCP auto-approve.
+LOCAL_BASH_MIMIC_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {
+                    "toolCallId": "tc-local-bash",
+                    "title": "Bash",
+                    "kind": "execute",
+                    "rawInput": {
+                        "command": (
+                            "grep -rn agent-legion-studio . && validate_workflow draft.yaml"
+                        )
+                    },
+                },
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
 WAIT_CANCEL_SCRIPT = {"wait_for_cancel": True, "on_prompt": []}
 
 
@@ -278,6 +304,60 @@ def test_human_permission_forward_answer_and_allow_all(chat) -> None:
         e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
     ]
     assert outcomes[-1] == {"outcome": "selected", "optionId": "allow"}
+
+
+def test_local_command_mentioning_tool_names_is_not_auto_approved(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(LOCAL_BASH_MIMIC_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "grep the repo")
+
+    # rawInput mentions server/tool names, but identity fields do not: the
+    # request parks for human confirmation instead of auto-approving.
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    pending = [
+        m
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "pending"
+    ]
+    assert len(pending) == 1
+    service.respond_permission(
+        session["id"],
+        workspace_id,
+        pending[0]["content"]["request_id"],
+        option_id="deny",
+        deny=True,
+    )
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+
+
+def test_close_during_pending_permission_stays_closed(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(HUMAN_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run ls")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    runtime = service._runtime(session["id"])
+    assert runtime is not None
+
+    service.close_session(session["id"], workspace_id)
+
+    # Teardown settles the pending permission as denied; the waiter thread's
+    # finally must not resurrect the closed session back to running.
+    _wait_for(lambda: not runtime.pending_permissions)
+    time.sleep(0.2)  # let a regressed finally's status write land
+    assert service.get_session(session["id"])["status"] == "closed"
+
+
+def test_ready_callback_does_not_revive_closed_session(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.close_session(session["id"], workspace_id)
+
+    service._on_ready(session["id"], {}, "late-acp-session")
+
+    assert service.get_session(session["id"])["status"] == "closed"
 
 
 def test_cancel_settles_pending_permission(chat) -> None:
