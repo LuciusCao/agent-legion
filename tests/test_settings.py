@@ -26,11 +26,6 @@ def _clear_agent_legion_env(monkeypatch):
         "BASECMS_TOKEN_URL",
         "AGENT_LEGION_CMS_TOKEN",
         "AGENT_LEGION_CMS_TOKEN_GEN_SECRET",
-        "AGENT_LEGION_ASR_WHISPER_BINARY",
-        "AGENT_LEGION_ASR_WHISPER_MODEL",
-        "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
-        "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
-        "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
         "AGENT_LEGION_OPENCLAW_CWD",
         "AGENT_LEGION_SKIP_DOTENV",
     ):
@@ -150,8 +145,8 @@ def test_split_layout_rejects_retired_agent_legion_yaml(tmp_path, monkeypatch):
         load_settings()
 
     message = str(exc_info.value)
-    assert "AGENT_LEGION_ASR_WHISPER_BINARY" in message
-    assert "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR" in message
+    assert "node configuration in Studio" in message
+    assert "instance-settings" in message
 
 
 def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
@@ -358,77 +353,7 @@ def test_unknown_executor_kind_rejected_at_definition_load() -> None:
 @pytest.mark.parametrize(
     ("layout", "env_var", "config_path", "env_value", "expected"),
     [
-        (
-            "legacy",
-            "AGENT_LEGION_ASR_WHISPER_BINARY",
-            ["asr", "whisper", "binary"],
-            "/tmp/whisper-cli",
-            "/tmp/whisper-cli",
-        ),
-        (
-            "legacy",
-            "AGENT_LEGION_ASR_WHISPER_MODEL",
-            ["asr", "whisper", "model"],
-            "/tmp/model.bin",
-            "/tmp/model.bin",
-        ),
-        (
-            "legacy",
-            "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
-            ["asr", "whisper", "vad_model"],
-            "/tmp/vad.bin",
-            "/tmp/vad.bin",
-        ),
-        (
-            "legacy",
-            "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
-            ["asr", "sensevoice", "script"],
-            "/tmp/transcribe.py",
-            "/tmp/transcribe.py",
-        ),
-        (
-            "legacy",
-            "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
-            ["asr", "sensevoice", "model_dir"],
-            "/tmp/sensevoice",
-            "/tmp/sensevoice",
-        ),
         ("legacy", "AGENT_LEGION_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
-        (
-            "split",
-            "AGENT_LEGION_ASR_WHISPER_BINARY",
-            ["asr", "whisper", "binary"],
-            "/tmp/whisper-cli",
-            "/tmp/whisper-cli",
-        ),
-        (
-            "split",
-            "AGENT_LEGION_ASR_WHISPER_MODEL",
-            ["asr", "whisper", "model"],
-            "/tmp/model.bin",
-            "/tmp/model.bin",
-        ),
-        (
-            "split",
-            "AGENT_LEGION_ASR_WHISPER_VAD_MODEL",
-            ["asr", "whisper", "vad_model"],
-            "/tmp/vad.bin",
-            "/tmp/vad.bin",
-        ),
-        (
-            "split",
-            "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT",
-            ["asr", "sensevoice", "script"],
-            "/tmp/transcribe.py",
-            "/tmp/transcribe.py",
-        ),
-        (
-            "split",
-            "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR",
-            ["asr", "sensevoice", "model_dir"],
-            "/tmp/sensevoice",
-            "/tmp/sensevoice",
-        ),
         ("split", "AGENT_LEGION_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
     ],
 )
@@ -442,13 +367,6 @@ def test_env_override_precedes_yaml(
         config_path_file = tmp_path / "workflow.yaml"
         config_path_file.write_text(
             "data_dir: data\n"
-            "asr:\n"
-            "  provider: whisper\n"
-            "  whisper:\n"
-            "    binary: yaml-binary\n"
-            "    model: yaml-model\n"
-            "  sensevoice:\n"
-            "    model_dir: yaml-dir\n"
             "workflows:\n"
             "  enabled: false\n"
             "openclaw:\n"

@@ -25,8 +25,7 @@ vi.mock('../../api/connections', () => ({
   testConnection: vi.fn(),
 }))
 
-// 类型名对齐后端 registry（server/app/services/connection_adapters.py），
-// 只有 static_bearer 与 cms_hmac 两种。
+// 类型名对齐后端 registry（server/app/services/connection_adapters.py）。
 const types: ConnectionTypesResponse = {
   types: [
     {
@@ -34,12 +33,6 @@ const types: ConnectionTypesResponse = {
       description: '静态 Bearer token',
       required_config_keys: [],
       secret_keys: ['token'],
-    },
-    {
-      type: 'cms_hmac',
-      description: 'CMS HMAC 签名',
-      required_config_keys: ['app_id', 'nonce', 'token_url'],
-      secret_keys: ['secret'],
     },
   ],
 }
@@ -60,14 +53,10 @@ const connections: ConnectionListResponse = {
       updated_at: '2026-08-10T00:00:00Z',
     },
     {
-      key: 'cms-main',
-      type: 'cms_hmac',
-      display_name: 'CMS',
-      config: {
-        app_id: 'app-1',
-        nonce: 'nonce-1',
-        token_url: 'https://cms.example.com/token',
-      },
+      key: 'backup-main',
+      type: 'static_bearer',
+      display_name: '备用租户',
+      config: { token: { secret_set: true } },
       enabled: false,
       token: null,
       created_at: '2026-08-01T00:00:00Z',
@@ -97,14 +86,14 @@ describe('ConnectionsSection', () => {
 
     expect(await screen.findByText('lark-main')).toBeInTheDocument()
     expect(screen.getByText('飞书主租户')).toBeInTheDocument()
-    expect(screen.getByText('cms-main')).toBeInTheDocument()
+    expect(screen.getByText('backup-main')).toBeInTheDocument()
     // token 存在时展示有效期与上次刷新；缺失时展示「未获取」。
     expect(screen.getByText(/有效期至/)).toBeInTheDocument()
     expect(screen.getByText(/上次刷新/)).toBeInTheDocument()
     expect(screen.getByText('未获取')).toBeInTheDocument()
     // enabled 开关反映连接状态。
     expect(screen.getByLabelText('启用 lark-main')).toBeChecked()
-    expect(screen.getByLabelText('启用 cms-main')).not.toBeChecked()
+    expect(screen.getByLabelText('启用 backup-main')).not.toBeChecked()
   })
 
   it('creates a connection with parsed JSON config', async () => {
@@ -290,12 +279,12 @@ describe('ConnectionsSection', () => {
     })
 
     renderSection()
-    await screen.findByText('cms-main')
+    await screen.findByText('backup-main')
 
-    fireEvent.click(screen.getByLabelText('启用 cms-main'))
+    fireEvent.click(screen.getByLabelText('启用 backup-main'))
 
     await waitFor(() => {
-      expect(updateConnection).toHaveBeenCalledWith('cms-main', {
+      expect(updateConnection).toHaveBeenCalledWith('backup-main', {
         enabled: true,
       })
     })
@@ -311,9 +300,9 @@ describe('ConnectionsSection', () => {
     vi.mocked(updateConnection).mockRejectedValue(new Error('HTTP 500: boom'))
 
     renderSection()
-    await screen.findByText('cms-main')
+    await screen.findByText('backup-main')
 
-    fireEvent.click(screen.getByLabelText('启用 cms-main'))
+    fireEvent.click(screen.getByLabelText('启用 backup-main'))
 
     await waitFor(() => {
       expect(useUiStore.getState().toast).toEqual({

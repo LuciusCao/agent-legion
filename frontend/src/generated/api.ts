@@ -971,40 +971,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/jobs/{job_id}/video': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Video Job Detail */
-    get: operations['get_video_job_detail_api_jobs__job_id__video_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/jobs/{job_id}/video/source': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Video Job Source */
-    get: operations['get_video_job_source_api_jobs__job_id__video_source_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/jobs/{job_id}/{invalid_path}': {
     parameters: {
       query?: never
@@ -1927,23 +1893,6 @@ export interface paths {
     put?: never
     /** Create Replay */
     post: operations['create_replay_api_workspaces__workspace_id__quality_sample_items__item_id__replays_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/workspaces/{workspace_id}/questions/{question_id}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Question Detail */
-    get: operations['get_question_detail_api_workspaces__workspace_id__questions__question_id__get']
-    put?: never
-    post?: never
     delete?: never
     options?: never
     head?: never
@@ -4146,49 +4095,6 @@ export interface components {
       /** Success Rate */
       success_rate: number
     }
-    /** QuestionDetailResponse */
-    QuestionDetailResponse: {
-      /** Cms Payload */
-      cms_payload?: {
-        [key: string]: unknown
-      } | null
-      /** Jobs */
-      jobs: {
-        [key: string]: unknown
-      }[]
-      normalized: components['schemas']['QuestionNormalized']
-      /** Question Id */
-      question_id: string
-      /** Title */
-      title: string
-    }
-    /** QuestionNormalized */
-    QuestionNormalized: {
-      /** Analysis */
-      analysis?: unknown | null
-      /** Analysis Steps */
-      analysis_steps?:
-        | {
-            [key: string]: unknown
-          }[][]
-        | null
-      /** Answer */
-      answer?: unknown | null
-      /** Answer Blanks */
-      answer_blanks?:
-        | {
-            [key: string]: unknown
-          }[]
-        | null
-      /** Options */
-      options?:
-        | {
-            [key: string]: unknown
-          }[]
-        | null
-      /** Stem */
-      stem?: string | null
-    }
     /** QueueAlert */
     QueueAlert: {
       /** At */
@@ -4894,87 +4800,6 @@ export interface components {
       msg: string
       /** Error Type */
       type: string
-    }
-    /** VideoJobArtifactsResponse */
-    VideoJobArtifactsResponse: {
-      /** Chapters */
-      chapters?: {
-        [key: string]: unknown
-      }[]
-      /** Checklist */
-      checklist?: {
-        [key: string]: unknown
-      } | null
-      /** Interactions */
-      interactions?: {
-        [key: string]: unknown
-      }[]
-      /** Metadata */
-      metadata?: {
-        [key: string]: unknown
-      } | null
-      /** Review */
-      review?: {
-        [key: string]: unknown
-      } | null
-      /** Subtitles */
-      subtitles?: components['schemas']['VideoSubtitleResponse'][]
-      /** Upload Params */
-      upload_params?: {
-        [key: string]: unknown
-      } | null
-      /** Video Url */
-      video_url?: string | null
-    }
-    /** VideoJobDetailResponse */
-    VideoJobDetailResponse: {
-      artifacts: components['schemas']['VideoJobArtifactsResponse']
-      input: components['schemas']['VideoJobInputResponse']
-    }
-    /** VideoJobInputResponse */
-    VideoJobInputResponse: {
-      /** Content Type */
-      content_type: string
-      /** Entity Type */
-      entity_type: string
-      /**
-       * External Id
-       * @default
-       */
-      external_id: string
-      /**
-       * Legacy Video Id
-       * @default
-       */
-      legacy_video_id: string
-      /** Schema Version */
-      schema_version: number
-      /**
-       * Source Url
-       * @default
-       */
-      source_url: string
-      /**
-       * Source Uuid
-       * @default
-       */
-      source_uuid: string
-      /**
-       * Title
-       * @default
-       */
-      title: string
-    }
-    /** VideoSubtitleResponse */
-    VideoSubtitleResponse: {
-      /** End */
-      end: number
-      /** Index */
-      index: number
-      /** Start */
-      start: number
-      /** Text */
-      text: string
     }
     /** WorkerStatusResponse */
     WorkerStatusResponse: {
@@ -7746,75 +7571,6 @@ export interface operations {
       }
     }
   }
-  get_video_job_detail_api_jobs__job_id__video_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        job_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['VideoJobDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_video_job_source_api_jobs__job_id__video_source_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        job_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'video/mp4': unknown
-        }
-      }
-      /** @description Redirect */
-      302: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   reject_invalid_job_subpath_api_jobs__job_id___invalid_path__get: {
     parameters: {
       query?: never
@@ -9857,38 +9613,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['QualityReplayResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_question_detail_api_workspaces__workspace_id__questions__question_id__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        question_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['QuestionDetailResponse']
         }
       }
       /** @description Validation Error */

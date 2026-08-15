@@ -85,11 +85,6 @@ def _csv_parser(value: str) -> list[str]:
 # ``_apply_database_url_env`` below, which applies the authoritative
 # AGENT_LEGION_DATABASE_URL override.
 _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
-    "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
-    "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
-    "AGENT_LEGION_ASR_WHISPER_VAD_MODEL": (("asr", "whisper", "vad_model"), _path_parser),
-    "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT": (("asr", "sensevoice", "script"), _path_parser),
-    "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
     "AGENT_LEGION_CUSTOM_NODES_ENABLED": (
         ("workflows", "custom_nodes_enabled"),
         _bool_parser,

@@ -150,40 +150,13 @@ def validate_runtime(
     """Validate enabled runtime dependencies at startup.
 
     Disabled runtimes require nothing. Enabled executors require their executable
-    or working directory to exist. The yaml ``asr:`` section is retired: ASR
-    machine paths arrive only via the ``AGENT_LEGION_ASR_*`` env overrides, so
-    when ``config["asr"]`` is present every provided path must resolve (a typo'd
-    env value fails fast); with no ASR env configured nothing is checked and a
-    missing binary surfaces as the provider's FileNotFoundError at transcription
-    time. Missing env-level CMS credentials only log a warning when a CMS-backed
-    resource provider is enabled (workspace vault bindings cannot be pre-checked
-    at startup).
+    or working directory to exist. Business integrations (CMS credentials, ASR
+    machine paths) retired with the legacy business workflows: external service
+    endpoints/credentials live on instance-level connections and are injected
+    into node config at dispatch time, so startup has nothing to pre-check for
+    them.
     """
     errors: list[tuple[str, str]] = []
-
-    asr_config = config.get("asr")
-    if isinstance(asr_config, dict) and asr_config:
-        whisper_cfg = asr_config.get("whisper") or {}
-        if not isinstance(whisper_cfg, dict):
-            whisper_cfg = {}
-        sensevoice_cfg = asr_config.get("sensevoice") or {}
-        if not isinstance(sensevoice_cfg, dict):
-            sensevoice_cfg = {}
-        binary = str(whisper_cfg.get("binary") or "")
-        if binary and _resolve_executable(binary) is None:
-            errors.append(("asr.whisper.binary", "whisper binary is not executable or on PATH"))
-        model = str(whisper_cfg.get("model") or "")
-        if model and not _expand(model).is_file():
-            errors.append(("asr.whisper.model", "whisper model does not exist"))
-        vad_model = str(whisper_cfg.get("vad_model") or "")
-        if vad_model and not _expand(vad_model).is_file():
-            errors.append(("asr.whisper.vad_model", "whisper VAD model does not exist"))
-        model_dir = str(sensevoice_cfg.get("model_dir") or "")
-        if model_dir and not _expand(model_dir).is_dir():
-            errors.append(("asr.sensevoice.model_dir", "sensevoice model_dir does not exist"))
-        script = str(sensevoice_cfg.get("script") or "")
-        if script and not _expand(script).is_file():
-            errors.append(("asr.sensevoice.script", "sensevoice script does not exist"))
 
     if runtime.workflows.enabled and any(
         isinstance(definition, PiExecutorConfig)

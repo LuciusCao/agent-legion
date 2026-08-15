@@ -32,10 +32,7 @@ export function EntityPanel({
     )
   }
 
-  if (
-    detail?.job.source_type === 'video' ||
-    detail?.job.workflow_key === 'video_knowledge'
-  ) {
+  if (detail?.job.source_type === 'video') {
     return <VideoContentPanel key={jobId} jobId={jobId} />
   }
 

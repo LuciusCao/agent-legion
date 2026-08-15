@@ -4,7 +4,7 @@ import logging
 from typing import Any
 
 from server.app.security import validate_download_url
-from server.app.services.job_errors import InvalidOperationError, UnsupportedOperationError
+from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_resolution import candidate
 
 logger = logging.getLogger(__name__)
@@ -29,42 +29,6 @@ def resolve_video_url_candidates(
                 value,
                 source_url=value,
                 source_uuid="",
-                content_type="knowledge",
-            )
-        )
-    return candidates
-
-
-def resolve_cms_video_candidates(
-    entity: str,
-    input_values: list[str],
-    source_kind: str,
-) -> list[dict[str, Any]]:
-    """Build opaque knowledge-video candidates without calling CMS.
-
-    Node-phase resolution: the download DAG node resolves ``source_ref``
-    against the CMS at execution time (binding + vault chain), so intake
-    only fans out one candidate per knowledge code, deduped by code.
-    """
-    if entity != "video":
-        raise UnsupportedOperationError(f"{entity} resolver not yet implemented")
-
-    candidates: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for code in input_values:
-        if code in seen:
-            continue
-        seen.add(code)
-        candidates.append(
-            candidate(
-                "video",
-                code,
-                f"Video {code}",
-                source_kind,
-                code,
-                source_url="",
-                source_uuid="",
-                source_ref=code,
                 content_type="knowledge",
             )
         )

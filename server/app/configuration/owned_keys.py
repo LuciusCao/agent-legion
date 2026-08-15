@@ -8,11 +8,11 @@ from pathlib import Path
 # live in the DB ``global_settings`` document ``instance``, executor
 # definitions live in the DB ``versioned_entities`` table), then
 # config/agent_legion.yaml (the openclaw runtime section retired into the same
-# DB instance settings document; the asr section's business parameters moved
-# into the transcribe_video capability config_schema and its machine-local
-# paths are env-only AGENT_LEGION_ASR_*). No split file owns any top-level
-# key anymore; the canonical layout loads zero files and starts from the code
-# defaults plus env overrides.
+# DB instance settings document; the asr section retired with the legacy
+# business transcription pipeline — business parameters and machine paths now
+# live in the corresponding node configuration). No split file owns any
+# top-level key anymore; the canonical layout loads zero files and starts
+# from the code defaults plus env overrides.
 CONFIG_FILE_KEYS: dict[str, frozenset[str]] = {}
 
 # Retired split files: their presence means the deployment predates the
@@ -23,7 +23,7 @@ RETIRED_FILE_NAMES = ("app.yaml", "workflow.yaml", "agent_legion.yaml")
 _RETIRED_FILE_GUIDANCE = {
     "app.yaml": "config/app.yaml was retired (instance-level settings moved out of yaml). Migrate: database.url -> env AGENT_LEGION_DATABASE_URL; data_dir -> env AGENT_LEGION_DATA_DIR; server.cors -> env AGENT_LEGION_CORS_ALLOW_ORIGINS / AGENT_LEGION_CORS_ALLOW_CREDENTIALS; cleanup/monitoring and executor runtime tuning -> the DB instance settings document (/api/admin/instance-settings); then delete config/app.yaml.",  # fmt: skip
     "workflow.yaml": "config/workflow.yaml was retired. Migrate: executors definitions -> the DB versioned_entities table (built-in catalog seeded at startup, managed in Studio); the agents catalog retired earlier -> Studio Agents manager; then delete config/workflow.yaml.",  # fmt: skip
-    "agent_legion.yaml": "config/agent_legion.yaml was retired. Migrate: asr.provider / asr.timeout_seconds -> the transcribe_video node configuration in Studio (capability config_schema defaults apply otherwise); ASR machine paths -> env AGENT_LEGION_ASR_WHISPER_BINARY / AGENT_LEGION_ASR_WHISPER_MODEL / AGENT_LEGION_ASR_WHISPER_VAD_MODEL / AGENT_LEGION_ASR_SENSEVOICE_SCRIPT / AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR; openclaw -> the DB instance settings document (/api/admin/instance-settings); then delete config/agent_legion.yaml.",  # fmt: skip
+    "agent_legion.yaml": "config/agent_legion.yaml was retired. Migrate: asr.provider / asr.timeout_seconds and ASR machine paths -> the corresponding node configuration in Studio (the ASR env channel retired with the legacy transcription pipeline); openclaw -> the DB instance settings document (/api/admin/instance-settings); then delete config/agent_legion.yaml.",  # fmt: skip
 }
 
 

@@ -73,8 +73,6 @@ class JobIntakeService:
 
         workspace_entity = str(workspace.get("default_entity") or "question")
         entity = (payload.get("entity") or workspace_entity).strip() or "question"
-        if entity == "video" and workflow_key != "video_knowledge":
-            raise InvalidOperationError("Unsupported entity and intake mode combination")
         spec = RESOLVERS.get((entity, mode.key))
         if spec is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
@@ -132,12 +130,7 @@ class JobIntakeService:
         )
 
         if not candidates:
-            if entity == "video" and resolved_any:
-                return {"created_count": 0, "jobs": []}
-            detail = "No tasks were resolved from input"
-            if spec.key.startswith("cms.") and mode.input_field == "knowledge_codes":
-                detail += f". Checked {len(input_values)} knowledge code(s) via CMS; ensure the codes are correct and the resource API URL is configured."
-            raise InvalidOperationError(detail)
+            raise InvalidOperationError("No tasks were resolved from input")
 
         if mode.input_field == "question_ids":
             resolved_ids = input_values

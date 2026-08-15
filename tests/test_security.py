@@ -105,14 +105,3 @@ class TestValidatePackageFilename:
     def test_rejects_leading_hyphen(self):
         with pytest.raises(ValueError, match="Invalid filename"):
             validate_package_filename("-dangerous.zip")
-
-
-def test_download_rejects_internal_url(tmp_path, monkeypatch):
-    monkeypatch.setattr(
-        "server.app.pipeline.download.requests.get",
-        lambda *a, **k: pytest.fail("requests.get should not be called"),
-    )
-    from server.app.pipeline.download import download_video
-
-    with pytest.raises(ValueError, match="Invalid URL"):
-        download_video("http://127.0.0.1/secrets", tmp_path / "video.mp4")

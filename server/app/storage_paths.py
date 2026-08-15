@@ -108,8 +108,7 @@ def make_data_relative(path: Path, data_dir: Path) -> str:
 
     Both paths are resolved. ``path`` must be a strict descendant of
     ``data_dir``. The returned string uses forward slashes and has no leading
-    slash. Examples: ``videos/knowledge_x41020501``,
-    ``jobs/question_comprehension/...``, ``logs/...-download.log``,
+    slash. Examples: ``jobs/demo_workflow/...``, ``logs/...-node.log``,
     ``packages/...``.
 
     Missing leaf paths are accepted so that not-yet-created log files and run
