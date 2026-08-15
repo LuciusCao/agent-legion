@@ -84,7 +84,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('acl-workspace', 'ACL', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('acl-workspace', 'ACL', 'education_video_problems_generation')"
             " on conflict(id) do nothing"
         )
 
@@ -123,10 +123,10 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
     assert expected_agents, "test requires a non-empty published Agent catalog"
 
     workspace = job_db.create_workspace(
-        "Route Check", default_workflow_key="question_comprehension_info"
+        "Route Check", default_workflow_key="education_video_problems_generation"
     )
     workspace_id = workspace["id"]
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     revision_service = WorkflowRevisionService(job_db)
     revision_service.publish_workspace_revision(workspace_id, definition)
     revision_service.reconcile_active_agent_routes()

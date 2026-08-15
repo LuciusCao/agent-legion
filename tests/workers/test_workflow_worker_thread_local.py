@@ -4,10 +4,7 @@ import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
-from cryptography.fernet import Fernet
-
 from server.app.jobs import JobQueries
-from server.app.services.connections import ConnectionService
 from server.app.services.workflow_revision_format import serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
@@ -40,7 +37,9 @@ def test_worker_creates_shared_pool_per_executor_id(tmp_path: Path) -> None:
 def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -77,7 +76,9 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
 def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     block_event = threading.Event()
     executor = RecordingExecutor("code-default", block_event=block_event)
     definition = _make_definition([_local_node("fetch")])
@@ -115,7 +116,9 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
 def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -154,7 +157,9 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
 def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -187,7 +192,9 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
 def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     executor = RecordingExecutor("code-default")
     executor.supports = lambda capability: capability == "other"  # type: ignore[method-assign]
     definition = _make_definition([_local_node("fetch")])
@@ -237,7 +244,9 @@ def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
 def test_poll_skips_paused_job(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -275,7 +284,9 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     executor = RecordingExecutor("code-default")
     definition = _make_definition(
         [
@@ -346,24 +357,15 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     assert job_after["pause_reason"] == "target_reached"
 
 
-def test_make_workflow_worker_runs_question_comprehension_info_local_node(
-    tmp_path: Path, monkeypatch
-) -> None:
-    # fetch_questions runs on the code-default executor in an isolated child
-    # process, which does not inherit parent monkeypatches. The dispatch layer
-    # resolves the node's connection (schema default "cms-internal") in the
-    # parent and injects it, so the test seeds a static_bearer connection
-    # without a base_url: the node derives no CMS api_url and writes the base
-    # payload without any network call.
-    monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
-    monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    ConnectionService(TEST_DATABASE_URL, {}).create(
-        "cms-internal", "static_bearer", "CMS", {"token": "tok-123"}
-    )
+def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkeypatch) -> None:
+    # intake_knowledge_points runs on the code-default executor in an isolated
+    # child process: it maps the job's source_id to a knowledge-point markdown
+    # under examples/education-video-problems-generation/ (pure stdlib, no
+    # network) and writes knowledge_point.json for the downstream agent nodes.
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
     workspace = queries.create_workspace(
-        "test_ws", default_workflow_key="question_comprehension_info"
+        "test_ws", default_workflow_key="education_video_problems_generation"
     )
     with queries.connect() as conn:
         conn.execute(
@@ -372,14 +374,19 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
         )
         conn.execute(
             "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (workspace["id"], "question_comprehension_info", "fetch_questions", "code-default"),
+            (
+                workspace["id"],
+                "education_video_problems_generation",
+                "intake_knowledge_points",
+                "code-default",
+            ),
         )
     job = queries.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
-        source_id="Q100",
+        source_id="fraction-addition-subtraction",
         batch_id="",
-        title="Question Q100",
+        title="fraction-addition-subtraction",
         node_keys=list(definition.nodes),
         workspace_id=workspace["id"],
     )
@@ -391,10 +398,10 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
     for future in worker._futures.values():
         future.result(timeout=5)
 
-    node = queries.get_job_node(job["id"], "fetch_questions")
+    node = queries.get_job_node(job["id"], "intake_knowledge_points")
     assert node is not None
     assert node["status"] == "completed"
-    assert (tmp_path / job["storage_dir"] / "questions.json").exists()
+    assert (tmp_path / job["storage_dir"] / "knowledge_point.json").exists()
 
     worker.stop()
 
@@ -404,7 +411,9 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
 ) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "Test WS", default_workflow_key="education_video_problems_generation"
+    )
     executor = RecordingExecutor("code-default")
 
     v1_nodes = [
@@ -427,7 +436,7 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
         ),
     ]
     v1_definition = WorkflowDefinition(
-        key="question_comprehension_info",
+        key="education_video_problems_generation",
         label="Question Comprehension V1",
         intake=WorkflowIntake(),
         nodes={n.key: n for n in v1_nodes},
@@ -442,7 +451,7 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
         ),
     ]
     v2_definition = WorkflowDefinition(
-        key="question_comprehension_info",
+        key="education_video_problems_generation",
         label="Question Comprehension V2",
         intake=WorkflowIntake(),
         nodes={n.key: n for n in v2_nodes},
@@ -451,14 +460,14 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     )
 
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id="",
         title="Q1",
         node_keys=list(v1_definition.nodes),
         workspace_id=ws["id"],
-        workflow_revision_id=f"{ws['id']}:question_comprehension_info:v1",
+        workflow_revision_id=f"{ws['id']}:education_video_problems_generation:v1",
         workflow_definition_hash="hash-v1",
         workflow_definition_snapshot_json=serialize_definition(v1_definition),
     )
@@ -466,7 +475,7 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
         for node in v1_definition.nodes.values():
             conn.execute(
                 "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-                (ws["id"], "question_comprehension_info", node.key, "code-default"),
+                (ws["id"], "education_video_problems_generation", node.key, "code-default"),
             )
         conn.execute(
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",

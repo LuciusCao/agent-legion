@@ -133,16 +133,12 @@ def test_extract_frontend_routes(tmp_path: Path):
 
 def test_extract_pipeline_phases(tmp_path: Path):
     result = extract_pipeline_phases(tmp_path)
-    assert "知识视频（8 阶段）" in result
+    assert "education_video_problems_generation（6 节点）" in result
     assert (
-        result.index("`download`")
-        < result.index("`transcribe`")
-        < result.index("`subtitle_review`")
-        < result.index("`chapter_generate`")
-        < result.index("`interaction_generate`")
-        < result.index("`content_review`")
-        < result.index("`assemble`")
-        < result.index("`package`")
+        result.index("`intake_knowledge_points`")
+        < result.index("`write_script`")
+        < result.index("`review_script`")
+        < result.index("`publish_content`")
     )
 
 

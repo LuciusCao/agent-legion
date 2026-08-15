@@ -16,8 +16,6 @@ def test_scan_entries_split_definitions_and_definitionless_keys(settings) -> Non
 
     assert {definition.key for definition in definitions} == {
         "education_video_problems_generation",
-        "question_comprehension_info",
-        "video_knowledge",
     }
     assert definitionless_keys == ["acme_quiz_flow"]
     entries = iter_scan_entries(definitions, definitionless_keys)

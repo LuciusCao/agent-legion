@@ -13,18 +13,12 @@ SCHEDULER_FORBIDDEN = (
     "server.app.executors.openclaw_runner",
     "server.app.workflows.pi_runner",
     "server.app.workflows.skills",
-    "server.app.workflows.question_comprehension_info",
-    "server.app.workflows.question_content",
     "executors.openclaw_runner",
     "workflows.pi_runner",
     "workflows.skills",
-    "workflows.question_comprehension_info",
-    "workflows.question_content",
     "pi_runner",
     "openclaw",
     "skills",
-    "question_comprehension_info",
-    "question_content",
     "subprocess",
 )
 ROUTE_FORBIDDEN = (

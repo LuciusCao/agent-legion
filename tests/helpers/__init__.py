@@ -29,7 +29,7 @@ def make_workflow_worker(
     tmp_path: Path,
     queries: JobQueries,
     *,
-    workflow_key: str = "question_comprehension_info",
+    workflow_key: str = "education_video_problems_generation",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
 ) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:

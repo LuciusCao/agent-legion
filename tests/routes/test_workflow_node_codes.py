@@ -7,8 +7,8 @@ import pytest
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 
-WF = "question_comprehension_info"
-NODE = "fetch_questions"
+WF = "education_video_problems_generation"
+NODE = "intake_knowledge_points"
 BASE = f"/api/workspaces/default/workflows/{WF}/nodes/{NODE}/code"
 CUSTOM_V1 = "def run(job, job_dir, runtime):\n    return 'v1'\n"
 CUSTOM_V2 = "def run(job, job_dir, runtime):\n    return 'v2'\n"
@@ -28,7 +28,7 @@ def test_get_builtin_code(workspace_with_revision) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["origin"] == "builtin"
-    assert body["path"] == "workflow_nodes/question_intake.py"
+    assert body["path"] == "workflow_nodes/example_intake.py"
     assert "def run(" in body["code"]
     assert body["version"] is None
     assert body["has_draft"] is False

@@ -36,8 +36,8 @@ def test_list_contains_seeded_builtin(client) -> None:
     assert seeded["kind"] == "code"
     assert seeded["global_capacity"] == 16
     assert seeded["status"] == "published"
-    assert "fetch_questions" in seeded["capabilities"]
-    assert len(seeded["capabilities"]) == 11
+    assert "intake_knowledge_points" in seeded["capabilities"]
+    assert len(seeded["capabilities"]) == 2
 
 
 def test_create_draft_publish_flow(client) -> None:

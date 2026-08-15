@@ -70,10 +70,6 @@ def test_rejects_route_importing_cms_client(tmp_path):
             "skills",
         ),
         (
-            "from server.app.workflows.question_comprehension_info import fetch_questions\n",
-            "question_comprehension_info",
-        ),
-        (
             "import subprocess\n",
             "subprocess",
         ),

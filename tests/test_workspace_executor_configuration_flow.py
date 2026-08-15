@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from server.app.main import create_app
 from tests.helpers.auth import authenticate_client
 
-WORKFLOW_KEY = "question_comprehension_info"
+WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _sort(rows: list[dict]) -> list[dict]:
@@ -35,17 +35,12 @@ def _expected_bindings(workspace_id: str) -> list[dict]:
     return [
         {
             "workflow_key": WORKFLOW_KEY,
-            "node_key": "clean_and_parse",
+            "node_key": "intake_knowledge_points",
             "executor_id": "code-default",
         },
         {
             "workflow_key": WORKFLOW_KEY,
-            "node_key": "fetch_questions",
-            "executor_id": "code-default",
-        },
-        {
-            "workflow_key": WORKFLOW_KEY,
-            "node_key": "assemble_comprehension_info",
+            "node_key": "publish_content",
             "executor_id": "code-default",
         },
     ]
@@ -79,24 +74,24 @@ def test_get_filters_retired_executor_residue(tmp_path) -> None:
             [
                 {
                     "workflow_key": WORKFLOW_KEY,
-                    "node_key": "clean_and_parse",
+                    "node_key": "write_script",
                     "executor_id": "pi",
                 },
                 {
                     "workflow_key": WORKFLOW_KEY,
-                    "node_key": "fetch_questions",
+                    "node_key": "intake_knowledge_points",
                     "executor_id": "code-default",
                 },
             ],
             [
                 {
                     "workflow_key": WORKFLOW_KEY,
-                    "node_key": "clean_and_parse",
+                    "node_key": "write_script",
                     "concurrency_limit": 1,
                 },
                 {
                     "workflow_key": WORKFLOW_KEY,
-                    "node_key": "fetch_questions",
+                    "node_key": "intake_knowledge_points",
                     "concurrency_limit": 2,
                 },
             ],
@@ -110,13 +105,17 @@ def test_get_filters_retired_executor_residue(tmp_path) -> None:
     assert config["bindings"] == [
         {
             "workflow_key": WORKFLOW_KEY,
-            "node_key": "fetch_questions",
+            "node_key": "intake_knowledge_points",
             "executor_id": "code-default",
         },
     ]
-    # The clean_and_parse limit is dropped with its filtered binding.
+    # The write_script limit is dropped with its filtered binding.
     assert config["node_limits"] == [
-        {"workflow_key": WORKFLOW_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
+        {
+            "workflow_key": WORKFLOW_KEY,
+            "node_key": "intake_knowledge_points",
+            "concurrency_limit": 2,
+        },
     ]
 
 
@@ -131,8 +130,8 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     assert "code-default" in executor_ids
     code_executor = next(executor for executor in catalog if executor["id"] == "code-default")
     assert code_executor["kind"] == "code"
-    assert "clean_and_parse" in code_executor["capabilities"]
-    assert "fetch_questions" in code_executor["capabilities"]
+    assert "intake_knowledge_points" in code_executor["capabilities"]
+    assert "publish_content" in code_executor["capabilities"]
 
     # Create a workspace to configure.
     workspace_response = client.post(
@@ -159,10 +158,14 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         ],
         "node_bindings": _expected_bindings(workspace_id),
         "node_limits": [
-            {"workflow_key": WORKFLOW_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
             {
                 "workflow_key": WORKFLOW_KEY,
-                "node_key": "assemble_comprehension_info",
+                "node_key": "intake_knowledge_points",
+                "concurrency_limit": 1,
+            },
+            {
+                "workflow_key": WORKFLOW_KEY,
+                "node_key": "publish_content",
                 "concurrency_limit": 1,
             },
         ],
@@ -191,7 +194,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "node_bindings": [
             {
                 "workflow_key": WORKFLOW_KEY,
-                "node_key": "generate_key_info",
+                "node_key": "write_script",
                 "executor_id": "code-default",
             },
         ],

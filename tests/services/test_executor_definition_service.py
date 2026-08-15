@@ -34,8 +34,8 @@ def test_conftest_seeds_builtin_catalog(service) -> None:
     assert set(published) == {"code-default"}
     config = published["code-default"]
     assert isinstance(config, CodeExecutorConfig)
-    # 9 business capabilities + 2 demo workflow capabilities.
-    assert len(config.capabilities) == 11
+    # 2 demo workflow capabilities.
+    assert len(config.capabilities) == 2
 
 
 def test_demo_capabilities_bind_builtin_node_paths(service) -> None:

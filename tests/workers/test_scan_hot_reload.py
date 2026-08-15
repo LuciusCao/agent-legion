@@ -50,7 +50,7 @@ def test_reload_picks_up_definition_backed_entry(settings) -> None:
     worker.reload_scan_entries()
     assert "acme_defined_flow" not in {d.key for d in worker._scan_entries[0]}
 
-    raw = dict(BUILTIN_WORKFLOW_DEFINITIONS["question_comprehension_info"])
+    raw = dict(BUILTIN_WORKFLOW_DEFINITIONS["education_video_problems_generation"])
     raw["key"] = "acme_defined_flow"
     WorkflowCatalogStore(settings.database_url).upsert_builtin(
         key="acme_defined_flow",

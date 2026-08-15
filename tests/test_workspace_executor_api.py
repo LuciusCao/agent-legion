@@ -2,8 +2,8 @@ def test_list_executors_endpoint(client):
     response = client.get("/api/executors")
     assert response.status_code == 200
     data = response.json()
-    agent = next(item for item in data["agents"] if item["id"] == "video-content-review-v1")
-    assert agent["capability"] == "review_video_content"
+    agent = next(item for item in data["agents"] if item["id"] == "example-review-questions-v1")
+    assert agent["capability"] == "review_questions"
     # 全局 provider/model/thinking 投影已退役（agent 配置治理 phase 3）：
     # 执行默认走 workspace agentDefaults，catalog 不再携带这些键。
     assert agent["runtime"] == "velites"
@@ -14,21 +14,12 @@ def test_list_executors_endpoint(client):
     assert code_executor["kind"] == "code"
     assert code_executor["global_capacity"] == 16
     assert code_executor["capabilities"] == [
-        "assemble_comprehension_info",
-        "assemble_video_metadata",
-        "classify_comprehension_eligibility",
-        "clean_and_parse",
-        "download_video",
-        "fetch_questions",
-        "finalize_non_uploadable",
         "intake_knowledge_points",
-        "package_video_job",
         "publish_content",
-        "transcribe_video",
     ]
     assert {
-        "name": "fetch_questions",
-        "path": "workflow_nodes/question_intake.py",
+        "name": "intake_knowledge_points",
+        "path": "workflow_nodes/example_intake.py",
         "timeout_seconds": 600,
         "skill": None,
         "tools": [],
@@ -41,30 +32,50 @@ def test_list_executors_endpoint(client):
 
 
 def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
-    # ref/commit come from the tracked config/skills.{yaml,lock}, but the file
-    # listing is read from the machine-local skill checkout at
-    # ~/.agents/skills/agent-legion, which only exists on maintainer machines.
-    # Point HOME at a fake checkout so the test is environment-independent.
+    # The demo skill sources point at machine-local repos created by
+    # `make import-demo`; materialize one under a fake HOME so the test is
+    # environment-independent.
+    import subprocess
+
     skill_dir = (
         tmp_path
         / "home"
         / ".agents"
         / "skills"
         / "agent-legion"
-        / "question_comprehension_info"
-        / "generate_key_info"
+        / "education-video-problems-generation"
+        / "generate-questions"
     )
     skill_dir.mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# Generate Key Info\n", encoding="utf-8")
+    (skill_dir / "SKILL.md").write_text("# Generate Questions\n", encoding="utf-8")
+    env = {
+        **dict(__import__("os").environ),
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    for args in (
+        ("init", "-q"),
+        ("add", "."),
+        ("commit", "-m", "init", "--no-gpg-sign"),
+        ("tag", "v1.0.0"),
+    ):
+        subprocess.run(
+            ["git", "-C", str(skill_dir), *args], check=True, capture_output=True, env=env
+        )
     monkeypatch.setenv("HOME", str(tmp_path / "home"))
 
-    with client_factory() as client:
-        response = client.get("/api/executors/skills/question_comprehension_info/generate_key_info")
+    # fresh=True: the skill catalog router resolves HOME at app build time, so
+    # the app must be created after the fake HOME is in place.
+    with client_factory(fresh=True) as client:
+        response = client.get(
+            "/api/executors/skills/education-video-problems-generation/generate-questions"
+        )
 
     assert response.status_code == 200
     data = response.json()
-    assert data["ref"] == "v1.4.1"
-    assert data["commit"].startswith("42356b8")
+    assert data["ref"] == "v1.0.0"
     assert data["available"] is True
     assert any(item["path"] == "SKILL.md" for item in data["files"])
 
@@ -72,7 +83,7 @@ def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
 def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(client):
     workspace_response = client.post(
         "/api/workspaces",
-        json={"name": "Legacy", "default_workflow_key": "question_comprehension_info"},
+        json={"name": "Legacy", "default_workflow_key": "education_video_problems_generation"},
     )
     assert workspace_response.status_code == 200
     workspace_id = workspace_response.json()["workspace"]["id"]

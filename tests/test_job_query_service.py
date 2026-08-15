@@ -32,16 +32,16 @@ def query_service(job_db, settings):
 
 def create_question_job(job_db, source_id: str) -> dict[str, Any]:
     workspace = job_db.get_workspace("default") or job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [source_id]},
         workspace_id=workspace["id"],
     )
     job: dict[str, Any] = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
         batch_id=batch["id"],
@@ -53,7 +53,7 @@ def create_question_job(job_db, source_id: str) -> dict[str, Any]:
 
 
 def test_job_query_service_lists_jobs(query_service, job_db):
-    job_db.create_workspace("default", default_workflow_key="question_comprehension_info")
+    job_db.create_workspace("default", default_workflow_key="education_video_problems_generation")
     job = query_service.list_jobs("default")
     assert isinstance(job, list)
 
@@ -85,22 +85,22 @@ def test_list_jobs_returns_typed_node_summaries(query_service, job_db):
 
 def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_service, job_db):
     workspace = job_db.create_workspace(
-        "versioned", default_workflow_key="question_comprehension_info"
+        "versioned", default_workflow_key="education_video_problems_generation"
     )
     definition = WorkflowCatalogService(query_service.settings).definition(
-        "question_comprehension_info"
+        "education_video_problems_generation"
     )
     revision_service = WorkflowRevisionService(job_db)
     original = revision_service.publish_workspace_revision(workspace["id"], definition)
     current = revision_service.publish_workspace_revision(workspace["id"], definition)
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -123,31 +123,27 @@ def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_servic
 
 def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
         title="Question 1",
         node_keys=[
-            "assemble_comprehension_info",
-            "assess_comprehension_difficulty",
-            "classify_comprehension_eligibility",
-            "clean_and_parse",
-            "fetch_questions",
-            "finalize_non_uploadable",
-            "generate_key_info",
-            "generate_possible_errors",
-            "review_key_info",
-            "review_possible_errors",
+            "publish_content",
+            "review_questions",
+            "generate_questions",
+            "review_script",
+            "write_script",
+            "intake_knowledge_points",
         ],
         workspace_id=workspace["id"],
     )
@@ -156,13 +152,11 @@ def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
 
     node_keys = [node["node_key"] for node in listed[0]["node_summaries"]]
     assert node_keys[:3] == [
-        "fetch_questions",
-        "clean_and_parse",
-        "classify_comprehension_eligibility",
+        "intake_knowledge_points",
+        "write_script",
+        "review_script",
     ]
-    assert node_keys.index("assemble_comprehension_info") > node_keys.index(
-        "assess_comprehension_difficulty"
-    )
+    assert node_keys.index("publish_content") > node_keys.index("review_questions")
 
 
 def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
@@ -219,16 +213,16 @@ def test_list_jobs_does_not_reload_each_job_for_execution_control(
 
 def test_job_query_service_detail_enriches_nodes(query_service, job_db):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -250,25 +244,25 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
 
 def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_service, job_db):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
         title="Question 1",
         node_keys=[
-            "assemble_comprehension_info",
-            "classify_comprehension_eligibility",
-            "clean_and_parse",
-            "fetch_questions",
+            "publish_content",
+            "generate_questions",
+            "write_script",
+            "intake_knowledge_points",
         ],
         workspace_id=workspace["id"],
     )
@@ -276,29 +270,29 @@ def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_
     detail = query_service.detail(job["id"])
 
     assert [node["node_key"] for node in detail["nodes"]] == [
-        "fetch_questions",
-        "clean_and_parse",
-        "classify_comprehension_eligibility",
-        "assemble_comprehension_info",
+        "intake_knowledge_points",
+        "write_script",
+        "generate_questions",
+        "publish_content",
     ]
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["classify_comprehension_eligibility"]["after"] == ["clean_and_parse"]
+    assert nodes["write_script"]["after"] == ["intake_knowledge_points"]
 
 
 def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
     query_service, job_db, settings
 ):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -318,16 +312,16 @@ def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
 
 def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_service, job_db):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -342,7 +336,7 @@ def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_serv
         ],
         bindings=[
             {
-                "workflow_key": "question_comprehension_info",
+                "workflow_key": "education_video_problems_generation",
                 "node_key": "assemble_package",
                 "executor_id": "code-default",
             },
@@ -361,16 +355,16 @@ def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_serv
 
 def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_service, job_db):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -385,7 +379,7 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
         ],
         bindings=[
             {
-                "workflow_key": "question_comprehension_info",
+                "workflow_key": "education_video_problems_generation",
                 "node_key": "assemble_package",
                 "executor_id": "code-default",
             },
@@ -402,16 +396,16 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
 
 def test_workspace_run_service_filters_runs(query_service, job_db):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -429,12 +423,12 @@ def test_workspace_run_service_filters_runs(query_service, job_db):
 
 def test_workspace_dag_preserves_status_buckets(query_service, job_db):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     definition = query_service.workflows.definition(workspace["default_workflow_key"])
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
@@ -452,16 +446,16 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
 
 def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -> dict[str, Any]:
     workspace = job_db.create_workspace(
-        workspace_id, default_workflow_key="question_comprehension_info"
+        workspace_id, default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job: dict[str, Any] = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -540,16 +534,16 @@ def test_workspace_runs_resolves_run_paths_absolute(query_service, job_db, setti
 
 def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, settings):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -586,25 +580,27 @@ def test_query_service_does_not_mutate_repository_records(query_service, job_db,
 
 
 def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db):
-    workspace = job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    workspace = job_db.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
         node_keys=["fetch_questions"],
         workspace_id=workspace["id"],
-        workflow_revision_id="question_comprehension_info:v1",
+        workflow_revision_id="education_video_problems_generation:v1",
         workflow_definition_hash="hash1",
-        workflow_definition_snapshot_json='{"key":"question_comprehension_info"}',
+        workflow_definition_snapshot_json='{"key":"education_video_problems_generation"}',
     )
     job_db.update_job_status(job["id"], "completed")
     job_db.update_job_outcome(job["id"], "non_uploadable")
 
     detail = query_service.detail(job["id"])["job"]
 
-    assert detail["workflow_revision_id"] == "question_comprehension_info:v1"
+    assert detail["workflow_revision_id"] == "education_video_problems_generation:v1"
     assert detail["workflow_definition_hash"] == "hash1"
     assert detail["outcome"] == "non_uploadable"
     assert "current_workflow_revision_id" in detail
@@ -613,16 +609,16 @@ def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db
 
 def _create_two_node_job(job_db) -> dict[str, Any]:
     workspace = job_db.get_workspace("default") or job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
     job: dict[str, Any] = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -637,7 +633,7 @@ def _bind_agent(job_db, workspace_id: str, node_key: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
             "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
-            " values (%s, 'question_comprehension_info', %s, 'agent', 'question-key-info-v1')"
+            " values (%s, 'education_video_problems_generation', %s, 'agent', 'example-write-script-v1')"
             " on conflict(workspace_id, workflow_key, node_key) do update set"
             " target_kind='agent', target_id=excluded.target_id",
             (workspace_id, node_key),
@@ -662,7 +658,7 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
             (
                 f"lease-{execution_id}",
                 execution_id,
-                "agent:question-key-info-v1",
+                "agent:example-write-script-v1",
                 job["workspace_id"],
                 job["id"],
                 job["workflow_key"],
@@ -680,12 +676,12 @@ def _insert_agent_request(job_db, execution_id: str, job, node_key: str) -> None
         definition = conn.execute(
             "select definition_hash from versioned_entities"
             " where entity_type='agent' and workspace_id is null"
-            " and entity_key='question-key-info-v1' and status='published'"
+            " and entity_key='example-write-script-v1' and status='published'"
         ).fetchone()
         conn.execute(
             "insert into agent_execution_requests(execution_id, workspace_id, job_id, workflow_key,"
             " node_key, agent_id, agent_definition_hash, node_concurrency_limit, queued_at, manifest_json)"
-            " values (%s, %s, %s, %s, %s, 'question-key-info-v1', %s, 20, current_timestamp, '{}')",
+            " values (%s, %s, %s, %s, %s, 'example-write-script-v1', %s, 20, current_timestamp, '{}')",
             (
                 execution_id,
                 job["workspace_id"],
@@ -711,7 +707,7 @@ def test_job_detail_projects_agent_and_claimed_worker(query_service, job_db):
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["agent_id"] == "question-key-info-v1"
+    assert nodes["question_understanding"]["agent_id"] == "example-write-script-v1"
     assert nodes["question_understanding"]["executor_id"] is None
     assert nodes["question_understanding"]["worker_id"] == "worker-mac-1"
     assert nodes["assemble_package"]["worker_id"] is None
@@ -726,7 +722,7 @@ def test_job_detail_worker_id_none_while_agent_execution_queued(query_service, j
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["agent_id"] == "question-key-info-v1"
+    assert nodes["question_understanding"]["agent_id"] == "example-write-script-v1"
     assert nodes["question_understanding"]["worker_id"] is None
 
 

@@ -2,7 +2,7 @@
 
 from server.app.storage_paths import resolve_job_dir
 
-WORKFLOW_KEY = "question_comprehension_info"
+WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _create_workspace(client, name: str) -> str:
@@ -18,9 +18,8 @@ def _create_jobs(client, workspace_id: str, question_ids: list[str]) -> list[str
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
             "workflow_key": WORKFLOW_KEY,
-            "source_kind": "batch_by_ids",
-            "question_ids": question_ids,
-            "knowledge_codes": [],
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": question_ids,
         },
     )
     assert created.status_code == 200
@@ -74,7 +73,7 @@ def test_batch_rerun_filter_selects_matching_jobs(client_factory):
 
         response = client.post(
             f"/api/workspaces/{ws_id}/jobs/batch-rerun",
-            json={"filter": {"status": "failed"}, "node_key": "fetch_questions"},
+            json={"filter": {"status": "failed"}, "node_key": "intake_knowledge_points"},
         )
 
         assert response.status_code == 200
@@ -99,7 +98,7 @@ def test_batch_rerun_filter_honors_exclude_ids(client_factory):
             json={
                 "filter": {"status": "failed"},
                 "exclude_ids": [excluded],
-                "node_key": "fetch_questions",
+                "node_key": "intake_knowledge_points",
             },
         )
 
@@ -118,7 +117,7 @@ def test_batch_rerun_explicit_job_ids_still_work(client_factory):
 
         response = client.post(
             f"/api/workspaces/{ws_id}/jobs/batch-rerun",
-            json={"job_ids": [job_id], "node_key": "fetch_questions"},
+            json={"job_ids": [job_id], "node_key": "intake_knowledge_points"},
         )
 
         assert response.status_code == 200
@@ -136,12 +135,12 @@ def test_batch_selection_requires_exactly_one_of_job_ids_or_filter(client_factor
             json={
                 "job_ids": [job_id],
                 "filter": {"status": "failed"},
-                "node_key": "fetch_questions",
+                "node_key": "intake_knowledge_points",
             },
         )
         neither = client.post(
             f"/api/workspaces/{ws_id}/jobs/batch-rerun",
-            json={"node_key": "fetch_questions"},
+            json={"node_key": "intake_knowledge_points"},
         )
         delete_neither = client.request("DELETE", f"/api/workspaces/{ws_id}/jobs/batch", json={})
         package_both = client.post(
@@ -203,7 +202,7 @@ def test_batch_run_to_filter_selects_matching_jobs(client_factory):
 
         response = client.post(
             f"/api/workspaces/{ws_id}/jobs/batch-run-to",
-            json={"filter": {"status": "pending"}, "target_node_key": "review_key_info"},
+            json={"filter": {"status": "pending"}, "target_node_key": "publish_content"},
         )
 
         assert response.status_code == 200
@@ -211,7 +210,7 @@ def test_batch_run_to_filter_selects_matching_jobs(client_factory):
         assert [r["job_id"] for r in results] == [pending]
         assert results[0]["status"] == "succeeded"
         detail = client.get(f"/api/jobs/{pending}").json()
-        assert detail["job"]["execution_control"]["target_node_key"] == "review_key_info"
+        assert detail["job"]["execution_control"]["target_node_key"] == "publish_content"
         untouched = client.get(f"/api/jobs/{failed}").json()
         assert untouched["job"]["execution_control"]["mode"] == "full"
 
@@ -295,7 +294,7 @@ def test_rerun_by_failure_filter_and_exclude_ids(client_factory):
         ws_id = _create_workspace(client, "rerun-by-failure-filter-ws")
         job_a, job_b, job_c = _create_jobs(client, ws_id, ["B1", "B2", "B3"])
         for job_id in (job_a, job_b, job_c):
-            _fail_job_node(client, job_id, "review_key_info", "business", "review_rejected")
+            _fail_job_node(client, job_id, "review_script", "business", "review_rejected")
         # job_c has a matching failed run but falls outside the status filter.
         client.app.state.job_db.update_job_status(job_c, "completed")
 
@@ -312,8 +311,8 @@ def test_rerun_by_failure_filter_and_exclude_ids(client_factory):
         results = response.json()["results"]
         assert [r["job_id"] for r in results] == [job_a]
         assert results[0]["status"] == "succeeded"
-        assert results[0]["rerun_nodes"] == ["generate_key_info"]
+        assert results[0]["rerun_nodes"] == ["write_script"]
         nodes = {
             n["node_key"]: n["status"] for n in client.get(f"/api/jobs/{job_a}").json()["nodes"]
         }
-        assert nodes["generate_key_info"] == "pending"
+        assert nodes["write_script"] == "pending"

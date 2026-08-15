@@ -6,10 +6,9 @@ from server.app.workflows.skills import resolve_workflow_skill
 from tests.helpers import load_builtin_definition
 
 WORKFLOWS = {
-    "question_comprehension_info": {
-        "fetch_questions",
-        "clean_and_parse",
-        "assemble_comprehension_info",
+    "education_video_problems_generation": {
+        "intake_knowledge_points",
+        "publish_content",
     },
 }
 

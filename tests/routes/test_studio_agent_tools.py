@@ -14,8 +14,8 @@ from __future__ import annotations
 from server.app.auth import scoped_tokens
 
 _NODE_CODE = "def run(job, job_dir, runtime):\n    return {}\n"
-_WORKFLOW_KEY = "question_comprehension_info"
-_NODE_KEY = "clean_and_parse"
+_WORKFLOW_KEY = "education_video_problems_generation"
+_NODE_KEY = "intake_knowledge_points"
 
 
 def _scoped_client(client, job_db):
@@ -129,8 +129,8 @@ def test_validate_workflow(client, job_db) -> None:
 key: studio_validate_flow
 label: Studio Validate Flow
 nodes:
-  clean_and_parse:
-    capability: clean_and_parse
+  publish_content:
+    capability: publish_content
 """
 
     # No executor binding yet: the publish validation set must surface it.
@@ -145,7 +145,7 @@ nodes:
         bindings=[
             {
                 "workflow_key": "studio_validate_flow",
-                "node_key": "clean_and_parse",
+                "node_key": "publish_content",
                 "executor_id": "code-default",
             }
         ],
@@ -177,7 +177,7 @@ def test_compare_workflow_draft(client, job_db) -> None:
     assert payload["summary"]["risk_level"] == "none"
 
     changed = scoped.post(
-        url, json={"definition_yaml": active_yaml.replace("清洗与解析", "清洗与解析 v2")}
+        url, json={"definition_yaml": active_yaml.replace("读取知识点", "读取知识点 v2")}
     )
     assert changed.status_code == 200
     changed_payload = changed.json()
@@ -375,8 +375,8 @@ def test_validate_workflow_unknown_workspace_reports_binding_errors(client, job_
 key: studio_validate_flow
 label: Studio Validate Flow
 nodes:
-  clean_and_parse:
-    capability: clean_and_parse
+  publish_content:
+    capability: publish_content
 """
     response = scoped.post(
         "/api/studio-agent/tools/workspaces/ws-missing/workflow/validate",

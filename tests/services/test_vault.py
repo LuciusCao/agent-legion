@@ -39,7 +39,7 @@ def vault(job_db, settings, vault_key):
 
 def test_set_get_round_trip(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-roundtrip"
+        default_workflow_key="education_video_problems_generation", name="vault-roundtrip"
     )
     metadata = vault.set(workspace["id"], "api-token", PLAINTEXT)
 
@@ -51,7 +51,7 @@ def test_set_get_round_trip(vault, job_db):
 
 def test_set_overwrites_existing(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-overwrite"
+        default_workflow_key="education_video_problems_generation", name="vault-overwrite"
     )
     vault.set(workspace["id"], "api-token", "first")
     vault.set(workspace["id"], "api-token", "second")
@@ -60,14 +60,14 @@ def test_set_overwrites_existing(vault, job_db):
 
 def test_get_missing_returns_none(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-missing"
+        default_workflow_key="education_video_problems_generation", name="vault-missing"
     )
     assert vault.get(workspace["id"], "nope") is None
 
 
 def test_list_returns_metadata_only(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-list"
+        default_workflow_key="education_video_problems_generation", name="vault-list"
     )
     vault.set(workspace["id"], "b-token", "value-b")
     vault.set(workspace["id"], "a-token", "value-a")
@@ -83,7 +83,7 @@ def test_list_returns_metadata_only(vault, job_db):
 
 def test_delete_removes_entry(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-delete"
+        default_workflow_key="education_video_problems_generation", name="vault-delete"
     )
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     vault.delete(workspace["id"], "api-token")
@@ -93,7 +93,7 @@ def test_delete_removes_entry(vault, job_db):
 
 def test_ciphertext_is_not_plaintext(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-cipher"
+        default_workflow_key="education_video_problems_generation", name="vault-cipher"
     )
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     with job_db.connect() as conn:
@@ -110,7 +110,7 @@ def test_missing_master_key_blocks_writes_and_reads(job_db, settings, monkeypatc
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     vault = VaultService(job_db.path, {})
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-no-key"
+        default_workflow_key="education_video_problems_generation", name="vault-no-key"
     )
 
     with pytest.raises(VaultMasterKeyMissingError, match="AGENT_LEGION_VAULT_MASTER_KEY"):
@@ -127,9 +127,9 @@ def test_invalid_master_key_rejected(job_db, monkeypatch):
 
 def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-resolve"
+        default_workflow_key="education_video_problems_generation", name="vault-resolve"
     )
-    name = node_secret_name("question_comprehension_info", "fetch_questions", "token")
+    name = node_secret_name("education_video_problems_generation", "fetch_questions", "token")
     vault.set(workspace["id"], name, PLAINTEXT)
 
     resolved = vault.resolve_secret_refs(
@@ -144,7 +144,7 @@ def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
 
 def test_resolve_secret_refs_missing_entry_raises(vault, job_db):
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-resolve-missing"
+        default_workflow_key="education_video_problems_generation", name="vault-resolve-missing"
     )
     with pytest.raises(VaultError, match="not found"):
         vault.resolve_secret_refs({"token": {"secret_ref": "gone"}}, workspace["id"])
@@ -155,7 +155,7 @@ def test_resolve_secret_refs_without_master_key_raises(job_db, monkeypatch):
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="vault-no-key-resolve"
+        default_workflow_key="education_video_problems_generation", name="vault-no-key-resolve"
     )
     VaultService(job_db.path, {}).set(workspace["id"], "api-token", PLAINTEXT)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
@@ -170,17 +170,16 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     # The bare settings fixture does not hydrate executor definitions
     # (create_app does); the node config schema chain needs the seeded catalog.
     hydrate_executor_definitions(settings)
-    # fetch_questions no longer declares secret fields (CMS credentials moved
-    # to instance-level external connections); republish the generate_key_info
+    # The demo nodes declare no secret fields; republish the write_script
     # agent with a secret field so the intake freeze chain still has a
     # schema-declared node secret to divert into the vault.
     agent_service = AgentService(settings.database_url)
     agent_service.save_draft(
-        "question-key-info-v1",
+        "example-write-script-v1",
         AgentDefinition(
-            capability="generate_key_info",
+            capability="write_script",
             runtime="velites",
-            skill="question_comprehension_info/generate_key_info",
+            skill="education-video-problems-generation/write-script",
             config_schema={
                 "type": "object",
                 "properties": {
@@ -191,11 +190,11 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
         ),
         created_by="test-seed",
     )
-    agent_service.publish("question-key-info-v1")
+    agent_service.publish("example-write-script-v1")
     workspace = job_db.create_workspace(
-        "vault-freeze", default_workflow_key="question_comprehension_info"
+        "vault-freeze", default_workflow_key="education_video_problems_generation"
     )
-    definition = WorkflowCatalogService(settings).definition("question_comprehension_info")
+    definition = WorkflowCatalogService(settings).definition("education_video_problems_generation")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     update_workspace_node_config(
         job_db,
@@ -204,7 +203,7 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
         job_db.get_workspace(workspace["id"]),
         {
             "nodeConfig": {
-                "generate_key_info": {
+                "write_script": {
                     "token": PLAINTEXT,
                     "api_url": "http://cms.example.com/question/detail",
                 }
@@ -217,19 +216,18 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     result = service.create_batch(
         workspace["id"],
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q1"],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q1"],
         },
     )
 
     batch = job_db.get_batch(str(result["batch"]["id"]))
     payload_text = str(batch["source_payload_json"])
     payload = json.loads(payload_text)
-    frozen = payload["node_config"]["generate_key_info"]
-    name = node_secret_name("question_comprehension_info", "generate_key_info", "token")
+    frozen = payload["node_config"]["write_script"]
+    name = node_secret_name("education_video_problems_generation", "write_script", "token")
     assert frozen["token"] == {"secret_ref": name}
     assert frozen["api_url"] == "http://cms.example.com/question/detail"
     assert PLAINTEXT not in payload_text

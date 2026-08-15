@@ -55,9 +55,9 @@ server/app/workflows/
 
 <!-- AUTO-GENERATED: scripts/generate_architecture.py -->
 
-### 视频流水线阶段
+### 内置 Workflow 节点序列
 
-**知识视频（8 阶段）：**
-`download` → `transcribe` → `subtitle_review` → `chapter_generate` → `interaction_generate` → `content_review` → `assemble` → `package`
+**education_video_problems_generation（6 节点）：**
+`intake_knowledge_points` → `write_script` → `review_script` → `generate_questions` → `review_questions` → `publish_content`
 
 <!-- END AUTO-GENERATED -->

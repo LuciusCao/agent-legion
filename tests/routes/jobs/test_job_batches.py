@@ -4,7 +4,9 @@ from concurrent.futures import ThreadPoolExecutor
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+def _create_workspace(
+    client, name="default", default_workflow_key="education_video_problems_generation"
+):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
@@ -22,10 +24,9 @@ def test_create_question_jobs_when_enabled(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001", "Q002"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001", "Q002"],
             },
         )
 
@@ -37,22 +38,12 @@ def test_create_question_jobs_when_enabled(tmp_path):
     assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
 
 
-def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path, monkeypatch):
+def test_async_batch_returns_queued_and_consumes_in_chunks(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
     from server.app.services.job_intake_queue import JobIntakeQueue
 
-    calls: list[str] = []
-
-    def spy_fetch_question_detail(question_id, api_url=None, token=None):
-        calls.append(question_id)
-        raise AssertionError("node-phase intake must not call the CMS")
-
-    monkeypatch.setattr(
-        "workspace_libs.cms.question.fetch_question_detail",
-        spy_fetch_question_detail,
-    )
     monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 2)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
@@ -67,10 +58,9 @@ def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001", "Q002", "Q003"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001", "Q002", "Q003"],
                 "async_processing": True,
             },
         )
@@ -80,7 +70,6 @@ def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path
         assert body["batch"]["status"] == "queued"
         assert body["created_count"] == 0
         assert body["jobs"] == []
-        assert calls == []
 
         claimed = app.state.job_db.claim_intake_batch()
         assert claimed is not None
@@ -101,7 +90,6 @@ def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path
         assert completed is not None
         assert completed["status"] == "completed"
         assert completed["created_count"] == 3
-        assert calls == []
 
 
 def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
@@ -120,10 +108,9 @@ def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001"],
                 "async_processing": True,
             },
         )
@@ -147,78 +134,23 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001", " Q002 ", "Q001", ""],
-                "knowledge_codes": ["K001"],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001", " Q002 ", "Q001", ""],
             },
         )
 
     assert response.status_code == 200
     body = response.json()
     payload = json.loads(body["batch"]["source_payload_json"])
-    assert payload["question_ids"] == ["Q001", "Q002"]
-    assert payload["knowledge_codes"] == []
+    assert [c["entity_id"] for c in payload["task_candidates"]] == ["Q001", "Q002"]
     assert body["created_count"] == 2
 
 
-def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
+def test_create_workspace_job_batch_from_direct_ids_uses_opaque_title(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
-
-    calls = []
-
-    def spy_list_questions_by_knowledge(code, api_url=None, token=None):
-        calls.append(code)
-        raise AssertionError("node-phase intake must not call the CMS")
-
-    monkeypatch.setattr(
-        "workspace_libs.cms.question.list_questions_by_knowledge",
-        spy_list_questions_by_knowledge,
-    )
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c)
-        response = c.post(
-            f"/api/workspaces/{ws_id}/job-batches",
-            json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_knowledge",
-                "question_ids": [],
-                "knowledge_codes": ["K001", "K001", " K002 "],
-            },
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    payload = json.loads(body["batch"]["source_payload_json"])
-    assert calls == []
-    assert payload["knowledge_codes"] == ["K001", "K002"]
-    assert payload["question_ids"] == ["K001", "K002"]
-    assert body["created_count"] == 2
-    assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
-    assert [job["source_id"] for job in body["jobs"]] == ["K001", "K002"]
-    assert [job["title"] for job in body["jobs"]] == ["Question K001", "Question K002"]
-
-
-def test_create_workspace_job_batch_from_question_ids_uses_opaque_title(tmp_path, monkeypatch):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    calls = []
-
-    def spy_fetch_question_detail(question_id, api_url=None, token=None):
-        calls.append(question_id)
-        raise AssertionError("node-phase intake must not call the CMS")
-
-    monkeypatch.setattr(
-        "workspace_libs.cms.question.fetch_question_detail",
-        spy_fetch_question_detail,
-    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -226,27 +158,23 @@ def test_create_workspace_job_batch_from_question_ids_uses_opaque_title(tmp_path
         workspace = c.post(
             "/api/workspaces",
             json={
-                "name": "Question Id Batch",
-                "default_workflow_key": "question_comprehension_info",
-                "intake_config": {"enabled_modes": ["batch_by_ids"]},
+                "name": "Direct Id Batch",
+                "default_workflow_key": "education_video_problems_generation",
+                "intake_config": {"enabled_modes": ["direct_ids"]},
             },
         ).json()["workspace"]
         response = c.post(
             f"/api/workspaces/{workspace['id']}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001", "Q002"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001", "Q002"],
             },
         )
 
     assert response.status_code == 200
     body = response.json()
     payload = json.loads(body["batch"]["source_payload_json"])
-    assert calls == []
-    assert payload["question_ids"] == ["Q001", "Q002"]
-    assert payload["knowledge_codes"] == []
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["title"] for job in body["jobs"]] == ["Question Q001", "Question Q002"]
@@ -254,10 +182,10 @@ def test_create_workspace_job_batch_from_question_ids_uses_opaque_title(tmp_path
         "Question Q001",
         "Question Q002",
     ]
-    assert all(c["source"]["kind"] == "batch_by_ids" for c in payload["task_candidates"])
+    assert all(c["source"]["kind"] == "direct_ids" for c in payload["task_candidates"])
 
 
-def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
+def test_create_workspace_job_batch_rejects_empty_ids(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -269,25 +197,24 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": [" ", ""],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": [" ", ""],
             },
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "At least one question_id is required"
+    assert response.json()["detail"] == "At least one knowledge_point_id is required"
 
 
-def test_question_comprehension_info_batch_by_ids_creates_one_job_per_question(client):
+def test_direct_ids_batch_creates_one_job_per_value(client):
     ws_id = _create_workspace(client)
     response = client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": ["Q1", "Q2", "Q1"],
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": ["Q1", "Q2", "Q1"],
         },
     )
 
@@ -295,52 +222,7 @@ def test_question_comprehension_info_batch_by_ids_creates_one_job_per_question(c
     body = response.json()
     assert body["created_count"] == 2
     assert {job["source_id"] for job in body["jobs"]} == {"Q1", "Q2"}
-    assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
-
-
-def test_question_comprehension_info_batch_by_knowledge_creates_one_job_per_code(
-    tmp_path, monkeypatch
-):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    calls = []
-
-    def spy_list_questions_by_knowledge(code, api_url=None, token=None):
-        calls.append(code)
-        raise AssertionError("node-phase intake must not call the CMS")
-
-    monkeypatch.setattr(
-        "workspace_libs.cms.question.list_questions_by_knowledge",
-        spy_list_questions_by_knowledge,
-    )
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c)
-        response = c.post(
-            f"/api/workspaces/{ws_id}/job-batches",
-            json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_knowledge",
-                "question_ids": [],
-                "knowledge_codes": ["K001", "K001", " K002 "],
-            },
-        )
-
-    assert response.status_code == 200
-    body = response.json()
-    payload = json.loads(body["batch"]["source_payload_json"])
-    assert calls == []
-    assert payload["knowledge_codes"] == ["K001", "K002"]
-    assert payload["question_ids"] == ["K001", "K002"]
-    assert body["created_count"] == 2
-    assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
-    assert [job["source_id"] for job in body["jobs"]] == ["K001", "K002"]
-    assert [job["title"] for job in body["jobs"]] == ["Question K001", "Question K002"]
-    assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
+    assert all(job["workflow_key"] == "education_video_problems_generation" for job in body["jobs"])
 
 
 def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path, monkeypatch):
@@ -360,9 +242,9 @@ def test_async_batch_resubmit_after_job_deletion_requeues_and_rebuilds(tmp_path,
         lambda self: False,
     )
     payload = {
-        "workflow_key": "question_comprehension_info",
-        "source_kind": "batch_by_ids",
-        "question_ids": ["Q001", "Q002"],
+        "workflow_key": "education_video_problems_generation",
+        "source_kind": "direct_ids",
+        "knowledge_point_ids": ["Q001", "Q002"],
         "knowledge_codes": [],
         "async_processing": True,
     }
@@ -428,9 +310,9 @@ def test_async_batch_resubmit_without_deletion_keeps_idempotency(tmp_path, monke
         lambda self: False,
     )
     payload = {
-        "workflow_key": "question_comprehension_info",
-        "source_kind": "batch_by_ids",
-        "question_ids": ["Q001", "Q002"],
+        "workflow_key": "education_video_problems_generation",
+        "source_kind": "direct_ids",
+        "knowledge_point_ids": ["Q001", "Q002"],
         "knowledge_codes": [],
         "async_processing": True,
     }
@@ -466,17 +348,17 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
     from server.app.services.job_intake_queue import JobIntakeQueue
     from server.app.services.job_intake_registry import RESOLVERS
     from server.app.services.job_intake_resolution import (
-        resolve_cms_question_opaque_candidates,
+        resolve_direct_candidates,
     )
 
     def flaky_resolver(entity, input_values, source_kind):
         if "Q002" in input_values:
-            raise RuntimeError("cms boom")
-        return resolve_cms_question_opaque_candidates(entity, input_values, source_kind)
+            raise RuntimeError("resolver boom")
+        return resolve_direct_candidates(entity, input_values, source_kind)
 
-    spec = RESOLVERS[("question", "batch_by_ids")]
+    spec = RESOLVERS[("question", "direct_ids")]
     monkeypatch.setitem(
-        RESOLVERS, ("question", "batch_by_ids"), replace(spec, handler=flaky_resolver)
+        RESOLVERS, ("question", "direct_ids"), replace(spec, handler=flaky_resolver)
     )
     monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 1)
 
@@ -492,10 +374,9 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001", "Q002", "Q003"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001", "Q002", "Q003"],
                 "async_processing": True,
             },
         )
@@ -511,6 +392,6 @@ def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp
         assert completed is not None
         assert completed["status"] == "completed"
         assert completed["created_count"] == 2
-        assert "cms boom" in completed["error_message"]
+        assert "resolver boom" in completed["error_message"]
         jobs = app.state.job_db.list_jobs(workspace_id=ws_id)
         assert sorted(job["source_id"] for job in jobs) == ["Q001", "Q003"]

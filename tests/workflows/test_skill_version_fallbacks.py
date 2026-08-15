@@ -10,7 +10,7 @@ from tests.helpers import load_builtin_definition
 
 
 def _job_with_snapshot() -> dict:
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     return {"workflow_definition_snapshot_json": serialize_definition(definition)}
 
 
@@ -21,7 +21,7 @@ def _context_with_skill(capability: str, skill: str) -> dict:
 
 
 def test_configured_skill_fallbacks_maps_skill_backed_nodes() -> None:
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     node = next(iter(definition.nodes.values()))
 
     fallbacks = configured_skill_fallbacks(
@@ -46,7 +46,7 @@ def test_configured_skill_fallbacks_skips_nodes_without_skill_mapping() -> None:
 
 
 def test_configured_skill_fallbacks_ignores_executors_without_skill() -> None:
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     node = next(iter(definition.nodes.values()))
 
     fallbacks = configured_skill_fallbacks(

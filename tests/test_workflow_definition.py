@@ -37,25 +37,23 @@ def test_workflow_node_loads_capability(tmp_path: Path) -> None:
     assert load_workflow_definition(path).nodes["one"].capability == "fetch_questions"
 
 
-def test_load_question_comprehension_info_definition():
-    definition = load_builtin_definition("question_comprehension_info")
+def test_load_demo_workflow_definition():
+    definition = load_builtin_definition("education_video_problems_generation")
 
-    assert definition.key == "question_comprehension_info"
-    assert definition.label == "题目审题信息生成 DAG"
-    batch_by_ids = definition.intake.modes["batch_by_ids"]
-    assert batch_by_ids.label == "按题目ID批量"
-    assert batch_by_ids.input_field == "question_ids"
-    batch_by_knowledge = definition.intake.modes["batch_by_knowledge"]
-    assert batch_by_knowledge.label == "按知识点批量"
-    assert batch_by_knowledge.input_field == "knowledge_codes"
-    assert definition.nodes["fetch_questions"].label == "获取题目"
-    assert definition.nodes["clean_and_parse"].label == "清洗与解析"
-    assert definition.nodes["clean_and_parse"].after == ["fetch_questions"]
-    assert definition.nodes["assemble_comprehension_info"].inputs == [
-        "questions_parsed_lean.json",
-        "key_info_reviewed.json",
-        "possible_errors_reviewed.json",
-        "comprehension_difficulty.json",
+    assert definition.key == "education_video_problems_generation"
+    assert definition.label == "教学视频脚本与题目生成（示例）"
+    direct_ids = definition.intake.modes["direct_ids"]
+    assert direct_ids.label == "按知识点批量"
+    assert direct_ids.input_field == "knowledge_point_ids"
+    assert definition.nodes["intake_knowledge_points"].label == "读取知识点"
+    assert definition.nodes["write_script"].label == "撰写教学视频脚本"
+    assert definition.nodes["write_script"].after == ["intake_knowledge_points"]
+    assert definition.nodes["publish_content"].inputs == [
+        "knowledge_point.json",
+        "script.md",
+        "script_review.json",
+        "exercises.json",
+        "exercises_review.json",
     ]
 
 
@@ -188,49 +186,30 @@ nodes:
     assert definition.nodes["one"].label == "步骤一"
 
 
-def test_load_question_comprehension_info_capabilities():
-    definition = load_builtin_definition("question_comprehension_info")
+def test_load_demo_workflow_capabilities():
+    definition = load_builtin_definition("education_video_problems_generation")
 
-    assert definition.key == "question_comprehension_info"
-    assert definition.label == "题目审题信息生成 DAG"
-    assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
+    assert definition.key == "education_video_problems_generation"
+    assert definition.label == "教学视频脚本与题目生成（示例）"
+    assert set(definition.intake.modes) == {"direct_ids"}
 
     assert list(definition.nodes) == [
-        "fetch_questions",
-        "clean_and_parse",
-        "classify_comprehension_eligibility",
-        "generate_key_info",
-        "review_key_info",
-        "generate_possible_errors",
-        "review_possible_errors",
-        "assess_comprehension_difficulty",
-        "assemble_comprehension_info",
-        "finalize_non_uploadable",
+        "intake_knowledge_points",
+        "write_script",
+        "review_script",
+        "generate_questions",
+        "review_questions",
+        "publish_content",
     ]
-    assert definition.nodes["fetch_questions"].capability == "fetch_questions"
-    assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
-    assert (
-        definition.nodes["classify_comprehension_eligibility"].capability
-        == "classify_comprehension_eligibility"
-    )
-    assert definition.nodes["generate_key_info"].after == ["clean_and_parse"]
-    assert definition.nodes["review_key_info"].after == ["generate_key_info"]
-    assert definition.nodes["generate_possible_errors"].after == ["review_key_info"]
-    assert definition.nodes["review_possible_errors"].after == ["generate_possible_errors"]
-    assert definition.nodes["assess_comprehension_difficulty"].after == [
-        "review_key_info",
-        "review_possible_errors",
-    ]
-    assert definition.nodes["assemble_comprehension_info"].after == [
-        "assess_comprehension_difficulty"
-    ]
-    assert definition.nodes["assemble_comprehension_info"].outputs == [
-        "comprehension_info.json",
-        "manifest.json",
-    ]
-    assert definition.nodes["finalize_non_uploadable"].capability == "finalize_non_uploadable"
-    assert definition.nodes["finalize_non_uploadable"].terminal is not None
-    assert definition.nodes["finalize_non_uploadable"].terminal.outcome == "non_uploadable"
+    assert definition.nodes["intake_knowledge_points"].capability == "intake_knowledge_points"
+    assert definition.nodes["write_script"].capability == "write_script"
+    assert definition.nodes["review_script"].after == ["write_script"]
+    assert definition.nodes["generate_questions"].after == ["intake_knowledge_points"]
+    assert definition.nodes["review_questions"].after == ["generate_questions"]
+    assert definition.nodes["publish_content"].after == ["review_script", "review_questions"]
+    assert definition.nodes["publish_content"].outputs == ["publish_payload.json"]
+    assert definition.nodes["publish_content"].terminal is not None
+    assert definition.nodes["publish_content"].terminal.outcome == "published"
 
 
 def test_workflow_node_loads_config_mapping(tmp_path: Path) -> None:

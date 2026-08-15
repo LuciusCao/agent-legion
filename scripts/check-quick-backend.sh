@@ -14,12 +14,9 @@ run_static_checks() {
   echo "=== Architecture Invariant Registry ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_invariants
 
-  # Skill repos live at machine-local paths (DB skill sources), so this check
-  # is meaningless on CI runners; set AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK=1 there.
-  if [[ "${AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK:-0}" != "1" ]]; then
-    echo "=== Skill Shared Content Sync ==="
-    UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check-skills-shared.py
-  fi
+  # The business skill shared-assets check (scripts/check-skills-shared.py)
+  # retired with the business skill sources; the script itself leaves with the
+  # business runtime code in P4.
 
   echo "=== MyPy Type Check ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app scripts/architecture scripts/quality workflow_nodes

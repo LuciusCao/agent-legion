@@ -2,7 +2,9 @@ from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
 
-def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+def _create_workspace(
+    client, name="default", default_workflow_key="education_video_problems_generation"
+):
     return client.post(
         "/api/workspaces",
         json={"name": name, "default_workflow_key": default_workflow_key},
@@ -17,7 +19,7 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c, "default", "question_comprehension_info")
+        ws_id = _create_workspace(c, "default", "education_video_problems_generation")
         response = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
@@ -25,29 +27,29 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 "description": "Atomic settings",
                 "settings": {
                     "entityType": "video",
-                    "intakeModes": ["batch_by_ids"],
-                    "labelOverrides": {"batch_by_ids": "Video IDs"},
-                    "workflowKey": "question_comprehension_info",
+                    "intakeModes": ["direct_ids"],
+                    "labelOverrides": {"direct_ids": "Direct IDs"},
+                    "workflowKey": "education_video_problems_generation",
                 },
                 "executor_allocations": [
                     {"executor_id": "code-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_comprehension_info",
-                        "node_key": "fetch_questions",
+                        "workflow_key": "education_video_problems_generation",
+                        "node_key": "intake_knowledge_points",
                         "executor_id": "code-default",
                     },
                     {
-                        "workflow_key": "question_comprehension_info",
-                        "node_key": "clean_and_parse",
+                        "workflow_key": "education_video_problems_generation",
+                        "node_key": "publish_content",
                         "executor_id": "code-default",
                     },
                 ],
                 "node_limits": [
                     {
-                        "workflow_key": "question_comprehension_info",
-                        "node_key": "clean_and_parse",
+                        "workflow_key": "education_video_problems_generation",
+                        "node_key": "publish_content",
                         "concurrency_limit": 3,
                     },
                 ],
@@ -63,20 +65,20 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     ]
     assert body["executor_configuration"]["bindings"] == [
         {
-            "workflow_key": "question_comprehension_info",
-            "node_key": "clean_and_parse",
+            "workflow_key": "education_video_problems_generation",
+            "node_key": "intake_knowledge_points",
             "executor_id": "code-default",
         },
         {
-            "workflow_key": "question_comprehension_info",
-            "node_key": "fetch_questions",
+            "workflow_key": "education_video_problems_generation",
+            "node_key": "publish_content",
             "executor_id": "code-default",
         },
     ]
     assert body["executor_configuration"]["node_limits"] == [
         {
-            "workflow_key": "question_comprehension_info",
-            "node_key": "clean_and_parse",
+            "workflow_key": "education_video_problems_generation",
+            "node_key": "publish_content",
             "concurrency_limit": 3,
         },
     ]
@@ -90,28 +92,28 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c, "rollback", "question_comprehension_info")
+        ws_id = _create_workspace(c, "rollback", "education_video_problems_generation")
 
         # Establish a known good configuration first.
         c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
                 "name": "Rollback Test",
-                "settings": {"workflowKey": "question_comprehension_info"},
+                "settings": {"workflowKey": "education_video_problems_generation"},
                 "executor_allocations": [
                     {"executor_id": "code-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_comprehension_info",
-                        "node_key": "clean_and_parse",
+                        "workflow_key": "education_video_problems_generation",
+                        "node_key": "publish_content",
                         "executor_id": "code-default",
                     },
                 ],
                 "node_limits": [
                     {
-                        "workflow_key": "question_comprehension_info",
-                        "node_key": "clean_and_parse",
+                        "workflow_key": "education_video_problems_generation",
+                        "node_key": "publish_content",
                         "concurrency_limit": 2,
                     },
                 ],
@@ -123,13 +125,13 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
             f"/api/workspaces/{ws_id}/configuration",
             json={
                 "name": "Must Roll Back",
-                "settings": {"workflowKey": "question_comprehension_info"},
+                "settings": {"workflowKey": "education_video_problems_generation"},
                 "executor_allocations": [
                     {"executor_id": "code-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_comprehension_info",
+                        "workflow_key": "education_video_problems_generation",
                         "node_key": "unknown_node",
                         "executor_id": "code-default",
                     },
@@ -157,7 +159,7 @@ def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_pa
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
     workspace = queries.create_workspace(
-        "Materialized", default_workflow_key="question_comprehension_info"
+        "Materialized", default_workflow_key="education_video_problems_generation"
     )
     ws_id = workspace["id"]
     queries.replace_workspace_executor_configuration(
@@ -185,7 +187,7 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c, "residue", "question_comprehension_info")
+        ws_id = _create_workspace(c, "residue", "education_video_problems_generation")
         # Seed rows left behind by the retired `pi` Executor alongside valid
         # code-default rows, bypassing PUT validation like the legacy writers
         # did.
@@ -197,30 +199,30 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
             ],
             [
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "clean_and_parse",
+                    "workflow_key": "education_video_problems_generation",
+                    "node_key": "write_script",
                     "executor_id": "pi",
                 },
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "fetch_questions",
+                    "workflow_key": "education_video_problems_generation",
+                    "node_key": "intake_knowledge_points",
                     "executor_id": "code-default",
                 },
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "finalize_non_uploadable",
+                    "workflow_key": "education_video_problems_generation",
+                    "node_key": "publish_content",
                     "executor_id": "code-default",
                 },
             ],
             [
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "clean_and_parse",
+                    "workflow_key": "education_video_problems_generation",
+                    "node_key": "write_script",
                     "concurrency_limit": 1,
                 },
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "finalize_non_uploadable",
+                    "workflow_key": "education_video_problems_generation",
+                    "node_key": "publish_content",
                     "concurrency_limit": 2,
                 },
             ],
@@ -233,7 +235,7 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
         response = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "question_comprehension_info"},
+                "settings": {"workflowKey": "education_video_problems_generation"},
                 "executor_allocations": [
                     {
                         "executor_id": row["executor_id"],
@@ -252,7 +254,7 @@ def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_
     assert {row["executor_id"] for row in persisted["allocations"]} == {"code-default"}
     assert {row["executor_id"] for row in persisted["bindings"]} == {"code-default"}
     assert [(row["workflow_key"], row["node_key"]) for row in persisted["node_limits"]] == [
-        ("question_comprehension_info", "finalize_non_uploadable")
+        ("education_video_problems_generation", "publish_content")
     ]
 
 
@@ -264,11 +266,11 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
-        ws_id = _create_workspace(c, "capacity", "question_comprehension_info")
+        ws_id = _create_workspace(c, "capacity", "education_video_problems_generation")
         saved = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "question_comprehension_info"},
+                "settings": {"workflowKey": "education_video_problems_generation"},
                 "executor_allocations": [],
                 "node_bindings": [],
                 "node_limits": [],
@@ -286,7 +288,7 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
         omitted = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "question_comprehension_info"},
+                "settings": {"workflowKey": "education_video_problems_generation"},
                 "executor_allocations": [],
                 "node_bindings": [],
                 "node_limits": [],
@@ -298,7 +300,7 @@ def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
         invalid = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
-                "settings": {"workflowKey": "question_comprehension_info"},
+                "settings": {"workflowKey": "education_video_problems_generation"},
                 "executor_allocations": [],
                 "node_bindings": [],
                 "node_limits": [],

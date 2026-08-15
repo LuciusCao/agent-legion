@@ -3320,6 +3320,8 @@ export interface components {
       source_kind: string
       /** Workflow Key */
       workflow_key: string
+    } & {
+      [key: string]: unknown
     }
     /**
      * JobBatchRerunPreviewRequest

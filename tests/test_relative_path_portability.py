@@ -18,7 +18,7 @@ from server.app.storage_paths import resolve_data_path, resolve_job_dir
 from tests.postgres_support import TEST_DATABASE_URL
 
 WORKSPACE_ID = "default"
-WORKFLOW_KEY = "question_comprehension_info"
+WORKFLOW_KEY = "education_video_problems_generation"
 SOURCE_ID = "S123"
 JOB_ID = f"{WORKSPACE_ID}_{WORKFLOW_KEY}_{SOURCE_ID}"
 NODE_KEY = "fetch_questions"
@@ -54,7 +54,7 @@ def _seed_old_root(old_root: Path) -> None:
         conn.execute(
             """
             insert into workspaces(id, name, default_workflow_key, default_entity)
-            values ('default', 'Default', 'question_comprehension_info', 'question')
+            values ('default', 'Default', 'education_video_problems_generation', 'question')
             """
         )
         conn.execute(
