@@ -10,6 +10,7 @@ from starlette import concurrency
 
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.agent_broker.agent_result_commit import commit_agent_result
+from server.app.agent_broker.result_spool import discard_staged_result, spool_result_body
 from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.dependencies import require_admin, require_user
@@ -207,29 +208,40 @@ def create_agent_workers_router(
             outcome, record = parse_result_metadata(request.headers.get("x-agent-result", "{}"))
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid Agent result metadata") from exc
-        # Size gate: reject on the declared length before buffering the body.
+        # Size gate: reject on the declared length before spooling the body.
         declared = request.headers.get("content-length")
         if declared is not None and declared.isdigit() and int(declared) > config.max_archive_bytes:
             raise HTTPException(status_code=413, detail="Agent result archive too large")
-        body = await request.body()
-        if len(body) > config.max_archive_bytes:
-            raise HTTPException(status_code=413, detail="Agent result archive too large")
         if broker.bundle_dir is None:
             raise HTTPException(status_code=500, detail="Agent bundle storage is unavailable")
-        # The blocking DB/disk commit runs in the threadpool: at agent scale
-        # (multiple reports per second) holding the event loop here stalls
-        # every heartbeat, claim, and dashboard stream behind it.
-        await concurrency.run_in_threadpool(
-            commit_agent_result,
-            broker,
-            completion,
-            execution_id,
-            worker_id,
-            lease_id,
-            outcome,
-            record,
-            body,
+        # Cheap ownership pre-check BEFORE spooling the body to disk: a stale
+        # lease would otherwise write up to max_archive_bytes for nothing.
+        # commit_agent_result re-checks under the commit to stay TOCTOU-safe.
+        payload = await concurrency.run_in_threadpool(
+            broker.claimed_payload, execution_id, worker_id
         )
+        if payload is None or str(payload["lease_id"]) != lease_id:
+            raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
+        staged = await spool_result_body(request, broker.bundle_dir, config.max_archive_bytes)
+        try:
+            # The blocking DB/disk commit runs in the threadpool: at agent scale
+            # (multiple reports per second) holding the event loop here stalls
+            # every heartbeat, claim, and dashboard stream behind it.
+            await concurrency.run_in_threadpool(
+                commit_agent_result,
+                broker,
+                completion,
+                execution_id,
+                worker_id,
+                lease_id,
+                outcome,
+                record,
+                staged,
+            )
+        finally:
+            # A successful commit atomically renamed the staging file into
+            # place; on any failure it is reclaimed here.
+            discard_staged_result(staged)
         return Response(status_code=204)
 
     return router

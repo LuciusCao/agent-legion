@@ -68,11 +68,15 @@ def reap_terminal_bundles(
                 target.unlink(missing_ok=True)
                 reaped += 1
     cutoff = time.time() - archive_max_age_seconds
-    for orphan in broker.bundle_dir.glob("*.result.tar.gz"):
-        try:
-            if orphan.stat().st_mtime < cutoff:
-                orphan.unlink(missing_ok=True)
-                reaped += 1
-        except OSError:
-            continue
+    # .result-*.tmp: staging files leaked by a process crash mid-spool
+    # (exception paths reclaim them, SIGKILL cannot). Age-gated like the
+    # archives so a slow in-flight upload is never reaped underfoot.
+    for pattern in ("*.result.tar.gz", ".result-*.tmp"):
+        for orphan in broker.bundle_dir.glob(pattern):
+            try:
+                if orphan.stat().st_mtime < cutoff:
+                    orphan.unlink(missing_ok=True)
+                    reaped += 1
+            except OSError:
+                continue
     return reaped

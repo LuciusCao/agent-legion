@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from server.app.agent_worker_liveness import WorkerLiveness
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 
@@ -33,6 +34,7 @@ CODE_PROTOCOL_VERSION = 2
 class AgentWorkerRegistry:
     def __init__(self, database_dsn: DatabaseDsn) -> None:
         self.database_dsn = database_dsn
+        self._liveness = WorkerLiveness()
 
     def issue_token(
         self,
@@ -216,12 +218,11 @@ class AgentWorkerRegistry:
             return None
         # Every Worker API call authenticates, and an idle Worker polls claim
         # every few seconds, so this is the liveness signal behind `online`.
-        with write_transaction(self.database_dsn) as conn:
-            conn.execute(
-                "update agent_workers set last_seen_at=current_timestamp where worker_id=%s",
-                (worker_id,),
-            )
-        # Reflect the just-written timestamp so this call already reads online.
+        # The write is throttled (WorkerLiveness): at agent scale a write
+        # transaction per call is the hottest write path on the Host.
+        self._liveness.record_seen(self.database_dsn, worker_id)
+        # Reflect a fresh timestamp so this call already reads online, even
+        # when the throttled write was skipped.
         return _worker_payload({**row, "last_seen_at": datetime.now(UTC)})
 
     def list_workers(self) -> list[dict[str, Any]]:
@@ -235,7 +236,9 @@ class AgentWorkerRegistry:
                 "update agent_workers set revoked_at=current_timestamp where worker_id=%s",
                 (worker_id,),
             )
-            return result.rowcount > 0
+        # Evict the liveness memo entry so the throttle dict stays bounded.
+        self._liveness.discard(worker_id)
+        return result.rowcount > 0
 
 
 def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
