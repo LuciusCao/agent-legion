@@ -10,7 +10,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 def _seed_job(job_db, job_id: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws1', 'Test') on conflict(id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'Test', 'question_comprehension_info') on conflict(id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"

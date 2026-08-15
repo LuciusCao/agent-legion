@@ -21,7 +21,7 @@ from server.app.services.path_hygiene import (
 def _seed(job_db, *, job_id: str, log_path: str, run_dir: str, storage_dir: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws-path', 'Test') on conflict(id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws-path', 'Test', 'question_comprehension_info') on conflict(id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"

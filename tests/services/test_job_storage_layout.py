@@ -110,7 +110,7 @@ def test_locate_job_dir_rejects_paths_outside_jobs_root(tmp_path) -> None:
 
 def _seed_job(conn, job_id, workspace_id, storage_dir) -> None:
     conn.execute(
-        "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict (id) do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(
@@ -185,7 +185,7 @@ def test_create_jobs_bulk_creates_shard_dir_for_new_jobs(job_db, settings) -> No
     data_dir = settings.data_dir
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws', 'ws') on conflict (id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws', 'ws', 'question_comprehension_info') on conflict (id) do nothing"
         )
 
     jobs = job_db.create_jobs_bulk(
@@ -212,7 +212,7 @@ def test_create_jobs_bulk_resubmit_does_not_precreate_shard_dir(job_db, settings
     job_id = "ws_wf_q-legacy"  # _job_id("ws", "wf", "q-legacy")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws', 'ws') on conflict (id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws', 'ws', 'question_comprehension_info') on conflict (id) do nothing"
         )
         conn.execute(
             """

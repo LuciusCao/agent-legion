@@ -3335,10 +3335,7 @@ export interface components {
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
-      /**
-       * Workflow Key
-       * @default question_comprehension_info
-       */
+      /** Workflow Key */
       workflow_key: string
     }
     /**

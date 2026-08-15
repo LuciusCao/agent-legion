@@ -31,7 +31,7 @@ def _fetch_sample(
 def _seed_workspace_job(job_id: str = "job-1", workspace_id: str = "ops-ws") -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (%s, 'Ops') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Ops', 'question_comprehension_info') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(

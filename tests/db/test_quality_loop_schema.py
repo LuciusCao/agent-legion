@@ -57,7 +57,7 @@ def test_quality_label_constraints_enforced() -> None:
         write_transaction(TEST_DATABASE_URL) as conn,
     ):
         conn.execute(
-            "insert into workspaces(id, name) values ('ws-ql', 'ws-ql') on conflict do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws-ql', 'ws-ql', 'question_comprehension_info') on conflict do nothing"
         )
         conn.execute(
             "insert into quality_sample_batches(id, workspace_id, sample_size)"

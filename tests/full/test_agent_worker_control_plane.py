@@ -84,7 +84,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('acl-workspace', 'ACL')"
+            "insert into workspaces(id, name, default_workflow_key) values ('acl-workspace', 'ACL', 'question_comprehension_info')"
             " on conflict(id) do nothing"
         )
 

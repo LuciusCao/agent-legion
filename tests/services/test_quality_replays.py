@@ -61,7 +61,9 @@ class _Env:
     def __init__(self, job_db, tmp_path: Path, route_kind: str) -> None:
         self.job_db = job_db
         self.tmp_path = tmp_path
-        ws = job_db.create_workspace("Replay WS")
+        ws = job_db.create_workspace(
+            default_workflow_key="question_comprehension_info", name="Replay WS"
+        )
         self.workspace_id = str(ws["id"])
         definition = _definition()
         snapshot = serialize_definition(definition)

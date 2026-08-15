@@ -91,7 +91,7 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
     now = datetime.now(UTC).replace(microsecond=0)
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ops-ws', 'Ops') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values ('ops-ws', 'Ops', 'question_comprehension_info') on conflict(id) do nothing",
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"

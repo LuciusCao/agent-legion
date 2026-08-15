@@ -10,7 +10,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _publish(client: TestClient, workspace_id: str = "ws-routes") -> None:
     job_db = JobQueries(TEST_DATABASE_URL, Path(client.app.state.settings.jobs_dir))
-    job_db.create_workspace(workspace_id)
+    job_db.create_workspace(workspace_id, default_workflow_key="question_comprehension_info")
     definition = load_builtin_definition("question_comprehension_info")
     WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
 

@@ -9,7 +9,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _seed_workspace(conn, workspace_id: str) -> None:
     conn.execute(
-        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(

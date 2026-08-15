@@ -47,7 +47,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
     def create_workspace(
         self,
         name: str,
-        default_workflow_key: str = "question_comprehension_info",
+        default_workflow_key: str,
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
         intake_config: dict[str, Any] | None = None,

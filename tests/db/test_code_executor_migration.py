@@ -10,7 +10,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _seed_workspace(conn, workspace_id: str, concurrency: int = 4) -> None:
     conn.execute(
-        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(
@@ -66,7 +66,7 @@ def test_migration_rebinds_first_nodes_and_copies_concurrency() -> None:
 def test_migration_defaults_concurrency_without_local_allocation() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('code-mig-ws2', 'code-mig-ws2')"
+            "insert into workspaces(id, name, default_workflow_key) values ('code-mig-ws2', 'code-mig-ws2', 'question_comprehension_info')"
             " on conflict do nothing"
         )
         migrate_code_executor_bindings(conn)

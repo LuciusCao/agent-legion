@@ -6,7 +6,8 @@ from server.app.routes.workspace_contracts import WorkspaceRecord
 
 
 class JobBatchRequest(BaseModel):
-    workflow_key: str = "question_comprehension_info"
+    # No platform default workflow: callers must choose explicitly.
+    workflow_key: str
     entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)

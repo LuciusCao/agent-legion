@@ -16,7 +16,7 @@ BASE = f"/api/workspaces/{WORKSPACE}/quality"
 def _seed_runs() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict do nothing",
             (WORKSPACE, WORKSPACE),
         )
         for index, (status, node_key) in enumerate(
@@ -110,7 +110,7 @@ def test_label_latest_wins_and_stats(client):
 def test_stats_confusion_matrix(client):
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict do nothing",
             (WORKSPACE, WORKSPACE),
         )
         # (node_key, status, failure_detail): review pass ×2, review reject ×2,
@@ -189,7 +189,7 @@ def test_cross_workspace_batch_not_visible(client):
     batch = _create_batch(client)
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws-other', 'ws-other')"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws-other', 'ws-other', 'question_comprehension_info')"
             " on conflict do nothing"
         )
     other = "/api/workspaces/ws-other/quality"

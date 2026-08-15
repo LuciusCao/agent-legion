@@ -27,7 +27,9 @@ def client(client_factory):
 def _seed(client_tmp_path):
     """Seed a workspace with one completed job + sample item; returns ids."""
     job_db = JobQueries(TEST_DATABASE_URL, client_tmp_path / "jobs")
-    ws = job_db.create_workspace("Replay Routes WS")
+    ws = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="Replay Routes WS"
+    )
     workspace_id = str(ws["id"])
     definition = WorkflowDefinition(
         key="test",
