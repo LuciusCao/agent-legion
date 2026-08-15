@@ -72,10 +72,10 @@ def test_split_manifest_config_drops_empty_secret() -> None:
     [
         ("import json\nfrom workspace_libs.node_sdk import NodeContext\n", True),
         ("import requests\n", True),
-        ("from workspace_libs.cms import urls\n", True),
-        ("import server.app.pipeline.download\n", False),
+        ("from workspace_libs import cancellation\n", True),
+        ("import server.app.main\n", False),
         ("from server.app import settings\n", False),
-        ("import workflow_nodes.video_download\n", False),
+        ("import workflow_nodes.example_intake\n", False),
         ("import importlib\n", False),
         ("x = __import__('os')\n", False),
         ("import os\nimport boto3\n", False),
@@ -89,9 +89,7 @@ def test_worker_eligibility_scan(code: str, expected: bool) -> None:
 def test_resolve_code_manifest_config_injects_and_strips_secrets(job_db, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="test-workspace"
-    )
+    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="test-workspace")
     vault = VaultService(job_db.path, {})
     vault.set(workspace["id"], "api-token", "s3cr3t")
     manifest = {
@@ -145,7 +143,7 @@ _CODE = "def run(job, job_dir, runtime):\n    pass\n"
 def _insert_job(job_db, job_id: str = "job-1") -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
         conn.execute(
@@ -163,7 +161,7 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
     queued = service.enqueue(
         capability="package",
         capability_config=CodeCapabilityConfig(
-            path="workflow_nodes/video_package.py",
+            path="workflow_nodes/example_publish.py",
             timeout_seconds=42,
             sandbox_network=True,
             config_schema=_SCHEMA,
@@ -212,7 +210,7 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
     assert (
         service.enqueue(
             capability="package",
-            capability_config=CodeCapabilityConfig(path="workflow_nodes/video_package.py"),
+            capability_config=CodeCapabilityConfig(path="workflow_nodes/example_publish.py"),
             workspace={"id": "test-workspace"},
             job={"id": "job-1"},
             workflow_key="questions",
@@ -235,21 +233,21 @@ _SENSITIVE_CONFIG = {
     "database": {"url": "postgresql://user:db-pw@db/agent_legion"},
     "agent_workers": {"register_token": "management-secret"},
     "server": {"cors": {"allow_origins": ["https://example.com"]}},
-    "asr": {"whisper": {"binary": "/env/whisper-cli"}},
 }
 
 
 def test_enqueue_strips_instance_settings_from_manifest_and_child_payload(job_db, tmp_path) -> None:
-    """VAULT-SECRET-001: only node-consumed settings sections may ride the
-    manifest — the vault master key, DB DSN and register token never persist
-    nor cross into the Worker sandbox stdin payload."""
+    """VAULT-SECRET-001: no settings sections ride the manifest today — the
+    whitelist is empty after the business sections retired, so the vault
+    master key, DB DSN and register token never persist nor cross into the
+    Worker sandbox stdin payload."""
     _insert_job(job_db)
     service = _service(job_db, tmp_path, config=_SENSITIVE_CONFIG)
 
     assert (
         service.enqueue(
             capability="package",
-            capability_config=CodeCapabilityConfig(path="workflow_nodes/video_package.py"),
+            capability_config=CodeCapabilityConfig(path="workflow_nodes/example_publish.py"),
             workspace={"id": "test-workspace"},
             job={"id": "job-1"},
             workflow_key="questions",
@@ -269,7 +267,7 @@ def test_enqueue_strips_instance_settings_from_manifest_and_child_payload(job_db
         row = conn.execute("select manifest_json from agent_execution_requests").fetchone()
     manifest = json.loads(row["manifest_json"])
     settings_config = manifest["runtime_context"]["settings_config"]
-    assert settings_config == {"asr": {"whisper": {"binary": "/env/whisper-cli"}}}
+    assert settings_config == {}
     # The manifest log_path is data-dir-relative, not a Host path leak.
     assert manifest["log_path"] == "logs/jobs/job-1-package.log"
     for leaked in ("fernet-key-material", "bootstrap-pw", "db-pw", "management-secret"):
@@ -326,7 +324,7 @@ def test_online_code_worker_probe_matches_claim_side_filters(job_db) -> None:
     job — so the probe says no and the node falls back to local execution."""
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('other-workspace', 'Other', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('other-workspace', 'Other', 'demo_workflow')"
         )
     _register_probe_worker(
         "worker-scoped",

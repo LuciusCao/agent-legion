@@ -165,12 +165,12 @@ def manifest_safe_config(schema: dict[str, Any], config: dict[str, Any]) -> dict
     }
 
 
-# Settings sections node code may ever see (VAULT-SECRET-001): only the
-# business sections the node SDK's ``service_config(section=...)`` actually
-# consumes. Instance-level sections (vault/auth/database/agent_workers/...)
-# carry secrets or machine-local values and must never enter a manifest, the
-# sandbox stdin payload, or the database.
-NODE_SETTINGS_CONFIG_SECTIONS = ("asr",)
+# Settings sections node code may ever see (VAULT-SECRET-001). The legacy
+# business sections (asr) retired with the business workflows, so the
+# whitelist is currently empty: instance-level sections (vault/auth/
+# database/agent_workers/...) carry secrets or machine-local values and must
+# never enter a manifest, the sandbox stdin payload, or the database.
+NODE_SETTINGS_CONFIG_SECTIONS: tuple[str, ...] = ()
 
 
 def node_safe_settings_config(settings_config: Mapping[str, Any]) -> dict[str, Any]:

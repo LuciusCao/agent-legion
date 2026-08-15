@@ -75,7 +75,6 @@ def test_types_listed(client) -> None:
     assert response.status_code == 200
     types = {t["type"]: t for t in response.json()["types"]}
     assert types["static_bearer"]["secret_keys"] == ["token"]
-    assert "cms_hmac" in types
 
 
 def test_create_get_mask_round_trip(client) -> None:

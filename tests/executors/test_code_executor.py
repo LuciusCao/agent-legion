@@ -71,14 +71,14 @@ def context(tmp_path: Path) -> ExecutionContext:
         executor_id="code-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="question_comprehension_info",
-        node_key="fetch_questions",
-        capability="fetch_questions",
+        workflow_key="demo_workflow",
+        node_key="fetch_items",
+        capability="fetch_items",
         workspace={"id": "ws-a"},
         job={
             "id": "job-1",
             "workspace_id": "ws-a",
-            "workflow_key": "question_comprehension_info",
+            "workflow_key": "demo_workflow",
             "source_type": "question",
             "source_id": "q-1",
             "batch_id": "",
@@ -107,7 +107,7 @@ def _executor(
 ) -> CodeExecutor:
     return CodeExecutor(
         "code-default",
-        {"fetch_questions": CodeCapabilityConfig(path=path, timeout_seconds=timeout_seconds)},
+        {"fetch_items": CodeCapabilityConfig(path=path, timeout_seconds=timeout_seconds)},
         repo_root=repo_root,
     )
 
@@ -133,7 +133,7 @@ def test_config_rejects_absolute_and_escape_paths() -> None:
 def test_supports(tmp_path: Path) -> None:
     path = _write_node(tmp_path, "node_ok.py", "def run(job, job_dir, runtime):\n    pass\n")
     executor = _executor(tmp_path, path)
-    assert executor.supports("fetch_questions")
+    assert executor.supports("fetch_items")
     assert not executor.supports("other")
 
 
@@ -392,11 +392,7 @@ def test_custom_sandbox_denies_network_by_default(
 
     executor_with_net = CodeExecutor(
         "code-default",
-        {
-            "fetch_questions": CodeCapabilityConfig(
-                path=path, timeout_seconds=60, sandbox_network=True
-            )
-        },
+        {"fetch_items": CodeCapabilityConfig(path=path, timeout_seconds=60, sandbox_network=True)},
         repo_root=tmp_path,
     )
     allowed = executor_with_net.execute(
@@ -408,9 +404,8 @@ def test_custom_sandbox_denies_network_by_default(
 
 
 def test_repo_read_subdirs_include_workspace_libs() -> None:
-    """Custom forks of the CMS-calling builtin nodes import workspace_libs
-    inside the sandbox (regression: the CMS client moved server/app/cms →
-    workspace_libs/cms and the deny-default sandbox lost read access)."""
+    """Custom node code imports workspace_libs (the node SDK) inside the
+    sandbox, so the deny-default sandbox must keep read access to it."""
     from server.app.executors._code_sandbox import _REPO_READ_SUBDIRS
 
     assert "workspace_libs" in _REPO_READ_SUBDIRS
@@ -504,7 +499,7 @@ class _FakeJobDb:
         if self._runs_error:
             raise RuntimeError("db down")
         return [
-            {"node_key": "fetch_questions", "skill_version": "abc123"},
+            {"node_key": "fetch_items", "skill_version": "abc123"},
             {"node_key": "review", "skill_version": None},
         ]
 
@@ -528,7 +523,7 @@ def test_build_runtime_prefetches_inputs_and_hides_db(
     assert "_jobs_dir" not in runtime
     assert "job_db" not in runtime
     assert runtime["job_batch"] == {"id": "b-1", "source_payload_json": "{}"}
-    assert runtime["skill_versions"] == {"fetch_questions": "abc123"}
+    assert runtime["skill_versions"] == {"fetch_items": "abc123"}
 
 
 def test_build_runtime_whitelists_settings_config_sections(
@@ -544,12 +539,11 @@ def test_build_runtime_whitelists_settings_config_sections(
     executor.settings_config = {
         "vault": {"master_key": "fernet-key-material"},
         "database": {"url": "postgresql://user:db-pw@db/agent_legion"},
-        "asr": {"whisper": {"binary": "/env/whisper-cli"}},
     }
 
     runtime = build_runtime(executor, context, CancellationToken())
 
-    assert runtime["settings_config"] == {"asr": {"whisper": {"binary": "/env/whisper-cli"}}}
+    assert runtime["settings_config"] == {}
 
 
 def test_build_runtime_skill_versions_degrade_on_db_error(
@@ -701,7 +695,7 @@ def test_sandboxed_custom_node_can_use_node_sdk(
 
     data = json.loads((tmp_path / "out.json").read_text(encoding="utf-8"))
     assert data["batch"] == {"id": "b-1", "source_payload_json": "{}"}
-    assert data["skill_versions"] == {"fetch_questions": "abc123"}
+    assert data["skill_versions"] == {"fetch_items": "abc123"}
 
 
 def test_pathless_capability_requires_custom_code(
@@ -711,10 +705,10 @@ def test_pathless_capability_requires_custom_code(
     without custom node code — a clear config error, not "not supported"."""
     executor = CodeExecutor(
         "code-default",
-        {"fetch_questions": CodeCapabilityConfig()},
+        {"fetch_items": CodeCapabilityConfig()},
         repo_root=tmp_path,
     )
-    assert executor.supports("fetch_questions")
+    assert executor.supports("fetch_items")
 
     result = executor.execute(context)
 
@@ -730,7 +724,7 @@ def test_pathless_capability_runs_custom_code_sandboxed(
     _sandboxed(monkeypatch)
     executor = CodeExecutor(
         "code-default",
-        {"fetch_questions": CodeCapabilityConfig()},
+        {"fetch_items": CodeCapabilityConfig()},
         repo_root=tmp_path,
     )
     custom_source = textwrap.dedent(

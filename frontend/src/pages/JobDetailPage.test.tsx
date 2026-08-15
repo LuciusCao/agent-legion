@@ -346,8 +346,8 @@ describe('JobDetailPage', () => {
             nodes: [
               {
                 ...mockDetail.nodes[0],
-                node_key: 'fetch_questions',
-                capability: 'fetch_questions',
+                node_key: 'fetch_items',
+                capability: 'fetch_items',
                 outputs: ['questions.json'],
                 status: completed ? 'completed' : 'running',
                 finished_at: completed ? '2026-06-18T10:00:00Z' : undefined,
@@ -720,32 +720,6 @@ describe('JobDetailPage', () => {
             }),
           })
         }
-        if (url === '/api/jobs/j1/video') {
-          return Promise.resolve({
-            ok: true,
-            json: async () => ({
-              input: {
-                title: 'Sample Video',
-                external_id: 'VID-001',
-                source_url: 'https://example.com/video.mp4',
-                source_uuid: 'uuid-1',
-                content_type: 'knowledge',
-                entity_type: 'video',
-                legacy_video_id: 'lv1',
-                schema_version: 1,
-              },
-              artifacts: {
-                video_url: 'https://cdn.example.com/video.mp4',
-                subtitles: [],
-                chapters: [],
-                interactions: [],
-                metadata: null,
-                review: null,
-                checklist: null,
-              },
-            }),
-          })
-        }
         return Promise.resolve({ ok: true, json: async () => ({}) })
       })
     )
@@ -754,7 +728,9 @@ describe('JobDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('video-content-panel')).toBeInTheDocument()
     })
-    expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
+    // Transitional shell (#11): the dedicated video detail endpoint retired
+    // with the business extraction; the panel renders its empty state.
+    expect(screen.getByText('视频内容尚未生成')).toBeInTheDocument()
   })
 
   it('renders job token usage dialog when open', async () => {

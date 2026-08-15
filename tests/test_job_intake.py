@@ -6,9 +6,7 @@ from server.app.services.workflow_catalog import WorkflowCatalogService
 
 
 def test_create_batch_requires_existing_active_revision(job_db, settings, agent_manager):
-    workspace = job_db.create_workspace(
-        "ws-no-revision", default_workflow_key="question_comprehension_info"
-    )
+    workspace = job_db.create_workspace("ws-no-revision", default_workflow_key="demo_workflow")
     service = JobIntakeService(
         job_db,
         settings,
@@ -19,7 +17,7 @@ def test_create_batch_requires_existing_active_revision(job_db, settings, agent_
         service.create_batch(
             workspace["id"],
             {
-                "workflow_key": "question_comprehension_info",
+                "workflow_key": "demo_workflow",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
             },

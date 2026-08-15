@@ -166,7 +166,9 @@ def test_batch_unsupported_entity_mode(tmp_path):
     assert "Unsupported entity and intake mode combination" in response.json()["detail"]
 
 
-def test_batch_video_entity_is_unsupported_for_demo_workflow(tmp_path):
+def test_batch_video_entity_direct_ids_is_resolver_driven(tmp_path):
+    """The intake no longer special-cases the video entity: any registered
+    (entity, mode) resolver applies to every workflow."""
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -180,6 +182,30 @@ def test_batch_video_entity_is_unsupported_for_demo_workflow(tmp_path):
             json={
                 "workflow_key": "education_video_problems_generation",
                 "entity": "video",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["K001"],
+            },
+        )
+
+    # ("video", "direct_ids") is a registered direct resolver: accepted.
+    assert response.status_code == 200
+    assert response.json()["created_count"] == 1
+
+
+def test_batch_unregistered_entity_mode_combination_rejected(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "education_video_problems_generation",
+                "entity": "audio",
                 "source_kind": "direct_ids",
                 "knowledge_point_ids": ["K001"],
             },

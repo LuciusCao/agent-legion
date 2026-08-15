@@ -119,7 +119,6 @@ _STATIC_BEARER = ConnectionAdapter(
 # type → adapter, or (module, attribute) for lazy loading from workspace packs.
 _REGISTRY: dict[str, ConnectionAdapter | tuple[str, str]] = {
     "static_bearer": _STATIC_BEARER,
-    "cms_hmac": ("workspace_libs.cms.adapters", "CMS_HMAC_ADAPTER"),
 }
 
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from server.app.services.job_errors import UnsupportedOperationError
-
 logger = logging.getLogger(__name__)
 
 
@@ -45,37 +43,3 @@ def resolve_direct_candidates(
         candidate(entity, value, f"{entity.title()} {value}", source_kind, value)
         for value in input_values
     ]
-
-
-def resolve_cms_question_opaque_candidates(
-    entity: str,
-    input_values: list[str],
-    source_kind: str,
-) -> list[dict[str, Any]]:
-    """Build opaque question candidates without calling CMS.
-
-    Node-phase resolution: the first DAG node (``workflow_nodes/question_intake.py``)
-    resolves ids / knowledge codes against the CMS at execution time (binding +
-    vault chain), so intake only fans out one candidate per input value,
-    deduped by value.
-    """
-    if entity != "question":
-        raise UnsupportedOperationError(f"{entity} resolver not yet implemented")
-
-    candidates: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for value in input_values:
-        if value in seen:
-            continue
-        seen.add(value)
-        candidates.append(
-            candidate(
-                entity,
-                value,
-                f"Question {value}",
-                source_kind,
-                value,
-                source_ref=value,
-            )
-        )
-    return candidates
