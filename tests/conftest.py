@@ -1,3 +1,4 @@
+import copy
 import json
 import os
 from contextlib import contextmanager
@@ -614,6 +615,29 @@ def _isolate_postgres_database(request):
 
 
 @pytest.fixture(autouse=True)
+def _assert_shared_app_invariants():
+    """Fail a test that left the worker-session shared app dirty.
+
+    Naming is load-bearing: same-scope autouse fixtures are set up in
+    alphabetical order (and torn down in reverse), and monkeypatch is torn
+    down only after every fixture that grabbed it. Sorting before
+    ``_block_real_cms_http`` — the first autouse fixture that requests
+    monkeypatch — puts this teardown after the monkeypatch undo, so it
+    observes the post-undo in-memory state of any shared app the test
+    touched. fresh=True apps are private and never tracked.
+    """
+    _SHARED_APP_USAGE.clear()
+    yield
+    apps = list(_SHARED_APP_USAGE)
+    _SHARED_APP_USAGE.clear()
+    errors = []
+    for app in apps:
+        errors.extend(_check_shared_app_invariants(app))
+    if errors:
+        raise AssertionError("shared app invariant violated: " + "; ".join(errors))
+
+
+@pytest.fixture(autouse=True)
 def _isolate_project_dotenv(monkeypatch):
     """Keep unit tests from inheriting real local credentials by default.
 
@@ -752,7 +776,12 @@ def _build_shared_client(tmp_path_factory, dir_name: str):
     from server.app.main import create_app
 
     data_dir = tmp_path_factory.mktemp(dir_name)
-    return create_app(data_dir=data_dir, start_worker=False)
+    app = create_app(data_dir=data_dir, start_worker=False)
+    # Baseline for the per-test shared-app invariant check below: executor
+    # publish/rollback/archive hot-reloads settings.executor_definitions in
+    # memory, and the per-test DB reset cannot restore that.
+    app.state.executor_definitions_baseline = copy.deepcopy(app.state.settings.executor_definitions)
+    return app
 
 
 @contextmanager
@@ -822,6 +851,43 @@ def _reset_client_state(client: TestClient, default_headers: dict[str, str]) -> 
         rate_limiter._entries.clear()
 
 
+def _check_shared_app_invariants(app) -> list[str]:
+    """Invariants for a worker-session shared app after one test.
+
+    The per-test reset restores DB state only; in-memory app.state survives
+    across tests. These O(1) checks turn silent cross-test pollution into a
+    red test (tests that must mutate app.state belong on
+    client_factory(fresh=True)). The job event buffer is drained rather than
+    asserted: the shared apps run with background flush loops disabled, so
+    every event-producing test would otherwise accumulate buffered events
+    into its successor.
+    """
+    app.state.job_event_buffer.drain_compacted()
+    errors = []
+    agents = app.state.agent_manager.agents
+    if agents:
+        errors.append(f"agent_manager.agents not empty after test: {agents!r}")
+    current = app.state.settings.executor_definitions
+    if current != app.state.executor_definitions_baseline:
+        errors.append(
+            "settings.executor_definitions diverged from the seeded baseline "
+            "(executor publish/rollback/archive hot-reloads the shared app; "
+            "use client_factory(fresh=True))"
+        )
+    return errors
+
+
+# Apps touched through the shared-client fixtures during the current test;
+# consumed by the autouse guard (_assert_shared_app_invariants). Module-level
+# (not fixture state) so both the client fixtures and the guard can reach it.
+_SHARED_APP_USAGE: list = []
+
+
+def _track_shared_app(app) -> None:
+    if not any(app is used for used in _SHARED_APP_USAGE):
+        _SHARED_APP_USAGE.append(app)
+
+
 def _bootstrap_admin(client: TestClient) -> None:
     # Every test schema starts empty; bootstrap the first admin and keep its
     # session cookie so existing tests stay authenticated.
@@ -846,6 +912,7 @@ def client_factory(app_factory, request):
             _reset_client_state(client, default_headers)
             if authenticated:
                 _bootstrap_admin(client)
+            _track_shared_app(client.app)
             yield client
             return
         app = app_factory(**app_options)
@@ -862,6 +929,7 @@ def client(_shared_authed_client):
     client, default_headers = _shared_authed_client
     _reset_client_state(client, default_headers)
     _bootstrap_admin(client)
+    _track_shared_app(client.app)
     yield client
     _reset_client_state(client, default_headers)
 
@@ -871,5 +939,6 @@ def anon_client(_shared_anon_client):
     """Unauthenticated client for auth-matrix tests (no session cookie)."""
     client, default_headers = _shared_anon_client
     _reset_client_state(client, default_headers)
+    _track_shared_app(client.app)
     yield client
     _reset_client_state(client, default_headers)
