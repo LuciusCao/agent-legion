@@ -143,9 +143,7 @@ def test_workspace_member_management(anon_client, job_db) -> None:
         headers=CSRF,
     )
     member_id = member_resp.json()["id"]
-    workspace = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="Auth Route WS"
-    )
+    workspace = job_db.create_workspace(default_workflow_key="demo_workflow", name="Auth Route WS")
 
     put = anon_client.put(
         f"/api/workspaces/{workspace['id']}/members",

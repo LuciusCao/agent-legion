@@ -21,7 +21,7 @@ WORKSPACE_ID = "default"
 WORKFLOW_KEY = "education_video_problems_generation"
 SOURCE_ID = "S123"
 JOB_ID = f"{WORKSPACE_ID}_{WORKFLOW_KEY}_{SOURCE_ID}"
-NODE_KEY = "fetch_questions"
+NODE_KEY = "fetch_items"
 RUN_TOKEN = "run-abc"
 
 

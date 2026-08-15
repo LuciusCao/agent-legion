@@ -56,9 +56,9 @@ def test_probe_all_warms_the_cache() -> None:
 @pytest.fixture
 def chat(job_db, settings):
     service = StudioChatService(job_db, settings, None)
-    workspace_id = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="Probe WS"
-    )["id"]
+    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Probe WS")[
+        "id"
+    ]
     user_id = str(job_db.create_user("probe-user", password_hash=None)["id"])
     yield service, workspace_id, user_id
     service.shutdown()

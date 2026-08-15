@@ -30,8 +30,8 @@ _DRAFT_YAML = """
 key: scope_guard_flow
 label: Scope Guard Flow
 nodes:
-  clean_and_parse:
-    capability: clean_and_parse
+  clean_items:
+    capability: clean_items
 """
 
 _NODE_CODE = "/api/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code"
@@ -219,9 +219,7 @@ def test_scoped_token_authenticates_as_initiating_user(client, job_db) -> None:
 
 def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> None:
     workspace_id = str(
-        job_db.create_workspace(
-            default_workflow_key="question_comprehension_info", name="scope-guard-ws"
-        )["id"]
+        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-guard-ws")["id"]
     )
     scoped = _scoped_client(client, job_db)
     for method, url, payload in _effecting_endpoints(workspace_id):
@@ -232,9 +230,7 @@ def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> Non
 
 def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) -> None:
     workspace_id = str(
-        job_db.create_workspace(
-            default_workflow_key="question_comprehension_info", name="scope-draft-ws"
-        )["id"]
+        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-draft-ws")["id"]
     )
     scoped = _scoped_client(client, job_db)
 
@@ -261,9 +257,7 @@ def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) ->
 
 def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
     workspace_id = str(
-        job_db.create_workspace(
-            default_workflow_key="question_comprehension_info", name="scope-admin-ws"
-        )["id"]
+        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-admin-ws")["id"]
     )
     scoped = _scoped_client(client, job_db)
     for method, url, payload in _effecting_endpoints(workspace_id):
@@ -289,9 +283,9 @@ def test_scoped_token_rejected_on_admin_endpoints(client, job_db) -> None:
     inherits role=admin from the initiating user's row (P0: without the
     actor_scope check the token would pass every admin endpoint)."""
     workspace_id = str(
-        job_db.create_workspace(
-            default_workflow_key="question_comprehension_info", name="scope-admin-guard-ws"
-        )["id"]
+        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-admin-guard-ws")[
+            "id"
+        ]
     )
     scoped = _scoped_client(client, job_db)
     endpoints = [

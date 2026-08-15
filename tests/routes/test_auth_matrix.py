@@ -27,9 +27,7 @@ def _member_client(client, username="member1", password="pw1"):
 @pytest.fixture
 def workspace_id(client, job_db) -> str:
     del client
-    return job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="Matrix WS"
-    )["id"]
+    return job_db.create_workspace(default_workflow_key="demo_workflow", name="Matrix WS")["id"]
 
 
 def test_anonymous_business_routes_return_401(anon_client) -> None:

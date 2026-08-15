@@ -11,7 +11,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _insert_agent_job(conn, job_id: str = "job-kind-probe") -> None:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'question_comprehension_info')"
+        "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
         " on conflict(id) do nothing"
     )
     conn.execute(

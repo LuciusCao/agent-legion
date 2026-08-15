@@ -46,7 +46,7 @@ def test_pi_executor_result_log_path_is_absolute(tmp_path: Path) -> None:
 
     skill_manager = _make_skill_manager(
         tmp_path,
-        "question_comprehension_info/generate_key_info",
+        "demo_workflow/generate_key_info",
         validate_script=(
             "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
             "job_dir = Path(sys.argv[1])\n"
@@ -58,11 +58,7 @@ def test_pi_executor_result_log_path_is_absolute(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary=str(fake_pi)),
         skill_manager,
-        {
-            "extract_keywords": PiCapabilityConfig(
-                skill="question_comprehension_info/generate_key_info"
-            )
-        },
+        {"extract_keywords": PiCapabilityConfig(skill="demo_workflow/generate_key_info")},
     )
 
     job_dir = tmp_path / "job"
@@ -74,7 +70,7 @@ def test_pi_executor_result_log_path_is_absolute(tmp_path: Path) -> None:
         executor_id="pi-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="extract_keywords",
         capability="extract_keywords",
         workspace={"id": "ws-a"},
@@ -118,7 +114,7 @@ def test_openclaw_executor_result_log_path_is_absolute(tmp_path: Path) -> None:
         executor_id="oc-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="interaction_generate",
         capability="interaction_generate",
         workspace={"id": "ws-a"},

@@ -32,7 +32,7 @@ _SCHEMA = {
 def _enqueue_code_request(app, job_db, *, job_id: str) -> str:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
         conn.execute(

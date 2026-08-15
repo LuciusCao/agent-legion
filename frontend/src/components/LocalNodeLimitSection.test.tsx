@@ -7,7 +7,7 @@ const catalog = [
   {
     id: 'code-default',
     kind: 'code' as const,
-    capabilities: ['fetch_questions', 'clean_and_parse', 'mark_question'],
+    capabilities: ['fetch_items', 'clean_items', 'mark_question'],
     global_capacity: 4,
   },
   {
@@ -25,18 +25,18 @@ const workflowDefinition = {
   edges: [],
   nodes: [
     {
-      key: 'fetch_questions',
+      key: 'fetch_items',
       label: '获取题目',
-      capability: 'fetch_questions',
+      capability: 'fetch_items',
       after: [],
       inputs: [],
       outputs: ['questions.json'],
     },
     {
-      key: 'clean_and_parse',
+      key: 'clean_items',
       label: '清洗与解析',
-      capability: 'clean_and_parse',
-      after: ['fetch_questions'],
+      capability: 'clean_items',
+      after: ['fetch_items'],
       inputs: ['questions.json'],
       outputs: ['parsed.json'],
     },
@@ -95,7 +95,7 @@ describe('LocalNodeLimitSection', () => {
         bindings: [
           {
             workflow_key: 'sample_workflow',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             executor_id: 'code-default',
           },
           {
@@ -107,7 +107,7 @@ describe('LocalNodeLimitSection', () => {
         node_limits: [
           {
             workflow_key: 'sample_workflow',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             concurrency_limit: 2,
           },
         ],
@@ -152,7 +152,7 @@ describe('LocalNodeLimitSection', () => {
       ).toEqual([
         {
           workflow_key: 'sample_workflow',
-          node_key: 'fetch_questions',
+          node_key: 'fetch_items',
           concurrency_limit: 3,
         },
       ])
@@ -185,7 +185,7 @@ describe('LocalNodeLimitSection', () => {
         bindings: [
           {
             workflow_key: 'sample_workflow',
-            node_key: 'clean_and_parse',
+            node_key: 'clean_items',
             executor_id: 'code-default',
           },
         ],
@@ -207,7 +207,7 @@ describe('LocalNodeLimitSection', () => {
       ).toEqual([
         {
           workflow_key: 'sample_workflow',
-          node_key: 'clean_and_parse',
+          node_key: 'clean_items',
           concurrency_limit: 2,
         },
       ])

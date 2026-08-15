@@ -417,12 +417,12 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     executor = RecordingExecutor("code-default")
 
     v1_nodes = [
-        _local_node("fetch_questions", outputs=["questions.json"]),
+        _local_node("fetch_items", outputs=["questions.json"]),
         WorkflowNode(
-            key="clean_and_parse",
-            label="clean_and_parse",
-            capability="clean_and_parse",
-            after=["fetch_questions"],
+            key="clean_items",
+            label="clean_items",
+            capability="clean_items",
+            after=["fetch_items"],
             inputs=["questions.json"],
             outputs=["questions_parsed.json"],
         ),
@@ -430,7 +430,7 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
             key="generate_key_info",
             label="generate_key_info",
             capability="generate_key_info",
-            after=["clean_and_parse"],
+            after=["clean_items"],
             inputs=["questions_parsed.json"],
             outputs=["key_info_raw.json"],
         ),
@@ -443,9 +443,9 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     )
     v2_nodes = list(v1_nodes) + [
         WorkflowNode(
-            key="classify_comprehension_eligibility",
+            key="classify_items",
             label="classify",
-            capability="classify_comprehension_eligibility",
+            capability="classify_items",
             inputs=["questions_parsed.json"],
             outputs=["comprehension_eligibility.json"],
         ),
@@ -486,8 +486,8 @@ def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     worker._poll()
 
     statuses = {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job["id"])}
-    assert "classify_comprehension_eligibility" not in statuses
-    assert statuses["fetch_questions"] in {"running", "completed"}
+    assert "classify_items" not in statuses
+    assert statuses["fetch_items"] in {"running", "completed"}
 
     executor.block_event.set()
     worker.stop()
@@ -509,14 +509,12 @@ def test_ensure_pools_reconciles_with_reloaded_registry(tmp_path: Path) -> None:
         "code-default": CodeExecutorConfig(
             kind="code",
             global_capacity=4,
-            capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
+            capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/example_intake.py")},
         ),
         "code-extra": CodeExecutorConfig(
             kind="code",
             global_capacity=1,
-            capabilities={
-                "other": CodeCapabilityConfig(path="workflow_nodes/question_clean_parse.py")
-            },
+            capabilities={"other": CodeCapabilityConfig(path="workflow_nodes/example_publish.py")},
         ),
     }
     worker.registry._runtime = RuntimeDependencies()

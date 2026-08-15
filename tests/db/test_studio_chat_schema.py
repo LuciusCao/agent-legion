@@ -59,7 +59,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
         conn.execute("drop table if exists studio_chat_sessions")
         conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('w-legacy', 'legacy-ws', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('w-legacy', 'legacy-ws', 'demo_workflow')"
         )
 
     init_db(TEST_DATABASE_URL)

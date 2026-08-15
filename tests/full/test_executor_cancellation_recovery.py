@@ -84,12 +84,12 @@ def _local_executor(repo_root: Path) -> CodeExecutor:
 
 
 def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
-    make_pi_skill(skill_root, "question_comprehension_info/blocked_pi")
+    make_pi_skill(skill_root, "demo_workflow/blocked_pi")
     return PiExecutor(
         "pi-default",
         PiConfig(binary=str(fake_pi), cancellation_grace_seconds=GRACE),
         _StubSkillManager(skill_root),
-        {"blocked_pi": PiCapabilityConfig(skill="question_comprehension_info/blocked_pi")},
+        {"blocked_pi": PiCapabilityConfig(skill="demo_workflow/blocked_pi")},
     )
 
 
@@ -101,14 +101,14 @@ def _make_registry(local_executor: CodeExecutor, pi_executor: PiExecutor) -> Any
                 "kind": "code",
                 "global_capacity": 3,
                 "capabilities": {
-                    "cooperative": {"path": "workflow_nodes/question_intake.py"},
-                    "blocked": {"path": "workflow_nodes/question_intake.py"},
+                    "cooperative": {"path": "workflow_nodes/example_intake.py"},
+                    "blocked": {"path": "workflow_nodes/example_intake.py"},
                 },
             },
             "pi-default": {
                 "kind": "pi",
                 "global_capacity": 1,
-                "capabilities": {"blocked_pi": {"skill": "question_comprehension_info/blocked_pi"}},
+                "capabilities": {"blocked_pi": {"skill": "demo_workflow/blocked_pi"}},
             },
         },
     )
@@ -127,9 +127,7 @@ def _make_nodes() -> list[Any]:
 def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace(
-        "Cancel Recovery", default_workflow_key="question_comprehension_info"
-    )
+    ws = job_db.create_workspace("Cancel Recovery", default_workflow_key="demo_workflow")
 
     fake_pi = tmp_path / "fake_pi"
     fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")

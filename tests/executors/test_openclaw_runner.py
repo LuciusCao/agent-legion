@@ -311,7 +311,7 @@ def test_resolve_skill_safety_repos_uses_locked_commit(tmp_path):
     repo = tmp_path / "skills" / "generate_chapters"
     lock = SkillsLock(
         skills={
-            "video_knowledge/generate_chapters": LockedSkillSource(
+            "demo_video_workflow/generate_chapters": LockedSkillSource(
                 repo=f"file://{repo}",
                 ref="v1.0.1",
                 commit="abc123",
@@ -328,7 +328,7 @@ def test_resolve_skill_safety_repos_falls_back_to_locked_ref(tmp_path):
     repo = tmp_path / "skills" / "review_subtitles"
     lock = SkillsLock(
         skills={
-            "video_knowledge/review_subtitles": LockedSkillSource(
+            "demo_video_workflow/review_subtitles": LockedSkillSource(
                 repo=f"file://{repo}",
                 ref="v1.0.2",
                 commit="",

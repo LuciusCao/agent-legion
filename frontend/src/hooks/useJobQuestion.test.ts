@@ -166,7 +166,7 @@ describe('useJobQuestion', () => {
       })
 
     const producerNode = {
-      node_key: 'fetch_questions',
+      node_key: 'fetch_items',
       outputs: ['questions.json'],
       status: 'running',
       started_at: '2026-06-18T09:00:00Z',

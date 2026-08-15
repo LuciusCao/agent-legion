@@ -57,12 +57,8 @@ def definitions(tmp_path: Path) -> dict[str, ExecutorConfig]:
             kind="code",
             global_capacity=4,
             capabilities={
-                "fetch_questions": CodeCapabilityConfig(
-                    path=_write_node(tmp_path, "fetch_questions.py")
-                ),
-                "clean_and_parse": CodeCapabilityConfig(
-                    path=_write_node(tmp_path, "clean_and_parse.py")
-                ),
+                "fetch_items": CodeCapabilityConfig(path=_write_node(tmp_path, "fetch_items.py")),
+                "clean_items": CodeCapabilityConfig(path=_write_node(tmp_path, "clean_items.py")),
             },
         ),
         "pi-default": PiExecutorConfig(
@@ -70,11 +66,11 @@ def definitions(tmp_path: Path) -> dict[str, ExecutorConfig]:
             global_capacity=8,
             capabilities={
                 "review_keywords": PiCapabilityConfig(
-                    skill="question_comprehension_info/review_key_info",
+                    skill="demo_workflow/review_key_info",
                     tools=("read", "write", "bash"),
                 ),
                 "extract_keywords": PiCapabilityConfig(
-                    skill="question_comprehension_info/generate_key_info",
+                    skill="demo_workflow/generate_key_info",
                     tools=("read", "write"),
                 ),
             },
@@ -143,8 +139,8 @@ def test_registry_require_returns_matching_executor(registry: ExecutorRegistry) 
 def test_registry_resolves_only_supported_capabilities(registry: ExecutorRegistry) -> None:
     executor = registry.require("pi-default", "review_keywords")
     assert executor.id == "pi-default"
-    with pytest.raises(UnsupportedCapabilityError, match="pi-default.*fetch_questions"):
-        registry.require("pi-default", "fetch_questions")
+    with pytest.raises(UnsupportedCapabilityError, match="pi-default.*fetch_items"):
+        registry.require("pi-default", "fetch_items")
 
 
 def test_registry_require_unknown_executor_raises(registry: ExecutorRegistry) -> None:
@@ -229,7 +225,7 @@ def test_registry_builds_code_executor_with_settings_and_job_db(
     )
 
     registry = ExecutorRegistry.build(definitions, runtime)
-    executor = registry.require("code-default", "fetch_questions")
+    executor = registry.require("code-default", "fetch_items")
     assert isinstance(executor, CodeExecutor)
     assert executor.settings_config == settings_config
     assert executor.job_db is job_db

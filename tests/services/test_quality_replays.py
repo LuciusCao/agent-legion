@@ -34,7 +34,7 @@ def _definition() -> WorkflowDefinition:
             "intake": WorkflowNode(
                 key="intake",
                 label="intake",
-                capability="question_intake",
+                capability="intake_items",
                 outputs=["question.json"],
             ),
             "generate": WorkflowNode(

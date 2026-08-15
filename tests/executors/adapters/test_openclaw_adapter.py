@@ -58,7 +58,7 @@ def test_openclaw_executor_returns_normalized_result(tmp_path: Path) -> None:
         executor_id="oc-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="interaction_generate",
         capability="interaction_generate",
         workspace={"id": "ws-a"},
@@ -101,7 +101,7 @@ def test_openclaw_executor_fails_when_output_missing(tmp_path: Path) -> None:
         executor_id="oc-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="interaction_generate",
         capability="interaction_generate",
         workspace={"id": "ws-a"},
@@ -135,7 +135,7 @@ def test_openclaw_executor_cancel_records_intent(tmp_path: Path) -> None:
         executor_id="oc-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="interaction_generate",
         capability="interaction_generate",
         workspace={"id": "ws-a"},
@@ -177,7 +177,7 @@ def test_openclaw_executor_prepends_skill_to_prompt(tmp_path: Path) -> None:
         executor_id="oc-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="interaction_generate",
         capability="interaction_generate",
         workspace={"id": "ws-a"},
@@ -217,7 +217,7 @@ def test_build_openclaw_executor_resolves_skill_safety_refs_from_lock(tmp_path: 
     manager = _skill_manager(
         tmp_path,
         {
-            "video_knowledge/generate_chapters": {
+            "demo_video_workflow/generate_chapters": {
                 "repo": f"file://{skill_repo}",
                 "ref": "v1.0.1",
                 "commit": "abc123",

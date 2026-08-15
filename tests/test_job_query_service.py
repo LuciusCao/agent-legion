@@ -589,7 +589,7 @@ def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
         workflow_revision_id="education_video_problems_generation:v1",
         workflow_definition_hash="hash1",

@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 
 const workflow = {
-  key: 'video_knowledge',
+  key: 'demo_video_workflow',
   label: '知识视频 DAG',
   intake: { modes: [] },
   nodes: [],
@@ -13,7 +13,7 @@ const workflow = {
 const revision = {
   id: 'rev-active',
   workspace_id: 'ws1',
-  workflow_key: 'video_knowledge',
+  workflow_key: 'demo_video_workflow',
   version: 1,
   status: 'active',
   definition_hash: '17d8077e',
@@ -30,7 +30,7 @@ const baseProps = {
   revisions: [revision],
   executorCatalog: [],
   agentCatalog: [],
-  definitionYaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
+  definitionYaml: 'key: demo_video_workflow\nlabel: 知识视频 DAG\n',
   setDefinitionYaml: vi.fn(),
   selectedNodeKey: null,
   setSelectedNodeKey: vi.fn(),

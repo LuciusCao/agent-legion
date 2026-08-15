@@ -223,7 +223,7 @@ def test_category_batch_matches_per_job_rerun_targets(rerun_service, job_db) -> 
         ws_id, "business", job_ids=[business_job["id"]]
     )
     assert results[0]["status"] == "succeeded"
-    # rerun_upstream：clean_and_parse 的上游是 fetch_questions。
+    # rerun_upstream：clean_items 的上游是 fetch_items。
     assert results[0]["rerun_nodes"] == ["intake_knowledge_points"]
     nodes = {n["node_key"]: n["status"] for n in job_db.list_job_nodes(business_job["id"])}
     assert nodes["intake_knowledge_points"] == "pending"

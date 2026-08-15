@@ -235,7 +235,7 @@ export function ExecutorEditor({
           fullWidth
           multiline
           minRows={6}
-          placeholder='{"clean_and_parse":{"path":"workflow_nodes/question_clean_parse.py"}}'
+          placeholder='{"clean_items":{"path":"workflow_nodes/example_publish.py"}}'
         />
       </div>
       <div className={styles.editorActions}>

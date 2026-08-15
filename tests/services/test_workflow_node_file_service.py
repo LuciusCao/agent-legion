@@ -75,14 +75,14 @@ def test_referencing_capabilities_matches_code_paths() -> None:
                 "kind": "code",
                 "global_capacity": 1,
                 "capabilities": {
-                    "fetch_questions": {"path": "workflow_nodes/question_intake.py"},
-                    "download_video": {"path": "workflow_nodes/video_download.py"},
+                    "fetch_items": {"path": "workflow_nodes/example_intake.py"},
+                    "fetch_media": {"path": "workflow_nodes/example_publish.py"},
                 },
             }
         ),
     }
 
-    assert referencing_capabilities(definitions, "workflow_nodes/question_intake.py") == [
-        {"executor_id": "code-default", "capability": "fetch_questions"}
+    assert referencing_capabilities(definitions, "workflow_nodes/example_intake.py") == [
+        {"executor_id": "code-default", "capability": "fetch_items"}
     ]
     assert referencing_capabilities(definitions, "workflow_nodes/other.py") == []

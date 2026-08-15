@@ -40,7 +40,7 @@ const executor: ExecutorListItem = {
   executor_id: 'code-default',
   kind: 'code',
   global_capacity: 16,
-  capabilities: ['clean_and_parse', 'fetch_questions'],
+  capabilities: ['clean_items', 'fetch_items'],
   version: 1,
   status: 'published',
   has_draft: false,
@@ -56,7 +56,7 @@ const publishedVersion: ExecutorVersion = {
     kind: 'code',
     global_capacity: 16,
     capabilities: {
-      clean_and_parse: { path: 'workflow_nodes/question_clean_parse.py' },
+      clean_items: { path: 'workflow_nodes/example_publish.py' },
     },
   },
   definition_hash: 'deadbeef',
@@ -183,7 +183,7 @@ describe('ExecutorsPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: /code-default/ }))
     const field = await screen.findByLabelText('capabilities（JSON，可空）')
     await waitFor(() =>
-      expect((field as HTMLTextAreaElement).value).toContain('clean_and_parse')
+      expect((field as HTMLTextAreaElement).value).toContain('clean_items')
     )
     fireEvent.change(field, { target: { value: '{not json' } })
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }))

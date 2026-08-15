@@ -22,9 +22,9 @@ function renderPage() {
 vi.mock('../api', () => {
   const activeRevisionPayload = {
     revision: {
-      id: 'ws1:video_knowledge:v1',
+      id: 'ws1:demo_video_workflow:v1',
       workspace_id: 'ws1',
-      workflow_key: 'video_knowledge',
+      workflow_key: 'demo_video_workflow',
       version: 1,
       status: 'active',
       definition_hash: 'abcdef1234567890',
@@ -32,36 +32,36 @@ vi.mock('../api', () => {
       published_at: '2026-07-02T00:00:00Z',
     },
     workflow: {
-      key: 'video_knowledge',
+      key: 'demo_video_workflow',
       label: '知识视频 DAG',
       intake: { modes: [] },
       edges: [
         {
-          source: 'fetch_questions',
-          target: 'clean_and_parse',
+          source: 'fetch_items',
+          target: 'clean_items',
           condition: null,
         },
       ],
       nodes: [
         {
-          key: 'fetch_questions',
+          key: 'fetch_items',
           label: '获取题目',
-          capability: 'fetch_questions',
+          capability: 'fetch_items',
           after: [],
           inputs: [],
           outputs: ['questions.json'],
         },
         {
-          key: 'clean_and_parse',
+          key: 'clean_items',
           label: '清洗与解析',
-          capability: 'clean_and_parse',
-          after: ['fetch_questions'],
+          capability: 'clean_items',
+          after: ['fetch_items'],
           inputs: ['questions.json'],
           outputs: ['questions_parsed.json'],
         },
       ],
     },
-    definition_yaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
+    definition_yaml: 'key: demo_video_workflow\nlabel: 知识视频 DAG\n',
   }
 
   return {
@@ -158,7 +158,7 @@ describe('WorkflowStudioPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'YAML 高级编辑' }))
     expect(
-      await screen.findByDisplayValue(/key: video_knowledge/)
+      await screen.findByDisplayValue(/key: demo_video_workflow/)
     ).toBeInTheDocument()
   })
 
@@ -194,7 +194,9 @@ describe('WorkflowStudioPage', () => {
 
     expect(within(commandBar).getByText(/已同步/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'YAML 高级编辑' }))
-    expect(screen.getByDisplayValue(/key: video_knowledge/)).toBeInTheDocument()
+    expect(
+      screen.getByDisplayValue(/key: demo_video_workflow/)
+    ).toBeInTheDocument()
   })
 
   it('opens publish review dialog before publishing', async () => {

@@ -16,7 +16,7 @@ def queries(tmp_path: Path) -> JobQueries:
 
 
 def test_get_workspace_executor_configuration_empty(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
 
     assert queries.get_workspace_executor_configuration(workspace["id"]) == {
         "allocations": [],
@@ -26,21 +26,21 @@ def test_get_workspace_executor_configuration_empty(queries: JobQueries) -> None
 
 
 def test_replace_executor_configuration_is_authoritative(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
     queries.replace_workspace_executor_configuration(
         workspace["id"],
         allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
         bindings=[
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "workflow_key": "demo_workflow",
+                "node_key": "fetch_items",
                 "executor_id": "code-default",
             }
         ],
         node_limits=[
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "workflow_key": "demo_workflow",
+                "node_key": "fetch_items",
                 "concurrency_limit": 2,
             }
         ],
@@ -57,19 +57,19 @@ def test_replace_executor_configuration_is_authoritative(queries: JobQueries) ->
 
 
 def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
     original_allocations = [{"executor_id": "code-default", "concurrency_limit": 4}]
     original_bindings = [
         {
-            "workflow_key": "question_comprehension_info",
-            "node_key": "fetch_questions",
+            "workflow_key": "demo_workflow",
+            "node_key": "fetch_items",
             "executor_id": "code-default",
         }
     ]
     original_node_limits = [
         {
-            "workflow_key": "question_comprehension_info",
-            "node_key": "fetch_questions",
+            "workflow_key": "demo_workflow",
+            "node_key": "fetch_items",
             "concurrency_limit": 2,
         }
     ]
@@ -87,15 +87,15 @@ def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
             allocations=[{"executor_id": "pi-default", "concurrency_limit": 8}],
             bindings=[
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "fetch_questions",
+                    "workflow_key": "demo_workflow",
+                    "node_key": "fetch_items",
                     "executor_id": "pi-default",
                 }
             ],
             node_limits=[
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "fetch_questions",
+                    "workflow_key": "demo_workflow",
+                    "node_key": "fetch_items",
                     "concurrency_limit": 1,
                 }
             ],
@@ -112,15 +112,15 @@ def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
         ],
         "bindings": [
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "workflow_key": "demo_workflow",
+                "node_key": "fetch_items",
                 "executor_id": "code-default",
             }
         ],
         "node_limits": [
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "workflow_key": "demo_workflow",
+                "node_key": "fetch_items",
                 "concurrency_limit": 2,
             }
         ],

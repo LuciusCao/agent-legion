@@ -45,12 +45,12 @@ def _create_settings(tmp_path: Path) -> Settings:
 def _create_job(
     job_db: JobQueries, workspace_id: str, source_id: str, status: str = "queued"
 ) -> dict[str, Any]:
-    job_db.create_workspace(workspace_id, default_workflow_key="question_comprehension_info")
+    job_db.create_workspace(workspace_id, default_workflow_key="demo_workflow")
     batch = job_db.create_batch(
-        "question_comprehension_info", "batch_by_ids", {"question_ids": [source_id]}, workspace_id
+        "demo_workflow", "batch_by_ids", {"question_ids": [source_id]}, workspace_id
     )
     job = job_db.create_job(
-        "question_comprehension_info",
+        "demo_workflow",
         "question",
         source_id,
         batch["id"],
@@ -96,7 +96,7 @@ def _insert_active_lease(
                 "local",
                 workspace_id,
                 job_id,
-                "question_comprehension_info",
+                "demo_workflow",
                 node_key,
                 node_run_id,
                 database_timestamp(now),

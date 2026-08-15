@@ -451,7 +451,7 @@ def _make_worker(
         kind="code",
         global_capacity=2,
         capabilities={
-            node.capability: CodeCapabilityConfig(path="workflow_nodes/question_intake.py")
+            node.capability: CodeCapabilityConfig(path="workflow_nodes/example_intake.py")
             for definition in definitions
             for node in definition.nodes.values()
         },

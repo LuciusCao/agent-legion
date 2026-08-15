@@ -6,7 +6,7 @@ import type { WorkflowNodeRecord } from '../../../types'
 const node: WorkflowNodeRecord = {
   key: 'fetch',
   label: 'Fetch',
-  capability: 'fetch_questions',
+  capability: 'fetch_items',
   after: [],
   inputs: [],
   outputs: ['questions.json'],
@@ -18,7 +18,7 @@ label: Demo
 nodes:
   fetch:
     label: Fetch
-    capability: fetch_questions
+    capability: fetch_items
     after: []
     inputs: []
     outputs:
@@ -56,11 +56,11 @@ describe('WorkflowNodeStructuredEditor', () => {
     )
 
     fireEvent.change(screen.getByLabelText('能力'), {
-      target: { value: 'fetch_questions_v2' },
+      target: { value: 'fetch_items_v2' },
     })
 
     expect(onChange).toHaveBeenLastCalledWith(
-      expect.stringContaining('capability: fetch_questions_v2')
+      expect.stringContaining('capability: fetch_items_v2')
     )
   })
 

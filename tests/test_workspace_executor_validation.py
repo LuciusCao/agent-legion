@@ -27,14 +27,14 @@ class ValidationContext:
 @pytest.fixture
 def context() -> ValidationContext:
     workflow = WorkflowDefinition(
-        key="question_comprehension_info",
+        key="demo_workflow",
         label="Reading Analysis",
         intake=WorkflowIntake(),
         nodes={
-            "fetch_questions": WorkflowNode(
-                key="fetch_questions",
+            "fetch_items": WorkflowNode(
+                key="fetch_items",
                 label="Fetch Questions",
-                capability="fetch_questions",
+                capability="fetch_items",
             ),
             "review_keywords": WorkflowNode(
                 key="review_keywords",
@@ -48,16 +48,14 @@ def context() -> ValidationContext:
             kind="code",
             global_capacity=4,
             capabilities={
-                "fetch_questions": CodeCapabilityConfig(path="workflow_nodes/question_intake.py"),
+                "fetch_items": CodeCapabilityConfig(path="workflow_nodes/example_intake.py"),
             },
         ),
         "pi-default": PiExecutorConfig(
             kind="pi",
             global_capacity=2,
             capabilities={
-                "review_keywords": PiCapabilityConfig(
-                    skill="question_comprehension_info/review_key_info"
-                ),
+                "review_keywords": PiCapabilityConfig(skill="demo_workflow/review_key_info"),
             },
         ),
     }
@@ -69,13 +67,13 @@ def allocation(executor_id: str, concurrency_limit: int) -> dict[str, object]:
 
 
 def binding(
-    node_key: str, executor_id: str, workflow_key: str = "question_comprehension_info"
+    node_key: str, executor_id: str, workflow_key: str = "demo_workflow"
 ) -> dict[str, object]:
     return {"workflow_key": workflow_key, "node_key": node_key, "executor_id": executor_id}
 
 
 def node_limit(
-    node_key: str, concurrency_limit: int, workflow_key: str = "question_comprehension_info"
+    node_key: str, concurrency_limit: int, workflow_key: str = "demo_workflow"
 ) -> dict[str, object]:
     return {
         "workflow_key": workflow_key,
@@ -138,15 +136,15 @@ def test_duplicate_node_bindings_are_rejected(context: ValidationContext) -> Non
 
     with pytest.raises(
         InvalidOperationError,
-        match="Duplicate Node binding question_comprehension_info\\.fetch_questions",
+        match="Duplicate Node binding demo_workflow\\.fetch_items",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("code-default", 4)],
             bindings=[
-                binding("fetch_questions", "code-default"),
-                binding("fetch_questions", "code-default"),
+                binding("fetch_items", "code-default"),
+                binding("fetch_items", "code-default"),
             ],
             node_limits=[],
         )
@@ -158,13 +156,13 @@ def test_binding_workflow_must_equal_workspace_workflow(context: ValidationConte
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Unknown Workflow Node other_workflow\\.fetch_questions"
+        InvalidOperationError, match="Unknown Workflow Node other_workflow\\.fetch_items"
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("code-default", 4)],
-            bindings=[binding("fetch_questions", "code-default", workflow_key="other_workflow")],
+            bindings=[binding("fetch_items", "code-default", workflow_key="other_workflow")],
             node_limits=[],
         )
 
@@ -176,7 +174,7 @@ def test_binding_node_must_exist_in_workflow(context: ValidationContext) -> None
 
     with pytest.raises(
         InvalidOperationError,
-        match="Unknown Workflow Node question_comprehension_info\\.unknown_node",
+        match="Unknown Workflow Node demo_workflow\\.unknown_node",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -199,7 +197,7 @@ def test_binding_executor_must_be_allocated(context: ValidationContext) -> None:
             workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[],
-            bindings=[binding("fetch_questions", "code-default")],
+            bindings=[binding("fetch_items", "code-default")],
             node_limits=[],
         )
 
@@ -226,16 +224,16 @@ def test_duplicate_node_limits_are_rejected(context: ValidationContext) -> None:
 
     with pytest.raises(
         InvalidOperationError,
-        match="Duplicate Node limit question_comprehension_info\\.fetch_questions",
+        match="Duplicate Node limit demo_workflow\\.fetch_items",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("code-default", 4)],
-            bindings=[binding("fetch_questions", "code-default")],
+            bindings=[binding("fetch_items", "code-default")],
             node_limits=[
-                node_limit("fetch_questions", 1),
-                node_limit("fetch_questions", 2),
+                node_limit("fetch_items", 1),
+                node_limit("fetch_items", 2),
             ],
         )
 
@@ -247,14 +245,14 @@ def test_node_limit_requires_existing_binding(context: ValidationContext) -> Non
 
     with pytest.raises(
         InvalidOperationError,
-        match="Node limit requires binding for question_comprehension_info\\.fetch_questions",
+        match="Node limit requires binding for demo_workflow\\.fetch_items",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("code-default", 4)],
             bindings=[],
-            node_limits=[node_limit("fetch_questions", 1)],
+            node_limits=[node_limit("fetch_items", 1)],
         )
 
 
@@ -265,7 +263,7 @@ def test_node_limit_rejects_agent_bound_node(context: ValidationContext) -> None
 
     with pytest.raises(
         InvalidOperationError,
-        match="Agent-bound Node question_comprehension_info\\.review_keywords cannot have a Node limit",
+        match="Agent-bound Node demo_workflow\\.review_keywords cannot have a Node limit",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -283,14 +281,14 @@ def test_node_limit_must_not_exceed_workspace_allocation(context: ValidationCont
 
     with pytest.raises(
         InvalidOperationError,
-        match="Node limit for question_comprehension_info\\.fetch_questions exceeds Workspace allocation for code-default",
+        match="Node limit for demo_workflow\\.fetch_items exceeds Workspace allocation for code-default",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("code-default", 2)],
-            bindings=[binding("fetch_questions", "code-default")],
-            node_limits=[node_limit("fetch_questions", 3)],
+            bindings=[binding("fetch_items", "code-default")],
+            node_limits=[node_limit("fetch_items", 3)],
         )
 
 
@@ -303,6 +301,6 @@ def test_unbound_node_is_valid(context: ValidationContext) -> None:
         workflow=context.workflow,
         executor_definitions=context.executors,
         allocations=[allocation("code-default", 4)],
-        bindings=[binding("fetch_questions", "code-default")],
+        bindings=[binding("fetch_items", "code-default")],
         node_limits=[],
     )

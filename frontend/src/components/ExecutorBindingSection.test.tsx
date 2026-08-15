@@ -26,7 +26,7 @@ const catalog = [
   {
     id: 'code-default',
     kind: 'code' as const,
-    capabilities: ['fetch_questions', 'clean_and_parse', 'mark_question'],
+    capabilities: ['fetch_items', 'clean_items', 'mark_question'],
     global_capacity: 4,
   },
 ]
@@ -38,9 +38,9 @@ const workflowDefinition = {
   edges: [],
   nodes: [
     {
-      key: 'fetch_questions',
+      key: 'fetch_items',
       label: '获取题目',
-      capability: 'fetch_questions',
+      capability: 'fetch_items',
       after: [],
       inputs: [],
       outputs: ['questions.json'],
@@ -130,7 +130,7 @@ describe('ExecutorBindingSection', () => {
   it('shows a binding select for every workflow node', () => {
     render(<ExecutorBindingSection />)
 
-    expect(getSelectInput('fetch_questions')).toBeInTheDocument()
+    expect(getSelectInput('fetch_items')).toBeInTheDocument()
     expect(getSelectInput('unsupported_node')).toBeInTheDocument()
     expect(getSelectInput('review_keywords')).toBeInTheDocument()
     expect(getSelectInput('generate_distractors')).toBeInTheDocument()
@@ -140,9 +140,9 @@ describe('ExecutorBindingSection', () => {
     render(<ExecutorBindingSection />)
 
     // The rendered input values reflect the available options.
-    expect(getSelectInput('fetch_questions').value).toBe('')
-    changeSelectValue('fetch_questions', 'code-default')
-    expect(getSelectInput('fetch_questions').value).toBe('code-default')
+    expect(getSelectInput('fetch_items').value).toBe('')
+    changeSelectValue('fetch_items', 'code-default')
+    expect(getSelectInput('fetch_items').value).toBe('code-default')
   })
 
   it('matches local nodes by capability, independent of executor implementation', () => {
@@ -151,7 +151,7 @@ describe('ExecutorBindingSection', () => {
       {
         id: 'alternate-local',
         kind: 'pi' as const,
-        capabilities: ['fetch_questions'],
+        capabilities: ['fetch_items'],
         global_capacity: 1,
       },
     ]
@@ -178,11 +178,11 @@ describe('ExecutorBindingSection', () => {
     render(<ExecutorBindingSection />)
 
     // Both compatible executors are selectable.
-    changeSelectValue('fetch_questions', 'code-default')
-    expect(getSelectInput('fetch_questions').value).toBe('code-default')
+    changeSelectValue('fetch_items', 'code-default')
+    expect(getSelectInput('fetch_items').value).toBe('code-default')
 
-    changeSelectValue('fetch_questions', 'alternate-local')
-    expect(getSelectInput('fetch_questions').value).toBe('alternate-local')
+    changeSelectValue('fetch_items', 'alternate-local')
+    expect(getSelectInput('fetch_items').value).toBe('alternate-local')
   })
 
   it('displays a warning when no allocated executor supports the capability', () => {
@@ -210,7 +210,7 @@ describe('ExecutorBindingSection', () => {
     expect(
       screen.queryByTestId('binding-select-review_keywords')
     ).not.toBeInTheDocument()
-    expect(getSelectInput('fetch_questions')).toBeInTheDocument()
+    expect(getSelectInput('fetch_items')).toBeInTheDocument()
     expect(getSelectInput('generate_distractors')).toBeInTheDocument()
   })
 })

@@ -73,11 +73,11 @@ def test_local_node_limit_blocks_same_node_but_allows_other_local_node(
     with queries.connect() as conn:
         conn.execute(
             "insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (workspace_id, "question_comprehension_info", other_node_key, executor_id),
+            (workspace_id, "demo_workflow", other_node_key, executor_id),
         )
         conn.execute(
             "insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit) values (%s, %s, %s, %s)",
-            (workspace_id, "question_comprehension_info", other_node_key, 1),
+            (workspace_id, "demo_workflow", other_node_key, 1),
         )
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values (%s, %s, 'pending')"
@@ -192,7 +192,7 @@ def test_claim_rejected_when_target_snapshot_stale(
         "ws-stale",
         "code-default",
         workspace_limit=2,
-        node_keys=["review_keywords", "clean_and_parse"],
+        node_keys=["review_keywords", "clean_items"],
     )
     queries.set_job_execution_target(job_id, "review_keywords")
 
@@ -205,7 +205,7 @@ def test_claim_rejected_when_target_snapshot_stale(
         allowed_node_keys=("review_keywords",),
     )
 
-    queries.set_job_execution_target(job_id, "clean_and_parse")
+    queries.set_job_execution_target(job_id, "clean_items")
 
     claim = repo_a.try_claim(stale_request)
     assert claim is None

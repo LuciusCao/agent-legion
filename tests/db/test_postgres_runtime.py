@@ -58,7 +58,7 @@ def test_write_transaction_rolls_back() -> None:
         write_transaction(TEST_DATABASE_URL) as conn,
     ):
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info')",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow')",
             ("rolled-back", "Rolled back"),
         )
         raise RuntimeError("rollback")
@@ -71,7 +71,7 @@ def test_connection_pool_reuses_short_lived_connections(tmp_path: Path) -> None:
     del tmp_path
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info')",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow')",
             ("pool", "Pool"),
         )
     with read_connection(TEST_DATABASE_URL) as conn:

@@ -265,13 +265,13 @@ def test_rerun_node_rejects_running_job(tmp_path):
         job_id = "test_education_video_problems_generation_Q1"
         log_dir = app.state.settings.logs_dir / "jobs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"{job_id}-fetch_questions.log"
+        log_path = log_dir / f"{job_id}-fetch_items.log"
         log_path.write_text("running")
         app.state.job_db.start_node_run(
             job_id,
             "intake_knowledge_points",
             ["cmd"],
-            f"logs/jobs/{job_id}-fetch_questions.log",
+            f"logs/jobs/{job_id}-fetch_items.log",
         )
         resp = c.post(f"/api/jobs/{job_id}/nodes/intake_knowledge_points/rerun")
     assert resp.status_code == 400

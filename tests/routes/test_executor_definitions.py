@@ -19,12 +19,12 @@ BASE = "/api/executor-definitions"
 PAYLOAD_V1 = {
     "kind": "code",
     "global_capacity": 2,
-    "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+    "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
 }
 PAYLOAD_V2 = {
     "kind": "code",
     "global_capacity": 4,
-    "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+    "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
 }
 
 
@@ -151,7 +151,7 @@ def test_invalid_definition_rejected(client) -> None:
             **PAYLOAD_V1,
             "capabilities": {
                 "x": {
-                    "path": "workflow_nodes/question_clean_parse.py",
+                    "path": "workflow_nodes/example_publish.py",
                     "config_schema": {"type": "object", "properties": {"bad": {"type": "nope"}}},
                 }
             },
@@ -194,8 +194,8 @@ def test_publish_hot_reloads_runtime_registry(client) -> None:
     published = client.post(f"{BASE}/code-extra/publish")
     assert published.status_code == 200
 
-    executor = registry.require("code-extra", "clean_and_parse")
-    assert executor.supports("clean_and_parse")
+    executor = registry.require("code-extra", "clean_items")
+    assert executor.supports("clean_items")
     assert registry.global_capacity("code-extra") == 2
     settings_definitions = client.app.state.settings.executor_definitions
     assert settings_definitions["code-extra"].global_capacity == 2

@@ -80,7 +80,7 @@ describe('agentDefinitions api', () => {
       agent_id: 'agent-1',
       capability: 'generate_key_info',
       runtime: 'pi' as const,
-      skill: 'question_comprehension_info/generate_key_info',
+      skill: 'demo_workflow/generate_key_info',
       tools: ['read'],
     }
     const result = await createAgentDefinition(body)

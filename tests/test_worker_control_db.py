@@ -46,11 +46,11 @@ def test_app_startup_resets_dispatch_to_paused(tmp_path: Path):
 
     app1 = create_app(data_dir=tmp_path / "d1", start_worker=False)
     control1 = app1.state.workspace_worker_control
-    control1.resume("question_comprehension")
-    assert control1.is_paused("question_comprehension") is False
+    control1.resume("demo_workspace")
+    assert control1.is_paused("demo_workspace") is False
 
     app2 = create_app(data_dir=tmp_path / "d2", start_worker=False)
-    assert app2.state.workspace_worker_control.is_paused("question_comprehension") is True
+    assert app2.state.workspace_worker_control.is_paused("demo_workspace") is True
 
 
 def test_updated_by_recorded(db_path):

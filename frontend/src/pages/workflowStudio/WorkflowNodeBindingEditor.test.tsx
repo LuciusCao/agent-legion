@@ -16,7 +16,7 @@ const mockGetCatalog = vi.mocked(getExecutorCatalog)
 const node: WorkflowNodeRecord = {
   key: 'build',
   label: '构建',
-  capability: 'fetch_questions',
+  capability: 'fetch_items',
   after: [],
   inputs: [],
   outputs: [],
@@ -28,17 +28,17 @@ const executorCatalog: ExecutorDefinition[] = [
     id: 'code-default',
     kind: 'code',
     global_capacity: 16,
-    capabilities: ['fetch_questions'],
+    capabilities: ['fetch_items'],
     capability_details: [
-      { name: 'fetch_questions', path: 'workflow_nodes/fetch_questions.py' },
+      { name: 'fetch_items', path: 'workflow_nodes/fetch_items.py' },
     ],
   },
   {
     id: 'pi-runner',
     kind: 'pi',
     global_capacity: 4,
-    capabilities: ['fetch_questions'],
-    capability_details: [{ name: 'fetch_questions', skill: 'ns/skill' }],
+    capabilities: ['fetch_items'],
+    capability_details: [{ name: 'fetch_items', skill: 'ns/skill' }],
   },
   {
     id: 'unallocated',

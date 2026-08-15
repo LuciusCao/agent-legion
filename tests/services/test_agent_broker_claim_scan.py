@@ -36,7 +36,7 @@ def _insert_job_rows(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'question_comprehension_info') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(

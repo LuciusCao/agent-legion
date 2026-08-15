@@ -21,11 +21,9 @@ def test_job_query_connections_use_postgres(tmp_path: Path) -> None:
 
 def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Cascade Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Cascade Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-CASCADE",
         batch_id="",
@@ -57,11 +55,9 @@ def _looks_like_timestamp(value: datetime | str) -> bool:
 
 def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Created At Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Created At Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-CREATED",
         batch_id="",
@@ -71,7 +67,7 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
     )
 
     assert job["storage_dir"] == job_storage_ref(
-        "created_at_workspace", "created_at_workspace_question_comprehension_info_Q-CREATED"
+        "created_at_workspace", "created_at_workspace_demo_workflow_Q-CREATED"
     )
     assert job_storage_dir(tmp_path / "jobs", "created_at_workspace", job["id"]).is_dir()
 
@@ -82,11 +78,9 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
 
 def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Rerun Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Rerun Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-RERUN",
         batch_id="",
@@ -128,11 +122,9 @@ def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
 
 def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Target Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Target Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-TARGET",
         batch_id="",
@@ -163,11 +155,9 @@ def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
 
 def test_pause_and_resume_job(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Pause Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Pause Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-PAUSE",
         batch_id="",
@@ -193,11 +183,9 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
 
 def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Continue Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Continue Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-CONTINUE",
         batch_id="",
@@ -229,11 +217,9 @@ def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
 
 def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Validation Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Validation Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-VALID",
         batch_id="",
@@ -261,11 +247,9 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
 
 def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "UpdatedAt Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("UpdatedAt Workspace", default_workflow_key="demo_workflow")
     job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-UPDATED",
         batch_id="",
@@ -329,14 +313,10 @@ def test_execution_control_mutations_raise_for_unknown_job(tmp_path: Path) -> No
 
 def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "List By Ids Workspace", default_workflow_key="question_comprehension_info"
-    )
-    other_workspace = db.create_workspace(
-        "Other Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("List By Ids Workspace", default_workflow_key="demo_workflow")
+    other_workspace = db.create_workspace("Other Workspace", default_workflow_key="demo_workflow")
     job1 = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q1",
         batch_id="",
@@ -345,7 +325,7 @@ def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
         workspace_id=workspace["id"],
     )
     job2 = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q2",
         batch_id="",
@@ -354,7 +334,7 @@ def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
         workspace_id=workspace["id"],
     )
     other_job = db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question_id",
         source_id="Q-OTHER",
         batch_id="",
@@ -371,7 +351,5 @@ def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
 
 def test_list_jobs_by_ids_returns_empty_for_empty_input(tmp_path: Path) -> None:
     db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = db.create_workspace(
-        "Empty List Workspace", default_workflow_key="question_comprehension_info"
-    )
+    workspace = db.create_workspace("Empty List Workspace", default_workflow_key="demo_workflow")
     assert db.list_jobs_by_ids(workspace["id"], []) == []

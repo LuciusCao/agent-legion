@@ -13,7 +13,7 @@ def _setup_workspace(
     workspace_limit: int,
     node_key: str = "review_keywords",
     local_limit: int | None = 1,
-    workflow_key: str = "question_comprehension_info",
+    workflow_key: str = "demo_workflow",
     node_keys: list[str] | None = None,
 ) -> tuple[str, str]:
     workspace = queries.create_workspace(name=name, default_workflow_key=workflow_key)
@@ -41,7 +41,7 @@ def _create_job_in_workspace(
     queries: JobQueries,
     workspace_id: str,
     node_key: str = "review_keywords",
-    workflow_key: str = "question_comprehension_info",
+    workflow_key: str = "demo_workflow",
     node_keys: list[str] | None = None,
 ) -> str:
     job = queries.create_job(
@@ -63,7 +63,7 @@ def _bind_executor_to_node(
     workspace_limit: int,
     node_key: str = "review_keywords",
     local_limit: int | None = 1,
-    workflow_key: str = "question_comprehension_info",
+    workflow_key: str = "demo_workflow",
 ) -> None:
     with queries.connect() as conn:
         conn.execute(
@@ -105,7 +105,7 @@ def _claim_request(
     local_node_limit: int | None = 1,
     ttl: int = 60,
     log_path: str = "logs/run.log",
-    workflow_key: str = "question_comprehension_info",
+    workflow_key: str = "demo_workflow",
     execution_mode: str = "full",
     target_node_key: str | None = None,
     allowed_node_keys: tuple[str, ...] = (),

@@ -18,7 +18,7 @@ export function questionArtifactVersion(detail: JobDetail | null): string {
 export function comprehensionVersion(detail: JobDetail | null): string {
   const findNode = (key: string) =>
     detail?.nodes.find((node) => node.node_key === key)
-  const assembleNode = findNode('assemble_comprehension_info')
+  const assembleNode = findNode('assemble_items')
   const reviewKeyInfoNode = findNode('review_key_info')
   const reviewPossibleErrorsNode = findNode('review_possible_errors')
   return [

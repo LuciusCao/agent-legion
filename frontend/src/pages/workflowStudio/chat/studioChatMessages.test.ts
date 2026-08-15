@@ -97,7 +97,7 @@ describe('groupToolCalls', () => {
 })
 
 describe('extractWorkflowDraft', () => {
-  const yaml = 'key: video_knowledge\nnodes: []\n'
+  const yaml = 'key: demo_video_workflow\nnodes: []\n'
   const validateInput = { workspace_id: 'ws1', definition_yaml: yaml }
 
   it('returns null when no validate/compare call carries definition_yaml', () => {

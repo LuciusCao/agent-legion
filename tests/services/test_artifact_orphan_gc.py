@@ -26,7 +26,7 @@ def _make_job(job_id: str) -> None:
     """artifact_refs.job_id has a real FK to jobs(id); create a minimal job row."""
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('ws', 'ws', 'question_comprehension_info') on conflict (id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws', 'ws', 'demo_workflow') on conflict (id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"

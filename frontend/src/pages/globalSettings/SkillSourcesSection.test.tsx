@@ -18,16 +18,16 @@ vi.mock('../../api/skillSources', () => ({
 const sources: SkillSourcesResponse = {
   skills: [
     {
-      key: 'video_knowledge/generate_chapters',
-      repo: '~/.agents/skills/agent-legion/video_knowledge/generate_chapters',
+      key: 'demo_video_workflow/generate_chapters',
+      repo: '~/.agents/skills/agent-legion/demo_video_workflow/generate_chapters',
       ref: 'v1.0.2',
       locked_commit: '957768e8e0e0ed731f3e07ac0111f961d8f42ae9',
       resolved_at: '2026-08-07T01:44:10Z',
       stale: false,
     },
     {
-      key: 'question_comprehension_info/generate_key_info',
-      repo: '~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info',
+      key: 'demo_workflow/generate_key_info',
+      repo: '~/.agents/skills/agent-legion/demo_workflow/generate_key_info',
       ref: 'v9.9.9',
       locked_commit: '42356b845038780016d28e49a9e99bea1c685ec0',
       resolved_at: '2026-08-07T01:44:10Z',
@@ -54,10 +54,10 @@ describe('SkillSourcesSection', () => {
     renderSection()
 
     expect(
-      await screen.findByText('video_knowledge/generate_chapters')
+      await screen.findByText('demo_video_workflow/generate_chapters')
     ).toBeInTheDocument()
     expect(
-      screen.getByText('question_comprehension_info/generate_key_info')
+      screen.getByText('demo_workflow/generate_key_info')
     ).toBeInTheDocument()
     // Locked commits render truncated to 8 chars.
     expect(screen.getByText('957768e8')).toBeInTheDocument()
@@ -77,22 +77,22 @@ describe('SkillSourcesSection', () => {
     }))
 
     renderSection()
-    await screen.findByText('video_knowledge/generate_chapters')
+    await screen.findByText('demo_video_workflow/generate_chapters')
 
     fireEvent.click(
-      screen.getByLabelText('编辑 video_knowledge/generate_chapters')
+      screen.getByLabelText('编辑 demo_video_workflow/generate_chapters')
     )
     fireEvent.change(
-      screen.getByLabelText('video_knowledge/generate_chapters ref'),
+      screen.getByLabelText('demo_video_workflow/generate_chapters ref'),
       { target: { value: 'v1.0.3' } }
     )
     fireEvent.click(screen.getByText('保存'))
 
     await waitFor(() => {
       expect(updateSkillSource).toHaveBeenCalledWith(
-        'video_knowledge/generate_chapters',
+        'demo_video_workflow/generate_chapters',
         {
-          repo: '~/.agents/skills/agent-legion/video_knowledge/generate_chapters',
+          repo: '~/.agents/skills/agent-legion/demo_video_workflow/generate_chapters',
           ref: 'v1.0.3',
         }
       )
@@ -108,7 +108,7 @@ describe('SkillSourcesSection', () => {
     })
 
     renderSection()
-    await screen.findByText('video_knowledge/generate_chapters')
+    await screen.findByText('demo_video_workflow/generate_chapters')
 
     fireEvent.click(screen.getByText('刷新锁'))
 
@@ -126,7 +126,7 @@ describe('SkillSourcesSection', () => {
     )
 
     renderSection()
-    await screen.findByText('video_knowledge/generate_chapters')
+    await screen.findByText('demo_video_workflow/generate_chapters')
 
     fireEvent.click(screen.getByText('刷新锁'))
 

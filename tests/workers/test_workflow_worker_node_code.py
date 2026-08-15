@@ -31,7 +31,7 @@ def _make_worker(
     definitions: list[WorkflowDefinition],
     *,
     custom_nodes_enabled: bool = True,
-    capability_path: str | None = "workflow_nodes/question_intake.py",
+    capability_path: str | None = "workflow_nodes/example_intake.py",
 ) -> WorkflowWorkerThread:
     executor_def = CodeExecutorConfig(
         kind="code",

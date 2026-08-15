@@ -21,7 +21,7 @@ def _make_db(tmp_path):
 
 def _seed_workspace(conn, workspace_id="ws1"):
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info')",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow')",
         (workspace_id, workspace_id),
     )
 
