@@ -59,7 +59,6 @@ const defaultState: Partial<SettingState> = {
   originalWorkspaceDescription: '',
   originalSettings: null,
   isDirty: false,
-  testStatus: { state: 'idle' as const },
   isSaving: false,
   saveError: null,
   executorConfiguration: initialExecutorConfiguration,
@@ -175,27 +174,6 @@ describe('settingStore', () => {
     })
     useSettingStore.getState().setNodeLimit('question_content', 'ingest', 3)
     expect(useSettingStore.getState().isDirty).toBe(true)
-  })
-
-  it('cycles through testConnection states', async () => {
-    mockApi.mockResolvedValueOnce({ ok: true, message: 'connected' })
-    const promise = useSettingStore.getState().testConnection()
-    expect(useSettingStore.getState().testStatus.state).toBe('testing')
-    await promise
-    expect(useSettingStore.getState().testStatus.state).toBe('success')
-    expect(useSettingStore.getState().testStatus.message).toBe('connected')
-    expect(mockShowToast).toHaveBeenCalledWith('连接成功', 'success')
-  })
-
-  it('sets failed on testConnection error and shows toast', async () => {
-    mockApi.mockRejectedValueOnce(new Error('network error'))
-    await useSettingStore.getState().testConnection()
-    expect(useSettingStore.getState().testStatus.state).toBe('failed')
-    expect(useSettingStore.getState().testStatus.message).toBe('network error')
-    expect(mockShowToast).toHaveBeenCalledWith(
-      '连接测试失败：network error',
-      'error'
-    )
   })
 
   it('hydrateSettings writes draft and original snapshots and clears saveError', () => {

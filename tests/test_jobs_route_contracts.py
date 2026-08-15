@@ -30,10 +30,6 @@ EXPECTED_OPERATIONS = {
     ("get", "/api/workspaces/{workspace_id}/settings"): "WorkspaceSettingsResponse",
     ("put", "/api/workspaces/{workspace_id}/configuration"): "WorkspaceConfigurationResponse",
     ("patch", "/api/workspaces/{workspace_id}/settings/{section}"): "WorkspaceSettingsResponse",
-    (
-        "post",
-        "/api/workspaces/{workspace_id}/settings/test-connection",
-    ): "WorkspaceSettingsTestResponse",
     ("post", "/api/workspaces/{workspace_id}/job-batches"): "JobBatchResponse",
     ("get", "/api/workspaces/{workspace_id}/jobs"): "JobsResponse",
     ("post", "/api/workspaces/{workspace_id}/jobs/batch-rerun"): "BatchJobMutationResponse",

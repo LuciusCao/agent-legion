@@ -253,7 +253,6 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | DELETE | `/workspaces/{workspace_id}/secrets/{name}` | `delete_workspace_secret` | routes/workspace_secrets.py |
 | GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/workspace_settings.py |
 | PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/workspace_settings.py |
-| POST | `/workspaces/{workspace_id}/settings/test-connection` | `test_workspace_connection` | routes/workspace_settings.py |
 | GET | `/workspaces` | `list_workspaces` | routes/workspaces.py |
 | POST | `/workspaces` | `create_workspace` | routes/workspaces.py |
 | GET | `/workspaces/{workspace_id}` | `get_workspace` | routes/workspaces.py |
@@ -370,7 +369,6 @@ CMS 协议代码不在 `server/app/` 下，而是作为 workspace pack 存于仓
 | WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_workflow_key: str | None, ... | app/routes/job_contracts.py |
 | WorkspaceSettingsResponse | BaseModel | settings: dict[str, Any] | app/routes/job_contracts.py |
 | WorkspaceSettingsSectionRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/job_contracts.py |
-| WorkspaceSettingsTestResponse | BaseModel | ok: bool, message: str | app/routes/job_contracts.py |
 | WorkspaceResponse | BaseModel | workspace: WorkspaceRecord | app/routes/job_contracts.py |
 | WorkspacesResponse | BaseModel | workspaces: list[WorkspaceRecord] | app/routes/job_contracts.py |
 | DeleteJobResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
@@ -666,7 +664,7 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - **Service**: `VaultService`（Fernet 加解密 + `workspace_secrets` 持久化，明文不跨越服务层边界落盘或出 API）与 `WorkspaceSecretsService`（API 门面）。
 - **Master key**: env `AGENT_LEGION_VAULT_MASTER_KEY` / `AGENT_LEGION_VAULT_MASTER_KEY_FILE`（映射到 `vault.master_key` / `vault.master_key_file`）；缺 key 时 server 可启动，但 vault 写操作与 `secret_ref` 解析报错。
 - **写入链**: 节点配置保存时，capability `config_schema` 标记 `secret: true` 的字段值转存 vault，节点覆盖只留 `{"secret_ref": "node:{workflow_key}:{node_key}:{field}"}`；settings payload 中 secret 字段只返回 `{"secret_set": bool}`。
-- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口），消费点为 dispatch 执行注入、question detail 与 settings test-connection 三处；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。CMS 侧消费已切到实例级外部服务连接：dispatch 在 vault 解析之后经 `inject_connection_config`（`server/app/workflow_worker/dispatch_config.py`）按节点 `connection` 键把连接端点配置与缓存 token 注入节点 config（仅内存，不落库、不进 agent manifest）；question detail 与 settings test-connection 改为解析节点引用的连接 key，经连接层（`ConnectionTokenService.runtime_config` / `ConnectionService.probe`）取运行时配置并真实探测 CMS（连通性 + 401/403 鉴权判定），不回显 token。
+- **运行时解析**: `resolve_secret_refs` 在 server 端把 `secret_ref` 解析为明文（仅内存；字符串明文透传为兼容窗口），消费点为 dispatch 执行注入与 question detail 两处；intake 冻结的是 `secret_ref` 而非明文；`job_logs` 脱敏并入 vault 明文。CMS 侧消费已切到实例级外部服务连接：dispatch 在 vault 解析之后经 `inject_connection_config`（`server/app/workflow_worker/dispatch_config.py`）按节点 `connection` 键把连接端点配置与缓存 token 注入节点 config（仅内存，不落库、不进 agent manifest）；question detail 改为解析节点引用的连接 key，经连接层（`ConnectionTokenService.runtime_config`）取运行时配置，不回显 token。
 
 ## Configuration Reference
 

@@ -7,7 +7,6 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import VaultService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.services.workspace_connection_test import test_workspace_connection
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
@@ -247,13 +246,6 @@ class WorkspaceConfigurationService:
         else:
             raise NotFoundError("Unknown settings section")
         return self._payload(workspace)
-
-    def test_connection(self, workspace_id: str) -> dict[str, Any]:
-        return test_workspace_connection(
-            workspace_id,
-            self._workspace(workspace_id),
-            self.settings,
-        )
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         return build_workspace_stats(

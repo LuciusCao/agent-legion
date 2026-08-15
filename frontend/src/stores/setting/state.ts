@@ -12,11 +12,6 @@ export interface HydrateSettingsInput {
   executorConfiguration: WorkspaceExecutorConfiguration
 }
 
-export type TestStatus = {
-  state: 'idle' | 'testing' | 'success' | 'failed'
-  message?: string
-}
-
 export type SettingState = {
   workspaceId: string | null
   workspaceName: string
@@ -28,7 +23,6 @@ export type SettingState = {
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
-  testStatus: TestStatus
   executorConfiguration: WorkspaceExecutorConfiguration
   originalExecutorConfiguration: WorkspaceExecutorConfiguration | null
   pendingAllocationRemoval: string | null
@@ -54,8 +48,6 @@ export type SettingState = {
   hydrateSettings: (workspaceId: string, snapshot: HydrateSettingsInput) => void
   // 返回是否真正保存成功（重入守卫拒绝或请求失败均为 false）。
   saveAll: () => Promise<boolean>
-  testConnection: () => Promise<void>
-  resetTestStatus: () => void
 }
 
 export type SettingStoreSet = (

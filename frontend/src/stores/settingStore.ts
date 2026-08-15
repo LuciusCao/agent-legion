@@ -1,2 +1,2 @@
 export { useSettingStore } from './setting'
-export type { SettingState, TestStatus } from './setting/state'
+export type { SettingState } from './setting/state'

@@ -1,5 +1,4 @@
 from pathlib import Path
-from types import SimpleNamespace
 
 from fastapi.testclient import TestClient
 
@@ -10,15 +9,9 @@ from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
 
-def test_workspace_settings_round_trip(tmp_path, monkeypatch):
+def test_workspace_settings_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    monkeypatch.setattr(
-        "server.app.services.workspace_connection_test.ConnectionService",
-        lambda *args, **kwargs: SimpleNamespace(
-            probe=lambda key: {"ok": True, "message": "连接成功 (HTTP 200)"}
-        ),
-    )
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -45,12 +38,10 @@ def test_workspace_settings_round_trip(tmp_path, monkeypatch):
             json={"workflowKey": "question_comprehension_info"},
         )
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
-        test_connection = c.post(f"/api/workspaces/{workspace_id}/settings/test-connection")
 
     assert connection.status_code == 200
     assert intake.status_code == 200
     assert workflow.status_code == 200
-    assert test_connection.status_code == 200
     settings = fetched.json()["settings"]
     assert "cmsUrl" not in settings
     assert "cmsToken" not in settings

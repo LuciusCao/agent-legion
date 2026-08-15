@@ -6,8 +6,7 @@ diverts them into the per-workspace vault under
 ``node:<workflow_key>:<node_key>:<field>`` and stores only
 ``{"secret_ref": name}`` markers (VAULT-SECRET-001). Frozen intake payloads
 carry the same markers; the server resolves them to plaintext in memory at
-dispatch time and in server-side consumers (test-connection, question
-detail). API payloads only expose a write-only ``{"secret_set": bool}``
+dispatch time and in server-side consumers (question detail). API payloads only expose a write-only ``{"secret_set": bool}``
 marker.
 """
 

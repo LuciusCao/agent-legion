@@ -277,7 +277,6 @@ describe('WorkspaceMainPage', () => {
         workflowKey: '',
       },
       isDirty: false,
-      testStatus: { state: 'idle' },
       isSaving: false,
       saveError: null,
       executorConfiguration: {
