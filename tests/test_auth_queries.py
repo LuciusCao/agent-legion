@@ -153,7 +153,9 @@ def test_password_reset_revokes_sessions(job_db) -> None:
 
 def test_workspace_membership_roundtrip(job_db) -> None:
     user = _make_user(job_db)
-    workspace = job_db.create_workspace("Auth WS")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="Auth WS"
+    )
     job_db.upsert_workspace_member(workspace["id"], user["id"], "viewer")
     assert job_db.get_workspace_role(workspace["id"], user["id"]) == "viewer"
     job_db.upsert_workspace_member(workspace["id"], user["id"], "editor")
@@ -171,7 +173,9 @@ def test_workspace_membership_roundtrip(job_db) -> None:
 
 def test_workspace_membership_validates_refs_and_role(job_db) -> None:
     user = _make_user(job_db)
-    workspace = job_db.create_workspace("Auth WS 2")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="Auth WS 2"
+    )
     with pytest.raises(ValueError, match="Unknown workspace member role"):
         job_db.upsert_workspace_member(workspace["id"], user["id"], "owner")
     with pytest.raises(ValueError, match="Workspace not found"):

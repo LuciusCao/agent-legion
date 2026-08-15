@@ -1,7 +1,7 @@
 create table if not exists workspaces (
   id text primary key,
   name text not null,
-  default_workflow_key text not null default 'question_comprehension_info',
+  default_workflow_key text not null,
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp,
   cms_config_json text not null default '{}',
@@ -18,6 +18,10 @@ create table if not exists workspaces (
 -- Idempotent upgrade path for databases created before schema v14:
 -- `create table if not exists` above does not add columns to existing tables.
 alter table workspaces add column if not exists node_config_json text not null default '{}';
+
+-- The platform ships no default workflow: existing databases keep their
+-- stored values, only the column default is dropped.
+alter table workspaces alter column default_workflow_key drop default;
 
 create table if not exists workspace_executor_allocations (
   workspace_id text not null references workspaces(id) on delete cascade,

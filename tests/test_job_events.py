@@ -101,7 +101,7 @@ def job_patch_query_service(job_db, settings):
 
 def _insert_workspace_job(conn):
     conn.execute(
-        "insert into workspaces(id, name) values ('ws1', 'ws1') on conflict(id) do nothing"
+        "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'question_comprehension_info') on conflict(id) do nothing"
     )
     conn.execute(
         """
@@ -482,7 +482,9 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
     job_db = JobQueries(db_path, jobs_dir)
 
     with job_db.connect() as conn:
-        conn.execute("insert into workspaces(id, name) values ('ws1', 'ws1')")
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'question_comprehension_info')"
+        )
         conn.execute(
             """
             insert into jobs(

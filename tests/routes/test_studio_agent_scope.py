@@ -222,7 +222,11 @@ def test_scoped_token_authenticates_as_initiating_user(client, job_db) -> None:
 
 
 def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> None:
-    workspace_id = str(job_db.create_workspace("scope-guard-ws")["id"])
+    workspace_id = str(
+        job_db.create_workspace(
+            default_workflow_key="question_comprehension_info", name="scope-guard-ws"
+        )["id"]
+    )
     scoped = _scoped_client(client, job_db)
     for method, url, payload in _effecting_endpoints(workspace_id):
         response = scoped.request(method, url, json=payload)
@@ -231,7 +235,11 @@ def test_scoped_token_rejected_on_all_effecting_endpoints(client, job_db) -> Non
 
 
 def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) -> None:
-    workspace_id = str(job_db.create_workspace("scope-draft-ws")["id"])
+    workspace_id = str(
+        job_db.create_workspace(
+            default_workflow_key="question_comprehension_info", name="scope-draft-ws"
+        )["id"]
+    )
     scoped = _scoped_client(client, job_db)
 
     validate = scoped.post(
@@ -256,7 +264,11 @@ def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) ->
 
 
 def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:
-    workspace_id = str(job_db.create_workspace("scope-admin-ws")["id"])
+    workspace_id = str(
+        job_db.create_workspace(
+            default_workflow_key="question_comprehension_info", name="scope-admin-ws"
+        )["id"]
+    )
     scoped = _scoped_client(client, job_db)
     for method, url, payload in _effecting_endpoints(workspace_id):
         admin_response = client.request(method, url, json=payload)
@@ -280,7 +292,11 @@ def test_scoped_token_rejected_on_admin_endpoints(client, job_db) -> None:
     """require_admin refuses scoped identities even though the scoped token
     inherits role=admin from the initiating user's row (P0: without the
     actor_scope check the token would pass every admin endpoint)."""
-    workspace_id = str(job_db.create_workspace("scope-admin-guard-ws")["id"])
+    workspace_id = str(
+        job_db.create_workspace(
+            default_workflow_key="question_comprehension_info", name="scope-admin-guard-ws"
+        )["id"]
+    )
     scoped = _scoped_client(client, job_db)
     endpoints = [
         *_ADMIN_ENDPOINTS,

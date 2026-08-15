@@ -89,7 +89,9 @@ def test_worker_eligibility_scan(code: str, expected: bool) -> None:
 def test_resolve_code_manifest_config_injects_and_strips_secrets(job_db, monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    workspace = job_db.create_workspace("test-workspace")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="test-workspace"
+    )
     vault = VaultService(job_db.path, {})
     vault.set(workspace["id"], "api-token", "s3cr3t")
     manifest = {
@@ -143,7 +145,7 @@ _CODE = "def run(job, job_dir, runtime):\n    pass\n"
 def _insert_job(job_db, job_id: str = "job-1") -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('test-workspace', 'Test')"
+            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'question_comprehension_info')"
             " on conflict(id) do nothing"
         )
         conn.execute(
@@ -323,7 +325,9 @@ def test_online_code_worker_probe_matches_claim_side_filters(job_db) -> None:
     request, and with no queued-timeout fallback the request would wedge the
     job — so the probe says no and the node falls back to local execution."""
     with job_db.connect() as conn:
-        conn.execute("insert into workspaces(id, name) values ('other-workspace', 'Other')")
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key) values ('other-workspace', 'Other', 'question_comprehension_info')"
+        )
     _register_probe_worker(
         "worker-scoped",
         capabilities=["package"],

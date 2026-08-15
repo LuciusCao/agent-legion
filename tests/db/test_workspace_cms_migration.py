@@ -29,8 +29,8 @@ def _insert_workspace(
     resource_config: dict[str, Any] | None = None,
 ) -> None:
     conn.execute(
-        "insert into workspaces(id, name, cms_config_json, resource_config_json)"
-        " values (%s, %s, %s, %s)",
+        "insert into workspaces(id, name, cms_config_json, resource_config_json, default_workflow_key)"
+        " values (%s, %s, %s, %s, 'question_comprehension_info')",
         (
             workspace_id,
             workspace_id,

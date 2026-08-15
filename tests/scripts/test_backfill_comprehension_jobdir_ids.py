@@ -33,7 +33,7 @@ def _make_job(data_dir: Path, job_id: str, *, packed: int = 0) -> Path:
     storage_dir = f"jobs/wf/ab/{job_id}"
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws', 'ws') on conflict (id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws', 'ws', 'question_comprehension_info') on conflict (id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"

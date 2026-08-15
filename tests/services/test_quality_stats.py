@@ -64,7 +64,7 @@ def _seed_item(
 
 def _seed_batch(conn) -> None:
     conn.execute(
-        "insert into workspaces(id, name) values (%s, %s) on conflict do nothing",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict do nothing",
         (WORKSPACE, WORKSPACE),
     )
     conn.execute(

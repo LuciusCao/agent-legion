@@ -14,7 +14,7 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def _setup(conn):
     conn.execute(
-        "insert into workspaces(id, name) values ('ws1', 'ws1') on conflict (id) do nothing"
+        "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'question_comprehension_info') on conflict (id) do nothing"
     )
     conn.execute(
         "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
@@ -32,7 +32,7 @@ def _make_db(tmp_path):
 
 def _seed_job(conn, job_id, workspace_id="ws1"):
     conn.execute(
-        "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict (id) do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(

@@ -83,7 +83,7 @@ def test_migrate_workspace_secrets_is_idempotent() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         migrate_workspace_secrets(conn)
         conn.execute(
-            "insert into workspaces(id, name) values ('idem-ws', 'idem-ws') on conflict do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('idem-ws', 'idem-ws', 'question_comprehension_info') on conflict do nothing"
         )
         conn.execute(
             "insert into workspace_secrets(workspace_id, name, ciphertext)"

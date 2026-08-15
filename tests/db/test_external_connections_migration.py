@@ -57,7 +57,7 @@ def clean_env(monkeypatch):
 
 def _insert_workspace(conn, workspace_id: str, node_config: dict) -> None:
     conn.execute(
-        "insert into workspaces(id, name, node_config_json) values (%s, %s, %s)",
+        "insert into workspaces(id, name, node_config_json, default_workflow_key) values (%s, %s, %s, 'question_comprehension_info')",
         (workspace_id, workspace_id, json.dumps(node_config)),
     )
 

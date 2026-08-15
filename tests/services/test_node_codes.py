@@ -33,7 +33,9 @@ def service(job_db):
 
 @pytest.fixture
 def workspace_id(job_db):
-    return job_db.create_workspace("node-codes")["id"]
+    return job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="node-codes"
+    )["id"]
 
 
 def test_save_draft_creates_version_one_with_hash(service, workspace_id) -> None:

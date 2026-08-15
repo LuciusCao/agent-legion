@@ -41,7 +41,9 @@ def _definition() -> WorkflowDefinition:
 
 @pytest.mark.full_gate
 def test_intake_freeze_and_manifest_whitelist(job_db) -> None:
-    workspace = job_db.create_workspace("cfg-ws")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="cfg-ws"
+    )
     job_db.update_workspace(
         workspace["id"],
         node_config={"wf": {"generate": {"page_size": 5, "api_key": "sekret"}}},
@@ -111,7 +113,9 @@ def test_executor_node_config_freeze_and_manifest(job_db) -> None:
     """Executor capability schemas join the same freeze chain (spec D15)."""
     from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 
-    workspace = job_db.create_workspace("cfg-exec-ws")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="cfg-exec-ws"
+    )
     job_db.update_workspace(
         workspace["id"],
         node_config={"wf": {"fetch": {"country_id": "9"}}},

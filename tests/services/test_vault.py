@@ -38,7 +38,9 @@ def vault(job_db, settings, vault_key):
 
 
 def test_set_get_round_trip(vault, job_db):
-    workspace = job_db.create_workspace("vault-roundtrip")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-roundtrip"
+    )
     metadata = vault.set(workspace["id"], "api-token", PLAINTEXT)
 
     assert metadata["name"] == "api-token"
@@ -48,19 +50,25 @@ def test_set_get_round_trip(vault, job_db):
 
 
 def test_set_overwrites_existing(vault, job_db):
-    workspace = job_db.create_workspace("vault-overwrite")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-overwrite"
+    )
     vault.set(workspace["id"], "api-token", "first")
     vault.set(workspace["id"], "api-token", "second")
     assert vault.get(workspace["id"], "api-token") == "second"
 
 
 def test_get_missing_returns_none(vault, job_db):
-    workspace = job_db.create_workspace("vault-missing")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-missing"
+    )
     assert vault.get(workspace["id"], "nope") is None
 
 
 def test_list_returns_metadata_only(vault, job_db):
-    workspace = job_db.create_workspace("vault-list")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-list"
+    )
     vault.set(workspace["id"], "b-token", "value-b")
     vault.set(workspace["id"], "a-token", "value-a")
 
@@ -74,7 +82,9 @@ def test_list_returns_metadata_only(vault, job_db):
 
 
 def test_delete_removes_entry(vault, job_db):
-    workspace = job_db.create_workspace("vault-delete")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-delete"
+    )
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     vault.delete(workspace["id"], "api-token")
     assert vault.get(workspace["id"], "api-token") is None
@@ -82,7 +92,9 @@ def test_delete_removes_entry(vault, job_db):
 
 
 def test_ciphertext_is_not_plaintext(vault, job_db):
-    workspace = job_db.create_workspace("vault-cipher")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-cipher"
+    )
     vault.set(workspace["id"], "api-token", PLAINTEXT)
     with job_db.connect() as conn:
         row = conn.execute(
@@ -97,7 +109,9 @@ def test_missing_master_key_blocks_writes_and_reads(job_db, settings, monkeypatc
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     vault = VaultService(job_db.path, {})
-    workspace = job_db.create_workspace("vault-no-key")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-no-key"
+    )
 
     with pytest.raises(VaultMasterKeyMissingError, match="AGENT_LEGION_VAULT_MASTER_KEY"):
         vault.set(workspace["id"], "api-token", PLAINTEXT)
@@ -112,7 +126,9 @@ def test_invalid_master_key_rejected(job_db, monkeypatch):
 
 
 def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
-    workspace = job_db.create_workspace("vault-resolve")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-resolve"
+    )
     name = node_secret_name("question_comprehension_info", "fetch_questions", "token")
     vault.set(workspace["id"], name, PLAINTEXT)
 
@@ -127,7 +143,9 @@ def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
 
 
 def test_resolve_secret_refs_missing_entry_raises(vault, job_db):
-    workspace = job_db.create_workspace("vault-resolve-missing")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-resolve-missing"
+    )
     with pytest.raises(VaultError, match="not found"):
         vault.resolve_secret_refs({"token": {"secret_ref": "gone"}}, workspace["id"])
 
@@ -136,7 +154,9 @@ def test_resolve_secret_refs_without_master_key_raises(job_db, monkeypatch):
     # Key removed after the secret was written: resolution must fail loudly.
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
-    workspace = job_db.create_workspace("vault-no-key-resolve")
+    workspace = job_db.create_workspace(
+        default_workflow_key="question_comprehension_info", name="vault-no-key-resolve"
+    )
     VaultService(job_db.path, {}).set(workspace["id"], "api-token", PLAINTEXT)
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY", raising=False)
 

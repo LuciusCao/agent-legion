@@ -11,7 +11,7 @@ from tests.helpers.job_dirs import job_storage_ref
 
 def _seed_job(conn, job_id, workspace_id, storage_dir):
     conn.execute(
-        "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict (id) do nothing",
         (workspace_id, workspace_id),
     )
     conn.execute(
