@@ -13,7 +13,6 @@ from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_enqueue import enqueue_intake_batch
 from server.app.services.job_intake_registry import RESOLVERS
 from server.app.services.job_intake_resolution import normalize_values
-from server.app.services.job_intake_video import write_video_input
 from server.app.services.job_intake_workspace import (
     enabled_intake_modes,
     get_workspace,
@@ -180,10 +179,6 @@ class JobIntakeService:
         )
         if jobs:
             notify_schedulable_work()
-
-        if entity == "video" and workflow_key == "video_knowledge":
-            for candidate, job in zip(candidates, jobs, strict=True):
-                write_video_input(resolve_job_dir(job, self.settings.jobs_dir), candidate)
 
         for job in jobs:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))

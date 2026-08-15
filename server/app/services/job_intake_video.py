@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
 from typing import Any
 
 from server.app.security import validate_download_url
@@ -82,22 +80,3 @@ def exclude_existing_candidates(
         for candidate in candidates
         if (str(candidate["entity_type"]), str(candidate["entity_id"])) not in existing_keys
     ]
-
-
-def write_video_input(job_dir: Path, candidate: dict[str, Any]) -> None:
-    video_input = {
-        "schema_version": 1,
-        "entity_type": "video",
-        "content_type": str(candidate.get("content_type") or "knowledge"),
-        "legacy_video_id": "",
-        "external_id": str(candidate.get("external_id") or candidate["entity_id"]),
-        "source_uuid": str(candidate.get("source_uuid") or ""),
-        "source_url": str(candidate.get("source_url") or ""),
-        "source_ref": str(candidate.get("source_ref") or ""),
-        "title": str(candidate["title"]),
-    }
-    job_dir.mkdir(parents=True, exist_ok=True)
-    (job_dir / "video_input.json").write_text(
-        json.dumps(video_input, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
