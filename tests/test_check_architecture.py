@@ -38,18 +38,6 @@ def test_rejects_new_route_without_response_model(tmp_path):
     assert any("response_model" in error and "example.py" in error for error in errors)
 
 
-def test_rejects_route_importing_cms_client(tmp_path):
-    write(
-        tmp_path / "server/app/routes/example.py",
-        "from server.app.cms.client import CmsClient\n",
-    )
-    write_neutral_budget_governance(tmp_path)
-
-    errors = check_repository(tmp_path)
-
-    assert any("route boundary" in error for error in errors)
-
-
 @pytest.mark.parametrize(
     "source,expected_error",
     [
@@ -239,22 +227,10 @@ def test_imported_modules_records_from_submodule_names(tmp_path):
     assert modules == {"server.app.workflows": 1, "server.app.workflows.pi_runner": 1}
 
 
-def test_route_imported_submodule_is_forbidden(tmp_path):
-    write(
-        tmp_path / "server/app/routes/example.py",
-        "from server.app import cms\n",
-    )
-    write_neutral_budget_governance(tmp_path)
-
-    errors = check_repository(tmp_path)
-
-    assert any("route boundary forbids import server.app.cms" in error for error in errors)
-
-
 def test_forbidden_imports_submodule_match():
-    modules = {"server.app.cms.client": 3}
-    result = forbidden_imports(modules, ("server.app.cms",))
-    assert result == [("server.app.cms.client", 3)]
+    modules = {"server.app.executors.code": 3}
+    result = forbidden_imports(modules, ("server.app.executors.code",))
+    assert result == [("server.app.executors.code", 3)]
 
 
 def test_is_scheduler_path_workflow_worker_thread():

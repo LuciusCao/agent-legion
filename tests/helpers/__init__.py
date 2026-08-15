@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -8,7 +7,6 @@ from typing import Any
 
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.builtin import load_builtin_workflow
@@ -73,52 +71,6 @@ def make_workflow_worker(
     )
     worker._scan_entries = ([definition], [])
     return worker, definition
-
-
-class BadProvider(TranscriptionProvider):
-    name = "whisper"
-
-    def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
-        raise RuntimeError("forced failure")
-
-
-class GoodProvider(TranscriptionProvider):
-    name = "sensevoice"
-
-    def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
-        output_path.write_text(
-            "1\n00:00:00,000 --> 00:00:10,000\n第一段讲解。\n\n"
-            "2\n00:00:10,000 --> 00:00:20,000\n第二段讲解。\n",
-            encoding="utf-8",
-        )
-
-
-class ChapterRunner:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def run(
-        self, phase: Any, video_id: str, video_dir: Path, prompt_dir: Path, log_path: Path
-    ) -> Any:
-        self.calls += 1
-        phase_key = getattr(phase, "key", str(phase))
-        (video_dir / "chapters_raw.json").write_text(
-            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
-            encoding="utf-8",
-        )
-        (video_dir / "chapters.json").write_text(
-            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
-            encoding="utf-8",
-        )
-        return type(
-            "Result",
-            (),
-            {
-                "status": "completed",
-                "error_message": "",
-                "command": ["openclaw", phase_key, video_id],
-            },
-        )()
 
 
 def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
