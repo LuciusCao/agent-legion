@@ -21,7 +21,7 @@ from server.app.executors.pi import build_skill_manager
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
-from server.app.pipeline.runners import list_openclaw_agents
+from server.app.openclaw_agents import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
 from server.app.scheduler_wakeup import unregister_wakeup

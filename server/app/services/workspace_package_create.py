@@ -1,3 +1,11 @@
+"""Workspace package (zip) creation for the job package service.
+
+Extracted from the retired ``server.app.pipeline`` package. The base
+artifact list only carries generic result files; business artifacts are
+picked up through the workflow catalog's declared node outputs (see
+``workspace_package_artifacts.workspace_artifact_names``).
+"""
+
 import json
 import zipfile
 from datetime import UTC, datetime
@@ -9,10 +17,6 @@ from server.app.workflows.workflow_manifest import workflow_manifest
 
 WORKSPACE_PACKAGE_FILES = [
     "result.json",
-    "comprehension_info.json",
-    "question_context.json",
-    "questions.json",
-    "upload_params.json",
     "metadata.json",
     "report.md",
 ]

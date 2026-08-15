@@ -10,7 +10,6 @@ from scripts.generate_architecture import (
     extract_fastapi_routes,
     extract_frontend_routes,
     extract_models,
-    extract_pipeline_phases,
     replace_section,
 )
 
@@ -127,22 +126,6 @@ def test_extract_frontend_routes(tmp_path: Path):
 
 
 # ---------------------------------------------------------------------------
-# Pipeline extraction
-# ---------------------------------------------------------------------------
-
-
-def test_extract_pipeline_phases(tmp_path: Path):
-    result = extract_pipeline_phases(tmp_path)
-    assert "education_video_problems_generation（6 节点）" in result
-    assert (
-        result.index("`intake_knowledge_points`")
-        < result.index("`write_script`")
-        < result.index("`review_script`")
-        < result.index("`publish_content`")
-    )
-
-
-# ---------------------------------------------------------------------------
 # Config extraction
 # ---------------------------------------------------------------------------
 
@@ -153,7 +136,7 @@ def test_extract_config(tmp_path: Path):
 
     result = extract_config(tmp_path)
     assert "退役" in result
-    assert "AGENT_LEGION_ASR_" in result
+    assert "AGENT_LEGION_DATABASE_URL" in result
 
 
 def test_extract_config_retired_split_file_is_an_error(tmp_path: Path):

@@ -1,3 +1,11 @@
+"""OpenClaw agent discovery for the agent status manager.
+
+Platform-level helper extracted from the retired ``server.app.pipeline``
+package: shells out to the openclaw CLI to enumerate locally available
+agents. Any failure (CLI missing, non-zero exit, invalid JSON) yields an
+empty list — discovery is best-effort.
+"""
+
 import json
 import logging
 import subprocess

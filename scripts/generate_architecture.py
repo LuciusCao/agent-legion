@@ -194,18 +194,6 @@ def extract_frontend_routes(root: Path) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Pipeline extraction
-# ---------------------------------------------------------------------------
-
-
-def extract_pipeline_phases(root: Path) -> str:
-    """Extract the node sequence from the built-in demo workflow DAG."""
-    from scripts.generate_architecture_pipeline import extract_pipeline_phases as _extract
-
-    return _extract()
-
-
-# ---------------------------------------------------------------------------
 # Config extraction
 # ---------------------------------------------------------------------------
 
@@ -253,7 +241,7 @@ def extract_config(root: Path) -> str:
         "_全部运行时配置段已从 split yaml 退役：业务参数在 capability config_schema"
         "（Studio 节点/workspace 配置覆盖），实例级调参在 DB 实例设置文档"
         "（/api/admin/instance-settings），机器路径与密钥走 env（如"
-        " AGENT_LEGION_ASR_* / AGENT_LEGION_DATABASE_URL）。_\n"
+        " AGENT_LEGION_DATABASE_URL）。_\n"
     )
 
 
@@ -275,10 +263,6 @@ def generate_frontend(root: Path) -> str:
     return "### 页面路由\n\n" + extract_frontend_routes(root)
 
 
-def generate_pipeline(root: Path) -> str:
-    return "### 内置 Workflow 节点序列\n\n" + extract_pipeline_phases(root)
-
-
 def generate_deployment(root: Path) -> str:
     return "### 顶层配置项\n\n" + extract_config(root)
 
@@ -286,7 +270,6 @@ def generate_deployment(root: Path) -> str:
 MODULES = {
     "backend": ("docs/architecture/backend.md", generate_backend),
     "frontend": ("docs/architecture/frontend.md", generate_frontend),
-    "pipeline": ("docs/architecture/pipeline.md", generate_pipeline),
     "deployment": ("docs/architecture/deployment.md", generate_deployment),
 }
 
