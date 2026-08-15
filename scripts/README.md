@@ -67,7 +67,6 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 |------|------|----------|
 | `backfill_failure_classification.py` | 为历史 failed `node_runs` 回填 `failure_category`/`failure_detail`（幂等，支持 `--dry-run` / `--include-unknown`）。 | 生产库中无未分类的 failed 行，且分类规则稳定不再需要重评 `unknown`。 |
 | `backfill_worker_output_validation.py` | 补跑 EXEC-VALIDATION-001 之前 Worker 完成节点的输出校验，失败的标记节点/任务 failed（幂等，支持 `--dry-run`）。 | 所有存量 Worker-run 节点完成重校验（无候选行）。 |
-| `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为（共享逻辑在 `_skill_cost_core.py`）。 | skill 成本对账不再需要按版本切片对比。 |
 | `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
 | `velites_diff_events.py` | 结构对比 Node Pi 与 velites 的 `events.jsonl` 事件流（忽略时序字段与 delta 事件差异）。 | velites 完全替代 Node Pi 且回归基线归档后。 |
 | `migrate_job_dirs_to_shards.py` | 一次性迁移：把扁平 `jobs/<workspace>/<job_id>` 目录改名为分片布局并同步 `jobs.storage_dir`（幂等可重入，`--apply` 需停后端/worker）。 | 生产库不再有 3 段 legacy `storage_dir` 行（全部迁移到 4 段分片布局）。 |
