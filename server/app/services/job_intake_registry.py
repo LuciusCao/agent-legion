@@ -15,7 +15,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from server.app.services.job_errors import InvalidOperationError
-from server.app.services.job_intake_resolution import resolve_direct_candidates
+from server.app.services.job_intake_resolution import (
+    resolve_direct_candidates,
+    resolve_opaque_candidates,
+)
 
 if TYPE_CHECKING:
     from server.app.settings import Settings
@@ -40,11 +43,31 @@ RESOLVERS: dict[tuple[str, str], ResolverSpec] = {
     ("question", "direct_ids"): ResolverSpec(
         "direct.question_ids", "question", None, None, resolve_direct_candidates
     ),
+    # External-reference modes: intake fans out opaque candidates carrying
+    # source_ref; the first DAG node resolves them against its configured
+    # connection at execution time (phase="node"). Mode keys exist so that
+    # workflow definitions declaring them stay valid without platform
+    # coupling to any concrete external service.
+    ("question", "batch_by_ids"): ResolverSpec(
+        "node.question_ids", "question", "node", None, resolve_opaque_candidates
+    ),
+    ("question", "batch_by_knowledge"): ResolverSpec(
+        "node.questions_by_knowledge", "question", "node", None, resolve_opaque_candidates
+    ),
+    ("question", "by_knowledge"): ResolverSpec(
+        "node.question_by_knowledge", "question", "node", None, resolve_opaque_candidates
+    ),
     ("video", "direct_ids"): ResolverSpec(
         "direct.video_ids", "video", None, None, resolve_direct_candidates
     ),
     ("video", "batch_by_urls"): ResolverSpec(
         "direct.video_urls", "video", None, None, resolve_direct_candidates
+    ),
+    ("video", "batch_by_knowledge"): ResolverSpec(
+        "node.knowledge_video", "video", "node", None, resolve_opaque_candidates
+    ),
+    ("video", "by_knowledge"): ResolverSpec(
+        "node.videos_by_knowledge", "video", "node", None, resolve_opaque_candidates
     ),
 }
 
