@@ -77,7 +77,7 @@ def test_catalog_reflects_db_published_edits(
     edited = {
         "kind": "code",
         "global_capacity": 4,
-        "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+        "capabilities": {"publish_content": {"path": "workflow_nodes/example_publish.py"}},
     }
     definitions.save_draft("code-default", edited, "user:admin")
     definitions.publish("code-default")
@@ -88,4 +88,4 @@ def test_catalog_reflects_db_published_edits(
 
     executors_by_id = {executor["id"]: executor for executor in result["executors"]}
     assert executors_by_id["code-default"]["global_capacity"] == 4
-    assert executors_by_id["code-default"]["capabilities"] == ["clean_and_parse"]
+    assert executors_by_id["code-default"]["capabilities"] == ["publish_content"]

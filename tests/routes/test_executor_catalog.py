@@ -15,7 +15,7 @@ def test_executor_catalog_reflects_published_edits(client_factory):
     edited = {
         "kind": "code",
         "global_capacity": 4,
-        "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+        "capabilities": {"publish_content": {"path": "workflow_nodes/example_publish.py"}},
     }
     with client_factory(fresh=True) as client:
         assert (
@@ -28,4 +28,4 @@ def test_executor_catalog_reflects_published_edits(client_factory):
     assert response.status_code == 200
     executors = {executor["id"]: executor for executor in response.json()["executors"]}
     assert executors["code-default"]["global_capacity"] == 4
-    assert executors["code-default"]["capabilities"] == ["clean_and_parse"]
+    assert executors["code-default"]["capabilities"] == ["publish_content"]
