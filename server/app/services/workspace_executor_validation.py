@@ -10,7 +10,7 @@ from server.app.workflows.definition import WorkflowDefinition
 
 def validate_workspace_executor_configuration(
     *,
-    workflow: WorkflowDefinition,
+    workflow: WorkflowDefinition | None,
     executor_definitions: Mapping[str, ExecutorConfig],
     allocations: Sequence[Mapping[str, Any]],
     bindings: Sequence[Mapping[str, Any]],
@@ -32,6 +32,12 @@ def validate_workspace_executor_configuration(
                 f"{definition.global_capacity}"
             )
         allocation_by_id[executor_id] = allocation
+    # Registered workflow before its first publish has no catalog definition:
+    # bindings/limits cannot be checked yet, so only the allocation checks
+    # above run. Publish-time validation (validate_workflow_for_publish)
+    # enforces binding correctness against the draft definition.
+    if workflow is None:
+        return
 
     binding_by_node: dict[tuple[str, str], Mapping[str, Any]] = {}
     for binding in bindings:

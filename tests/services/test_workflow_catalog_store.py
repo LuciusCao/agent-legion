@@ -37,6 +37,11 @@ def catalog(settings):
 
 @pytest.fixture
 def workspace_service(job_db, settings, agent_manager):
+    # The bare settings fixture does not hydrate executor definitions
+    # (create_app does); pull the conftest-seeded catalog in explicitly.
+    from server.app.services.executor_definition_service import hydrate_executor_definitions
+
+    hydrate_executor_definitions(settings)
     return WorkspaceConfigurationService(
         job_db, settings, agent_manager, WorkflowCatalogService(settings)
     )
@@ -160,18 +165,93 @@ def test_replace_configuration_without_executor_payload_works_definitionless(
     assert result["workspace"]["name"] == "Renamed"
 
 
-def test_replace_configuration_rejects_executor_payload_definitionless(
+def test_replace_configuration_saves_executor_payload_definitionless(
+    catalog, workspace_service, job_db
+) -> None:
+    """Registered workflow without a catalog definition: executor payloads are
+    saved (allocations validated, bindings unchecked) so the first draft
+    publish — which requires bindings — is no longer a chicken-and-egg."""
+    catalog.register(_REGISTERED_KEY, "Acme Quiz")
+    workspace = workspace_service.create({"name": "Acme", "default_workflow_key": _REGISTERED_KEY})
+
+    result = workspace_service.replace_configuration(
+        workspace["id"],
+        workspace_patch={},
+        settings_patch={},
+        executor_allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
+        node_bindings=[
+            {
+                "workflow_key": _REGISTERED_KEY,
+                "node_key": "parse",
+                "executor_id": "code-default",
+            }
+        ],
+        node_limits=[],
+    )
+
+    configuration = result["executor_configuration"]
+    assert [
+        (row["executor_id"], row["concurrency_limit"]) for row in configuration["allocations"]
+    ] == [("code-default", 1)]
+    assert [
+        (row["workflow_key"], row["node_key"], row["executor_id"])
+        for row in configuration["bindings"]
+    ] == [(_REGISTERED_KEY, "parse", "code-default")]
+
+
+def test_replace_configuration_definitionless_rejects_unknown_executor(
     catalog, workspace_service
 ) -> None:
     catalog.register(_REGISTERED_KEY, "Acme Quiz")
     workspace = workspace_service.create({"name": "Acme", "default_workflow_key": _REGISTERED_KEY})
 
-    with pytest.raises(InvalidOperationError, match="no published definition"):
+    with pytest.raises(InvalidOperationError, match="Unknown Executor"):
         workspace_service.replace_configuration(
             workspace["id"],
             workspace_patch={},
             settings_patch={},
-            executor_allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
+            executor_allocations=[{"executor_id": "no-such-executor", "concurrency_limit": 1}],
             node_bindings=[],
             node_limits=[],
         )
+
+
+def test_first_publish_uses_bindings_saved_before_definition(
+    catalog, workspace_service, job_db, settings
+) -> None:
+    """Full first-publish chain for a registered workflow over code-executor
+    nodes: register → create workspace → save binding → publish draft v1."""
+    catalog.register(_REGISTERED_KEY, "Acme Quiz")
+    workspace = workspace_service.create({"name": "Acme", "default_workflow_key": _REGISTERED_KEY})
+    workspace_service.replace_configuration(
+        workspace["id"],
+        workspace_patch={},
+        settings_patch={},
+        executor_allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
+        node_bindings=[
+            {
+                "workflow_key": _REGISTERED_KEY,
+                "node_key": "parse",
+                "executor_id": "code-default",
+            }
+        ],
+        node_limits=[],
+    )
+
+    # clean_and_parse is a code-default capability with no published Agent in
+    # the test seed, so the publish validator requires the saved binding.
+    draft_yaml = """
+key: acme_quiz_flow
+label: Acme Quiz Flow
+nodes:
+  parse:
+    capability: clean_and_parse
+"""
+    ok, errors = publish_workflow_draft(
+        job_db, workspace["id"], draft_yaml, settings.executor_definitions
+    )
+
+    assert (ok, errors) == (True, [])
+    active = job_db.get_active_workflow_revision(workspace["id"], _REGISTERED_KEY)
+    assert active is not None
+    assert active["version"] == 1
