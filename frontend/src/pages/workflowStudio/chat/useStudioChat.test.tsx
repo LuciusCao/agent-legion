@@ -147,6 +147,30 @@ describe('useStudioChat', () => {
     expect(result.current.messages[1]?.content.text).toBe('full text')
   })
 
+  it('refreshes the session snapshot when the SSE stream (re)opens', async () => {
+    mockApi.fetchStudioChatSession.mockResolvedValue(
+      sessionRecord({ status: 'awaiting_permission' })
+    )
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+
+    // 断连前最后一次 SSE 推送让本地快照滞留在 running。
+    emit({ type: 'session', session: sessionRecord({ status: 'running' }) })
+    expect(result.current.session?.status).toBe('running')
+
+    // 断连期间 agent 抛了权限请求（服务端置 awaiting_permission）；
+    // 重连 open 必须重拉会话快照，否则 approve/deny 永远 disabled。
+    const source = EventSourceMock.instances[0]
+    act(() => source.onopen?.())
+
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatSession).toHaveBeenCalledWith('ws1', 's1')
+    )
+    await waitFor(() =>
+      expect(result.current.session?.status).toBe('awaiting_permission')
+    )
+  })
+
   it('tracks run state from session events and supports cancel', async () => {
     mockApi.cancelStudioChatTurn.mockResolvedValue(sessionRecord())
     const { result } = await renderChat()
