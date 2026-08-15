@@ -28,7 +28,7 @@ from typing import Any
 
 # Auth-failure back-channel (design §5.3): the node records the fact, the
 # parent executor performs the privileged token invalidation. The marker lives
-# in a subdirectory so top-level file inventories (e.g. video_package's
+# in a subdirectory so top-level file inventories in node code (an
 # ``iterdir()`` listing) never pick it up.
 NODE_RUNTIME_DIR = ".node_runtime"
 AUTH_FAILURE_MARKER = "auth_failure"
