@@ -113,9 +113,46 @@ def test_get_merged_view_after_seed(client) -> None:
     assert all(not item["stale"] for item in skills)
 
 
-def test_put_unknown_key_404(client) -> None:
-    response = client.put(f"{SKILL_SOURCES_URL}/not/declared", json={"repo": "r", "ref": "v1.0.0"})
-    assert response.status_code == 404
+def test_put_creates_unknown_key(client) -> None:
+    """Unknown keys are created, not 404'd: declaring a brand-new skill
+    source over the API is the fresh-deployment bootstrap path."""
+    response = client.put(
+        f"{SKILL_SOURCES_URL}/brand_new/skill",
+        json={"repo": "https://example.com/new.git", "ref": "v1.0.0"},
+    )
+    assert response.status_code == 200, response.text
+    skills = response.json()["skills"]
+    assert len(skills) == len(BUILTIN_SKILL_SOURCES.skills) + 1
+    created = next(item for item in skills if item["key"] == "brand_new/skill")
+    assert created["repo"] == "https://example.com/new.git"
+    assert created["ref"] == "v1.0.0"
+    # The lock has no entry for the new key, so it is stale until relock.
+    assert created["locked_commit"] is None
+    assert created["stale"] is True
+
+    persisted = client.get(SKILL_SOURCES_URL).json()["skills"]
+    assert next(item for item in persisted if item["key"] == "brand_new/skill")["ref"] == "v1.0.0"
+
+
+def test_put_creates_document_when_never_seeded(client) -> None:
+    """Fresh deployment with no skill_sources document at all: the first PUT
+    creates the document with just the declared entry."""
+    from server.app.db.transaction import write_transaction
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("delete from global_settings where key='skill_sources'")
+
+    response = client.put(
+        f"{SKILL_SOURCES_URL}/wf/cap",
+        json={"repo": "https://example.com/s.git", "ref": "main"},
+    )
+    assert response.status_code == 200, response.text
+    skills = response.json()["skills"]
+    assert [item["key"] for item in skills] == ["wf/cap"]
+    assert skills[0]["repo"] == "https://example.com/s.git"
+    assert skills[0]["ref"] == "main"
+    assert skills[0]["stale"] is True
 
 
 def test_put_updates_source_and_marks_stale(client) -> None:
