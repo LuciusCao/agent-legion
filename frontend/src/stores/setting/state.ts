@@ -52,7 +52,8 @@ export type SettingState = {
     limit: number | null
   ) => void
   hydrateSettings: (workspaceId: string, snapshot: HydrateSettingsInput) => void
-  saveAll: () => Promise<void>
+  // 返回是否真正保存成功（重入守卫拒绝或请求失败均为 false）。
+  saveAll: () => Promise<boolean>
   testConnection: () => Promise<void>
   resetTestStatus: () => void
 }

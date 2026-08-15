@@ -49,7 +49,7 @@ const executorCatalog: ExecutorDefinition[] = [
   },
 ]
 
-const saveAllMock = vi.hoisted(() => vi.fn())
+const saveAllMock = vi.hoisted(() => vi.fn().mockResolvedValue(true))
 const navMock = vi.hoisted(() => ({
   openAgent: vi.fn(),
   openExecutor: vi.fn(),
@@ -174,6 +174,31 @@ describe('WorkflowNodeBindingEditor', () => {
       useSettingStore.getState().executorConfiguration.bindings
     ).toHaveLength(0)
     expect(saveAllMock).toHaveBeenCalledTimes(1)
+  })
+
+  it('rolls back the draft binding when the save fails', async () => {
+    // 保存失败：服务端快照未变，Select 草稿必须回滚到旧绑定，避免与 DAG
+    // 展示长期分叉（失败 toast 由 saveAll 负责）。
+    saveAllMock.mockResolvedValueOnce(false)
+    renderEditor()
+
+    changeSelectValue('build', 'pi-runner')
+    expect(
+      useSettingStore.getState().executorConfiguration.bindings
+    ).toContainEqual({
+      workflow_key: 'wf',
+      node_key: 'build',
+      executor_id: 'pi-runner',
+    })
+
+    await act(async () => {})
+    expect(
+      useSettingStore.getState().executorConfiguration.bindings
+    ).toContainEqual({
+      workflow_key: 'wf',
+      node_key: 'build',
+      executor_id: 'code-default',
+    })
   })
 
   it('warns and disables the executor jump when unbound', () => {
