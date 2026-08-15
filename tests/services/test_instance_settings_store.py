@@ -58,7 +58,8 @@ def test_default_document_matches_retired_yaml_values() -> None:
         "max_archive_bytes": 64 * 1024 * 1024,
         "min_protocol_version": 1,
     }
-    # openclaw defaults mirror the retired agent_legion.yaml section.
+    # openclaw defaults mirror the retired agent_legion.yaml section, except
+    # skill_safety.repos (emptied: no business skills ship with the platform).
     assert document["openclaw"] == {
         "cwd": ".",
         "timeout_seconds": 600,
@@ -79,12 +80,10 @@ def test_default_document_matches_retired_yaml_values() -> None:
         ],
         "skill_safety": {
             "enabled": True,
-            "repos": [
-                {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_interactions"},
-                {"path": "~/.agents/skills/agent-legion/video_knowledge/review_video_content"},
-                {"path": "~/.agents/skills/agent-legion/video_knowledge/review_subtitles"},
-                {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_chapters"},
-            ],
+            # Diverges from the retired yaml on purpose: the platform ships
+            # no business skills, so the whitelist defaults to empty
+            # (open-source extraction plan §1.1 #6).
+            "repos": [],
         },
     }
 
