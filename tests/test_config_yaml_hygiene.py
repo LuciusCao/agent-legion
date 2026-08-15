@@ -65,7 +65,7 @@ def test_tracked_config_files_have_no_asr_section():
 
 def test_skill_safety_repos_are_path_only():
     repos = DEFAULT_OPENCLAW_CONFIG["skill_safety"]["repos"]
-    assert repos, "code defaults must keep the retired skill_safety whitelist"
+    assert isinstance(repos, list)
     for repo in repos:
         assert set(repo) <= {"path"}, (
             "skill_safety repos are a pure path allowlist (G3); "

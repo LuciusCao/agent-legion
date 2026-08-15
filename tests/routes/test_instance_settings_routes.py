@@ -53,12 +53,9 @@ def _payload() -> dict:
             ],
             "skill_safety": {
                 "enabled": True,
-                "repos": [
-                    {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_interactions"},
-                    {"path": "~/.agents/skills/agent-legion/video_knowledge/review_video_content"},
-                    {"path": "~/.agents/skills/agent-legion/video_knowledge/review_subtitles"},
-                    {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_chapters"},
-                ],
+                # Code defaults ship no business skills (open-source
+                # extraction plan §1.1 #6): the whitelist starts empty.
+                "repos": [],
             },
         },
     }
@@ -126,7 +123,7 @@ def test_put_rejects_out_of_range_values(client) -> None:
 def test_put_rejects_skill_safety_ref(client) -> None:
     """skill_safety repos are a path-only allowlist (G3): ref keys 422."""
     payload = _payload()
-    payload["openclaw"]["skill_safety"]["repos"][0]["ref"] = "v1.0.0"
+    payload["openclaw"]["skill_safety"]["repos"] = [{"path": "~/skills/s1", "ref": "v1.0.0"}]
     assert client.put(INSTANCE_SETTINGS_URL, json=payload).status_code == 422
 
 
