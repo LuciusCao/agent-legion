@@ -10,6 +10,14 @@ CSRF = {"x-agent-legion-request": "1"}
 SKILL_SOURCES_URL = "/api/admin/skill-sources"
 RELOCK_URL = "/api/admin/skill-sources/relock"
 KEY = "question_comprehension_info/generate_key_info"
+# Demo skills (imported per machine by `make import-demo`) are seeded without
+# lock entries — they show stale until the first dispatch or relock resolves
+# them against the local repos.
+_DEMO_PREFIX = "education-video-problems-generation/"
+
+
+def _is_demo(key: str) -> bool:
+    return key.startswith(_DEMO_PREFIX)
 
 
 def _member_client(client, username="skill_source_member", password="pw1"):
@@ -98,7 +106,7 @@ def test_get_merged_view_after_seed(client) -> None:
     response = client.get(SKILL_SOURCES_URL)
     assert response.status_code == 200, response.text
     skills = response.json()["skills"]
-    assert len(skills) == len(BUILTIN_SKILL_SOURCES.skills) == 9
+    assert len(skills) == len(BUILTIN_SKILL_SOURCES.skills) == 13
     locked = BUILTIN_SKILL_LOCK.skills[KEY]
     resolved_at = BUILTIN_SKILL_LOCK.resolved_at
     entry = next(item for item in skills if item["key"] == KEY)
@@ -110,7 +118,7 @@ def test_get_merged_view_after_seed(client) -> None:
         "resolved_at": resolved_at,
         "stale": False,
     }
-    assert all(not item["stale"] for item in skills)
+    assert all(item["stale"] is _is_demo(item["key"]) for item in skills)
 
 
 def test_put_creates_unknown_key(client) -> None:
@@ -165,10 +173,11 @@ def test_put_updates_source_and_marks_stale(client) -> None:
     skills = response.json()["skills"]
     changed = next(item for item in skills if item["key"] == KEY)
     assert changed["ref"] == "v9.9.9"
-    # The lock still pins the old ref, so the entry is stale until relock.
+    # The lock still pins the old ref, so the entry is stale until relock
+    # (the never-locked demo skills are stale too).
     assert changed["locked_commit"] == BUILTIN_SKILL_LOCK.skills[KEY].commit
     assert changed["stale"] is True
-    assert all(item["stale"] is (item["key"] == KEY) for item in skills)
+    assert all(item["stale"] is (item["key"] == KEY or _is_demo(item["key"])) for item in skills)
 
     persisted = client.get(SKILL_SOURCES_URL).json()["skills"]
     assert next(item for item in persisted if item["key"] == KEY)["stale"] is True
@@ -199,7 +208,7 @@ def test_relock_resolves_local_repos(client, tmp_path, monkeypatch) -> None:
     response = client.post(RELOCK_URL)
     assert response.status_code == 200, response.text
     skills = response.json()["skills"]
-    assert len(skills) == 9
+    assert len(skills) == 13
     assert all(not item["stale"] for item in skills)
     entry = next(item for item in skills if item["key"] == KEY)
     assert entry["ref"] == "v9.9.9"

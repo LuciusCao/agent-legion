@@ -34,7 +34,21 @@ def test_conftest_seeds_builtin_catalog(service) -> None:
     assert set(published) == {"code-default"}
     config = published["code-default"]
     assert isinstance(config, CodeExecutorConfig)
-    assert len(config.capabilities) == 9
+    # 9 business capabilities + 2 demo workflow capabilities.
+    assert len(config.capabilities) == 11
+
+
+def test_demo_capabilities_bind_builtin_node_paths(service) -> None:
+    """The demo workflow's code capabilities bind repo files (EXEC-CODE-001)."""
+    config = service.list_published_definitions()["code-default"]
+    intake = config.capabilities["intake_knowledge_points"]
+    publish = config.capabilities["publish_content"]
+    assert str(intake.path) == "workflow_nodes/example_intake.py"
+    assert str(publish.path) == "workflow_nodes/example_publish.py"
+    properties = intake.config_schema["properties"]
+    assert properties["knowledge_dir"]["default"] == (
+        "examples/education-video-problems-generation"
+    )
 
 
 def test_save_draft_then_publish_round_trip(service) -> None:

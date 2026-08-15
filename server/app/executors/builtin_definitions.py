@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.executors.builtin_demo import DEMO_CODE_CAPABILITIES
+
 # CMS connection schema shared by the capabilities that call the CMS: the
 # instance-level external connection key plus non-secret business selectors.
 # Endpoint URLs and credentials live on the connection (admin settings →
@@ -68,6 +70,9 @@ BUILTIN_EXECUTOR_DEFINITIONS: dict[str, dict[str, Any]] = {
         "kind": "code",
         "global_capacity": 16,
         "capabilities": {
+            # Demo workflow (education_video_problems_generation) code nodes
+            # (see builtin_demo.py).
+            **DEMO_CODE_CAPABILITIES,
             # Custom forks call the CMS: allow network inside the sandbox
             # (EXEC-CODE-003).
             "fetch_questions": {

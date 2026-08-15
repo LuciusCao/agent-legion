@@ -15,6 +15,7 @@ def test_scan_entries_split_definitions_and_definitionless_keys(settings) -> Non
     definitions, definitionless_keys = load_workflow_scan_entries(settings)
 
     assert {definition.key for definition in definitions} == {
+        "education_video_problems_generation",
         "question_comprehension_info",
         "video_knowledge",
     }
