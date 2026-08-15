@@ -9,38 +9,31 @@ def test_get_workflow_definition_when_enabled(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
-        response = c.get("/api/workflows/question_comprehension_info")
+        response = c.get("/api/workflows/education_video_problems_generation")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["workflow"]["key"] == "question_comprehension_info"
-    assert body["workflow"]["label"] == "题目审题信息生成 DAG"
+    assert body["workflow"]["key"] == "education_video_problems_generation"
+    assert body["workflow"]["label"] == "教学视频脚本与题目生成（示例）"
     assert body["workflow"]["intake"]["modes"] == [
         {
-            "key": "batch_by_knowledge",
+            "key": "direct_ids",
             "label": "按知识点批量",
-            "input_field": "knowledge_codes",
-        },
-        {
-            "key": "batch_by_ids",
-            "label": "按题目ID批量",
-            "input_field": "question_ids",
+            "input_field": "knowledge_point_ids",
         },
     ]
     node_keys = [node["key"] for node in body["workflow"]["nodes"]]
-    assert node_keys[0] == "fetch_questions"
-    assert "assemble_comprehension_info" in node_keys
+    assert node_keys[0] == "intake_knowledge_points"
+    assert "publish_content" in node_keys
     assert all("label" in node for node in body["workflow"]["nodes"])
-    fetch_node = next(
-        node for node in body["workflow"]["nodes"] if node["key"] == "fetch_questions"
+    intake_node = next(
+        node for node in body["workflow"]["nodes"] if node["key"] == "intake_knowledge_points"
     )
-    assert fetch_node["label"] == "获取题目"
+    assert intake_node["label"] == "读取知识点"
     graph_node = next(
-        node
-        for node in body["workflow"]["nodes"]
-        if node["key"] == "assess_comprehension_difficulty"
+        node for node in body["workflow"]["nodes"] if node["key"] == "publish_content"
     )
-    assert graph_node["after"] == ["review_key_info", "review_possible_errors"]
+    assert graph_node["after"] == ["review_script", "review_questions"]
 
 
 def test_list_workflows_includes_registered_workflows(tmp_path):
@@ -68,7 +61,7 @@ def test_update_workspace_rejects_invalid_workflow_key(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         create_resp = c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
         assert create_resp.status_code == 200, create_resp.text
         ws_id = create_resp.json()["workspace"]["id"]
@@ -101,7 +94,7 @@ def test_register_workflow_via_admin_api(tmp_path):
         listing = c.get("/api/workflows")
         assert listing.status_code == 200
         keys = {item["key"] for item in listing.json()["workflows"]}
-        assert {"question_comprehension_info", "video_knowledge", "acme_quiz_flow"} <= keys
+        assert {"education_video_problems_generation", "acme_quiz_flow"} <= keys
 
         # A registered key binds to new workspaces immediately.
         create_resp = c.post(
@@ -126,7 +119,7 @@ def test_register_workflow_conflict_and_invalid_key(tmp_path):
         assert duplicate.status_code == 409
 
         builtin = c.post(
-            "/api/workflows", json={"key": "question_comprehension_info", "label": "Hijack"}
+            "/api/workflows", json={"key": "education_video_problems_generation", "label": "Hijack"}
         )
         assert builtin.status_code == 409
 

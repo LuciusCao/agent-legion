@@ -26,7 +26,7 @@ key: acme_quiz_flow
 label: Acme Quiz Flow
 nodes:
   generate:
-    capability: generate_key_info
+    capability: write_script
 """
 
 
@@ -53,16 +53,16 @@ def test_seed_is_idempotent_and_refreshes_builtin_rows() -> None:
     entries = WorkflowCatalogStore(TEST_DATABASE_URL).list_entries()
     assert {entry["key"] for entry in entries} == {
         "education_video_problems_generation",
-        "question_comprehension_info",
-        "video_knowledge",
     }
     # A stale builtin row (older code seed) is refreshed on the next seed run.
     with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute("update workflow_catalog set label='stale' where key='video_knowledge'")
+        conn.execute(
+            "update workflow_catalog set label='stale' where key='education_video_problems_generation'"
+        )
     seed_builtin_workflow_catalog(TEST_DATABASE_URL)
-    entry = WorkflowCatalogStore(TEST_DATABASE_URL).get_entry("video_knowledge")
+    entry = WorkflowCatalogStore(TEST_DATABASE_URL).get_entry("education_video_problems_generation")
     assert entry is not None
-    assert entry["label"] == "知识视频 DAG"
+    assert entry["label"] == "教学视频脚本与题目生成（示例）"
 
 
 def test_seed_never_touches_registered_rows(catalog) -> None:
@@ -93,7 +93,7 @@ def test_register_rejects_duplicate_and_builtin_keys(catalog) -> None:
     with pytest.raises(ConflictError):
         catalog.register(_REGISTERED_KEY, "Acme Quiz Again")
     with pytest.raises(ConflictError):
-        catalog.register("question_comprehension_info", "Builtin Hijack")
+        catalog.register("education_video_problems_generation", "Builtin Hijack")
 
 
 def test_definition_resolution_by_origin(catalog) -> None:
@@ -102,7 +102,10 @@ def test_definition_resolution_by_origin(catalog) -> None:
         catalog.definition("missing")
     with pytest.raises(NotFoundError, match="no published definition"):
         catalog.definition(_REGISTERED_KEY)
-    assert catalog.definition("video_knowledge").key == "video_knowledge"
+    assert (
+        catalog.definition("education_video_problems_generation").key
+        == "education_video_problems_generation"
+    )
     assert catalog.definition_or_none(_REGISTERED_KEY) is None
     assert catalog.definition_or_none("missing") is None
     with pytest.raises(NotFoundError, match="Unknown workflow"):
@@ -117,7 +120,7 @@ def test_list_includes_registered_workflows(catalog) -> None:
     summaries = {entry["key"]: entry for entry in catalog.list_workflows()}
     assert summaries[_REGISTERED_KEY]["origin"] == "registered"
     assert summaries[_REGISTERED_KEY]["description"] == "custom"
-    assert summaries["video_knowledge"]["origin"] == "builtin"
+    assert summaries["education_video_problems_generation"]["origin"] == "builtin"
 
 
 def test_workspace_create_with_registered_key_defers_revision(
@@ -239,14 +242,14 @@ def test_first_publish_uses_bindings_saved_before_definition(
         node_limits=[],
     )
 
-    # clean_and_parse is a code-default capability with no published Agent in
+    # publish_content is a code-default capability with no published Agent in
     # the test seed, so the publish validator requires the saved binding.
     draft_yaml = """
 key: acme_quiz_flow
 label: Acme Quiz Flow
 nodes:
   parse:
-    capability: clean_and_parse
+    capability: publish_content
 """
     ok, errors = publish_workflow_draft(
         job_db, workspace["id"], draft_yaml, settings.executor_definitions

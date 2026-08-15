@@ -27,7 +27,7 @@ def workspace_service(job_db, settings, agent_manager):
 @pytest.fixture
 def workspace(workspace_service):
     return workspace_service.create(
-        {"name": "Test", "default_workflow_key": "question_comprehension_info"}
+        {"name": "Test", "default_workflow_key": "education_video_problems_generation"}
     )
 
 
@@ -48,36 +48,36 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
     result = workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={"name": "Reading"},
-        settings_patch={"workflowKey": "question_comprehension_info"},
+        settings_patch={"workflowKey": "education_video_problems_generation"},
         executor_allocations=[
             {"executor_id": "code-default", "concurrency_limit": 4},
         ],
         node_bindings=[
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "workflow_key": "education_video_problems_generation",
+                "node_key": "intake_knowledge_points",
                 "executor_id": "code-default",
             },
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "clean_and_parse",
+                "workflow_key": "education_video_problems_generation",
+                "node_key": "publish_content",
                 "executor_id": "code-default",
             },
         ],
         node_limits=[
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "clean_and_parse",
+                "workflow_key": "education_video_problems_generation",
+                "node_key": "publish_content",
                 "concurrency_limit": 2,
             }
         ],
     )
     assert result["workspace"]["name"] == "Reading"
-    assert result["settings"]["workflowKey"] == "question_comprehension_info"
+    assert result["settings"]["workflowKey"] == "education_video_problems_generation"
     assert result["executor_configuration"]["allocations"][0]["concurrency_limit"] == 4
     assert {b["node_key"] for b in result["executor_configuration"]["bindings"]} == {
-        "fetch_questions",
-        "clean_and_parse",
+        "intake_knowledge_points",
+        "publish_content",
     }
     assert result["executor_configuration"]["node_limits"][0]["concurrency_limit"] == 2
 
@@ -91,11 +91,11 @@ def test_replace_configuration_rolls_back_workspace_on_invalid_binding(
         workspace_service.replace_configuration(
             workspace["id"],
             workspace_patch={"name": "Must Roll Back"},
-            settings_patch={"workflowKey": "question_comprehension_info"},
+            settings_patch={"workflowKey": "education_video_problems_generation"},
             executor_allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
             node_bindings=[
                 {
-                    "workflow_key": "question_comprehension_info",
+                    "workflow_key": "education_video_problems_generation",
                     "node_key": "unknown_node",
                     "executor_id": "code-default",
                 }
@@ -117,7 +117,7 @@ def test_workspace_configuration_update_delegates(workspace_service, workspace):
 
 def test_workspace_configuration_settings_payload(workspace_service, workspace):
     payload = workspace_service.settings_payload(workspace["id"])
-    assert payload["workflowKey"] == "question_comprehension_info"
+    assert payload["workflowKey"] == "education_video_problems_generation"
 
 
 def test_executor_stats_report_configured_capacity_and_leases(
@@ -140,12 +140,12 @@ def test_executor_stats_report_configured_capacity_and_leases(
         ],
         bindings=[
             {
-                "workflow_key": "question_comprehension_info",
+                "workflow_key": "education_video_problems_generation",
                 "node_key": "fetch",
                 "executor_id": "code-default",
             },
             {
-                "workflow_key": "question_comprehension_info",
+                "workflow_key": "education_video_problems_generation",
                 "node_key": "review",
                 "executor_id": "openclaw-main",
             },
@@ -156,7 +156,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
     jobs = []
     for i in range(3):
         job = job_db.create_job(
-            workflow_key="question_comprehension_info",
+            workflow_key="education_video_problems_generation",
             source_type="question",
             source_id=f"src-{i}",
             batch_id="",
@@ -168,7 +168,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
 
     repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
     claim_specs = [
-        ("code-default", "fetch", "fetch_questions", 16, None),
+        ("code-default", "fetch", "fetch", 16, None),
         ("openclaw-main", "review", "review", 8, None),
     ]
     for i, (executor_id, node_key, capability, global_capacity, local_limit) in enumerate(
@@ -180,7 +180,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
                 global_capacity=global_capacity,
                 workspace_id=workspace["id"],
                 job_id=jobs[i]["id"],
-                workflow_key="question_comprehension_info",
+                workflow_key="education_video_problems_generation",
                 node_key=node_key,
                 capability=capability,
                 local_node_limit=local_limit,
@@ -214,7 +214,7 @@ def test_executor_stats_does_not_consult_agent_status_manager(
     executor_definitions["code-default"] = CodeExecutorConfig(
         kind="code",
         global_capacity=4,
-        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
+        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/example_intake.py")},
     )
     monkeypatch.setattr(settings, "executor_definitions", executor_definitions)
 
@@ -223,7 +223,7 @@ def test_executor_stats_does_not_consult_agent_status_manager(
         allocations=[{"executor_id": "code-default", "concurrency_limit": 2}],
         bindings=[
             {
-                "workflow_key": "question_comprehension_info",
+                "workflow_key": "education_video_problems_generation",
                 "node_key": "fetch",
                 "executor_id": "code-default",
             }
@@ -249,7 +249,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     workspace_service, workspace, job_db, settings
 ):
     other = workspace_service.create(
-        {"name": "Other", "default_workflow_key": "question_comprehension_info"}
+        {"name": "Other", "default_workflow_key": "education_video_problems_generation"}
     )
     for workspace_id, limit in ((workspace["id"], 8), (other["id"], 128)):
         job_db.replace_workspace_executor_configuration(
@@ -257,7 +257,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
             allocations=[{"executor_id": "code-default", "concurrency_limit": limit}],
             bindings=[
                 {
-                    "workflow_key": "question_comprehension_info",
+                    "workflow_key": "education_video_problems_generation",
                     "node_key": "fetch",
                     "executor_id": "code-default",
                 }
@@ -269,7 +269,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     for i in range(128):
         owner = other
         job = job_db.create_job(
-            workflow_key="question_comprehension_info",
+            workflow_key="education_video_problems_generation",
             source_type="question",
             source_id=f"global-{i}",
             batch_id="",
@@ -283,9 +283,9 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
                 global_capacity=128,
                 workspace_id=owner["id"],
                 job_id=job["id"],
-                workflow_key="question_comprehension_info",
+                workflow_key="education_video_problems_generation",
                 node_key="fetch",
-                capability="fetch_questions",
+                capability="fetch",
                 local_node_limit=None,
                 lease_ttl_seconds=60,
                 log_path=str(settings.logs_dir / "run.log"),
@@ -301,9 +301,11 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
 
 def test_create_workspace_seeds_active_workflow_revision(workspace_service, job_db):
     workspace = workspace_service.create(
-        {"name": "WS", "default_workflow_key": "question_comprehension_info"}
+        {"name": "WS", "default_workflow_key": "education_video_problems_generation"}
     )
-    active = job_db.get_active_workflow_revision(workspace["id"], "question_comprehension_info")
+    active = job_db.get_active_workflow_revision(
+        workspace["id"], "education_video_problems_generation"
+    )
     assert active is not None
     assert active["version"] == 1
 
@@ -312,7 +314,7 @@ def _save(workspace_service, workspace_id: str, agent_capacity: int | None = Non
     return workspace_service.replace_configuration(
         workspace_id,
         workspace_patch={},
-        settings_patch={"workflowKey": "question_comprehension_info"},
+        settings_patch={"workflowKey": "education_video_problems_generation"},
         executor_allocations=[],
         node_bindings=[],
         node_limits=[],
@@ -345,9 +347,12 @@ def test_replace_configuration_rejects_non_positive_agent_capacity(workspace_ser
 
 def test_update_workflow_seeds_revision_for_new_workflow(workspace_service, job_db):
     workspace = workspace_service.create(
-        {"name": "WS", "default_workflow_key": "question_comprehension_info"}
+        {"name": "WS", "default_workflow_key": "education_video_problems_generation"}
     )
     workspace_service.update_section(
-        workspace["id"], "workflow", {"workflowKey": "video_knowledge"}
+        workspace["id"], "workflow", {"workflowKey": "education_video_problems_generation"}
     )
-    assert job_db.get_active_workflow_revision(workspace["id"], "video_knowledge") is not None
+    assert (
+        job_db.get_active_workflow_revision(workspace["id"], "education_video_problems_generation")
+        is not None
+    )

@@ -6,6 +6,10 @@ from server.app.routes.workspace_contracts import WorkspaceRecord
 
 
 class JobBatchRequest(BaseModel):
+    # Intake input fields are workflow-definition-driven (mode.input_field),
+    # so extra fields pass through to the intake service verbatim.
+    model_config = ConfigDict(extra="allow")
+
     # No platform default workflow: callers must choose explicitly.
     workflow_key: str
     entity: str | None = None

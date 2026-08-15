@@ -12,8 +12,6 @@ pytestmark = pytest.mark.no_db
 def test_builtin_workflow_keys() -> None:
     assert sorted(BUILTIN_WORKFLOW_DEFINITIONS) == [
         "education_video_problems_generation",
-        "question_comprehension_info",
-        "video_knowledge",
     ]
 
 

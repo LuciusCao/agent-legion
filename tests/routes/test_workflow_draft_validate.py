@@ -6,8 +6,8 @@ _DRAFT_YAML = """
 key: test_validate_flow
 label: Test Validate Flow
 nodes:
-  clean_and_parse:
-    capability: clean_and_parse
+  publish_content:
+    capability: publish_content
 """
 
 
@@ -41,7 +41,7 @@ def test_validate_clean_with_complete_binding(client, job_db) -> None:
         bindings=[
             {
                 "workflow_key": "test_validate_flow",
-                "node_key": "clean_and_parse",
+                "node_key": "publish_content",
                 "executor_id": "code-default",
             }
         ],

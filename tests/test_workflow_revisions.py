@@ -33,8 +33,10 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_builtin_definition("question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
 
     revision = service.publish_workspace_revision(workspace["id"], definition)
@@ -42,7 +44,7 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
 
     assert active["id"] == revision["id"]
     assert active["workspace_id"] == workspace["id"]
-    assert active["workflow_key"] == "question_comprehension_info"
+    assert active["workflow_key"] == "education_video_problems_generation"
     assert active["version"] == 1
     assert active["status"] == "active"
     assert active["definition_hash"]
@@ -50,16 +52,16 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     with queries._connect_read() as conn:
         route = conn.execute(
             "select target_kind, target_id from workspace_node_routes"
-            " where workspace_id=%s and workflow_key=%s and node_key='generate_key_info'",
+            " where workspace_id=%s and workflow_key=%s and node_key='write_script'",
             (workspace["id"], definition.key),
         ).fetchone()
         capacity = conn.execute(
             "select max_concurrency, source_revision_id from workspace_node_capacities"
-            " where workspace_id=%s and workflow_key=%s and node_key='generate_key_info'",
+            " where workspace_id=%s and workflow_key=%s and node_key='write_script'",
             (workspace["id"], definition.key),
         ).fetchone()
     assert route is not None
-    assert dict(route) == {"target_kind": "agent", "target_id": "question-key-info-v1"}
+    assert dict(route) == {"target_kind": "agent", "target_id": "example-write-script-v1"}
     # Agent capacity is workspace-level now; publish no longer writes per-node rows.
     assert capacity is None
 
@@ -125,18 +127,18 @@ def test_runtime_only_save_updates_active_revision_without_new_version(
 def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
     # Agent routing is capability-driven: review_as_local gives the node a
     # capability no enabled Agent implements, so it keeps the handler path.
-    review_capability = "local_review" if review_as_local else "review_key_info"
+    review_capability = "local_review" if review_as_local else "review_script"
     return workflow_definition_from_mapping(
         {
-            "key": "question_comprehension_info",
-            "label": "QCI",
+            "key": "agent_nodes_flow",
+            "label": "Agent Nodes Flow",
             "nodes": {
-                "generate_key_info": {
-                    "capability": "generate_key_info",
+                "write_script": {
+                    "capability": "write_script",
                 },
-                "review_key_info": {
+                "review_script": {
                     "capability": review_capability,
-                    "after": ["generate_key_info"],
+                    "after": ["write_script"],
                 },
             },
         }
@@ -163,19 +165,21 @@ def _route_and_capacity_rows(queries: JobQueries, workspace_id: str, workflow_ke
 
 def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    video_definition = load_builtin_definition("video_knowledge")
-    service.publish_workspace_revision(workspace["id"], video_definition)
+    demo_definition = load_builtin_definition("education_video_problems_generation")
+    service.publish_workspace_revision(workspace["id"], demo_definition)
     # Legacy projection: a stale per-node capacity row must be pruned by the
     # next publish even though publish no longer writes such rows.
     with queries.connect() as conn:
         conn.execute(
             "insert into workspace_node_capacities(workspace_id, workflow_key, node_key, max_concurrency)"
-            " values (%s, 'question_comprehension_info', 'generate_key_info', 20)",
+            " values (%s, 'agent_nodes_flow', 'write_script', 20)",
             (workspace["id"],),
         )
 
@@ -183,26 +187,28 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
         workspace["id"], _agent_nodes_definition(review_as_local=True)
     )
 
-    question_rows = _route_and_capacity_rows(
-        queries, workspace["id"], "question_comprehension_info"
+    flow_rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    assert flow_rows["routes"] == {"write_script": ("agent", "example-write-script-v1")}
+    assert flow_rows["capacities"] == {}
+    demo_rows = _route_and_capacity_rows(
+        queries, workspace["id"], "education_video_problems_generation"
     )
-    assert question_rows["routes"] == {"generate_key_info": ("agent", "question-key-info-v1")}
-    assert question_rows["capacities"] == {}
-    video_rows = _route_and_capacity_rows(queries, workspace["id"], "video_knowledge")
-    assert set(video_rows["routes"]) == {
-        "subtitle_review",
-        "chapter_generate",
-        "interaction_generate",
-        "content_review",
+    assert set(demo_rows["routes"]) == {
+        "write_script",
+        "review_script",
+        "generate_questions",
+        "review_questions",
     }
-    assert video_rows["capacities"] == {}
+    assert demo_rows["capacities"] == {}
 
 
 def test_reconcile_warns_and_skips_on_ambiguous_capability(
     tmp_path: Path, caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
@@ -214,15 +220,15 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     from server.app.agent_catalog import AgentDefinition
 
     ambiguous = {
-        "question-key-info-v1": AgentDefinition(
-            capability="generate_key_info",
+        "example-write-script-v1": AgentDefinition(
+            capability="write_script",
             runtime="velites",
-            skill="question/generate_key_info",
+            skill="example/write-script",
         ),
-        "question-key-info-v2": AgentDefinition(
-            capability="generate_key_info",
+        "example-write-script-v2": AgentDefinition(
+            capability="write_script",
             runtime="velites",
-            skill="question/generate_key_info_v2",
+            skill="example/write-script-v2",
         ),
     }
     monkeypatch.setattr(
@@ -243,15 +249,17 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     assert warnings
     assert any(workspace["id"] in record.getMessage() for record in warnings)
     # The ambiguous revision was skipped: its previously materialized rows are untouched.
-    rows = _route_and_capacity_rows(queries, workspace["id"], "question_comprehension_info")
-    assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
+    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    assert rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
 
 
 def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
@@ -263,41 +271,43 @@ def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
         service.reconcile_active_agent_routes()
 
     assert any("no published Agent Definitions" in record.getMessage() for record in caplog.records)
-    rows = _route_and_capacity_rows(queries, workspace["id"], "question_comprehension_info")
-    assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
+    rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    assert rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
 
 
 def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    video_definition = load_builtin_definition("video_knowledge")
-    service.publish_workspace_revision(workspace["id"], video_definition)
     # Simulate a pre-cutover active revision: no materialized routes/capacities.
     with queries.connect() as conn:
         conn.execute(
             "delete from workspace_node_routes where workspace_id=%s and workflow_key=%s",
-            (workspace["id"], "video_knowledge"),
+            (workspace["id"], "agent_nodes_flow"),
         )
         conn.execute(
             "delete from workspace_node_capacities where workspace_id=%s and workflow_key=%s",
-            (workspace["id"], "video_knowledge"),
+            (workspace["id"], "agent_nodes_flow"),
         )
 
     service.reconcile_active_agent_routes()
 
-    video_rows = _route_and_capacity_rows(queries, workspace["id"], "video_knowledge")
-    assert video_rows["routes"]["subtitle_review"] == ("agent", "video-subtitle-review-v1")
-    assert video_rows["capacities"] == {}
+    flow_rows = _route_and_capacity_rows(queries, workspace["id"], "agent_nodes_flow")
+    assert flow_rows["routes"]["write_script"] == ("agent", "example-write-script-v1")
+    assert flow_rows["capacities"] == {}
 
 
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_builtin_definition("question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
     revision = service.publish_workspace_revision(workspace["id"], definition)
 
@@ -318,7 +328,7 @@ def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
     assert job["workflow_revision_id"] == revision["id"]
     assert job["workflow_version"] == revision["version"]
     assert job["workflow_definition_hash"] == revision["definition_hash"]
-    assert "fetch_questions" in job["workflow_definition_snapshot_json"]
+    assert "intake_knowledge_points" in job["workflow_definition_snapshot_json"]
 
 
 def test_validate_workflow_definition_reports_malformed_yaml() -> None:
@@ -357,8 +367,10 @@ edges: []
 
 def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_builtin_definition("question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
 
     errors = validate_workflow_for_publish(
         definition=definition,
@@ -372,8 +384,10 @@ def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> 
 
 def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
-    definition = load_builtin_definition("question_comprehension_info")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
     active = service.publish_workspace_revision(workspace["id"], definition)
 
@@ -396,7 +410,7 @@ def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path
     with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
-            json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "Studio", "default_workflow_key": "education_video_problems_generation"},
         )
         assert response.status_code == 200
         workspace_id = response.json()["workspace"]["id"]
@@ -407,12 +421,12 @@ def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path
     payload = active.json()
     assert payload["revision"]["status"] == "active"
     assert payload["revision"]["version"] == 1
-    assert payload["workflow"]["key"] == "question_comprehension_info"
+    assert payload["workflow"]["key"] == "education_video_problems_generation"
     assert payload["workflow"]["nodes"]
-    assert "key: question_comprehension_info" in payload["definition_yaml"]
+    assert "key: education_video_problems_generation" in payload["definition_yaml"]
 
     definition = workflow_definition_from_yaml_string(payload["definition_yaml"])
-    assert definition.key == "question_comprehension_info"
+    assert definition.key == "education_video_problems_generation"
     assert definition.nodes
     assert definition.edges
 
@@ -423,7 +437,7 @@ def test_get_workflow_revision_detail_returns_definition_and_yaml(tmp_path: Path
     with authenticate_client(TestClient(app)) as client:
         response = client.post(
             "/api/workspaces",
-            json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "Studio", "default_workflow_key": "education_video_problems_generation"},
         )
         assert response.status_code == 200
         workspace_id = response.json()["workspace"]["id"]
@@ -438,9 +452,9 @@ def test_get_workflow_revision_detail_returns_definition_and_yaml(tmp_path: Path
     payload = detail.json()
     assert payload["revision"]["id"] == revision_id
     assert payload["revision"]["status"] == "active"
-    assert payload["workflow"]["key"] == "question_comprehension_info"
+    assert payload["workflow"]["key"] == "education_video_problems_generation"
     assert payload["workflow"]["nodes"]
-    assert "key: question_comprehension_info" in payload["definition_yaml"]
+    assert "key: education_video_problems_generation" in payload["definition_yaml"]
 
 
 def test_get_workflow_revision_detail_returns_404_for_unknown_revision(
@@ -450,7 +464,7 @@ def test_get_workflow_revision_detail_returns_404_for_unknown_revision(
     app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "Studio",
-        default_workflow_key="question_comprehension_info",
+        default_workflow_key="education_video_problems_generation",
     )
     with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/missing-rev")
@@ -467,11 +481,11 @@ def test_get_workflow_revision_detail_rejects_other_workspace_revision(
     with authenticate_client(TestClient(app)) as client:
         first = client.post(
             "/api/workspaces",
-            json={"name": "First", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "First", "default_workflow_key": "education_video_problems_generation"},
         )
         second = client.post(
             "/api/workspaces",
-            json={"name": "Second", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "Second", "default_workflow_key": "education_video_problems_generation"},
         )
         assert first.status_code == 200
         assert second.status_code == 200
@@ -494,7 +508,7 @@ def test_get_active_workflow_revision_returns_404_for_workspace_without_revision
     app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "No Revision",
-        default_workflow_key="question_comprehension_info",
+        default_workflow_key="education_video_problems_generation",
     )
     with authenticate_client(TestClient(app)) as client:
         response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/active")
@@ -504,7 +518,7 @@ def test_get_active_workflow_revision_returns_404_for_workspace_without_revision
 
 
 def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> None:
-    definition = load_builtin_definition("video_knowledge")
+    definition = load_builtin_definition("education_video_problems_generation")
 
     yaml_text = definition_to_yaml(definition)
 
@@ -515,7 +529,7 @@ def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> N
 
 
 def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
 
     payload = workflow_definition_to_response_payload(definition)
 
@@ -528,18 +542,18 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
     """Publish snapshots published custom code versions as node_code_pins."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
-        "ws-pins", default_workflow_key="question_comprehension_info"
+        "ws-pins", default_workflow_key="education_video_problems_generation"
     )
     codes = NodeCodeService(queries.path)
     codes.save_draft(
         workspace["id"],
-        "question_comprehension_info",
-        "fetch_questions",
+        "education_video_problems_generation",
+        "intake_knowledge_points",
         "def run(job, job_dir, runtime):\n    return None\n",
         "user:u1",
     )
-    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
-    definition = load_builtin_definition("question_comprehension_info")
+    codes.publish(workspace["id"], "education_video_problems_generation", "intake_knowledge_points")
+    definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
 
     service.publish_workspace_revision(workspace["id"], definition)
@@ -547,9 +561,9 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
 
     payload = json.loads(active["definition_json"])
     pins = payload["node_code_pins"]
-    assert pins["fetch_questions"]["version"] == 1
-    assert len(pins["fetch_questions"]["code_hash"]) == 64
-    assert "clean_and_parse" not in pins
+    assert pins["intake_knowledge_points"]["version"] == 1
+    assert len(pins["intake_knowledge_points"]["code_hash"]) == 64
+    assert "write_script" not in pins
     # Pins are publish-moment state, not part of the definition: the hash
     # covers the pure definition only.
     assert active["definition_hash"] == definition_hash(serialize_definition(definition))
@@ -560,9 +574,9 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
 def test_publish_revision_without_custom_codes_has_no_pins(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
-        "ws-no-pins", default_workflow_key="question_comprehension_info"
+        "ws-no-pins", default_workflow_key="education_video_problems_generation"
     )
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
 
     service.publish_workspace_revision(workspace["id"], definition)
@@ -574,18 +588,18 @@ def test_publish_revision_without_custom_codes_has_no_pins(tmp_path: Path) -> No
 def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
-        "ws-gated-pins", default_workflow_key="question_comprehension_info"
+        "ws-gated-pins", default_workflow_key="education_video_problems_generation"
     )
     codes = NodeCodeService(queries.path)
     codes.save_draft(
         workspace["id"],
-        "question_comprehension_info",
-        "fetch_questions",
+        "education_video_problems_generation",
+        "intake_knowledge_points",
         "def run(job, job_dir, runtime):\n    return None\n",
         "user:u1",
     )
-    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
-    definition = load_builtin_definition("question_comprehension_info")
+    codes.publish(workspace["id"], "education_video_problems_generation", "intake_knowledge_points")
+    definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries, custom_nodes_enabled=False)
 
     service.publish_workspace_revision(workspace["id"], definition)
@@ -602,28 +616,28 @@ def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
 
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
-        "ws-pins-keep", default_workflow_key="question_comprehension_info"
+        "ws-pins-keep", default_workflow_key="education_video_problems_generation"
     )
     codes = NodeCodeService(queries.path)
     codes.save_draft(
         workspace["id"],
-        "question_comprehension_info",
-        "fetch_questions",
+        "education_video_problems_generation",
+        "intake_knowledge_points",
         "def run(job, job_dir, runtime):\n    return None\n",
         "user:u1",
     )
-    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
-    definition = load_builtin_definition("question_comprehension_info")
+    codes.publish(workspace["id"], "education_video_problems_generation", "intake_knowledge_points")
+    definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(workspace["id"], definition)
 
     # Runtime-only change: same structure, different execution settings.
-    node = definition.nodes["generate_key_info"]
+    node = definition.nodes["write_script"]
     updated = dc_replace(
         definition,
         nodes={
             **definition.nodes,
-            "generate_key_info": dc_replace(
+            "write_script": dc_replace(
                 node, execution=WorkflowNodeExecution(provider="deepseek", model="m2")
             ),
         },
@@ -632,7 +646,7 @@ def test_runtime_only_update_preserves_node_code_pins(tmp_path: Path) -> None:
 
     active = service.get_active(workspace["id"], definition.key)
     payload = json.loads(active["definition_json"])
-    assert payload["node_code_pins"]["fetch_questions"]["version"] == 1
+    assert payload["node_code_pins"]["intake_knowledge_points"]["version"] == 1
     # The runtime change did land, and no new revision was created.
-    assert payload["nodes"]["generate_key_info"]["execution"]["model"] == "m2"
+    assert payload["nodes"]["write_script"]["execution"]["model"] == "m2"
     assert active["version"] == 1

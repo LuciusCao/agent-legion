@@ -31,13 +31,14 @@ def _demo_keys() -> set[str]:
     return {key for key in BUILTIN_SKILL_SOURCES.skills if key.startswith(_DEMO_PREFIX)}
 
 
-def test_builtin_sources_cover_business_and_demo_skills() -> None:
+def test_builtin_sources_cover_demo_skills() -> None:
     assert _demo_keys() == {
         f"{_DEMO_PREFIX}{name}"
         for name in ("write-script", "review-script", "generate-questions", "review-questions")
     }
-    assert len(BUILTIN_SKILL_SOURCES.skills) == 13
-    # Every business skill is locked; demo skills are intentionally unlocked.
+    assert len(BUILTIN_SKILL_SOURCES.skills) == 4
+    # Demo skills are intentionally unlocked (machine-local repos); the lock
+    # starts empty and the first relock fills it.
     assert set(BUILTIN_SKILL_LOCK.skills) == set(BUILTIN_SKILL_SOURCES.skills) - _demo_keys()
 
 

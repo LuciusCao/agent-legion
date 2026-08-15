@@ -71,7 +71,7 @@ def _register_fake_agent(
 def _create_workspace(client, name="Chat WS") -> str:
     response = client.post(
         "/api/workspaces",
-        json={"name": name, "default_workflow_key": "question_comprehension_info"},
+        json={"name": name, "default_workflow_key": "education_video_problems_generation"},
     )
     assert response.status_code == 200, response.text
     return response.json()["workspace"]["id"]

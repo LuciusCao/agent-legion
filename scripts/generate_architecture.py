@@ -199,7 +199,7 @@ def extract_frontend_routes(root: Path) -> str:
 
 
 def extract_pipeline_phases(root: Path) -> str:
-    """Extract the video pipeline node sequence from the built-in video_knowledge DAG."""
+    """Extract the node sequence from the built-in demo workflow DAG."""
     from scripts.generate_architecture_pipeline import extract_pipeline_phases as _extract
 
     return _extract()
@@ -276,7 +276,7 @@ def generate_frontend(root: Path) -> str:
 
 
 def generate_pipeline(root: Path) -> str:
-    return "### 视频流水线阶段\n\n" + extract_pipeline_phases(root)
+    return "### 内置 Workflow 节点序列\n\n" + extract_pipeline_phases(root)
 
 
 def generate_deployment(root: Path) -> str:

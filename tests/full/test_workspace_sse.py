@@ -66,7 +66,10 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
             # Create workspace first via API
             resp = client.post(
                 f"{base_url}/api/workspaces",
-                json={"name": "sse-test", "default_workflow_key": "question_comprehension_info"},
+                json={
+                    "name": "sse-test",
+                    "default_workflow_key": "education_video_problems_generation",
+                },
             )
             assert resp.status_code == 200
             workspace_id = resp.json()["workspace"]["id"]
@@ -80,10 +83,9 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
                 resp = client.post(
                     f"{base_url}/api/workspaces/{workspace_id}/job-batches",
                     json={
-                        "workflow_key": "question_comprehension_info",
-                        "source_kind": "batch_by_ids",
-                        "question_ids": ["q123"],
-                        "knowledge_codes": [],
+                        "workflow_key": "education_video_problems_generation",
+                        "source_kind": "direct_ids",
+                        "knowledge_point_ids": ["q123"],
                     },
                 )
                 assert resp.status_code == 200

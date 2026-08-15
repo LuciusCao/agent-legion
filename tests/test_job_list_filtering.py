@@ -1,6 +1,6 @@
 import pytest
 
-WORKFLOW_KEY = "question_comprehension_info"
+WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _make_workspace(job_db, slug):

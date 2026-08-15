@@ -22,13 +22,12 @@ os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"
 import psycopg
 from psycopg import sql
 
-from server.app.agent_catalog import AgentDefinition
 from server.app.agent_catalog_builtin import seed_builtin_agent_definitions
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import AgentService, reset_published_agent_cache
+from server.app.services.agent_service import reset_published_agent_cache
 from server.app.services.executor_definition_service import (
     ExecutorDefinitionService,
     reset_published_executor_cache,
@@ -39,78 +38,12 @@ from server.app.services.workflow_catalog import seed_builtin_workflow_catalog
 from server.app.settings import load_settings
 from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
-# Test Agent catalog: mirrors the retired config/workflow.yaml `agents:`
-# section, with the 4 video agents already flipped to velites (schema v27
-# cutover). Seeded via AgentService after every TRUNCATE so published
+
+# Test Agent catalog: mirrors the app startup seed (create_app) — the
+# built-in demo workflow agents are seed-if-absent in production, so test DBs
+# carry them too. Seeded via AgentService after every TRUNCATE so published
 # definitions exist for route resolution and dispatch.
-_TEST_AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
-    agent_id: AgentDefinition(capability=capability, runtime=runtime, skill=skill)
-    for agent_id, capability, runtime, skill in [
-        (
-            "question-key-info-v1",
-            "generate_key_info",
-            "velites",
-            "question_comprehension_info/generate_key_info",
-        ),
-        (
-            "question-key-info-review-v1",
-            "review_key_info",
-            "velites",
-            "question_comprehension_info/review_key_info",
-        ),
-        (
-            "question-possible-errors-v1",
-            "generate_possible_errors",
-            "velites",
-            "question_comprehension_info/generate_possible_errors",
-        ),
-        (
-            "question-possible-errors-review-v1",
-            "review_possible_errors",
-            "velites",
-            "question_comprehension_info/review_possible_errors",
-        ),
-        (
-            "question-difficulty-v1",
-            "assess_comprehension_difficulty",
-            "velites",
-            "question_comprehension_info/assess_comprehension_difficulty",
-        ),
-        (
-            "video-subtitle-review-v1",
-            "review_subtitles",
-            "velites",
-            "video_knowledge/review_subtitles",
-        ),
-        (
-            "video-chapter-generation-v1",
-            "generate_chapters",
-            "velites",
-            "video_knowledge/generate_chapters",
-        ),
-        (
-            "video-interaction-generation-v1",
-            "generate_interactions",
-            "velites",
-            "video_knowledge/generate_interactions",
-        ),
-        (
-            "video-content-review-v1",
-            "review_video_content",
-            "velites",
-            "video_knowledge/review_video_content",
-        ),
-    ]
-}
-
-
 def _seed_agent_definitions() -> None:
-    service = AgentService(TEST_DATABASE_URL)
-    for agent_id, definition in _TEST_AGENT_DEFINITIONS.items():
-        service.save_draft(agent_id, definition, created_by="test-seed")
-        service.publish(agent_id)
-    # Mirror the app startup seed (create_app): the built-in demo agents are
-    # seed-if-absent in production, so test DBs carry them too.
     seed_builtin_agent_definitions(TEST_DATABASE_URL)
 
 
@@ -135,8 +68,8 @@ def _seed_skill_sources() -> None:
 
 # Test workflow catalog: the built-in workflow registry (workflow_catalog
 # table, schema v40) re-seeded after every TRUNCATE, mirroring the app startup
-# seed so catalog reads (routes, workspace binding, worker scan) see the two
-# built-in workflows.
+# seed so catalog reads (routes, workspace binding, worker scan) see the
+# built-in demo workflow.
 def _seed_workflow_catalog() -> None:
     seed_builtin_workflow_catalog(TEST_DATABASE_URL)
 
@@ -266,7 +199,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/jobs/test_job_rerun.py",
         "tests/routes/jobs/test_job_run_to.py",
         "tests/routes/jobs/test_openapi_contracts.py",
-        "tests/routes/jobs/test_video_jobs_source.py",
         "tests/routes/jobs/test_workflow_catalog.py",
         "tests/routes/jobs/test_workflow_upgrade.py",
         "tests/routes/test_agent_workers.py",
@@ -274,8 +206,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/test_video_job_projection.py",
         "tests/routes/test_workspace_secrets.py",
         "tests/test_cors.py",
-        "tests/test_questions_api.py",
-        "tests/test_video_job_intake.py",
         "tests/test_workflow_draft_compare.py",
         "tests/test_workspace_executor_configuration_flow.py",
         "tests/test_workspace_job_control_flow.py",
@@ -337,7 +267,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_jobs_queries.py",
         "tests/test_log_cleanup.py",
         "tests/test_pi_runner.py",
-        "tests/test_question_comprehension_info_workflow.py",
         "tests/test_relative_path_portability.py",
         "tests/test_run_dir_cleanup.py",
         "tests/test_skill_catalog_service.py",

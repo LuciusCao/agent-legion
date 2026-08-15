@@ -26,14 +26,16 @@ def execution_service(job_db: JobQueries, settings):
 
 @pytest.fixture
 def workspace(job_db: JobQueries):
-    return job_db.create_workspace("exec-ws", default_workflow_key="question_comprehension_info")
+    return job_db.create_workspace(
+        "exec-ws", default_workflow_key="education_video_problems_generation"
+    )
 
 
 def _create_job(
     job_db: JobQueries,
     workspace_id: str,
     source_id: str = "Q1",
-    workflow_key: str = "question_comprehension_info",
+    workflow_key: str = "education_video_problems_generation",
 ) -> dict[str, Any]:
     batch = job_db.create_batch(
         workflow_key,
@@ -96,7 +98,7 @@ def _create_active_lease(
 
 def test_continue_to_target(execution_service: JobExecutionService, job_db: JobQueries, workspace):
     job = _create_job(job_db, workspace["id"])
-    job_db.set_job_execution_target(job["id"], "clean_and_parse")
+    job_db.set_job_execution_target(job["id"], "write_script")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
         conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
@@ -123,27 +125,27 @@ def test_run_to_without_start_unpauses_target_reached_job(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
     job = _create_job(job_db, workspace["id"])
-    job_db.update_job_node(job["id"], "fetch_questions", status="completed")
-    job_db.update_job_node(job["id"], "clean_and_parse", status="completed")
-    job_db.set_job_execution_target(job["id"], "clean_and_parse")
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="completed")
+    job_db.set_job_execution_target(job["id"], "write_script")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
         conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
 
-    result = execution_service.run_to(workspace["id"], job["id"], "generate_key_info")
+    result = execution_service.run_to(workspace["id"], job["id"], "review_script")
 
     assert result["status"] == "succeeded"
-    assert result["node_key"] == "generate_key_info"
+    assert result["node_key"] == "review_script"
     job_after = job_db.get_job(job["id"])
     assert job_after["status"] == "queued"
     assert job_after["execution_mode"] == "until_node"
-    assert job_after["target_node_key"] == "generate_key_info"
+    assert job_after["target_node_key"] == "review_script"
     assert job_after["execution_paused"] == 0
     assert job_after["pause_reason"] == ""
     statuses = _node_statuses(job_db, job["id"])
-    assert statuses["fetch_questions"] == "completed"
-    assert statuses["clean_and_parse"] == "completed"
-    assert statuses["generate_key_info"] == "pending"
+    assert statuses["intake_knowledge_points"] == "completed"
+    assert statuses["write_script"] == "completed"
+    assert statuses["review_script"] == "pending"
 
 
 def test_run_to_with_start_unpauses_target_reached_job(
@@ -152,10 +154,10 @@ def test_run_to_with_start_unpauses_target_reached_job(
     job = _create_job(job_db, workspace["id"])
     storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "questions_parsed.json").write_text("understanding")
-    job_db.update_job_node(job["id"], "fetch_questions", status="completed")
-    job_db.update_job_node(job["id"], "clean_and_parse", status="completed")
-    job_db.set_job_execution_target(job["id"], "clean_and_parse")
+    (storage / "script.md").write_text("understanding")
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="completed")
+    job_db.set_job_execution_target(job["id"], "write_script")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
         conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
@@ -163,8 +165,8 @@ def test_run_to_with_start_unpauses_target_reached_job(
     result = execution_service.run_to(
         workspace["id"],
         job["id"],
-        "generate_key_info",
-        start_node_key="clean_and_parse",
+        "review_script",
+        start_node_key="write_script",
     )
 
     assert result["status"] == "succeeded"
@@ -173,30 +175,30 @@ def test_run_to_with_start_unpauses_target_reached_job(
     assert job_after["execution_paused"] == 0
     assert job_after["pause_reason"] == ""
     statuses = _node_statuses(job_db, job["id"])
-    assert statuses["clean_and_parse"] == "pending"
-    assert statuses["generate_key_info"] == "stale"
-    assert not (storage / "questions_parsed.json").exists()
+    assert statuses["write_script"] == "pending"
+    assert statuses["review_script"] == "stale"
+    assert not (storage / "script.md").exists()
 
 
 def test_run_to_without_start_preserves_completed_ancestors(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
     job = _create_job(job_db, workspace["id"])
-    job_db.update_job_node(job["id"], "fetch_questions", status="completed")
-    job_db.update_job_node(job["id"], "clean_and_parse", status="failed")
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="failed")
 
-    result = execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+    result = execution_service.run_to(workspace["id"], job["id"], "write_script")
 
     assert result["job_id"] == job["id"]
     assert result["operation"] == "run_to"
     assert result["status"] == "succeeded"
-    assert result["node_key"] == "clean_and_parse"
+    assert result["node_key"] == "write_script"
     statuses = _node_statuses(job_db, job["id"])
-    assert statuses["fetch_questions"] == "completed"
-    assert statuses["clean_and_parse"] == "pending"
+    assert statuses["intake_knowledge_points"] == "completed"
+    assert statuses["write_script"] == "pending"
     control = job_db.get_job_execution_control(job["id"])
     assert control["execution_mode"] == "until_node"
-    assert control["target_node_key"] == "clean_and_parse"
+    assert control["target_node_key"] == "write_script"
 
 
 def test_run_to_with_start_reruns_within_target_closure(
@@ -205,25 +207,25 @@ def test_run_to_with_start_reruns_within_target_closure(
     job = _create_job(job_db, workspace["id"])
     storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "questions.json").write_text("context")
-    (storage / "questions_parsed.json").write_text("understanding")
+    (storage / "knowledge_point.json").write_text("context")
+    (storage / "script.md").write_text("understanding")
 
     result = execution_service.run_to(
         workspace["id"],
         job["id"],
-        "clean_and_parse",
-        start_node_key="fetch_questions",
+        "write_script",
+        start_node_key="intake_knowledge_points",
     )
 
     assert result["status"] == "succeeded"
-    assert result["node_key"] == "clean_and_parse"
+    assert result["node_key"] == "write_script"
     statuses = _node_statuses(job_db, job["id"])
-    assert statuses["fetch_questions"] == "pending"
-    assert statuses["clean_and_parse"] == "stale"
-    assert not (storage / "questions.json").exists()
-    assert not (storage / "questions_parsed.json").exists()
+    assert statuses["intake_knowledge_points"] == "pending"
+    assert statuses["write_script"] == "stale"
+    assert not (storage / "knowledge_point.json").exists()
+    assert not (storage / "script.md").exists()
     control = job_db.get_job_execution_control(job["id"])
-    assert control["target_node_key"] == "clean_and_parse"
+    assert control["target_node_key"] == "write_script"
 
 
 def test_run_to_rejects_start_node_outside_target_closure(
@@ -235,8 +237,8 @@ def test_run_to_rejects_start_node_outside_target_closure(
         execution_service.run_to(
             workspace["id"],
             job["id"],
-            "clean_and_parse",
-            start_node_key="review_possible_errors",
+            "write_script",
+            start_node_key="review_questions",
         )
 
     error = exc_info.value
@@ -244,7 +246,7 @@ def test_run_to_rejects_start_node_outside_target_closure(
     assert error.operation == "run_to"
     assert error.status == "failed"
     assert error.reason_code == "invalid_start"
-    assert "review_possible_errors" in (error.message or "")
+    assert "review_questions" in (error.message or "")
 
 
 def test_run_to_rejects_unknown_target(
@@ -263,10 +265,10 @@ def test_run_to_rejects_active_lease(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
     job = _create_job(job_db, workspace["id"])
-    _create_active_lease(job_db, job, "fetch_questions")
+    _create_active_lease(job_db, job, "intake_knowledge_points")
 
     with pytest.raises(JobOperationError) as exc_info:
-        execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+        execution_service.run_to(workspace["id"], job["id"], "write_script")
 
     assert exc_info.value.status == "skipped"
     assert exc_info.value.reason_code == "busy"
@@ -292,14 +294,14 @@ def test_run_to_uses_atomic_execution_control_mutation(
 
     monkeypatch.setattr(job_db, "apply_run_to_atomic", tracked)
 
-    result = execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+    result = execution_service.run_to(workspace["id"], job["id"], "write_script")
 
     assert result["status"] == "succeeded"
     assert calls == [
         (
             job["id"],
-            "clean_and_parse",
-            frozenset({"fetch_questions", "clean_and_parse"}),
+            "write_script",
+            frozenset({"intake_knowledge_points", "write_script"}),
         )
     ]
 
@@ -313,28 +315,28 @@ def test_run_to_atomic_guard_catches_lease_created_after_precheck(
     monkeypatch.setattr(execution_service, "_has_active_lease", lambda _job_id: False)
 
     def race(job_id: str, target_node_key: str, closure: frozenset[str], *, now=None):
-        _create_active_lease(job_db, job, "fetch_questions")
+        _create_active_lease(job_db, job, "intake_knowledge_points")
         original(job_id, target_node_key, closure, now=now)
 
     monkeypatch.setattr(job_db, "apply_run_to_atomic", race)
 
     with pytest.raises(JobOperationError) as exc_info:
-        execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+        execution_service.run_to(workspace["id"], job["id"], "write_script")
 
     assert exc_info.value.status == "skipped"
     assert exc_info.value.reason_code == "busy"
-    assert _node_statuses(job_db, job["id"])["fetch_questions"] == "running"
+    assert _node_statuses(job_db, job["id"])["intake_knowledge_points"] == "running"
 
 
 def test_run_to_skips_already_completed_target(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
     job = _create_job(job_db, workspace["id"])
-    job_db.update_job_node(job["id"], "fetch_questions", status="completed")
-    job_db.update_job_node(job["id"], "clean_and_parse", status="completed")
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="completed")
 
     with pytest.raises(JobOperationError) as exc_info:
-        execution_service.run_to(workspace["id"], job["id"], "clean_and_parse")
+        execution_service.run_to(workspace["id"], job["id"], "write_script")
 
     assert exc_info.value.status == "skipped"
     assert exc_info.value.reason_code == "target_already_completed"
@@ -344,12 +346,12 @@ def test_continue_full_dag_after_target_reached(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
     job = _create_job(job_db, workspace["id"])
-    job_db.set_job_execution_target(job["id"], "clean_and_parse")
+    job_db.set_job_execution_target(job["id"], "write_script")
     job_db.pause_job(job["id"], "target_reached")
     with job_db.connect() as conn:
         conn.execute("update jobs set status='paused' where id=%s", (job["id"],))
         conn.execute(
-            "update job_nodes set status='completed' where job_id=%s and node_key in ('fetch_questions', 'clean_and_parse')",
+            "update job_nodes set status='completed' where job_id=%s and node_key in ('intake_knowledge_points', 'write_script')",
             (job["id"],),
         )
 
@@ -368,7 +370,7 @@ def test_run_to_rejects_wrong_workspace(
     job = _create_job(job_db, workspace["id"])
 
     with pytest.raises(JobOperationError) as exc_info:
-        execution_service.run_to("other-ws", job["id"], "clean_and_parse")
+        execution_service.run_to("other-ws", job["id"], "write_script")
 
     assert exc_info.value.status == "failed"
     assert exc_info.value.reason_code == "wrong_workspace"
@@ -394,7 +396,7 @@ def test_batch_run_to_returns_mixed_results_in_request_order(
     results = execution_service.batch_run_to(
         workspace["id"],
         [job["id"], "missing-job"],
-        "clean_and_parse",
+        "write_script",
     )
 
     assert len(results) == 2

@@ -1,8 +1,9 @@
-"""Video pipeline node extraction for scripts/generate_architecture.py."""
+"""Demo workflow node extraction for scripts/generate_architecture.py."""
 
 from typing import Any
 
 from server.app.workflows.builtin import BUILTIN_WORKFLOW_DEFINITIONS
+from server.app.workflows.builtin_demo import DEMO_WORKFLOW_KEY
 
 
 def _topological_node_order(nodes: dict[str, Any]) -> list[str]:
@@ -26,12 +27,12 @@ def _topological_node_order(nodes: dict[str, Any]) -> list[str]:
 
 
 def extract_pipeline_phases() -> str:
-    """Extract the video pipeline node sequence from the built-in video_knowledge DAG."""
-    nodes = BUILTIN_WORKFLOW_DEFINITIONS["video_knowledge"]["nodes"]
+    """Extract the node sequence from the built-in demo workflow DAG."""
+    nodes = BUILTIN_WORKFLOW_DEFINITIONS[DEMO_WORKFLOW_KEY]["nodes"]
 
     ordered = _topological_node_order(nodes)
     lines = [
-        f"**知识视频（{len(ordered)} 阶段）：**",
+        f"**{DEMO_WORKFLOW_KEY}（{len(ordered)} 节点）：**",
         " → ".join(f"`{key}`" for key in ordered),
     ]
     return "\n".join(lines) + "\n"

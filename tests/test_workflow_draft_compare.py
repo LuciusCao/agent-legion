@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 from server.app.main import create_app
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.workflows.definition import WorkflowCondition
 from server.app.workflows.schema import WorkflowNodeExecution
 from tests.helpers import load_builtin_definition
 from tests.helpers.auth import authenticate_client
@@ -17,10 +18,10 @@ def app_with_workspace(tmp_path):
     app.state.settings.executor_runtime.workflows.enabled = True
     response = authenticate_client(TestClient(app)).post(
         "/api/workspaces",
-        json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
+        json={"name": "Studio", "default_workflow_key": "education_video_problems_generation"},
     )
     workspace_id = response.json()["workspace"]["id"]
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     WorkflowRevisionService(app.state.job_db).publish_workspace_revision(workspace_id, definition)
     return app, workspace_id
 
@@ -36,7 +37,7 @@ def _compare(client: TestClient, workspace_id: str, definition_yaml: str) -> dic
 
 def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     yaml_text = definition_to_yaml(definition)
 
     with authenticate_client(TestClient(app)) as client:
@@ -49,14 +50,14 @@ def test_compare_no_op_draft_returns_none_risk(app_with_workspace):
     assert result["summary"]["edge_changes"] == []
     assert result["summary"]["intake_changes"] == []
     assert result["summary"]["risk_flags"] == []
-    assert result["base_revision"]["workflow_key"] == "question_comprehension_info"
-    assert result["draft_workflow"]["key"] == "question_comprehension_info"
+    assert result["base_revision"]["workflow_key"] == "education_video_problems_generation"
+    assert result["draft_workflow"]["key"] == "education_video_problems_generation"
 
 
 def test_compare_node_added_returns_info_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
-    definition.nodes["extra_node"] = definition.nodes["fetch_questions"].__class__(
+    definition = load_builtin_definition("education_video_problems_generation")
+    definition.nodes["extra_node"] = definition.nodes["intake_knowledge_points"].__class__(
         key="extra_node",
         label="额外节点",
         capability="extra_capability",
@@ -81,9 +82,9 @@ def test_compare_node_added_returns_info_change(app_with_workspace):
 
 def test_compare_execution_only_change_does_not_create_revision(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
-    node = definition.nodes["fetch_questions"]
-    definition.nodes["fetch_questions"] = replace(
+    definition = load_builtin_definition("education_video_problems_generation")
+    node = definition.nodes["write_script"]
+    definition.nodes["write_script"] = replace(
         node,
         execution=WorkflowNodeExecution(provider="openai", model="gpt-5.2"),
     )
@@ -93,25 +94,23 @@ def test_compare_execution_only_change_does_not_create_revision(app_with_workspa
 
     assert result["valid"] is True
     assert result["creates_revision"] is False
-    change = next(
-        c for c in result["summary"]["node_changes"] if c["node_key"] == "fetch_questions"
-    )
+    change = next(c for c in result["summary"]["node_changes"] if c["node_key"] == "write_script")
     assert change["fields"] == ["execution"]
 
 
 def test_compare_node_removed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
-    del definition.nodes["fetch_questions"]
-    clean_node = definition.nodes["clean_and_parse"]
-    definition.nodes["clean_and_parse"] = clean_node.__class__(
-        key=clean_node.key,
-        label=clean_node.label,
-        capability=clean_node.capability,
-        after=[],
-        inputs=clean_node.inputs,
-        outputs=clean_node.outputs,
-        terminal=clean_node.terminal,
+    definition = load_builtin_definition("education_video_problems_generation")
+    del definition.nodes["review_questions"]
+    publish_node = definition.nodes["publish_content"]
+    definition.nodes["publish_content"] = publish_node.__class__(
+        key=publish_node.key,
+        label=publish_node.label,
+        capability=publish_node.capability,
+        after=["review_script"],
+        inputs=publish_node.inputs,
+        outputs=publish_node.outputs,
+        terminal=publish_node.terminal,
     )
     object.__setattr__(
         definition,
@@ -119,7 +118,7 @@ def test_compare_node_removed_returns_breaking_change(app_with_workspace):
         [
             edge
             for edge in definition.edges
-            if edge.source != "fetch_questions" and edge.target != "fetch_questions"
+            if edge.source != "review_questions" and edge.target != "review_questions"
         ],
     )
     raw = definition_to_yaml(definition)
@@ -129,20 +128,20 @@ def test_compare_node_removed_returns_breaking_change(app_with_workspace):
 
     assert result["valid"] is True
     change = next(
-        c for c in result["summary"]["node_changes"] if c["node_key"] == "fetch_questions"
+        c for c in result["summary"]["node_changes"] if c["node_key"] == "review_questions"
     )
     assert change["type"] == "removed"
     assert change["risk"] == "breaking"
     flag = next(flag for flag in result["summary"]["risk_flags"] if flag["code"] == "node_removed")
-    assert "fetch_questions" in flag["message"]
+    assert "review_questions" in flag["message"]
     assert result["summary"]["risk_level"] == "breaking"
 
 
 def test_compare_capability_changed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
-    node = definition.nodes["fetch_questions"]
-    definition.nodes["fetch_questions"] = node.__class__(
+    definition = load_builtin_definition("education_video_problems_generation")
+    node = definition.nodes["intake_knowledge_points"]
+    definition.nodes["intake_knowledge_points"] = node.__class__(
         key=node.key,
         label=node.label,
         capability="different_capability",
@@ -157,7 +156,7 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace):
         result = _compare(client, workspace_id, raw)
 
     change = next(
-        c for c in result["summary"]["node_changes"] if c["node_key"] == "fetch_questions"
+        c for c in result["summary"]["node_changes"] if c["node_key"] == "intake_knowledge_points"
     )
     assert change["type"] == "modified"
     assert change["risk"] == "breaking"
@@ -170,9 +169,9 @@ def test_compare_capability_changed_returns_breaking_change(app_with_workspace):
 
 def test_compare_output_removed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
-    node = definition.nodes["fetch_questions"]
-    definition.nodes["fetch_questions"] = node.__class__(
+    definition = load_builtin_definition("education_video_problems_generation")
+    node = definition.nodes["intake_knowledge_points"]
+    definition.nodes["intake_knowledge_points"] = node.__class__(
         key=node.key,
         label=node.label,
         capability=node.capability,
@@ -187,7 +186,7 @@ def test_compare_output_removed_returns_breaking_change(app_with_workspace):
         result = _compare(client, workspace_id, raw)
 
     change = next(
-        c for c in result["summary"]["node_changes"] if c["node_key"] == "fetch_questions"
+        c for c in result["summary"]["node_changes"] if c["node_key"] == "intake_knowledge_points"
     )
     assert change["type"] == "modified"
     assert change["risk"] == "breaking"
@@ -195,28 +194,23 @@ def test_compare_output_removed_returns_breaking_change(app_with_workspace):
     flag = next(
         flag for flag in result["summary"]["risk_flags"] if flag["code"] == "output_removed"
     )
-    assert "questions.json" in flag["message"]
+    assert "knowledge_point.json" in flag["message"]
 
 
 def test_compare_edge_condition_changed_returns_breaking_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     new_edges = []
     for edge in definition.edges:
-        if (
-            edge.source == "classify_comprehension_eligibility"
-            and edge.target == "generate_key_info"
-            and edge.condition is not None
-            and edge.condition.equals is True
-        ):
+        if edge.source == "write_script" and edge.target == "review_script":
             new_edges.append(
                 edge.__class__(
                     source=edge.source,
                     target=edge.target,
-                    condition=edge.condition.__class__(
-                        artifact=edge.condition.artifact,
-                        path=edge.condition.path,
-                        equals=False,
+                    condition=WorkflowCondition(
+                        artifact="script.md",
+                        path="$.approved",
+                        equals=True,
                     ),
                 )
             )
@@ -231,13 +225,12 @@ def test_compare_edge_condition_changed_returns_breaking_change(app_with_workspa
     change = next(
         c
         for c in result["summary"]["edge_changes"]
-        if c["source"] == "classify_comprehension_eligibility"
-        and c["target"] == "generate_key_info"
+        if c["source"] == "write_script" and c["target"] == "review_script"
     )
     assert change["type"] == "condition_changed"
     assert change["risk"] == "breaking"
-    assert change["before_condition"] == "$.eligible == true"
-    assert change["after_condition"] == "$.eligible == false"
+    assert change["before_condition"] == ""
+    assert change["after_condition"] == "$.approved == true"
     assert result["summary"]["risk_level"] == "breaking"
 
 
@@ -263,10 +256,10 @@ def test_compare_missing_active_revision_returns_revision_error(tmp_path):
     app.state.settings.executor_runtime.workflows.enabled = True
     workspace = app.state.job_db.create_workspace(
         "Empty",
-        default_workflow_key="question_comprehension_info",
+        default_workflow_key="education_video_problems_generation",
     )
     workspace_id = workspace["id"]
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     raw = definition_to_yaml(definition)
 
     with authenticate_client(TestClient(app)) as client:
@@ -280,9 +273,9 @@ def test_compare_missing_active_revision_returns_revision_error(tmp_path):
 
 def test_compare_rejects_draft_key_mismatch(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     raw = definition_to_yaml(definition).replace(
-        "key: question_comprehension_info",
+        "key: education_video_problems_generation",
         "key: changed_workflow_key",
     )
 
@@ -296,14 +289,14 @@ def test_compare_rejects_draft_key_mismatch(app_with_workspace):
     assert len(result["errors"]) == 1
     assert result["errors"][0]["category"] == "schema"
     assert "changed_workflow_key" in result["errors"][0]["message"]
-    assert "question_comprehension_info" in result["errors"][0]["message"]
+    assert "education_video_problems_generation" in result["errors"][0]["message"]
 
 
 def test_compare_aggregate_risk_breaking_wins(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     # Add a node (info) and remove an output (breaking) before serializing.
-    definition.nodes["extra_node"] = definition.nodes["fetch_questions"].__class__(
+    definition.nodes["extra_node"] = definition.nodes["intake_knowledge_points"].__class__(
         key="extra_node",
         label="额外节点",
         capability="extra_capability",
@@ -312,8 +305,8 @@ def test_compare_aggregate_risk_breaking_wins(app_with_workspace):
         outputs=[],
         terminal=None,
     )
-    node = definition.nodes["fetch_questions"]
-    definition.nodes["fetch_questions"] = node.__class__(
+    node = definition.nodes["intake_knowledge_points"]
+    definition.nodes["intake_knowledge_points"] = node.__class__(
         key=node.key,
         label=node.label,
         capability=node.capability,
@@ -335,7 +328,7 @@ def test_compare_aggregate_risk_breaking_wins(app_with_workspace):
 
 def test_compare_workflow_label_changed_returns_info_metadata_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     object.__setattr__(definition, "label", f"{definition.label} v2")
     raw = definition_to_yaml(definition)
 
@@ -351,7 +344,7 @@ def test_compare_workflow_label_changed_returns_info_metadata_change(app_with_wo
 
 def test_compare_schema_version_changed_returns_breaking_metadata_change(app_with_workspace):
     app, workspace_id = app_with_workspace
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     raw = definition_to_yaml(definition).replace("schema_version: 2", "schema_version: 3")
 
     with authenticate_client(TestClient(app)) as client:

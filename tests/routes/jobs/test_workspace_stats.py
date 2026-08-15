@@ -1,4 +1,6 @@
-def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+def _create_workspace(
+    client, name="default", default_workflow_key="education_video_problems_generation"
+):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
@@ -14,16 +16,18 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
     with client_factory(workflows_enabled=True) as c:
         ws = c.post(
             "/api/workspaces",
-            json={"name": "Stats WS", "default_workflow_key": "question_comprehension_info"},
+            json={
+                "name": "Stats WS",
+                "default_workflow_key": "education_video_problems_generation",
+            },
         ).json()
         ws_id = ws["workspace"]["id"]
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q301", "Q302"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q301", "Q302"],
             },
         )
         stats = c.get(f"/api/workspaces/{ws_id}/stats")
@@ -32,8 +36,8 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
     body = stats.json()
     assert body["workspace_id"] == ws_id
     assert body["name"] == "Stats WS"
-    assert body["workflow_key"] == "question_comprehension_info"
-    assert body["workflow_label"] == "题目审题信息生成 DAG"
+    assert body["workflow_key"] == "education_video_problems_generation"
+    assert body["workflow_label"] == "教学视频脚本与题目生成（示例）"
     assert body["job_stats"]["pending"] == 2
     assert "queued" not in body["job_stats"]
     assert body["executor_status"]["executors"] == []
@@ -45,7 +49,10 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_
         job_db = c.app.state.job_db
         ws = c.post(
             "/api/workspaces",
-            json={"name": "Stats WS", "default_workflow_key": "question_comprehension_info"},
+            json={
+                "name": "Stats WS",
+                "default_workflow_key": "education_video_problems_generation",
+            },
         ).json()
         ws_id = ws["workspace"]["id"]
         job_db.replace_workspace_executor_configuration(
@@ -53,7 +60,7 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_
             allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
             bindings=[
                 {
-                    "workflow_key": "question_comprehension_info",
+                    "workflow_key": "education_video_problems_generation",
                     "node_key": "review_keywords",
                     "executor_id": "code-default",
                 }
@@ -63,10 +70,9 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q301"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q301"],
             },
         )
         stats = c.get(f"/api/workspaces/{ws_id}/stats")
@@ -90,15 +96,14 @@ def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q401"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q401"],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
         job_db = c.app.state.job_db
-        run = job_db.start_node_run(job_id, "review_key_info", ["echo", "hi"], "/dev/null")
+        run = job_db.start_node_run(job_id, "write_script", ["echo", "hi"], "/dev/null")
         job_db.finish_node_run(run["id"], "completed", 0, "")
         stats = c.get(f"/api/workspaces/{ws_id}/stats")
 
@@ -106,7 +111,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
     body = stats.json()
     assert body["latest_run"] is not None
     assert body["latest_run"]["job_id"] == job_id
-    assert body["latest_run"]["node_key"] == "review_key_info"
+    assert body["latest_run"]["node_key"] == "write_script"
     assert body["latest_run"]["status"] == "completed"
 
 

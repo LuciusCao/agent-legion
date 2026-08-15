@@ -21,8 +21,8 @@ from tests.postgres_support import TEST_DATABASE_URL
 
 pytestmark = pytest.mark.fresh_schema
 
-AGENT_ID = "question-key-info-v1"  # seeded published v1 by tests/conftest.py
-CAPABILITY = "generate_key_info"
+AGENT_ID = "example-write-script-v1"  # seeded published v1 by tests/conftest.py
+CAPABILITY = "write_script"
 
 
 def _definition() -> WorkflowDefinition:
@@ -62,7 +62,7 @@ class _Env:
         self.job_db = job_db
         self.tmp_path = tmp_path
         ws = job_db.create_workspace(
-            default_workflow_key="question_comprehension_info", name="Replay WS"
+            default_workflow_key="education_video_problems_generation", name="Replay WS"
         )
         self.workspace_id = str(ws["id"])
         definition = _definition()
@@ -265,7 +265,7 @@ def _save_draft(capability: str = CAPABILITY) -> AgentDefinition:
     definition = AgentDefinition(
         capability=capability,
         runtime="velites",
-        skill="question_comprehension_info/generate_key_info",
+        skill="education-video-problems-generation/write-script",
         tools=("read",),
     )
     AgentService(TEST_DATABASE_URL).save_draft(AGENT_ID, definition, created_by="test")

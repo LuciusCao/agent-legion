@@ -73,9 +73,9 @@ def test_worker_wake_sets_wake_event(tmp_path: Path, registered) -> None:
 
 def _create_workspace_with_revision(job_db, settings):
     workspace = job_db.create_workspace(
-        "default", default_workflow_key="question_comprehension_info"
+        "default", default_workflow_key="education_video_problems_generation"
     )
-    definition = WorkflowCatalogService(settings).definition("question_comprehension_info")
+    definition = WorkflowCatalogService(settings).definition("education_video_problems_generation")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     return workspace
 
@@ -91,10 +91,9 @@ def test_job_intake_create_batch_notifies(job_db, settings, monkeypatch) -> None
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": ["Q1"],
-            "knowledge_codes": [],
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": ["Q1"],
         },
     )
 
@@ -112,10 +111,9 @@ def test_intake_queue_chunk_jobs_notify(job_db, settings, monkeypatch) -> None:
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": ["Q1"],
-            "knowledge_codes": [],
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": ["Q1"],
             "async_processing": True,
         },
     )

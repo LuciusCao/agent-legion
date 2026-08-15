@@ -4,7 +4,9 @@ from tests.helpers import load_builtin_definition
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+def _create_workspace(
+    client, name="default", default_workflow_key="education_video_problems_generation"
+):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
@@ -14,17 +16,16 @@ def _create_job(client, workspace_id, question_id="Q301"):
     created = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": [question_id],
-            "knowledge_codes": [],
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": [question_id],
         },
     ).json()
     return created["jobs"][0]["id"]
 
 
 def _publish_next_revision(app, workspace_id):
-    definition = load_builtin_definition("question_comprehension_info")
+    definition = load_builtin_definition("education_video_problems_generation")
     return WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
         workspace_id, definition
     )

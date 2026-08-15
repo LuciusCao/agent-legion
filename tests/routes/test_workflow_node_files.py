@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-NODE_URL = "/api/workflow-nodes/files/question_intake.py"
+NODE_URL = "/api/workflow-nodes/files/example_intake.py"
 
 
 def _member_client(client):
@@ -23,16 +23,18 @@ def test_admin_reads_node_file(client) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["path"] == "workflow_nodes/question_intake.py"
+    assert body["path"] == "workflow_nodes/example_intake.py"
     assert "def run(" in body["content"]
-    assert {"executor_id": "code-default", "capability": "fetch_questions"} in body["capabilities"]
+    assert {"executor_id": "code-default", "capability": "intake_knowledge_points"} in body[
+        "capabilities"
+    ]
 
 
 def test_accepts_workflow_nodes_prefix(client) -> None:
-    response = client.get("/api/workflow-nodes/files/workflow_nodes/question_intake.py")
+    response = client.get("/api/workflow-nodes/files/workflow_nodes/example_intake.py")
 
     assert response.status_code == 200
-    assert response.json()["path"] == "workflow_nodes/question_intake.py"
+    assert response.json()["path"] == "workflow_nodes/example_intake.py"
 
 
 def test_anonymous_access_rejected(anon_client) -> None:
@@ -68,7 +70,7 @@ def test_missing_file_is_404(client) -> None:
 def test_put_write_endpoint_is_gone(client) -> None:
     """EXEC-CODE-001: no runtime API may rewrite repo node files (removed in M1)."""
     response = client.put(
-        "/api/workflow-nodes/files/question_intake.py",
+        "/api/workflow-nodes/files/example_intake.py",
         json={"content": "def run(job, job_dir, runtime):\n    pass\n"},
     )
     # GET-only route remains; the write verb is unhandled (404/405 by mount).
