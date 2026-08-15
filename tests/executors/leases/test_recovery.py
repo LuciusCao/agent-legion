@@ -132,7 +132,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
         1,
         node_key="node_b",
         local_limit=1,
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
     )
     with queries.connect() as conn:
         conn.execute(
@@ -149,7 +149,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
         executor_id="exec-requeue",
         workspace_id=workspace_id,
         job_id=job_id,
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="node_b",
         capability="review_keywords",
         log_path="logs/node_b.log",
@@ -268,7 +268,7 @@ def test_recover_skips_jobs_with_active_lease(
                 "exec-active",
                 workspace_id,
                 job_id,
-                "question_comprehension_info",
+                "demo_workflow",
                 "node_a",
                 node_run_id,
                 database_timestamp(datetime.now(UTC)),
@@ -351,7 +351,7 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
         2,
         node_key="node_b",
         local_limit=None,
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
     )
     # Orphaned state: job running, node_a running with no lease; node_b pending.
     with queries.connect() as conn:

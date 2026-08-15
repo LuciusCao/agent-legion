@@ -14,9 +14,9 @@ vi.mock('../../api', () => ({
 const mockApi = vi.mocked(api)
 
 const node: WorkflowNodeRecord = {
-  key: 'fetch_questions',
+  key: 'fetch_items',
   label: '获取题目',
-  capability: 'fetch_questions',
+  capability: 'fetch_items',
   after: [],
   inputs: [],
   outputs: [],
@@ -26,14 +26,14 @@ const codeExecutor: ExecutorDefinition = {
   id: 'code-default',
   kind: 'code',
   global_capacity: 16,
-  capabilities: ['fetch_questions'],
+  capabilities: ['fetch_items'],
   capability_details: [
-    { name: 'fetch_questions', path: 'workflow_nodes/question_intake.py' },
+    { name: 'fetch_items', path: 'workflow_nodes/example_intake.py' },
   ],
 }
 
 const BASE =
-  '/api/workspaces/default/workflows/question_comprehension_info/nodes/fetch_questions/code'
+  '/api/workspaces/default/workflows/demo_workflow/nodes/fetch_items/code'
 
 const BUILTIN_CODE = 'def run(job, job_dir, runtime):\n    return None\n'
 const CUSTOM_CODE = "def run(job, job_dir, runtime):\n    return 'custom'\n"
@@ -41,7 +41,7 @@ const CUSTOM_CODE = "def run(job, job_dir, runtime):\n    return 'custom'\n"
 const builtinResponse = {
   origin: 'builtin',
   code: BUILTIN_CODE,
-  path: 'workflow_nodes/question_intake.py',
+  path: 'workflow_nodes/example_intake.py',
   version: null,
   has_draft: false,
   draft_code: null,
@@ -88,7 +88,7 @@ function renderSection(
     <WorkflowNodeCodeSection
       node={node}
       executorCatalog={[codeExecutor]}
-      workflowKey="question_comprehension_info"
+      workflowKey="demo_workflow"
       {...overrides}
     />
   )
@@ -99,7 +99,7 @@ describe('WorkflowNodeCodeSection', () => {
     mockApi.mockReset()
     useSettingStore.setState({ workspaceId: 'default' })
     useSettingStore.getState().setSettings({
-      workflowKey: 'question_comprehension_info',
+      workflowKey: 'demo_workflow',
     })
     useUiStore.setState({ toast: null })
     mockApi.mockResolvedValue(builtinResponse)
@@ -110,8 +110,8 @@ describe('WorkflowNodeCodeSection', () => {
       id: 'pi-default',
       kind: 'pi',
       global_capacity: 4,
-      capabilities: ['fetch_questions'],
-      capability_details: [{ name: 'fetch_questions' }],
+      capabilities: ['fetch_items'],
+      capability_details: [{ name: 'fetch_items' }],
     }
     const { container } = renderSection({ executorCatalog: [piExecutor] })
     expect(container.firstChild).toBeNull()
@@ -126,7 +126,7 @@ describe('WorkflowNodeCodeSection', () => {
 
     await screen.findByText(/内置/)
     expect(mockApi).toHaveBeenCalledWith(
-      '/api/workspaces/default/workflows/visible_wf/nodes/fetch_questions/code'
+      '/api/workspaces/default/workflows/visible_wf/nodes/fetch_items/code'
     )
   })
 
@@ -362,7 +362,7 @@ describe('WorkflowNodeCodeSection', () => {
       <WorkflowNodeCodeSection
         node={pathlessNode}
         executorCatalog={[pathlessExecutor]}
-        workflowKey="question_comprehension_info"
+        workflowKey="demo_workflow"
       />
     )
 
@@ -379,7 +379,7 @@ describe('WorkflowNodeCodeSection', () => {
       expect(useUiStore.getState().toast?.message).toBe('已从模板创建草稿')
     )
     const customBase =
-      '/api/workspaces/default/workflows/question_comprehension_info/nodes/do_custom/code'
+      '/api/workspaces/default/workflows/demo_workflow/nodes/do_custom/code'
     expect(mockApi.mock.calls[1][0]).toBe('/api/workflow-node-code-template')
     expect(mockApi.mock.calls[2][0]).toBe(customBase)
     expect(mockApi.mock.calls[2][1]?.method).toBe('PUT')
@@ -416,7 +416,7 @@ describe('WorkflowNodeCodeSection', () => {
       <WorkflowNodeCodeSection
         node={pathlessNode}
         executorCatalog={[pathlessExecutor]}
-        workflowKey="question_comprehension_info"
+        workflowKey="demo_workflow"
       />
     )
 

@@ -222,9 +222,7 @@ def test_report_auth_failure_without_connection_writes_empty_marker(tmp_path: Pa
 
 
 def test_logger_named_after_node_key(tmp_path: Path) -> None:
-    assert _ctx(tmp_path, {"node_key": "fetch_questions"}).logger.name == (
-        "workflow_node.fetch_questions"
-    )
+    assert _ctx(tmp_path, {"node_key": "fetch_items"}).logger.name == ("workflow_node.fetch_items")
 
 
 def test_parse_json_object_tolerates_garbage() -> None:

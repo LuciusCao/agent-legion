@@ -6,12 +6,12 @@ BASE = "/api/agent-definitions"
 PAYLOAD_V1 = {
     "capability": "review_keywords",
     "runtime": "velites",
-    "skill": "question_comprehension_info/review_key_info",
+    "skill": "demo_workflow/review_key_info",
 }
 PAYLOAD_V2 = {
     "capability": "review_keywords",
     "runtime": "velites",
-    "skill": "question_comprehension_info/review_key_info",
+    "skill": "demo_workflow/review_key_info",
     "tools": ["read"],
 }
 

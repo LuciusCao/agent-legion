@@ -33,7 +33,7 @@ def _insert_job_rows(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'question_comprehension_info') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
@@ -384,7 +384,7 @@ def test_worker_registration_stores_and_refreshes_allowed_workspaces(job_db) -> 
     _seed_request(job_db, job_id="job-1")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('other-workspace', 'Other', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('other-workspace', 'Other', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
@@ -530,7 +530,7 @@ def test_idle_claim_poll_registers_worker_panel_rows(job_db) -> None:
     broker = _broker(job_db.jobs_dir.parent, agent_status=manager)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('idle-workspace', 'Idle', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('idle-workspace', 'Idle', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
 

@@ -22,7 +22,7 @@ def _service(artifact_store: ArtifactStore | None = None) -> QualityLabelService
 def _seed_item(item_id: str = "item-1", batch_id: str = "batch-1") -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow') on conflict do nothing",
             (WORKSPACE, WORKSPACE),
         )
         conn.execute(

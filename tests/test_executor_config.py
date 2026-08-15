@@ -13,14 +13,14 @@ def test_loads_discriminated_executor_definitions() -> None:
             "code-default": {
                 "kind": "code",
                 "global_capacity": 4,
-                "capabilities": {"fetch_questions": {"path": "workflow_nodes/question_intake.py"}},
+                "capabilities": {"fetch_items": {"path": "workflow_nodes/example_intake.py"}},
             },
             "pi-default": {
                 "kind": "pi",
                 "global_capacity": 8,
                 "capabilities": {
                     "review_keywords": {
-                        "skill": "question_comprehension_info/review_key_info",
+                        "skill": "demo_workflow/review_key_info",
                         "tools": ["read", "write", "bash"],
                     }
                 },
@@ -59,7 +59,7 @@ def test_rejects_empty_capability_name() -> None:
                 "code-default": {
                     "kind": "code",
                     "global_capacity": 4,
-                    "capabilities": {"": {"path": "workflow_nodes/question_intake.py"}},
+                    "capabilities": {"": {"path": "workflow_nodes/example_intake.py"}},
                 }
             }
         )
@@ -86,8 +86,8 @@ def test_loads_code_capability_config_schema() -> None:
                 "kind": "code",
                 "global_capacity": 4,
                 "capabilities": {
-                    "fetch_questions": {
-                        "path": "workflow_nodes/question_intake.py",
+                    "fetch_items": {
+                        "path": "workflow_nodes/example_intake.py",
                         "config_schema": {
                             "type": "object",
                             "properties": {"bank_version": {"type": "string"}},
@@ -99,7 +99,7 @@ def test_loads_code_capability_config_schema() -> None:
     )
     code = definitions["code-default"]
     assert isinstance(code, CodeExecutorConfig)
-    assert code.capabilities["fetch_questions"].config_schema == {
+    assert code.capabilities["fetch_items"].config_schema == {
         "type": "object",
         "properties": {"bank_version": {"type": "string"}},
     }
@@ -121,8 +121,8 @@ def test_rejects_invalid_code_capability_config_schema(schema: object) -> None:
                     "kind": "code",
                     "global_capacity": 4,
                     "capabilities": {
-                        "fetch_questions": {
-                            "path": "workflow_nodes/question_intake.py",
+                        "fetch_items": {
+                            "path": "workflow_nodes/example_intake.py",
                             "config_schema": schema,
                         }
                     },

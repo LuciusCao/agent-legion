@@ -197,7 +197,7 @@ describe('StudioChatPanel', () => {
   })
 
   it('applies a workflow draft to the editor and shows the diff dialog', async () => {
-    const yaml = 'key: video_knowledge\nnodes: []\n'
+    const yaml = 'key: demo_video_workflow\nnodes: []\n'
     mockApi.fetchStudioChatMessages.mockResolvedValue([
       chatMessage('m1', 1, 'tool_call', 'agent', {
         sessionUpdate: 'tool_call',

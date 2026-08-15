@@ -73,8 +73,8 @@ describe('NodeConfigCard', () => {
     // parameters without defaults; the card must render them like any
     // other node card.
     renderCard({
-      nodeKey: 'fetch_questions',
-      label: 'fetch_questions',
+      nodeKey: 'fetch_items',
+      label: 'fetch_items',
       schema: {
         type: 'object',
         properties: {

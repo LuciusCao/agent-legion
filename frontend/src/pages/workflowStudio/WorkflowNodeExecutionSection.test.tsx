@@ -38,11 +38,11 @@ const executorCatalog: ExecutorDefinition[] = [
     id: 'code-default',
     kind: 'code',
     global_capacity: 16,
-    capabilities: ['fetch_questions'],
+    capabilities: ['fetch_items'],
     capability_details: [
       {
-        name: 'fetch_questions',
-        path: 'workflow_nodes/fetch_questions.py',
+        name: 'fetch_items',
+        path: 'workflow_nodes/fetch_items.py',
       },
     ],
   },
@@ -53,7 +53,7 @@ const agentCatalog: AgentDefinition[] = [
     id: 'question-key-info-v1',
     runtime: 'pi',
     capability: 'generate_key_info',
-    skill: 'question_comprehension_info/generate_key_info',
+    skill: 'demo_workflow/generate_key_info',
     tools: ['read', 'write', 'bash'],
     requires_labels: {},
     provider: 'deepseek',
@@ -84,7 +84,7 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
     expect(screen.getByText('pi')).toBeInTheDocument()
     expect(
-      screen.getByText('question_comprehension_info/generate_key_info')
+      screen.getByText('demo_workflow/generate_key_info')
     ).toBeInTheDocument()
     expect(screen.getByText('read, write, bash')).toBeInTheDocument()
     expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()

@@ -153,8 +153,8 @@ def test_velites_flavor_end_to_end(tmp_path: Path) -> None:
     gateway = _StubGateway()
     try:
         skill_root = tmp_path / "skills"
-        make_pi_skill(skill_root, "question_comprehension_info/generate_key_info")
-        skill_dir = skill_root / "question_comprehension_info/generate_key_info"
+        make_pi_skill(skill_root, "demo_workflow/generate_key_info")
+        skill_dir = skill_root / "demo_workflow/generate_key_info"
 
         runner = PiRunner.from_config(
             {
@@ -172,11 +172,9 @@ def test_velites_flavor_end_to_end(tmp_path: Path) -> None:
         )
 
         job_db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
-        workspace = job_db.create_workspace(
-            "velites_e2e_ws", default_workflow_key="question_comprehension_info"
-        )
+        workspace = job_db.create_workspace("velites_e2e_ws", default_workflow_key="demo_workflow")
         job = job_db.create_job(
-            workflow_key="question_comprehension_info",
+            workflow_key="demo_workflow",
             source_type="question",
             source_id="Q-velites",
             batch_id="b-velites",
@@ -287,13 +285,13 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
     gateway = _StubGateway()
     try:
         skill_root = tmp_path / "skills"
-        make_pi_skill(skill_root, "question_comprehension_info/generate_key_info")
-        skill_dir = skill_root / "question_comprehension_info/generate_key_info"
+        make_pi_skill(skill_root, "demo_workflow/generate_key_info")
+        skill_dir = skill_root / "demo_workflow/generate_key_info"
 
         definition = AgentDefinition(
             capability="generate",
             runtime="velites",
-            skill="question_comprehension_info/generate_key_info",
+            skill="demo_workflow/generate_key_info",
         )
         replace_agent_catalog({"velites-agent": definition})
         _insert_job_rows(

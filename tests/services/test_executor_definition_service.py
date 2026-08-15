@@ -20,7 +20,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 VALID_DEFINITION = {
     "kind": "code",
     "global_capacity": 2,
-    "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+    "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
 }
 
 
@@ -94,7 +94,7 @@ def test_save_draft_rejects_invalid_config_schema(service) -> None:
         "global_capacity": 1,
         "capabilities": {
             "x": {
-                "path": "workflow_nodes/question_clean_parse.py",
+                "path": "workflow_nodes/example_publish.py",
                 "config_schema": {"type": "object", "properties": {"bad": {"type": "nope"}}},
             }
         },
@@ -174,7 +174,7 @@ def test_seed_is_absent_only_and_never_overrides_admin_edits(service) -> None:
     edited = {
         "kind": "code",
         "global_capacity": 4,
-        "capabilities": {"clean_and_parse": {"path": "workflow_nodes/question_clean_parse.py"}},
+        "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
     }
     service.save_draft("code-default", edited, "user:admin")
     service.publish("code-default")

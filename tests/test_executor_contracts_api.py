@@ -21,7 +21,7 @@ def test_binding_requires_non_empty_keys() -> None:
 def test_node_limit_requires_positive_limit() -> None:
     with pytest.raises(ValidationError):
         NodeLimitRequest(
-            workflow_key="question_comprehension_info",
-            node_key="fetch_questions",
+            workflow_key="demo_workflow",
+            node_key="fetch_items",
             concurrency_limit=0,
         )

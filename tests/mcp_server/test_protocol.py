@@ -42,7 +42,7 @@ class _StubHandler(BaseHTTPRequestHandler):
             self._reply(401, {"detail": "Not authenticated"})
             return
         if self.path == "/api/studio-agent/tools/workflows":
-            self._reply(200, {"workflows": [{"key": "question_comprehension_info"}]})
+            self._reply(200, {"workflows": [{"key": "demo_workflow"}]})
             return
         if self.path.endswith("/workflow/validate"):
             self._reply(200, {"valid": True, "errors": []})
@@ -102,7 +102,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 return "".join(c.text for c in result.content if c.type == "text")
 
             listed = json.loads(await call_text("list_workflows", {}))
-            assert listed["workflows"][0]["key"] == "question_comprehension_info"
+            assert listed["workflows"][0]["key"] == "demo_workflow"
 
             validated = json.loads(
                 await call_text(

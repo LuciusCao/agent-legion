@@ -36,13 +36,13 @@ def lease_repo(tmp_path: Path):
 def _setup_workspace_and_job(job_db: JobQueries) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info')",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow')",
             ("ws-1", "Test"),
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values (%s, %s, %s, %s, %s)",
-            ("job-1", "ws-1", "question_comprehension_info", "question", "q-1"),
+            ("job-1", "ws-1", "demo_workflow", "question", "q-1"),
         )
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values (%s, %s, %s)",
@@ -55,7 +55,7 @@ def test_finish_lease_captures_token_usage(lease_repo):
     _setup_workspace_and_job(job_db)
 
     workspace_id = "ws-1"
-    workflow_key = "question_comprehension_info"
+    workflow_key = "demo_workflow"
     node_key = "review_keywords"
     executor_id = "pi-1"
 
@@ -124,7 +124,7 @@ def test_finish_lease_missing_events_does_not_fail_lease(lease_repo):
     _setup_workspace_and_job(job_db)
 
     workspace_id = "ws-1"
-    workflow_key = "question_comprehension_info"
+    workflow_key = "demo_workflow"
     node_key = "review_keywords"
     executor_id = "pi-1"
 
@@ -169,7 +169,7 @@ def test_finish_lease_missing_events_does_not_fail_lease(lease_repo):
 
 def _claim_lease(repo: ExecutorLeaseRepository, job_db: JobQueries, data_dir: Path):
     workspace_id = "ws-1"
-    workflow_key = "question_comprehension_info"
+    workflow_key = "demo_workflow"
     node_key = "review_keywords"
     executor_id = "pi-1"
 
@@ -280,7 +280,7 @@ def test_claim_lease_rejects_terminal_job(lease_repo):
     repo, job_db, data_dir = lease_repo
     _setup_workspace_and_job(job_db)
     allocate(job_db, "ws-1", "pi-1", 10)
-    bind(job_db, "ws-1", "question_comprehension_info", "review_keywords", "pi-1")
+    bind(job_db, "ws-1", "demo_workflow", "review_keywords", "pi-1")
     with job_db.connect() as conn:
         conn.execute("update jobs set status='failed' where id=%s", ("job-1",))
 
@@ -290,7 +290,7 @@ def test_claim_lease_rejects_terminal_job(lease_repo):
             global_capacity=10,
             workspace_id="ws-1",
             job_id="job-1",
-            workflow_key="question_comprehension_info",
+            workflow_key="demo_workflow",
             node_key="review_keywords",
             capability="review_keywords",
             local_node_limit=None,

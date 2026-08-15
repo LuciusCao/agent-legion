@@ -157,9 +157,9 @@ def chat(job_db, settings, tmp_path):
         )
         return script_path
 
-    workspace_id = job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="Chat WS"
-    )["id"]
+    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Chat WS")[
+        "id"
+    ]
     user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
     yield service, bus, register, workspace_id, user_id
     service.shutdown()

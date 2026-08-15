@@ -270,7 +270,7 @@ describe('useJobComprehensionInfo', () => {
     mockFetchJobArtifact.mockResolvedValue(artifact(JSON.stringify(baseInfo)))
 
     const assembleNode = {
-      node_key: 'assemble_comprehension_info',
+      node_key: 'assemble_items',
       status: 'running',
       started_at: '2026-06-18T09:00:00Z',
     }

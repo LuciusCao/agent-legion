@@ -32,14 +32,14 @@ const adminUser: UserResponse = {
 }
 
 const workflow = {
-  key: 'video_knowledge',
+  key: 'demo_video_workflow',
   label: '知识视频 DAG',
   intake: { modes: [] },
   nodes: [
     {
-      key: 'fetch_questions',
+      key: 'fetch_items',
       label: '获取题目',
-      capability: 'fetch_questions',
+      capability: 'fetch_items',
       after: [],
       inputs: [],
       outputs: ['questions.json'],
@@ -53,11 +53,11 @@ const executorCatalog = [
     id: 'code-default',
     kind: 'code' as const,
     global_capacity: 16,
-    capabilities: ['fetch_questions'],
+    capabilities: ['fetch_items'],
     capability_details: [
       {
-        name: 'fetch_questions',
-        path: 'workflow_nodes/fetch_questions.py',
+        name: 'fetch_items',
+        path: 'workflow_nodes/fetch_items.py',
       },
     ],
   },
@@ -79,9 +79,9 @@ function renderPanel(
         workflow={workflow}
         executorCatalog={executorCatalog}
         agentCatalog={[]}
-        selectedNodeKey="fetch_questions"
+        selectedNodeKey="fetch_items"
         readOnly={false}
-        definitionYaml="key: video_knowledge\n"
+        definitionYaml="key: demo_video_workflow\n"
         setDefinitionYaml={vi.fn()}
         activeTab="inspector"
         onTabChange={vi.fn()}
@@ -100,7 +100,7 @@ describe('WorkflowStudioRightPanel', () => {
     mockApi.mockResolvedValue({
       origin: 'builtin',
       code: 'def run(inputs):\n    return {}\n',
-      path: 'workflow_nodes/fetch_questions.py',
+      path: 'workflow_nodes/fetch_items.py',
       version: null,
       has_draft: false,
     })
@@ -120,7 +120,7 @@ describe('WorkflowStudioRightPanel', () => {
     expect(screen.getByText('基本设置')).toBeInTheDocument()
     expect(screen.getByText('code-default')).toBeInTheDocument()
     expect(
-      screen.getByText('workflow_nodes/fetch_questions.py')
+      screen.getByText('workflow_nodes/fetch_items.py')
     ).toBeInTheDocument()
     expect(screen.queryByText('YAML 源码')).not.toBeInTheDocument()
     expect(
@@ -147,9 +147,9 @@ describe('WorkflowStudioRightPanel', () => {
           workflow={workflow}
           executorCatalog={executorCatalog}
           agentCatalog={[]}
-          selectedNodeKey="fetch_questions"
+          selectedNodeKey="fetch_items"
           readOnly={false}
-          definitionYaml="key: video_knowledge\n"
+          definitionYaml="key: demo_video_workflow\n"
           setDefinitionYaml={vi.fn()}
           activeTab="chat"
           onTabChange={onTabChange}
@@ -167,10 +167,10 @@ describe('WorkflowStudioRightPanel', () => {
       workspaceId: 'ws1',
       settings: {
         ...baseSettings,
-        workflowKey: 'video_knowledge',
-        nodeConfig: { fetch_questions: { bank_version: 'v2' } },
+        workflowKey: 'demo_video_workflow',
+        nodeConfig: { fetch_items: { bank_version: 'v2' } },
         nodeConfigSchemas: {
-          fetch_questions: {
+          fetch_items: {
             type: 'object',
             properties: {
               bank_version: { type: 'string', description: '题库版本' },
@@ -186,7 +186,7 @@ describe('WorkflowStudioRightPanel', () => {
       await screen.findByText('def run(inputs):', { exact: false })
     ).toBeInTheDocument()
     expect(
-      screen.getByRole('region', { name: '节点配置 fetch_questions' })
+      screen.getByRole('region', { name: '节点配置 fetch_items' })
     ).toBeInTheDocument()
     expect(screen.getByRole('textbox', { name: 'bank_version' })).toHaveValue(
       'v2'
@@ -198,7 +198,7 @@ describe('WorkflowStudioRightPanel', () => {
       executorCatalog: [
         {
           ...executorCatalog[0],
-          capability_details: [{ name: 'fetch_questions', path: null }],
+          capability_details: [{ name: 'fetch_items', path: null }],
         },
       ],
     })
@@ -207,7 +207,7 @@ describe('WorkflowStudioRightPanel', () => {
       screen.queryByRole('region', { name: '节点代码' })
     ).not.toBeInTheDocument()
     expect(
-      screen.queryByRole('region', { name: '节点配置 fetch_questions' })
+      screen.queryByRole('region', { name: '节点配置 fetch_items' })
     ).not.toBeInTheDocument()
   })
 })

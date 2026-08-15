@@ -129,7 +129,7 @@ def test_resolve_secret_refs_replaces_ref_and_passes_plaintext(vault, job_db):
     workspace = job_db.create_workspace(
         default_workflow_key="education_video_problems_generation", name="vault-resolve"
     )
-    name = node_secret_name("education_video_problems_generation", "fetch_questions", "token")
+    name = node_secret_name("education_video_problems_generation", "fetch_items", "token")
     vault.set(workspace["id"], name, PLAINTEXT)
 
     resolved = vault.resolve_secret_refs(

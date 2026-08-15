@@ -195,9 +195,9 @@ describe('SettingsPage', () => {
       edges: [],
       nodes: [
         {
-          key: 'fetch_questions',
+          key: 'fetch_items',
           label: '获取题目',
-          capability: 'fetch_questions',
+          capability: 'fetch_items',
           after: [],
           inputs: [],
           outputs: [],
@@ -209,7 +209,7 @@ describe('SettingsPage', () => {
         {
           id: 'code-default',
           kind: 'code',
-          capabilities: ['fetch_questions'],
+          capabilities: ['fetch_items'],
           global_capacity: 4,
         },
       ],
@@ -226,7 +226,7 @@ describe('SettingsPage', () => {
         bindings: [
           {
             workflow_key: 'question_content',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             executor_id: 'code-default',
           },
         ],
@@ -347,7 +347,7 @@ describe('SettingsPage', () => {
 
   it('renders checked checkbox for enabled intake modes', async () => {
     setWorkflowDefinition({
-      key: 'question_comprehension_info',
+      key: 'demo_workflow',
       label: '题目审题信息生成',
       intake: {
         modes: [
@@ -383,7 +383,7 @@ describe('SettingsPage', () => {
 
   it('renders unchecked checkbox for disabled intake modes', async () => {
     setWorkflowDefinition({
-      key: 'question_comprehension_info',
+      key: 'demo_workflow',
       label: '题目审题信息生成',
       intake: {
         modes: [
@@ -420,9 +420,9 @@ describe('SettingsPage', () => {
       edges: [],
       nodes: [
         {
-          key: 'fetch_questions',
+          key: 'fetch_items',
           label: '获取题目',
-          capability: 'fetch_questions',
+          capability: 'fetch_items',
           after: [],
           inputs: [],
           outputs: [],
@@ -434,7 +434,7 @@ describe('SettingsPage', () => {
         {
           id: 'code-default',
           kind: 'code',
-          capabilities: ['fetch_questions'],
+          capabilities: ['fetch_items'],
           global_capacity: 4,
         },
       ],
@@ -451,7 +451,7 @@ describe('SettingsPage', () => {
         bindings: [
           {
             workflow_key: 'question_content',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             executor_id: 'code-default',
           },
         ],
@@ -484,7 +484,7 @@ describe('SettingsPage', () => {
         {
           id: 'code-default',
           kind: 'code' as const,
-          capabilities: ['fetch_questions'],
+          capabilities: ['fetch_items'],
           global_capacity: 4,
         },
       ],
@@ -496,9 +496,9 @@ describe('SettingsPage', () => {
       edges: [],
       nodes: [
         {
-          key: 'fetch_questions',
+          key: 'fetch_items',
           label: '获取题目',
-          capability: 'fetch_questions',
+          capability: 'fetch_items',
           after: [],
           inputs: [],
           outputs: ['questions.json'],
@@ -550,14 +550,14 @@ describe('SettingsPage', () => {
         bindings: [
           {
             workflow_key: 'sample_workflow',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             executor_id: 'code-default',
           },
         ],
         node_limits: [
           {
             workflow_key: 'sample_workflow',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             concurrency_limit: 2,
           },
         ],
@@ -588,7 +588,7 @@ describe('SettingsPage', () => {
     })
 
     const select = screen.getByRole('combobox', {
-      name: '绑定 fetch_questions',
+      name: '绑定 fetch_items',
     })
     await act(async () => {
       fireEvent.mouseDown(select)
@@ -618,7 +618,7 @@ describe('SettingsPage', () => {
       ).toEqual([
         {
           workflow_key: 'sample_workflow',
-          node_key: 'fetch_questions',
+          node_key: 'fetch_items',
           concurrency_limit: 2,
         },
       ])
@@ -646,14 +646,14 @@ describe('SettingsPage', () => {
       node_bindings: [
         {
           workflow_key: 'sample_workflow',
-          node_key: 'fetch_questions',
+          node_key: 'fetch_items',
           executor_id: 'code-default',
         },
       ],
       node_limits: [
         {
           workflow_key: 'sample_workflow',
-          node_key: 'fetch_questions',
+          node_key: 'fetch_items',
           concurrency_limit: 2,
         },
       ],
@@ -668,7 +668,7 @@ describe('SettingsPage', () => {
         {
           id: 'code-default',
           kind: 'code' as const,
-          capabilities: ['fetch_questions'],
+          capabilities: ['fetch_items'],
           global_capacity: 4,
         },
       ],
@@ -680,9 +680,9 @@ describe('SettingsPage', () => {
       edges: [],
       nodes: [
         {
-          key: 'fetch_questions',
+          key: 'fetch_items',
           label: '获取题目',
-          capability: 'fetch_questions',
+          capability: 'fetch_items',
           after: [],
           inputs: [],
           outputs: ['questions.json'],
@@ -702,7 +702,7 @@ describe('SettingsPage', () => {
         bindings: [
           {
             workflow_key: 'sample_workflow',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             executor_id: 'code-default',
           },
         ],
@@ -720,7 +720,7 @@ describe('SettingsPage', () => {
         bindings: [
           {
             workflow_key: 'sample_workflow',
-            node_key: 'fetch_questions',
+            node_key: 'fetch_items',
             executor_id: 'code-default',
           },
         ],
@@ -747,7 +747,7 @@ describe('SettingsPage', () => {
         screen.getByText('移除执行器会同时清除以下节点绑定')
       ).toBeInTheDocument()
       expect(
-        screen.getByText('sample_workflow / fetch_questions')
+        screen.getByText('sample_workflow / fetch_items')
       ).toBeInTheDocument()
     })
 

@@ -45,7 +45,7 @@ def _seed_request(
     replace_agent_catalog({"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow') on conflict(id) do nothing",
             (workspace_id, workspace_id),
         )
         conn.execute(

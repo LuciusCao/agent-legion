@@ -91,7 +91,7 @@ describe('WorkflowChangeSummaryPanel', () => {
       {
         category: 'schema',
         message: 'Missing capability',
-        node_key: 'classify_comprehension_eligibility',
+        node_key: 'classify_items',
       },
     ]
 
@@ -104,13 +104,9 @@ describe('WorkflowChangeSummaryPanel', () => {
       />
     )
 
-    await userEvent.click(
-      screen.getByText('节点: classify_comprehension_eligibility')
-    )
+    await userEvent.click(screen.getByText('节点: classify_items'))
 
-    expect(onSelectNode).toHaveBeenCalledWith(
-      'classify_comprehension_eligibility'
-    )
+    expect(onSelectNode).toHaveBeenCalledWith('classify_items')
   })
 
   it('renders breaking risk state with severity badge', () => {

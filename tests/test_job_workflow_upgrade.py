@@ -41,14 +41,14 @@ def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
         workflow_revision_id=original["id"],
         workflow_version=original["version"],
         workflow_definition_hash=original["definition_hash"],
         workflow_definition_snapshot_json=original["definition_json"],
     )
-    queries.update_job_node(job["id"], "fetch_questions", status="completed")
+    queries.update_job_node(job["id"], "fetch_items", status="completed")
     queries.update_job_status(job["id"], "completed")
     service = JobWorkflowUpgradeService(
         queries,
@@ -83,10 +83,10 @@ def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
     )
-    queries.update_job_node(job["id"], "fetch_questions", status="completed")
+    queries.update_job_node(job["id"], "fetch_items", status="completed")
     queries.update_job_status(job["id"], "completed")
     service = JobWorkflowUpgradeService(
         queries,
@@ -147,7 +147,7 @@ def test_upgrade_job_workflow_fails_without_active_revision(tmp_path: Path) -> N
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
     )
     service = JobWorkflowUpgradeService(
@@ -176,14 +176,14 @@ def test_upgrade_job_workflow_skips_running_job(tmp_path: Path) -> None:
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
         workflow_revision_id=original["id"],
         workflow_version=original["version"],
         workflow_definition_hash=original["definition_hash"],
         workflow_definition_snapshot_json=original["definition_json"],
     )
-    queries.update_job_node(job["id"], "fetch_questions", status="running")
+    queries.update_job_node(job["id"], "fetch_items", status="running")
     service = JobWorkflowUpgradeService(
         queries,
         ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
@@ -210,14 +210,14 @@ def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
         workflow_revision_id=original["id"],
         workflow_version=original["version"],
         workflow_definition_hash=original["definition_hash"],
         workflow_definition_snapshot_json=original["definition_json"],
     )
-    run = queries.start_node_run(job["id"], "fetch_questions", ["pi"], "")
+    run = queries.start_node_run(job["id"], "fetch_items", ["pi"], "")
     with closing(connect_database(queries.path)) as conn, conn:
         conn.execute(
             """
@@ -225,7 +225,7 @@ def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
               id, execution_id, executor_id, workspace_id, job_id, workflow_key,
               node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             ) values (
-              'lease-1', 'exec-1', 'pi-1', %s, %s, %s, 'fetch_questions', %s,
+              'lease-1', 'exec-1', 'pi-1', %s, %s, %s, 'fetch_items', %s,
               'active', current_timestamp, current_timestamp, '2999-01-01 00:00:00'
             )
             """,
@@ -256,7 +256,7 @@ def test_upgrade_job_workflow_fails_for_missing_or_wrong_workspace(tmp_path: Pat
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
     )
     service = JobWorkflowUpgradeService(
@@ -288,7 +288,7 @@ def test_upgrade_job_workflow_records_event_buffer_update(tmp_path: Path) -> Non
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
         workflow_revision_id=original["id"],
         workflow_version=original["version"],
@@ -323,7 +323,7 @@ def test_upgrade_job_workflow_broadcasts_via_event_manager(tmp_path: Path) -> No
         source_id="Q1",
         batch_id="batch1",
         title="Question 1",
-        node_keys=["fetch_questions"],
+        node_keys=["fetch_items"],
         workspace_id=workspace["id"],
         workflow_revision_id=original["id"],
         workflow_version=original["version"],

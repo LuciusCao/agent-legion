@@ -143,7 +143,7 @@ def _make_registry() -> ExecutorRegistry:
     definition = CodeExecutorConfig(
         kind="code",
         global_capacity=4,
-        capabilities={"any": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
+        capabilities={"any": CodeCapabilityConfig(path="workflow_nodes/example_intake.py")},
     )
     return ExecutorRegistry(
         executors={executor.id: executor},

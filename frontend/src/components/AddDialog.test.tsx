@@ -69,7 +69,7 @@ describe('AddDialog', () => {
   it('shows error toast when workspace job batch creation fails', async () => {
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {
-        key: 'question_comprehension_info',
+        key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
           modes: [
@@ -89,7 +89,7 @@ describe('AddDialog', () => {
         workspace: {
           id: 'ws1',
           name: '题目审题信息',
-          default_workflow_key: 'question_comprehension_info',
+          default_workflow_key: 'demo_workflow',
           default_entity: 'question',
         },
       })
@@ -125,7 +125,7 @@ describe('AddDialog', () => {
   it('submits with the selected intake mode when multiple modes exist', async () => {
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {
-        key: 'question_comprehension_info',
+        key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
           modes: [
@@ -150,7 +150,7 @@ describe('AddDialog', () => {
         workspace: {
           id: 'ws1',
           name: '题目审题信息',
-          default_workflow_key: 'question_comprehension_info',
+          default_workflow_key: 'demo_workflow',
           default_entity: 'question',
           intake_config: {
             enabled_modes: ['batch_by_knowledge', 'batch_by_ids'],
@@ -198,7 +198,7 @@ describe('AddDialog', () => {
       mockApi.mock.calls[mockApi.mock.calls.length - 1][1]?.body as string
     )
     expect(body).toMatchObject({
-      workflow_key: 'question_comprehension_info',
+      workflow_key: 'demo_workflow',
       entity: 'question',
       source_kind: 'batch_by_ids',
       question_ids: ['5cf31cfe5805488fe22aea87b3853267'],
@@ -216,7 +216,7 @@ describe('AddDialog', () => {
   it('attaches the select change listener when the dialog opens after mount', async () => {
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {
-        key: 'question_comprehension_info',
+        key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
           modes: [
@@ -241,7 +241,7 @@ describe('AddDialog', () => {
         workspace: {
           id: 'ws1',
           name: '题目审题信息',
-          default_workflow_key: 'question_comprehension_info',
+          default_workflow_key: 'demo_workflow',
           default_entity: 'question',
           intake_config: {
             enabled_modes: ['batch_by_knowledge', 'batch_by_ids'],
@@ -310,7 +310,7 @@ describe('AddDialog', () => {
   it('disables submit and shows hint when workspace enabled_modes is empty', async () => {
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {
-        key: 'question_comprehension_info',
+        key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
           modes: [
@@ -329,7 +329,7 @@ describe('AddDialog', () => {
       workspace: {
         id: 'ws1',
         name: '题目审题信息',
-        default_workflow_key: 'question_comprehension_info',
+        default_workflow_key: 'demo_workflow',
         default_entity: 'question',
         intake_config: { enabled_modes: [], label_overrides: {} },
       },

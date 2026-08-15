@@ -32,9 +32,9 @@ def test_workflow_node_requires_non_empty_capability(tmp_path: Path) -> None:
 def test_workflow_node_loads_capability(tmp_path: Path) -> None:
     path = write_workflow(
         tmp_path,
-        node_body="label: Fetch\ncapability: fetch_questions\noutputs: [out.json]",
+        node_body="label: Fetch\ncapability: fetch_items\noutputs: [out.json]",
     )
-    assert load_workflow_definition(path).nodes["one"].capability == "fetch_questions"
+    assert load_workflow_definition(path).nodes["one"].capability == "fetch_items"
 
 
 def test_load_demo_workflow_definition():
@@ -216,7 +216,7 @@ def test_workflow_node_loads_config_mapping(tmp_path: Path) -> None:
     path = write_workflow(
         tmp_path,
         node_body=(
-            "capability: fetch_questions\noutputs: [out.json]\n"
+            "capability: fetch_items\noutputs: [out.json]\n"
             "config:\n      page_size: 20\n      subject_id: math"
         ),
     )
@@ -225,14 +225,14 @@ def test_workflow_node_loads_config_mapping(tmp_path: Path) -> None:
 
 
 def test_workflow_node_config_defaults_to_empty(tmp_path: Path) -> None:
-    path = write_workflow(tmp_path, node_body="capability: fetch_questions\noutputs: [out.json]")
+    path = write_workflow(tmp_path, node_body="capability: fetch_items\noutputs: [out.json]")
     assert load_workflow_definition(path).nodes["one"].config == {}
 
 
 def test_workflow_node_rejects_non_mapping_config(tmp_path: Path) -> None:
     path = write_workflow(
         tmp_path,
-        node_body="capability: fetch_questions\noutputs: [out.json]\nconfig: [page_size]",
+        node_body="capability: fetch_items\noutputs: [out.json]\nconfig: [page_size]",
     )
     with pytest.raises(WorkflowDefinitionError, match="config must be a mapping"):
         load_workflow_definition(path)
@@ -243,7 +243,7 @@ def test_workflow_node_rejects_retired_resources_key(tmp_path: Path) -> None:
     # the legacy node field so stale DAGs surface immediately.
     path = write_workflow(
         tmp_path,
-        node_body="capability: fetch_questions\noutputs: [out.json]\nresources: [question_detail]",
+        node_body="capability: fetch_items\noutputs: [out.json]\nresources: [question_detail]",
     )
     with pytest.raises(WorkflowDefinitionError, match="'resources' was removed"):
         load_workflow_definition(path)
@@ -257,9 +257,7 @@ def test_node_config_round_trips_through_job_snapshot(tmp_path: Path) -> None:
 
     path = write_workflow(
         tmp_path,
-        node_body=(
-            "capability: fetch_questions\noutputs: [out.json]\nconfig:\n      page_size: 20"
-        ),
+        node_body=("capability: fetch_items\noutputs: [out.json]\nconfig:\n      page_size: 20"),
     )
     definition = load_workflow_definition(path)
     snapshot = serialize_definition(definition)
@@ -273,7 +271,7 @@ def test_legacy_snapshot_without_node_config_still_loads() -> None:
 
     snapshot = (
         '{"key":"test","label":"Test","schema_version":1,'
-        '"nodes":{"one":{"key":"one","label":"One","capability":"fetch_questions",'
+        '"nodes":{"one":{"key":"one","label":"One","capability":"fetch_items",'
         '"after":[],"inputs":[],"outputs":["out.json"],"terminal":null,'
         '"execution":{"provider":"","model":"","thinking":"","prompt":""}}},"edges":[]}'
     )

@@ -53,7 +53,7 @@ def _setup(
 ):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
     block_event = threading.Event()
     executor = BlockingExecutor("code-default", block_event)
     registry = make_registry(
@@ -138,8 +138,8 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
     """Paused workspaces contribute no jobs; other workspaces still schedule."""
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("WS A", default_workflow_key="question_comprehension_info")
-    ws_b = job_db.create_workspace("WS B", default_workflow_key="question_comprehension_info")
+    ws_a = job_db.create_workspace("WS A", default_workflow_key="demo_workflow")
+    ws_b = job_db.create_workspace("WS B", default_workflow_key="demo_workflow")
     block_event = threading.Event()
     executor = BlockingExecutor("code-default", block_event)
     registry = make_registry(

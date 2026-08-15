@@ -13,7 +13,7 @@ from tests.executors.adapters.helpers import _make_skill_manager
 def skill_manager(tmp_path: Path) -> SkillManager:
     return _make_skill_manager(
         tmp_path,
-        "video_knowledge/gen",
+        "demo_video_workflow/gen",
         validate_script="#!/usr/bin/env python3\n",
     )
 
@@ -27,14 +27,14 @@ def execution_context(tmp_path: Path) -> ExecutionContext:
         executor_id="test",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="video_knowledge",
+        workflow_key="demo_video_workflow",
         node_key="gen",
         capability="cap",
         workspace={"id": "ws-a"},
         job={
             "id": "job-1",
             "workspace_id": "ws-a",
-            "workflow_key": "video_knowledge",
+            "workflow_key": "demo_video_workflow",
             "source_type": "video",
             "source_id": "v-1",
             "batch_id": "",

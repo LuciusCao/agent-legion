@@ -65,7 +65,7 @@ def _make_run(
     return run_dir
 
 
-def _make_skill_root(root: Path, node: str, domain: str = "video_knowledge") -> Path:
+def _make_skill_root(root: Path, node: str, domain: str = "demo_video_workflow") -> Path:
     skill_dir = root / domain / node
     skill_dir.mkdir(parents=True)
     (skill_dir / "SKILL.md").write_text("# skill", encoding="utf-8")
@@ -145,7 +145,7 @@ def test_find_samples_recovers_prompt_from_events_only(tmp_path: Path) -> None:
     assert len(samples) == 1
     assert samples[0].prompt_source == "events.jsonl"
     assert samples[0].outputs == ("subtitles_reviewed.srt", "review_report.json")
-    assert samples[0].skill_dir == skill_root / "video_knowledge" / "review_subtitles"
+    assert samples[0].skill_dir == skill_root / "demo_video_workflow" / "review_subtitles"
 
 
 def test_find_samples_prefers_prompt_md(tmp_path: Path) -> None:

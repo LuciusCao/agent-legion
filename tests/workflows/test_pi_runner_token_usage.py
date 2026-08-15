@@ -22,7 +22,7 @@ def skill_dir(tmp_path: Path) -> Path:
 def _setup_job(job_db: JobQueries) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info')",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow')",
             ("ws-1", "Test"),
         )
         conn.execute(

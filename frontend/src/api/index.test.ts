@@ -83,7 +83,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_workflow_key: 'question_comprehension_info',
+            default_workflow_key: 'demo_workflow',
             default_entity: 'question',
             resource_config: {
               resources: { question_detail: { enabled: true, config: {} } },
@@ -123,7 +123,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_workflow_key: 'question_comprehension_info',
+            default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
             intake_config: { enabled_modes: ['manual'] },
           },
@@ -158,7 +158,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'physics',
             name: 'Physics',
-            default_workflow_key: 'question_comprehension_info',
+            default_workflow_key: 'demo_workflow',
             default_entity: 'knowledge',
             resource_config: { storage: 's3' },
             intake_config: { enabled_modes: ['manual', 'cms'] },
@@ -169,7 +169,7 @@ describe('workspace api', () => {
 
     const workspace = await createWorkspace(
       'Physics',
-      'question_comprehension_info',
+      'demo_workflow',
       { storage: 's3' },
       'knowledge',
       { enabled_modes: ['manual', 'cms'] }
@@ -185,7 +185,7 @@ describe('workspace api', () => {
         method: 'POST',
         body: JSON.stringify({
           name: 'Physics',
-          default_workflow_key: 'question_comprehension_info',
+          default_workflow_key: 'demo_workflow',
           resource_config: { storage: 's3' },
           default_entity: 'knowledge',
           intake_config: { enabled_modes: ['manual', 'cms'] },
@@ -210,7 +210,7 @@ describe('createJobBatch', () => {
 
     await createJobBatch('math', {
       async_processing: false,
-      workflow_key: 'question_comprehension_info',
+      workflow_key: 'demo_workflow',
       source_kind: 'question_ids',
       question_ids: ['q1', 'q2'],
       knowledge_codes: [],
@@ -222,7 +222,7 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           async_processing: false,
-          workflow_key: 'question_comprehension_info',
+          workflow_key: 'demo_workflow',
           source_kind: 'question_ids',
           question_ids: ['q1', 'q2'],
           knowledge_codes: [],
@@ -245,7 +245,7 @@ describe('createJobBatch', () => {
 
     await createJobBatch('math', {
       async_processing: true,
-      workflow_key: 'video_knowledge',
+      workflow_key: 'demo_video_workflow',
       source_kind: 'knowledge_codes',
       knowledge_codes: ['k1'],
       question_ids: [],
@@ -257,7 +257,7 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           async_processing: true,
-          workflow_key: 'video_knowledge',
+          workflow_key: 'demo_video_workflow',
           source_kind: 'knowledge_codes',
           knowledge_codes: ['k1'],
           question_ids: [],
@@ -414,9 +414,9 @@ describe('workflow revisions api', () => {
       json: () =>
         Promise.resolve({
           revision: {
-            id: 'ws1:question_comprehension_info:v1',
+            id: 'ws1:demo_workflow:v1',
             workspace_id: 'ws1',
-            workflow_key: 'question_comprehension_info',
+            workflow_key: 'demo_workflow',
             version: 1,
             status: 'active',
             definition_hash: 'abcdef123456',
@@ -424,13 +424,13 @@ describe('workflow revisions api', () => {
             published_at: '2026-07-02T00:00:00Z',
           },
           workflow: {
-            key: 'question_comprehension_info',
+            key: 'demo_workflow',
             label: '题目审题信息生成 DAG',
             intake: { modes: [] },
             nodes: [],
             edges: [],
           },
-          definition_yaml: 'key: question_comprehension_info\n',
+          definition_yaml: 'key: demo_workflow\n',
         }),
     } as Response)
     global.fetch = fetchMock
@@ -442,7 +442,7 @@ describe('workflow revisions api', () => {
       expect.any(Object)
     )
     expect(result.revision.version).toBe(1)
-    expect(result.definition_yaml).toContain('question_comprehension_info')
+    expect(result.definition_yaml).toContain('demo_workflow')
   })
 
   it('fetches workspace workflow revisions', async () => {
@@ -452,9 +452,9 @@ describe('workflow revisions api', () => {
         Promise.resolve({
           revisions: [
             {
-              id: 'ws1:question_comprehension_info:v1',
+              id: 'ws1:demo_workflow:v1',
               workspace_id: 'ws1',
-              workflow_key: 'question_comprehension_info',
+              workflow_key: 'demo_workflow',
               version: 1,
               status: 'active',
               definition_hash: 'abcdef123456',
@@ -483,7 +483,7 @@ describe('workflow revisions api', () => {
           revision: {
             id: 'rev-1',
             workspace_id: 'ws1',
-            workflow_key: 'video_knowledge',
+            workflow_key: 'demo_video_workflow',
             version: 1,
             status: 'archived',
             definition_hash: '17d8077e',
@@ -491,14 +491,14 @@ describe('workflow revisions api', () => {
             published_at: '2026-07-06T10:05:00Z',
           },
           workflow: {
-            key: 'video_knowledge',
+            key: 'demo_video_workflow',
             label: '知识视频 DAG',
             schema_version: 2,
             intake: { modes: {} },
             nodes: [],
             edges: [],
           },
-          definition_yaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
+          definition_yaml: 'key: demo_video_workflow\nlabel: 知识视频 DAG\n',
         }),
     } as Response)
     global.fetch = fetchMock
@@ -510,7 +510,7 @@ describe('workflow revisions api', () => {
       expect.any(Object)
     )
     expect(result.revision.id).toBe('rev-1')
-    expect(result.workflow.key).toBe('video_knowledge')
-    expect(result.definition_yaml).toContain('key: video_knowledge')
+    expect(result.workflow.key).toBe('demo_video_workflow')
+    expect(result.definition_yaml).toContain('key: demo_video_workflow')
   })
 })

@@ -22,8 +22,8 @@ from server.app.services.node_codes import (
 
 VALID_CODE = "def run(job, job_dir, runtime):\n    return None\n"
 UPDATED_CODE = "async def run(job, job_dir, runtime):\n    return 1\n"
-WF = "question_comprehension_info"
-NODE = "fetch_questions"
+WF = "demo_workflow"
+NODE = "fetch_items"
 
 
 @pytest.fixture
@@ -33,9 +33,7 @@ def service(job_db):
 
 @pytest.fixture
 def workspace_id(job_db):
-    return job_db.create_workspace(
-        default_workflow_key="question_comprehension_info", name="node-codes"
-    )["id"]
+    return job_db.create_workspace(default_workflow_key="demo_workflow", name="node-codes")["id"]
 
 
 def test_save_draft_creates_version_one_with_hash(service, workspace_id) -> None:
@@ -178,7 +176,7 @@ def test_freeze_node_code_versions_pins_only_published(job_db, service, workspac
     # A draft without publish is not pinned.
     service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
 
-    pins = freeze_node_code_versions(job_db.path, True, workspace_id, WF, [NODE, "download_video"])
+    pins = freeze_node_code_versions(job_db.path, True, workspace_id, WF, [NODE, "fetch_media"])
 
     assert list(pins) == [NODE]
     assert pins[NODE]["version"] == 1

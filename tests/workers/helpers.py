@@ -76,7 +76,7 @@ def _make_worker(
     executor_def = CodeExecutorConfig(
         kind="code",
         global_capacity=2,
-        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
+        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/example_intake.py")},
     )
     registry = ExecutorRegistry(
         executors={"code-default": executor},

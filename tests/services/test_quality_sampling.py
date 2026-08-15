@@ -23,7 +23,7 @@ def _service() -> QualitySamplingService:
 
 def _seed_workspace(conn, workspace_id: str = WORKSPACE) -> None:
     conn.execute(
-        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'question_comprehension_info') on conflict do nothing",
+        "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow') on conflict do nothing",
         (workspace_id, workspace_id),
     )
 

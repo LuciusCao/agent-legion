@@ -136,7 +136,7 @@ def _executors(schema: dict | None = None) -> dict[str, CodeExecutorConfig]:
             global_capacity=2,
             capabilities={
                 "fetch": CodeCapabilityConfig(
-                    path="workflow_nodes/question_intake.py", config_schema=schema or {}
+                    path="workflow_nodes/example_intake.py", config_schema=schema or {}
                 ),
             },
         )

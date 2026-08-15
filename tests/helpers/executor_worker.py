@@ -36,9 +36,7 @@ def local_def(capacity: int, capabilities: set[str]) -> Any:
     return {
         "kind": "code",
         "global_capacity": capacity,
-        "capabilities": {
-            cap: {"path": "workflow_nodes/question_intake.py"} for cap in capabilities
-        },
+        "capabilities": {cap: {"path": "workflow_nodes/example_intake.py"} for cap in capabilities},
     }
 
 

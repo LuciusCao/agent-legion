@@ -39,7 +39,7 @@ def _make_worker(
         global_capacity=2,
         capabilities={
             "fetch": CodeCapabilityConfig(
-                path="workflow_nodes/question_intake.py", config_schema=SCHEMA
+                path="workflow_nodes/example_intake.py", config_schema=SCHEMA
             ),
         },
     )

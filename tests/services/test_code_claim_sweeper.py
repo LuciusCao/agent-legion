@@ -35,7 +35,7 @@ def _broker(data_dir) -> AgentExecutionBroker:
 def _insert_code_job_rows(job_db, *, job_id: str) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'question_comprehension_info')"
+            "insert into workspaces(id, name, default_workflow_key) values ('test-workspace', 'Test', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
         conn.execute(

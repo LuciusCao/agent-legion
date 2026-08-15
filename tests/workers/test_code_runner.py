@@ -83,7 +83,7 @@ def _code_manifest(code_text: str = CODE_OK, **overrides: Any) -> dict[str, Any]
         "job_id": "job-1",
         "workflow_key": "wf",
         "node_key": "node_a",
-        "capability": "question_intake",
+        "capability": "intake_items",
         "code_hash": hashlib.sha256(code_text.encode("utf-8")).hexdigest(),
         "custom_code": False,
         "config_schema": {},

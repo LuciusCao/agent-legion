@@ -44,14 +44,14 @@ describe('worker tokens api', () => {
     const fetchMock = mockFetchJson({
       token_id: 't1',
       register_token: 'plain',
-      workspace_id: 'video_knowledge',
+      workspace_id: 'demo_video_workflow',
       label: 'home-mac-mini',
     })
     global.fetch = fetchMock
 
     const created = await createRegisterToken({
       label: 'home-mac-mini',
-      workspace_id: 'video_knowledge',
+      workspace_id: 'demo_video_workflow',
     })
 
     expect(created.register_token).toBe('plain')
@@ -61,7 +61,7 @@ describe('worker tokens api', () => {
         method: 'POST',
         body: JSON.stringify({
           label: 'home-mac-mini',
-          workspace_id: 'video_knowledge',
+          workspace_id: 'demo_video_workflow',
         }),
       })
     )
