@@ -212,6 +212,26 @@ def test_dispatch_resolves_vault_secret_refs_in_memory(tmp_path: Path, monkeypat
     worker.stop()
 
 
+def test_dispatch_reads_definitions_from_registry_not_settings(tmp_path: Path) -> None:
+    """Worker 的 dispatch 以 registry 为唯一定义权威（热重载原子换出）：
+    settings.executor_definitions 只服务请求路径，清空不影响 dispatch。"""
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    executor = RecordingExecutor("code-default")
+    node = _local_node("fetch")
+    _ws, _job = _prepare_job(job_db, node)
+    worker = _make_worker(tmp_path, executor, [_make_definition([node])])
+    worker.settings.executor_definitions = {}
+    executor.block_event.set()
+
+    assert worker._poll() is True
+    for future in worker._futures.values():
+        future.result(timeout=5)
+
+    # The schema default declared on the registry definition still applies.
+    assert executor.contexts[0].node_config == {"bank_version": "v5"}
+    worker.stop()
+
+
 def test_dispatch_fails_node_on_unresolvable_secret_ref(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     executor = RecordingExecutor("code-default")

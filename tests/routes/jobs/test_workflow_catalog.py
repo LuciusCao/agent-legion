@@ -204,3 +204,26 @@ def test_register_workflow_failure_skips_scan_reload(tmp_path, monkeypatch):
 
     assert worker.reload_calls == 1
     assert len(wakeups) == 1
+
+
+class _FailingReloadWorker:
+    def reload_scan_entries(self):
+        raise RuntimeError("catalog read failed")
+
+
+def test_register_workflow_reload_failure_keeps_committed_write(tmp_path):
+    """热刷新失败不得把已提交的注册写成 500：poll loop 周期对账自愈。"""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    app.state.workflow_worker = _FailingReloadWorker()
+    with authenticate_client(TestClient(app)) as c:
+        response = c.post("/api/workflows", json={"key": "acme_reload_flow", "label": "Acme"})
+
+        assert response.status_code == 200, response.text
+        assert response.json()["key"] == "acme_reload_flow"
+        listing = c.get("/api/workflows")
+        assert "acme_reload_flow" in {item["key"] for item in listing.json()["workflows"]}

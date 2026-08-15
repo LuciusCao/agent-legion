@@ -37,7 +37,7 @@ def resolve_code_node_dispatch(
     capability without custom code raises ValueError (EXEC-CODE-002) — the
     caller fails the node as a config error.
     """
-    definition = worker.settings.executor_definitions.get(executor_id)
+    definition = worker.registry.definitions().get(executor_id)
     if not isinstance(definition, CodeExecutorConfig):
         return None
     frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
