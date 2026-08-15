@@ -524,3 +524,56 @@ def test_ensure_pools_reconciles_with_reloaded_registry(tmp_path: Path) -> None:
     assert "code-default" not in worker._pools
     assert "code-extra" in worker._pools
     worker.stop()
+
+
+def test_ensure_pools_drop_finishes_unstarted_claims(tmp_path: Path) -> None:
+    """Archive hot reload: claimed-but-never-started leases fail fast.
+
+    A queued future cancelled by pool.shutdown(cancel_futures=True) never runs
+    run_claim, so without the explicit finish its lease would read as running
+    until the TTL sweeper reaps it.
+    """
+    from server.app.executors.kinds import RuntimeDependencies
+
+    db_path = TEST_DATABASE_URL
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
+    worker._ensure_pools()
+
+    finished: list[tuple[str, object]] = []
+
+    class _RecordingLeases:
+        def finish(self, lease_id: str, result: object) -> bool:
+            finished.append((lease_id, result))
+            return True
+
+    worker.leases = _RecordingLeases()
+    pool = worker._pools["code-default"]
+    blocker = threading.Event()
+    running = [pool.submit(blocker.wait) for _ in range(2)]  # fill both workers
+    queued = pool.submit(lambda: None)  # stays queued behind the blockers
+    worker._futures["exec-queued"] = queued
+    worker._future_claims["exec-queued"] = ("code-default", "lease-queued")
+    worker._futures["exec-running"] = running[0]
+    worker._future_claims["exec-running"] = ("code-default", "lease-running")
+
+    worker.registry._runtime = RuntimeDependencies()
+    worker.registry.replace_definitions({})  # archive: no executor remains
+    try:
+        worker._ensure_pools()
+
+        assert queued.cancelled()
+        assert [lease_id for lease_id, _ in finished] == ["lease-queued"]
+        result = finished[0][1]
+        assert result.status == "failed"
+        assert "archived" in result.error_message
+        assert "exec-queued" not in worker._futures
+        assert "exec-queued" not in worker._future_claims
+        # A future that already started runs to completion and finishes its
+        # own lease through run_claim — the drop must not double-finish it.
+        assert "exec-running" in worker._futures
+    finally:
+        worker._futures.pop("exec-running", None)
+        worker._future_claims.pop("exec-running", None)
+        blocker.set()
+        worker.stop()

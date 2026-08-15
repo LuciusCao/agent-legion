@@ -35,7 +35,7 @@ from server.app.routes.workflow_revisions_contracts import (
     WorkflowDraftValidationResponse,
     WorkflowRevisionSummary,
 )
-from server.app.scheduler_wakeup import notify_schedulable_work
+from server.app.scheduler_wakeup import notify_schedulable_work, reload_scan_entries_best_effort
 from server.app.services.job_errors import JobServiceError
 from server.app.services.studio_agent_tools import StudioAgentToolsService
 from server.app.services.versioned_entities import VersionedEntity
@@ -161,9 +161,11 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         # The catalog row is committed at this point. Refresh the running
         # worker's scan list so the new key is scanned without a restart,
         # then wake the poll loop (same trigger as the admin register route).
+        # Best-effort: a reload failure must not 500 the committed write;
+        # the poll loop reconcile self-heals.
         worker = getattr(request.app.state, "workflow_worker", None)
         if worker is not None:
-            worker.reload_scan_entries()
+            reload_scan_entries_best_effort(worker)
         notify_schedulable_work()
         return workflow_contracts.WorkflowRegisteredResponse.model_validate(entry)
 

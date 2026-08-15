@@ -145,7 +145,7 @@ def try_claim_and_submit(
     # and a Worker-eligible payload is enqueued to the broker; anything else
     # falls through to the local executor path below (the safety net).
     if isinstance(
-        worker.settings.executor_definitions.get(executor_id), CodeExecutorConfig
+        worker.registry.definitions().get(executor_id), CodeExecutorConfig
     ) and try_claim_code_worker_node(
         worker, workspace, job, node, job_dir, log_path, inputs, executor_id, workflow_key
     ):

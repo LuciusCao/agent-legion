@@ -34,8 +34,8 @@ def reload_published_executors(settings: Settings, registry: ExecutorRegistry) -
     """Hot-apply the published executor catalog after publish/rollback/archive.
 
     Adapters are rebuilt and validated before the single state swap: a build
-    failure leaves the running registry and settings untouched. The write
-    paths invalidate the published cache first, so this read is fresh.
+    failure leaves the running registry and settings untouched. The registry
+    is the worker's single definition authority (atomic ``_state`` swap).
     """
     definitions = published_executor_definitions(settings.database_url)
     registry.replace_definitions(definitions)

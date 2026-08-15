@@ -101,13 +101,21 @@ def test_reload_swap_stays_consistent_under_concurrent_reads(settings, monkeypat
 
     def _reader() -> None:
         while not stop.is_set():
-            definitions, definitionless_keys = worker._scan_entries
-            if not definitions or not definitionless_keys:
-                continue
-            def_generation = definitions[0].rsplit("-", 1)[1]
-            key_generation = definitionless_keys[0].rsplit("-", 1)[1]
-            if def_generation != key_generation:
-                errors.append("torn scan snapshot observed")
+            try:
+                definitions, definitionless_keys = worker._scan_entries
+                if not definitions or not definitionless_keys:
+                    # Brief wait: a bare continue would busy-spin a core.
+                    stop.wait(0.001)
+                    continue
+                def_generation = definitions[0].rsplit("-", 1)[1]
+                key_generation = definitionless_keys[0].rsplit("-", 1)[1]
+                if def_generation != key_generation:
+                    errors.append("torn scan snapshot observed")
+            except Exception as exc:
+                # An unexpected reader failure must fail the test, not exit
+                # the thread silently and shrink the reader pool (假绿窗口).
+                errors.append(f"reader thread failed: {exc!r}")
+                return
 
     def _writer() -> None:
         for _ in range(300):
@@ -120,6 +128,7 @@ def test_reload_swap_stays_consistent_under_concurrent_reads(settings, monkeypat
     stop.set()
     for reader in readers:
         reader.join(timeout=5)
+        assert not reader.is_alive(), "reader thread did not exit"
 
     assert errors == []
     # Converges on the last generation once the writer stops.

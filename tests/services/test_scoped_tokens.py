@@ -66,3 +66,25 @@ def test_disabled_user_token_does_not_authenticate(job_db) -> None:
     job_db.update_user(user_id, disabled=True)
 
     assert scoped_tokens.authenticate_scoped_token(job_db, token) is None
+
+
+def test_delete_expired_scoped_tokens_purges_only_expired(job_db) -> None:
+    """Hourly maintenance sweep 的批量清理：过期行（含已吊销）删除，
+    未过期行（含已吊销）保留。"""
+    user_id = _create_user(job_db)
+    scoped_tokens.mint_scoped_token(job_db, user_id, ttl=timedelta(seconds=-1))
+    scoped_tokens.mint_scoped_token(job_db, user_id, ttl=timedelta(seconds=-3600))
+    live = scoped_tokens.mint_scoped_token(job_db, user_id)
+    revoked_live = scoped_tokens.mint_scoped_token(job_db, user_id)
+    scoped_tokens.revoke_scoped_token(job_db, revoked_live)
+
+    deleted = job_db.delete_expired_scoped_tokens()
+
+    assert deleted == 2
+    with read_connection(TEST_DATABASE_URL) as conn:
+        remaining = conn.execute("select token_hash from auth_scoped_tokens").fetchall()
+    assert {row["token_hash"] for row in remaining} == {
+        hash_token(live),
+        hash_token(revoked_live),
+    }
+    assert scoped_tokens.authenticate_scoped_token(job_db, live) is not None

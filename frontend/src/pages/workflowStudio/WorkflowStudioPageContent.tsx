@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import type { useWorkflowStudio } from './useWorkflowStudio'
 import type { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
 import { StudioNavContext, type StudioNav } from './workflowStudioNav'
@@ -12,10 +13,16 @@ export function WorkflowStudioPageContent(props: {
   view: View
 }) {
   const { studio, view } = props
-  const nav: StudioNav = {
-    openAgent: (agentId) => view.openPanel('agents', agentId),
-    openExecutor: (executorId) => view.openPanel('executors', executorId),
-  }
+  // useMemo 稳住 context value：YAML 击键会重渲染本组件，新建的 nav 对象
+  // 会让全部 useStudioNav 消费者无谓重渲染。
+  const nav: StudioNav = useMemo(
+    () => ({
+      openAgent: (agentId) => view.openPanel('agents', agentId),
+      openExecutor: (executorId) => view.openPanel('executors', executorId),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只依赖稳定化后的 openPanel
+    [view.openPanel]
+  )
   return (
     <StudioNavContext.Provider value={nav}>
       <WorkflowStudioLayout
