@@ -57,11 +57,6 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     agentDefaults: dict[str, str] | None = None
 
 
-class WorkspaceSettingsTestResponse(BaseModel):
-    ok: bool
-    message: str
-
-
 class WorkspaceResponse(BaseModel):
     workspace: WorkspaceRecord
 

@@ -109,7 +109,6 @@ const defaultState: SettingState = {
   originalWorkspaceDescription: '测试描述',
   originalSettings: null,
   isDirty: false,
-  testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
   executorConfiguration: {
@@ -142,8 +141,6 @@ const defaultState: SettingState = {
   setAgentCapacity: vi.fn(),
   hydrateSettings: vi.fn(),
   saveAll: vi.fn().mockResolvedValue(undefined),
-  testConnection: vi.fn().mockResolvedValue(undefined),
-  resetTestStatus: vi.fn(),
 }
 
 function renderPage(initialEntries = ['/workspaces/ws1/settings']) {
@@ -314,43 +311,6 @@ describe('SettingsPage', () => {
     renderPage()
     await waitFor(() => {
       expect(mockHydration).toHaveBeenCalledWith('ws1')
-    })
-  })
-
-  it('calls test connection and shows status change', async () => {
-    const testConnection = vi.fn().mockResolvedValue(undefined)
-    useSettingStore.setState({ testConnection })
-    renderPage()
-    await waitFor(() => {
-      expect(testConnection).toBeDefined()
-    })
-    const btn = screen.getByText('测试连接')
-    fireEvent.click(btn)
-    await waitFor(() => {
-      expect(testConnection).toHaveBeenCalled()
-    })
-  })
-
-  it('shows failed status and toast on test connection failure', async () => {
-    const testConnection = vi.fn().mockImplementation(() => {
-      useSettingStore.setState({
-        testStatus: { state: 'failed', message: 'connection refused' },
-      })
-      useUiStore
-        .getState()
-        .showToast('连接测试失败：connection refused', 'error')
-      return Promise.resolve()
-    })
-    useSettingStore.setState({ testConnection })
-    renderPage()
-    await waitFor(() => {
-      expect(testConnection).toBeDefined()
-    })
-    const btn = screen.getByText('测试连接')
-    fireEvent.click(btn)
-    await waitFor(() => {
-      const failedBadge = document.querySelector('.status-badge.failed')
-      expect(failedBadge).toBeInTheDocument()
     })
   })
 

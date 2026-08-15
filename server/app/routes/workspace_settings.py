@@ -4,7 +4,6 @@ from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.routes.job_contracts import (
     WorkspaceSettingsResponse,
     WorkspaceSettingsSectionRequest,
-    WorkspaceSettingsTestResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.workspace_secrets import create_workspace_secrets_router
@@ -44,17 +43,6 @@ def create_workspace_settings_router(
                     workspace_id, section, payload.model_dump(exclude_unset=True)
                 )
             )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
-
-    @router.post(
-        "/workspaces/{workspace_id}/settings/test-connection",
-        response_model=WorkspaceSettingsTestResponse,
-    )
-    def test_workspace_connection(workspace_id: str) -> WorkspaceSettingsTestResponse:
-        require_workflows_enabled(settings)
-        try:
-            return WorkspaceSettingsTestResponse(**service.test_connection(workspace_id))
         except JobServiceError as exc:
             raise_job_http_error(exc)
 

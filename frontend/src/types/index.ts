@@ -77,8 +77,6 @@ export type WorkspaceRecord = ApiSchemas['WorkspaceRecord']
 export type WorkspaceResponse = ApiSchemas['WorkspaceResponse']
 export type WorkspaceConfigurationResponse =
   ApiSchemas['WorkspaceConfigurationResponse']
-export type WorkspaceSettingsTestResponse =
-  ApiSchemas['WorkspaceSettingsTestResponse']
 export type WorkflowDraftValidationResponse =
   ApiSchemas['WorkflowDraftValidationResponse']
 export type WorkerStatusResponse = ApiSchemas['WorkerStatusResponse']

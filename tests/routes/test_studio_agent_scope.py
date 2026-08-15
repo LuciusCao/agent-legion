@@ -136,10 +136,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/artifacts"): "worker credential channel",
     # Draft/validate/compare: no production effect; explicitly reachable for
     # scoped tokens per STUDIO-AGENT-001.
-    (
-        "POST",
-        "/api/workspaces/{workspace_id}/settings/test-connection",
-    ): "probe only, no persistent effect",
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/workflow-drafts/compare"): "read-only compare",
     ("PUT", f"{_NODE_CODE}"): "node code draft write",

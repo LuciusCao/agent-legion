@@ -1,29 +1,19 @@
-import { Button, Checkbox, MenuItem, TextField } from '@mui/material'
+import { Checkbox, MenuItem, TextField } from '@mui/material'
 import styles from '../../pages/SettingsPage.module.css'
-import { ConnectionTestStatus } from './ConnectionTestStatus'
 import type { WorkflowDefinitionRecord, WorkspaceSettings } from '../../types'
-import type { TestStatus } from '../../stores/settingStore'
 
 interface Props {
   settings: WorkspaceSettings
   workflowDefinition: WorkflowDefinitionRecord | null
-  testStatus: TestStatus
   saveError: string | null
-  isTesting: boolean
-  isSaving: boolean
   setSettings: (s: Partial<WorkspaceSettings>) => void
-  onTestConnection: () => void
 }
 
 export function IntakeConfigSection({
   settings,
   workflowDefinition,
-  testStatus,
   saveError,
-  isTesting,
-  isSaving,
   setSettings,
-  onTestConnection,
 }: Props) {
   const toggleIntakeMode = (key: string) => {
     const isEnabled = settings.intakeModes.includes(key)
@@ -95,28 +85,6 @@ export function IntakeConfigSection({
         </div>
       </div>
 
-      <div
-        style={{
-          display: 'flex',
-          gap: 12,
-          flexWrap: 'wrap',
-          marginTop: 16,
-        }}
-      >
-        <Button
-          variant="outlined"
-          onClick={onTestConnection}
-          disabled={isTesting || isSaving}
-        >
-          {isTesting ? '测试中...' : '测试连接'}
-        </Button>
-        <div aria-live="polite" aria-atomic="true">
-          <ConnectionTestStatus
-            state={testStatus.state}
-            message={testStatus.message}
-          />
-        </div>
-      </div>
       {saveError && (
         <div
           className="error-text"

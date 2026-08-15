@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
@@ -36,10 +36,7 @@ export function SettingsPage() {
     isSaving,
     saveError,
     executorConfiguration,
-    testStatus,
     saveAll,
-    testConnection,
-    resetTestStatus,
   } = useSettingStore()
 
   // 服务端快照经 react-query 拉取并水合进 store（切换工作区重置草稿；
@@ -97,13 +94,7 @@ export function SettingsPage() {
   const { activeSection, contentRef, scrollToSection } =
     useSettingsScrollSpy(navItems)
 
-  useEffect(() => {
-    resetTestStatus()
-  }, [workspaceId, resetTestStatus])
-
   if (!workspaceId) return null
-
-  const isTesting = testStatus.state === 'testing'
 
   const rightActions = (
     <div className={styles.saveButtonWrap}>
@@ -163,12 +154,8 @@ export function SettingsPage() {
           <IntakeConfigSection
             settings={settings}
             workflowDefinition={workflowDefinition}
-            testStatus={testStatus}
             saveError={saveError}
-            isTesting={isTesting}
-            isSaving={isSaving}
             setSettings={setSettings}
-            onTestConnection={testConnection}
           />
 
           <WorkflowSection
