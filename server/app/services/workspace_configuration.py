@@ -130,25 +130,21 @@ class WorkspaceConfigurationService:
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
         workflow = self.workflows.bound_definition(workflow_key)
-        if workflow is None and (executor_allocations or node_bindings or node_limits):
-            raise InvalidOperationError(
-                f"Workflow {workflow_key!r} has no published definition yet; "
-                "publish a draft before configuring executors"
-            )
-        if workflow is not None:
-            validate_workspace_executor_configuration(
-                workflow=workflow,
-                executor_definitions=self.settings.executor_definitions,
-                allocations=executor_allocations,
-                bindings=node_bindings,
-                node_limits=node_limits,
-                agent_capabilities={
-                    definition.capability
-                    for definition in published_agent_definitions(
-                        self.settings.database_url
-                    ).values()
-                },
-            )
+        # workflow is None for a registered workflow before its first publish;
+        # the validator then runs only the definition-independent allocation
+        # checks, and publish-time validation enforces binding correctness —
+        # this unblocks the first-publish chicken-and-egg.
+        validate_workspace_executor_configuration(
+            workflow=workflow,
+            executor_definitions=self.settings.executor_definitions,
+            allocations=executor_allocations,
+            bindings=node_bindings,
+            node_limits=node_limits,
+            agent_capabilities={
+                definition.capability
+                for definition in published_agent_definitions(self.settings.database_url).values()
+            },
+        )
         name_value = workspace_patch.get("name")
         name: str = name_value if name_value is not None else str(workspace["name"])
         description_value = workspace_patch.get("description")
