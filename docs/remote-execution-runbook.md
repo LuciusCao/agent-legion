@@ -176,8 +176,8 @@ raising `max_concurrency`, and keep OS headroom:
 `max_concurrency = floor((RAM - OS reserve) / measured peak)`.
 
 **Code execution pool (protocol v2).** Self-contained workflow code nodes
-(the six question/comprehension nodes and `video_package`; the three
-`server.app.pipeline`-dependent video nodes stay Host-local) can be dispatched
+(static import closure ⊆ `workspace_libs` + stdlib + `requests`;
+all in-repo demo nodes qualify) can be dispatched
 to Workers: the Host ships the node code text plus a sha256 `code_hash` and a
 `workspace_libs` snapshot in the bundle, and the Worker executes it inside the
 same `velites sandbox wrap` OS sandbox used for custom nodes. To opt a Worker

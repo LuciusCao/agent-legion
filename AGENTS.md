@@ -104,8 +104,8 @@
   （fail-closed，EXEC-CODE-003）；开关 `workflows.custom_nodes_enabled`。
 - code 节点上 Worker（批次 2，协议 v2，EXEC-CODE-WORKER-001）：worker-eligible =
   对解析后代码文本做静态 import 闭包扫描，闭包 ⊆ `workspace_libs` + stdlib
-  （+ requests）才可上 Worker；video 三节点（`video_download` / `video_assemble` /
-  `video_transcribe`）因 import `server.app.pipeline.*` 天然留 Host 本地执行。
+  （+ requests）才可上 Worker；repo 内置节点只剩示例 workflow 的两个
+  纯 stdlib 节点，全部 Worker-eligible。
   无在线 code Worker 时 dispatch 探测并回落本地 executor（兜底=本地，不做
   queued 超时回落）。Worker 上所有 code 执行（内置与自定义）统一过 velites
   沙箱；Worker 与 Host 的容量按 kind 分池（`max_concurrency` /
@@ -147,16 +147,11 @@
 # Wrong: Workflow leaks implementation details.
 review_keywords:
   runner: pi
-  skill: question_comprehension_info/review_key_info
+  skill: education-video-problems-generation/review-questions
 
 # Correct: Workflow declares business capability only.
 review_keywords:
   capability: review_keywords
-```
-
-```python
-# Wrong: Generic Workspace route imports a legacy video pipeline phase.
-from server.app.pipeline.download import download_video
 ```
 
 ```python
@@ -199,22 +194,13 @@ CodeExecutor(...).execute(context)
   split yaml 写 `openclaw:` 撞 owned-key 校验报错；`openclaw.skill_safety`
   写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以 DB
   `skill_lock` 文档为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
-  整体退役（文件存在即启动报错，带迁移指引）：业务参数
-  `provider` / `timeout_seconds` 在 `transcribe_video` capability 的
-  config_schema（Studio 节点/workspace 配置覆盖），机器路径只走 env
-  `AGENT_LEGION_ASR_*`。
+  整体退役（文件存在即启动报错，带迁移指引）：业务参数与机器路径
+  随业务转录节点一并迁出，平台不再有 ASR 配置通道。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
   （CONFIG-YAML-001）。
 - OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。
 
-## 9. Video Knowledge Workspace
-
-- Knowledge video work lives in the `video_knowledge` workspace workflow.
-- Job Detail video UI uses `VideoContentPanel`.
-- Do not add new `/api/videos` or `/video-hive` behavior.
-- Do not read legacy video tables in runtime paths.
-
-## 10. Where to look next
+## 9. Where to look next
 
 - 项目结构 / 运行细节：[README.md](README.md) / [docs/architecture/](docs/architecture/)
 - 远程执行运维手册：[docs/remote-execution-runbook.md](docs/remote-execution-runbook.md)

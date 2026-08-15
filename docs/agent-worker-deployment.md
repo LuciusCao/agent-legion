@@ -85,8 +85,8 @@ Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope
 ```bash
 curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
   -H 'Content-Type: application/json' \
-  -d '{"workspace_id": "video_knowledge", "label": "home-mac-mini"}'
-# => {"token_id": "...", "register_token": "<明文，只返回这一次>", "workspace_id": "video_knowledge", "label": "home-mac-mini"}
+  -d '{"workspace_id": "<workspace_id>", "label": "home-mac-mini"}'
+# => {"token_id": "...", "register_token": "<明文，只返回这一次>", "workspace_id": "<workspace_id>", "label": "home-mac-mini"}
 ```
 
 ```bash
@@ -129,7 +129,7 @@ Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capab
 
 ### code 节点执行池（协议 v2）
 
-自足的 workflow code 节点（question/comprehension 链路 6 个节点与 `video_package`；依赖 `server.app.pipeline` 的 3 个 video 重节点留在 Host 本地执行）可以被分派到 Worker：Host 把节点代码文本 + sha256 `code_hash` 与 `workspace_libs` 快照打进 bundle 下发，Worker 在 `velites sandbox wrap` OS 沙箱内执行（内置与自定义节点同一条沙箱路径）。接入方式：
+自足的 workflow code 节点（静态 import 闭包 ⊆ `workspace_libs` + stdlib + `requests`；repo 内置的示例节点全部满足）可以被分派到 Worker：Host 把节点代码文本 + sha256 `code_hash` 与 `workspace_libs` 快照打进 bundle 下发，Worker 在 `velites sandbox wrap` OS 沙箱内执行（内置与自定义节点同一条沙箱路径）。接入方式：
 
 - **code capability 声明**：与 agent 一样写在 `capabilities` 列表里（同一通道，Host 按 capability 匹配，不看 model）；
 - **容量**：`max_code_concurrency`（默认 0 = 不领取 code 任务），与 `max_concurrency` 是两个独立池，Host 分开记账、分开强制，长 code 任务不会挤占 agent 容量；code 任务也不占 workspace 级 Agent 并发上限；

@@ -1,20 +1,20 @@
 # Agent Legion
 
 Agent Legion is a self-hosted console that turns AI agents into a managed
-production line for educational content. You define a workflow as a DAG of
-**capabilities**, submit a batch of work (video URLs, knowledge codes, question
-IDs), and Agent Legion schedules every node across local and remote agent
-executors — with a live UI to watch, rerun, and package the results.
+production line for content workflows. You define a workflow as a DAG of
+**capabilities**, submit a batch of work, and Agent Legion schedules every
+node across local and remote agent executors — with a live UI to watch,
+rerun, and package the results.
 
-It ships with two production workflows:
-
-- **`video_knowledge`** — turn raw knowledge videos into structured teaching
-  packages: download → transcribe → subtitle review → chaptering → interaction
-  design → content review → assemble → package.
-- **`question_comprehension_info`** — generate structured comprehension
-  metadata for math word problems: fetch from CMS → parse → eligibility
-  classification → key-info & error generation/review → difficulty scoring →
-  assemble.
+It ships with one minimal example workflow,
+**`education_video_problems_generation`** — expand a directory of knowledge
+points into jobs that draft a teaching video script, review it, generate
+practice questions, review them, and assemble a mock publish payload. It
+runs out of the box with no external services and demonstrates the core
+mechanics (intake → code nodes → agent nodes → review → packaged artifacts).
+Real production workflows are registered into the DB-backed catalog
+(`POST /api/workflows`) and their node code published as custom nodes —
+see `docs/architecture/`.
 
 ## Features
 
@@ -28,8 +28,8 @@ It ships with two production workflows:
   a target node, or continue from a pause; downstream staleness is tracked
   automatically.
 - **Batch intake.** Create job batches through
-  `POST /api/workspaces/{id}/job-batches`: submit video URLs directly, or
-  resolve videos/questions from the CMS by knowledge code or ID list.
+  `POST /api/workspaces/{id}/job-batches` with direct ID/URL lists; external
+  resolution belongs to the workflow's own nodes, not the platform.
 - **Pluggable agent runtimes.** Agent nodes run headlessly through the Pi CLI
   or **velites** — Agent Legion's own Rust harness (&lt;50 ms cold start vs
   Pi's ~1.6 s, a fraction of the memory, same pi-compatible event stream).
@@ -195,17 +195,6 @@ effect on restart. `AGENT_LEGION_OPENCLAW_CWD` stays as an env override that
 outranks the DB value. Executor definitions (the retired `workflow.yaml`
 `executors` section) live in the DB `versioned_entities` table, seeded from
 the built-in factory catalog at startup and managed in Studio.
-
-ASR (the retired `agent_legion.yaml` `asr:` section): the business parameters
-`provider` (`auto` / `whisper` / `sensevoice`, default `auto`) and
-`timeout_seconds` (default 900) are declared on the `transcribe_video`
-capability `config_schema` and overridable per node/workspace in Studio; the
-machine-local paths are env-only — `AGENT_LEGION_ASR_WHISPER_BINARY`,
-`AGENT_LEGION_ASR_WHISPER_MODEL`, `AGENT_LEGION_ASR_WHISPER_VAD_MODEL`,
-`AGENT_LEGION_ASR_SENSEVOICE_SCRIPT`, `AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR`.
-Startup validates only env-provided paths (a typo fails fast); with no ASR
-env configured the server starts fine and a missing binary surfaces as the
-provider's `FileNotFoundError` at transcription time.
 
 Secrets are never written to yaml: database URL comes from
 `AGENT_LEGION_DATABASE_URL`, the vault master key from

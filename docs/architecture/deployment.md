@@ -54,6 +54,6 @@ scripts/
 
 ### 顶层配置项
 
-_全部运行时配置段已从 split yaml 退役：业务参数在 capability config_schema（Studio 节点/workspace 配置覆盖），实例级调参在 DB 实例设置文档（/api/admin/instance-settings），机器路径与密钥走 env（如 AGENT_LEGION_ASR_* / AGENT_LEGION_DATABASE_URL）。_
+_全部运行时配置段已从 split yaml 退役：业务参数在 capability config_schema（Studio 节点/workspace 配置覆盖），实例级调参在 DB 实例设置文档（/api/admin/instance-settings），机器路径与密钥走 env（如 AGENT_LEGION_DATABASE_URL）。_
 
 <!-- END AUTO-GENERATED -->

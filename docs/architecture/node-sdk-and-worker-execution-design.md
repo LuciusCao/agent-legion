@@ -34,10 +34,10 @@ node_code（`services/node_codes.py`）→ `CodeExecutor.execute`
 
 关键事实：
 
-1. **runtime 两条路径不一致**：`job_db` 是内置路径独有的 Host 依赖，消费点只有
-   两处——`question_intake` 读 batch payload（`job_db.get_batch`）、
-   `comprehension_assemble/finalize` 经 `collect_skill_versions` 读
-   `list_node_runs`。两者都可以在父进程预取，沙箱路径已经这么做了（batch）。
+1. **runtime 两条路径不一致**：`job_db` 是内置路径独有的 Host 依赖，典型消费点
+   只有两类——节点读 batch payload（`job_db.get_batch`）、节点经
+   `collect_skill_versions` 读 `list_node_runs`。两者都可以在父进程预取，
+   沙箱路径已经这么做了（batch）。
 2. **SDK 分发不是新问题**：沙箱 read allowlist 已含 `workspace_libs/` 且
    PYTHONPATH=repo 根（`_code_sandbox.py`），Worker 也跑同一 repo checkout。
    SDK 落在 `workspace_libs/` 下，内置/自定义/沙箱/Worker 四个执行环境今天就能
@@ -72,8 +72,9 @@ auth 失败上报（§5.3）。
 
 - SDK 只依赖 stdlib（+ 同包 `workspace_libs`），**禁止 import `server.app.*`**。
   这是批次 2 Worker 侧复用的根本：SDK 是执行面代码，不能拖拽控制面依赖。
-- 节点可以继续 import 业务库（`server.app.pipeline.*`、`workspace_libs.cms.*`
-  等）——业务库不是脚手架，是否随批次 2 向 `workspace_libs/` 搬迁另行评估。
+- 节点可以继续 import 业务库——业务库不是脚手架，是否随批次 2 向
+  `workspace_libs/` 搬迁另行评估。（2026-08 业务剥离后，repo 内已不再
+  携带业务库；业务节点以自包含自定义节点承载。）
 - executor 入口签名不变：`run(job, job_dir, runtime)`。SDK 是节点内部的
   适配层，不是新的执行协议；存量已冻结的自定义节点版本零影响。
 
@@ -136,7 +137,7 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
 - 节点侧：`ctx.report_auth_failure()` 在 `job_dir/.node_runtime/auth_failure`
   写标记文件（内容为 node_config 里的 connection key，可为空串）。job_dir 在
   内置子进程、沙箱（可写白名单含 job_dir）、未来 Worker 三条路径都可写，无需
-  协议扩展；`.node_runtime/` 是目录，不会被 `video_package` 的顶层文件清单
+  协议扩展；`.node_runtime/` 是目录，不会被节点产物的顶层文件清单
   （`iterdir()` + `is_file()`）捞走。
 - 父进程侧：`_execute_isolated` 与 `execute_custom_sandboxed` 在子进程退出后
   检查标记；存在则用 `ConnectionTokenService` 失效该连接的缓存 token，随后删除
@@ -147,21 +148,13 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
 
 ## 6. 内置节点迁移（批次 1 dogfood）
 
-9 个节点全部迁到 SDK，删除重复脚手架：
+当时的 9 个内置业务节点全部迁到 SDK，删除重复脚手架（手写的服务配置读取、
+manifest 拼装、取消检查点）：统一走 `ctx.service_config(...)` /
+`ctx.skill_versions` / `ctx.workflow_manifest()` / `ctx.checkpoint()`。
+业务逻辑零改动；迁移前后节点输入输出 artifact 逐字节等价。
 
-- `_cms_config` ×2（`question_intake`、`video_download`，仅 legacy 键列表不同）
-  → `ctx.service_config(legacy_keys=...)`；
-- `_asr_config`（`video_transcribe`）→ `ctx.service_config(section="asr")`；
-- `_load_video_input` ×3 → `VideoKnowledgeInput.from_mapping(ctx.artifacts.read_json(...))`
-  一行；
-- 手写 manifest dict 中的 `collect_skill_versions` / `workflow_manifest` →
-  `ctx.skill_versions` / `ctx.workflow_manifest()`；
-- 散点 `check_cancellation` → `ctx.checkpoint()` + 写边界自动 checkpoint
-  （video_download / video_transcribe 等长操作节点补上显式 checkpoint）；
-- `comprehension_common`（question_id 校验等业务 helper）保留，仍由节点 import。
-
-业务逻辑零改动；迁移前后节点输入输出 artifact 逐字节等价（统一 JSON 序列化参数
-本就与现状一致）。
+（2026-08 业务剥离后，这些业务节点整体迁出 repo，以自包含自定义节点经 DB
+发布流承载；repo 内置节点只剩示例 workflow 的两个纯 stdlib 节点。）
 
 ## 7. 批次 2 方案：Worker code 执行协议（2026-08-12 已定案，2026-08 已实施）
 
@@ -191,16 +184,10 @@ SDK 不自定义异常类型，builtin 子进程与沙箱 child 的两种 token 
   EXEC-CODE-001 不变：内置代码源头仍是
   Host 的 git 仓库，评审链不变，仅运输方式从「Worker 读本地 repo」变为
   「Host 读了发过去」。
-- 批次 2a 前置：把节点依赖的轻量 helper（`comprehension_common`、
-  `comprehension_contract`、`question_fingerprint`，均为纯 stdlib）下沉到
-  `workspace_libs`。下沉后 6 个节点自足（`question_intake`、`question_clean_parse`、
-  `comprehension_classify` / `comprehension_assemble` / `comprehension_finalize`、
-  `video_package`），走 Host 发送上 Worker。
-- 3 个 video 重节点（`video_download` / `video_assemble` / `video_transcribe`，
-  依赖 `server.app.pipeline.*`：ffmpeg 子进程、ASR provider、第三方库
-  `requests`/`srt`）批次 2 暂缓上 Worker，留 Host 本地执行（routing 不绑定
-  Worker 即可）。后续单独决策：`pipeline` 下沉 vs 视频处理专用 Worker——
-  其依赖（ffmpeg、ASR 模型路径）与机器环境强绑定，值得独立设计。
+- 批次 2a 前置：把节点依赖的轻量 helper（业务契约模块，均为纯
+  stdlib）下沉到 `workspace_libs`。（2026-08 业务剥离后这些节点整体迁出
+  repo，以自包含自定义节点承载，全部 Worker-eligible；Host-local 例外
+  已不存在。）
 - 安全加分：Worker 上所有 code 执行统一过 velites 沙箱（内置节点在 Host
   本地本不沙箱，远程化后反而更规范）。
 
