@@ -1,3 +1,4 @@
+import pytest
 from fastapi.testclient import TestClient
 
 from server.app.events.agents import AgentStatusManager
@@ -157,3 +158,39 @@ def test_gzip_compresses_text_but_skips_range_requests(tmp_path, monkeypatch):
         assert ranged.status_code == 206
         assert "content-encoding" not in ranged.headers
         assert ranged.headers["content-range"].startswith("bytes 0-99/")
+
+
+@pytest.mark.no_db
+def test_gzip_skips_already_compressed_responses():
+    """Worker-facing downloads (agent bundles, result archives) are tar.gz;
+    re-gzipping them burns CPU and strips Content-Length."""
+    import gzip as gzip_module
+
+    from fastapi import FastAPI
+    from starlette.responses import PlainTextResponse, Response
+
+    from server.app.http_middleware import SelectiveGZipMiddleware
+
+    archive = gzip_module.compress(b"payload" * 1000)  # above minimum_size
+    app = FastAPI()
+
+    @app.get("/bundle")
+    def _bundle() -> Response:
+        return Response(content=archive, media_type="application/gzip")
+
+    @app.get("/text")
+    def _text() -> Response:
+        return PlainTextResponse("x" * 2000)
+
+    app.add_middleware(SelectiveGZipMiddleware)
+    with TestClient(app) as c:
+        bundle = c.get("/bundle", headers={"Accept-Encoding": "gzip"})
+        assert bundle.status_code == 200
+        assert "content-encoding" not in bundle.headers
+        assert bundle.headers["content-length"] == str(len(archive))
+        assert bundle.content == archive
+
+        # Compressible payloads are still gzipped.
+        text = c.get("/text", headers={"Accept-Encoding": "gzip"})
+        assert text.headers["content-encoding"] == "gzip"
+        assert text.text == "x" * 2000

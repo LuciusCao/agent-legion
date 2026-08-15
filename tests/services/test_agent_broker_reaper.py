@@ -68,6 +68,26 @@ def test_reap_terminal_bundles_removes_done_bundles_and_stale_archives(job_db, t
     assert not stale_archive.exists()
 
 
+def test_reap_terminal_bundles_reaps_stale_result_staging_files(job_db, tmp_path) -> None:
+    """Staging files (.result-*.tmp) leaked by a crashed spool are reaped by
+    age alongside orphaned archives; fresh ones (possibly mid-upload) stay."""
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    stale = bundle_dir / ".result-stale.tmp"
+    stale.write_bytes(b"partial")
+    fresh = bundle_dir / ".result-fresh.tmp"
+    fresh.write_bytes(b"partial")
+    old = datetime.now(UTC).timestamp() - 7200
+    os.utime(stale, (old, old))
+
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+    reaped = broker.reap_terminal_bundles()
+
+    assert reaped == 1
+    assert not stale.exists()
+    assert fresh.is_file()
+
+
 def test_reap_terminal_bundles_incremental_uses_done_and_cancelled_branches(
     job_db, tmp_path
 ) -> None:
