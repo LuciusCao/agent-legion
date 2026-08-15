@@ -100,7 +100,9 @@ COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
 export COVERAGE_FILE
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
   cleanup_coverage() {
-    rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*
+    # xdist workers write "$COVERAGE_FILE".<host>.<pid>.<random>; require the
+    # two extra dots so an unrelated same-prefix file (e.g. .log) survives.
+    rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*.*.*
   }
   trap cleanup_coverage EXIT
 fi
