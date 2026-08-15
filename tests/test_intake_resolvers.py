@@ -55,4 +55,28 @@ def test_unknown_resolver_phase_raises() -> None:
 def test_unknown_entity_mode_combination_is_not_registered() -> None:
     assert RESOLVERS.get(("audio", "batch_by_knowledge")) is None
     assert RESOLVERS.get(("video", "batch_by_ids")) is None
-    assert RESOLVERS.get(("question", "by_knowledge")) is None
+    assert RESOLVERS.get(("question", "batch_by_urls")) is None
+
+
+def test_node_phase_modes_fan_out_opaque_candidates() -> None:
+    spec = RESOLVERS[("question", "batch_by_ids")]
+    assert spec.phase == "node"
+
+    candidates = resolve_candidates(
+        spec, "question", ["Q1", "Q1", "Q2"], "batch_by_ids", _mode("batch_by_ids"), None, {}, "ws"
+    )
+
+    assert [c["entity_id"] for c in candidates] == ["Q1", "Q2"]
+    assert all(c["source_ref"] == c["entity_id"] for c in candidates)
+
+
+def test_node_phase_video_candidates_carry_empty_source_fields() -> None:
+    spec = RESOLVERS[("video", "batch_by_knowledge")]
+
+    candidates = resolve_candidates(
+        spec, "video", ["K1"], "batch_by_knowledge", _mode("batch_by_knowledge"), None, {}, "ws"
+    )
+
+    assert candidates[0]["source_ref"] == "K1"
+    assert candidates[0]["source_url"] == ""
+    assert candidates[0]["content_type"] == "knowledge"

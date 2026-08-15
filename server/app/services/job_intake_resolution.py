@@ -43,3 +43,29 @@ def resolve_direct_candidates(
         candidate(entity, value, f"{entity.title()} {value}", source_kind, value)
         for value in input_values
     ]
+
+
+def resolve_opaque_candidates(
+    entity: str,
+    input_values: list[str],
+    source_kind: str,
+) -> list[dict[str, Any]]:
+    """Fan out opaque candidates carrying ``source_ref`` for node-phase resolution.
+
+    Intake does not talk to any external service here: the first DAG node
+    resolves ``source_ref`` against its configured connection at execution
+    time, so intake only fans out one deduped candidate per input value.
+    """
+    seen: set[str] = set()
+    candidates: list[dict[str, Any]] = []
+    for value in normalize_values(input_values):
+        if value in seen:
+            continue
+        seen.add(value)
+        extras: dict[str, Any] = {"source_ref": value}
+        if entity == "video":
+            extras.update(source_url="", source_uuid="", content_type="knowledge")
+        candidates.append(
+            candidate(entity, value, f"{entity.title()} {value}", source_kind, value, **extras)
+        )
+    return candidates
