@@ -28,6 +28,9 @@ SELF_CONTAINED_NODES = (
     "comprehension_assemble",
     "comprehension_finalize",
     "video_package",
+    # Demo workflow nodes: pure stdlib + node SDK.
+    "example_intake",
+    "example_publish",
 )
 
 # Exempt: depend on server.app.pipeline.* (ffmpeg subprocess / ASR providers)
