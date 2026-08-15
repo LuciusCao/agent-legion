@@ -53,14 +53,17 @@ AGENT_LEGION_MCP_SERVER_NAME = "agent-legion-studio"
 
 
 def looks_like_agent_legion_tool_call(text: str) -> bool:
-    """Heuristic: whether this tool-call title/payload references our MCP tools.
+    """Heuristic: whether a tool-call identity field references our MCP tools.
 
     ACP gives the client no direct view into the agent's MCP wiring, so MCP
     visibility and permission auto-approve both key off the tool-call text the
-    agent streams in session/update notifications. Matching is deliberately
-    conservative (server name or an exact tool-name token) — a false negative
-    only degrades to the safe path (human-confirmed permission, mcp_status
-    warning).
+    agent streams in session/update notifications. Callers must pass only
+    structured identity fields (title/kind/name) — never a serialization of
+    the whole payload, whose rawInput would let an agent's local command text
+    (e.g. a Bash line mentioning a tool name) impersonate an MCP call.
+    Matching is deliberately conservative (server name or an exact tool-name
+    token) — a false negative only degrades to the safe path (human-confirmed
+    permission, mcp_status warning).
     """
     lowered = text.lower()
     if AGENT_LEGION_MCP_SERVER_NAME in lowered:

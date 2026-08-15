@@ -284,6 +284,11 @@ class StudioChatService:
     # -- callbacks from the ACP session thread -----------------------------
 
     def _on_ready(self, session_id: str, capabilities: dict[str, Any], acp_session_id: str) -> None:
+        # A close that raced the startup window already owns the final status;
+        # readiness must not resurrect a closed (or failed) session.
+        current = self._db.get_studio_chat_session(session_id) or {}
+        if current.get("status") in ("closed", "error"):
+            return
         self._db.update_studio_chat_session(
             session_id,
             status="idle",
@@ -350,8 +355,13 @@ class StudioChatService:
         finally:
             with runtime.lock:
                 runtime.pending_permissions.pop(request_id, None)
-            self._db.update_studio_chat_session(session_id, status="running")
-            self._publish_session(session_id)
+            # Only the awaiting_permission → running transition is ours: a
+            # close (or fatal error) that settled this waiter as denied must
+            # not be overwritten back to running (ghost live session).
+            current = self._db.get_studio_chat_session(session_id) or {}
+            if current.get("status") == "awaiting_permission":
+                self._db.update_studio_chat_session(session_id, status="running")
+                self._publish_session(session_id)
         decision = pending.decision
         self._append_message(
             session_id,
@@ -496,8 +506,14 @@ class StudioChatService:
             runtime.open_text = ""
 
     def _is_agent_legion_tool_call(self, payload: dict[str, Any]) -> bool:
-        text = json.dumps(payload, ensure_ascii=False)
-        return looks_like_agent_legion_tool_call(text)
+        # Match only the structured identity fields (title/kind/name). Never
+        # serialize the whole payload: rawInput carries the agent's local
+        # command text (e.g. a Bash line mentioning a platform tool name),
+        # which must not win an MCP auto-approve.
+        fields = (payload.get(key) for key in ("title", "kind", "name"))
+        return any(
+            looks_like_agent_legion_tool_call(value) for value in fields if isinstance(value, str)
+        )
 
     def _mark_mcp_verified(self, session_id: str) -> None:
         session = self._db.get_studio_chat_session(session_id) or {}
