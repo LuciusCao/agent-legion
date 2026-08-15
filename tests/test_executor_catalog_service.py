@@ -27,7 +27,9 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
                 "download_video",
                 "fetch_questions",
                 "finalize_non_uploadable",
+                "intake_knowledge_points",
                 "package_video_job",
+                "publish_content",
                 "transcribe_video",
             ],
             "capability_details": [
@@ -67,8 +69,18 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
                     "timeout_seconds": 600,
                 },
                 {
+                    "name": "intake_knowledge_points",
+                    "path": "workflow_nodes/example_intake.py",
+                    "timeout_seconds": 600,
+                },
+                {
                     "name": "package_video_job",
                     "path": "workflow_nodes/video_package.py",
+                    "timeout_seconds": 600,
+                },
+                {
+                    "name": "publish_content",
+                    "path": "workflow_nodes/example_publish.py",
                     "timeout_seconds": 600,
                 },
                 {

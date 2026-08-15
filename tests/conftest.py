@@ -23,6 +23,7 @@ import psycopg
 from psycopg import sql
 
 from server.app.agent_catalog import AgentDefinition
+from server.app.agent_catalog_builtin import seed_builtin_agent_definitions
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
@@ -108,6 +109,9 @@ def _seed_agent_definitions() -> None:
     for agent_id, definition in _TEST_AGENT_DEFINITIONS.items():
         service.save_draft(agent_id, definition, created_by="test-seed")
         service.publish(agent_id)
+    # Mirror the app startup seed (create_app): the built-in demo agents are
+    # seed-if-absent in production, so test DBs carry them too.
+    seed_builtin_agent_definitions(TEST_DATABASE_URL)
 
 
 # Test executor catalog: the built-in factory definitions (retired

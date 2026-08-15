@@ -139,7 +139,9 @@ exemptions:
   path: server/app/main.py
   reason: Phase 3 chunk 4 wires the StudioChatService (construction, app
     state, lifespan shutdown, router parameter) into the application
-    composition root, the single assembly point for app services.
+    composition root, the single assembly point for app services. The
+    built-in demo agent seed (P3c example workflow) adds one import and one
+    seed-if-absent call next to the executor/workflow/skill seeds.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
-  ceiling: 204
+  ceiling: 206

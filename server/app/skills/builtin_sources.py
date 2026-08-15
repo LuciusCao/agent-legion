@@ -20,8 +20,24 @@ from server.app.skills.config import (
 
 _REPO_PREFIX = "~/.agents/skills/agent-legion"
 
+# Demo workflow (education_video_problems_generation) skills. The repos are
+# created on the local machine by ``make import-demo`` (git init + tag
+# v1.0.0), so their commits are intentionally NOT pinned in
+# BUILTIN_SKILL_LOCK below: the first dispatch or ``make skills-lock``
+# resolves and locks them (lock entries for absent repos fail with guidance
+# pointing at ``make import-demo``).
+_DEMO_SKILL_REF = "v1.0.0"
+_DEMO_SKILL_SOURCES: dict[str, SkillSourceConfig] = {
+    f"education-video-problems-generation/{name}": SkillSourceConfig(
+        repo=f"{_REPO_PREFIX}/education-video-problems-generation/{name}",
+        ref=_DEMO_SKILL_REF,
+    )
+    for name in ("write-script", "review-script", "generate-questions", "review-questions")
+}
+
 BUILTIN_SKILL_SOURCES = SkillsConfig(
     skills={
+        **_DEMO_SKILL_SOURCES,
         "question_comprehension_info/assess_comprehension_difficulty": SkillSourceConfig(
             repo=f"{_REPO_PREFIX}/question_comprehension_info/assess_comprehension_difficulty",
             ref="v1.1.9",

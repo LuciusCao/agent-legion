@@ -12,10 +12,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from server.app.workflows.builtin_demo import DEMO_WORKFLOW_DEFINITION, DEMO_WORKFLOW_KEY
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.loader import workflow_definition_from_dict
 
 BUILTIN_WORKFLOW_DEFINITIONS: dict[str, dict[str, Any]] = {
+    DEMO_WORKFLOW_KEY: DEMO_WORKFLOW_DEFINITION,
     "question_comprehension_info": {
         "key": "question_comprehension_info",
         "label": "题目审题信息生成 DAG",

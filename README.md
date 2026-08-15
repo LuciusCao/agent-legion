@@ -131,12 +131,36 @@ Common tasks have Makefile shortcuts (`make help` lists all):
 ```bash
 make dev-backend      # backend dev server
 make dev-frontend     # frontend dev server
+make import-demo      # import the demo workflow's skills (required before running it)
 make check-quick      # quick quality gate (daily)
 make check            # full quality gate (before handoff)
 make api-generate     # regenerate frontend API types
 make skills-lock      # refresh the DB skill lock (global_settings skill_lock)
 make install-hooks    # install pre-commit / pre-push gates
 ```
+
+### Demo workflow (education_video_problems_generation)
+
+The repository ships a minimal demo workflow: ten generic K-12 math
+knowledge points under `examples/education-video-problems-generation/` are
+fanned out one job each, then each job writes a teaching-video script, reviews
+it, generates five exercises, reviews them, and finishes with a simulated
+(no-network) publish. To run it:
+
+```bash
+make import-demo      # copy examples/skills/* into the local skill source root,
+                      # git-init each and tag v1.0.0 (idempotent, never overwrites)
+make skills-lock      # resolve the demo skill refs into the DB skill lock
+```
+
+`make import-demo` is a **required step**: the demo skill sources
+(`~/.agents/skills/agent-legion/education-video-problems-generation/*`) are
+created by it, and relocking or dispatching without it fails with a
+"local skill repo not found" error that points back to the command. Then bind
+a workspace to the `education_video_problems_generation` workflow and
+configure the workspace's default agent model
+(`default_agent_provider` / `default_agent_model` in workspace Settings) —
+agent nodes still need a real LLM. See `examples/README.md` for the layout.
 
 ## Configuration
 
@@ -148,7 +172,7 @@ files:
 
 | File | Owns |
 |------|------|
-| `server/app/workflows/builtin.py` | built-in workflow DAG definitions |
+| `server/app/workflows/builtin.py` (+ `builtin_demo.py`) | built-in workflow DAG definitions |
 
 Skill sources and pinned refs are no longer tracked files: they live in the
 DB `global_settings` documents `skill_sources` / `skill_lock`, managed through

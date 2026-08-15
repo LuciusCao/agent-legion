@@ -11,9 +11,35 @@ pytestmark = pytest.mark.no_db
 
 def test_builtin_workflow_keys() -> None:
     assert sorted(BUILTIN_WORKFLOW_DEFINITIONS) == [
+        "education_video_problems_generation",
         "question_comprehension_info",
         "video_knowledge",
     ]
+
+
+def test_demo_workflow_shape() -> None:
+    """The open-source demo DAG: six nodes, linear chain, simulated publish."""
+    definition = load_builtin_workflow("education_video_problems_generation")
+    assert [node.key for node in definition.nodes.values()] == [
+        "intake_knowledge_points",
+        "write_script",
+        "review_script",
+        "generate_questions",
+        "review_questions",
+        "publish_content",
+    ]
+    assert [node.capability for node in definition.nodes.values()] == [
+        "intake_knowledge_points",
+        "write_script",
+        "review_script",
+        "generate_questions",
+        "review_questions",
+        "publish_content",
+    ]
+    assert definition.nodes["publish_content"].terminal is not None
+    assert definition.intake is not None
+    mode = definition.intake.modes["direct_ids"]
+    assert mode.input_field == "knowledge_point_ids"
 
 
 def test_load_builtin_workflow_validates_and_matches_key() -> None:
