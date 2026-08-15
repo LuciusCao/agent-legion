@@ -6,9 +6,9 @@ node is worker-eligible only when its transitive import closure stays within
 ``workspace_libs`` + stdlib — the same rule the custom-node sandbox enforces
 (see docs/architecture/node-sdk-and-worker-execution-design.md §7.2).
 
-The three video heavy nodes are explicitly exempt: they import
-``server.app.pipeline.*`` (ffmpeg subprocess, ASR providers) and stay on
-Host local execution for batch 2 (design doc §7.2).
+Every in-repo node must be self-contained; Host-only exceptions no longer
+exist now that the legacy business nodes (which imported
+``server.app.pipeline.*``) have been extracted from the repo.
 """
 
 from __future__ import annotations
@@ -22,20 +22,13 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 SELF_CONTAINED_NODES = (
-    "question_intake",
-    "question_clean_parse",
-    "comprehension_classify",
-    "comprehension_assemble",
-    "comprehension_finalize",
-    "video_package",
     # Demo workflow nodes: pure stdlib + node SDK.
     "example_intake",
     "example_publish",
 )
 
-# Exempt: depend on server.app.pipeline.* (ffmpeg subprocess / ASR providers)
-# and stay on Host local execution (design doc §7.2); not worker-eligible.
-EXEMPT_NODES = ("video_download", "video_assemble", "video_transcribe")
+# No Host-only exemptions remain: legacy business nodes were extracted.
+EXEMPT_NODES: tuple[str, ...] = ()
 
 # Repo-local roots a worker-eligible node may pull into its closure.
 _ALLOWED_REPO_ROOTS = frozenset({"workspace_libs", "workflow_nodes"})
