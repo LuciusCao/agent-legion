@@ -101,3 +101,16 @@ def require_studio_agent_scope(
     if user.get("actor_scope") != STUDIO_AGENT_SCOPE:
         raise HTTPException(status_code=403, detail="Studio agent scoped token required")
     return user
+
+
+def require_studio_agent_workspace(
+    workspace_id: str,
+    user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
+) -> dict[str, Any]:
+    """Refuse a workspace-bound run token operating on another workspace."""
+    # Schema v45 (STUDIO-AGENT-001): unbound self-service tokens keep the
+    # previous membership-only behaviour.
+    bound = user.get("scoped_workspace_id")
+    if bound and bound != workspace_id:
+        raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
+    return user

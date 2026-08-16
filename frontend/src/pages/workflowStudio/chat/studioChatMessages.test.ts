@@ -232,6 +232,14 @@ describe('buildPermissionViews', () => {
     expect(permissionResolutionText(auto)).toBe(
       '已自动允许（平台工具）：validate_workflow'
     )
+    const readOnly = message('permission', 'system', {
+      status: 'resolved',
+      decision: { option_id: 'o1', via: 'auto_read_only' },
+      tool_call: { title: 'Read' },
+    })
+    expect(permissionResolutionText(readOnly)).toBe(
+      '已自动允许（只读工具）：Read'
+    )
   })
 })
 

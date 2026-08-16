@@ -335,6 +335,7 @@ function decisionText(resolved: Record<string, unknown>): string {
   if (decision.deny === true) return '已拒绝'
   const via = asText(decision.via)
   if (via === 'auto_approved') return '已自动允许（平台工具）'
+  if (via === 'auto_read_only') return '已自动允许（只读工具）'
   if (via === 'allow_all') return '已自动允许（本次全部允许）'
   return '已允许'
 }

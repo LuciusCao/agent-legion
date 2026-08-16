@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SessionStatus = Literal["starting", "idle", "running", "awaiting_permission", "closed", "error"]
-MessageKind = Literal["text", "tool_call", "plan", "permission", "status"]
+MessageKind = Literal["text", "tool_call", "plan", "permission", "status", "thought"]
 MessageRole = Literal["user", "agent", "system"]
 McpStatus = Literal["unknown", "verified", "unverified"]
 
@@ -44,6 +44,7 @@ class StudioChatSessionRecord(BaseModel):
     capability_snapshot: dict[str, Any]
     allow_all_permissions: bool
     mcp_status: McpStatus
+    selected_node_key: str | None
     error_detail: str
     created_at: datetime
     updated_at: datetime
@@ -86,6 +87,14 @@ class StudioChatAllowAllRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
+
+
+class StudioChatContextUpdateRequest(BaseModel):
+    """Human-side context push: the Studio node currently selected (or null)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_node_key: str | None = None
 
 
 class StudioChatPermissionAnswerRequest(BaseModel):

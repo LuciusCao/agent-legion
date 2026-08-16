@@ -280,11 +280,15 @@ class AcpSessionHandle:
         asyncio.get_running_loop().create_task(drain())
 
 
-def build_mcp_server_spec(*, token: str, api_base: str, python_executable: str) -> McpServerStdio:
+def build_mcp_server_spec(
+    *, token: str, api_base: str, python_executable: str, session_id: str
+) -> McpServerStdio:
     """The session-scoped agent-legion MCP entry injected into session/new.
 
     The raw scoped token crosses only as an MCP env entry inside the ACP
     session/new request — never persisted, never logged (STUDIO-AGENT-001).
+    The chat session id rides along (AGENT_LEGION_MCP_SESSION_ID) so the
+    get_studio_context tool can resolve this session's live context.
     """
     return McpServerStdio(
         name="agent-legion-studio",
@@ -293,5 +297,6 @@ def build_mcp_server_spec(*, token: str, api_base: str, python_executable: str) 
         env=[
             EnvVariable(name="AGENT_LEGION_STUDIO_AGENT_TOKEN", value=token),
             EnvVariable(name="AGENT_LEGION_MCP_API_BASE", value=api_base),
+            EnvVariable(name="AGENT_LEGION_MCP_SESSION_ID", value=session_id),
         ],
     )

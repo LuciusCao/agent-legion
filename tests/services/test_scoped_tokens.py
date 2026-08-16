@@ -23,7 +23,23 @@ def test_mint_and_authenticate_roundtrip(job_db) -> None:
     assert user is not None
     assert user["id"] == user_id
     assert user["actor_scope"] == scoped_tokens.STUDIO_AGENT_SCOPE
+    assert user["scoped_workspace_id"] is None
     assert "password_hash" not in user
+
+
+def test_workspace_bound_token_roundtrip(job_db) -> None:
+    """Schema v45: a run token minted with workspace_id resolves with the
+    binding attached; the tool surface enforces it (STUDIO-AGENT-001)."""
+    user_id = _create_user(job_db)
+    workspace_id = str(
+        job_db.create_workspace(default_workflow_key="demo_workflow", name="Scoped WS")["id"]
+    )
+    token = scoped_tokens.mint_scoped_token(job_db, user_id, workspace_id=workspace_id)
+
+    user = scoped_tokens.authenticate_scoped_token(job_db, token)
+
+    assert user is not None
+    assert user["scoped_workspace_id"] == workspace_id
 
 
 def test_only_token_hash_is_persisted(job_db) -> None:

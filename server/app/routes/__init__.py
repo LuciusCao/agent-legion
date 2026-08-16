@@ -38,6 +38,7 @@ from .quality import create_quality_router
 from .quality_replays import create_quality_replays_router
 from .skill_sources import create_skill_sources_router
 from .skills import create_skills_router
+from .studio_agent_context import create_studio_agent_context_router
 from .studio_agent_tokens import create_studio_agent_tokens_router
 from .studio_agent_tools import create_studio_agent_tools_router
 from .studio_agents_admin import create_studio_agents_admin_router
@@ -132,6 +133,7 @@ def create_router(
     secured(executors_router)
     secured(create_workspace_agent_routes_router(job_db, settings))
     secured(create_studio_agent_tools_router(job_db, settings))
+    secured(create_studio_agent_context_router(job_db))
     secured(create_studio_agent_tokens_router(job_db))
     if studio_chat_service is not None:
         router.include_router(create_studio_agents_admin_router(job_db))
