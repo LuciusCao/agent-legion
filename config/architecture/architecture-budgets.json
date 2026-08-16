@@ -1139,9 +1139,13 @@
     "worker/upload_scheduler.py": 81,
     "worker/worker_declarations.py": 51,
     "workspace_libs/__init__.py": 10,
+    "workspace_libs/_service_config.py": 51,
     "workspace_libs/cancellation.py": 39,
     "workspace_libs/code_child.py": 72,
     "workspace_libs/code_loader.py": 46,
+    "workspace_libs/http_client.py": 186,
+    "workspace_libs/media.py": 95,
+    "workspace_libs/node_artifacts.py": 54,
     "workspace_libs/node_sdk.py": 176
   }
 }
