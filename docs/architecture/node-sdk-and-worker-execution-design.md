@@ -1,7 +1,12 @@
 # 节点 SDK 与 code 节点执行迁移 Worker（合并设计）
 
 状态：批次 0/1 已实现；批次 2 已实施（§7，协议 v2 + schema v39，2026-08 落地）；
-批次 3 已取消（§9）
+批次 3 已取消（§9）。**2026-08-17 更新（#82/#96）**：§4.2 API 表面已扩展
+（entrypoint / batch_payload / root_dir + http_client / media 姊妹模块）；
+path 绑定机制（EXEC-CODE-001 legacy）已退役——本文 §2「内置节点」列、
+§5 的双路径对比、§7.2 的「内置读 repo 文件」均为历史记录，现行语义：
+所有节点代码以 DB 发布文本（workspace 版本或 demo 的 global 出厂种子）
+在 velites 沙箱执行（Host 与 Worker 一致），runtime 键集合见 §3。
 日期：2026-08-12
 关联：Issue #30（code 节点 Host→Worker）、Issue #82（节点 SDK）、
 EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、
@@ -51,12 +56,13 @@ node_code（`services/node_codes.py`）→ `CodeExecutor.execute`
 
 ## 3. 目标契约：节点只依赖「预取输入 + job_dir + config」
 
-批次 1 完成后，内置与自定义路径的 runtime 键集合完全一致：
+批次 1 完成后，两条路径的 runtime 键集合完全一致（#96 后内置路径整体消失）：
 
 ```
 job_dir, log_path, inputs, expected_outputs, capability, node_key,
 workflow_key, execution_id, workspace_id, workspace, job,
 settings_config, node_config, cancellation,
+root_dir          # Host 根目录（节点解析机器相对资源路径用；Worker 不下发）
 job_batch        # 父进程预取（有 batch_id 且父进程有 DB 时）
 skill_versions   # 父进程预取（node_key -> skill_version）
 ```
@@ -78,14 +84,15 @@ auth 失败上报（§5.3）。
 - executor 入口签名不变：`run(job, job_dir, runtime)`。SDK 是节点内部的
   适配层，不是新的执行协议；存量已冻结的自定义节点版本零影响。
 
-### 4.2 API 表面（v1）
+### 4.2 API 表面（v1；2026-08-17 随 #82/#96 扩展）
 
 ```python
-from workspace_libs.node_sdk import NodeContext
+from workspace_libs.node_sdk import NodeContext, entrypoint
 
-def run(job, job_dir, runtime):
-    ctx = NodeContext(job, job_dir, runtime)
-
+@entrypoint                      # 推荐入口：def run(ctx) 业务函数，
+                                 # 装饰器适配 executor 的 run(job, job_dir, runtime) 契约；
+                                 # 经典签名继续受支持（存量冻结版本零影响）
+def run(ctx: NodeContext) -> None:
     ctx.job                      # job dict（只读约定）
     ctx.config                   # node_config（dispatch 已合并 defaults/workspace/vault/连接注入）
     ctx.service_config(section=None, legacy_keys=())
@@ -98,10 +105,25 @@ def run(job, job_dir, runtime):
     ctx.checkpoint()             # 取消检查；write_json/write_text 写前自动 checkpoint
     ctx.logger                   # 按 node_key 命名的 logger
     ctx.batch                    # 预取的 batch 行（取代 job_db.get_batch）
+    ctx.batch_payload            # batch 行 source_payload_json 的解析结果（dict）
+    ctx.root_dir                 # Host 根目录（runtime root_dir；无则 None）
     ctx.skill_versions           # 预取的 node_key -> skill_version
     ctx.workflow_manifest(default_key="")  # 原 workflow_manifest(job, ...) 的内容
     ctx.report_auth_failure()    # 见 §5.3
 ```
+
+框架层姊妹模块（同属 workspace_libs、同一闭包白名单）：
+
+- `workspace_libs/http_client.py`（stdlib + requests）：联网节点的通用机制——
+  `HttpServiceError(auth_failure=...)` 基类（节点子类化以保持业务错误类名与
+  失败分类语义）、`bearer_headers` / `config_token` / `require_configured_url` /
+  `fetch_json`（GET JSON，401/403 → auth_failure）/ `check_in_band_error`
+  （in-band 错误码，auth code 集合由节点传入）/ `validate_download_url`
+  （SSRF 守卫）/ `download_file`（content-type 白名单 + 流式落盘 + 半成品清理）。
+  全部按 `service` 标签与 `error_type` 参数化——框架不含任何业务语义；
+  服务特定的 URL 拼规则与 payload 解析留在节点里。
+- `workspace_libs/media.py`（纯 stdlib）：`parse_srt`（vendored srt 语义）、
+  `get_video_duration`（ffprobe）。字幕质量校验阈值等业务策略留在节点里。
 
 取消语义：显式 `ctx.checkpoint()` 保留给长循环；框架在 artifact 写边界自动
 checkpoint（写是最常见的「阶段提交点」，9 个节点全有写、只有 3 个有手工检查）。
