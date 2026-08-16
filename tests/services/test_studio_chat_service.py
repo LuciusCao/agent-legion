@@ -459,6 +459,26 @@ def test_create_session_failure_cleans_up_row_token_and_runtime(chat, job_db, mo
     assert service._runtime(sessions[0]["id"]) is None
 
 
+def test_create_session_mint_failure_still_clears_starting_row(chat, monkeypatch) -> None:
+    """A failure inside token minting (before the handle exists) must also
+    funnel through the cleanup path: no 'starting' residue, no revoke of a
+    token that never materialized (#91 review follow-up)."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+
+    def exploding_mint(*args, **kwargs):
+        raise RuntimeError("mint blew up")
+
+    monkeypatch.setattr(service_module, "mint_scoped_token", exploding_mint)
+
+    with pytest.raises(RuntimeError, match="mint blew up"):
+        service.create_session(workspace_id, user_id, "fake-agent")
+
+    sessions = service.list_sessions(workspace_id)
+    assert sessions and sessions[0]["status"] == "error"
+    assert service._runtime(sessions[0]["id"]) is None
+
+
 def test_busy_claim_rejects_second_sender_without_duplicate_user_message(chat) -> None:
     """The idle -> running claim is atomic: a concurrent second sender gets a
     conflict and must not append a duplicate user message (#91)."""

@@ -119,9 +119,10 @@ class StudioChatService:
                 f" (command not found: {command})"
             )
         session_id = self._db.create_studio_chat_session(workspace_id, user_id, agent_id)
-        token = mint_scoped_token(self._db, user_id, origin="run")
+        token: str | None = None
         runtime: SessionRuntime | None = None
         try:
+            token = mint_scoped_token(self._db, user_id, origin="run")
             handle = AcpSessionHandle(
                 command=command,
                 args=[str(arg) for arg in agent.get("args", [])],
@@ -152,12 +153,14 @@ class StudioChatService:
                 session_id, status="error", error_detail=detail[:500]
             )
             if runtime is None:
-                # The handle never materialized: nothing to tear down, but the
-                # minted token must not leak.
-                try:
-                    revoke_scoped_token(self._db, token)
-                except Exception:
-                    logger.warning("failed to revoke studio chat token for %s", session_id)
+                # The handle never materialized: nothing to tear down, but a
+                # minted token must not leak (token is None when the mint
+                # itself failed).
+                if token is not None:
+                    try:
+                        revoke_scoped_token(self._db, token)
+                    except Exception:
+                        logger.warning("failed to revoke studio chat token for %s", session_id)
             else:
                 self._teardown_runtime(session_id, runtime)
             raise
