@@ -643,7 +643,7 @@ invariants:
         gate: full
 
   - id: SECURITY-EXTERNAL-CONNECTION-001
-    statement: "External service credentials are instance-level and admin-managed: connections live in external_connections with non-sensitive config only (secret fields are diverted into the instance vault as `conn:<key>:<field>` refs), acquired tokens are cached Fernet-encrypted in connection_tokens with single-flight refresh under the parent row lock, auth-protocol semantics live in workspace packs (workspace_libs) behind the platform adapter registry (server/app carries no vendor knowledge), and connection config + tokens are injected into node runtimes in memory only at dispatch — never persisted, never in agent manifests."
+    statement: "External service credentials are instance-level and admin-managed: connections live in external_connections with non-sensitive config only (secret fields are diverted into the instance vault as `conn:<key>:<field>` refs), acquired tokens are cached Fernet-encrypted in connection_tokens with single-flight refresh under the parent row lock, the platform adapter registry ships only vendor-neutral built-ins (static_bearer, hmac_token — generic HMAC-signed token exchange, issue #97) while vendor-specific auth semantics live in workspace packs (workspace_libs), and connection config + tokens are injected into node runtimes in memory only at dispatch — never persisted, never in agent manifests."
     owner: security
     risk: high
     evidence:
@@ -652,6 +652,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_connection_tokens.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_connection_adapter_hmac.py
         gate: quick
       - kind: integration
         target: tests/routes/test_connections_api.py
