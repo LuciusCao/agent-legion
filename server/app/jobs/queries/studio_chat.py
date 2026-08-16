@@ -80,6 +80,20 @@ class StudioChatQueriesMixin(JobQueriesBase):
                 (*updates.values(), session_id),
             )
 
+    def claim_studio_chat_turn(self, session_id: str) -> bool:
+        """Atomically move a session idle -> running; False when not idle.
+
+        The check-and-set happens in one UPDATE so two concurrent senders
+        cannot both observe "idle" and start duplicate turns.
+        """
+        with self.connect() as conn:
+            row = conn.execute(
+                "update studio_chat_sessions set status='running',"
+                " updated_at=current_timestamp where id=%s and status='idle' returning id",
+                (session_id,),
+            ).fetchone()
+        return row is not None
+
     def append_studio_chat_message(
         self, session_id: str, kind: str, role: str, content: dict[str, Any]
     ) -> dict[str, Any]:
