@@ -60,10 +60,8 @@ run_tests() {
   #
   # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
   # regression still fails after the single retry (visible as RERUN in output).
-  default_workers="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
-  if [[ "$default_workers" -gt 4 ]]; then
-    default_workers=4
-  fi
+  source "$ROOT_DIR/scripts/gate-jobs.sh"
+  default_workers="$(detect_gate_default_jobs)"
   workers="${AGENT_LEGION_TEST_WORKERS:-$default_workers}"
   telemetry_args=()
   if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
