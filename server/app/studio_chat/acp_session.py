@@ -43,6 +43,8 @@ from acp.schema import (
     DeniedOutcome as AcpDeniedOutcome,
 )
 
+from server.app.studio_chat.capabilities import capability_snapshot
+
 logger = logging.getLogger(__name__)
 
 _CLOSE = object()
@@ -235,7 +237,7 @@ class AcpSessionHandle:
                         name="agent-legion-studio", title="Agent Legion", version="1"
                     ),
                 )
-                capabilities = _capability_snapshot(initialize)
+                capabilities = capability_snapshot(initialize)
                 session = await conn.new_session(cwd=self.cwd, mcp_servers=[self.mcp_server])
                 with self._state_lock:
                     self._acp_session_id = session.session_id
@@ -276,42 +278,6 @@ class AcpSessionHandle:
                 logger.debug("studio chat agent stderr: %s", line.decode(errors="replace").rstrip())
 
         asyncio.get_running_loop().create_task(drain())
-
-
-def _capability_snapshot(initialize: Any) -> dict[str, Any]:
-    """Freeze the negotiated agent capabilities (decision: snapshot at
-    initialize; later logic trims behavior by this table). Built field by
-    field — a wholesale model_dump of AgentCapabilities trips pydantic
-    serializer warnings on the auth sub-model."""
-    capabilities = initialize.agent_capabilities
-    snapshot: dict[str, Any] = {}
-    if capabilities is not None:
-        snapshot = {
-            "loadSession": bool(capabilities.load_session),
-            "mcpCapabilities": (
-                capabilities.mcp_capabilities.model_dump(exclude_none=True)
-                if capabilities.mcp_capabilities
-                else {}
-            ),
-            "promptCapabilities": (
-                capabilities.prompt_capabilities.model_dump(exclude_none=True)
-                if capabilities.prompt_capabilities
-                else {}
-            ),
-            "sessionCapabilities": (
-                capabilities.session_capabilities.model_dump(exclude_none=True)
-                if capabilities.session_capabilities
-                else {}
-            ),
-        }
-    agent_info = initialize.agent_info
-    if agent_info is not None:
-        snapshot["agentInfo"] = {
-            "name": agent_info.name,
-            "title": agent_info.title,
-            "version": agent_info.version,
-        }
-    return snapshot
 
 
 def build_mcp_server_spec(*, token: str, api_base: str, python_executable: str) -> McpServerStdio:
