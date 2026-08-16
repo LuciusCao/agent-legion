@@ -98,7 +98,8 @@
   `run(job, job_dir, runtime)` 签名继续受支持）；节点内部的通用脚手架统一走节点 SDK
   `workspace_libs/node_sdk.py` 的 `NodeContext`（artifact 读写、service_config 合并、
   checkpoint、batch_payload、auth 上报）与姊妹模块 `workspace_libs/http_client.py`
-  （联网机制）/ `workspace_libs/media.py`（SRT/ffprobe）——框架层不收业务语义（服务特定的
+  （联网机制）/ `workspace_libs/download.py`（SSRF 守卫 + 流式下载）/
+  `workspace_libs/media.py`（SRT/ffprobe）——框架层不收业务语义（服务特定的
   URL 规则、payload 解析、质量阈值留在节点里）。不要在新节点里手写
   JSON 读写/配置合并/取消检查；节点运行时不含 DB 句柄或 DSN——batch、skill_versions 等
   DB 派生输入由父进程预取进 runtime，特权动作（连接 token 失效）由节点写 marker、

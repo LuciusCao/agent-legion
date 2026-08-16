@@ -1142,7 +1142,8 @@
     "workspace_libs/cancellation.py": 39,
     "workspace_libs/code_child.py": 72,
     "workspace_libs/code_loader.py": 30,
-    "workspace_libs/http_client.py": 186,
+    "workspace_libs/download.py": 88,
+    "workspace_libs/http_client.py": 141,
     "workspace_libs/media.py": 91,
     "workspace_libs/node_artifacts.py": 54,
     "workspace_libs/node_sdk.py": 176
