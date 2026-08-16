@@ -15,7 +15,10 @@ from pydantic import ValidationError
 
 import server.app.routes.workflow_contracts as workflow_contracts
 from server.app.agent_catalog import AgentDefinition
-from server.app.auth.dependencies import require_studio_agent_scope
+from server.app.auth.dependencies import (
+    require_studio_agent_scope,
+    require_studio_agent_workspace,
+)
 from server.app.jobs import JobQueries
 from server.app.routes.agent_definition_contracts import (
     AgentDefinitionPayload,
@@ -67,11 +70,14 @@ def _agent_version_response(entity: VersionedEntity) -> AgentVersionResponse:
 
 def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     router = APIRouter(dependencies=[Depends(require_studio_agent_scope)])
+    # Workspace-path endpoints additionally enforce the run token's workspace
+    # binding (schema v45, STUDIO-AGENT-001); global endpoints stay on `router`.
+    workspace_scoped = APIRouter(dependencies=[Depends(require_studio_agent_workspace)])
 
     def _service() -> StudioAgentToolsService:
         return StudioAgentToolsService(job_db, settings)
 
-    @router.post(
+    @workspace_scoped.post(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/validate",
         response_model=WorkflowDraftValidationResponse,
     )
@@ -82,7 +88,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         errors = _service().validate_workflow(workspace_id, payload.definition_yaml)
         return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
 
-    @router.post(
+    @workspace_scoped.post(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/compare",
         response_model=WorkflowDraftCompareResponse,
     )
@@ -96,7 +102,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             raise_job_http_error(exc)
         return WorkflowDraftCompareResponse.model_validate(result)
 
-    @router.put(
+    @workspace_scoped.put(
         "/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}"
         "/nodes/{node_key}/code/draft",
         response_model=WorkflowNodeCodeVersionResponse,
@@ -169,7 +175,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         notify_schedulable_work()
         return workflow_contracts.WorkflowRegisteredResponse.model_validate(entry)
 
-    @router.get(
+    @workspace_scoped.get(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
         response_model=ActiveWorkflowRevisionResponse,
     )
@@ -200,7 +206,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             ]
         )
 
-    @router.get(
+    @workspace_scoped.get(
         "/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}"
         "/nodes/{node_key}/code",
         response_model=WorkflowNodeCodeResponse,
@@ -215,4 +221,5 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             raise_job_http_error(exc)
         return WorkflowNodeCodeResponse(**state)
 
+    router.include_router(workspace_scoped)
     return router

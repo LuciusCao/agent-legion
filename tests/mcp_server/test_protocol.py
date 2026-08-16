@@ -2,7 +2,7 @@
 
 Spawns ``python -m server.app.mcp_server`` over stdio like a real MCP host
 would, pointed at a local stub HTTP backend (no platform database involved):
-handshake, tools/list discovers the 8 tools, and a tools/call round-trip
+handshake, tools/list discovers the 9 tools, and a tools/call round-trip
 proves the scoped token reaches the backend and the response comes back as
 text.
 """
@@ -44,6 +44,9 @@ class _StubHandler(BaseHTTPRequestHandler):
         if self.path == "/api/studio-agent/tools/workflows":
             self._reply(200, {"workflows": [{"key": "demo_workflow"}]})
             return
+        if self.path == "/api/studio-agent/tools/chat-sessions/sess-1/context":
+            self._reply(200, {"workspace_id": "ws-1", "selected_node_key": "node-a"})
+            return
         if self.path.endswith("/workflow/validate"):
             self._reply(200, {"valid": True, "errors": []})
             return
@@ -75,6 +78,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
             env={
                 "AGENT_LEGION_MCP_API_BASE": stub_backend,
                 "AGENT_LEGION_STUDIO_AGENT_TOKEN": _TOKEN,
+                "AGENT_LEGION_MCP_SESSION_ID": "sess-1",
             },
             cwd=REPO_ROOT,
         )
@@ -90,6 +94,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 "compare_workflow",
                 "get_active_workflow",
                 "get_node_code",
+                "get_studio_context",
                 "list_workflows",
                 "register_workflow",
                 "save_agent_definition_draft",
@@ -115,5 +120,10 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
             # Unknown stub path → non-2xx surfaces as text, session alive.
             missing = await call_text("get_active_workflow", {"workspace_id": "ws-x"})
             assert missing.startswith("HTTP 404: ")
+
+            # The session-bound context tool resolves its session from env.
+            context = json.loads(await call_text("get_studio_context", {}))
+            assert context["workspace_id"] == "ws-1"
+            assert context["selected_node_key"] == "node-a"
 
     asyncio.run(asyncio.wait_for(run(), timeout=60))

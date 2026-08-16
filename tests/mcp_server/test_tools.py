@@ -16,6 +16,7 @@ import requests
 from server.app.mcp_server.config import (
     API_BASE_ENV,
     DEFAULT_API_BASE,
+    SESSION_ID_ENV,
     TOKEN_ENV,
     McpConfigError,
     McpServerConfig,
@@ -149,6 +150,32 @@ def test_register_workflow_posts_catalog_entry(recorded) -> None:
     assert calls[0]["json"] == {"key": "wf-new", "label": "New", "description": ""}
 
 
+def test_get_studio_context_uses_the_bound_session(monkeypatch) -> None:
+    calls: list[dict] = []
+
+    def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
+        calls.append({"method": method, "url": url})
+        return _FakeResponse(200, {"workspace_id": "ws-1"})
+
+    monkeypatch.setattr("server.app.mcp_server.server.requests.request", fake_request)
+    config = McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
+    server = create_mcp_server(config)
+    assert json.loads(_run_tool(server, "get_studio_context", {})) == {"workspace_id": "ws-1"}
+    assert calls == [
+        {
+            "method": "GET",
+            "url": "http://backend.test:9000/api/studio-agent/tools/chat-sessions/sess-1/context",
+        }
+    ]
+
+
+def test_get_studio_context_without_session_binding() -> None:
+    # Self-service (external agent) setups carry no chat session binding.
+    server = create_mcp_server(_CONFIG)
+    text = _run_tool(server, "get_studio_context", {})
+    assert "no chat session bound" in text
+
+
 def test_non_2xx_returns_http_text(monkeypatch) -> None:
     def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
         return _FakeResponse(403, text='{"detail":"Studio agent scoped token required"}')
@@ -180,8 +207,12 @@ def test_config_defaults_and_overrides() -> None:
     default = McpServerConfig.from_env({TOKEN_ENV: "  tok  "})
     assert default.api_base == DEFAULT_API_BASE
     assert default.token == "tok"
-    custom = McpServerConfig.from_env({TOKEN_ENV: "tok", API_BASE_ENV: "http://example.test:8000/"})
+    assert default.session_id is None
+    custom = McpServerConfig.from_env(
+        {TOKEN_ENV: "tok", API_BASE_ENV: "http://example.test:8000/", SESSION_ID_ENV: " sess-9 "}
+    )
     assert custom.api_base == "http://example.test:8000"
+    assert custom.session_id == "sess-9"
 
 
 def test_main_fails_fast_without_token(monkeypatch, capsys) -> None:

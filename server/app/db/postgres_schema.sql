@@ -593,6 +593,10 @@ create table if not exists auth_scoped_tokens (
   -- 'run' = minted per studio chat run (short TTL); 'user' = self-service
   -- token minted via /api/studio-agent-tokens for external agents (v42).
   origin text not null default 'run',
+  -- Workspace binding for run tokens (schema v45): the studio-agent tool
+  -- surface refuses workspace-path endpoints for any other workspace.
+  -- NULL for self-service tokens, which keep the unbound behaviour.
+  workspace_id text,
   expires_at timestamptz not null,
   revoked_at timestamptz,
   created_at timestamptz not null default current_timestamp
@@ -605,6 +609,8 @@ alter table auth_scoped_tokens add column if not exists id text;
 update auth_scoped_tokens set id = gen_random_uuid()::text where id is null;
 alter table auth_scoped_tokens alter column id set not null;
 alter table auth_scoped_tokens alter column id set default gen_random_uuid()::text;
+-- Upgrade path for pre-v45 databases (workspace binding).
+alter table auth_scoped_tokens add column if not exists workspace_id text;
 create unique index if not exists idx_auth_scoped_tokens_id on auth_scoped_tokens(id);
 create index if not exists idx_auth_scoped_tokens_user_id on auth_scoped_tokens(user_id);
 create index if not exists idx_auth_scoped_tokens_expires_at on auth_scoped_tokens(expires_at);
@@ -797,7 +803,8 @@ create table if not exists connection_tokens (
   refreshed_at timestamptz not null default current_timestamp
 );
 
--- Studio chat (schema v43, phase 3 chunk 4): ACP conversation backend. One row
+-- Studio chat (schema v43, phase 3 chunk 4; v45 adds selected_node_key and
+-- the auth_scoped_tokens workspace binding): ACP conversation backend. One row
 -- per Studio conversation session (an in-process handle onto an ACP agent
 -- subprocess) plus the persisted message timeline. capability_snapshot_json
 -- freezes the capabilities negotiated at ACP initialize; mcp_status is the
@@ -819,6 +826,9 @@ create table if not exists studio_chat_sessions (
   allow_all_permissions boolean not null default false,
   mcp_status text not null default 'unknown'
     check(mcp_status in ('unknown', 'verified', 'unverified')),
+  -- The node the human currently has selected in Studio (v45); pushed by the
+  -- frontend, read live by the get_studio_context MCP tool.
+  selected_node_key text,
   error_detail text not null default '',
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp,
@@ -826,6 +836,8 @@ create table if not exists studio_chat_sessions (
 );
 create index if not exists idx_studio_chat_sessions_workspace
   on studio_chat_sessions(workspace_id, created_at desc);
+-- Upgrade path for pre-v45 databases.
+alter table studio_chat_sessions add column if not exists selected_node_key text;
 
 create table if not exists studio_chat_messages (
   id text primary key,

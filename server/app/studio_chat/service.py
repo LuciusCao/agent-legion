@@ -48,6 +48,7 @@ from server.app.studio_chat.runtime import (
     SessionRuntime,
     teardown_runtime,
 )
+from server.app.studio_chat.streaming import stream_message_payload
 
 logger = logging.getLogger(__name__)
 
@@ -122,7 +123,9 @@ class StudioChatService:
         token: str | None = None
         runtime: SessionRuntime | None = None
         try:
-            token = mint_scoped_token(self._db, user_id, origin="run")
+            # The run token is bound to this session's workspace (schema v45):
+            # the tool surface then refuses other workspaces for it.
+            token = mint_scoped_token(self._db, user_id, origin="run", workspace_id=workspace_id)
             handle = AcpSessionHandle(
                 command=command,
                 args=[str(arg) for arg in agent.get("args", [])],
@@ -131,6 +134,7 @@ class StudioChatService:
                     token=token,
                     api_base=str(self._registry.get()["api_base"]),
                     python_executable=sys.executable,
+                    session_id=session_id,
                 ),
                 env=None,
                 callbacks=ServiceCallbacks(self, session_id),
@@ -257,6 +261,17 @@ class StudioChatService:
         self._publish_session(session_id)
         return self.get_session(session_id)
 
+    def set_selected_node(
+        self, session_id: str, workspace_id: str, node_key: str | None
+    ) -> dict[str, Any]:
+        """Record the human's live Studio node selection on the session row;
+        the session's agent reads it back via the get_studio_context tool."""
+        self.get_session(session_id, workspace_id)
+        # No SSE publish: the selection only feeds get_studio_context (live DB
+        # read); the pushing client already knows the value.
+        self._db.update_studio_chat_session(session_id, selected_node_key=node_key)
+        return self.get_session(session_id)
+
     def respond_permission(
         self,
         session_id: str,
@@ -295,7 +310,7 @@ class StudioChatService:
         if kind == "agent_message_chunk":
             text = str((update.get("content") or {}).get("text") or "")
             if runtime is not None:
-                self._append_agent_chunk(session_id, runtime, text)
+                self._append_stream_chunk(session_id, runtime, "text", text)
             return
         if kind in ("tool_call", "tool_call_update"):
             if self._is_agent_legion_tool_call(update) and runtime is not None:
@@ -393,7 +408,7 @@ class StudioChatService:
         return outcome
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
-        self._close_open_text_message(session_id)
+        self._close_open_stream_messages(session_id)
         session = self._db.get_studio_chat_session(session_id) or {}
         runtime = self._runtime(session_id)
         mcp_observed = runtime.mcp_observed if runtime is not None else False
@@ -420,7 +435,7 @@ class StudioChatService:
         self._publish_session(session_id)
 
     def _on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
-        self._close_open_text_message(session_id)
+        self._close_open_stream_messages(session_id)
         self._append_message(session_id, "status", "system", {"event": "error", "detail": detail})
         current = self._db.get_studio_chat_session(session_id) or {}
         if current.get("status") == "closed":
@@ -467,41 +482,33 @@ class StudioChatService:
         with self._runtimes_lock:
             return self._runtimes.get(session_id)
 
-    def _append_agent_chunk(self, session_id: str, runtime: SessionRuntime, text: str) -> None:
-        """Fold a streamed text chunk into the turn's single agent message."""
+    def _append_stream_chunk(
+        self, session_id: str, runtime: SessionRuntime, kind: str, text: str
+    ) -> None:
+        """Fold a streamed chunk into the turn's single message of its kind."""
         if not text:
             return
         with runtime.lock:
-            open_id = runtime.open_text_message_id
-            runtime.open_text += text
-            full_text = runtime.open_text
+            open_id, full_text = runtime.stream.append(kind, text)
         if open_id is None:
-            message = self._append_message(session_id, "text", "agent", {"text": full_text})
+            message = self._append_message(session_id, kind, "agent", {"text": full_text})
             with runtime.lock:
-                runtime.open_text_message_id = message["id"]
+                runtime.stream.attach(kind, message["id"])
             return
         self._db.update_studio_chat_message_content(open_id, {"text": full_text})
         self._publish(
             session_id,
             {
                 "type": "message",
-                "message": {
-                    "id": open_id,
-                    "session_id": session_id,
-                    "kind": "text",
-                    "role": "agent",
-                    "content": {"text": full_text},
-                },
+                "message": stream_message_payload(session_id, open_id, kind, full_text),
             },
         )
 
-    def _close_open_text_message(self, session_id: str) -> None:
+    def _close_open_stream_messages(self, session_id: str) -> None:
         runtime = self._runtime(session_id)
-        if runtime is None:
-            return
-        with runtime.lock:
-            runtime.open_text_message_id = None
-            runtime.open_text = ""
+        if runtime is not None:
+            with runtime.lock:
+                runtime.stream.close()
 
     def _is_agent_legion_tool_call(self, payload: dict[str, Any]) -> bool:
         # Match only the structured identity fields (title/kind/name). Never

@@ -1,6 +1,6 @@
 """Environment configuration for the studio-agent MCP server.
 
-Two variables, following the project's ``AGENT_LEGION_*`` naming:
+Three variables, following the project's ``AGENT_LEGION_*`` naming:
 
 - ``AGENT_LEGION_MCP_API_BASE`` — base URL of the Agent Legion backend
   (default ``http://127.0.0.1:8000``).
@@ -8,6 +8,10 @@ Two variables, following the project's ``AGENT_LEGION_*`` naming:
   ``POST /api/studio-agent-tokens``. Required; the server fails fast at
   startup when it is missing so a misconfigured MCP entry surfaces
   immediately instead of on first tool call.
+- ``AGENT_LEGION_MCP_SESSION_ID`` — optional Studio chat session id, injected
+  by the backend when the MCP server is spawned for a chat session. It backs
+  the ``get_studio_context`` tool; external (self-service) setups leave it
+  unset and the tool reports the missing binding instead of failing.
 """
 
 from __future__ import annotations
@@ -18,6 +22,7 @@ from dataclasses import dataclass
 
 API_BASE_ENV = "AGENT_LEGION_MCP_API_BASE"
 TOKEN_ENV = "AGENT_LEGION_STUDIO_AGENT_TOKEN"
+SESSION_ID_ENV = "AGENT_LEGION_MCP_SESSION_ID"
 DEFAULT_API_BASE = "http://127.0.0.1:8000"
 
 
@@ -29,6 +34,7 @@ class McpConfigError(RuntimeError):
 class McpServerConfig:
     api_base: str
     token: str
+    session_id: str | None = None
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str] | None = None) -> McpServerConfig:
@@ -39,4 +45,5 @@ class McpServerConfig:
                 f"{TOKEN_ENV} is not set; mint one with POST /api/studio-agent-tokens"
             )
         api_base = env.get(API_BASE_ENV, "").strip() or DEFAULT_API_BASE
-        return cls(api_base=api_base.rstrip("/"), token=token)
+        session_id = env.get(SESSION_ID_ENV, "").strip() or None
+        return cls(api_base=api_base.rstrip("/"), token=token, session_id=session_id)

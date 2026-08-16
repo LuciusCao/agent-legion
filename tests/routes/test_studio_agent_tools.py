@@ -56,6 +56,7 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
         ("GET", f"{base}/workflow/active", None),
         ("GET", "/api/studio-agent/tools/workflows", None),
         ("GET", f"{base}/workflows/wf/nodes/node/code", None),
+        ("GET", "/api/studio-agent/tools/chat-sessions/session-x/context", None),
     ]
 
 
@@ -87,6 +88,25 @@ def test_scoped_token_passes_scope_guard_on_all_tool_endpoints(client, job_db) -
         assert response.status_code not in (401, 403) and response.status_code < 500, (
             f"{method} {url} -> {response.status_code}: {response.text}"
         )
+
+
+def test_workspace_bound_token_is_refused_on_other_workspaces(client, job_db) -> None:
+    """Schema v45: a run token bound to workspace A gets 403 on workspace B's
+    tool endpoints; unbound (self-service) tokens keep the old behaviour."""
+    workspace_id = _create_workspace(client)
+    other_id = _create_workspace(client, "Other WS")
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    bound = client.__class__(client.app)
+    bound.headers["authorization"] = (
+        f"Bearer {scoped_tokens.mint_scoped_token(job_db, admin_id, workspace_id=workspace_id)}"
+    )
+    assert (
+        bound.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active").status_code
+        == 200
+    )
+    response = bound.get(f"/api/studio-agent/tools/workspaces/{other_id}/workflow/active")
+    assert response.status_code == 403
+    assert "bound" in response.json()["detail"]
 
 
 def test_get_active_revision_returns_definition_and_yaml(client, job_db) -> None:

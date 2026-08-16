@@ -1,9 +1,9 @@
 """MCP 工具 → 真实路由表的契约测试（防止 stub 对 stub 漂移）。
 
 tests/mcp_server/test_tools.py 用假 HTTP 层验证转发语义；这里把每个 MCP 工具
-实际发出的 (method, path) 与 create_studio_agent_tools_router 的真实路由表
-做双向比对：工具参数一律填 "{参数名}" 占位，记录到的 path 即路由模板本身，
-任何一边改名/改路径都会在这里炸出来。
+实际发出的 (method, path) 与工具面真实路由表（studio_agent_tools +
+studio_agent_context 两个 router）做双向比对：工具参数一律填 "{参数名}" 占位，
+记录到的 path 即路由模板本身，任何一边改名/改路径都会在这里炸出来。
 """
 
 from __future__ import annotations
@@ -14,12 +14,15 @@ import pytest
 
 from server.app.mcp_server.config import McpServerConfig
 from server.app.mcp_server.server import create_mcp_server
+from server.app.routes.studio_agent_context import create_studio_agent_context_router
 from server.app.routes.studio_agent_tools import create_studio_agent_tools_router
 from server.app.settings import Settings
 
 pytestmark = pytest.mark.no_db
 
-_CONFIG = McpServerConfig(api_base="http://backend.test:9000", token="scoped-token-1")
+_CONFIG = McpServerConfig(
+    api_base="http://backend.test:9000", token="scoped-token-1", session_id="{session_id}"
+)
 _ROUTE_METHODS = {"GET", "POST", "PUT", "DELETE", "PATCH"}
 
 
@@ -40,7 +43,7 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
 
     tools = asyncio.run(server.list_tools())
     # 工具面清单变化时同步这里与工具文档（server/app/mcp_server/server.py）。
-    assert len(tools) == 8
+    assert len(tools) == 9
     for tool in tools:
         schema = tool.inputSchema
         args = {
@@ -62,7 +65,8 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
     router = create_studio_agent_tools_router(None, settings)  # 枚举路由不触 DB
     table = {
         (method, route.path)
-        for route in router.routes
+        for router_ in (router, create_studio_agent_context_router(None))
+        for route in router_.routes
         for method in (route.methods or set()) & _ROUTE_METHODS
     }
 
