@@ -307,10 +307,11 @@ class StudioChatService:
     def _on_update(self, session_id: str, update: dict[str, Any]) -> None:
         kind = update.get("sessionUpdate")
         runtime = self._runtime(session_id)
-        if kind == "agent_message_chunk":
+        if kind in ("agent_message_chunk", "agent_thought_chunk"):
             text = str((update.get("content") or {}).get("text") or "")
+            slot = "thought" if kind == "agent_thought_chunk" else "text"
             if runtime is not None:
-                self._append_stream_chunk(session_id, runtime, "text", text)
+                self._append_stream_chunk(session_id, runtime, slot, text)
             return
         if kind in ("tool_call", "tool_call_update"):
             if self._is_agent_legion_tool_call(update) and runtime is not None:
@@ -323,7 +324,7 @@ class StudioChatService:
         if kind and str(kind).startswith("plan"):
             self._append_message(session_id, "plan", "agent", update)
             return
-        # user_message_chunk / thought / mode / usage updates: not persisted.
+        # user_message_chunk / mode / usage updates: not persisted.
 
     def _on_permission_request(
         self, session_id: str, tool_call: dict[str, Any], options: list[dict[str, Any]]

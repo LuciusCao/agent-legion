@@ -804,7 +804,7 @@ create table if not exists connection_tokens (
 );
 
 -- Studio chat (schema v43, phase 3 chunk 4; v45 adds selected_node_key and
--- the auth_scoped_tokens workspace binding): ACP conversation backend. One row
+-- the 'thought' message kind): ACP conversation backend. One row
 -- per Studio conversation session (an in-process handle onto an ACP agent
 -- subprocess) plus the persisted message timeline. capability_snapshot_json
 -- freezes the capabilities negotiated at ACP initialize; mcp_status is the
@@ -844,11 +844,15 @@ create table if not exists studio_chat_messages (
   seq bigint generated always as identity,
   session_id text not null references studio_chat_sessions(id) on delete cascade,
   kind text not null
-    check(kind in ('text', 'tool_call', 'plan', 'permission', 'status')),
+    check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought')),
   role text not null check(role in ('user', 'agent', 'system')),
   content_json text not null default '{}',
   created_at timestamptz not null default current_timestamp
 );
+-- Upgrade path for pre-v45 databases: widen the kind check with 'thought'.
+alter table studio_chat_messages drop constraint if exists studio_chat_messages_kind_check;
+alter table studio_chat_messages add constraint studio_chat_messages_kind_check
+  check(kind in ('text', 'tool_call', 'plan', 'permission', 'status', 'thought'));
 create unique index if not exists idx_studio_chat_messages_seq
   on studio_chat_messages(seq);
 create index if not exists idx_studio_chat_messages_session

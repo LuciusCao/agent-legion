@@ -50,7 +50,7 @@ function sessionRecord(
 function chatMessage(
   id: string,
   seq: number,
-  kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status',
+  kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status' | 'thought',
   role: 'user' | 'agent' | 'system',
   content: Record<string, unknown>
 ) {
@@ -154,6 +154,25 @@ describe('StudioChatPanel', () => {
     fireEvent.click(screen.getByText('get_active_workflow'))
     expect(screen.getByText(/"workspace_id"/)).toBeInTheDocument()
     expect(screen.getAllByText('{"version": 6}')).not.toHaveLength(0)
+  })
+
+  it('renders agent thought as a collapsed foldable block', async () => {
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'thought', 'agent', {
+        text: '推理：先读 active 版本',
+      }),
+      chatMessage('m2', 2, 'text', 'agent', { text: '好的' }),
+    ])
+    renderPanel()
+
+    const summary = await screen.findByText('思考过程')
+    const details = summary.closest('details')
+    expect(details).not.toBeNull()
+    // 默认折叠，与正文气泡区分。
+    expect(details).not.toHaveAttribute('open')
+    fireEvent.click(summary)
+    expect(details).toHaveAttribute('open')
+    expect(screen.getByText('推理：先读 active 版本')).toBeInTheDocument()
   })
 
   it('answers a permission request inline', async () => {
