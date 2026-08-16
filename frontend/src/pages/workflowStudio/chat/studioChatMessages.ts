@@ -338,3 +338,16 @@ function decisionText(resolved: Record<string, unknown>): string {
   if (via === 'allow_all') return '已自动允许（本次全部允许）'
   return '已允许'
 }
+
+/** 消息列表的派生视图集合（hook 里单次 useMemo 消费，避免每个视图一条
+ * memo 链）。 */
+export function deriveChatViews(messages: ChatMessage[]) {
+  const toolCalls = groupToolCalls(messages)
+  return {
+    toolCalls,
+    workflowDraft: extractWorkflowDraft(toolCalls),
+    agentDrafts: extractAgentDefinitionDrafts(toolCalls),
+    nodeDrafts: extractNodeCodeDrafts(toolCalls),
+    permissions: buildPermissionViews(messages),
+  }
+}

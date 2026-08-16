@@ -16,15 +16,13 @@ import {
   type StudioChatSessionRecord,
 } from './studioChatApi'
 import {
-  buildPermissionViews,
-  extractAgentDefinitionDrafts,
-  extractNodeCodeDrafts,
-  extractWorkflowDraft,
-  groupToolCalls,
+  deriveChatViews,
   maxSeq,
+  statusEvent,
   upsertMessage,
   type ChatMessage,
 } from './studioChatMessages'
+import { mergeMessages } from './studioChatRefill'
 
 type SsePayload = {
   type?: string
@@ -98,15 +96,12 @@ export function useStudioChat(workspaceId: string | undefined) {
         sessionId,
         after
       )
-      setMessages((current) => {
+      setMessages((current) =>
         // 跨会话竞态：拉取在途时切换了会话，旧会话的消息不得合入新列表。
-        if (activeSessionIdRef.current !== sessionId) return current
-        let next = current
-        for (const message of fetched) {
-          next = upsertMessage(next, message) ?? next
-        }
-        return next
-      })
+        activeSessionIdRef.current === sessionId
+          ? mergeMessages(current, fetched)
+          : current
+      )
     },
     [workspaceId, activeSessionId]
   )
@@ -175,14 +170,7 @@ export function useStudioChat(workspaceId: string | undefined) {
           }
           // 断连期间的流式 text 尾部会永久截断（原地更新 seq 不变，after_seq
           // 增量补齐拿不到）；turn 结束时全量回取一次自愈。
-          const content = incoming.content
-          const statusEvent =
-            incoming.kind === 'status' &&
-            content !== null &&
-            typeof content === 'object'
-              ? (content as Record<string, unknown>).event
-              : undefined
-          if (statusEvent === 'turn_end') {
+          if (statusEvent(incoming as ChatMessage).event === 'turn_end') {
             void refillMessages(0).catch(() => undefined)
           }
         } else if (payload.type === 'session' && payload.session) {
@@ -280,20 +268,8 @@ export function useStudioChat(workspaceId: string | undefined) {
     })
   }
 
-  const toolCalls = useMemo(() => groupToolCalls(messages), [messages])
-  const workflowDraft = useMemo(
-    () => extractWorkflowDraft(toolCalls),
-    [toolCalls]
-  )
-  const agentDrafts = useMemo(
-    () => extractAgentDefinitionDrafts(toolCalls),
-    [toolCalls]
-  )
-  const nodeDrafts = useMemo(
-    () => extractNodeCodeDrafts(toolCalls),
-    [toolCalls]
-  )
-  const permissions = useMemo(() => buildPermissionViews(messages), [messages])
+  const { toolCalls, workflowDraft, agentDrafts, nodeDrafts, permissions } =
+    useMemo(() => deriveChatViews(messages), [messages])
 
   const busy = session ? BUSY_STATUSES.has(session.status) : false
   const closed = session

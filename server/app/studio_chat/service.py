@@ -43,6 +43,11 @@ from server.app.studio_chat.prompts import (
     looks_like_agent_legion_tool_call,
 )
 from server.app.studio_chat.registry import StudioAgentRegistryStore
+from server.app.studio_chat.runtime import (
+    PendingPermission,
+    SessionRuntime,
+    teardown_runtime,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -58,32 +63,6 @@ def studio_chat_channel(session_id: str) -> str:
     return f"studio-chat:{session_id}"
 
 
-class _PendingPermission:
-    def __init__(self, request_id: str) -> None:
-        self.request_id = request_id
-        self.event = threading.Event()
-        self.decision: dict[str, Any] = {"deny": True}
-
-
-class _SessionRuntime:
-    """Live (in-memory) state for one chat session; never persisted."""
-
-    def __init__(self, handle: AcpSessionHandle, token: str) -> None:
-        self.handle = handle
-        # Raw scoped token, held only to revoke on close; never leaves memory.
-        self.token = token
-        self.lock = threading.Lock()
-        self.pending_permissions: dict[str, _PendingPermission] = {}
-        # Streaming agent text coalescing: chunks of one turn accumulate onto
-        # a single message row (the ACP SDK resolves the prompt response
-        # before the last session/update handler tasks run, so buffer-until-
-        # turn-end would lose trailing chunks; an open row tolerates any
-        # ordering). Turn end closes the open message.
-        self.open_text_message_id: str | None = None
-        self.open_text: str = ""
-        self.mcp_observed = False
-
-
 class StudioChatService:
     def __init__(
         self,
@@ -97,7 +76,7 @@ class StudioChatService:
         self._bus = bus
         self._registry = StudioAgentRegistryStore(job_db.path)
         self._probe = probe if probe is not None else AgentAvailabilityProbe()
-        self._runtimes: dict[str, _SessionRuntime] = {}
+        self._runtimes: dict[str, SessionRuntime] = {}
         self._runtimes_lock = threading.Lock()
         self._shutdown = False
 
@@ -141,7 +120,7 @@ class StudioChatService:
             )
         session_id = self._db.create_studio_chat_session(workspace_id, user_id, agent_id)
         token = mint_scoped_token(self._db, user_id, origin="run")
-        runtime: _SessionRuntime | None = None
+        runtime: SessionRuntime | None = None
         try:
             handle = AcpSessionHandle(
                 command=command,
@@ -155,7 +134,7 @@ class StudioChatService:
                 env=None,
                 callbacks=ServiceCallbacks(self, session_id),
             )
-            runtime = _SessionRuntime(handle, token)
+            runtime = SessionRuntime(handle, token)
             with self._runtimes_lock:
                 self._runtimes[session_id] = runtime
             handle.start()
@@ -214,22 +193,8 @@ class StudioChatService:
         self._publish_session(session_id)
         return self.get_session(session_id)
 
-    def _teardown_runtime(self, session_id: str, runtime: _SessionRuntime | None) -> None:
-        """Deny pending permissions, stop the subprocess, revoke the token."""
-        with self._runtimes_lock:
-            current = self._runtimes.pop(session_id, None)
-        runtime = current if current is not None else runtime
-        if runtime is None:
-            return
-        with runtime.lock:
-            for pending in runtime.pending_permissions.values():
-                pending.decision = {"deny": True}
-                pending.event.set()
-        runtime.handle.close()
-        try:
-            revoke_scoped_token(self._db, runtime.token)
-        except Exception:
-            logger.warning("failed to revoke studio chat token for %s", session_id)
+    def _teardown_runtime(self, session_id: str, runtime: SessionRuntime | None) -> None:
+        teardown_runtime(self._db, self._runtimes, self._runtimes_lock, session_id, runtime)
 
     # -- messaging ---------------------------------------------------------
 
@@ -356,7 +321,7 @@ class StudioChatService:
         if session.get("allow_all_permissions"):
             return self._auto_approve(session_id, tool_call, options, decision="allow_all")
         request_id = uuid4().hex
-        pending = _PendingPermission(request_id)
+        pending = PendingPermission(request_id)
         runtime = self._runtime(session_id)
         if runtime is None:
             return {"deny": True}
@@ -495,11 +460,11 @@ class StudioChatService:
 
     # -- internals -------------------------------------------------------------
 
-    def _runtime(self, session_id: str) -> _SessionRuntime | None:
+    def _runtime(self, session_id: str) -> SessionRuntime | None:
         with self._runtimes_lock:
             return self._runtimes.get(session_id)
 
-    def _append_agent_chunk(self, session_id: str, runtime: _SessionRuntime, text: str) -> None:
+    def _append_agent_chunk(self, session_id: str, runtime: SessionRuntime, text: str) -> None:
         """Fold a streamed text chunk into the turn's single agent message."""
         if not text:
             return
