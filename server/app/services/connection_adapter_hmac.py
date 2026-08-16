@@ -83,7 +83,14 @@ def _hmac_token_authenticate(config: dict[str, Any], secrets: dict[str, str]) ->
     }
     try:
         resp = requests.post(
-            token_url, json=payload, headers={"Content-Type": "application/json"}, timeout=10
+            token_url,
+            json=payload,
+            headers={"Content-Type": "application/json"},
+            timeout=10,
+            # Do not follow redirects: the payload carries the plaintext
+            # secret, and a 307/308 redirect would re-POST it to a host the
+            # admin never configured (same rule as bearer_probe).
+            allow_redirects=False,
         )
         status = resp.status_code
         resp.raise_for_status()

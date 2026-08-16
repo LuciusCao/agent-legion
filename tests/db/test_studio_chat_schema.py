@@ -49,10 +49,10 @@ def test_studio_chat_tables_exist() -> None:
 @pytest.mark.fresh_schema
 def test_v42_database_upgrades_via_init_db() -> None:
     # Reproduce the real upgrade path: a database that applied v42 has no
-    # studio chat tables and no v43 schema_migrations row, so init_db replays
-    # the whole schema file — the file's own create-if-not-exists statements
-    # must create the tables (the migrations module replays the same DDL as
-    # the idempotent fallback).
+    # studio chat tables and no current schema_migrations row, so init_db
+    # replays the whole schema file — the file's own create-if-not-exists
+    # statements must create the tables (the migrations module replays the
+    # same DDL as the idempotent fallback).
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
         conn.execute("drop table if exists studio_chat_messages")
@@ -71,7 +71,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "studio_chat_tables"
+    assert migration["name"] == "hmac_connection_type"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

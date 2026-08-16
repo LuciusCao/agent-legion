@@ -34,10 +34,11 @@ def test_auth_scoped_tokens_table_exists() -> None:
 @pytest.mark.fresh_schema
 def test_v41_database_upgrades_via_init_db() -> None:
     # Reproduce the real upgrade path: a database that applied v41 has an
-    # auth_scoped_tokens table without id/origin and no v42 schema_migrations
-    # row, so init_db replays the whole schema file — create table if not
-    # exists skips the old table, and the file's own alter statements must add
-    # the columns before the unique index on id can be built.
+    # auth_scoped_tokens table without id/origin and no current
+    # schema_migrations row, so init_db replays the whole schema file —
+    # create table if not exists skips the old table, and the file's own
+    # alter statements must add the columns before the unique index on id
+    # can be built.
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
         conn.execute("alter table auth_scoped_tokens drop column origin")
@@ -71,7 +72,7 @@ def test_v41_database_upgrades_via_init_db() -> None:
     assert row["id"]
     assert "idx_auth_scoped_tokens_id" in indexes
     assert migration is not None
-    assert migration["name"] == "studio_chat_tables"
+    assert migration["name"] == "hmac_connection_type"
 
     # Idempotent on replay (init_db runs at every backend startup).
     init_db(TEST_DATABASE_URL)
