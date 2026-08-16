@@ -79,9 +79,14 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
         ws_b["id"]: 6,
         ws_c["id"]: 2,
     }
+    from tests.workers.helpers import _seed_trivial_node_code
+
     for ws in workspaces.values():
         allocate(job_db, ws["id"], "code-default", limits[ws["id"]])
         bind(job_db, ws["id"], "test", "fetch", "code-default")
+        # Post-#96 every code node needs published code to dispatch; the
+        # BlockingExecutor never reads the text.
+        _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
 
     jobs_per_workspace = 4
     jobs: list[tuple[str, str]] = []

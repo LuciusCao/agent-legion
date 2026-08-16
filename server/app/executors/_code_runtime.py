@@ -2,7 +2,7 @@
 
 Split from ``code.py`` to keep it within its size budget; mirrors the
 ``_code_sandbox.py`` layout (functions take the executor instance and reach
-its internals).
+its internals). Since #96 every code child is the sandboxed child.
 
 Design: ``docs/architecture/node-sdk-and-worker-execution-design.md`` §3/§5.
 Builtin and sandboxed children share one runtime contract: every DB-derived

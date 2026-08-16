@@ -6,6 +6,7 @@ import sys
 import textwrap
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -113,15 +114,14 @@ def run(job, job_dir, runtime):
 def _code_executor(
     repo_root: Path,
     capability: str,
-    node_body: str,
     *,
     cancellation_grace_seconds: float = 0.5,
 ) -> CodeExecutor:
-    node_name = f"node_{capability}.py"
-    (repo_root / node_name).write_text(textwrap.dedent(node_body), encoding="utf-8")
+    # Post-#96 node code arrives as DB-published text on the context and runs
+    # sandboxed; there is no repo file to bind.
     return CodeExecutor(
         "code-default",
-        {capability: CodeCapabilityConfig(path=node_name)},
+        {capability: CodeCapabilityConfig()},
         repo_root=repo_root,
         cancellation_grace_seconds=cancellation_grace_seconds,
     )
@@ -155,28 +155,43 @@ def _code_context(
 
 
 class TestCodeExecutorIsolation:
-    def test_code_executor_rejects_path_outside_repo_root(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="inside the repository root"):
-            CodeExecutor(
-                "code-default",
-                {"unsafe": CodeCapabilityConfig(path="nodes/missing.py")},
-                repo_root=tmp_path,
-            )
+    def test_code_executor_rejects_retired_path_key(self) -> None:
+        # The capability ``path`` binding is retired (#96).
+        with pytest.raises(ValueError):
+            CodeCapabilityConfig(path="nodes/missing.py")
 
     @pytest.mark.slow
-    def test_code_executor_runs_node_in_isolated_child(self, tmp_path: Path) -> None:
-        executor = _code_executor(tmp_path, "cooperative", _COOPERATIVE_NODE)
+    def test_code_executor_runs_node_sandboxed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.executors.test_code_executor import _sandboxed
+
+        _sandboxed(monkeypatch)
+        executor = _code_executor(tmp_path, "cooperative")
         ctx = _code_context(tmp_path, "exec-cooperative", "cooperative", ("out.json",))
+        ctx = replace(ctx, node_code=textwrap.dedent(_COOPERATIVE_NODE))
         result = executor.execute(ctx)
         assert result.status == "completed"
         assert (ctx.job_dir / "out.json").is_file()
 
     @pytest.mark.slow
-    def test_code_executor_cancels_blocked_child(self, tmp_path: Path) -> None:
-        executor = _code_executor(
-            tmp_path, "blocked", _BLOCKED_NODE, cancellation_grace_seconds=0.3
-        )
+    def test_code_executor_cancels_blocked_child(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from server.app.executors.cancellation import CancellationToken
+        from tests.executors.test_code_executor import _sandboxed
+
+        _sandboxed(monkeypatch)
+        executor = _code_executor(tmp_path, "blocked", cancellation_grace_seconds=0.3)
+        # In-flight cancellation flows through the runtime token (the parent's
+        # ExecutionRuntime cancel path); executor.cancel marks pre-start only.
+        token = CancellationToken(threading.Event())
         ctx = _code_context(tmp_path, "exec-blocked", "blocked", ("out.json",))
+        ctx = replace(
+            ctx,
+            node_code=textwrap.dedent(_BLOCKED_NODE),
+            runtime={"cancellation": token},
+        )
         result_holder: dict[str, ExecutionResult] = {}
 
         def run() -> None:
@@ -184,19 +199,21 @@ class TestCodeExecutorIsolation:
 
         thread = threading.Thread(target=run)
         thread.start()
-        time.sleep(0.1)
-        executor.cancel(ctx.execution_id)
-        thread.join(timeout=3.0)
+        time.sleep(0.5)
+        token.cancel()
+        thread.join(timeout=5.0)
         assert not thread.is_alive()
         assert result_holder["result"].status == "cancelled"
 
     @pytest.mark.slow
-    def test_code_executor_pre_start_cancellation(self, tmp_path: Path) -> None:
-        executor = _code_executor(
-            tmp_path, "cooperative", _COOPERATIVE_NODE, cancellation_grace_seconds=0.3
-        )
+    def test_code_executor_pre_start_cancellation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _no_sandbox_needed = monkeypatch  # pre-start cancel never spawns
+        executor = _code_executor(tmp_path, "cooperative", cancellation_grace_seconds=0.3)
         executor.cancel("exec-pre")
         ctx = _code_context(tmp_path, "exec-pre", "cooperative", ("out.json",))
+        ctx = replace(ctx, node_code=textwrap.dedent(_COOPERATIVE_NODE))
         result = executor.execute(ctx)
         assert result.status == "cancelled"
         assert result.exit_code == -1
