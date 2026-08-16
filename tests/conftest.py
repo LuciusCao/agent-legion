@@ -348,6 +348,11 @@ def _rebuild_schema() -> None:
 # later resets replay the snapshot with plain multi-row INSERTs instead of
 # re-running the service-layer seed (~70ms/test) per test. The snapshot is
 # invalidated by every schema rebuild, so DDL drift can never stale it.
+#
+# Note: the replayed rows are byte-frozen at capture time — timestamps inside
+# seed rows do NOT advance between tests. A test asserting a seeded row is
+# "fresh" (e.g. updated_at >= now - interval) would false-red; assert
+# presence/content, never recency, against seeded rows.
 _SEEDED_TABLES = ("job_event_seq", "global_settings", "versioned_entities", "workflow_catalog")
 _SEED_SNAPSHOT: dict[str, tuple[list[str], list[tuple]]] | None = None
 
@@ -393,6 +398,12 @@ def _dirty_tables(conn, tables: list[str]) -> set[str]:
     ... RESTART IDENTITY rewinds that, so such tables stay in the truncate
     set. Any detection error falls back to "everything dirty" — missing a
     dirty table would leak data between tests, which is worse than slow.
+
+    Precondition: every sequence in the test schema is column-owned (serial /
+    identity / owned default), so the pg_depend auto/internal join below
+    reaches it. A standalone CREATE SEQUENCE (no owning column) is invisible
+    here; the current schema has none — if one is ever added, it must be
+    rewound explicitly in _reset_schema_data.
     """
     try:
         probes = sql.SQL(", ").join(
@@ -709,6 +720,13 @@ def app_factory(tmp_path):
 # app lifespan a second time, and its exit would fire the shutdown hooks
 # (cancel background tasks, close the enqueue pool, shut down studio chat)
 # on the still-shared app.
+#
+# The shared app's data_dir is session-scoped and NOT reset between tests:
+# job artifact paths are job-id-derived, so a re-issued job id (the DB-side
+# sequence rewinds per test) collides with the previous test's leftover
+# files. Tests that assert on the filesystem must use
+# client_factory(fresh=True) — that is also why the job_db fixture's tmp_path
+# jobs_dir deliberately diverges from the shared app's jobs_dir.
 def _build_shared_client(tmp_path_factory, dir_name: str):
     from server.app.main import create_app
 
@@ -783,9 +801,11 @@ def _reset_client_state(client: TestClient, default_headers: dict[str, str]) -> 
     # so the per-test TRUNCATE cannot reach it; a fresh app starts with an
     # empty table, and the shared app must be restored to the same condition
     # or a lockout test poisons every later login/bootstrap on this worker.
-    rate_limiter = getattr(client.app.state.auth_service, "_rate_limiter", None)
-    if rate_limiter is not None:
-        rate_limiter._entries.clear()
+    # Hard attribute references on purpose: a rename inside AuthService or
+    # LoginRateLimiter must fail this reset loudly instead of silently
+    # skipping it (#91).
+    rate_limiter = client.app.state.auth_service._rate_limiter
+    rate_limiter._entries.clear()
 
 
 def _check_shared_app_invariants(app) -> list[str]:
@@ -797,7 +817,9 @@ def _check_shared_app_invariants(app) -> list[str]:
     client_factory(fresh=True)). The job event buffer is drained rather than
     asserted: the shared apps run with background flush loops disabled, so
     every event-producing test would otherwise accumulate buffered events
-    into its successor.
+    into its successor. The in-memory revision high-water mark still advances
+    across tests while the DB-side job_event_seq rewinds per test, so tests
+    must never assert absolute revision values against the DB sequence (#91).
     """
     app.state.job_event_buffer.drain_compacted()
     errors = []
