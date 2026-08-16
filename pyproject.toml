@@ -11,7 +11,6 @@ dependencies = [
   "cryptography",
   "fastapi",
   "filelock",
-  "funasr>=1.3.1",
   # Pinned below 2.0: mcp 2.0 removed mcp.server.fastmcp (breaking change) and
   # the standalone fastmcp 3.x package is incompatible with mcp 2.x; the MCP
   # server (server/app/mcp_server) uses FastMCP from mcp.server.fastmcp.
@@ -21,9 +20,6 @@ dependencies = [
   "python-dotenv>=1.2.2",
   "pyyaml",
   "requests",
-  "srt>=3.5.3",
-  "torch>=2.12.0",
-  "torchaudio>=2.11.0",
   "uvicorn",
   "websockets",
 ]
