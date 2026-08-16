@@ -23,7 +23,7 @@ ENV PYTHONUNBUFFERED=1 \
     UV_LINK_MODE=copy \
     PATH=/app/.venv/bin:$PATH
 WORKDIR /app
-# g++：funasr 依赖链（editdistance 等 sdist）无预编译 wheel，uv sync 需现场编译。
+# g++：兜底编译无预编译 wheel 的 sdist 依赖。
 # ffmpeg：视频管线（转写前转 wav、章节切片、yt-dlp 合并）在 host 上直接调用。
 RUN apt-get update \
     && apt-get install -y --no-install-recommends g++ ffmpeg \
