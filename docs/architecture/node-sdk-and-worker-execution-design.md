@@ -122,6 +122,10 @@ def run(ctx: NodeContext) -> None:
   （SSRF 守卫）/ `download_file`（content-type 白名单 + 流式落盘 + 半成品清理）。
   全部按 `service` 标签与 `error_type` 参数化——框架不含任何业务语义；
   服务特定的 URL 拼规则与 payload 解析留在节点里。
+- `workspace_libs/download.py`（stdlib + requests）：`validate_download_url`
+  （SSRF 守卫；已知限制：主机名在请求时才解析，DNS rebinding 不在此拦截——
+  与 server/app/security.py 的同名校验器保持同步）/ `download_file`
+  （content-type 白名单 + 流式落盘 + 半成品清理 + 拒绝 3xx 重定向）。
 - `workspace_libs/media.py`（纯 stdlib）：`parse_srt`（vendored srt 语义）、
   `get_video_duration`（ffprobe）。字幕质量校验阈值等业务策略留在节点里。
 

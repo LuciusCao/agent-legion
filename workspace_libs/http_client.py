@@ -21,10 +21,7 @@ worker/sandbox import closure allowlist); never import ``server.app.*``.
 
 from __future__ import annotations
 
-import ipaddress
-from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import requests
 
@@ -98,10 +95,24 @@ def fetch_json(
     """GET *url* with a bearer token and return the JSON payload.
 
     HTTP 401/403 flag ``auth_failure``; other transport/parse failures do
-    not. Raises ``error_type`` in every failure case.
+    not. Raises ``error_type`` in every failure case. Redirects are refused
+    (``allow_redirects=False`` + explicit 3xx rejection): following them
+    would bypass any caller-side URL guard by hopping to an internal
+    address. A service that legitimately redirects needs an explicit design,
+    not a silent follow.
     """
     try:
-        resp = requests.get(url, params=params, headers=bearer_headers(token), timeout=timeout)
+        resp = requests.get(
+            url,
+            params=params,
+            headers=bearer_headers(token),
+            timeout=timeout,
+            allow_redirects=False,
+        )
+        if 300 <= resp.status_code < 400:
+            raise error_type(
+                f"{service} request failed: unexpected redirect (HTTP {resp.status_code})"
+            )
         resp.raise_for_status()
         return resp.json()  # type: ignore[no-any-return]
     except requests.HTTPError as exc:
@@ -143,68 +154,3 @@ def check_in_band_error(
         f"{service} 返回错误: code={code} message={message} ({resource})",
         auth_failure=auth_failure,
     )
-
-
-_ALLOWED_SCHEMES = {"http", "https"}
-
-
-def validate_download_url(url: str) -> None:
-    """SSRF guard for user-influenced download URLs (scheme/host/IP checks)."""
-    if not url:
-        raise ValueError("Invalid URL: empty")
-    parsed = urlparse(url)
-    if parsed.scheme not in _ALLOWED_SCHEMES:
-        raise ValueError(f"Invalid URL scheme: {parsed.scheme}")
-    hostname = parsed.hostname
-    if hostname is None:
-        raise ValueError("Invalid URL: missing hostname")
-    hostname_lower = hostname.lower()
-    if hostname_lower in {"localhost", "0.0.0.0"}:
-        raise ValueError(f"Invalid URL: blocked host {hostname}")
-    try:
-        addr = ipaddress.ip_address(hostname)
-    except ValueError:
-        # Reject non-standard IP notations (octal/hex) that ipaddress doesn't
-        # parse but underlying getaddrinfo may resolve to internal addresses.
-        if all(c in "0123456789abcdefABCDEF.xX" for c in hostname):
-            raise ValueError(f"Invalid URL: blocked IP-like host {hostname}") from None
-        return
-    if addr.is_loopback or addr.is_private or addr.is_link_local or addr.is_reserved:
-        raise ValueError(f"Invalid URL: blocked IP {hostname}")
-
-
-def download_file(
-    url: str,
-    output_path: Path,
-    *,
-    allowed_content_type_prefixes: tuple[str, ...] = ("video/", "application/octet-stream"),
-    expected: str = "video",
-    timeout: int = 120,
-    chunk_size: int = 1024 * 1024,
-) -> None:
-    """Stream *url* to *output_path* with an SSRF guard and content-type gate.
-
-    An existing non-empty output short-circuits (retry-safe); a failed
-    download removes the partial file so a retry never sees a truncated
-    artifact.
-    """
-    validate_download_url(url)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    if output_path.exists() and output_path.stat().st_size > 0:
-        return
-    with requests.get(url, stream=True, timeout=timeout) as response:
-        response.raise_for_status()
-        content_type = response.headers.get("content-type", "")
-        if content_type and not any(
-            content_type.startswith(prefix) for prefix in allowed_content_type_prefixes
-        ):
-            raise ValueError(f"Expected {expected} content, got {content_type}")
-        try:
-            with output_path.open("wb") as handle:
-                for chunk in response.iter_content(chunk_size=chunk_size):
-                    if chunk:
-                        handle.write(chunk)
-        except Exception:
-            if output_path.exists():
-                output_path.unlink()
-            raise

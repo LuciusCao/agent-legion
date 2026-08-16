@@ -9,15 +9,14 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
+from workspace_libs.download import download_file, validate_download_url
 from workspace_libs.http_client import (
     HttpServiceError,
     bearer_headers,
     check_in_band_error,
     config_token,
-    download_file,
     fetch_json,
     require_configured_url,
-    validate_download_url,
 )
 
 pytestmark = pytest.mark.no_db
@@ -188,6 +187,7 @@ def test_validate_download_url_accepts(url: str) -> None:
 
 def _stream_response(chunks: list[bytes], content_type: str = "video/mp4") -> MagicMock:
     resp = MagicMock()
+    resp.status_code = 200
     resp.headers = {"content-type": content_type}
     resp.raise_for_status.return_value = None
     resp.iter_content.return_value = iter(chunks)
@@ -248,3 +248,37 @@ def test_download_file_custom_content_type_prefixes(
         expected="audio",
     )
     assert out.read_bytes() == b"x"
+
+
+# ---------------------------------------------------------------------------
+# redirect refusal (P0: a 302 must not bypass the URL guard / fetch contract)
+
+
+def test_fetch_json_refuses_redirects(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen: dict = {}
+
+    def fake_get(url: str, **kw: Any) -> MagicMock:
+        seen.update(kw)
+        return _response(302)
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    with pytest.raises(NodeServiceError) as excinfo:
+        fetch_json("https://x/api", {}, None, service="SVC", error_type=NodeServiceError)
+    assert "unexpected redirect (HTTP 302)" in str(excinfo.value)
+    assert excinfo.value.auth_failure is False
+    assert seen["allow_redirects"] is False
+
+
+def test_download_file_refuses_redirect_to_internal(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A guarded URL answering 302 (e.g. pointing at 169.254.169.254) is
+    refused: following it would bypass validate_download_url entirely."""
+    resp = _stream_response([b"x"])
+    resp.status_code = 302
+    resp.headers = {"location": "http://169.254.169.254/latest/meta-data"}
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: resp)
+    out = tmp_path / "o.bin"
+    with pytest.raises(ValueError, match="Unexpected redirect"):
+        download_file("https://cdn.example.com/v.mp4", out)
+    assert not out.exists()
