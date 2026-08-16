@@ -172,6 +172,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_executor_asr_config_schema_migration.py",
         "tests/db/test_executor_entity_type_migration.py",
         "tests/db/test_external_connections_migration.py",
+        "tests/db/test_hmac_connection_type_migration.py",
         "tests/db/test_job_status_counts_migration.py",
         "tests/db/test_local_executor_removal_migration.py",
         "tests/db/test_monitoring_hotpath_indexes.py",

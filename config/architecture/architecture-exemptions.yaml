@@ -121,20 +121,20 @@ exemptions:
   ceiling: 135
 - check: architecture.file_budget
   path: server/app/db/schema.py
-  reason: Schema v43 (studio_chat_tables) adds one migration import and one
+  reason: Schema v44 (hmac_connection_type) adds one migration import and one
     migrate call to the version chain; the module is the single wiring point
     for the idempotent DDL replay and grows by two lines per schema version.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
-  ceiling: 76
+  ceiling: 78
 - check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
-  reason: Schema v43 (studio_chat_tables) adds one import and one __all__
+  reason: Schema v44 (hmac_connection_type) adds one import and one __all__
     entry to the migration export list; the module is the flat export point
     for the idempotent migration chain and grows by two lines per version.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-08-14-studio-acp-chat-backend.md
-  ceiling: 30
+  ceiling: 32
 - check: architecture.file_budget
   path: server/app/main.py
   reason: Phase 3 chunk 4 wires the StudioChatService (construction, app

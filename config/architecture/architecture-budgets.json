@@ -674,6 +674,7 @@
     "server/app/db/migrations/executor_entity_type.py": 30,
     "server/app/db/migrations/external_connections.py": 263,
     "server/app/db/migrations/external_connections_groups.py": 146,
+    "server/app/db/migrations/hmac_connection_type.py": 16,
     "server/app/db/migrations/job_status_counts.py": 21,
     "server/app/db/migrations/local_executor_removal.py": 33,
     "server/app/db/migrations/node_cms_config.py": 129,

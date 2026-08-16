@@ -104,6 +104,8 @@ def test_authenticate_signs_and_exchanges_for_jwt(monkeypatch) -> None:
     call = calls[0]
     assert call["args"][0] == "http://auth.example/token"
     assert call["kwargs"]["timeout"] == 10
+    # The payload carries the plaintext secret: redirects must not be followed.
+    assert call["kwargs"]["allow_redirects"] is False
     payload = call["kwargs"]["json"]
     assert payload["app_id"] == "app-1"
     assert payload["secret"] == "s3cret"
