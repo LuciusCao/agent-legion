@@ -32,17 +32,20 @@ def mint_scoped_token(
     scope: str = STUDIO_AGENT_SCOPE,
     ttl: timedelta = SCOPED_TOKEN_TTL,
     origin: str = "run",
+    workspace_id: str | None = None,
     now: datetime | None = None,
 ) -> str:
     """Mint a scoped bearer token for user_id; the raw token is returned once.
 
-    origin records who minted the token: 'run' for per-run tokens (the
-    default, unchanged for existing callers) and 'user' for self-service
-    tokens minted via /api/studio-agent-tokens.
+    origin: 'run' (per-run, the default) or 'user' (self-service via
+    /api/studio-agent-tokens). workspace_id binds a run token to the chat
+    session's workspace (schema v45), written atomically in the same INSERT.
     """
     token = issue_token()
     expires_at = (now or datetime.now(UTC)) + ttl
-    queries.create_scoped_token(hash_token(token), user_id, scope, expires_at, origin=origin)
+    queries.create_scoped_token(
+        hash_token(token), user_id, scope, expires_at, origin=origin, workspace_id=workspace_id
+    )
     return token
 
 

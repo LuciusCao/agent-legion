@@ -36,6 +36,7 @@ def test_studio_chat_tables_exist() -> None:
         "capability_snapshot_json",
         "allow_all_permissions",
         "mcp_status",
+        "selected_node_key",
         "error_detail",
         "created_at",
         "updated_at",
@@ -71,7 +72,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "hmac_connection_type"
+    assert migration["name"] == "studio_chat_context"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

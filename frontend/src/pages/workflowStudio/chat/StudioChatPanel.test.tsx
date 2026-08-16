@@ -38,6 +38,7 @@ function sessionRecord(
     capability_snapshot: {},
     allow_all_permissions: false,
     mcp_status: 'unknown',
+    selected_node_key: null,
     error_detail: '',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -49,7 +50,7 @@ function sessionRecord(
 function chatMessage(
   id: string,
   seq: number,
-  kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status',
+  kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status' | 'thought',
   role: 'user' | 'agent' | 'system',
   content: Record<string, unknown>
 ) {
@@ -91,6 +92,7 @@ describe('StudioChatPanel', () => {
     ])
     mockApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
     mockApi.fetchStudioChatMessages.mockResolvedValue([])
+    mockApi.updateStudioChatContext.mockResolvedValue(sessionRecord())
   })
 
   afterEach(() => {
@@ -152,6 +154,45 @@ describe('StudioChatPanel', () => {
     fireEvent.click(screen.getByText('get_active_workflow'))
     expect(screen.getByText(/"workspace_id"/)).toBeInTheDocument()
     expect(screen.getAllByText('{"version": 6}')).not.toHaveLength(0)
+  })
+
+  it('renders agent thought as a collapsed foldable block', async () => {
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'thought', 'agent', {
+        text: '推理：先读 active 版本',
+      }),
+      chatMessage('m2', 2, 'text', 'agent', { text: '好的' }),
+    ])
+    renderPanel()
+
+    const summary = await screen.findByText('思考过程')
+    const details = summary.closest('details')
+    expect(details).not.toBeNull()
+    // 默认折叠，与正文气泡区分。
+    expect(details).not.toHaveAttribute('open')
+    fireEvent.click(summary)
+    expect(details).toHaveAttribute('open')
+    expect(screen.getByText('推理：先读 active 版本')).toBeInTheDocument()
+  })
+
+  it('marks a pending permission request as a prominent alert', async () => {
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'awaiting_permission' }),
+    ])
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'permission', 'agent', {
+        request_id: 'r1',
+        status: 'pending',
+        tool_call: { title: 'Bash' },
+        options: [{ optionId: 'o1', name: '允许一次', kind: 'allow_once' }],
+      }),
+    ])
+    renderPanel()
+
+    // pending 权限卡用 role=alert + 「需要你的确认」徽标，避免被忽略。
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('需要你的确认')
+    expect(alert).toHaveTextContent('Bash')
   })
 
   it('answers a permission request inline', async () => {
@@ -242,6 +283,18 @@ describe('StudioChatPanel', () => {
       })
     )
     expect(await screen.findByText('变更摘要')).toBeInTheDocument()
+  })
+
+  it('pushes the Studio node selection to the active session context', async () => {
+    renderPanel({ selectedNodeKey: 'node-a' })
+    // 自动打开最近会话 s1 后，选中节点同步到该会话上下文。
+    await waitFor(() =>
+      expect(mockApi.updateStudioChatContext).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        'node-a'
+      )
+    )
   })
 
   it('shows cancel while running and disables the input', async () => {

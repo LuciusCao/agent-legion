@@ -14,8 +14,8 @@ from server.app.jobs.queries.studio_chat_messages import StudioChatMessageQuerie
 
 _SESSION_COLUMNS = (
     "id, workspace_id, user_id, agent_id, title, status, acp_session_id,"
-    " capability_snapshot_json, allow_all_permissions, mcp_status, error_detail,"
-    " created_at, updated_at, closed_at"
+    " capability_snapshot_json, allow_all_permissions, mcp_status,"
+    " selected_node_key, error_detail, created_at, updated_at, closed_at"
 )
 
 
@@ -63,6 +63,7 @@ class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
             "acp_session_id",
             "allow_all_permissions",
             "mcp_status",
+            "selected_node_key",
             "error_detail",
             "closed_at",
         }

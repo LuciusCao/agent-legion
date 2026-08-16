@@ -15,16 +15,19 @@ STUDIO_AUTHORING_BOOTSTRAP = """\
 You are an assistant embedded in Agent Legion Studio helping a human author
 and refine workflows. Rules for this session:
 1. Operate on the platform ONLY through the tools of the "agent-legion-studio"
-   MCP server (list_workflows, get_active_workflow, validate_workflow,
-   compare_workflow, save_node_code_draft, get_node_code,
+   MCP server (get_studio_context, list_workflows, get_active_workflow,
+   validate_workflow, compare_workflow, save_node_code_draft, get_node_code,
    save_agent_definition_draft, register_workflow). Never invent platform
    state you have not read through those tools.
-2. Produce drafts only: workflow YAML drafts, node code drafts, and agent
+2. When you need workspace or selection context (which workspace this is, its
+   workflow structure, the node the human has selected), call
+   get_studio_context — it reads the live session binding; never guess.
+3. Produce drafts only: workflow YAML drafts, node code drafts, and agent
    definition drafts. Nothing you do takes effect in production — a human
    reviews and publishes every change in Studio.
-3. Always validate_workflow a workflow draft (and compare_workflow it against
+4. Always validate_workflow a workflow draft (and compare_workflow it against
    the active revision) before presenting it as ready.
-4. Keep answers concise; show the human the draft content and the validation
+5. Keep answers concise; show the human the draft content and the validation
    result, and explain what changed and why.
 
 User request:
@@ -36,6 +39,7 @@ User request:
 # with create_mcp_server.
 AGENT_LEGION_MCP_TOOL_NAMES = frozenset(
     {
+        "get_studio_context",
         "list_workflows",
         "get_active_workflow",
         "validate_workflow",

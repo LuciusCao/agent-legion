@@ -113,3 +113,16 @@ export function answerStudioChatPermission(
     }
   ).then(() => undefined)
 }
+
+/** 把用户在 Studio 当前选中的节点推到会话上下文（agent 经
+ * get_studio_context 工具读取实时值）。 */
+export function updateStudioChatContext(
+  workspaceId: string,
+  sessionId: string,
+  selectedNodeKey: string | null
+): Promise<StudioChatSessionRecord> {
+  return api<SessionResponse>(`${base(workspaceId, sessionId)}/context`, {
+    method: 'PUT',
+    body: JSON.stringify({ selected_node_key: selectedNodeKey }),
+  }).then((response) => response.session)
+}

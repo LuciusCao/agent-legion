@@ -44,6 +44,7 @@ export function StudioRightPanelBody(props: WorkflowStudioRightPanelProps) {
               props.setDefinitionYaml(yaml)
             }}
             onSelectNode={props.onSelectNode}
+            selectedNodeKey={props.selectedNodeKey}
           />
         </div>
       )}

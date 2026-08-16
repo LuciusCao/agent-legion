@@ -48,9 +48,20 @@ class _ToolClient:
 
 
 def create_mcp_server(config: McpServerConfig) -> FastMCP:
-    """Build the FastMCP server exposing the 8 studio-agent tools."""
+    """Build the FastMCP server exposing the studio-agent tools."""
     mcp = FastMCP("agent-legion-studio")
     client = _ToolClient(config)
+
+    @mcp.tool()
+    def get_studio_context() -> str:
+        """Current Studio session context: the bound workspace, its active
+        workflow structure (nodes and capabilities), and the node the human
+        currently has selected in Studio (live value on every call). Takes no
+        workspace_id — the session binding decides which workspace you operate
+        on. Call this first when you need workspace or selection context."""
+        if config.session_id is None:
+            return "get_studio_context is unavailable: no chat session bound"
+        return client.call("GET", f"/chat-sessions/{config.session_id}/context")
 
     @mcp.tool()
     def list_workflows() -> str:

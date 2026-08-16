@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useSettingStore } from '../../../stores/settingStore'
 import { useStudioChat } from './useStudioChat'
+import { useStudioContextSync } from './useStudioContextSync'
 import { StudioChatSessionBar } from './StudioChatSessionBar'
 import { StudioChatMessageList } from './StudioChatMessageList'
 import { StudioChatRunBar } from './StudioChatRunBar'
@@ -10,6 +11,7 @@ import styles from './StudioChatPanel.module.css'
 type Props = {
   onApplyWorkflowDraft: (yaml: string) => void
   onSelectNode?: (nodeKey: string) => void
+  selectedNodeKey?: string | null
 }
 
 /** Studio 右栏「Agent 助手」tab：ACP 对话面板。agent 只能产草稿，
@@ -17,6 +19,11 @@ type Props = {
 export function StudioChatPanel(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
   const chat = useStudioChat(workspaceId)
+  useStudioContextSync(
+    workspaceId,
+    chat.activeSessionId,
+    props.selectedNodeKey ?? null
+  )
   const [chosenAgentId, setChosenAgentId] = useState('')
   // 未手动选择时跟随 agent 列表第一项（picker 只列本机可用 agent）。
   const selectedAgentId = chosenAgentId || (chat.agents[0]?.id ?? '')

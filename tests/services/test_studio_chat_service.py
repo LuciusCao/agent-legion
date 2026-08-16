@@ -12,7 +12,8 @@ import pytest
 from acp.schema import McpServerStdio
 
 from server.app.auth.scoped_tokens import authenticate_scoped_token
-from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
+from server.app.studio_chat import permissions as permissions_module
 from server.app.studio_chat import service as service_module
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
@@ -106,7 +107,46 @@ LOCAL_BASH_MIMIC_SCRIPT = {
     ],
 }
 
+# A local read-only tool call (ACP kind "read"/"search" — the Read/Glob/Grep
+# class): auto-approved without a human roundtrip (side-effect-free).
+READ_ONLY_PERMISSION_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {"toolCallId": "tc-read", "title": "Read", "kind": "read"},
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
 WAIT_CANCEL_SCRIPT = {"wait_for_cancel": True, "on_prompt": []}
+
+THOUGHT_SCRIPT = {
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "先想"},
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "一下"},
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "答案"},
+            }
+        },
+    ],
+}
 
 
 class RecordingBus:
@@ -195,6 +235,42 @@ def _new_session_mcp_env(sink: list[dict]) -> dict[str, str]:
     raise AssertionError("session/new never reached the fake agent")
 
 
+def test_run_token_is_bound_to_the_session_workspace(chat, job_db) -> None:
+    """Schema v45: the per-session run token records the workspace binding so
+    the tool surface can refuse other workspaces for it (STUDIO-AGENT-001)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    service.create_session(workspace_id, user_id, "fake-agent")
+
+    token = _new_session_mcp_env(_read_sink(script_path))["AGENT_LEGION_STUDIO_AGENT_TOKEN"]
+    resolved = authenticate_scoped_token(job_db, token)
+    assert resolved is not None
+    assert resolved["scoped_workspace_id"] == workspace_id
+
+
+def test_mcp_env_carries_the_chat_session_id(chat) -> None:
+    """The get_studio_context tool resolves its session through this env."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    env = _new_session_mcp_env(_read_sink(script_path))
+    assert env["AGENT_LEGION_MCP_SESSION_ID"] == session["id"]
+
+
+def test_set_selected_node_roundtrip(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    updated = service.set_selected_node(session["id"], workspace_id, "node-a")
+    assert updated["selected_node_key"] == "node-a"
+    cleared = service.set_selected_node(session["id"], workspace_id, None)
+    assert cleared["selected_node_key"] is None
+    with pytest.raises(NotFoundError):
+        service.set_selected_node(session["id"], "other-ws", "node-a")
+
+
 def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
     service, bus, register, workspace_id, user_id = chat
     script_path = register(TEXT_SCRIPT)
@@ -242,6 +318,31 @@ def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
     assert authenticate_scoped_token(job_db, token) is None
     with pytest.raises(ConflictError):
         service.send_message(session["id"], workspace_id, "again")
+
+
+def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:
+    """agent_thought_chunk 不再丢弃：按 turn 聚合落库为一条 thought 消息
+    （前端可折叠），与正文 text 消息分开，且经 SSE 透传。"""
+    service, bus, register, workspace_id, user_id = chat
+    register(THOUGHT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "think it through")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    messages = service.list_messages(session["id"], workspace_id)
+    thoughts = [m for m in messages if m["kind"] == "thought"]
+    assert len(thoughts) == 1
+    assert thoughts[0]["role"] == "agent"
+    assert thoughts[0]["content"]["text"] == "先想一下"
+    agent_texts = [m for m in messages if m["kind"] == "text" and m["role"] == "agent"]
+    assert len(agent_texts) == 1
+    assert agent_texts[0]["content"]["text"] == "答案"
+    thought_events = [
+        payload
+        for _, payload in bus.events
+        if payload.get("type") == "message" and payload["message"].get("kind") == "thought"
+    ]
+    assert thought_events
 
 
 def test_run_without_mcp_tool_call_is_flagged_unverified(chat) -> None:
@@ -310,6 +411,35 @@ def test_human_permission_forward_answer_and_allow_all(chat) -> None:
         e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
     ]
     assert outcomes[-1] == {"outcome": "selected", "optionId": "allow"}
+
+
+def test_read_only_tool_permission_auto_approves(chat) -> None:
+    """Read 类只读本地工具（kind=read/search）自动批准，不经人工确认；
+    写/Bash 类仍走人工（由 HUMAN_PERMISSION_SCRIPT 系列测试覆盖）。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(READ_ONLY_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "read the draft")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "selected", "optionId": "allow"}]
+    decisions = [
+        m["content"]["decision"]
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "resolved"
+    ]
+    assert decisions and decisions[-1]["via"] == "auto_read_only"
+    # 只读自动批准不park会话、也不计为 MCP 可见性信号。
+    assert service.get_session(session["id"])["mcp_status"] == "unverified"
+
+
+def test_permission_timeout_is_bounded() -> None:
+    """Guard: the human permission wait must stay short enough that an
+    abandoned tab cannot park a turn for long (#91 follow-up: 900s → 120s)."""
+    assert permissions_module.PERMISSION_TIMEOUT_SECONDS == 120
 
 
 def test_local_command_mentioning_tool_names_is_not_auto_approved(chat) -> None:
@@ -504,7 +634,7 @@ def test_unanswered_permission_auto_denies_after_timeout(chat, monkeypatch) -> N
     park the waiter thread forever: the timeout auto-denies it (#91)."""
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(HUMAN_PERMISSION_SCRIPT)
-    monkeypatch.setattr(service_module, "PERMISSION_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(permissions_module, "PERMISSION_TIMEOUT_SECONDS", 0.2)
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.send_message(session["id"], workspace_id, "run ls")
 

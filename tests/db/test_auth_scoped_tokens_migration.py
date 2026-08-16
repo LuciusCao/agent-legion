@@ -25,6 +25,7 @@ def test_auth_scoped_tokens_table_exists() -> None:
         "user_id",
         "scope",
         "origin",
+        "workspace_id",
         "expires_at",
         "revoked_at",
         "created_at",
@@ -44,6 +45,8 @@ def test_v41_database_upgrades_via_init_db() -> None:
         conn.execute("alter table auth_scoped_tokens drop column origin")
         # Dropping the column also drops the idx_auth_scoped_tokens_id index.
         conn.execute("alter table auth_scoped_tokens drop column id")
+        # Pre-v45 databases also lack the workspace binding column.
+        conn.execute("alter table auth_scoped_tokens drop column workspace_id")
         conn.execute("insert into users(id, username) values ('u-legacy', 'legacy-user')")
         conn.execute(
             "insert into auth_scoped_tokens(token_hash, user_id, scope, expires_at)"
@@ -54,7 +57,7 @@ def test_v41_database_upgrades_via_init_db() -> None:
 
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
-            "select id, origin from auth_scoped_tokens where token_hash='legacy-hash'"
+            "select id, origin, workspace_id from auth_scoped_tokens where token_hash='legacy-hash'"
         ).fetchone()
         indexes = {
             r["indexname"]
@@ -66,13 +69,15 @@ def test_v41_database_upgrades_via_init_db() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    # Existing rows survive with origin='run' and a backfilled public id.
+    # Existing rows survive with origin='run', a backfilled public id, and no
+    # workspace binding (NULL = unbound legacy/self-service token).
     assert row is not None
     assert row["origin"] == "run"
     assert row["id"]
+    assert row["workspace_id"] is None
     assert "idx_auth_scoped_tokens_id" in indexes
     assert migration is not None
-    assert migration["name"] == "hmac_connection_type"
+    assert migration["name"] == "studio_chat_context"
 
     # Idempotent on replay (init_db runs at every backend startup).
     init_db(TEST_DATABASE_URL)

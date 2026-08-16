@@ -14,6 +14,7 @@ from typing import Any
 from server.app.auth.scoped_tokens import revoke_scoped_token
 from server.app.jobs import JobQueries
 from server.app.studio_chat.acp_session import AcpSessionHandle
+from server.app.studio_chat.streaming import TurnStreamState
 
 logger = logging.getLogger(__name__)
 
@@ -34,13 +35,9 @@ class SessionRuntime:
         self.token = token
         self.lock = threading.Lock()
         self.pending_permissions: dict[str, PendingPermission] = {}
-        # Streaming agent text coalescing: chunks of one turn accumulate onto
-        # a single message row (the ACP SDK resolves the prompt response
-        # before the last session/update handler tasks run, so buffer-until-
-        # turn-end would lose trailing chunks; an open row tolerates any
-        # ordering). Turn end closes the open message.
-        self.open_text_message_id: str | None = None
-        self.open_text: str = ""
+        # Streaming chunk coalescing (agent text + thought): each kind folds
+        # into one message row per turn; turn end closes the open slots.
+        self.stream = TurnStreamState()
         self.mcp_observed = False
 
 

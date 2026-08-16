@@ -138,6 +138,12 @@ def test_anonymous_requests_return_401(anon_client) -> None:
         anon_client.post(f"{base}/sessions/s-1/permissions/r-1", json={"deny": True}).status_code
         == 401
     )
+    assert (
+        anon_client.put(
+            f"{base}/sessions/s-1/context", json={"selected_node_key": None}
+        ).status_code
+        == 401
+    )
 
 
 def test_non_member_gets_404(client, job_db, tmp_path) -> None:
@@ -171,6 +177,12 @@ def test_viewer_reads_but_cannot_write(client, job_db, tmp_path) -> None:
             == 403
         )
         assert member.post(f"{base}/sessions/{session_id}/cancel").status_code == 403
+        assert (
+            member.put(
+                f"{base}/sessions/{session_id}/context", json={"selected_node_key": "n"}
+            ).status_code
+            == 403
+        )
         assert (
             member.post(
                 f"{base}/sessions/{session_id}/permissions/allow-all", json={"enabled": True}
@@ -301,6 +313,43 @@ def test_cross_workspace_session_is_not_found(client, tmp_path) -> None:
         )
     finally:
         client.delete(_session_url(workspace_a, session_id))
+
+
+def test_context_update_route_roundtrip_and_scope_guard(client, tmp_path) -> None:
+    """PUT context records the live Studio node selection; the session's own
+    scoped token (the agent) must not rewrite the context it reads back."""
+    script_path = _register_fake_agent(client, tmp_path)
+    workspace_id = _create_workspace(client)
+    session_id = _create_session(client, workspace_id)
+    url = _session_url(workspace_id, session_id)
+    try:
+        response = client.put(f"{url}/context", json={"selected_node_key": "node-a"})
+        assert response.status_code == 200, response.text
+        assert response.json()["session"]["selected_node_key"] == "node-a"
+        assert client.get(url).json()["session"]["selected_node_key"] == "node-a"
+        cleared = client.put(f"{url}/context", json={"selected_node_key": None})
+        assert cleared.status_code == 200
+        assert cleared.json()["session"]["selected_node_key"] is None
+
+        sink = [
+            json.loads(line)
+            for line in Path(str(script_path) + ".sink.jsonl").read_text().splitlines()
+        ]
+        new_session = next(
+            e["received"] for e in sink if e.get("received", {}).get("method") == "session/new"
+        )
+        env = {
+            item["name"]: item["value"] for item in new_session["params"]["mcpServers"][0]["env"]
+        }
+        scoped = client.put(
+            f"{url}/context",
+            json={"selected_node_key": "node-b"},
+            headers={"Authorization": f"Bearer {env['AGENT_LEGION_STUDIO_AGENT_TOKEN']}"},
+        )
+        assert scoped.status_code == 403
+        assert client.get(url).json()["session"]["selected_node_key"] is None
+    finally:
+        client.delete(url)
 
 
 def test_create_session_with_unknown_agent_is_400(client, tmp_path) -> None:
