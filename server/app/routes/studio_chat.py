@@ -13,7 +13,8 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from server.app.auth.dependencies import reject_studio_agent_scope, require_workspace_access
+from server.app.auth.dependencies import reject_studio_agent_scope
+from server.app.auth.workspace_access import require_workspace_access
 from server.app.events import JobEventManager
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.studio_chat_contracts import (

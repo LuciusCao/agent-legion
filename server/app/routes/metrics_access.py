@@ -1,11 +1,11 @@
 """Workspace membership guard for query-param-scoped metrics requests.
 
-``require_workspace_access`` only inspects the ``workspace_id`` *path*
-parameter; ``/api/metrics/overview`` takes the workspace scope as a query
-parameter, so the membership check lives here. Global scope (no
-``workspace_id``) is admin-only: members see only workspaces they belong to.
-Non-members get 404 (not 403) so workspace existence cannot be enumerated —
-same semantics as the path-parameter guard.
+``/api/metrics/overview`` takes the workspace scope as a query parameter.
+``require_workspace_access`` honours the ``workspace_id`` query parameter as
+well, so the member case is already covered there; this guard adds the
+remaining rule: global scope (no ``workspace_id``) is admin-only, members see
+only workspaces they belong to. Non-members get 404 (not 403) so workspace
+existence cannot be enumerated — same semantics as the path-parameter guard.
 """
 
 from __future__ import annotations

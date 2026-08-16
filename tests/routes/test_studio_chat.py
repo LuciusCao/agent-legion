@@ -2,13 +2,34 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import sys
 import time
 from pathlib import Path
 
+import pytest
+
 FAKE_AGENT = Path(__file__).resolve().parents[1] / "helpers" / "fake_acp_agent.py"
 CSRF = {"x-agent-legion-request": "1"}
+
+# Sessions created through _create_session during the current test, drained by
+# the autouse cleanup below.
+_CREATED_SESSIONS: list[tuple[str, str]] = []
+
+
+@pytest.fixture(autouse=True)
+def _close_created_sessions(client):
+    """Per-test backstop: a mid-test assertion failure must not orphan the
+    fake ACP subprocess on the shared app (#91)."""
+    _CREATED_SESSIONS.clear()
+    yield
+    for workspace_id, session_id in _CREATED_SESSIONS:
+        # Best-effort: the test's own failure is the signal that matters.
+        with contextlib.suppress(Exception):
+            client.delete(_session_url(workspace_id, session_id))
+    _CREATED_SESSIONS.clear()
+
 
 ECHO_SCRIPT = {
     "on_prompt": [
@@ -83,7 +104,9 @@ def _create_session(client, workspace_id: str) -> str:
         json={"agent_id": "fake-agent", "title": "t"},
     )
     assert response.status_code == 200, response.text
-    return response.json()["session"]["id"]
+    session_id = response.json()["session"]["id"]
+    _CREATED_SESSIONS.append((workspace_id, session_id))
+    return session_id
 
 
 def _session_url(workspace_id: str, session_id: str) -> str:

@@ -2,7 +2,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Request
 
-from server.app.auth.dependencies import require_workspace_access
+from server.app.auth.workspace_access import require_workspace_access
 from server.app.routes.metrics_access import enforce_workspace_membership
 from server.app.routes.metrics_contracts import (
     MetricBucket,
