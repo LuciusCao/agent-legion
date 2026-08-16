@@ -98,13 +98,3 @@ class StudioChatQueriesMixin(StudioChatMessageQueriesMixin):
                 (session_id,),
             ).fetchone()
         return row is not None
-
-    def bind_scoped_token_workspace(self, token_hash: str, workspace_id: str) -> None:
-        """Bind a run-scoped token to the chat session's workspace (schema v45)."""
-        # Lives here rather than in ScopedTokenQueriesMixin (file budget): only
-        # the studio chat flow writes the binding; self-service tokens stay NULL.
-        with self.connect() as conn:
-            conn.execute(
-                "update auth_scoped_tokens set workspace_id=%s where token_hash=%s",
-                (workspace_id, token_hash),
-            )

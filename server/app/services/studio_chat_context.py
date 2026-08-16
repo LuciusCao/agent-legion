@@ -20,23 +20,32 @@ if TYPE_CHECKING:
 
 
 def build_session_context(
-    job_db: JobQueries, session_id: str, bound_workspace_id: str | None
+    job_db: JobQueries, session_id: str, user: dict[str, Any]
 ) -> dict[str, Any]:
     """Assemble the context payload for one chat session.
 
-    A bound token may only read sessions of its own workspace; a mismatch is a
-    404 (not 403) so other workspaces' session ids cannot be probed.
+    Authorization mirrors require_workspace_access: a bound run token may only
+    read sessions of its own workspace; an unbound self-service token must
+    belong to the session's workspace (admins pass). Mismatches are 404 (not
+    403) so other workspaces' session ids cannot be probed.
     """
     session = job_db.get_studio_chat_session(session_id)
-    if session is None or (
-        bound_workspace_id is not None and session["workspace_id"] != bound_workspace_id
-    ):
+    if session is None or not _may_read_session(job_db, session, user):
         raise NotFoundError("Chat session not found")
     return {
         "workspace_id": session["workspace_id"],
         "selected_node_key": session.get("selected_node_key"),
         "workflow": _active_workflow_summary(job_db, str(session["workspace_id"])),
     }
+
+
+def _may_read_session(job_db: JobQueries, session: dict[str, Any], user: dict[str, Any]) -> bool:
+    bound = user.get("scoped_workspace_id")
+    if bound is not None:
+        return bool(session["workspace_id"] == bound)
+    if user.get("role") == "admin":
+        return True
+    return job_db.get_workspace_role(str(session["workspace_id"]), str(user["id"])) is not None
 
 
 def _active_workflow_summary(job_db: JobQueries, workspace_id: str) -> dict[str, Any] | None:

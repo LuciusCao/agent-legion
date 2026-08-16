@@ -3,9 +3,9 @@
 ``GET /api/studio-agent/tools/chat-sessions/{session_id}/context`` returns the
 session's bound workspace, the human's live Studio node selection, and the
 active workflow's structural summary. A workspace-bound run token may only
-read sessions of its own workspace (404 on foreign sessions, so bound tokens
-cannot probe other workspaces); unbound self-service tokens keep the previous
-behaviour.
+read sessions of its own workspace; an unbound self-service token must belong
+to the session's workspace (admins pass). Mismatches are 404 so session ids
+of other workspaces cannot be probed.
 """
 
 from __future__ import annotations
@@ -122,8 +122,9 @@ def test_bound_token_gets_404_on_foreign_workspace_session(client, job_db, tmp_p
 
 
 def test_unbound_self_service_token_keeps_legacy_behaviour(client, job_db, tmp_path) -> None:
-    """Tokens minted via /api/studio-agent-tokens carry no workspace binding
-    and may read any session's context (pre-v45 semantics)."""
+    """Tokens minted via /api/studio-agent-tokens carry no workspace binding;
+    held by an admin they read any session's context (membership rule for
+    non-admin holders is covered by the next test)."""
     _register_fake_agent(client, tmp_path)
     workspace_id = _create_workspace(client)
     session_id = _create_session(client, workspace_id)
@@ -136,6 +137,28 @@ def test_unbound_self_service_token_keeps_legacy_behaviour(client, job_db, tmp_p
         assert response.status_code == 200, response.text
         assert response.json()["workspace_id"] == workspace_id
         assert response.json()["selected_node_key"] is None
+    finally:
+        client.delete(f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}")
+
+
+def test_unbound_token_requires_workspace_membership(client, job_db, tmp_path) -> None:
+    """P0-1: an unbound self-service token is not a free pass — a non-member
+    holder gets 404 (session ids cannot be probed), a workspace member (even
+    a viewer) reads the context."""
+    _register_fake_agent(client, tmp_path)
+    workspace_id = _create_workspace(client)
+    session_id = _create_session(client, workspace_id)
+    outsider_id = str(job_db.create_user("ctx-outsider", password_hash=None)["id"])
+    outsider = client.__class__(client.app)
+    outsider.headers["authorization"] = (
+        f"Bearer {scoped_tokens.mint_scoped_token(job_db, outsider_id, origin='user')}"
+    )
+    try:
+        assert outsider.get(_context_url(session_id)).status_code == 404
+        job_db.upsert_workspace_member(workspace_id, outsider_id, "viewer")
+        response = outsider.get(_context_url(session_id))
+        assert response.status_code == 200, response.text
+        assert response.json()["workspace_id"] == workspace_id
     finally:
         client.delete(f"/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}")
 

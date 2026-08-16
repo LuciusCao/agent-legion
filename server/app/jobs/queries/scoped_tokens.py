@@ -18,15 +18,18 @@ class ScopedTokenQueriesMixin(JobQueriesBase):
         expires_at: datetime,
         *,
         origin: str = "run",
+        workspace_id: str | None = None,
     ) -> str:
         """Insert a scoped token row and return its public (non-digest) id."""
         # str(uuid4()) matches the DB default gen_random_uuid()::text format.
+        # workspace_id rides the same INSERT: the run token's workspace binding
+        # is born atomically with the row, never in a follow-up UPDATE.
         token_id = str(uuid4())
         with self.connect() as conn:
             conn.execute(
                 "insert into auth_scoped_tokens(id, token_hash, user_id, scope, origin,"
-                " expires_at) values (%s, %s, %s, %s, %s, %s)",
-                (token_id, token_hash, user_id, scope, origin, expires_at),
+                " workspace_id, expires_at) values (%s, %s, %s, %s, %s, %s, %s)",
+                (token_id, token_hash, user_id, scope, origin, workspace_id, expires_at),
             )
         return token_id
 
