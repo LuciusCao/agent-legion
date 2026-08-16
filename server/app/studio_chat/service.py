@@ -1,13 +1,14 @@
 """Studio chat session service (phase 3 chunk 4): lifecycle + run state machine.
 
 One chat session = one ACP agent subprocess (AcpSessionHandle) plus its
-persisted timeline. The service owns the registry of live handles, applies
-the permission policy (agent-legion MCP tool calls auto-approve — the scoped
-token is already the authority boundary; everything else goes to the human,
-with a per-session allow-all switch), tracks the behavioural MCP-visibility
-smoke signal (a run that never showed an agent-legion tool call ends with
-mcp_status='unverified' instead of silently succeeding), and forwards
-everything to SSE subscribers through the shared event bus.
+persisted timeline. The service owns the registry of live handles, delegates
+the permission policy to studio_chat.permissions (MCP tool calls auto-approve —
+the scoped token is already the authority boundary; local read-only kinds
+auto-approve; everything else goes to the human, with a per-session allow-all
+switch), tracks the behavioural MCP-visibility smoke signal (a run that never
+showed an agent-legion tool call ends with mcp_status='unverified' instead of
+silently succeeding), and forwards everything to SSE subscribers through the
+shared event bus.
 
 All callback entry points (on_ready/on_update/...) run on the session's ACP
 thread; public entry points run on FastAPI worker threads. Mutable runtime
@@ -23,7 +24,6 @@ import sys
 import threading
 from datetime import UTC, datetime
 from typing import Any
-from uuid import uuid4
 
 from server.app.auth.scoped_tokens import mint_scoped_token, revoke_scoped_token
 from server.app.events.bus import EventBus
@@ -34,17 +34,16 @@ from server.app.studio_chat.acp_session import AcpSessionHandle, build_mcp_serve
 from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.callbacks import ServiceCallbacks
 from server.app.studio_chat.payloads import (
-    pick_allow_option,
     serialize_message,
     serialize_session,
 )
+from server.app.studio_chat.permissions import handle_permission_request
 from server.app.studio_chat.prompts import (
     STUDIO_AUTHORING_BOOTSTRAP,
     looks_like_agent_legion_tool_call,
 )
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.runtime import (
-    PendingPermission,
     SessionRuntime,
     teardown_runtime,
 )
@@ -54,10 +53,6 @@ logger = logging.getLogger(__name__)
 
 # Time to wait for the agent subprocess to finish initialize + session/new.
 SESSION_START_TIMEOUT_SECONDS = 60
-# A human permission prompt that is never answered (browser closed, tab
-# abandoned) must not park the ACP thread-pool thread and the agent subprocess
-# forever: after the timeout the request is auto-denied.
-PERMISSION_TIMEOUT_SECONDS = 900
 
 
 def studio_chat_channel(session_id: str) -> str:
@@ -329,84 +324,7 @@ class StudioChatService:
     def _on_permission_request(
         self, session_id: str, tool_call: dict[str, Any], options: list[dict[str, Any]]
     ) -> dict[str, Any]:
-        if self._is_agent_legion_tool_call(tool_call):
-            runtime = self._runtime(session_id)
-            if runtime is not None:
-                with runtime.lock:
-                    runtime.mcp_observed = True
-            self._mark_mcp_verified(session_id)
-            return self._auto_approve(session_id, tool_call, options, decision="auto_approved")
-        session = self._db.get_studio_chat_session(session_id) or {}
-        if session.get("allow_all_permissions"):
-            return self._auto_approve(session_id, tool_call, options, decision="allow_all")
-        request_id = uuid4().hex
-        pending = PendingPermission(request_id)
-        runtime = self._runtime(session_id)
-        if runtime is None:
-            return {"deny": True}
-        with runtime.lock:
-            runtime.pending_permissions[request_id] = pending
-        self._append_message(
-            session_id,
-            "permission",
-            "agent",
-            {
-                "request_id": request_id,
-                "status": "pending",
-                "tool_call": tool_call,
-                "options": options,
-            },
-        )
-        self._db.update_studio_chat_session(session_id, status="awaiting_permission")
-        self._publish_session(session_id)
-        try:
-            settled = pending.event.wait(timeout=PERMISSION_TIMEOUT_SECONDS)
-            if not settled:
-                logger.warning("studio chat permission %s timed out; auto-denied", request_id)
-                pending.decision = {"deny": True, "via": "timeout"}
-        finally:
-            with runtime.lock:
-                runtime.pending_permissions.pop(request_id, None)
-            # Only the awaiting_permission → running transition is ours: a
-            # close (or fatal error) that settled this waiter as denied must
-            # not be overwritten back to running (ghost live session).
-            current = self._db.get_studio_chat_session(session_id) or {}
-            if current.get("status") == "awaiting_permission":
-                self._db.update_studio_chat_session(session_id, status="running")
-                self._publish_session(session_id)
-        decision = pending.decision
-        self._append_message(
-            session_id,
-            "permission",
-            "user",
-            {"request_id": request_id, "status": "resolved", "decision": decision},
-        )
-        return decision
-
-    def _auto_approve(
-        self,
-        session_id: str,
-        tool_call: dict[str, Any],
-        options: list[dict[str, Any]],
-        *,
-        decision: str,
-    ) -> dict[str, Any]:
-        option = pick_allow_option(options)
-        if option is None:
-            outcome: dict[str, Any] = {"deny": True}
-        else:
-            outcome = {"option_id": option["optionId"]}
-        self._append_message(
-            session_id,
-            "permission",
-            "system",
-            {
-                "status": "resolved",
-                "decision": {**outcome, "via": decision},
-                "tool_call": tool_call,
-            },
-        )
-        return outcome
+        return handle_permission_request(self, session_id, tool_call, options)
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
         self._close_open_stream_messages(session_id)

@@ -162,6 +162,15 @@
   font-size: 12px;
   color: #424242;
 }
+.permissionPending {
+  border-color: #ef6c00;
+  background: #fff3e0;
+}
+.permissionBadge {
+  color: #b26a00;
+  font-weight: 600;
+  margin-right: 6px;
+}
 .permissionTitle {
   margin-bottom: 8px;
 }

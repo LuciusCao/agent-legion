@@ -18,9 +18,17 @@ export function StudioChatPermission(props: Props) {
     option.kind.startsWith('allow')
   )
   const buttons = allowOptions.length > 0 ? allowOptions : permission.options
+  const pending = !permission.resolved
   return (
-    <div className={styles.permission} role="group" aria-label="权限请求">
+    <div
+      className={`${styles.permission}${pending ? ` ${styles.permissionPending}` : ''}`}
+      role={pending ? 'alert' : 'group'}
+      aria-label="权限请求"
+    >
       <div className={styles.permissionTitle}>
+        {pending && (
+          <span className={styles.permissionBadge}>需要你的确认</span>
+        )}
         Agent 请求权限：<code>{permission.toolTitle}</code>
       </div>
       {permission.resolved ? (
