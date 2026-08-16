@@ -58,15 +58,6 @@ export function createStudioChatSession(
   }).then((response) => response.session)
 }
 
-export function closeStudioChatSession(
-  workspaceId: string,
-  sessionId: string
-): Promise<StudioChatSessionRecord> {
-  return api<SessionResponse>(base(workspaceId, sessionId), {
-    method: 'DELETE',
-  }).then((response) => response.session)
-}
-
 export function fetchStudioChatMessages(
   workspaceId: string,
   sessionId: string,
