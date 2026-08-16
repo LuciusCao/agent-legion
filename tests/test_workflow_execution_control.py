@@ -451,7 +451,7 @@ def _make_worker(
         kind="code",
         global_capacity=2,
         capabilities={
-            node.capability: CodeCapabilityConfig(path="workflow_nodes/example_intake.py")
+            node.capability: CodeCapabilityConfig()
             for definition in definitions
             for node in definition.nodes.values()
         },
@@ -562,6 +562,12 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
                 """,
                 (workspace_id, "branched", node.key, 1),
             )
+    # Since #96 every code node needs published code to dispatch; the
+    # _FakeExecutor never reads the text.
+    from tests.workers.helpers import _seed_trivial_node_code
+
+    for node in definition.nodes.values():
+        _seed_trivial_node_code(str(queries.path), workspace_id, "branched", node.key)
 
     worker = _make_worker(tmp_path, queries, [definition])
     worker._scan_entries = ([definition], [])

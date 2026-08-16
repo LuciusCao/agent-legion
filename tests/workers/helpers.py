@@ -76,7 +76,7 @@ def _make_worker(
     executor_def = CodeExecutorConfig(
         kind="code",
         global_capacity=2,
-        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/example_intake.py")},
+        capabilities={"fetch": CodeCapabilityConfig()},
     )
     registry = ExecutorRegistry(
         executors={"code-default": executor},
@@ -224,3 +224,24 @@ def _make_fake_skill(skill_dir: Path) -> None:
         "(job_dir / 'keywords_report.json').write_text('{\"summary\": {}}')\n"
     )
     validator.chmod(0o755)
+
+
+def _seed_trivial_node_code(
+    database_url: str, workspace_id: str, workflow_key: str, node_key: str
+) -> None:
+    """Publish a no-op node code so a code-executor node can dispatch.
+
+    Since #96 every code node requires published code (workspace version or
+    global factory seed); the RecordingExecutor never reads the text.
+    """
+    from server.app.services.node_codes import NodeCodeService
+
+    codes = NodeCodeService(database_url)
+    codes.save_draft(
+        workspace_id,
+        workflow_key,
+        node_key,
+        "def run(job, job_dir, runtime):\n    pass\n",
+        "test seed",
+    )
+    codes.publish(workspace_id, workflow_key, node_key)

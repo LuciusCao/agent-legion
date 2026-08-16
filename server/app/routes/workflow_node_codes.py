@@ -16,7 +16,6 @@ from server.app.routes.workflow_node_code_contracts import (
     WorkflowNodeCodeVersionsResponse,
     WorkflowNodeCodeVersionSummary,
 )
-from server.app.services import workflow_node_files
 from server.app.services.job_errors import JobServiceError
 from server.app.services.node_code_template import NODE_CODE_TEMPLATE
 from server.app.services.node_codes import NodeCodeService
@@ -47,16 +46,11 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
             raise HTTPException(status_code=404, detail=f"Unknown workflow node: {node_key}")
         return node.capability
 
-    def _read_builtin_code(capability: str) -> tuple[str, str] | None:
-        """Builtin file (path, content); None when the capability is pathless."""
-        path = workflow_node_files.builtin_code_path(settings.executor_definitions, capability)
-        if path is None:
-            return None
-        nodes_dir = workflow_node_files.workflow_nodes_dir(settings.root_dir)
-        try:
-            return workflow_node_files.read_node_file(nodes_dir, path)
-        except (FileNotFoundError, workflow_node_files.NodeFileError) as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
+    def _read_factory_code(workflow_key: str, node_key: str) -> str | None:
+        """Global factory-seeded node code (demo nodes, #96); None when the
+        node has no factory version."""
+        row = _service().get_global_published(workflow_key, node_key)
+        return str(row["code"]) if row is not None else None
 
     @router.get(
         "/workflow-node-code-template",
@@ -72,7 +66,7 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
     def get_node_code(
         workspace_id: str, workflow_key: str, node_key: str
     ) -> WorkflowNodeCodeResponse:
-        capability = _capability(workspace_id, workflow_key, node_key)
+        _capability(workspace_id, workflow_key, node_key)
         try:
             versions = _service().list_versions(workspace_id, workflow_key, node_key)
         except JobServiceError as exc:
@@ -93,13 +87,12 @@ def create_workflow_node_codes_router(job_db: JobQueries, settings: Settings) ->
             return _response(
                 origin="custom", code=str(published["code"]), version=int(published["version"])
             )
-        builtin = _read_builtin_code(capability)
-        if builtin is None:
-            # Pathless (custom-code-only) capability: no builtin file to show;
+        factory = _read_factory_code(workflow_key, node_key)
+        if factory is None:
+            # No factory seed (custom-code-only capability): nothing to show;
             # the section starts from the SDK template instead.
             return _response(origin="none", code="")
-        path, content = builtin
-        return _response(origin="builtin", code=content, path=path)
+        return _response(origin="builtin", code=factory)
 
     @router.put(
         "/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code",

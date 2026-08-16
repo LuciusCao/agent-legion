@@ -12,7 +12,7 @@ import { useUiStore } from '../../stores/uiStore'
 import { ExecutorVersionsDialog } from './ExecutorVersionsDialog'
 import styles from './AgentsPanel.module.css'
 
-// 当前仅注册了 code executor kind（EXEC-CODE-001）。
+// 当前仅注册了 code executor kind。
 const kinds = ['code']
 
 type Props = {
@@ -35,9 +35,9 @@ type ExecutorDefinitionShape = {
 
 /**
  * Executor 定义编辑器。发布后的 definition 不可变：编辑已发布 Executor 就是
- * 保存一份新草稿再发布。capabilities 用 JSON 文本域编辑（path /
- * timeout_seconds / sandbox_network / config_schema 都在其中），非法 JSON
- * 在提交前拦截。发布/回滚/归档后调度 registry 热刷新，无需重启。
+ * 保存一份新草稿再发布。capabilities 用 JSON 文本域编辑（timeout_seconds /
+ * sandbox_network / config_schema 都在其中；节点代码经 DB 发布流，不再走
+ * path），非法 JSON 在提交前拦截。发布/回滚/归档后调度 registry 热刷新，无需重启。
  */
 export function ExecutorEditor({
   executorId,
@@ -235,7 +235,7 @@ export function ExecutorEditor({
           fullWidth
           multiline
           minRows={6}
-          placeholder='{"clean_items":{"path":"workflow_nodes/example_publish.py"}}'
+          placeholder='{"clean_items":{"timeout_seconds":600}}'
         />
       </div>
       <div className={styles.editorActions}>

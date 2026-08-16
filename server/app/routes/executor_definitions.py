@@ -81,7 +81,7 @@ def create_executor_definitions_router(job_db: JobQueries, settings: Settings) -
     router = APIRouter()
 
     def _service() -> ExecutorDefinitionService:
-        return ExecutorDefinitionService(job_db.path, settings.root_dir)
+        return ExecutorDefinitionService(job_db.path)
 
     def _reload_registry_best_effort(request: Request) -> None:
         # The publish/rollback/archive write is already committed when this

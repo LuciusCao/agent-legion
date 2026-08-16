@@ -2,7 +2,7 @@
 
 Split from ``code.py`` to keep it within its size budget; mirrors the
 ``_code_sandbox.py`` layout (functions take the executor instance and reach
-its internals).
+its internals). Since #96 every code child is the sandboxed child.
 
 Design: ``docs/architecture/node-sdk-and-worker-execution-design.md`` §3/§5.
 Builtin and sandboxed children share one runtime contract: every DB-derived
@@ -46,6 +46,9 @@ def build_runtime(
         "workspace_id": context.workspace_id,
         "workspace": dict(context.workspace),
         "job": dict(context.job),
+        # Host root: nodes resolve machine-relative asset paths against it
+        # instead of ``__file__`` (meaningless for DB-loaded code text).
+        "root_dir": str(executor._repo_root),
         # Section-whitelisted (VAULT-SECRET-001): the sandboxed child is user
         # code, so vault/auth/database/agent_workers sections never cross.
         "settings_config": node_safe_settings_config(executor.settings_config),

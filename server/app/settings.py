@@ -231,5 +231,4 @@ def validate_settings(settings: Settings) -> None:
         settings.executor_runtime,
         settings.config,
         settings.executor_definitions,
-        repo_root=settings.root_dir,
     )

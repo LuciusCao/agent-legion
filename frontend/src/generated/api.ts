@@ -1330,23 +1330,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/workflow-nodes/files/{file_path}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Read Workflow Node File */
-    get: operations['read_workflow_node_file_api_workflow_nodes_files__file_path__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/workflows': {
     parameters: {
       query?: never
@@ -2960,8 +2943,6 @@ export interface components {
       model?: string | null
       /** Name */
       name: string
-      /** Path */
-      path?: string | null
       /** Provider */
       provider?: string | null
       /** Skill */
@@ -2972,8 +2953,6 @@ export interface components {
       skill_ref?: string | null
       /** Thinking */
       thinking?: string | null
-      /** Timeout Seconds */
-      timeout_seconds?: number | null
       /** Tools */
       tools?: string[]
     }
@@ -5075,13 +5054,6 @@ export interface components {
        */
       type: 'modified'
     }
-    /** WorkflowNodeCapabilityReference */
-    WorkflowNodeCapabilityReference: {
-      /** Capability */
-      capability: string
-      /** Executor Id */
-      executor_id: string
-    }
     /** WorkflowNodeChange */
     WorkflowNodeChange: {
       /** Fields */
@@ -5131,8 +5103,6 @@ export interface components {
        * @enum {string}
        */
       origin: 'builtin' | 'custom' | 'none'
-      /** Path */
-      path?: string | null
       /** Version */
       version?: number | null
     }
@@ -5213,15 +5183,6 @@ export interface components {
        * @default
        */
       thinking: string
-    }
-    /** WorkflowNodeFileResponse */
-    WorkflowNodeFileResponse: {
-      /** Capabilities */
-      capabilities?: components['schemas']['WorkflowNodeCapabilityReference'][]
-      /** Content */
-      content: string
-      /** Path */
-      path: string
     }
     /** WorkflowNodeResponse */
     WorkflowNodeResponse: {
@@ -8356,37 +8317,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowNodeCodeTemplateResponse']
-        }
-      }
-    }
-  }
-  read_workflow_node_file_api_workflow_nodes_files__file_path__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        file_path: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowNodeFileResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

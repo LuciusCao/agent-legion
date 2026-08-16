@@ -56,7 +56,7 @@ const publishedVersion: ExecutorVersion = {
     kind: 'code',
     global_capacity: 16,
     capabilities: {
-      clean_items: { path: 'workflow_nodes/example_publish.py' },
+      clean_items: { timeout_seconds: 600 },
     },
   },
   definition_hash: 'deadbeef',

@@ -57,7 +57,6 @@ const executorCatalog = [
     capability_details: [
       {
         name: 'fetch_items',
-        path: 'workflow_nodes/fetch_items.py',
       },
     ],
   },
@@ -100,7 +99,6 @@ describe('WorkflowStudioRightPanel', () => {
     mockApi.mockResolvedValue({
       origin: 'builtin',
       code: 'def run(inputs):\n    return {}\n',
-      path: 'workflow_nodes/fetch_items.py',
       version: null,
       has_draft: false,
     })
@@ -119,9 +117,6 @@ describe('WorkflowStudioRightPanel', () => {
     )
     expect(screen.getByText('基本设置')).toBeInTheDocument()
     expect(screen.getByText('code-default')).toBeInTheDocument()
-    expect(
-      screen.getByText('workflow_nodes/fetch_items.py')
-    ).toBeInTheDocument()
     expect(screen.queryByText('YAML 源码')).not.toBeInTheDocument()
     expect(
       screen.queryByLabelText('输入产物，每行一个')
@@ -234,7 +229,7 @@ describe('WorkflowStudioRightPanel', () => {
       executorCatalog: [
         {
           ...executorCatalog[0],
-          capability_details: [{ name: 'fetch_items', path: null }],
+          capability_details: [{ name: 'fetch_items' }],
         },
       ],
     })

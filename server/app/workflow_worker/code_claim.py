@@ -23,7 +23,7 @@ from server.app.services.connection_tokens import (
     inject_connection_config,
 )
 from server.app.services.job_errors import JobServiceError
-from server.app.services.node_codes import resolve_dispatch_node_code
+from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.services.node_config import dispatch_effective_config
 from server.app.services.vault import VaultError, VaultService
 from server.app.workflow_worker.agent_claim import cached_batch_payload, fail_node_config
@@ -76,11 +76,12 @@ def try_claim_code_worker_node(
         return False
 
     batch_payload = cached_batch_payload(worker, job)
-    # Same resolution order as the local path: frozen job version → published
-    # → builtin repo file (resolve_dispatch_node_code, EXEC-CODE-001/002).
+    # Same resolution order as the local path: frozen job version → workspace
+    # published → global factory seed (resolve_dispatch_node_code,
+    # EXEC-CODE-002; #96 retired the repo-file path fallback).
     frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
     try:
-        node_code = resolve_dispatch_node_code(
+        code_text = resolve_dispatch_node_code(
             worker.job_db.path,
             worker.settings.executor_runtime.workflows.custom_nodes_enabled,
             workspace_id,
@@ -88,16 +89,9 @@ def try_claim_code_worker_node(
             node.key,
             frozen_pins.get(node.key),
         )
-        if node_code is not None:
-            code_text = node_code
-        elif capability_config.path is not None:
-            code_text = (Path(worker.settings.root_dir) / capability_config.path).read_text(
-                encoding="utf-8"
-            )
-        else:
-            # Custom-code-only capability with no frozen/published version:
-            # nothing to ship to a Worker; the local executor reports the
-            # missing code (EXEC-CODE-002).
+        if code_text is None:
+            # No published code at either scope: nothing to ship to a Worker;
+            # the local executor reports the missing code (EXEC-CODE-002).
             return False
     except (ValueError, OSError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
@@ -145,7 +139,10 @@ def try_claim_code_worker_node(
                 log_path=log_path,
                 inputs=inputs,
                 code_text=code_text,
-                custom_code=node_code is not None,
+                # All node code is DB-published since #96 (workspace version
+                # or global factory seed); the flag stays for protocol
+                # stability and is always True now.
+                custom_code=True,
                 config=config,
                 secret_config=secret_config,
             )

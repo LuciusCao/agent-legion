@@ -221,7 +221,6 @@ server/app/
 | GET | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/versions/{version}` | `get_node_code_version` | routes/workflow_node_codes.py |
 | POST | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/rollback` | `rollback_node_code` | routes/workflow_node_codes.py |
 | DELETE | `/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code` | `archive_node_code` | routes/workflow_node_codes.py |
-| GET | `/workflow-nodes/files/{file_path:path}` | `read_workflow_node_file` | routes/workflow_node_files.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions` | `list_workflow_revisions` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/active` | `get_active_workflow_revision` | routes/workflow_revisions.py |
 | GET | `/workspaces/{workspace_id}/workflow-revisions/{revision_id}` | `get_workflow_revision_detail` | routes/workflow_revisions.py |
@@ -252,7 +251,7 @@ server/app/
 |------|------|------|------|
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/agent_broker/dispatch_pool.py |
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
-| CodeCapabilityConfig | BaseModel | path: str | None, timeout_seconds: int, sandbox_network: bool, config_schema:... | app/executors/code_config.py |
+| CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/code_config.py |
 | CodeExecutorConfig | BaseModel | kind: Literal['code'], global_capacity: int, capabilities: dict[str, CodeCapa... | app/executors/code_config.py |
 | PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
 | OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
@@ -313,7 +312,7 @@ server/app/
 | ConnectionTypeView | BaseModel | type: str, description: str, required_config_keys: list[str], secret_keys: li... | app/routes/connections_contracts.py |
 | ConnectionTypesResponse | BaseModel | types: list[ConnectionTypeView] | app/routes/connections_contracts.py |
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |
-| ExecutorCapabilityResponse | BaseModel | name: str, path: str | None, timeout_seconds: int | None, skill: str | None, ... | app/routes/executor_catalog_contracts.py |
+| ExecutorCapabilityResponse | BaseModel | name: str, skill: str | None, tools: list[str], provider: str | None, model: ... | app/routes/executor_catalog_contracts.py |
 | ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['code', 'pi', 'openclaw'], global_capacity: int, capab... | app/routes/executor_catalog_contracts.py |
 | ExecutorCatalogResponse | BaseModel | executors: list[ExecutorDefinitionResponse], agents: list[AgentDefinitionResp... | app/routes/executor_catalog_contracts.py |
 | ExecutorAllocationRequest | BaseModel | executor_id: str, concurrency_limit: int | app/routes/executor_contracts.py |
@@ -487,7 +486,7 @@ server/app/
 | WorkflowCompareSummary | BaseModel | risk_level: WorkflowRiskLevel, node_changes: list[WorkflowNodeChange], edge_c... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowDraftCompareResponse | BaseModel | valid: bool, creates_revision: bool, base_revision: WorkflowRevisionSummaryIt... | app/routes/workflow_draft_compare_contracts.py |
 | WorkflowMetadataChange | BaseModel | type: Literal['modified'], field: str, before_value: str | None, after_value:... | app/routes/workflow_draft_compare_metadata_contracts.py |
-| WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, path: str | None, ve... | app/routes/workflow_node_code_contracts.py |
+| WorkflowNodeCodeResponse | BaseModel | origin: Literal['builtin', 'custom', 'none'], code: str, version: int | None,... | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeTemplateResponse | BaseModel | code: str | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeDraftRequest | BaseModel | code: str, change_note: str | None | app/routes/workflow_node_code_contracts.py |
 | WorkflowNodeCodeVersionResponse | BaseModel | id: str, version: int, status: str, code: str, code_hash: str, created_by: st... | app/routes/workflow_node_code_contracts.py |
@@ -498,8 +497,6 @@ server/app/
 | WorkflowTerminalResponse | BaseModel | outcome: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeExecutionResponse | BaseModel | provider: str, model: str, thinking: str, prompt: str | app/routes/workflow_node_contracts.py |
 | WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, after: list[str], inputs: list[str], o... | app/routes/workflow_node_contracts.py |
-| WorkflowNodeCapabilityReference | BaseModel | executor_id: str, capability: str | app/routes/workflow_node_file_contracts.py |
-| WorkflowNodeFileResponse | BaseModel | path: str, content: str, capabilities: list[WorkflowNodeCapabilityReference] | app/routes/workflow_node_file_contracts.py |
 | WorkflowRevisionSummary | BaseModel | id: str, workspace_id: str, workflow_key: str, version: int, status: str, def... | app/routes/workflow_revisions_contracts.py |
 | WorkflowRevisionsResponse | BaseModel | revisions: list[WorkflowRevisionSummary] | app/routes/workflow_revisions_contracts.py |
 | WorkflowDraftRequest | BaseModel | definition_yaml: str | app/routes/workflow_revisions_contracts.py |
@@ -553,7 +550,7 @@ server/app/
 - `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
-  - 节点按 capability 分发：内置 code 节点（`workflow_nodes/`，EXEC-CODE-001）、DB 发布的自定义代码节点（EXEC-CODE-002/003）、或 agent 节点（pi / velites runtime）。
+  - 节点按 capability 分发：DB 发布的 code 节点（EXEC-CODE-002/003，demo 节点走 global 出厂种子）或 agent 节点（pi / velites runtime）。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
 - 内置示例 workflow `education_video_problems_generation` 的节点序列：
 

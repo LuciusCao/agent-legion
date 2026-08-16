@@ -1,8 +1,10 @@
-"""Repo-tracked code nodes executed by the ``code`` executor kind.
+"""Git-reviewed seed sources for the demo workflow's two code nodes.
 
-Each module exposes a module-level ``run(job, job_dir, runtime)`` with the
-same contract as local handlers. Files here are referenced by repo-relative
-``path`` entries in ``config/workflow.yaml`` executor capabilities and are
-loaded by path inside an isolated child process (EXEC-CODE-001): node code is
-always git-reviewed and CI-gated.
+Since #96 retired the capability ``path`` binding (EXEC-CODE-001 legacy),
+these files are no longer executed from the repo: at startup they are
+published as global node_code versions (EXEC-CODE-002) and run from the DB
+text inside the velites sandbox. Each module exposes a module-level ``run``
+(a ``def run(ctx)`` business function decorated with the node SDK's
+``@entrypoint``). Changes land exclusively through git review + CI; no
+runtime API may create, modify, or delete files here.
 """

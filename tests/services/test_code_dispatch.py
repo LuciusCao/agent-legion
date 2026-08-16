@@ -161,7 +161,6 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
     queued = service.enqueue(
         capability="package",
         capability_config=CodeCapabilityConfig(
-            path="workflow_nodes/example_publish.py",
             timeout_seconds=42,
             sandbox_network=True,
             config_schema=_SCHEMA,
@@ -210,7 +209,7 @@ def test_enqueue_builds_secret_free_manifest_and_bundle(job_db, tmp_path) -> Non
     assert (
         service.enqueue(
             capability="package",
-            capability_config=CodeCapabilityConfig(path="workflow_nodes/example_publish.py"),
+            capability_config=CodeCapabilityConfig(),
             workspace={"id": "test-workspace"},
             job={"id": "job-1"},
             workflow_key="questions",
@@ -247,7 +246,7 @@ def test_enqueue_strips_instance_settings_from_manifest_and_child_payload(job_db
     assert (
         service.enqueue(
             capability="package",
-            capability_config=CodeCapabilityConfig(path="workflow_nodes/example_publish.py"),
+            capability_config=CodeCapabilityConfig(),
             workspace={"id": "test-workspace"},
             job={"id": "job-1"},
             workflow_key="questions",

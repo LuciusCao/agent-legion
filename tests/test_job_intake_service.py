@@ -256,7 +256,10 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
     assert "write_script" not in pins
 
 
-def test_job_intake_freezes_empty_when_no_custom_codes(job_db, settings):
+def test_job_intake_freezes_global_factory_seed_pins(job_db, settings):
+    """Post-#96: the demo workflow's global factory-seeded node codes are
+    pinned like workspace-published ones (jobs freeze the code they start
+    with); agent nodes are never pinned."""
     _create_workspace_with_revision(job_db, settings)
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
@@ -274,4 +277,8 @@ def test_job_intake_freezes_empty_when_no_custom_codes(job_db, settings):
     import json
 
     payload = json.loads(batch["source_payload_json"])
-    assert payload["node_code_versions"] == {}
+    pins = payload["node_code_versions"]
+    assert set(pins) == {"intake_knowledge_points", "publish_content"}
+    for pin in pins.values():
+        assert pin["version"] == 1
+        assert len(pin["code_hash"]) == 64
