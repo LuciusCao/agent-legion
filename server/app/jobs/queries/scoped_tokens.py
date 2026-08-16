@@ -40,7 +40,7 @@ class ScopedTokenQueriesMixin(JobQueriesBase):
         with self._connect_read() as conn:
             row = conn.execute(
                 """
-                select u.*, t.scope from auth_scoped_tokens t
+                select u.*, t.scope, t.workspace_id as scoped_workspace_id from auth_scoped_tokens t
                 join users u on u.id = t.user_id
                 where t.token_hash=%s and t.revoked_at is null
                   and t.expires_at > current_timestamp

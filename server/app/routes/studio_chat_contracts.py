@@ -44,6 +44,7 @@ class StudioChatSessionRecord(BaseModel):
     capability_snapshot: dict[str, Any]
     allow_all_permissions: bool
     mcp_status: McpStatus
+    selected_node_key: str | None
     error_detail: str
     created_at: datetime
     updated_at: datetime
@@ -86,6 +87,14 @@ class StudioChatAllowAllRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool
+
+
+class StudioChatContextUpdateRequest(BaseModel):
+    """Human-side context push: the Studio node currently selected (or null)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    selected_node_key: str | None = None
 
 
 class StudioChatPermissionAnswerRequest(BaseModel):

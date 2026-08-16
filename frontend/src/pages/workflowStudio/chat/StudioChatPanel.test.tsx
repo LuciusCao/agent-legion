@@ -38,6 +38,7 @@ function sessionRecord(
     capability_snapshot: {},
     allow_all_permissions: false,
     mcp_status: 'unknown',
+    selected_node_key: null,
     error_detail: '',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -91,6 +92,7 @@ describe('StudioChatPanel', () => {
     ])
     mockApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
     mockApi.fetchStudioChatMessages.mockResolvedValue([])
+    mockApi.updateStudioChatContext.mockResolvedValue(sessionRecord())
   })
 
   afterEach(() => {
@@ -242,6 +244,18 @@ describe('StudioChatPanel', () => {
       })
     )
     expect(await screen.findByText('变更摘要')).toBeInTheDocument()
+  })
+
+  it('pushes the Studio node selection to the active session context', async () => {
+    renderPanel({ selectedNodeKey: 'node-a' })
+    // 自动打开最近会话 s1 后，选中节点同步到该会话上下文。
+    await waitFor(() =>
+      expect(mockApi.updateStudioChatContext).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        'node-a'
+      )
+    )
   })
 
   it('shows cancel while running and disables the input', async () => {

@@ -1091,6 +1091,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/studio-agent/tools/chat-sessions/{session_id}/context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Chat Session Context */
+    get: operations['get_chat_session_context_api_studio_agent_tools_chat_sessions__session_id__context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/studio-agent/tools/workflows': {
     parameters: {
       query?: never
@@ -2066,6 +2083,23 @@ export interface paths {
     put?: never
     /** Cancel Turn */
     post: operations['cancel_turn_api_workspaces__workspace_id__studio_chat_sessions__session_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Update Context */
+    put: operations['update_context_api_workspaces__workspace_id__studio_chat_sessions__session_id__context_put']
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -4427,6 +4461,27 @@ export interface components {
       /** Enabled */
       enabled: boolean
     }
+    /**
+     * StudioChatContextResponse
+     * @description What the get_studio_context MCP tool returns: the session's bound
+     *     workspace, the human's live Studio node selection, and the active
+     *     workflow's structure. ``workflow`` is None when nothing is published yet.
+     */
+    StudioChatContextResponse: {
+      /** Selected Node Key */
+      selected_node_key: string | null
+      workflow: components['schemas']['StudioContextWorkflow'] | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * StudioChatContextUpdateRequest
+     * @description Human-side context push: the Studio node currently selected (or null).
+     */
+    StudioChatContextUpdateRequest: {
+      /** Selected Node Key */
+      selected_node_key?: string | null
+    }
     /** StudioChatMessageCreateRequest */
     StudioChatMessageCreateRequest: {
       /** Text */
@@ -4525,6 +4580,8 @@ export interface components {
        * @enum {string}
        */
       mcp_status: 'unknown' | 'verified' | 'unverified'
+      /** Selected Node Key */
+      selected_node_key: string | null
       /**
        * Status
        * @enum {string}
@@ -4556,6 +4613,34 @@ export interface components {
     StudioChatSessionsResponse: {
       /** Sessions */
       sessions: components['schemas']['StudioChatSessionRecord'][]
+    }
+    /** StudioContextEdge */
+    StudioContextEdge: {
+      /** Source */
+      source: string
+      /** Target */
+      target: string
+    }
+    /** StudioContextNode */
+    StudioContextNode: {
+      /** Capability */
+      capability: string
+      /** Key */
+      key: string
+    }
+    /**
+     * StudioContextWorkflow
+     * @description Structural summary of the workspace's active workflow revision.
+     */
+    StudioContextWorkflow: {
+      /** Edges */
+      edges: components['schemas']['StudioContextEdge'][]
+      /** Nodes */
+      nodes: components['schemas']['StudioContextNode'][]
+      /** Version */
+      version: number
+      /** Workflow Key */
+      workflow_key: string
     }
     /** TokenUsageCostBreakdown */
     TokenUsageCostBreakdown: {
@@ -7819,6 +7904,37 @@ export interface operations {
       }
     }
   }
+  get_chat_session_context_api_studio_agent_tools_chat_sessions__session_id__context_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_workflow_catalog_api_studio_agent_tools_workflows_get: {
     parameters: {
       query?: never
@@ -10031,6 +10147,42 @@ export interface operations {
       cookie?: never
     }
     requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_context_api_workspaces__workspace_id__studio_chat_sessions__session_id__context_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatContextUpdateRequest']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {

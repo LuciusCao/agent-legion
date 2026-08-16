@@ -26,6 +26,7 @@ function sessionRecord(
     capability_snapshot: {},
     allow_all_permissions: false,
     mcp_status: 'unknown',
+    selected_node_key: null,
     error_detail: '',
     created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-01-01T00:00:00Z',
@@ -62,6 +63,7 @@ describe('useStudioChat', () => {
     ])
     mockApi.fetchStudioChatSessions.mockResolvedValue([sessionRecord()])
     mockApi.fetchStudioChatMessages.mockResolvedValue([])
+    mockApi.updateStudioChatContext.mockResolvedValue(sessionRecord())
   })
 
   afterEach(() => {

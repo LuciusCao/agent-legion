@@ -12,7 +12,7 @@ import pytest
 from acp.schema import McpServerStdio
 
 from server.app.auth.scoped_tokens import authenticate_scoped_token
-from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
 from server.app.studio_chat import service as service_module
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
@@ -193,6 +193,42 @@ def _new_session_mcp_env(sink: list[dict]) -> dict[str, str]:
             assert servers, "session/new carried no MCP servers"
             return {item["name"]: item["value"] for item in servers[0].get("env", [])}
     raise AssertionError("session/new never reached the fake agent")
+
+
+def test_run_token_is_bound_to_the_session_workspace(chat, job_db) -> None:
+    """Schema v45: the per-session run token records the workspace binding so
+    the tool surface can refuse other workspaces for it (STUDIO-AGENT-001)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    service.create_session(workspace_id, user_id, "fake-agent")
+
+    token = _new_session_mcp_env(_read_sink(script_path))["AGENT_LEGION_STUDIO_AGENT_TOKEN"]
+    resolved = authenticate_scoped_token(job_db, token)
+    assert resolved is not None
+    assert resolved["scoped_workspace_id"] == workspace_id
+
+
+def test_mcp_env_carries_the_chat_session_id(chat) -> None:
+    """The get_studio_context tool resolves its session through this env."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    env = _new_session_mcp_env(_read_sink(script_path))
+    assert env["AGENT_LEGION_MCP_SESSION_ID"] == session["id"]
+
+
+def test_set_selected_node_roundtrip(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    updated = service.set_selected_node(session["id"], workspace_id, "node-a")
+    assert updated["selected_node_key"] == "node-a"
+    cleared = service.set_selected_node(session["id"], workspace_id, None)
+    assert cleared["selected_node_key"] is None
+    with pytest.raises(NotFoundError):
+        service.set_selected_node(session["id"], "other-ws", "node-a")
 
 
 def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
