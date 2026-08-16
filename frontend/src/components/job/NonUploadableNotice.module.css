@@ -1,0 +1,9 @@
+.notice {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border: 1px solid var(--log-border);
+  border-radius: 6px;
+  background: var(--log-header-bg);
+  color: var(--log-text-secondary);
+  font-size: 13px;
+}
