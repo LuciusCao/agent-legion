@@ -22,11 +22,13 @@ def exemptions_root(tmp_path: Path) -> Path:
     """Create a temporary project root with plan and issue files."""
     root = tmp_path / "project"
     (root / "docs" / "superpowers" / "plans").mkdir(parents=True)
+    (root / "docs" / "architecture").mkdir(parents=True)
     (root / "issues" / "open").mkdir(parents=True)
     (root / "issues" / "closed").mkdir(parents=True)
     (root / "config").mkdir(parents=True)
 
     (root / "docs" / "superpowers" / "plans" / "example.md").write_text("# Task 3\n")
+    (root / "docs" / "architecture" / "tracked-plan.md").write_text("# Tracked plan\n")
     (root / "issues" / "open" / "123.md").write_text("issue\n")
     (root / "issues" / "closed" / "456.md").write_text("issue\n")
 
@@ -213,6 +215,44 @@ def test_closed_issue_accepted(write_exemptions, exemptions_root):
         }
     )
     assert validate_exemptions(exemptions, exemptions_root) == []
+
+
+def test_tracked_architecture_doc_accepted(write_exemptions, exemptions_root):
+    """docs/architecture/ is tracked in the repository, so a remove_when
+    pointing there is verifiable from any checkout (unlike gitignored
+    docs/superpowers/ plan documents)."""
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.import_boundary",
+                    "path": "server/app/example.py",
+                    "reason": "Specific technical reason.",
+                    "owner": "workspace-executor",
+                    "remove_when": "docs/architecture/tracked-plan.md",
+                }
+            ]
+        }
+    )
+    assert validate_exemptions(exemptions, exemptions_root) == []
+
+
+def test_missing_architecture_doc_rejected(write_exemptions, exemptions_root):
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.import_boundary",
+                    "path": "server/app/example.py",
+                    "reason": "Specific technical reason.",
+                    "owner": "workspace-executor",
+                    "remove_when": "docs/architecture/missing.md",
+                }
+            ]
+        }
+    )
+    errors = validate_exemptions(exemptions, exemptions_root)
+    assert any("missing file" in e for e in errors)
 
 
 def test_plan_section_with_anchor_accepted(write_exemptions, exemptions_root):

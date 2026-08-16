@@ -12,7 +12,7 @@ import yaml
 _VAGUE_REASONS: tuple[str, ...] = ("legacy", "temporary", "follow up")
 
 # Allowed prefixes for removal references.
-_PLAN_PREFIX: str = "docs/superpowers/plans/"
+_PLAN_PREFIXES: tuple[str, ...] = ("docs/superpowers/plans/", "docs/architecture/")
 _ISSUE_PREFIXES: tuple[str, ...] = ("issues/open/", "issues/closed/")
 
 
@@ -59,7 +59,8 @@ def _validate_remove_when(remove_when: str, base_path: Path) -> str | None:
     with the repository. When the corresponding directory tree is absent (for
     example in an open-source checkout), the file-existence check is skipped
     instead of failing; when the directory exists, a missing referenced file is
-    still an error.
+    still an error. docs/architecture/ is tracked, so a reference there is
+    always verifiable from a fresh checkout — prefer it for new exemptions.
     """
     remove_when = remove_when.strip()
     if not remove_when:
@@ -68,18 +69,22 @@ def _validate_remove_when(remove_when: str, base_path: Path) -> str | None:
     # Strip anchor so the file path can be resolved.
     file_part = remove_when.split("#", 1)[0]
 
-    is_plan = remove_when.startswith(_PLAN_PREFIX)
+    is_plan = any(remove_when.startswith(prefix) for prefix in _PLAN_PREFIXES)
     is_issue = any(remove_when.startswith(prefix) for prefix in _ISSUE_PREFIXES)
 
     if not (is_plan or is_issue):
         return (
-            f"remove_when '{remove_when}' must reference either "
-            f"'{_PLAN_PREFIX}' or one of {_ISSUE_PREFIXES}"
+            f"remove_when '{remove_when}' must reference one of {_PLAN_PREFIXES + _ISSUE_PREFIXES}"
         )
 
     referenced = base_path / file_part
     if not referenced.exists():
-        anchor = base_path / "docs" / "superpowers" if is_plan else base_path / "issues"
+        if remove_when.startswith("docs/superpowers/"):
+            anchor = base_path / "docs" / "superpowers"
+        elif is_plan:
+            anchor = base_path / "docs" / "architecture"
+        else:
+            anchor = base_path / "issues"
         if anchor.is_dir():
             return f"remove_when references missing file '{file_part}'"
 

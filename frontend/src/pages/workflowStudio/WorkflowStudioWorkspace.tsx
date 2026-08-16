@@ -59,6 +59,7 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
             active={inspectorActive}
             rightPanelTab={rightPanel.tab}
             onRightPanelTabChange={rightPanel.setTab}
+            onSelectNode={rightPanel.selectNode}
             onClose={rightPanel.closePanel}
           />
         )}

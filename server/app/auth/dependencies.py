@@ -10,7 +10,6 @@ from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
 SESSION_COOKIE = "agent_legion_session"
 CSRF_HEADER = "x-agent-legion-request"
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-_MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
 
 
 def extract_session_token(request: Request) -> tuple[str | None, str | None]:
@@ -76,9 +75,20 @@ def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) ->
 def reject_studio_agent_scope(
     user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Effecting-endpoint guard: studio-agent scoped tokens get 403 (STUDIO-AGENT-001)."""
-    if user.get("actor_scope") == STUDIO_AGENT_SCOPE:
-        raise HTTPException(status_code=403, detail="Studio agent scope cannot take effect")
+    """Effecting-endpoint guard: scoped tokens get 403 (STUDIO-AGENT-001).
+
+    Aligned with require_admin: any non-empty actor_scope is refused, not just
+    the studio-agent scope, so a future scope type cannot silently inherit
+    effecting rights.
+    """
+    scope = user.get("actor_scope")
+    if scope:
+        detail = (
+            "Studio agent scope cannot take effect"
+            if scope == STUDIO_AGENT_SCOPE
+            else "Scoped tokens cannot take effect"
+        )
+        raise HTTPException(status_code=403, detail=detail)
     return user
 
 
@@ -90,28 +100,4 @@ def require_studio_agent_scope(
     (STUDIO-AGENT-001)."""
     if user.get("actor_scope") != STUDIO_AGENT_SCOPE:
         raise HTTPException(status_code=403, detail="Studio agent scoped token required")
-    return user
-
-
-def require_workspace_access(
-    request: Request,
-    user: Annotated[dict[str, Any], Depends(get_current_user)],
-) -> dict[str, Any]:
-    """Workspace membership guard: viewers read, editors write, admins pass.
-
-    Routes without a workspace_id path parameter only require a logged-in
-    user. Non-members get 404 (not 403) so workspace existence cannot be
-    enumerated.
-    """
-    if user.get("role") == "admin":
-        return user
-    workspace_id = request.path_params.get("workspace_id")
-    if not workspace_id:
-        return user
-    role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
-    if role is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-    minimum = "viewer" if request.method in _SAFE_METHODS else "editor"
-    if _MEMBER_ROLE_RANK.get(role, 0) < _MEMBER_ROLE_RANK[minimum]:
-        raise HTTPException(status_code=403, detail="Insufficient workspace role")
     return user

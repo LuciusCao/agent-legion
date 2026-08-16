@@ -124,10 +124,8 @@ lanes_started_at=$SECONDS
 # Shared per-lane job cap: min(4, core count) keeps parallel lanes polite on
 # machines running several worktrees (per-lane envs override; CI 4-vCPU
 # runners are unaffected).
-default_gate_jobs="$(sysctl -n hw.ncpu 2>/dev/null || nproc 2>/dev/null || echo 4)"
-if [[ "$default_gate_jobs" -gt 4 ]]; then
-  default_gate_jobs=4
-fi
+source "$ROOT_DIR/scripts/gate-jobs.sh"
+default_gate_jobs="$(detect_gate_default_jobs)"
 
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]
