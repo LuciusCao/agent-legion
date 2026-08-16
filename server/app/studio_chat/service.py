@@ -21,6 +21,7 @@ import json
 import logging
 import sys
 import threading
+from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
@@ -47,6 +48,10 @@ logger = logging.getLogger(__name__)
 
 # Time to wait for the agent subprocess to finish initialize + session/new.
 SESSION_START_TIMEOUT_SECONDS = 60
+# A human permission prompt that is never answered (browser closed, tab
+# abandoned) must not park the ACP thread-pool thread and the agent subprocess
+# forever: after the timeout the request is auto-denied.
+PERMISSION_TIMEOUT_SECONDS = 900
 
 
 def studio_chat_channel(session_id: str) -> str:
@@ -136,36 +141,49 @@ class StudioChatService:
             )
         session_id = self._db.create_studio_chat_session(workspace_id, user_id, agent_id)
         token = mint_scoped_token(self._db, user_id, origin="run")
-        handle = AcpSessionHandle(
-            command=command,
-            args=[str(arg) for arg in agent.get("args", [])],
-            cwd=str(self._settings.root_dir),
-            mcp_server=build_mcp_server_spec(
-                token=token,
-                api_base=str(self._registry.get()["api_base"]),
-                python_executable=sys.executable,
-            ),
-            env=None,
-            callbacks=ServiceCallbacks(self, session_id),
-        )
-        runtime = _SessionRuntime(handle, token)
-        with self._runtimes_lock:
-            self._runtimes[session_id] = runtime
-        handle.start()
-        if not handle.ready_event.wait(timeout=SESSION_START_TIMEOUT_SECONDS):
-            self._fail_session_start(session_id, runtime, "agent startup timed out")
-            raise InvalidOperationError("Studio agent failed to start (timeout)")
-        session = self._db.get_studio_chat_session(session_id)
-        if session is None or session["status"] != "idle":
-            detail = (session or {}).get("error_detail") or "agent startup failed"
-            self._fail_session_start(session_id, runtime, detail)
-            raise InvalidOperationError(f"Studio agent failed to start: {detail}")
+        runtime: _SessionRuntime | None = None
+        try:
+            handle = AcpSessionHandle(
+                command=command,
+                args=[str(arg) for arg in agent.get("args", [])],
+                cwd=str(self._settings.root_dir),
+                mcp_server=build_mcp_server_spec(
+                    token=token,
+                    api_base=str(self._registry.get()["api_base"]),
+                    python_executable=sys.executable,
+                ),
+                env=None,
+                callbacks=ServiceCallbacks(self, session_id),
+            )
+            runtime = _SessionRuntime(handle, token)
+            with self._runtimes_lock:
+                self._runtimes[session_id] = runtime
+            handle.start()
+            if not handle.ready_event.wait(timeout=SESSION_START_TIMEOUT_SECONDS):
+                raise InvalidOperationError("Studio agent failed to start (timeout)")
+            session = self._db.get_studio_chat_session(session_id)
+            if session is None or session["status"] != "idle":
+                detail = (session or {}).get("error_detail") or "agent startup failed"
+                raise InvalidOperationError(f"Studio agent failed to start: {detail}")
+        except Exception as exc:
+            # One cleanup path for every startup failure: no half-applied
+            # 'starting' row, no leaked token, no orphaned runtime.
+            detail = str(exc) or exc.__class__.__name__
+            self._db.update_studio_chat_session(
+                session_id, status="error", error_detail=detail[:500]
+            )
+            if runtime is None:
+                # The handle never materialized: nothing to tear down, but the
+                # minted token must not leak.
+                try:
+                    revoke_scoped_token(self._db, token)
+                except Exception:
+                    logger.warning("failed to revoke studio chat token for %s", session_id)
+            else:
+                self._teardown_runtime(session_id, runtime)
+            raise
         self._publish_session(session_id)
         return session
-
-    def _fail_session_start(self, session_id: str, runtime: _SessionRuntime, detail: str) -> None:
-        self._db.update_studio_chat_session(session_id, status="error", error_detail=detail)
-        self._teardown_runtime(session_id, runtime)
 
     def list_sessions(self, workspace_id: str) -> list[dict[str, Any]]:
         return self._db.list_studio_chat_sessions(workspace_id)
@@ -188,7 +206,9 @@ class StudioChatService:
         if session["status"] == "closed":
             return session
         runtime = self._runtime(session_id)
-        self._db.update_studio_chat_session(session_id, status="closed")
+        self._db.update_studio_chat_session(
+            session_id, status="closed", closed_at=datetime.now(UTC)
+        )
         self._teardown_runtime(session_id, runtime)
         self._append_message(session_id, "status", "system", {"event": "session_closed"})
         self._publish_session(session_id)
@@ -217,14 +237,19 @@ class StudioChatService:
         session = self.get_session(session_id, workspace_id)
         if session["status"] == "closed":
             raise ConflictError("Chat session is closed")
-        if session["status"] != "idle":
-            raise ConflictError(f"Chat session is busy ({session['status']})")
         runtime = self._runtime(session_id)
         if runtime is None:
             raise ConflictError("Chat session is not running on this server")
         first_prompt = self._db.count_studio_chat_user_messages(session_id) == 0
+        # Atomic idle -> running claim: two concurrent senders (double click,
+        # two clients) cannot both observe idle and start duplicate turns.
+        if not self._db.claim_studio_chat_turn(session_id):
+            current = self._db.get_studio_chat_session(session_id) or {}
+            status = str(current.get("status", "unknown"))
+            if status == "closed":
+                raise ConflictError("Chat session is closed")
+            raise ConflictError(f"Chat session is busy ({status})")
         message = self._append_message(session_id, "text", "user", {"text": text})
-        self._db.update_studio_chat_session(session_id, status="running")
         self._publish_session(session_id)
         prompt_text = (STUDIO_AUTHORING_BOOTSTRAP + text) if first_prompt else text
         if not runtime.handle.send_prompt(prompt_text):
@@ -351,7 +376,10 @@ class StudioChatService:
         self._db.update_studio_chat_session(session_id, status="awaiting_permission")
         self._publish_session(session_id)
         try:
-            pending.event.wait()
+            settled = pending.event.wait(timeout=PERMISSION_TIMEOUT_SECONDS)
+            if not settled:
+                logger.warning("studio chat permission %s timed out; auto-denied", request_id)
+                pending.decision = {"deny": True, "via": "timeout"}
         finally:
             with runtime.lock:
                 runtime.pending_permissions.pop(request_id, None)
@@ -458,7 +486,9 @@ class StudioChatService:
             items = list(self._runtimes.items())
         for session_id, runtime in items:
             try:
-                self._db.update_studio_chat_session(session_id, status="closed")
+                self._db.update_studio_chat_session(
+                    session_id, status="closed", closed_at=datetime.now(UTC)
+                )
             except Exception:
                 logger.warning("failed to mark studio chat session %s closed", session_id)
             self._teardown_runtime(session_id, runtime)

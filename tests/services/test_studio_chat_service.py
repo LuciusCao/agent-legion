@@ -2,15 +2,19 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 import time
 from pathlib import Path
 
 import pytest
+from acp.schema import McpServerStdio
 
 from server.app.auth.scoped_tokens import authenticate_scoped_token
 from server.app.services.job_errors import ConflictError, InvalidOperationError
+from server.app.studio_chat import service as service_module
+from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 from server.app.studio_chat.service import StudioChatService
@@ -425,3 +429,122 @@ def test_agent_startup_failure_marks_session_error(chat, tmp_path) -> None:
         service.create_session(workspace_id, user_id, "broken-agent")
     sessions = service.list_sessions(workspace_id)
     assert sessions and sessions[0]["status"] == "error"
+
+
+def test_create_session_failure_cleans_up_row_token_and_runtime(chat, job_db, monkeypatch) -> None:
+    """A failure between session-row creation and runtime registration must
+    not leave a 'starting' row, a live scoped token, or a registered runtime."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    minted: list[str] = []
+    real_mint = service_module.mint_scoped_token
+
+    def capturing_mint(*args, **kwargs):
+        token = real_mint(*args, **kwargs)
+        minted.append(token)
+        return token
+
+    def exploding_handle(**kwargs):
+        raise RuntimeError("spawn blew up")
+
+    monkeypatch.setattr(service_module, "mint_scoped_token", capturing_mint)
+    monkeypatch.setattr(service_module, "AcpSessionHandle", exploding_handle)
+
+    with pytest.raises(RuntimeError, match="spawn blew up"):
+        service.create_session(workspace_id, user_id, "fake-agent")
+
+    sessions = service.list_sessions(workspace_id)
+    assert sessions and sessions[0]["status"] == "error"
+    assert minted and authenticate_scoped_token(job_db, minted[0]) is None
+    assert service._runtime(sessions[0]["id"]) is None
+
+
+def test_busy_claim_rejects_second_sender_without_duplicate_user_message(chat) -> None:
+    """The idle -> running claim is atomic: a concurrent second sender gets a
+    conflict and must not append a duplicate user message (#91)."""
+    service, _bus, register, workspace_id, user_id = chat
+    register(WAIT_CANCEL_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "long turn")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "running")
+
+    with pytest.raises(ConflictError):
+        service.send_message(session["id"], workspace_id, "second")
+
+    user_texts = [
+        m["content"]["text"]
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "text" and m["role"] == "user"
+    ]
+    assert user_texts == ["long turn"]
+
+
+def test_unanswered_permission_auto_denies_after_timeout(chat, monkeypatch) -> None:
+    """A permission prompt the human never answers (closed browser) must not
+    park the waiter thread forever: the timeout auto-denies it (#91)."""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(HUMAN_PERMISSION_SCRIPT)
+    monkeypatch.setattr(service_module, "PERMISSION_TIMEOUT_SECONDS", 0.2)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "run ls")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "awaiting_permission")
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    decisions = [
+        m["content"]["decision"]
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "resolved"
+    ]
+    assert decisions and decisions[-1] == {"deny": True, "via": "timeout"}
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "cancelled"}]
+
+
+def test_close_session_records_closed_at(chat) -> None:
+    service, _bus, register, workspace_id, user_id = chat
+    register(TEXT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+
+    closed = service.close_session(session["id"], workspace_id)
+
+    assert closed["status"] == "closed"
+    assert closed["closed_at"] is not None
+
+
+def test_handle_cancel_after_loop_closed_is_a_noop() -> None:
+    """cancel() racing a torn-down session loop must not raise the closed-loop
+    RuntimeError back into the request path (#91)."""
+
+    class _NoopCallbacks:
+        def on_ready(self, capabilities, acp_session_id) -> None: ...
+
+        def on_update(self, update) -> None: ...
+
+        def on_permission_request(self, tool_call, options) -> dict:
+            return {"deny": True}
+
+        def on_turn_end(self, stop_reason) -> None: ...
+
+        def on_turn_error(self, detail) -> None: ...
+
+        def on_error(self, detail) -> None: ...
+
+        def on_exit(self) -> None: ...
+
+    handle = AcpSessionHandle(
+        command=sys.executable,
+        args=[],
+        cwd=".",
+        mcp_server=McpServerStdio(name="x", command="x", args=[], env=[]),
+        env=None,
+        callbacks=_NoopCallbacks(),
+    )
+    closed_loop = asyncio.new_event_loop()
+    closed_loop.close()
+    handle._loop = closed_loop
+    handle._conn = object()
+    handle._acp_session_id = "acp-1"
+
+    handle.cancel()

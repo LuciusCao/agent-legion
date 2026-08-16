@@ -47,6 +47,17 @@ logger = logging.getLogger(__name__)
 
 _CLOSE = object()
 
+
+def _log_cancel_result(task: asyncio.Task[Any]) -> None:
+    """Retrieve the cancel task's result so a failure never surfaces as an
+    unretrieved-exception warning on an otherwise healthy loop."""
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.warning("studio chat ACP cancel failed: %s", exc)
+
+
 # Safety net for a wedged agent turn; cancel() is the intended control path.
 PROMPT_TIMEOUT_SECONDS = 3600
 # Grace for the loop to drain _CLOSE and let the SDK transport shut the child
@@ -160,9 +171,14 @@ class AcpSessionHandle:
             return
 
         def _send() -> None:
-            asyncio.create_task(conn.cancel(acp_session_id))
+            task = asyncio.create_task(conn.cancel(acp_session_id))
+            task.add_done_callback(_log_cancel_result)
 
-        loop.call_soon_threadsafe(_send)
+        # The loop may already be closed (session torn down between the state
+        # check and the hand-off); align with _kill_process and never let a
+        # late cancel surface as a 500.
+        with contextlib.suppress(Exception):
+            loop.call_soon_threadsafe(_send)
 
     def close(self) -> None:
         """Stop the loop and reap the subprocess; safe to call more than once."""
