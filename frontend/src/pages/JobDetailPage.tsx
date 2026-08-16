@@ -10,6 +10,7 @@ import { ArtifactPreviewDialog } from '../components/artifact/ArtifactPreviewDia
 import { DagFullscreenDialog } from '../components/dag/DagFullscreenDialog'
 import { TokenUsageDialog } from '../components/tokenUsage/TokenUsageDialog'
 import { JobDetailActions } from '../components/job/JobDetailActions'
+import { NonUploadableNotice } from '../components/job/NonUploadableNotice'
 import { useJobDetail } from './jobDetail/useJobDetail'
 import { EntityPanel } from './jobDetail/EntityPanel'
 
@@ -128,6 +129,14 @@ export default function JobDetailPage() {
   return (
     <div className={styles.page}>
       {error ? <p className={styles.error}>{error}</p> : null}
+
+      {detail && jobId && (
+        <NonUploadableNotice
+          jobId={jobId}
+          jobStatus={detail.job.status}
+          artifacts={detail.artifacts}
+        />
+      )}
 
       <div className={styles.columns}>
         <div className={styles.left}>
