@@ -32,13 +32,6 @@ from server.app.skills.manager import SkillManager
 from tests.helpers.skill_store import memory_skill_store
 
 
-def _write_node(repo_root: Path, name: str) -> str:
-    node = repo_root / "nodes" / name
-    node.parent.mkdir(parents=True, exist_ok=True)
-    node.write_text("def run(job, job_dir, runtime):\n    pass\n", encoding="utf-8")
-    return f"nodes/{name}"
-
-
 def _sample_pi_runtime() -> PiRuntimeConfig:
     return PiRuntimeConfig(
         binary="pi",
@@ -57,8 +50,8 @@ def definitions(tmp_path: Path) -> dict[str, ExecutorConfig]:
             kind="code",
             global_capacity=4,
             capabilities={
-                "fetch_items": CodeCapabilityConfig(path=_write_node(tmp_path, "fetch_items.py")),
-                "clean_items": CodeCapabilityConfig(path=_write_node(tmp_path, "clean_items.py")),
+                "fetch_items": CodeCapabilityConfig(),
+                "clean_items": CodeCapabilityConfig(),
             },
         ),
         "pi-default": PiExecutorConfig(
@@ -179,21 +172,10 @@ def test_registry_rejects_unknown_kind_factory(
         )
 
 
-def test_registry_rejects_missing_code_paths(
-    runtime_dependencies: RuntimeDependencies,
-) -> None:
-    definitions: dict[str, ExecutorConfig] = {
-        "code-default": CodeExecutorConfig(
-            kind="code",
-            global_capacity=4,
-            capabilities={
-                "missing": CodeCapabilityConfig(path="nodes/missing.py"),
-            },
-        ),
-    }
-
-    with pytest.raises(ValueError, match="inside the repository root"):
-        ExecutorRegistry.build(definitions, runtime_dependencies)
+def test_registry_rejects_retired_path_key() -> None:
+    """The capability ``path`` binding is retired (#96): the model rejects it."""
+    with pytest.raises(ValueError):
+        CodeCapabilityConfig(path="nodes/missing.py")
 
 
 def test_registry_builds_openclaw_executor_with_agent_id_substitution(

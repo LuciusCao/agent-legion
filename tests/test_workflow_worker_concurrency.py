@@ -65,7 +65,7 @@ def _local_def(capacity: int, capabilities: set[str]) -> Any:
     return {
         "kind": "code",
         "global_capacity": capacity,
-        "capabilities": {cap: {"path": "workflow_nodes/example_intake.py"} for cap in capabilities},
+        "capabilities": {cap: {} for cap in capabilities},
     }
 
 
@@ -207,6 +207,19 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
+    # Post-#96 every code node needs published code to dispatch; the
+    # FakeExecutor never reads the text, so a global no-op seed is enough.
+    from server.app.services.node_codes import NodeCodeService
+
+    codes = NodeCodeService(str(db_path))
+    for definition in definitions:
+        for node in definition.nodes.values():
+            codes.seed_global(
+                definition.key,
+                node.key,
+                "def run(job, job_dir, runtime):\n    pass\n",
+                "test seed",
+            )
     worker._scan_entries = (definitions, [])
     return worker
 
