@@ -13,6 +13,7 @@ from acp.schema import McpServerStdio
 
 from server.app.auth.scoped_tokens import authenticate_scoped_token
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
+from server.app.studio_chat import permissions as permissions_module
 from server.app.studio_chat import service as service_module
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
@@ -97,6 +98,22 @@ LOCAL_BASH_MIMIC_SCRIPT = {
                         )
                     },
                 },
+                "options": [
+                    {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
+                    {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
+                ],
+            }
+        }
+    ],
+}
+
+# A local read-only tool call (ACP kind "read"/"search" — the Read/Glob/Grep
+# class): auto-approved without a human roundtrip (side-effect-free).
+READ_ONLY_PERMISSION_SCRIPT = {
+    "on_prompt": [
+        {
+            "permission": {
+                "toolCall": {"toolCallId": "tc-read", "title": "Read", "kind": "read"},
                 "options": [
                     {"optionId": "allow", "name": "Allow", "kind": "allow_once"},
                     {"optionId": "deny", "name": "Deny", "kind": "reject_once"},
@@ -396,6 +413,35 @@ def test_human_permission_forward_answer_and_allow_all(chat) -> None:
     assert outcomes[-1] == {"outcome": "selected", "optionId": "allow"}
 
 
+def test_read_only_tool_permission_auto_approves(chat) -> None:
+    """Read 类只读本地工具（kind=read/search）自动批准，不经人工确认；
+    写/Bash 类仍走人工（由 HUMAN_PERMISSION_SCRIPT 系列测试覆盖）。"""
+    service, _bus, register, workspace_id, user_id = chat
+    script_path = register(READ_ONLY_PERMISSION_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "read the draft")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    outcomes = [
+        e["permission_outcome"] for e in _read_sink(script_path) if "permission_outcome" in e
+    ]
+    assert outcomes == [{"outcome": "selected", "optionId": "allow"}]
+    decisions = [
+        m["content"]["decision"]
+        for m in service.list_messages(session["id"], workspace_id)
+        if m["kind"] == "permission" and m["content"].get("status") == "resolved"
+    ]
+    assert decisions and decisions[-1]["via"] == "auto_read_only"
+    # 只读自动批准不park会话、也不计为 MCP 可见性信号。
+    assert service.get_session(session["id"])["mcp_status"] == "unverified"
+
+
+def test_permission_timeout_is_bounded() -> None:
+    """Guard: the human permission wait must stay short enough that an
+    abandoned tab cannot park a turn for long (#91 follow-up: 900s → 120s)."""
+    assert permissions_module.PERMISSION_TIMEOUT_SECONDS == 120
+
+
 def test_local_command_mentioning_tool_names_is_not_auto_approved(chat) -> None:
     service, _bus, register, workspace_id, user_id = chat
     register(LOCAL_BASH_MIMIC_SCRIPT)
@@ -588,7 +634,7 @@ def test_unanswered_permission_auto_denies_after_timeout(chat, monkeypatch) -> N
     park the waiter thread forever: the timeout auto-denies it (#91)."""
     service, _bus, register, workspace_id, user_id = chat
     script_path = register(HUMAN_PERMISSION_SCRIPT)
-    monkeypatch.setattr(service_module, "PERMISSION_TIMEOUT_SECONDS", 0.2)
+    monkeypatch.setattr(permissions_module, "PERMISSION_TIMEOUT_SECONDS", 0.2)
     session = service.create_session(workspace_id, user_id, "fake-agent")
     service.send_message(session["id"], workspace_id, "run ls")
 

@@ -175,6 +175,26 @@ describe('StudioChatPanel', () => {
     expect(screen.getByText('推理：先读 active 版本')).toBeInTheDocument()
   })
 
+  it('marks a pending permission request as a prominent alert', async () => {
+    mockApi.fetchStudioChatSessions.mockResolvedValue([
+      sessionRecord({ status: 'awaiting_permission' }),
+    ])
+    mockApi.fetchStudioChatMessages.mockResolvedValue([
+      chatMessage('m1', 1, 'permission', 'agent', {
+        request_id: 'r1',
+        status: 'pending',
+        tool_call: { title: 'Bash' },
+        options: [{ optionId: 'o1', name: '允许一次', kind: 'allow_once' }],
+      }),
+    ])
+    renderPanel()
+
+    // pending 权限卡用 role=alert + 「需要你的确认」徽标，避免被忽略。
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('需要你的确认')
+    expect(alert).toHaveTextContent('Bash')
+  })
+
   it('answers a permission request inline', async () => {
     mockApi.fetchStudioChatSessions.mockResolvedValue([
       sessionRecord({ status: 'awaiting_permission' }),
