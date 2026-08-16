@@ -46,6 +46,9 @@ def build_runtime(
         "workspace_id": context.workspace_id,
         "workspace": dict(context.workspace),
         "job": dict(context.job),
+        # Host root: nodes resolve machine-relative asset paths against it
+        # instead of ``__file__`` (meaningless for DB-loaded code text).
+        "root_dir": str(executor._repo_root),
         # Section-whitelisted (VAULT-SECRET-001): the sandboxed child is user
         # code, so vault/auth/database/agent_workers sections never cross.
         "settings_config": node_safe_settings_config(executor.settings_config),

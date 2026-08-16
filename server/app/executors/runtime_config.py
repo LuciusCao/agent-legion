@@ -10,7 +10,6 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
-from server.app.executors.code_config import validate_code_config_paths
 from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
 
@@ -145,7 +144,6 @@ def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
     executor_definitions: Mapping[str, ExecutorConfig] | None = None,
-    repo_root: Path | None = None,
 ) -> None:
     """Validate enabled runtime dependencies at startup.
 
@@ -174,9 +172,6 @@ def validate_runtime(
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
-
-    if repo_root is not None:
-        errors.extend(validate_code_config_paths(executor_definitions or {}, repo_root))
 
     if errors:
         raise StartupValidationError(errors)

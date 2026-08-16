@@ -52,8 +52,29 @@ def _seed_agent_definitions() -> None:
 # after every TRUNCATE, mirroring the app startup seed so published executor
 # definitions exist before any app hydration reads them.
 def _seed_executor_definitions() -> None:
-    service = ExecutorDefinitionService(TEST_DATABASE_URL, Path(__file__).resolve().parents[1])
+    service = ExecutorDefinitionService(TEST_DATABASE_URL)
     seed_builtin_executor_definitions(service)
+
+
+# Test demo node codes: the demo workflow's two code nodes are global
+# (workspace-NULL) factory seeds since #96, mirroring the app startup seed
+# (seed_demo_node_codes) so dispatch and Studio reads see them after every
+# TRUNCATE.
+def _seed_demo_node_codes() -> None:
+    from server.app.services.node_codes import NodeCodeService
+
+    repo_root = Path(__file__).resolve().parents[1]
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    for node_key, relative in (
+        ("intake_knowledge_points", "workflow_nodes/example_intake.py"),
+        ("publish_content", "workflow_nodes/example_publish.py"),
+    ):
+        codes.seed_global(
+            "education_video_problems_generation",
+            node_key,
+            (repo_root / relative).read_text(encoding="utf-8"),
+            "test seed",
+        )
 
 
 # Test skill sources: the built-in constants (retired config/skills.yaml +
@@ -540,6 +561,7 @@ def _isolate_postgres_database(request):
         _seed_agent_definitions()
         reset_published_executor_cache()
         _seed_executor_definitions()
+        _seed_demo_node_codes()
         _seed_skill_sources()
         _seed_workflow_catalog()
         _capture_seed_snapshot()
@@ -551,6 +573,7 @@ def _isolate_postgres_database(request):
         if not replayed:
             _seed_agent_definitions()
             _seed_executor_definitions()
+            _seed_demo_node_codes()
             _seed_skill_sources()
             _seed_workflow_catalog()
             _capture_seed_snapshot()

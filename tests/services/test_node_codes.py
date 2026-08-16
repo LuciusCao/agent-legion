@@ -12,12 +12,14 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
+from server.app.services.node_code_resolution import (
+    freeze_node_code_versions,
+    resolve_dispatch_node_code,
+)
 from server.app.services.node_codes import (
     MAX_CODE_BYTES,
     NodeCodeService,
     code_hash,
-    freeze_node_code_versions,
-    resolve_dispatch_node_code,
 )
 
 VALID_CODE = "def run(job, job_dir, runtime):\n    return None\n"

@@ -14,9 +14,10 @@ publish/rollback/archive then hot-reload the runtime registry in place
 needed. The short-TTL module cache below only serves read paths that hit the
 catalog outside startup (Studio display, executor catalog route).
 
-Validation runs at two points (EXEC-CODE-001): ``save_draft`` fully parses the
-payload (path safety, ``config_schema`` contract) and ``publish`` additionally
-checks every code capability path resolves to a file inside the repo root.
+Validation runs at ``save_draft``/``publish``/``rollback`` by fully parsing
+the payload (kind dispatch + the ``config_schema`` contract). The legacy
+capability ``path`` key (EXEC-CODE-001, retired in #96) is tolerated and
+stripped at parse time by ``load_executor_definitions``.
 """
 
 from __future__ import annotations
@@ -24,12 +25,10 @@ from __future__ import annotations
 import hashlib
 import json
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from server.app.db.connection import DatabaseDsn
 from server.app.executors.builtin_definitions import BUILTIN_EXECUTOR_DEFINITIONS
-from server.app.executors.code_config import validate_code_config_paths
 from server.app.executors.config import ExecutorConfig
 from server.app.executors.definitions import load_executor_definitions
 from server.app.services.job_errors import InvalidOperationError
@@ -84,9 +83,8 @@ def _definition_hash(definition: dict[str, Any]) -> str:
 class ExecutorDefinitionService:
     """Versioned executor definition storage and publish flow (global scope)."""
 
-    def __init__(self, database_dsn: DatabaseDsn, repo_root: Path) -> None:
+    def __init__(self, database_dsn: DatabaseDsn) -> None:
         self._store = VersionedEntityStore(database_dsn, _ENTITY_TYPE)
-        self._repo_root = repo_root
 
     def list_latest(self) -> list[VersionedEntity]:
         """Latest version per executor (a pending draft beats the published row)."""
@@ -120,37 +118,13 @@ class ExecutorDefinitionService:
         return entity
 
     def publish(self, executor_id: str) -> VersionedEntity:
-        """Publish the current draft; the previously published version archives.
-
-        Beyond the save_draft parse, every declared code capability path must
-        resolve to a real file inside the repository root (EXEC-CODE-001) —
-        the same check startup runs on the hydrated definitions. Pathless
-        (custom-code-only, EXEC-CODE-002) capabilities have nothing to check.
-        """
-        versions = self._store.list_versions(executor_id, None)
-        draft = next((v for v in versions if v.status == "draft"), None)
-        if draft is not None:
-            parsed = _parse_definitions({executor_id: draft.definition})
-            problems = validate_code_config_paths(parsed, self._repo_root)
-            if problems:
-                detail = "; ".join(f"{path}: {message}" for path, message in problems)
-                raise InvalidOperationError(f"executor {executor_id!r} publish rejected: {detail}")
+        """Publish the current draft; the previously published version archives."""
         entity = self._store.publish(executor_id, None)
         _invalidate_published_cache(self._store._dsn)
         return entity
 
     def rollback(self, executor_id: str, version: int, created_by: str) -> VersionedEntity:
         """Re-publish an old version as a new version (versions stay immutable)."""
-        source = next(
-            (v for v in self._store.list_versions(executor_id, None) if v.version == version),
-            None,
-        )
-        if source is not None:
-            parsed = _parse_definitions({executor_id: source.definition})
-            problems = validate_code_config_paths(parsed, self._repo_root)
-            if problems:
-                detail = "; ".join(f"{path}: {message}" for path, message in problems)
-                raise InvalidOperationError(f"executor {executor_id!r} rollback rejected: {detail}")
         entity = self._store.rollback(executor_id, version, None, created_by)
         _invalidate_published_cache(self._store._dsn)
         return entity
@@ -195,7 +169,13 @@ def hydrate_executor_definitions(settings: Settings) -> None:
 
     Runs once at startup (``create_app``, right after instance settings
     hydration); later publishes hot-reload the registry without a restart.
+    Also seeds the demo workflow's global node_code versions (#96): the
+    code-default executor's demo capabilities are custom-code-only, their
+    factory code publishes from the git-reviewed workflow_nodes/ sources.
     """
-    service = ExecutorDefinitionService(settings.database_url, settings.root_dir)
+    from server.app.services.demo_node_seed import seed_demo_node_codes
+
+    service = ExecutorDefinitionService(settings.database_url)
     seed_builtin_executor_definitions(service)
+    seed_demo_node_codes(settings)
     settings.executor_definitions = service.list_published_definitions()

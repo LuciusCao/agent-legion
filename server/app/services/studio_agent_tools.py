@@ -14,7 +14,6 @@ import json
 from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
-from server.app.services import workflow_node_files
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import NotFoundError
 from server.app.services.node_codes import NodeCodeService
@@ -62,18 +61,10 @@ class StudioAgentToolsService:
             raise NotFoundError(f"Unknown workflow node: {node_key}")
         return node.capability
 
-    def _read_builtin_code(self, capability: str) -> tuple[str, str] | None:
-        """Builtin file (path, content); None when the capability is pathless."""
-        path = workflow_node_files.builtin_code_path(
-            self._settings.executor_definitions, capability
-        )
-        if path is None:
-            return None
-        nodes_dir = workflow_node_files.workflow_nodes_dir(self._settings.root_dir)
-        try:
-            return workflow_node_files.read_node_file(nodes_dir, path)
-        except (FileNotFoundError, workflow_node_files.NodeFileError) as exc:
-            raise NotFoundError(str(exc)) from exc
+    def _read_factory_code(self, workflow_key: str, node_key: str) -> str | None:
+        """Global factory-seeded node code (#96); None when the node has none."""
+        row = self._node_code_service().get_global_published(workflow_key, node_key)
+        return str(row["code"]) if row is not None else None
 
     # Write tools (draft/register only — no effecting operations).
 
@@ -145,7 +136,7 @@ class StudioAgentToolsService:
         self, workspace_id: str, workflow_key: str, node_key: str
     ) -> dict[str, Any]:
         """Effective code plus any pending draft (mirrors the Studio read)."""
-        capability = self._node_capability(workspace_id, workflow_key, node_key)
+        self._node_capability(workspace_id, workflow_key, node_key)
         versions = self._node_code_service().list_versions(workspace_id, workflow_key, node_key)
         published = next((row for row in versions if row["status"] == "published"), None)
         # list_versions is version-descending: the first draft is the current one.
@@ -162,9 +153,8 @@ class StudioAgentToolsService:
                 "code": str(published["code"]),
                 "version": int(published["version"]),
             }
-        builtin = self._read_builtin_code(capability)
-        if builtin is None:
-            # Pathless (custom-code-only) capability: no builtin file to show.
+        factory = self._read_factory_code(workflow_key, node_key)
+        if factory is None:
+            # No factory seed: the node starts from the SDK template.
             return {**state, "origin": "none", "code": ""}
-        path, content = builtin
-        return {**state, "origin": "builtin", "code": content, "path": path}
+        return {**state, "origin": "builtin", "code": factory}

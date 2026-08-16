@@ -86,26 +86,31 @@
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
-- `code` executor 节点：capability 定义的 `path`（仓库相对路径）绑定 `workflow_nodes/` 下的
-  Python 文件，文件暴露模块级 `run(job, job_dir, runtime)`。`config/workflow.yaml` 已退役，
+- `code` executor 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
+  DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变、
+  job intake 冻结代码版本（EXEC-CODE-002），禁止任何运行时 API 增删改 repo 文件。
   出厂 executor 目录钉在 `server/app/executors/builtin_definitions.py`，经种子流发布为 DB
-  `versioned_entities`（Studio 可改，admin 编辑不被种子覆盖）。path 禁止绝对路径与 `..`
-  （EXEC-CODE-001），内置节点代码变更必须入库经 git review 与 CI。
-  节点内部的通用脚手架统一走节点 SDK `workspace_libs/node_sdk.py` 的 `NodeContext`
-  （artifact 读写、service_config 合并、checkpoint、auth 上报），不要在新节点里手写
+  `versioned_entities`（Studio 可改，admin 编辑不被种子覆盖）。`workflow_nodes/` 只剩示例
+  workflow 的两个 git 评审种子源（启动时 seed-if-absent 发布为 global 作用域 node_code，
+  `server/app/services/demo_node_seed.py`）。存量带 `path` 键的 executor 定义在加载时容忍剥离
+  + warning（实体不可变，不回写）。
+  节点入口推荐 `def run(ctx)` + 节点 SDK 的 `@entrypoint` 装饰器（经典
+  `run(job, job_dir, runtime)` 签名继续受支持）；节点内部的通用脚手架统一走节点 SDK
+  `workspace_libs/node_sdk.py` 的 `NodeContext`（artifact 读写、service_config 合并、
+  checkpoint、batch_payload、auth 上报）与姊妹模块 `workspace_libs/http_client.py`
+  （联网机制）/ `workspace_libs/media.py`（SRT/ffprobe）——框架层不收业务语义（服务特定的
+  URL 规则、payload 解析、质量阈值留在节点里）。不要在新节点里手写
   JSON 读写/配置合并/取消检查；节点运行时不含 DB 句柄或 DSN——batch、skill_versions 等
   DB 派生输入由父进程预取进 runtime，特权动作（连接 token 失效）由节点写 marker、
   父进程执行（EXEC-CODE-004，设计见
   `docs/architecture/node-sdk-and-worker-execution-design.md`）。
-- 节点代码变更只有两条通道：内置节点走 git（EXEC-CODE-001）；自定义节点代码只存
-  `workflow_node_codes` 表、经发布流生效、版本不可变、job intake 冻结代码版本
-  （EXEC-CODE-002），禁止任何运行时 API 增删改 repo `workflow_nodes/` 文件。
-  自定义节点执行必须经 `velites sandbox wrap` OS 沙箱，沙箱不可用即拒绝执行
-  （fail-closed，EXEC-CODE-003）；开关 `workflows.custom_nodes_enabled`。
+- 所有节点代码执行必须经 `velites sandbox wrap` OS 沙箱，沙箱不可用即拒绝执行
+  （fail-closed，EXEC-CODE-003；#96 后 Host 本地也不再有裸子进程路径）；开关
+  `workflows.custom_nodes_enabled`。
 - code 节点上 Worker（批次 2，协议 v2，EXEC-CODE-WORKER-001）：worker-eligible =
   对解析后代码文本做静态 import 闭包扫描，闭包 ⊆ `workspace_libs` + stdlib
-  （+ requests）才可上 Worker；repo 内置节点只剩示例 workflow 的两个
-  纯 stdlib 节点，全部 Worker-eligible。
+  （+ requests）才可上 Worker；示例 workflow 的两个纯 stdlib 节点全部
+  Worker-eligible。
   无在线 code Worker 时 dispatch 探测并回落本地 executor（兜底=本地，不做
   queued 超时回落）。Worker 上所有 code 执行（内置与自定义）统一过 velites
   沙箱；Worker 与 Host 的容量按 kind 分池（`max_concurrency` /

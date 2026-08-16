@@ -1,9 +1,9 @@
 """Code-capability node code resolution for the dispatch path.
 
 Extracted from ``schedule.py`` to keep it within its size budget. Resolves
-the node code text for code-kind executors (frozen job pin → published →
-builtin, EXEC-CODE-001/002) and fails fast when a pathless capability has no
-code to run.
+the node code text for code-kind executors (frozen job pin → workspace
+published → global factory seed, EXEC-CODE-002; #96 retired the repo-file
+path binding) and fails fast when a capability has no code to run.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 from server.app.executors.config import CodeExecutorConfig
-from server.app.services.node_codes import (
+from server.app.services.node_code_resolution import (
     require_runnable_capability,
     resolve_dispatch_node_code,
 )
@@ -29,13 +29,14 @@ def resolve_code_node_dispatch(
     executor_id: str,
     batch_payload: dict[str, Any] | None,
 ) -> str | None:
-    """Return custom code text for a code-executor node, or None for builtin.
+    """Return the node code text for a code-executor node, or None for
+    non-code executors.
 
     Non-code executors short-circuit to None without a DB read. Frozen job
-    version wins over the current published version; a frozen-pin hash
-    mismatch raises ValueError (fail closed, EXEC-CODE-003), and a pathless
-    capability without custom code raises ValueError (EXEC-CODE-002) — the
-    caller fails the node as a config error.
+    version wins over the workspace published version, then the global
+    factory seed; a frozen-pin hash mismatch raises ValueError (fail closed,
+    EXEC-CODE-003), and a capability without any published code raises
+    ValueError (EXEC-CODE-002) — the caller fails the node as a config error.
     """
     definition = worker.registry.definitions().get(executor_id)
     if not isinstance(definition, CodeExecutorConfig):

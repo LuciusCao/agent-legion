@@ -18,7 +18,7 @@ const executor: ExecutorDefinition = {
   global_capacity: 16,
   capabilities: ['fetch_items'],
   capability_details: [
-    { name: 'fetch_items', path: 'workflow_nodes/fetch_items.py' },
+    { name: 'fetch_items' },
   ],
 }
 

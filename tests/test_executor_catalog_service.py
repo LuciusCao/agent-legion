@@ -24,16 +24,8 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
                 "publish_content",
             ],
             "capability_details": [
-                {
-                    "name": "intake_knowledge_points",
-                    "path": "workflow_nodes/example_intake.py",
-                    "timeout_seconds": 600,
-                },
-                {
-                    "name": "publish_content",
-                    "path": "workflow_nodes/example_publish.py",
-                    "timeout_seconds": 600,
-                },
+                {"name": "intake_knowledge_points"},
+                {"name": "publish_content"},
             ],
         }
     ]
@@ -73,11 +65,11 @@ def test_catalog_reflects_db_published_edits(
     service: ExecutorCatalogService, job_db, settings
 ) -> None:
     """Catalog reads the DB published rows: an admin edit shows up without restart."""
-    definitions = ExecutorDefinitionService(job_db.path, settings.root_dir)
+    definitions = ExecutorDefinitionService(job_db.path)
     edited = {
         "kind": "code",
         "global_capacity": 4,
-        "capabilities": {"publish_content": {"path": "workflow_nodes/example_publish.py"}},
+        "capabilities": {"publish_content": {}},
     }
     definitions.save_draft("code-default", edited, "user:admin")
     definitions.publish("code-default")

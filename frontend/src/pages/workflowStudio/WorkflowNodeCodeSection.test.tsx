@@ -27,9 +27,7 @@ const codeExecutor: ExecutorDefinition = {
   kind: 'code',
   global_capacity: 16,
   capabilities: ['fetch_items'],
-  capability_details: [
-    { name: 'fetch_items', path: 'workflow_nodes/example_intake.py' },
-  ],
+  capability_details: [{ name: 'fetch_items' }],
 }
 
 const BASE =
@@ -41,7 +39,6 @@ const CUSTOM_CODE = "def run(job, job_dir, runtime):\n    return 'custom'\n"
 const builtinResponse = {
   origin: 'builtin',
   code: BUILTIN_CODE,
-  path: 'workflow_nodes/example_intake.py',
   version: null,
   has_draft: false,
   draft_code: null,
@@ -51,7 +48,6 @@ const builtinResponse = {
 const customResponse = {
   origin: 'custom',
   code: CUSTOM_CODE,
-  path: null,
   version: 1,
   has_draft: false,
   draft_code: null,
@@ -124,7 +120,7 @@ describe('WorkflowNodeCodeSection', () => {
     useSettingStore.getState().setSettings({ workflowKey: 'stale_snapshot' })
     renderSection({ workflowKey: 'visible_wf' })
 
-    await screen.findByText(/内置/)
+    await screen.findByText(/出厂版本/)
     expect(mockApi).toHaveBeenCalledWith(
       '/api/workspaces/default/workflows/visible_wf/nodes/fetch_items/code'
     )
@@ -139,7 +135,7 @@ describe('WorkflowNodeCodeSection', () => {
       })
     ).toBeInTheDocument()
     expect(mockApi).toHaveBeenCalledWith(BASE)
-    expect(screen.getByText(/内置/)).toBeInTheDocument()
+    expect(screen.getByText(/出厂版本/)).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: 'fork 为自定义节点' })
     ).toBeInTheDocument()
@@ -147,7 +143,7 @@ describe('WorkflowNodeCodeSection', () => {
 
   it('forks the builtin code into a draft via PUT', async () => {
     renderSection()
-    await screen.findByText(/内置/)
+    await screen.findByText(/出厂版本/)
 
     fireEvent.click(screen.getByRole('button', { name: 'fork 为自定义节点' }))
     const editor = screen.getByLabelText('节点代码内容')
@@ -247,7 +243,7 @@ describe('WorkflowNodeCodeSection', () => {
 
   it('surfaces write permission errors inline', async () => {
     renderSection()
-    await screen.findByText(/内置/)
+    await screen.findByText(/出厂版本/)
 
     fireEvent.click(screen.getByRole('button', { name: 'fork 为自定义节点' }))
     mockApi.mockRejectedValueOnce(new Error('Insufficient workspace role'))
@@ -324,7 +320,7 @@ describe('WorkflowNodeCodeSection', () => {
 
   it('offers 从模板新建 alongside fork for a builtin node', async () => {
     renderSection()
-    await screen.findByText(/内置/)
+    await screen.findByText(/出厂版本/)
 
     expect(
       screen.getByRole('button', { name: 'fork 为自定义节点' })
@@ -350,7 +346,6 @@ describe('WorkflowNodeCodeSection', () => {
     const noneResponse = {
       origin: 'none',
       code: '',
-      path: null,
       version: null,
       has_draft: false,
       draft_code: null,
@@ -366,7 +361,7 @@ describe('WorkflowNodeCodeSection', () => {
       />
     )
 
-    await screen.findByText(/无内置代码/)
+    await screen.findByText(/无代码版本/)
     expect(
       screen.queryByRole('button', { name: 'fork 为自定义节点' })
     ).not.toBeInTheDocument()
@@ -406,7 +401,6 @@ describe('WorkflowNodeCodeSection', () => {
     mockApi.mockResolvedValue({
       origin: 'none',
       code: '',
-      path: null,
       version: null,
       has_draft: true,
       draft_code: templateCode,

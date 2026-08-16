@@ -4,6 +4,8 @@ import threading
 from pathlib import Path
 from unittest.mock import MagicMock
 
+import pytest
+
 from server.app.jobs import JobQueries
 from server.app.services.workflow_revision_format import serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
@@ -15,7 +17,10 @@ from tests.workers.helpers import (
     _local_node,
     _make_definition,
     _make_worker,
+    _seed_trivial_node_code,
 )
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 def test_worker_creates_shared_pool_per_executor_id(tmp_path: Path) -> None:
@@ -61,6 +66,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "code-default", 2),
         )
+    _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     processed = worker._poll()
@@ -101,6 +107,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "code-default", 2),
         )
+    _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     worker._poll()
@@ -358,12 +365,47 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
 
 def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkeypatch) -> None:
-    # intake_knowledge_points runs on the code-default executor in an isolated
-    # child process: it maps the job's source_id to a knowledge-point markdown
-    # under examples/education-video-problems-generation/ (pure stdlib, no
-    # network) and writes knowledge_point.json for the downstream agent nodes.
+    # intake_knowledge_points runs on the code-default executor inside the
+    # velites sandbox (post-#96: the demo node code is the global factory
+    # seed, executed from the DB text): it maps the job's source_id to a
+    # knowledge-point markdown under examples/education-video-problems-
+    # generation/ (pure stdlib, no network) and writes knowledge_point.json
+    # for the downstream agent nodes.
+    import shutil
+    import subprocess
+    import sys
+
+    if sys.platform == "darwin":
+        backend = shutil.which("sandbox-exec")
+    elif sys.platform == "linux":
+        backend = shutil.which("bwrap")
+    else:
+        backend = None
+    if backend is None:
+        pytest.skip("no OS sandbox backend (macOS sandbox-exec / Linux bwrap)")
+    velites = REPO_ROOT / "velites" / "target" / "debug" / "velites"
+    if not velites.exists():
+        cargo = shutil.which("cargo")
+        if cargo is None:
+            pytest.skip("no prebuilt velites binary and cargo is not available")
+        proc = subprocess.run(
+            [cargo, "build", "--manifest-path", str(REPO_ROOT / "velites" / "Cargo.toml")],
+            capture_output=True,
+            text=True,
+        )
+        if proc.returncode != 0 or not velites.exists():
+            pytest.skip(f"velites build failed: {proc.stderr[-400:]}")
+    monkeypatch.setattr(
+        "server.app.executors._code_sandbox.shutil.which", lambda _name: str(velites)
+    )
+
     queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
+    # The demo node code rides the global factory seed (seed-if-absent from
+    # the git-reviewed workflow_nodes/ sources).
+    from server.app.services.demo_node_seed import seed_demo_node_codes
+
+    seed_demo_node_codes(worker.settings)
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="education_video_problems_generation"
     )
@@ -509,12 +551,12 @@ def test_ensure_pools_reconciles_with_reloaded_registry(tmp_path: Path) -> None:
         "code-default": CodeExecutorConfig(
             kind="code",
             global_capacity=4,
-            capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/example_intake.py")},
+            capabilities={"fetch": CodeCapabilityConfig()},
         ),
         "code-extra": CodeExecutorConfig(
             kind="code",
             global_capacity=1,
-            capabilities={"other": CodeCapabilityConfig(path="workflow_nodes/example_publish.py")},
+            capabilities={"other": CodeCapabilityConfig()},
         ),
     }
     worker.registry._runtime = RuntimeDependencies()

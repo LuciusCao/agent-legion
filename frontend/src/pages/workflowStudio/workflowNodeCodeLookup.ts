@@ -7,7 +7,8 @@ type NodeCodeTemplateResponse =
   components['schemas']['WorkflowNodeCodeTemplateResponse']
 
 // A node has viewable/editable code when its capability binds to a kind="code"
-// executor — with or without a builtin path (pathless = custom-code only).
+// executor; the code itself is DB-published (workspace version or the global
+// factory seed for demo nodes) — there is no repo path anymore (#96).
 export function hasCodeCapability(
   executorCatalog: ExecutorDefinition[],
   capability: string
@@ -15,17 +16,6 @@ export function hasCodeCapability(
   return findCapabilityBindings(executorCatalog, capability).some(
     ({ executor }) => executor.kind === 'code'
   )
-}
-
-// Repo path of the builtin file serving the capability; null when pathless.
-export function findNodeCodePath(
-  executorCatalog: ExecutorDefinition[],
-  capability: string
-): string | null {
-  const binding = findCapabilityBindings(executorCatalog, capability).find(
-    ({ executor, detail }) => executor.kind === 'code' && Boolean(detail.path)
-  )
-  return binding?.detail.path ?? null
 }
 
 // Backend-owned minimal Node SDK skeleton for the「从模板新建」entry.

@@ -171,10 +171,10 @@ def try_claim_and_submit(
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
-    # Custom node code (EXEC-CODE-002): only code-kind executors can carry
-    # custom code, so other kinds skip the DB read entirely. Frozen job
-    # version wins over the current published version; None keeps builtin.
-    # A frozen-pin hash mismatch fails the node (fail closed, EXEC-CODE-003).
+    # Node code (EXEC-CODE-002): only code-kind executors carry node code, so
+    # other kinds skip the DB read entirely. Frozen job version wins over the
+    # workspace published version, then the global factory seed; a
+    # frozen-pin hash mismatch fails the node (fail closed, EXEC-CODE-003).
     try:
         node_code = resolve_code_node_dispatch(
             worker, workspace_id, workflow_key, node, executor_id, batch_payload

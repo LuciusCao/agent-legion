@@ -21,7 +21,6 @@ export function WorkflowExecutorBindingList(props: {
             <span>{executor.id}</span>
           </div>
           <dl className={styles.bindingFields}>
-            {detail.path && <BindingField label="Path" value={detail.path} />}
             {detail.skill && (
               <BindingField label="Skill" value={detail.skill} />
             )}
