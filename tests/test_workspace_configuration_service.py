@@ -214,7 +214,7 @@ def test_executor_stats_does_not_consult_agent_status_manager(
     executor_definitions["code-default"] = CodeExecutorConfig(
         kind="code",
         global_capacity=4,
-        capabilities={"fetch": CodeCapabilityConfig(path="workflow_nodes/example_intake.py")},
+        capabilities={"fetch": CodeCapabilityConfig()},
     )
     monkeypatch.setattr(settings, "executor_definitions", executor_definitions)
 

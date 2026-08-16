@@ -5,7 +5,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from server.app.services.agent_service import published_agent_definitions
-from server.app.services.node_codes import freeze_node_code_versions
+from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.workflow_revision_format import (
     definition_hash,
     serialize_definition,

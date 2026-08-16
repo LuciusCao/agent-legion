@@ -12,7 +12,6 @@ import inspectorStyles from './WorkflowNodeInspector.module.css'
 import styles from './WorkflowNodeCodeSection.module.css'
 import {
   fetchNodeCodeTemplate,
-  findNodeCodePath,
   hasCodeCapability,
 } from './workflowNodeCodeLookup'
 
@@ -34,10 +33,6 @@ export function WorkflowNodeCodeSection(props: {
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
   const codeBound = hasCodeCapability(
-    props.executorCatalog,
-    props.node.capability
-  )
-  const codePath = findNodeCodePath(
     props.executorCatalog,
     props.node.capability
   )
@@ -136,9 +131,9 @@ export function WorkflowNodeCodeSection(props: {
       <div className={styles.path}>
         {isCustom
           ? `自定义 v${data?.version}`
-          : codePath
-            ? `内置 ${codePath}`
-            : '无内置代码'}
+          : data?.origin === 'builtin'
+            ? '出厂版本（全局种子）'
+            : '无代码版本'}
         {data?.has_draft && <span className={styles.badge}>有未发布草稿</span>}
       </div>
       {props.readOnly && (
@@ -178,7 +173,7 @@ export function WorkflowNodeCodeSection(props: {
           {writable && !editing && (
             <WorkflowNodeCodeActions
               isCustom={isCustom}
-              hasBuiltin={codePath !== null}
+              hasBuiltin={data?.origin === 'builtin'}
               hasDraft={data.has_draft}
               busy={busy}
               confirmingReset={confirmingReset}

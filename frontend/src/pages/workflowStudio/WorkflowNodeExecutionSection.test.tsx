@@ -42,7 +42,6 @@ const executorCatalog: ExecutorDefinition[] = [
     capability_details: [
       {
         name: 'fetch_items',
-        path: 'workflow_nodes/fetch_items.py',
       },
     ],
   },

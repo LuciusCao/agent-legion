@@ -122,9 +122,7 @@ def test_executor_node_config_freeze_and_manifest(job_db) -> None:
             kind="code",
             global_capacity=2,
             capabilities={
-                "fetch": CodeCapabilityConfig(
-                    path="workflow_nodes/example_intake.py", config_schema=EXECUTOR_SCHEMA
-                ),
+                "fetch": CodeCapabilityConfig(config_schema=EXECUTOR_SCHEMA),
             },
         )
     }

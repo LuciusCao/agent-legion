@@ -4,7 +4,8 @@ The constants were transcribed field-for-field from the retired tracked
 ``config/workflow.yaml`` executors section (equivalence was pinned by a
 yaml-comparison test before the file was deleted); this suite now guards the
 constant against accidental drift: it must parse through the same loader the
-runtime uses and every capability path must resolve inside the repo.
+runtime uses, and (since #96) no capability may carry the retired ``path``
+key — the demo node code reaches the DB via the global factory seed instead.
 """
 
 from __future__ import annotations
@@ -14,7 +15,7 @@ from pathlib import Path
 import pytest
 
 from server.app.executors.builtin_definitions import BUILTIN_EXECUTOR_DEFINITIONS
-from server.app.executors.code_config import CodeExecutorConfig, validate_code_config_paths
+from server.app.executors.code_config import CodeExecutorConfig
 from server.app.executors.definitions import load_executor_definitions
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -27,14 +28,32 @@ EXPECTED_CAPABILITIES = {
 
 
 @pytest.mark.no_db
-def test_builtin_definitions_parse_and_resolve_to_repo_files() -> None:
+def test_builtin_definitions_parse_and_carry_no_path() -> None:
     definitions = load_executor_definitions(BUILTIN_EXECUTOR_DEFINITIONS)
     assert set(definitions) == {"code-default"}
     config = definitions["code-default"]
     assert isinstance(config, CodeExecutorConfig)
     assert config.global_capacity == 16
     assert set(config.capabilities) == EXPECTED_CAPABILITIES
-    assert validate_code_config_paths(definitions, REPO_ROOT) == []
+    # The capability path binding is retired (#96): nothing to resolve.
+    for raw in BUILTIN_EXECUTOR_DEFINITIONS.values():
+        for capability in raw["capabilities"].values():
+            assert "path" not in capability
+
+
+@pytest.mark.no_db
+def test_legacy_path_keys_are_stripped_at_load() -> None:
+    """Stored pre-#96 definitions may still carry ``path``: the loader drops
+    it with a warning instead of crashing hydration (immutable entities)."""
+    legacy = {
+        "code-default": {
+            "kind": "code",
+            "global_capacity": 4,
+            "capabilities": {"fetch_items": {"path": "workflow_nodes/example_intake.py"}},
+        }
+    }
+    definitions = load_executor_definitions(legacy)
+    assert set(definitions["code-default"].capabilities) == {"fetch_items"}
 
 
 @pytest.mark.no_db
@@ -45,7 +64,7 @@ def test_builtin_definitions_preserve_factory_semantics() -> None:
     # Demo nodes are pure-stdlib and network-free.
     assert {name for name, cap in capabilities.items() if cap.sandbox_network} == set()
     # The intake node's knowledge-dir default survives (node/workspace can
-    # override) and resolves relative to the repo root.
+    # override) and resolves relative to the host root.
     intake_schema = capabilities["intake_knowledge_points"].config_schema["properties"]
     assert (
         intake_schema["knowledge_dir"]["default"] == "examples/education-video-problems-generation"

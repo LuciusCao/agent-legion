@@ -18,7 +18,7 @@ from server.app.services.job_intake_workspace import (
     get_workspace,
     singular_field_name,
 )
-from server.app.services.node_codes import freeze_node_code_versions
+from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings

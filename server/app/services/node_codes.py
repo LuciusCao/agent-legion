@@ -1,14 +1,15 @@
-"""DB-backed custom workflow node codes (EXEC-CODE-002).
+"""DB-backed workflow node codes (EXEC-CODE-002).
 
-Custom node code is user data, not a repo asset: versions live in the
+Node code is data, not a repo asset: versions live in the
 ``versioned_entities`` table (entity_type ``node_code``, schema v26), are
 immutable, and take effect only through the publish flow
 (draft → published → archived). At most one published version exists per
-``(workspace, workflow, node)`` (partial unique index); archiving every
-version falls the node back to the builtin repo-tracked implementation
-(EXEC-CODE-001). The lifecycle engine is the shared ``VersionedEntityStore``;
-this module owns the node-code payload shape (``code`` + ``change_note``) and
-the ``workflow_key:node_key`` entity-key mapping.
+``(workspace, workflow, node)`` (partial unique index). Codes are
+workspace-scoped; the open-source demo workflow's two nodes additionally
+have a **global** factory version (``workspace_id`` NULL) seeded at startup
+from the git-reviewed ``workflow_nodes/`` sources (#96), so the demo runs on
+a fresh deployment without per-workspace setup. Resolution order:
+frozen job pin → workspace published → global published.
 
 The feature is gated by ``workflows.custom_nodes_enabled`` (default on in this
 phase, design §7); every public entry point checks the gate before validating
@@ -102,9 +103,15 @@ class NodeCodeService:
     def get_effective_code(
         self, workspace_id: str, workflow_key: str, node_key: str
     ) -> dict[str, Any] | None:
-        """Return the published version row, or None when the node is builtin."""
+        """Return the workspace's published version row, or None."""
         self._require_enabled()
         entity = self._store.get_published(_entity_key(workflow_key, node_key), workspace_id)
+        return _to_row(entity) if entity else None
+
+    def get_global_published(self, workflow_key: str, node_key: str) -> dict[str, Any] | None:
+        """Return the global (factory-seeded) published row, or None."""
+        self._require_enabled()
+        entity = self._store.get_published(_entity_key(workflow_key, node_key), None)
         return _to_row(entity) if entity else None
 
     def get_code_by_version(
@@ -175,89 +182,29 @@ class NodeCodeService:
         return _to_row(entity)
 
     def archive_all(self, workspace_id: str, workflow_key: str, node_key: str) -> int:
-        """Archive every version; the node falls back to the builtin implementation."""
+        """Archive every workspace version; the node falls back to the global
+        factory version when one exists (demo nodes), else becomes unrunnable."""
         self._require_enabled()
         return self._store.archive_all(_entity_key(workflow_key, node_key), workspace_id)
 
+    def seed_global(self, workflow_key: str, node_key: str, code: str, change_note: str) -> bool:
+        """Publish *code* as the global (workspace-NULL) version when absent.
 
-def freeze_node_code_versions(
-    database_dsn: DatabaseDsn,
-    custom_nodes_enabled: bool,
-    workspace_id: str,
-    workflow_key: str,
-    node_keys: list[str],
-) -> dict[str, dict[str, Any]]:
-    """Intake freeze: published ``{node_key: {version, code_hash}}`` pins.
-
-    Only nodes with a published custom version appear; the gate short-circuits
-    to an empty mapping so intake never touches the table when the feature is
-    off.
-    """
-    if not custom_nodes_enabled or not node_keys:
-        return {}
-    store = VersionedEntityStore(database_dsn, _ENTITY_TYPE)
-    entities = store.list_published_keys(
-        workspace_id, [_entity_key(workflow_key, node_key) for node_key in node_keys]
-    )
-    return {
-        _split_entity_key(entity.entity_key)[1]: {
-            "version": entity.version,
-            "code_hash": entity.definition_hash,
-        }
-        for entity in entities
-    }
-
-
-def resolve_dispatch_node_code(
-    database_dsn: DatabaseDsn,
-    custom_nodes_enabled: bool,
-    workspace_id: str,
-    workflow_key: str,
-    node_key: str,
-    frozen: dict[str, Any] | None,
-) -> str | None:
-    """Dispatch-time code text: frozen job version → published → None (builtin).
-
-    One DB read per dispatch, same cadence as the vault secret resolution it
-    runs next to; the 30s route cache in ``routing.py`` only covers executor
-    bindings and is deliberately not consulted here. The gate short-circuits
-    to builtin instead of raising so a disabled feature never breaks dispatch.
-    """
-    if not custom_nodes_enabled:
-        return None
-    service = NodeCodeService(database_dsn)
-    if frozen is not None:
-        row = service.get_code_by_version(
-            workspace_id, workflow_key, node_key, int(frozen["version"])
+        Seed-if-absent, mirroring ``seed_builtin_executor_definitions``: a
+        global entity the operator somehow already touched is never
+        overwritten. Returns True when a version was published this call.
+        """
+        self._require_enabled()
+        entity_key = _entity_key(workflow_key, node_key)
+        if self._store.list_versions(entity_key, None):
+            return False
+        validate_node_code(code)
+        self._store.save_draft(
+            entity_key,
+            {"code": code, "change_note": change_note},
+            code_hash(code),
+            None,
+            "system",
         )
-        if row is not None:
-            # Fail closed on hash drift: the frozen pin and the stored code
-            # must match exactly, otherwise the snapshot was tampered with.
-            if row["code_hash"] != frozen.get("code_hash"):
-                raise ValueError(
-                    f"frozen node code hash mismatch for {workflow_key}/{node_key} "
-                    f"v{frozen['version']}"
-                )
-            return str(row["code"])
-        logger.warning(
-            "frozen node code version missing, falling back to published: "
-            "workspace=%s workflow=%s node=%s version=%s",
-            workspace_id,
-            workflow_key,
-            node_key,
-            frozen.get("version"),
-        )
-    row = service.get_effective_code(workspace_id, workflow_key, node_key)
-    return str(row["code"]) if row is not None else None
-
-
-def require_runnable_capability(
-    capabilities: dict[str, Any], capability: str, node_code: str | None
-) -> None:
-    """Pathless capability without custom code has nothing to run: fail fast."""
-    config = capabilities.get(capability)
-    if config is not None and config.path is None and node_code is None:
-        raise ValueError(
-            f"capability {capability!r} has no builtin code path and no "
-            "published custom node code (EXEC-CODE-002)"
-        )
+        self._store.publish(entity_key, None)
+        return True

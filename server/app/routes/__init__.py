@@ -47,7 +47,6 @@ from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
 from .workflow_catalog_admin import create_workflow_catalog_admin_router
 from .workflow_node_codes import create_workflow_node_codes_router
-from .workflow_node_files import create_workflow_node_files_router
 from .workflow_revisions import create_workflow_revisions_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
 from .workspace_configuration import create_workspace_configuration_router
@@ -93,7 +92,6 @@ def create_router(
     router.include_router(create_instance_settings_router(job_db, settings))
     router.include_router(create_skill_sources_router(settings))
     router.include_router(create_connections_router(settings))
-    router.include_router(create_workflow_node_files_router(settings))
     secured(create_packages_router(job_db, settings, job_packages))
     secured(create_worker_router(workspace_worker_control))
     if (

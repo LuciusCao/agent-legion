@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 from pydantic import ValidationError
 
@@ -15,18 +13,16 @@ from server.app.services.executor_definition_service import (
 )
 from server.app.services.job_errors import InvalidOperationError
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
-
 VALID_DEFINITION = {
     "kind": "code",
     "global_capacity": 2,
-    "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
+    "capabilities": {"clean_items": {}},
 }
 
 
 @pytest.fixture
 def service(job_db):
-    return ExecutorDefinitionService(job_db.path, REPO_ROOT)
+    return ExecutorDefinitionService(job_db.path)
 
 
 def test_conftest_seeds_builtin_catalog(service) -> None:
@@ -38,13 +34,12 @@ def test_conftest_seeds_builtin_catalog(service) -> None:
     assert len(config.capabilities) == 2
 
 
-def test_demo_capabilities_bind_builtin_node_paths(service) -> None:
-    """The demo workflow's code capabilities bind repo files (EXEC-CODE-001)."""
+def test_demo_capabilities_are_custom_code_only(service) -> None:
+    """Since #96 the demo capabilities carry no path: their code reaches the
+    DB via the global factory seed (EXEC-CODE-002)."""
     config = service.list_published_definitions()["code-default"]
     intake = config.capabilities["intake_knowledge_points"]
-    publish = config.capabilities["publish_content"]
-    assert str(intake.path) == "workflow_nodes/example_intake.py"
-    assert str(publish.path) == "workflow_nodes/example_publish.py"
+    assert "publish_content" in config.capabilities
     properties = intake.config_schema["properties"]
     assert properties["knowledge_dir"]["default"] == (
         "examples/education-video-problems-generation"
@@ -78,14 +73,17 @@ def test_save_draft_rejects_unknown_kind(service) -> None:
         )
 
 
-def test_save_draft_rejects_unsafe_path(service) -> None:
+def test_save_draft_strips_retired_path_key(service) -> None:
+    """The legacy capability ``path`` key (pre-#96 stored definitions) is
+    tolerated and dropped at parse time instead of failing validation."""
     payload = {
         "kind": "code",
         "global_capacity": 1,
         "capabilities": {"x": {"path": "../outside.py"}},
     }
-    with pytest.raises(ValidationError):
-        service.save_draft("code-bad", payload, "user:u1")
+    service.save_draft("code-bad", payload, "user:u1")
+    published = service.publish("code-bad")
+    assert published.status == "published"
 
 
 def test_save_draft_rejects_invalid_config_schema(service) -> None:
@@ -94,7 +92,6 @@ def test_save_draft_rejects_invalid_config_schema(service) -> None:
         "global_capacity": 1,
         "capabilities": {
             "x": {
-                "path": "workflow_nodes/example_publish.py",
                 "config_schema": {"type": "object", "properties": {"bad": {"type": "nope"}}},
             }
         },
@@ -103,21 +100,8 @@ def test_save_draft_rejects_invalid_config_schema(service) -> None:
         service.save_draft("code-bad", payload, "user:u1")
 
 
-def test_publish_rejects_path_outside_repo(service) -> None:
-    payload = {
-        "kind": "code",
-        "global_capacity": 1,
-        "capabilities": {"x": {"path": "workflow_nodes/does_not_exist.py"}},
-    }
-    service.save_draft("code-bad", payload, "user:u1")
-
-    with pytest.raises(InvalidOperationError, match="publish rejected"):
-        service.publish("code-bad")
-    assert service.get_published("code-bad") is None
-
-
-def test_publish_accepts_pathless_custom_code_capability(service) -> None:
-    """A capability without a repo path is custom-code only (EXEC-CODE-002)."""
+def test_publish_accepts_custom_code_capability(service) -> None:
+    """All code capabilities are custom-code only since #96 (EXEC-CODE-002)."""
     payload = {
         "kind": "code",
         "global_capacity": 1,
@@ -129,10 +113,10 @@ def test_publish_accepts_pathless_custom_code_capability(service) -> None:
 
     assert published.status == "published"
     config = service.list_published_definitions()["code-custom"]
-    assert config.capabilities["custom_only"].path is None
+    assert set(config.capabilities) == {"custom_only"}
 
 
-def test_rollback_accepts_pathless_custom_code_capability(service) -> None:
+def test_rollback_accepts_custom_code_capability(service) -> None:
     payload = {
         "kind": "code",
         "global_capacity": 1,
@@ -152,7 +136,7 @@ def test_rollback_accepts_pathless_custom_code_capability(service) -> None:
 
     assert rolled.status == "published"
     config = service.list_published_definitions()["code-custom"]
-    assert config.capabilities["custom_only"].path is None
+    assert set(config.capabilities) == {"custom_only"}
 
 
 def test_publish_invalidates_cached_catalog(service) -> None:
@@ -174,7 +158,7 @@ def test_seed_is_absent_only_and_never_overrides_admin_edits(service) -> None:
     edited = {
         "kind": "code",
         "global_capacity": 4,
-        "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
+        "capabilities": {"clean_items": {}},
     }
     service.save_draft("code-default", edited, "user:admin")
     service.publish("code-default")
