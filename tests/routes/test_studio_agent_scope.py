@@ -241,18 +241,36 @@ def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) ->
     assert validate.status_code == 200
 
     # Draft writes are allowed through the scope guard; they may still fail
-    # later for business reasons (no active revision, invalid payload).
+    # later for business reasons (no active revision, invalid payload) — but a
+    # 5xx here would be a server bug masquerading as a pass.
     node_draft = scoped.put(
         f"/api/workspaces/{workspace_id}/workflows/wf/nodes/node/code",
         json={"code": "def run(job, job_dir, runtime):\n    pass\n"},
     )
-    assert node_draft.status_code != 403
+    assert node_draft.status_code not in (401, 403) and node_draft.status_code < 500
 
     agent_draft = scoped.put("/api/agent-definitions/agent-x/draft", json={})
-    assert agent_draft.status_code != 403
+    assert agent_draft.status_code not in (401, 403) and agent_draft.status_code < 500
 
     executor_draft = scoped.put("/api/executor-definitions/exec-x/draft", json={})
-    assert executor_draft.status_code != 403
+    assert executor_draft.status_code not in (401, 403) and executor_draft.status_code < 500
+
+
+def test_unknown_scope_type_is_also_rejected_on_effecting_endpoints(client, job_db) -> None:
+    """reject_studio_agent_scope refuses any non-empty actor_scope, aligned
+    with require_admin: a future scope type must not silently inherit
+    effecting rights."""
+    workspace_id = str(
+        job_db.create_workspace(default_workflow_key="demo_workflow", name="scope-future-ws")["id"]
+    )
+    admin_id = str(job_db.get_user_credentials("admin")["id"])
+    token = scoped_tokens.mint_scoped_token(job_db, admin_id, scope="future_scope")
+    scoped = client.__class__(client.app)
+    scoped.headers["authorization"] = f"Bearer {token}"
+
+    response = scoped.post("/api/worker/pause", params={"workspace_id": workspace_id})
+    assert response.status_code == 403
+    assert "Scoped tokens cannot take effect" in response.json()["detail"]
 
 
 def test_full_session_still_reaches_effecting_endpoints(client, job_db) -> None:

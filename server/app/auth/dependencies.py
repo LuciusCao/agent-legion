@@ -76,9 +76,20 @@ def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) ->
 def reject_studio_agent_scope(
     user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Effecting-endpoint guard: studio-agent scoped tokens get 403 (STUDIO-AGENT-001)."""
-    if user.get("actor_scope") == STUDIO_AGENT_SCOPE:
-        raise HTTPException(status_code=403, detail="Studio agent scope cannot take effect")
+    """Effecting-endpoint guard: scoped tokens get 403 (STUDIO-AGENT-001).
+
+    Aligned with require_admin: any non-empty actor_scope is refused, not just
+    the studio-agent scope, so a future scope type cannot silently inherit
+    effecting rights.
+    """
+    scope = user.get("actor_scope")
+    if scope:
+        detail = (
+            "Studio agent scope cannot take effect"
+            if scope == STUDIO_AGENT_SCOPE
+            else "Scoped tokens cannot take effect"
+        )
+        raise HTTPException(status_code=403, detail=detail)
     return user
 
 
@@ -99,13 +110,17 @@ def require_workspace_access(
 ) -> dict[str, Any]:
     """Workspace membership guard: viewers read, editors write, admins pass.
 
-    Routes without a workspace_id path parameter only require a logged-in
-    user. Non-members get 404 (not 403) so workspace existence cannot be
-    enumerated.
+    The workspace scope is read from the ``workspace_id`` path parameter,
+    falling back to the ``workspace_id`` query parameter for routes that take
+    the scope in the query string (``/api/worker/*``, ``/api/metrics/overview``).
+    Routes without either only require a logged-in user. Non-members get 404
+    (not 403) so workspace existence cannot be enumerated.
     """
     if user.get("role") == "admin":
         return user
-    workspace_id = request.path_params.get("workspace_id")
+    workspace_id = request.path_params.get("workspace_id") or request.query_params.get(
+        "workspace_id"
+    )
     if not workspace_id:
         return user
     role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
