@@ -62,19 +62,22 @@ def freeze_node_code_versions(
     return pins
 
 
-def _get_version_scoped(
+def _get_pinned_rows(
     service: NodeCodeService,
     workspace_id: str,
     workflow_key: str,
     node_key: str,
     version: int,
-) -> dict[str, Any] | None:
-    """Version lookup across scopes: workspace first, then the global seed."""
+) -> list[dict[str, Any]]:
+    """The frozen version's row at BOTH scopes (workspace and global seed)."""
+    rows = []
     row = service.get_code_by_version(workspace_id, workflow_key, node_key, version)
-    if row is None:
-        entity = service._store.get_version(_entity_key(workflow_key, node_key), version, None)
-        row = _to_row(entity) if entity else None
-    return row
+    if row is not None:
+        rows.append(row)
+    entity = service._store.get_version(_entity_key(workflow_key, node_key), version, None)
+    if entity is not None:
+        rows.append(_to_row(entity))
+    return rows
 
 
 def resolve_dispatch_node_code(
@@ -97,18 +100,19 @@ def resolve_dispatch_node_code(
         return None
     service = NodeCodeService(database_dsn)
     if frozen is not None:
-        row = _get_version_scoped(
+        rows = _get_pinned_rows(
             service, workspace_id, workflow_key, node_key, int(frozen["version"])
         )
-        if row is not None:
-            # Fail closed on hash drift: the frozen pin and the stored code
-            # must match exactly, otherwise the snapshot was tampered with.
-            if row["code_hash"] != frozen.get("code_hash"):
-                raise ValueError(
-                    f"frozen node code hash mismatch for {workflow_key}/{node_key} "
-                    f"v{frozen['version']}"
-                )
-            return str(row["code"])
+        for row in rows:
+            if row["code_hash"] == frozen.get("code_hash"):
+                return str(row["code"])
+        if rows:
+            # Fail closed on hash drift: the pin matches neither scope's row
+            # at that version. A workspace publish with a colliding version
+            # number is fine as long as the other scope matches the pin.
+            raise ValueError(
+                f"frozen node code hash mismatch for {workflow_key}/{node_key} v{frozen['version']}"
+            )
         logger.warning(
             "frozen node code version missing, falling back to published: "
             "workspace=%s workflow=%s node=%s version=%s",
@@ -117,10 +121,10 @@ def resolve_dispatch_node_code(
             node_key,
             frozen.get("version"),
         )
-    row = service.get_effective_code(workspace_id, workflow_key, node_key)
-    if row is None:
-        row = service.get_global_published(workflow_key, node_key)
-    return str(row["code"]) if row is not None else None
+    published = service.get_effective_code(workspace_id, workflow_key, node_key)
+    if published is None:
+        published = service.get_global_published(workflow_key, node_key)
+    return str(published["code"]) if published is not None else None
 
 
 def require_runnable_capability(

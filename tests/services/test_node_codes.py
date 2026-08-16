@@ -276,3 +276,39 @@ def test_insert_version_collision_maps_to_conflict_error(
     monkeypatch.setattr(versioned_entities, "_next_version", lambda *args: 1)
     with pytest.raises(ConflictError):
         service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+
+
+GLOBAL_CODE = "def run(job, job_dir, runtime):\n    return 'global'\n"
+
+
+def test_frozen_pin_matches_across_scopes_by_hash(job_db, service, workspace_id) -> None:
+    """Pin scope collision (review P1-2): the job froze the global seed v1 at
+    intake; a later workspace publish also numbered v1. The pin's code_hash —
+    not the scope — identifies the frozen code, so the old job must still
+    resolve the global code instead of erroring on the workspace row."""
+    assert service.seed_global(WF, NODE, GLOBAL_CODE, "test seed")
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 1, "code_hash": code_hash(GLOBAL_CODE)}
+    resolved = resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+    assert resolved == GLOBAL_CODE
+
+    # And the workspace pin still resolves the workspace code.
+    frozen_ws = {"version": 1, "code_hash": code_hash(VALID_CODE)}
+    assert (
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen_ws)
+        == VALID_CODE
+    )
+
+
+def test_frozen_pin_matching_neither_scope_still_fails_closed(
+    job_db, service, workspace_id
+) -> None:
+    assert service.seed_global(WF, NODE, GLOBAL_CODE, "test seed")
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 1, "code_hash": "tampered"}
+    with pytest.raises(ValueError, match="hash mismatch"):
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
