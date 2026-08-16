@@ -571,7 +571,9 @@ def test_publish_revision_records_node_code_pins(tmp_path: Path) -> None:
     workflow_definition_from_dict(payload)
 
 
-def test_publish_revision_without_custom_codes_has_no_pins(tmp_path: Path) -> None:
+def test_publish_revision_pins_global_factory_seed_codes(tmp_path: Path) -> None:
+    """Post-#96: the demo workflow's global factory seeds are pinned into
+    revision publishes exactly like workspace-published custom codes."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "ws-no-pins", default_workflow_key="education_video_problems_generation"
@@ -582,7 +584,11 @@ def test_publish_revision_without_custom_codes_has_no_pins(tmp_path: Path) -> No
     service.publish_workspace_revision(workspace["id"], definition)
     active = service.get_active(workspace["id"], definition.key)
 
-    assert "node_code_pins" not in json.loads(active["definition_json"])
+    pins = json.loads(active["definition_json"])["node_code_pins"]
+    assert set(pins) == {"intake_knowledge_points", "publish_content"}
+    for pin in pins.values():
+        assert pin["version"] == 1
+        assert len(pin["code_hash"]) == 64
 
 
 def test_publish_revision_skips_pins_when_gate_disabled(tmp_path: Path) -> None:

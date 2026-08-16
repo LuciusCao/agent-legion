@@ -12,6 +12,7 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
+from server.app.services.node_codes import NodeCodeService
 from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -38,9 +39,7 @@ def _make_worker(
         kind="code",
         global_capacity=2,
         capabilities={
-            "fetch": CodeCapabilityConfig(
-                path="workflow_nodes/example_intake.py", config_schema=SCHEMA
-            ),
+            "fetch": CodeCapabilityConfig(config_schema=SCHEMA),
         },
     )
     registry = ExecutorRegistry(
@@ -110,6 +109,13 @@ def _prepare_job(
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "code-default", 2),
         )
+    # Since #96 every code node needs published node code to dispatch; the
+    # RecordingExecutor never reads it, so a trivial version is enough.
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(
+        ws["id"], "test", node.key, "def run(job, job_dir, runtime):\n    pass\n", "test seed"
+    )
+    codes.publish(ws["id"], "test", node.key)
     return ws, job
 
 

@@ -12,6 +12,7 @@ from typing import cast
 from pydantic import BaseModel, ValidationError
 from pydantic_core import InitErrorDetails
 
+from server.app.executors.code_config import strip_retired_path_keys
 from server.app.executors.kinds import load_executor_config
 
 
@@ -39,7 +40,9 @@ def load_executor_definitions(raw: dict[str, object]) -> dict[str, BaseModel]:
                 f"Executor {executor_id!r}: expected a mapping, got {type(value).__name__}"
             )
         try:
-            definitions[executor_id] = load_executor_config(executor_id, value)
+            definitions[executor_id] = load_executor_config(
+                executor_id, strip_retired_path_keys(executor_id, value)
+            )
         except ValidationError as exc:
             raise _validation_error_with_executor_id(exc, executor_id) from exc
     return definitions

@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
-from pathlib import Path
+import logging
 from typing import Any, Literal
 
 from pydantic import (
@@ -18,10 +17,6 @@ from server.app.config_schema import validate_config_schema
 
 class CodeCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
-    # Repo-relative path to a tracked Python file exposing ``run(job, job_dir, runtime)``.
-    # None means the capability is custom-code only (EXEC-CODE-002): dispatch
-    # then requires a published custom node code version.
-    path: str | None = Field(default=None, min_length=1)
     timeout_seconds: int = Field(default=600, ge=1)
     # Custom (DB-backed) code for this capability runs inside the velites OS
     # sandbox (EXEC-CODE-003), which denies network by default; flip this on
@@ -30,17 +25,6 @@ class CodeCapabilityConfig(BaseModel):
     # Non-secret tunable parameters for the node_config chain (spec D15);
     # secrets stay in resource bindings / the vault (spec D16).
     config_schema: dict[str, Any] = Field(default_factory=dict)
-
-    @field_validator("path", mode="after")
-    @classmethod
-    def _reject_unsafe_path(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        if value.startswith("/"):
-            raise ValueError("code path must not be absolute")
-        if ".." in Path(value).parts:
-            raise ValueError("code path must not contain '..'")
-        return value
 
     @field_validator("config_schema", mode="after")
     @classmethod
@@ -65,28 +49,40 @@ class CodeExecutorConfig(BaseModel):
         return value
 
 
-def validate_code_config_paths(
-    executor_definitions: Mapping[str, Any], repo_root: Path
-) -> list[tuple[str, str]]:
-    """Startup check: declared code capability paths stay inside the repo root.
+logger = logging.getLogger(__name__)
 
-    Capabilities without a path are custom-code only (EXEC-CODE-002) and have
-    nothing to check here; dispatch requires their published custom code.
+
+def _log_path_strip_warning(executor_id: str, retired: list[str]) -> None:
+    logger.warning(
+        "executor %r: dropped retired capability path key for %s "
+        "(EXEC-CODE-001 legacy; the capability is custom-code-only now)",
+        executor_id,
+        ", ".join(sorted(retired)),
+    )
+
+
+def strip_retired_path_keys(executor_id: str, value: dict[str, object]) -> dict[str, object]:
+    """Drop the retired capability ``path`` key (EXEC-CODE-001 legacy, #96).
+
+    Stored definitions from before the path-mechanism retirement may still
+    carry ``path``; versioned entities are immutable, so the key is stripped
+    at parse time (the capability becomes custom-code-only: its code comes
+    from a published node_code version — workspace-scoped, or the global
+    factory seed for the demo nodes). Never written back to the DB.
     """
-    root = repo_root.resolve()
-    problems: list[tuple[str, str]] = []
-    for executor_id, definition in executor_definitions.items():
-        if not isinstance(definition, CodeExecutorConfig):
-            continue
-        for capability, cap_config in definition.capabilities.items():
-            if cap_config.path is None:
-                continue
-            resolved = (root / cap_config.path).resolve()
-            if not resolved.is_relative_to(root) or not resolved.is_file():
-                problems.append(
-                    (
-                        f"executors.{executor_id}.capabilities.{capability}.path",
-                        "code path does not resolve to a file inside the repository root",
-                    )
-                )
-    return problems
+    if value.get("kind") != "code":
+        return value
+    capabilities = value.get("capabilities")
+    if not isinstance(capabilities, dict):
+        return value
+    stripped: dict[str, object] = {}
+    retired: list[str] = []
+    for name, cap in capabilities.items():
+        if isinstance(cap, dict) and "path" in cap:
+            cap = {key: val for key, val in cap.items() if key != "path"}
+            retired.append(str(name))
+        stripped[str(name)] = cap
+    if retired:
+        _log_path_strip_warning(executor_id, retired)
+        return {**value, "capabilities": stripped}
+    return value

@@ -7,15 +7,13 @@ Last node of the ``education_video_problems_generation`` example workflow
 deliberately **no network requests**: a fresh open-source checkout has no
 external content service, so "publish" is demonstrated as a local payload.
 
-Pure stdlib + node SDK.
+This file is the git-reviewed **seed source** of the demo publish node: at
+startup it is published as a global node_code version (EXEC-CODE-002, #96)
+and executes from the DB text inside the velites sandbox. Pure stdlib + node
+SDK.
 """
 
-from __future__ import annotations
-
-from pathlib import Path
-from typing import Any
-
-from workspace_libs.node_sdk import NodeContext
+from workspace_libs.node_sdk import NodeContext, entrypoint
 
 _SCRIPT_INPUT = "script.md"
 _JSON_INPUTS = (
@@ -26,12 +24,8 @@ _JSON_INPUTS = (
 )
 
 
-def run(
-    job: dict[str, Any],
-    job_dir: Path,
-    runtime: dict[str, Any] | None = None,
-) -> None:
-    ctx = NodeContext(job, job_dir, runtime)
+@entrypoint
+def run(ctx: NodeContext) -> None:
     log = ctx.logger
     ctx.checkpoint()
 
@@ -43,7 +37,7 @@ def run(
     exercises = exercises_payload.get("exercises") or []
 
     payload = {
-        "job_id": str(job.get("id", "")),
+        "job_id": str(ctx.job.get("id", "")),
         "workflow": ctx.workflow_manifest(default_key="education_video_problems_generation"),
         "knowledge_point": knowledge_point,
         "script": {

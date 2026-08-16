@@ -7,8 +7,8 @@ from server.app.routes.agent_catalog_contracts import AgentDefinitionResponse
 
 class ExecutorCapabilityResponse(BaseModel):
     name: str
-    path: str | None = None
-    timeout_seconds: int | None = None
+    # The code capability ``path`` (and its timeout display) retired with the
+    # path binding (#96): node code lives in the DB catalog, not the repo.
     skill: str | None = None
     tools: list[str] = Field(default_factory=list)
     provider: str | None = None

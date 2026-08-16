@@ -48,7 +48,7 @@ def context() -> ValidationContext:
             kind="code",
             global_capacity=4,
             capabilities={
-                "fetch_items": CodeCapabilityConfig(path="workflow_nodes/example_intake.py"),
+                "fetch_items": CodeCapabilityConfig(),
             },
         ),
         "pi-default": PiExecutorConfig(

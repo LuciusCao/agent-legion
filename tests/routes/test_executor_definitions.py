@@ -19,12 +19,12 @@ BASE = "/api/executor-definitions"
 PAYLOAD_V1 = {
     "kind": "code",
     "global_capacity": 2,
-    "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
+    "capabilities": {"clean_items": {}},
 }
 PAYLOAD_V2 = {
     "kind": "code",
     "global_capacity": 4,
-    "capabilities": {"clean_items": {"path": "workflow_nodes/example_publish.py"}},
+    "capabilities": {"clean_items": {}},
 }
 
 
@@ -135,15 +135,6 @@ def test_unknown_executor_404(client) -> None:
 
 
 def test_invalid_definition_rejected(client) -> None:
-    unsafe_path = client.post(
-        BASE,
-        json={
-            "executor_id": "code-bad",
-            **PAYLOAD_V1,
-            "capabilities": {"x": {"path": "../outside.py"}},
-        },
-    )
-    assert unsafe_path.status_code == 422
     bad_schema = client.post(
         BASE,
         json={
@@ -164,17 +155,24 @@ def test_invalid_definition_rejected(client) -> None:
     assert unknown_kind.status_code == 422
 
 
-def test_publish_rejects_path_outside_repo(client) -> None:
+def test_legacy_path_key_is_stripped_at_load(client) -> None:
+    """Pre-#96 stored definitions may still carry ``path``: tolerated and
+    dropped (the capability becomes custom-code-only), never resurrected."""
     payload = {
         "kind": "code",
         "global_capacity": 1,
         "capabilities": {"x": {"path": "workflow_nodes/does_not_exist.py"}},
     }
-    assert client.post(BASE, json={"executor_id": "code-bad", **payload}).status_code == 200
+    assert client.post(BASE, json={"executor_id": "code-legacy", **payload}).status_code == 200
+    assert client.post(f"{BASE}/code-legacy/publish").status_code == 200
 
-    rejected = client.post(f"{BASE}/code-bad/publish")
-    assert rejected.status_code == 400
-    assert "publish rejected" in rejected.json()["detail"]
+    catalog = client.get("/api/executors")
+    assert catalog.status_code == 200
+    executors = {e["id"]: e for e in catalog.json()["executors"]}
+    details = executors["code-legacy"]["capability_details"]
+    assert len(details) == 1
+    assert details[0]["name"] == "x"
+    assert "path" not in details[0]
 
 
 def test_endpoints_require_auth(anon_client) -> None:

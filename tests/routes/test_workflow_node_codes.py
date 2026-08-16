@@ -28,7 +28,8 @@ def test_get_builtin_code(workspace_with_revision) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["origin"] == "builtin"
-    assert body["path"] == "workflow_nodes/example_intake.py"
+    assert "path" not in body
+    # origin=builtin is now backed by the global factory seed (#96).
     assert "def run(" in body["code"]
     assert body["version"] is None
     assert body["has_draft"] is False
@@ -191,8 +192,9 @@ def test_node_code_template_endpoint(client) -> None:
 
     assert response.status_code == 200
     code = response.json()["code"]
-    assert "from workspace_libs.node_sdk import NodeContext" in code
-    assert "def run(job, job_dir, runtime)" in code
+    assert "from workspace_libs.node_sdk import NodeContext, entrypoint" in code
+    assert "@entrypoint" in code
+    assert "def run(ctx: NodeContext)" in code
     # The template must stay directly runnable as a node module.
     compile(code, "<template>", "exec")
 
@@ -229,4 +231,4 @@ def test_get_code_pathless_capability_returns_none_origin(client_factory, job_db
     body = response.json()
     assert body["origin"] == "none"
     assert body["code"] == ""
-    assert body["path"] is None
+    assert "path" not in body

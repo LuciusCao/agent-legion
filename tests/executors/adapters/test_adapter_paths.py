@@ -18,20 +18,23 @@ from tests.executors.adapters.helpers import _make_skill_manager
 
 
 def test_code_executor_result_log_path_is_absolute(
-    tmp_path: Path, context: ExecutionContext
+    tmp_path: Path, context: ExecutionContext, monkeypatch
 ) -> None:
-    node = tmp_path / "node_write_output.py"
-    node.write_text(
+    from tests.executors.test_code_executor import _sandboxed
+
+    _sandboxed(monkeypatch)
+    node_code = (
         "def run(job, job_dir, runtime):\n"
-        "    (job_dir / 'out.json').write_text('{}', encoding='utf-8')\n",
-        encoding="utf-8",
+        "    (job_dir / 'out.json').write_text('{}', encoding='utf-8')\n"
     )
     executor = CodeExecutor(
         "code-default",
-        {"fetch": CodeCapabilityConfig(path="node_write_output.py")},
+        {"fetch": CodeCapabilityConfig()},
         repo_root=tmp_path,
     )
-    result = executor.execute(replace(context, capability="fetch", expected_outputs=("out.json",)))
+    result = executor.execute(
+        replace(context, capability="fetch", node_code=node_code, expected_outputs=("out.json",))
+    )
     assert result.status == "completed"
     assert result.log_path == str(context.log_path)
     assert Path(result.log_path).is_absolute()

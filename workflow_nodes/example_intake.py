@@ -18,12 +18,16 @@ How job parameters reach this node (the intake fan-out contract):
 
 ``knowledge_dir`` is declared in the capability's config_schema and arrives
 via ``ctx.config`` (schema default → node config → workspace override, frozen
-at intake). The default is a repo-relative path resolved against the
-repository root — this works for Host-local execution; on a remote Worker the
-bundle carries no ``examples/`` tree, so a Worker-bound deployment must point
+at intake). The default is a repo-relative path resolved against the host
+root from the runtime (``ctx.root_dir``, injected by the parent executor) —
+this works for Host-local execution; on a remote Worker the bundle carries
+no ``examples/`` tree, so a Worker-bound deployment must point
 ``knowledge_dir`` at a path that exists on the Worker host.
 
-Pure stdlib + node SDK: no business imports, no network.
+This file is the git-reviewed **seed source** of the demo intake node: at
+startup it is published as a global node_code version (EXEC-CODE-002, #96)
+and executes from the DB text inside the velites sandbox. Pure stdlib + node
+SDK: no business imports, no network.
 """
 
 from __future__ import annotations
@@ -31,13 +35,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from workspace_libs.node_sdk import NodeContext
+from workspace_libs.node_sdk import NodeContext, entrypoint
 
 DEFAULT_KNOWLEDGE_DIR = "examples/education-video-problems-generation"
-
-# Repo root: this file is a built-in node (EXEC-CODE-001) pinned at
-# ``workflow_nodes/example_intake.py``, one level below the root.
-_REPO_ROOT = Path(__file__).resolve().parents[1]
 
 _HEADING_1 = "# "
 _HEADING_2 = "## "
@@ -50,7 +50,7 @@ def _resolve_knowledge_dir(ctx: NodeContext) -> Path:
     configured = str(ctx.config.get("knowledge_dir") or DEFAULT_KNOWLEDGE_DIR).strip()
     path = Path(configured).expanduser()
     if not path.is_absolute():
-        path = _REPO_ROOT / path
+        path = (ctx.root_dir or Path.cwd()) / path
     return path
 
 
@@ -117,16 +117,12 @@ def _parse_knowledge_markdown(text: str, source_id: str) -> dict[str, Any]:
     }
 
 
-def run(
-    job: dict[str, Any],
-    job_dir: Path,
-    runtime: dict[str, Any] | None = None,
-) -> None:
-    ctx = NodeContext(job, job_dir, runtime)
+@entrypoint
+def run(ctx: NodeContext) -> None:
     log = ctx.logger
     ctx.checkpoint()
 
-    source_id = str(job["source_id"])
+    source_id = str(ctx.job["source_id"])
     knowledge_dir = _resolve_knowledge_dir(ctx)
     source_file = knowledge_dir / f"{source_id}.md"
     log.info(

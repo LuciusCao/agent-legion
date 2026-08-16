@@ -11,13 +11,10 @@ from server.app.settings import Settings
 
 def capability_detail(capability: str, config: Any) -> dict[str, Any]:
     detail: dict[str, Any] = {"name": capability}
-    path = getattr(config, "path", None)
-    timeout_seconds = getattr(config, "timeout_seconds", None)
+    # The code capability ``path`` key is retired (#96): code capabilities
+    # have no file to display; node code lives in the DB catalog.
     skill = getattr(config, "skill", None)
     tools = getattr(config, "tools", ())
-    if path:
-        detail["path"] = path
-        detail["timeout_seconds"] = timeout_seconds
     if skill:
         detail["skill"] = skill
     if tools:

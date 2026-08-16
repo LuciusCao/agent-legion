@@ -359,7 +359,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-001
-    statement: "Built-in code executor capabilities must reference repo-tracked Python files via repo-relative paths stored as pointers in the DB executor definition (versioned_entities, entity_type 'executor'; the tracked yaml executors section is retired): absolute paths and '..' segments are rejected at draft validation, paths must resolve to files inside the repository root at publish and again at startup hydration / executor construction, and node code runs only through the isolated child-process contract run(job, job_dir, runtime). Scope is built-in nodes only: built-in node code changes land exclusively through git review + CI; no runtime API may create, modify, or delete repo workflow_nodes/ files (the former Studio online-edit write endpoint was removed in M1)."
+    statement: "The capability 'path' binding to repo-tracked node files is retired (#96): executor definitions never carry a path key (the pydantic model rejects it; the loader tolerates-and-strips legacy stored keys with a warning because versioned entities are immutable), the repo-file module loader and the bare multiprocessing child are gone, and the Studio repo-file viewer (routes/services workflow_node_files) is deleted. The only repo-tracked node code left is the demo workflow's two seed sources under workflow_nodes/ — git-reviewed, CI-gated, read-only for every runtime path — published at startup as global (workspace-NULL) node_code versions via seed-if-absent (server/app/services/demo_node_seed.py), so the demo runs on a fresh deployment with zero per-workspace setup."
     owner: workspace-executor
     risk: high
     evidence:
@@ -370,17 +370,20 @@ invariants:
         target: tests/executors/test_executor_kind_registration.py::test_builtin_kinds_registered
         gate: quick
       - kind: integration
-        target: tests/db/test_code_executor_migration.py
-        gate: quick
-      - kind: integration
         target: tests/executors/test_builtin_definitions.py
         gate: quick
       - kind: integration
         target: tests/services/test_executor_definition_service.py
         gate: quick
+      - kind: integration
+        target: tests/services/test_demo_node_seed.py
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_worker_thread_local.py::test_make_workflow_worker_runs_demo_intake_local_node
+        gate: quick
 
   - id: EXEC-CODE-002
-    statement: "Custom workflow node code lives only in the DB (workflow_node_codes), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and jobs freeze the code version they started with; no runtime path may write repo workflow_nodes/ files. A code capability may omit path entirely (custom-code only): dispatch then requires a published custom code version and otherwise fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
+    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and jobs freeze the code version they started with; no runtime path may write repo workflow_nodes/ files. Codes are workspace-scoped with a global (workspace-NULL) factory-seed scope for the demo nodes (#96); dispatch resolves frozen pin → workspace published → global published, and a capability with no published code at either scope fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
     owner: workspace-executor
     risk: high
     evidence:
@@ -394,10 +397,10 @@ invariants:
         target: tests/workers/test_workflow_worker_node_code.py
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_execute_custom_node_code_from_source
+        target: tests/executors/test_code_executor.py::test_execute_without_node_code_is_a_config_error
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_pathless_capability_runs_custom_code_sandboxed
+        target: tests/executors/test_code_executor.py::test_config_rejects_retired_path_key
         gate: quick
       - kind: integration
         target: tests/test_workflow_revisions.py::test_publish_revision_records_node_code_pins
@@ -409,12 +412,12 @@ invariants:
   # Rust-side wrap policy (seatbelt/bwrap argv) is covered by
   # velites/tests/sandbox_wrap.rs; registry targets allow only tests//scripts/.
   - id: EXEC-CODE-003
-    statement: "Custom (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend custom code never runs unsandboxed. Builtin repo-tracked nodes keep the bare multiprocessing child on the Host (EXEC-CODE-001), but on a Worker ALL code execution (builtin and custom alike, worker/code_runner.py) goes through the same velites sandbox wrap — the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites."
+    statement: "All (DB-backed) node code executes only inside the velites OS sandbox (`velites sandbox wrap`: macOS seatbelt / Linux bubblewrap) with deny-by-default policy — read-only filesystem except job_dir and tmp, network denied unless the capability opts in via sandbox_network — and fail-closed: without a sandbox backend node code never runs unsandboxed. This holds on the Host (the bare multiprocessing child retired with the path mechanism in #96) and on a Worker alike (worker/code_runner.py): the Worker verifies code_hash before spawn, and its startup preflight refuses to start when code capacity is declared without a resolvable velites binary (fail-closed). Worker-side binary resolution is shared between preflight, code_runner and execution_prepare (worker/binary_resolution.py resolve_binary): the bundled copy `data/bin/velites` (installed per-platform via `scripts/ensure-velites.sh --dest data/bin`) takes precedence over PATH, so a Worker machine needs no preinstalled velites."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_custom_node_code_fails_closed_without_sandbox
+        target: tests/executors/test_code_executor.py::test_node_code_fails_closed_without_sandbox
         gate: quick
       - kind: integration
         target: tests/executors/test_code_executor.py::test_custom_sandbox_denies_network_by_default
@@ -447,7 +450,7 @@ invariants:
         target: tests/executors/test_code_executor.py::test_build_runtime_prefetches_inputs_and_hides_db
         gate: quick
       - kind: integration
-        target: tests/executors/test_code_executor.py::test_builtin_child_auth_failure_marker_reaches_parent
+        target: tests/executors/test_code_executor.py::test_sandboxed_child_auth_failure_marker_reaches_parent
         gate: quick
       - kind: integration
         target: tests/executors/test_code_executor.py::test_sandboxed_custom_node_can_use_node_sdk

@@ -42,8 +42,9 @@ class _StubSkillManager(SkillManager):
         return self.base_dir / skill_key
 
 
-# Minimal code-node files, written into a tmp repo root so the isolated
-# multiprocessing child can load them by path after spawn.
+# Minimal code-node sources, published as workspace node codes and executed
+# from the text inside the velites sandbox (post-#96; the path-loaded bare
+# child is gone).
 
 _COOPERATIVE_NODE = """\
 import time
@@ -70,13 +71,11 @@ def run(job, job_dir, runtime):
 
 
 def _local_executor(repo_root: Path) -> CodeExecutor:
-    (repo_root / "cooperative_node.py").write_text(_COOPERATIVE_NODE, encoding="utf-8")
-    (repo_root / "blocked_node.py").write_text(_BLOCKED_NODE, encoding="utf-8")
     return CodeExecutor(
         "code-default",
         {
-            "cooperative": CodeCapabilityConfig(path="cooperative_node.py"),
-            "blocked": CodeCapabilityConfig(path="blocked_node.py"),
+            "cooperative": CodeCapabilityConfig(),
+            "blocked": CodeCapabilityConfig(),
         },
         repo_root=repo_root,
         cancellation_grace_seconds=GRACE,
@@ -100,10 +99,7 @@ def _make_registry(local_executor: CodeExecutor, pi_executor: PiExecutor) -> Any
             "code-default": {
                 "kind": "code",
                 "global_capacity": 3,
-                "capabilities": {
-                    "cooperative": {"path": "workflow_nodes/example_intake.py"},
-                    "blocked": {"path": "workflow_nodes/example_intake.py"},
-                },
+                "capabilities": {"cooperative": {}, "blocked": {}},
             },
             "pi-default": {
                 "kind": "pi",
@@ -133,6 +129,16 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
     fake_pi.chmod(0o755)
 
+    from tests.executors.test_code_executor import _sandbox_backend_available, _velites_binary
+
+    if not _sandbox_backend_available():
+        pytest.skip("no OS sandbox backend (macOS sandbox-exec / Linux bwrap)")
+    binary = _velites_binary()
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "server.app.executors._code_sandbox.shutil.which", lambda _name: str(binary)
+    )
+
     local_executor = _local_executor(tmp_path)
     pi_executor = _pi_executor(fake_pi, tmp_path / "skills")
     registry = _make_registry(local_executor, pi_executor)
@@ -148,6 +154,13 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
             node.key,
             "pi-default" if node.key == "blocked_pi" else "code-default",
         )
+
+    from server.app.services.node_codes import NodeCodeService
+
+    codes = NodeCodeService(db_path)
+    for node_key, code in (("cooperative", _COOPERATIVE_NODE), ("blocked", _BLOCKED_NODE)):
+        codes.save_draft(ws["id"], "test", node_key, code, "test seed")
+        codes.publish(ws["id"], "test", node_key)
 
     job = job_db.create_job(
         workflow_key="test",
@@ -197,6 +210,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
         start_stop = time.monotonic()
         worker.stop(timeout=GRACE + 1)
         stop_elapsed = time.monotonic() - start_stop
+        monkeypatch.undo()
 
     assert stop_elapsed < GRACE + 2, "worker shutdown was unbounded"
 

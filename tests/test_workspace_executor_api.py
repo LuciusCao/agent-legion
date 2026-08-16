@@ -19,8 +19,6 @@ def test_list_executors_endpoint(client):
     ]
     assert {
         "name": "intake_knowledge_points",
-        "path": "workflow_nodes/example_intake.py",
-        "timeout_seconds": 600,
         "skill": None,
         "tools": [],
         "provider": None,

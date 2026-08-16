@@ -9,6 +9,7 @@ from tests.workers.helpers import (
     _local_node,
     _make_definition,
     _make_worker,
+    _seed_trivial_node_code,
 )
 
 
@@ -37,6 +38,7 @@ def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Pa
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
             (ws["id"], "code-default", 2),
         )
+    _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     processed = worker._poll()

@@ -22,3 +22,9 @@ generate_questions → review_questions → publish_content（模拟入库，
 （`make skills-lock`）、workspace 绑定该 workflow 并配置了 agent 执行所需的
 模型默认值（workspace Settings 的 `default_agent_provider` /
 `default_agent_model`）。
+
+两个 code 节点（intake/publish）的出厂代码随后端启动自动发布为全局
+node_code 版本（seed-if-absent，源自 `workflow_nodes/` 的 git 评审文件）；
+它们与其他 code 节点一样在 velites 沙箱内执行（#96），因此运行示例的
+Host 需要 velites 二进制在 PATH（或用 `scripts/ensure-velites.sh` 安装到
+`data/bin/`）且 macOS `sandbox-exec` / Linux `bwrap` 可用。

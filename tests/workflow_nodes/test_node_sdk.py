@@ -7,7 +7,12 @@ from pathlib import Path
 
 import pytest
 
-from workspace_libs.node_sdk import AUTH_FAILURE_MARKER_PATH, NodeContext, parse_json_object
+from workspace_libs.node_sdk import (
+    AUTH_FAILURE_MARKER_PATH,
+    NodeContext,
+    entrypoint,
+    parse_json_object,
+)
 
 pytestmark = pytest.mark.no_db
 
@@ -231,3 +236,55 @@ def test_parse_json_object_tolerates_garbage() -> None:
     assert parse_json_object("not json") == {}
     assert parse_json_object(None) == {}
     assert parse_json_object("") == {}
+
+
+# ---------------------------------------------------------------------------
+# batch_payload / root_dir
+
+
+def test_batch_payload_parses_prefetched_source_payload(tmp_path: Path) -> None:
+    batch = {"id": "b-1", "source_payload_json": '{"intake_mode": {"input_field": "ids"}}'}
+    ctx = _ctx(tmp_path, {"job_batch": batch})
+
+    assert ctx.batch_payload == {"intake_mode": {"input_field": "ids"}}
+
+
+def test_batch_payload_defaults_to_empty(tmp_path: Path) -> None:
+    assert _ctx(tmp_path, {}).batch_payload == {}
+    assert _ctx(tmp_path, {"job_batch": {"source_payload_json": "not json"}}).batch_payload == {}
+    assert _ctx(tmp_path, {"job_batch": {"id": "b-1"}}).batch_payload == {}
+
+
+def test_root_dir_reads_runtime_key(tmp_path: Path) -> None:
+    assert _ctx(tmp_path, {"root_dir": "/repo/root"}).root_dir == Path("/repo/root")
+    assert _ctx(tmp_path, {}).root_dir is None
+    assert _ctx(tmp_path, {"root_dir": ""}).root_dir is None
+
+
+# ---------------------------------------------------------------------------
+# entrypoint
+
+
+def test_entrypoint_adapts_business_function(tmp_path: Path) -> None:
+    seen: dict = {}
+
+    @entrypoint
+    def run(ctx: NodeContext) -> None:
+        seen["job"] = ctx.job
+        seen["node_key"] = ctx.config.get("k")
+        ctx.artifacts.write_json("out.json", {"ok": True})
+
+    assert run.__name__ == "run"
+    run({"id": "j-1"}, tmp_path, {"node_config": {"k": "v"}})
+
+    assert seen == {"job": {"id": "j-1"}, "node_key": "v"}
+    assert json.loads((tmp_path / "out.json").read_text(encoding="utf-8")) == {"ok": True}
+
+
+def test_entrypoint_runtime_defaults_to_none(tmp_path: Path) -> None:
+    @entrypoint
+    def run(ctx: NodeContext) -> None:
+        assert ctx.config == {}
+        assert ctx.batch is None
+
+    run({"id": "j-2"}, tmp_path)
