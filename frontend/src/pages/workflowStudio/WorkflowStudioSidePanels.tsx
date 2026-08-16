@@ -9,6 +9,7 @@ type Props = {
   active: boolean
   rightPanelTab: StudioRightPanelTab
   onRightPanelTabChange: (tab: StudioRightPanelTab) => void
+  onSelectNode: (nodeKey: string) => void
   onClose: () => void
 }
 
@@ -20,7 +21,7 @@ export function WorkflowStudioInspectorPanel(p: Props) {
         activeTab={p.rightPanelTab}
         onTabChange={p.onRightPanelTabChange}
         onBackToDraft={p.props.backToDraft}
-        onSelectNode={p.props.setSelectedNodeKey}
+        onSelectNode={p.onSelectNode}
         onClose={p.onClose}
       />
     </aside>

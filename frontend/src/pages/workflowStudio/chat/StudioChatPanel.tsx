@@ -67,7 +67,7 @@ export function StudioChatPanel(props: Props) {
         onNewChat={() =>
           selectedAgentId && void chat.startSession(selectedAgentId)
         }
-        newChatDisabled={!selectedAgentId}
+        newChatDisabled={!selectedAgentId || chat.starting}
       />
       <div className={styles.scopeNote}>
         Agent 来自管理员配置并按本机安装过滤；agent 只能产出草稿与校验，

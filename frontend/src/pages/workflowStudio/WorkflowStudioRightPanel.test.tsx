@@ -161,6 +161,42 @@ describe('WorkflowStudioRightPanel', () => {
     expect(screen.queryByText('基本设置')).not.toBeInTheDocument()
   })
 
+  it('keeps the chat panel mounted (hidden) across tab switches', () => {
+    const panelProps = {
+      workflow,
+      executorCatalog,
+      agentCatalog: [],
+      selectedNodeKey: 'fetch_items',
+      readOnly: false,
+      definitionYaml: 'key: demo_video_workflow\n',
+      setDefinitionYaml: vi.fn(),
+      onTabChange: vi.fn(),
+      onClose: vi.fn(),
+    }
+    const { rerender } = render(
+      <TestQueryProvider>
+        <WorkflowStudioRightPanel {...panelProps} activeTab="chat" />
+      </TestQueryProvider>
+    )
+    expect(screen.getByText('chat panel stub')).toBeInTheDocument()
+
+    rerender(
+      <TestQueryProvider>
+        <WorkflowStudioRightPanel {...panelProps} activeTab="inspector" />
+      </TestQueryProvider>
+    )
+    // chat 面板保活：仍在文档中但 hidden，会话选择与滚动状态不丢。
+    expect(screen.getByText('chat panel stub').parentElement).toHaveAttribute(
+      'hidden'
+    )
+    expect(screen.getByText('基本设置')).toBeInTheDocument()
+  })
+
+  it('does not mount the chat panel before its first activation', () => {
+    renderPanel()
+    expect(screen.queryByText('chat panel stub')).not.toBeInTheDocument()
+  })
+
   it('shows code and config cards for a code-bound node with a config schema', async () => {
     useAuthStore.setState({ user: adminUser, status: 'authenticated' })
     useSettingStore.setState({

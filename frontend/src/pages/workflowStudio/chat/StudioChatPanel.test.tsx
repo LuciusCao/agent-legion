@@ -292,4 +292,38 @@ describe('StudioChatPanel', () => {
       )
     )
   })
+
+  it('disables the new-chat button while a session is being created', async () => {
+    let resolveCreate: (session: StudioChatSessionRecord) => void = () => {}
+    mockApi.createStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    renderPanel()
+
+    // 等 agent 列表到达（否则 selectedAgentId 为空，按钮天然禁用）。
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '＋ 新对话' })).toBeEnabled()
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '＋ 新对话' }))
+    })
+    // 创建在途：按钮禁用，重复点击不会起第二个 agent 子进程。
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '＋ 新对话' })).toBeDisabled()
+    )
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: '＋ 新对话' }))
+    })
+    expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveCreate(sessionRecord({ id: 's2' }))
+    })
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: '＋ 新对话' })).toBeEnabled()
+    )
+  })
 })

@@ -44,6 +44,7 @@ export function useStudioChat(workspaceId: string | undefined) {
   const [session, setSession] = useState<StudioChatSessionRecord | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
   const [sending, setSending] = useState(false)
+  const [starting, setStarting] = useState(false)
   const [runTiming, setRunTiming] = useState<{
     startedAt: number | null
     lastMs: number | null
@@ -52,6 +53,10 @@ export function useStudioChat(workspaceId: string | undefined) {
   useEffect(() => {
     messagesRef.current = messages
   }, [messages])
+  const activeSessionIdRef = useRef<string | null>(null)
+  useEffect(() => {
+    activeSessionIdRef.current = activeSessionId
+  }, [activeSessionId])
 
   const agentsQuery = useQuery({
     queryKey: queryKeys.studioChatAgents(workspaceId ?? ''),
@@ -83,22 +88,28 @@ export function useStudioChat(workspaceId: string | undefined) {
     })
   }, [sessionStatus])
 
-  const refillMessages = useCallback(async () => {
-    if (!workspaceId || !activeSessionId) return
-    const after = maxSeq(messagesRef.current)
-    const fetched = await fetchStudioChatMessages(
-      workspaceId,
-      activeSessionId,
-      after
-    )
-    setMessages((current) => {
-      let next = current
-      for (const message of fetched) {
-        next = upsertMessage(next, message) ?? next
-      }
-      return next
-    })
-  }, [workspaceId, activeSessionId])
+  const refillMessages = useCallback(
+    async (fromSeq?: number) => {
+      if (!workspaceId || !activeSessionId) return
+      const sessionId = activeSessionId
+      const after = fromSeq ?? maxSeq(messagesRef.current)
+      const fetched = await fetchStudioChatMessages(
+        workspaceId,
+        sessionId,
+        after
+      )
+      setMessages((current) => {
+        // 跨会话竞态：拉取在途时切换了会话，旧会话的消息不得合入新列表。
+        if (activeSessionIdRef.current !== sessionId) return current
+        let next = current
+        for (const message of fetched) {
+          next = upsertMessage(next, message) ?? next
+        }
+        return next
+      })
+    },
+    [workspaceId, activeSessionId]
+  )
 
   // 进入/切换会话：全量拉一次消息与会话快照。
   useEffect(() => {
@@ -153,22 +164,34 @@ export function useStudioChat(workspaceId: string | undefined) {
           return
         }
         if (payload.type === 'message' && payload.message) {
-          setMessages((current) => {
-            const next = upsertMessage(current, payload.message!)
-            if (next === null) {
-              // 流式残片指向未知消息：增量补齐而不是丢弃。
-              void refillMessages()
-              return current
-            }
-            return next
-          })
+          const incoming = payload.message
+          // 缺 seq 的流式残片指向未知消息：在 updater 外判定（updater 在
+          // StrictMode 下会被双调用，副作用放里面会重复 fetch），增量补齐
+          // 而不是丢弃；补齐失败留待下次事件再试，不产生 unhandled rejection。
+          const missed = upsertMessage(messagesRef.current, incoming) === null
+          setMessages((current) => upsertMessage(current, incoming) ?? current)
+          if (missed) {
+            void refillMessages().catch(() => undefined)
+          }
+          // 断连期间的流式 text 尾部会永久截断（原地更新 seq 不变，after_seq
+          // 增量补齐拿不到）；turn 结束时全量回取一次自愈。
+          const content = incoming.content
+          const statusEvent =
+            incoming.kind === 'status' &&
+            content !== null &&
+            typeof content === 'object'
+              ? (content as Record<string, unknown>).event
+              : undefined
+          if (statusEvent === 'turn_end') {
+            void refillMessages(0).catch(() => undefined)
+          }
         } else if (payload.type === 'session' && payload.session) {
           applySession(payload.session)
         }
       },
       onStatus: (status) => {
         if (status !== 'open') return
-        void refillMessages()
+        void refillMessages().catch(() => undefined)
         // 断连期间的会话状态翻转（如 agent 抛权限请求置
         // awaiting_permission）不补发 SSE；重连必须重拉会话快照，否则本地
         // status 滞留 running，approve/deny 永远 disabled。刷新失败不阻断
@@ -196,7 +219,8 @@ export function useStudioChat(workspaceId: string | undefined) {
   }
 
   async function startSession(agentId: string) {
-    if (!workspaceId) return
+    if (!workspaceId || starting) return
+    setStarting(true)
     await runAction(async () => {
       const created = await createStudioChatSession(workspaceId, agentId)
       await queryClient.invalidateQueries({
@@ -205,6 +229,7 @@ export function useStudioChat(workspaceId: string | undefined) {
       applySession(created)
       setActiveSessionId(created.id)
     })
+    setStarting(false)
   }
 
   async function send(text: string) {
@@ -291,6 +316,7 @@ export function useStudioChat(workspaceId: string | undefined) {
     busy,
     closed,
     sending,
+    starting,
     actionError,
     lastRunMs: runTiming.lastMs,
     selectSession,

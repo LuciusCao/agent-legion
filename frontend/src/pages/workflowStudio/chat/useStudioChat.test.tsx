@@ -269,4 +269,106 @@ describe('useStudioChat', () => {
     expect(result.current.workflowDraft?.yaml).toBe('key: w\n')
     expect(result.current.workflowDraft?.validated).toBe(true)
   })
+
+  it('refetches the full timeline on turn_end to heal truncated streaming text', async () => {
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+    emit({ type: 'message', message: textMessage('m1', 1, 'trunc') })
+    expect(result.current.messages[0]?.content.text).toBe('trunc')
+
+    // 断连期间流式 text 的尾部只在服务端落库（原地更新 seq 不变）；turn_end
+    // 后按 after_seq=0 全量回取，本地截断消息被完整版本覆盖。
+    mockApi.fetchStudioChatMessages.mockResolvedValueOnce([
+      textMessage('m1', 1, 'full ending'),
+    ])
+    emit({
+      type: 'message',
+      message: {
+        id: 'st1',
+        session_id: 's1',
+        kind: 'status',
+        role: 'system',
+        content: { event: 'turn_end', stop_reason: 'end_turn' },
+      },
+    })
+
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        0
+      )
+    )
+    await waitFor(() =>
+      expect(result.current.messages[0]?.content.text).toBe('full ending')
+    )
+  })
+
+  it('does not merge an in-flight refill from a previous session', async () => {
+    type MessagesResult = Awaited<
+      ReturnType<typeof chatApi.fetchStudioChatMessages>
+    >
+    let resolveRefill: (messages: MessagesResult) => void = () => {}
+    mockApi.fetchStudioChatMessages.mockImplementation(
+      (_workspaceId, sessionId, afterSeq) => {
+        if (sessionId === 's1' && afterSeq !== undefined) {
+          return new Promise<MessagesResult>((resolve) => {
+            resolveRefill = resolve
+          })
+        }
+        return Promise.resolve([])
+      }
+    )
+    mockApi.fetchStudioChatSession.mockResolvedValue(sessionRecord())
+    const { result } = await renderChat()
+    await waitFor(() => expect(EventSourceMock.instances).toHaveLength(1))
+
+    // 重连触发对 s1 的增量补齐（在途），期间用户切到 s2。
+    const source = EventSourceMock.instances[0]
+    act(() => source.onopen?.())
+    await waitFor(() =>
+      expect(mockApi.fetchStudioChatMessages).toHaveBeenCalledWith(
+        'ws1',
+        's1',
+        0
+      )
+    )
+    await act(async () => {
+      await result.current.selectSession('s2')
+    })
+
+    await act(async () => {
+      resolveRefill([textMessage('stale', 1, 'from old session')])
+    })
+    expect(result.current.messages).toEqual([])
+  })
+
+  it('disables concurrent new-chat creation while one is in flight', async () => {
+    let resolveCreate: (session: StudioChatSessionRecord) => void = () => {}
+    mockApi.createStudioChatSession.mockImplementation(
+      () =>
+        new Promise<StudioChatSessionRecord>((resolve) => {
+          resolveCreate = resolve
+        })
+    )
+    const { result } = await renderChat()
+
+    let first: Promise<void> | undefined
+    act(() => {
+      first = result.current.startSession('kimi')
+    })
+    await waitFor(() => expect(result.current.starting).toBe(true))
+
+    await act(async () => {
+      await result.current.startSession('kimi')
+    })
+    expect(mockApi.createStudioChatSession).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      resolveCreate(sessionRecord({ id: 's2' }))
+      await first
+    })
+    expect(result.current.starting).toBe(false)
+    expect(result.current.activeSessionId).toBe('s2')
+  })
 })
