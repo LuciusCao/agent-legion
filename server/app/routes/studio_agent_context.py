@@ -2,8 +2,9 @@
 
 Split from studio_agent_tools.py (file budget): the ``get_studio_context``
 MCP tool's backing route. Unlike the workspace-path tool endpoints, the
-session scope arrives as a path parameter and the workspace binding is
-enforced inside the service (bound token + foreign session = 404).
+session scope arrives as a path parameter and authorization is enforced
+inside the service (bound token → workspace match, unbound token → workspace
+membership; mismatches are 404).
 """
 
 from typing import Annotated, Any
@@ -30,7 +31,7 @@ def create_studio_agent_context_router(job_db: JobQueries) -> APIRouter:
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
     ) -> StudioChatContextResponse:
         try:
-            context = build_session_context(job_db, session_id, user.get("scoped_workspace_id"))
+            context = build_session_context(job_db, session_id, user)
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return StudioChatContextResponse.model_validate(context)
