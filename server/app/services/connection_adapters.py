@@ -1,14 +1,14 @@
 """External connection type adapters: platform protocol + registry.
 
 The platform owns the connection *mechanism* (storage, admin API, token
-caching); auth-protocol semantics live with the workspace integration packs
-under ``workspace_libs/``. The registry maps a type string to a lazy import
-location so ``server/app`` itself carries no vendor-specific knowledge — a
-new external service type is added by dropping an adapter into a workspace
-pack and registering its import path here.
+caching); vendor-specific auth semantics live with the workspace
+integration packs under ``workspace_libs/``. The registry maps a type
+string to a lazy import location so ``server/app`` itself carries no
+vendor-specific knowledge — a workspace-pack type is added by dropping
+an adapter into the pack and registering its import path here.
 
-Only the trivial ``static_bearer`` type (a ready-made token) is implemented
-in the platform; everything with real auth semantics lives outside it.
+The platform ships two vendor-neutral built-ins: ``static_bearer`` (a
+ready-made token) and ``hmac_token`` (``connection_adapter_hmac.py``).
 """
 
 from __future__ import annotations
@@ -119,6 +119,8 @@ _STATIC_BEARER = ConnectionAdapter(
 # type → adapter, or (module, attribute) for lazy loading from workspace packs.
 _REGISTRY: dict[str, ConnectionAdapter | tuple[str, str]] = {
     "static_bearer": _STATIC_BEARER,
+    # Lazy import keeps this module inside its file budget.
+    "hmac_token": ("server.app.services.connection_adapter_hmac", "HMAC_TOKEN_ADAPTER"),
 }
 
 
