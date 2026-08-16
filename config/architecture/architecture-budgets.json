@@ -718,7 +718,7 @@
     "server/app/executors/builtin_definitions.py": 32,
     "server/app/executors/builtin_demo.py": 38,
     "server/app/executors/cancellation.py": 100,
-    "server/app/executors/code.py": 132,
+    "server/app/executors/code.py": 129,
     "server/app/executors/code_config.py": 73,
     "server/app/executors/config.py": 67,
     "server/app/executors/definitions.py": 45,
@@ -1143,7 +1143,7 @@
     "workspace_libs/code_child.py": 72,
     "workspace_libs/code_loader.py": 30,
     "workspace_libs/http_client.py": 186,
-    "workspace_libs/media.py": 95,
+    "workspace_libs/media.py": 91,
     "workspace_libs/node_artifacts.py": 54,
     "workspace_libs/node_sdk.py": 176
   }

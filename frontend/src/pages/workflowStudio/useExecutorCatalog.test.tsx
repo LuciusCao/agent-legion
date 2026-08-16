@@ -17,9 +17,7 @@ const executor: ExecutorDefinition = {
   kind: 'code',
   global_capacity: 16,
   capabilities: ['fetch_items'],
-  capability_details: [
-    { name: 'fetch_items' },
-  ],
+  capability_details: [{ name: 'fetch_items' }],
 }
 
 function wrapper(client: QueryClient) {
