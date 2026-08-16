@@ -108,6 +108,29 @@ LOCAL_BASH_MIMIC_SCRIPT = {
 
 WAIT_CANCEL_SCRIPT = {"wait_for_cancel": True, "on_prompt": []}
 
+THOUGHT_SCRIPT = {
+    "on_prompt": [
+        {
+            "notify": {
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "先想"},
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "agent_thought_chunk",
+                "content": {"type": "text", "text": "一下"},
+            }
+        },
+        {
+            "notify": {
+                "sessionUpdate": "agent_message_chunk",
+                "content": {"type": "text", "text": "答案"},
+            }
+        },
+    ],
+}
+
 
 class RecordingBus:
     """EventBus stand-in capturing published (channel, payload) pairs."""
@@ -278,6 +301,31 @@ def test_session_lifecycle_turn_and_token_revocation(chat, job_db) -> None:
     assert authenticate_scoped_token(job_db, token) is None
     with pytest.raises(ConflictError):
         service.send_message(session["id"], workspace_id, "again")
+
+
+def test_thought_chunks_persist_as_coalesced_thought_message(chat) -> None:
+    """agent_thought_chunk 不再丢弃：按 turn 聚合落库为一条 thought 消息
+    （前端可折叠），与正文 text 消息分开，且经 SSE 透传。"""
+    service, bus, register, workspace_id, user_id = chat
+    register(THOUGHT_SCRIPT)
+    session = service.create_session(workspace_id, user_id, "fake-agent")
+    service.send_message(session["id"], workspace_id, "think it through")
+
+    _wait_for(lambda: service.get_session(session["id"])["status"] == "idle")
+    messages = service.list_messages(session["id"], workspace_id)
+    thoughts = [m for m in messages if m["kind"] == "thought"]
+    assert len(thoughts) == 1
+    assert thoughts[0]["role"] == "agent"
+    assert thoughts[0]["content"]["text"] == "先想一下"
+    agent_texts = [m for m in messages if m["kind"] == "text" and m["role"] == "agent"]
+    assert len(agent_texts) == 1
+    assert agent_texts[0]["content"]["text"] == "答案"
+    thought_events = [
+        payload
+        for _, payload in bus.events
+        if payload.get("type") == "message" and payload["message"].get("kind") == "thought"
+    ]
+    assert thought_events
 
 
 def test_run_without_mcp_tool_call_is_flagged_unverified(chat) -> None:

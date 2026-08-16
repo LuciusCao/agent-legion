@@ -8,7 +8,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 SessionStatus = Literal["starting", "idle", "running", "awaiting_permission", "closed", "error"]
-MessageKind = Literal["text", "tool_call", "plan", "permission", "status"]
+MessageKind = Literal["text", "tool_call", "plan", "permission", "status", "thought"]
 MessageRole = Literal["user", "agent", "system"]
 McpStatus = Literal["unknown", "verified", "unverified"]
 

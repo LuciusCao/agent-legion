@@ -4504,7 +4504,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status'
+      kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status' | 'thought'
       /**
        * Role
        * @enum {string}

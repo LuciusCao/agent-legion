@@ -10,6 +10,7 @@ import {
 } from './studioChatMessages'
 import { StudioChatToolCallCard } from './StudioChatToolCallCard'
 import { StudioChatPermission } from './StudioChatPermission'
+import { StudioChatThought } from './StudioChatThought'
 import {
   AgentDefinitionDraftCard,
   NodeCodeDraftCard,
@@ -122,6 +123,9 @@ function MessageItem({
     const className =
       message.role === 'user' ? styles.bubbleUser : styles.bubbleAgent
     return <div className={className}>{textContent(message)}</div>
+  }
+  if (message.kind === 'thought') {
+    return <StudioChatThought text={textContent(message)} />
   }
   if (message.kind === 'tool_call') {
     if (!toolCall) return null

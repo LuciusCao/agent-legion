@@ -407,6 +407,8 @@
     "frontend/src/pages/workflowStudio/chat/StudioChatPermission.tsx": 79,
     "frontend/src/pages/workflowStudio/chat/StudioChatRunBar.tsx": 63,
     "frontend/src/pages/workflowStudio/chat/StudioChatSessionBar.tsx": 75,
+    "frontend/src/pages/workflowStudio/chat/StudioChatThought.module.css": 25,
+    "frontend/src/pages/workflowStudio/chat/StudioChatThought.tsx": 20,
     "frontend/src/pages/workflowStudio/chat/StudioChatToolCallCard.tsx": 56,
     "frontend/src/pages/workflowStudio/chat/StudioRightPanelBody.tsx": 57,
     "frontend/src/pages/workflowStudio/chat/StudioRightPanelTabs.tsx": 49,
