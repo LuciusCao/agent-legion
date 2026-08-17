@@ -278,10 +278,14 @@ describe('streamingTextId', () => {
     expect(streamingTextId([first, turnEnd(), second])).toBe(second.id)
   })
 
-  it('returns null once the turn ended after the last text', () => {
-    const text = message('text', 'agent', { text: '好了' })
-    expect(streamingTextId([text, turnEnd()])).toBeNull()
-  })
+  it.each(['turn_end', 'error', 'session_closed'])(
+    'returns null once %s closed the stream slot',
+    (event) => {
+      const text = message('text', 'agent', { text: '好了' })
+      const status = message('status', 'system', { event })
+      expect(streamingTextId([text, status])).toBeNull()
+    }
+  )
 
   it('ignores user text messages and historical loads without status events', () => {
     const agentText = message('text', 'agent', { text: '答' })
