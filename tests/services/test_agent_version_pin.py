@@ -16,6 +16,7 @@ from tests.helpers import replace_agent_catalog
 from tests.postgres_support import TEST_DATABASE_URL
 
 _AGENT = "generator-v1"
+_WORKSPACE = "test-workspace"
 
 
 def _v1() -> AgentDefinition:
@@ -32,10 +33,14 @@ def _v2() -> AgentDefinition:
     )
 
 
+def _service() -> AgentService:
+    return AgentService(TEST_DATABASE_URL, _WORKSPACE)
+
+
 def _seed_catalog() -> None:
-    """v1 published, v2 draft."""
-    replace_agent_catalog({_AGENT: _v1()})
-    AgentService(TEST_DATABASE_URL).save_draft(_AGENT, _v2(), created_by="test")
+    """v1 published, v2 draft (workspace-scoped catalog, schema v46)."""
+    replace_agent_catalog(_WORKSPACE, {_AGENT: _v1()})
+    _service().save_draft(_AGENT, _v2(), created_by="test")
 
 
 def _insert_job_rows(job_db, job_id: str) -> None:
@@ -170,7 +175,7 @@ def test_stale_definition_sweeper_respects_pin(job_db) -> None:
 
     # Publishing v2 archives v1: the unpinned request goes stale, the pinned
     # one stays valid because its immutable version row still exists.
-    AgentService(TEST_DATABASE_URL).publish(_AGENT)
+    _service().publish(_AGENT)
     failed = fail_stale_definition_requests(broker)
 
     assert failed == [unpinned_id]
@@ -180,16 +185,28 @@ def test_stale_definition_sweeper_respects_pin(job_db) -> None:
 
 def test_resolve_dispatch_agent_definition() -> None:
     _seed_catalog()
-    assert resolve_dispatch_agent_definition(TEST_DATABASE_URL, _AGENT, None) == _v1()
+    assert resolve_dispatch_agent_definition(TEST_DATABASE_URL, _WORKSPACE, _AGENT, None) == _v1()
 
     pin = {"agent_id": _AGENT, "version": 2, "definition_hash": _v2().definition_hash()}
-    assert resolve_dispatch_agent_definition(TEST_DATABASE_URL, _AGENT, pin) == _v2()
+    assert resolve_dispatch_agent_definition(TEST_DATABASE_URL, _WORKSPACE, _AGENT, pin) == _v2()
+
+    # No global fallback (schema v46): the same agent id is invisible in
+    # another workspace.
+    other = "other-workspace"
+    assert resolve_dispatch_agent_definition(TEST_DATABASE_URL, other, _AGENT, None) is None
 
     with pytest.raises(ValueError, match="routes to"):
-        resolve_dispatch_agent_definition(TEST_DATABASE_URL, _AGENT, {**pin, "agent_id": "other"})
+        resolve_dispatch_agent_definition(
+            TEST_DATABASE_URL, _WORKSPACE, _AGENT, {**pin, "agent_id": "other"}
+        )
     with pytest.raises(ValueError, match="does not exist"):
-        resolve_dispatch_agent_definition(TEST_DATABASE_URL, _AGENT, {**pin, "version": 99})
+        resolve_dispatch_agent_definition(
+            TEST_DATABASE_URL, _WORKSPACE, _AGENT, {**pin, "version": 99}
+        )
     with pytest.raises(ValueError, match="hash mismatch"):
         resolve_dispatch_agent_definition(
-            TEST_DATABASE_URL, _AGENT, {**pin, "definition_hash": _v1().definition_hash()}
+            TEST_DATABASE_URL,
+            _WORKSPACE,
+            _AGENT,
+            {**pin, "definition_hash": _v1().definition_hash()},
         )

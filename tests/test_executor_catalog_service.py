@@ -5,6 +5,12 @@ from server.app.services.executor_definition_service import (
     ExecutorDefinitionService,
     reset_published_executor_cache,
 )
+from tests.helpers import seed_workspace_agent_definitions
+
+
+@pytest.fixture
+def workspace_id(job_db) -> str:
+    return job_db.create_workspace("Catalog WS", default_workflow_key="demo_workflow")["id"]
 
 
 @pytest.fixture
@@ -12,8 +18,10 @@ def service(job_db, settings, agent_manager):
     return ExecutorCatalogService(settings)
 
 
-def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogService) -> None:
-    result = service.catalog()
+def test_catalog_exposes_normalized_yaml_definitions(
+    service: ExecutorCatalogService, workspace_id: str
+) -> None:
+    result = service.catalog(workspace_id)
     assert result["executors"] == [
         {
             "id": "code-default",
@@ -32,9 +40,9 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
 
 
 def test_executor_catalog_does_not_expose_agent_runtimes(
-    service: ExecutorCatalogService,
+    service: ExecutorCatalogService, workspace_id: str
 ) -> None:
-    result = service.catalog()
+    result = service.catalog(workspace_id)
     executors_by_id = {executor["id"]: executor for executor in result["executors"]}
 
     assert "pi-video-main" not in executors_by_id
@@ -44,12 +52,13 @@ def test_executor_catalog_does_not_expose_agent_runtimes(
 
 
 def test_catalog_exposes_published_agent_definitions(
-    service: ExecutorCatalogService,
+    service: ExecutorCatalogService, workspace_id: str
 ) -> None:
-    result = service.catalog()
+    # Agent 目录是 workspace 作用域（schema v46）：把 demo 模板播进本 workspace。
+    seed_workspace_agent_definitions(workspace_id)
+    result = service.catalog(workspace_id)
     agents_by_id = {agent["id"]: agent for agent in result["agents"]}
 
-    # conftest 播种的 published catalog（示例 workflow 的 4 个 agent）。
     agent = agents_by_id["example-review-questions-v1"]
     assert agent["runtime"] == "velites"
     assert agent["capability"] == "review_questions"
@@ -62,7 +71,7 @@ def test_catalog_exposes_published_agent_definitions(
 
 
 def test_catalog_reflects_db_published_edits(
-    service: ExecutorCatalogService, job_db, settings
+    service: ExecutorCatalogService, job_db, settings, workspace_id: str
 ) -> None:
     """Catalog reads the DB published rows: an admin edit shows up without restart."""
     definitions = ExecutorDefinitionService(job_db.path)
@@ -76,7 +85,7 @@ def test_catalog_reflects_db_published_edits(
     # TRUNCATE isolation may leave a stale TTL entry from an earlier test.
     reset_published_executor_cache()
 
-    result = service.catalog()
+    result = service.catalog(workspace_id)
 
     executors_by_id = {executor["id"]: executor for executor in result["executors"]}
     assert executors_by_id["code-default"]["global_capacity"] == 4

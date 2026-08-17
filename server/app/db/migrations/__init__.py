@@ -1,6 +1,7 @@
-"""Data migrations applied alongside the idempotent DDL replay."""
+# Data migrations applied alongside the idempotent DDL replay.
 
 from server.app.db.migrations.agent_catalog_cutover import migrate_agent_catalog_cutover
+from server.app.db.migrations.agent_workspace_scope import migrate_agent_workspace_scope
 from server.app.db.migrations.cms_config import migrate_workspace_cms_config
 from server.app.db.migrations.code_executor import migrate_code_executor_bindings
 from server.app.db.migrations.custom_node_codes import migrate_custom_node_codes
@@ -19,6 +20,7 @@ from server.app.db.migrations.versioned_entities import migrate_versioned_entiti
 
 __all__ = [
     "migrate_agent_catalog_cutover",
+    "migrate_agent_workspace_scope",
     "migrate_code_executor_bindings",
     "migrate_custom_node_codes",
     "migrate_executor_asr_config_schema",

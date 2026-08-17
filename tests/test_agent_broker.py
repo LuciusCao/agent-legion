@@ -76,7 +76,7 @@ def _seed_request(
         requires_labels={"arch": "arm64"},
     )
     catalog = definitions or {agent_id: definition}
-    replace_agent_catalog(catalog)
+    replace_agent_catalog(workspace_id, catalog)
     _insert_job_rows(
         job_db,
         job_id=job_id,
@@ -880,7 +880,7 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    replace_agent_catalog({"generator-v1": velites_definition})
+    replace_agent_catalog("test-workspace", {"generator-v1": velites_definition})
     _insert_job_rows(
         job_db,
         job_id="job-new",

@@ -192,15 +192,20 @@ def test_workspace_settings_agent_defaults_reject_bad_payload(client):
     assert wrong_type.status_code == 422
 
 
-def _inject_write_script_config_schema() -> None:
-    """Publish a new example-write-script-v1 version carrying a config_schema."""
+def _inject_write_script_config_schema(workspace_id: str) -> None:
+    """Publish a new example-write-script-v1 version carrying a config_schema.
+
+    Agent definitions are workspace-scoped (schema v46): the workspace already
+    holds the seeded demo agent (workspaces binding the demo workflow get the
+    factory templates at binding time), so this publishes v2 inside it.
+    """
     schema = {
         "type": "object",
         "properties": {
             "max_items": {"type": "integer", "default": 10, "minimum": 1, "maximum": 100}
         },
     }
-    service = AgentService(TEST_DATABASE_URL)
+    service = AgentService(TEST_DATABASE_URL, workspace_id)
     entity = service.get_published("example-write-script-v1")
     assert entity is not None
     updated = AgentDefinition.model_validate(entity.definition).model_copy(
@@ -213,7 +218,6 @@ def _inject_write_script_config_schema() -> None:
 def test_workspace_settings_nodes_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    _inject_write_script_config_schema()
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -224,6 +228,7 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         )
         assert ws.status_code == 200
         workspace_id = ws.json()["workspace"]["id"]
+        _inject_write_script_config_schema(workspace_id)
 
         fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
         assert fetched.status_code == 200
@@ -265,7 +270,6 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
 def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    _inject_write_script_config_schema()
     with authenticate_client(TestClient(app)) as c:
         ws = c.post(
             "/api/workspaces",
@@ -275,6 +279,7 @@ def test_workspace_settings_nodes_reject_invalid_overrides(tmp_path):
             },
         )
         workspace_id = ws.json()["workspace"]["id"]
+        _inject_write_script_config_schema(workspace_id)
 
         unknown_key = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",

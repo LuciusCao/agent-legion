@@ -24,7 +24,7 @@ def list_workspace_agent_routes(job_db: JobQueries, workspace_id: str) -> list[d
                    d.definition_json
             from workspace_node_routes r
             join versioned_entities d
-              on d.entity_type='agent' and d.workspace_id is null
+              on d.entity_type='agent' and d.workspace_id = r.workspace_id
              and d.entity_key = r.target_id and d.status='published'
             where r.workspace_id = %s and r.target_kind = 'agent'
             order by r.workflow_key, r.node_key
