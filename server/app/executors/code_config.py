@@ -51,8 +51,16 @@ class CodeExecutorConfig(BaseModel):
 
 logger = logging.getLogger(__name__)
 
+# The published-catalog cache (executor_definition_service, ~5s TTL) reparses
+# stored definitions on every refresh, so an unstripped legacy definition
+# would re-warn each cycle; warn once per executor per process instead.
+_warned_path_strip: set[str] = set()
+
 
 def _log_path_strip_warning(executor_id: str, retired: list[str]) -> None:
+    if executor_id in _warned_path_strip:
+        return
+    _warned_path_strip.add(executor_id)
     logger.warning(
         "executor %r: dropped retired capability path key for %s "
         "(EXEC-CODE-001 legacy; the capability is custom-code-only now)",
