@@ -688,6 +688,7 @@
     "server/app/db/dialect.py": 21,
     "server/app/db/migrations/__init__.py": 27,
     "server/app/db/migrations/agent_catalog_cutover.py": 69,
+    "server/app/db/migrations/agent_workspace_scope.py": 96,
     "server/app/db/migrations/cms_config.py": 98,
     "server/app/db/migrations/code_executor.py": 49,
     "server/app/db/migrations/custom_node_codes.py": 36,
