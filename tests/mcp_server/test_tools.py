@@ -50,8 +50,26 @@ def recorded(monkeypatch):
         )
         return _FakeResponse(200, {"echo": True})
 
-    monkeypatch.setattr("server.app.mcp_server.server.requests.request", fake_request)
+    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
     return create_mcp_server(_CONFIG), calls
+
+
+def test_get_authoring_guide_is_served_locally(recorded) -> None:
+    server, calls = recorded
+    text = _run_tool(server, "get_authoring_guide", {})
+    # The playbook ships with the MCP server: no HTTP call to the backend.
+    assert calls == []
+    assert text.startswith("# Agent Legion Workflow Authoring Guide")
+    # Guard the sections the from-scratch flow depends on.
+    for section in (
+        "Tool map",
+        "From-scratch flow",
+        "Workflow definition YAML",
+        "Capabilities and node kinds",
+        "Agent definitions and tunables",
+        "Common errors",
+    ):
+        assert section in text
 
 
 def test_list_workflows_forwards_get(recorded) -> None:
@@ -171,7 +189,7 @@ def test_get_studio_context_uses_the_bound_session(monkeypatch) -> None:
         calls.append({"method": method, "url": url})
         return _FakeResponse(200, {"workspace_id": "ws-1"})
 
-    monkeypatch.setattr("server.app.mcp_server.server.requests.request", fake_request)
+    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
     config = McpServerConfig(api_base="http://backend.test:9000", token="t", session_id="sess-1")
     server = create_mcp_server(config)
     assert json.loads(_run_tool(server, "get_studio_context", {})) == {"workspace_id": "ws-1"}
@@ -194,7 +212,7 @@ def test_non_2xx_returns_http_text(monkeypatch) -> None:
     def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
         return _FakeResponse(403, text='{"detail":"Studio agent scoped token required"}')
 
-    monkeypatch.setattr("server.app.mcp_server.server.requests.request", fake_request)
+    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
     server = create_mcp_server(_CONFIG)
     text = _run_tool(server, "list_workflows", {})
     assert text.startswith("HTTP 403: ")
@@ -205,7 +223,7 @@ def test_connection_error_returns_text_not_exception(monkeypatch) -> None:
     def fake_request(method, url, json=None, headers=None, timeout=None):  # noqa: A002
         raise requests.ConnectionError("refused")
 
-    monkeypatch.setattr("server.app.mcp_server.server.requests.request", fake_request)
+    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
     server = create_mcp_server(_CONFIG)
     text = _run_tool(server, "list_workflows", {})
     assert text.startswith("request failed: ")
