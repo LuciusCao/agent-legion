@@ -62,6 +62,35 @@ describe('StudioChatTextBubble', () => {
     expect(link!.getAttribute('href')).toBeNull()
   })
 
+  it('keeps legit https links with href and opens them in a new tab', () => {
+    const { container } = render(
+      <StudioChatTextBubble
+        message={message('agent', '[文档](https://example.com/doc)')}
+        streaming={false}
+      />
+    )
+    const link = container.querySelector('a')
+    expect(link).not.toBeNull()
+    expect(link!.getAttribute('href')).toBe('https://example.com/doc')
+    expect(link!.getAttribute('target')).toBe('_blank')
+    expect(link!.getAttribute('rel')).toBe('noopener noreferrer')
+  })
+
+  it('renders GFM tables as table markup', () => {
+    const { container } = render(
+      <StudioChatTextBubble
+        message={message(
+          'agent',
+          '| 节点 | 状态 |\n| --- | --- |\n| a | 完成 |'
+        )}
+        streaming={false}
+      />
+    )
+    expect(container.querySelector('table')).not.toBeNull()
+    expect(container.querySelector('th')).toHaveTextContent('节点')
+    expect(container.querySelector('td')).toHaveTextContent('a')
+  })
+
   it('keeps a streaming agent message as plain text', () => {
     const { container } = render(
       <StudioChatTextBubble
