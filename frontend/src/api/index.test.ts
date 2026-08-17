@@ -321,10 +321,10 @@ describe('executor configuration api', () => {
     const fetchMock = mockFetchJson({ executors: [] })
     global.fetch = fetchMock
 
-    await getExecutorCatalog()
+    await getExecutorCatalog('ws1')
 
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/executors',
+      '/api/executors?workspace_id=ws1',
       expect.objectContaining({ cache: 'no-store' })
     )
   })

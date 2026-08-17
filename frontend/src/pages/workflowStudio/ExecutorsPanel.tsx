@@ -51,8 +51,9 @@ export function ExecutorsPanel(props: { initialSelectedId?: string | null }) {
       queryKey: extraQueryKeys.executorDefinitions(),
     })
     // Executor capability 变更影响绑定候选，Studio 目录同会话失效重取。
+    // Executor 定义是全局的，按前缀失效所有 workspace 的目录缓存。
     void queryClient.invalidateQueries({
-      queryKey: extraQueryKeys.studioExecutorCatalog(),
+      queryKey: ['studioExecutorCatalog'],
     })
   }
 
