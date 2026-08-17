@@ -5,7 +5,8 @@ draft/validate/register-request operations plus reads — never publish or
 other effecting actions (STUDIO-AGENT-001). This module composes the existing
 services behind that surface and stamps every draft it writes with
 ``created_by=f"studio-agent:{user_id}"`` so agent-authored drafts stay
-attributable to the run's initiating user.
+attributable to the run's initiating user. Node-code reads/drafts live in
+``studio_agent_node_codes`` (split for budget).
 """
 
 from __future__ import annotations
@@ -15,8 +16,8 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_service import AgentService
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.node_codes import NodeCodeService
+from server.app.services.job_errors import NotFoundError
+from server.app.services.studio_agent_node_codes import StudioAgentNodeCodeTools
 from server.app.services.versioned_entities import VersionedEntity
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_draft_compare import compare_workflow_draft
@@ -45,36 +46,14 @@ class StudioAgentToolsService:
     def __init__(self, job_db: JobQueries, settings: Settings) -> None:
         self._job_db = job_db
         self._settings = settings
-
-    def _node_code_service(self) -> NodeCodeService:
-        return NodeCodeService(
-            self._job_db.path, self._settings.executor_runtime.workflows.custom_nodes_enabled
-        )
-
-    def _node_capability(self, workspace_id: str, workflow_key: str, node_key: str) -> str:
-        revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
-        if revision is None:
-            raise NotFoundError("No active workflow revision")
-        definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
-        node = definition.nodes.get(node_key)
-        if node is None:
-            raise NotFoundError(f"Unknown workflow node: {node_key}")
-        return node.capability
-
-    def _read_factory_code(self, workflow_key: str, node_key: str) -> str | None:
-        """Global factory-seeded node code (#96); None when the node has none."""
-        row = self._node_code_service().get_global_published(workflow_key, node_key)
-        return str(row["code"]) if row is not None else None
+        self.node_codes = StudioAgentNodeCodeTools(job_db, settings)
 
     # Write tools (draft/register only — no effecting operations).
 
     def validate_workflow(self, workspace_id: str, definition_yaml: str) -> list[str]:
         """The full publish validation set (structure + bindings), no writes."""
         return validate_workflow_draft_for_publish(
-            self._job_db,
-            workspace_id,
-            definition_yaml,
-            self._settings.executor_definitions,
+            self._job_db, workspace_id, definition_yaml, self._settings.executor_definitions
         )
 
     def compare_workflow(self, workspace_id: str, definition_yaml: str) -> dict[str, Any]:
@@ -96,32 +75,14 @@ class StudioAgentToolsService:
         user_id: str,
         expected_capability: str | None = None,
     ) -> dict[str, Any]:
-        revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
-        if revision is None:
-            if expected_capability is None:
-                raise NotFoundError("No active workflow revision")
-            # Skeleton draft for a node the not-yet-published workflow draft
-            # will introduce; there is no revision to validate against.
-        else:
-            definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
-            node = definition.nodes.get(node_key)
-            if node is None:
-                if expected_capability is None:
-                    raise NotFoundError(f"Unknown workflow node: {node_key}")
-                # New node key on an existing revision: same skeleton rule.
-            elif expected_capability is not None and expected_capability != node.capability:
-                raise InvalidOperationError(
-                    f"Node {node_key} capability mismatch: the active workflow revision "
-                    f"binds {node.capability!r}, but expected_capability declares "
-                    f"{expected_capability!r}"
-                )
-        return self._node_code_service().save_draft(
+        return self.node_codes.save_draft(
             workspace_id,
             workflow_key,
             node_key,
             code,
             studio_agent_created_by(user_id),
             change_note,
+            expected_capability,
         )
 
     def save_agent_definition_draft(
@@ -142,11 +103,9 @@ class StudioAgentToolsService:
         if workspace is None:
             raise NotFoundError("Workspace not found")
         workflow_key = str(workspace.get("default_workflow_key") or "")
-        revision = (
-            self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
-            if workflow_key
-            else None
-        )
+        revision = None
+        if workflow_key:
+            revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
         if revision is None:
             # Structured empty state (no default workflow key, or no published
             # revision yet): the agent switches to the from-scratch flow.
@@ -167,25 +126,4 @@ class StudioAgentToolsService:
         self, workspace_id: str, workflow_key: str, node_key: str
     ) -> dict[str, Any]:
         """Effective code plus any pending draft (mirrors the Studio read)."""
-        self._node_capability(workspace_id, workflow_key, node_key)
-        versions = self._node_code_service().list_versions(workspace_id, workflow_key, node_key)
-        published = next((row for row in versions if row["status"] == "published"), None)
-        # list_versions is version-descending: the first draft is the current one.
-        draft = next((row for row in versions if row["status"] == "draft"), None)
-        state: dict[str, Any] = {
-            "has_draft": draft is not None,
-            "draft_code": str(draft["code"]) if draft is not None else None,
-            "draft_version": int(draft["version"]) if draft is not None else None,
-        }
-        if published is not None:
-            return {
-                **state,
-                "origin": "custom",
-                "code": str(published["code"]),
-                "version": int(published["version"]),
-            }
-        factory = self._read_factory_code(workflow_key, node_key)
-        if factory is None:
-            # No factory seed: the node starts from the SDK template.
-            return {**state, "origin": "none", "code": ""}
-        return {**state, "origin": "builtin", "code": factory}
+        return self.node_codes.get_state(workspace_id, workflow_key, node_key)
