@@ -7,10 +7,8 @@ import pytest
 from server.app.agent_broker import AgentExecutionBroker
 from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
-from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.sweeper import SweeperThread
 from server.app.jobs.queries import JobQueries
@@ -83,20 +81,6 @@ def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
     with queries.connect() as conn:
         conn.execute(
             """
-            insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (%s, %s, %s)
-            """,
-            (workspace_id, "code-default", 1),
-        )
-        conn.execute(
-            """
-            insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-            values (%s, %s, %s, %s)
-            """,
-            (workspace_id, "recovery_test", "fetch", "code-default"),
-        )
-        conn.execute(
-            """
             insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
             values (%s, %s, %s, %s)
             """,
@@ -149,7 +133,7 @@ def _fetch_recovery_state(queries: JobQueries, job_id: str, lease_id: str, node_
 
 class _NoOpExecutor:
     kind = "code"
-    id = "code-default"
+    id = "code"
 
     def supports(self, capability: str) -> bool:
         return True
@@ -164,19 +148,9 @@ class _NoOpExecutor:
 def _make_worker(
     tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
 ) -> WorkflowWorkerThread:
-    executor_def = CodeExecutorConfig(
-        kind="code",
-        global_capacity=1,
-        capabilities={"fetch": CodeCapabilityConfig()},
-    )
-    registry = ExecutorRegistry(
-        executors={"code-default": _NoOpExecutor()},
-        global_capacities={"code-default": 1},
-        definitions={"code-default": executor_def},
-    )
     runtime = ExecutionRuntime(
         leases=repo,
-        registry=registry,
+        executor=_NoOpExecutor(),
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
     )
@@ -189,12 +163,10 @@ def _make_worker(
         jobs_dir=tmp_path / "jobs",
         config={"workflows": {"enabled": True}},
         database_url=str(queries.path),
-        executor_definitions=registry.definitions(),
     )
     worker = WorkflowWorkerThread(
         job_db=queries,
         leases=repo,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )

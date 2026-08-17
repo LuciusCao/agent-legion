@@ -8,38 +8,16 @@ from typing import Any
 import pytest
 
 from server.app.executors.code import CodeExecutor
-from server.app.executors.config import CodeCapabilityConfig, PiCapabilityConfig
-from server.app.executors.pi import PiExecutor
 from server.app.jobs import JobQueries
-from server.app.services.skill_source_store import InMemorySkillSourceStore
-from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
-from server.app.workflows.pi_runner import PiConfig
 from tests.helpers.executor_worker import (
-    allocate,
-    bind,
     local_node,
     make_definition,
-    make_pi_skill,
-    make_registry,
     make_worker,
 )
 from tests.postgres_support import TEST_DATABASE_URL
 
 GRACE = 0.5
-
-
-class _StubSkillManager(SkillManager):
-    """SkillManager stub that returns an existing on-disk skill directory."""
-
-    def __init__(self, base_dir: Path) -> None:
-        super().__init__(
-            store=InMemorySkillSourceStore(),
-            base_dir=base_dir,
-        )
-
-    def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
-        return self.base_dir / skill_key
 
 
 # Minimal code-node sources, published as workspace node codes and executed
@@ -72,41 +50,8 @@ def run(job, job_dir, runtime):
 
 def _local_executor(repo_root: Path) -> CodeExecutor:
     return CodeExecutor(
-        "code-default",
-        {
-            "cooperative": CodeCapabilityConfig(),
-            "blocked": CodeCapabilityConfig(),
-        },
         repo_root=repo_root,
         cancellation_grace_seconds=GRACE,
-    )
-
-
-def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
-    make_pi_skill(skill_root, "demo_workflow/blocked_pi")
-    return PiExecutor(
-        "pi-default",
-        PiConfig(binary=str(fake_pi), cancellation_grace_seconds=GRACE),
-        _StubSkillManager(skill_root),
-        {"blocked_pi": PiCapabilityConfig(skill="demo_workflow/blocked_pi")},
-    )
-
-
-def _make_registry(local_executor: CodeExecutor, pi_executor: PiExecutor) -> Any:
-    return make_registry(
-        executors={"code-default": local_executor, "pi-default": pi_executor},
-        definitions={
-            "code-default": {
-                "kind": "code",
-                "global_capacity": 3,
-                "capabilities": {"cooperative": {}, "blocked": {}},
-            },
-            "pi-default": {
-                "kind": "pi",
-                "global_capacity": 1,
-                "capabilities": {"blocked_pi": {"skill": "demo_workflow/blocked_pi"}},
-            },
-        },
     )
 
 
@@ -114,7 +59,6 @@ def _make_nodes() -> list[Any]:
     return [
         local_node("cooperative"),
         local_node("blocked"),
-        local_node("blocked_pi"),
     ]
 
 
@@ -124,10 +68,6 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Cancel Recovery", default_workflow_key="demo_workflow")
-
-    fake_pi = tmp_path / "fake_pi"
-    fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
-    fake_pi.chmod(0o755)
 
     from tests.executors.test_code_executor import _sandbox_backend_available, _velites_binary
 
@@ -140,20 +80,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     )
 
     local_executor = _local_executor(tmp_path)
-    pi_executor = _pi_executor(fake_pi, tmp_path / "skills")
-    registry = _make_registry(local_executor, pi_executor)
     definition = make_definition(_make_nodes())
-
-    allocate(job_db, ws["id"], "code-default", 3)
-    allocate(job_db, ws["id"], "pi-default", 1)
-    for node in definition.nodes.values():
-        bind(
-            job_db,
-            ws["id"],
-            "test",
-            node.key,
-            "pi-default" if node.key == "blocked_pi" else "code-default",
-        )
 
     from server.app.services.node_codes import NodeCodeService
 
@@ -175,8 +102,9 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     worker = make_worker(
         tmp_path,
         db_path,
-        registry,
+        local_executor,
         [],
+        code_capacity=3,
         heartbeat_interval_seconds=0.1,
         lease_ttl_seconds=2,
         cancellation_grace_seconds=GRACE,
@@ -187,23 +115,18 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            local_counts = worker.leases.active_counts("code-default")
-            pi_counts = worker.leases.active_counts("pi-default")
-            if local_counts.get("global", 0) >= 2 and pi_counts.get("global", 0) >= 1:
+            if worker.leases.active_counts("code").get("global", 0) >= 2:
                 break
             time.sleep(0.05)
 
-        local_counts = worker.leases.active_counts("code-default")
-        pi_counts = worker.leases.active_counts("pi-default")
-        assert local_counts.get("global", 0) >= 2
-        assert pi_counts.get("global", 0) == 1
+        assert worker.leases.active_counts("code").get("global", 0) >= 2
 
         # Force lease loss: heartbeats will report inactive, triggering cancellation.
         worker.leases.heartbeat = lambda lease_id, ttl_seconds: False  # type: ignore[method-assign]
 
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if worker.leases.active_counts("code-default").get("global", 0) == 0:
+            if worker.leases.active_counts("code").get("global", 0) == 0:
                 break
             time.sleep(0.05)
     finally:
@@ -215,11 +138,9 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     assert stop_elapsed < GRACE + 2, "worker shutdown was unbounded"
 
     # All leases finalized and capacity released.
-    assert worker.leases.active_counts("code-default").get("global", 0) == 0
-    assert worker.leases.active_counts("pi-default").get("global", 0) == 0
+    assert worker.leases.active_counts("code").get("global", 0) == 0
 
     # Active process maps drained.
-    assert pi_executor._tracker.active() == []
     assert not multiprocessing.active_children()
 
     # Each execution finalized exactly once.
@@ -228,7 +149,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
             "select count(*) from node_runs where job_id=%s and status='failed'",
             (job["id"],),
         ).fetchone()[0]
-    assert finished_runs == 3
+    assert finished_runs == 2
 
     # Capacity reuse: a newly queued cooperative node can be claimed and completed.
     job2 = job_db.create_job(
@@ -244,14 +165,15 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     worker2 = make_worker(
         tmp_path,
         db_path,
-        registry,
+        local_executor,
         [definition],
+        code_capacity=3,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
         cancellation_grace_seconds=GRACE,
     )
     worker2._poll()
-    assert worker2.leases.active_counts("code-default").get("global", 0) == 1
+    assert worker2.leases.active_counts("code").get("global", 0) == 1
     for future in list(worker2._futures.values()):
         future.result(timeout=10)
     node2 = job_db.get_job_node(job2["id"], "cooperative")

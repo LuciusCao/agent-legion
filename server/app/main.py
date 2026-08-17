@@ -14,9 +14,7 @@ from server.app.events import JobEventManager
 from server.app.events.agents import AgentStatusManager
 from server.app.events.aggregator import build_workspace_event_aggregator
 from server.app.events.bus import InProcessEventBus
-from server.app.executors.executor_registry_factory import build_executor_registry
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.pi import build_skill_manager
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
@@ -26,8 +24,8 @@ from server.app.routes.auth import create_auth_router
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
+from server.app.services.demo_node_seed import seed_demo_node_codes
 from server.app.services.executor_catalog import ExecutorCatalogService
-from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
@@ -43,6 +41,7 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
+from server.app.skills.runtime import build_skill_manager
 from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
@@ -63,10 +62,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # Hydrate instance-level settings from the DB before any service reads
     # them (executor runtime, cleanup/monitoring config).
     apply_instance_settings(settings, job_db.path)
-    # Executor definitions live in the DB (versioned_entities, entity_type
-    # 'executor'): seed-if-absent the built-in catalog, then hydrate from the
-    # published rows (publish/rollback/archive hot-reload the registry).
-    hydrate_executor_definitions(settings)
+    # Executor definitions are retired (schema v47, P-0.5); only the demo
+    # workflow's global node_code versions still seed from the git-reviewed
+    # workflow_nodes/ sources (#96).
+    seed_demo_node_codes(settings)
     # Agent definitions are workspace-scoped (schema v46): there is no global
     # seed. Workspaces binding the built-in demo workflow get the factory
     # agent templates instantiated seed-if-absent at binding time
@@ -99,9 +98,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     )
     agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
     skill_manager = build_skill_manager(settings.database_url)
-    executor_registry = build_executor_registry(
-        settings, job_db, artifact_store=artifact_store, skill_manager=skill_manager
-    )
 
     executor_leases = ExecutorLeaseRepository(
         job_db.path,
@@ -146,7 +142,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 settings,
                 job_db=job_db,
                 executor_leases=executor_leases,
-                executor_registry=executor_registry,
                 agent_broker=agent_broker,
                 workspace_worker_control=workspace_worker_control,
                 agent_manager=agent_manager,
@@ -156,6 +151,8 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             # Routes pick the thread up here to trigger scan-list reloads
             # (workflow registration hot refresh).
             app.state.workflow_worker = workflow_worker_thread
+            if workflow_worker_thread is not None:
+                app.state.code_executor = workflow_worker_thread.runtime.executor
             # Orphan GC shares the sweeper ownership rule: exactly one
             # replica (sweeper_enabled) reclaims, the rest stay idle.
             if settings.executor_runtime.sweeper_enabled:
@@ -182,7 +179,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)
-    app.state.executor_registry = executor_registry
     app.state.agent_broker = agent_broker
     app.state.agent_dispatch = agent_dispatch
     app.state.agent_worker_registry = agent_worker_registry

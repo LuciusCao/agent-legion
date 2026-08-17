@@ -9,12 +9,8 @@ import pytest
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
 from tests.helpers.executor_worker import (
-    allocate,
-    bind,
-    local_def,
     local_node,
     make_definition,
-    make_registry,
     make_worker,
 )
 from tests.postgres_support import TEST_DATABASE_URL
@@ -62,11 +58,7 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
     ws_c = job_db.create_workspace("Workspace C", default_workflow_key="demo_workflow")
 
     block_event = threading.Event()
-    executor = BlockingExecutor("code-default", block_event=block_event)
-    registry = make_registry(
-        {"code-default": executor},
-        {"code-default": local_def(10, {"fetch"})},
-    )
+    executor = BlockingExecutor("code", block_event=block_event)
     definition = make_definition([local_node("fetch")])
 
     workspaces = {
@@ -74,16 +66,9 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
         "B": ws_b,
         "C": ws_c,
     }
-    limits = {
-        ws_a["id"]: 8,
-        ws_b["id"]: 6,
-        ws_c["id"]: 2,
-    }
     from tests.workers.helpers import _seed_trivial_node_code
 
     for ws in workspaces.values():
-        allocate(job_db, ws["id"], "code-default", limits[ws["id"]])
-        bind(job_db, ws["id"], "test", "fetch", "code-default")
         # Post-#96 every code node needs published code to dispatch; the
         # BlockingExecutor never reads the text.
         _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
@@ -106,21 +91,20 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
             workspace_id=workspace_id,
         )
 
-    worker = make_worker(tmp_path, db_path, registry, [definition])
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=10)
 
+    # P-0.5: 单池 + round-robin —— 全局容量不突破、无 workspace 隔离，
+    # 但每个 workspace 都必须在少量 pass 内拿到认领（不被饿死）。
     for _ in range(30):
         worker._poll()
-        counts = worker.leases.active_counts("code-default")
+        counts = worker.leases.active_counts("code")
         assert counts.get("global", 0) <= 10
-        for ws in workspaces.values():
-            assert counts.get(ws["id"], 0) <= limits[ws["id"]]
         if counts.get("global", 0) == 10:
             break
 
-    counts = worker.leases.active_counts("code-default")
+    counts = worker.leases.active_counts("code")
     assert counts.get("global", 0) <= 10
     for ws in workspaces.values():
-        assert counts.get(ws["id"], 0) <= limits[ws["id"]]
         assert counts.get(ws["id"], 0) >= 1, f"workspace {ws['id']} was starved with seed {seed}"
 
     block_event.set()

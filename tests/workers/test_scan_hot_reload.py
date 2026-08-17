@@ -17,11 +17,10 @@ from server.app.workflows.builtin import BUILTIN_WORKFLOW_DEFINITIONS
 
 def _make_thread(settings, job_db=None) -> WorkflowWorkerThread:
     # reload_scan_entries only reads the catalog through settings; the
-    # lease/registry/runtime machinery is not exercised by these tests.
+    # lease/runtime machinery is not exercised by these tests.
     return WorkflowWorkerThread(
         job_db=job_db,
         leases=None,
-        registry=None,
         runtime=None,
         settings=settings,
     )

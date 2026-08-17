@@ -5,19 +5,18 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { getExecutorCatalog } from '../../api/executorApi'
 import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import { createTestQueryClient } from '../../testing/testQueryClient'
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { useExecutorCatalog } from './useExecutorCatalog'
 
 vi.mock('../../api/executorApi', () => ({ getExecutorCatalog: vi.fn() }))
 
 const mockGetCatalog = vi.mocked(getExecutorCatalog)
 
-const executor: ExecutorDefinition = {
-  id: 'code-default',
-  kind: 'code',
-  global_capacity: 16,
-  capabilities: ['fetch_items'],
-  capability_details: [{ name: 'fetch_items' }],
+const agent: AgentDefinition = {
+  id: 'agent-v1',
+  capability: 'fetch_items',
+  runtime: 'velites',
+  skill: 'demo/skill',
 }
 
 function wrapper(client: QueryClient) {
@@ -31,14 +30,14 @@ describe('useExecutorCatalog', () => {
     vi.clearAllMocks()
   })
 
-  it('returns executors and agents from the catalog', async () => {
-    mockGetCatalog.mockResolvedValue({ executors: [executor], agents: [] })
+  it('returns the agents from the catalog', async () => {
+    mockGetCatalog.mockResolvedValue({ agents: [agent] })
     const { result } = renderHook(() => useExecutorCatalog('ws1'), {
       wrapper: wrapper(createTestQueryClient()),
     })
 
-    await waitFor(() => expect(result.current.executors).toHaveLength(1))
-    expect(result.current.executors[0]?.id).toBe('code-default')
+    await waitFor(() => expect(result.current.agents).toHaveLength(1))
+    expect(result.current.agents[0]?.id).toBe('agent-v1')
     expect(result.current.loadError).toBe(false)
   })
 
@@ -49,26 +48,26 @@ describe('useExecutorCatalog', () => {
     })
 
     await waitFor(() => expect(result.current.loadError).toBe(true))
-    expect(result.current.executors).toEqual([])
+    expect(result.current.agents).toEqual([])
 
-    mockGetCatalog.mockResolvedValue({ executors: [executor], agents: [] })
+    mockGetCatalog.mockResolvedValue({ agents: [agent] })
     await act(async () => {
       await result.current.retry()
     })
 
     await waitFor(() => expect(result.current.loadError).toBe(false))
-    expect(result.current.executors).toHaveLength(1)
+    expect(result.current.agents).toHaveLength(1)
     expect(mockGetCatalog).toHaveBeenCalledTimes(2)
   })
 
   it('refetches when the studioExecutorCatalog key is invalidated', async () => {
-    mockGetCatalog.mockResolvedValue({ executors: [executor], agents: [] })
+    mockGetCatalog.mockResolvedValue({ agents: [agent] })
     const client = createTestQueryClient()
     const { result } = renderHook(() => useExecutorCatalog('ws1'), {
       wrapper: wrapper(client),
     })
 
-    await waitFor(() => expect(result.current.executors).toHaveLength(1))
+    await waitFor(() => expect(result.current.agents).toHaveLength(1))
     expect(mockGetCatalog).toHaveBeenCalledTimes(1)
 
     await act(async () => {

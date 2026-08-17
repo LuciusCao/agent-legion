@@ -69,7 +69,7 @@ class TestJobExecutionExecutorBoundary:
             ),
             (
                 "server/app/services/job_rerun.py",
-                "from server.app.executors.registry import ExecutorRegistry\n"
+                "from server.app.executors.contracts import Executor\n"
                 "class JobRerunService:\n"
                 "    pass\n",
             ),

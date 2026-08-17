@@ -5,6 +5,7 @@ from typing import Any
 
 import yaml
 
+from server.app.workflows.node_config_schema import load_node_config_schema
 from server.app.workflows.schema import (
     WorkflowCondition,
     WorkflowDefinition,
@@ -228,6 +229,7 @@ def _load_nodes(
             terminal=_load_terminal(raw_node, node_key),
             execution=load_node_execution(raw_node, node_key),
             config=dict(raw_config),
+            config_schema=load_node_config_schema(raw_node, node_key),
             shard=_load_shard(raw_node, node_key, inputs),
             reduce=_load_reduce(raw_node, node_key),
         )

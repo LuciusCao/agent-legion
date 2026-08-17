@@ -743,19 +743,19 @@ def test_cleanliness_probes_every_call_when_ttl_zero(tmp_path: Path) -> None:
 def test_get_skill_version_memoized_within_ttl(tmp_path: Path, monkeypatch) -> None:
     """Manifest skill versions fork git twice per call (rev-parse + describe);
     the memo serves repeat dispatches from the first probe."""
-    from server.app.executors import _pi_skill
+    from server.app.skills import runtime as _skill_runtime
 
     manager = _make_manager_with_cache(tmp_path)
     calls = {"n": 0}
-    real = _pi_skill.resolve_skill_version
+    real = _skill_runtime.resolve_skill_version
 
     def spy(skill_dir: Path) -> str:
         calls["n"] += 1
         return real(skill_dir)
 
-    monkeypatch.setattr(_pi_skill, "resolve_skill_version", spy)
-    first = _pi_skill.get_skill_version(manager, _KEY)
-    second = _pi_skill.get_skill_version(manager, _KEY)
+    monkeypatch.setattr(_skill_runtime, "resolve_skill_version", spy)
+    first = _skill_runtime.get_skill_version(manager, _KEY)
+    second = _skill_runtime.get_skill_version(manager, _KEY)
 
     assert first == second != ""
     assert calls["n"] == 1

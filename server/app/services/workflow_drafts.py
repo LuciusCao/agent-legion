@@ -1,11 +1,10 @@
 from __future__ import annotations
 
-from typing import Any
-
 import yaml
 
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
+from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.workflows.definition import (
     WorkflowDefinition,
     WorkflowDefinitionError,
@@ -38,15 +37,15 @@ def validate_workflow_for_publish(
     definition: WorkflowDefinition,
     workspace_id: str,
     job_db: JobQueries,
-    settings_executor_definitions: dict[str, Any],
+    custom_nodes_enabled: bool,
 ) -> list[str]:
+    """Publish validation: Agent routing uniqueness + code resolvability.
+
+    P-0.5: non-Agent-routed nodes all run on the implicit code pool, so the
+    publish gate is "resolvable published node code" (workspace version or
+    global factory seed), not executor binding/allocation checks.
+    """
     errors: list[str] = []
-    configuration = job_db.get_workspace_executor_configuration(workspace_id)
-    bindings = {
-        (binding["workflow_key"], binding["node_key"]): binding["executor_id"]
-        for binding in configuration.get("bindings", [])
-    }
-    allocated = {allocation["executor_id"] for allocation in configuration.get("allocations", [])}
     capability_counts: dict[str, int] = {}
     for agent_definition in published_agent_definitions(job_db.path, workspace_id).values():
         capability_counts[agent_definition.capability] = (
@@ -60,15 +59,17 @@ def validate_workflow_for_publish(
                     f"Agent capability {node.capability} must resolve to exactly one published Agent"
                 )
             continue
-        executor_id = bindings.get((definition.key, node.key))
-        if not executor_id:
-            errors.append(f"missing executor binding for {definition.key}.{node.key}")
-            continue
-        if executor_id not in allocated:
-            errors.append(f"executor {executor_id} is not allocated to workspace {workspace_id}")
-            continue
-        executor = settings_executor_definitions.get(executor_id)
-        capabilities = getattr(executor, "capabilities", [])
-        if node.capability not in capabilities:
-            errors.append(f"executor {executor_id} does not support capability {node.capability}")
+        node_code = resolve_dispatch_node_code(
+            job_db.path,
+            custom_nodes_enabled,
+            workspace_id,
+            definition.key,
+            node.key,
+            None,
+        )
+        if node_code is None:
+            errors.append(
+                f"no published node code for {definition.key}.{node.key} "
+                "(publish a workspace version or a global factory seed first, EXEC-CODE-002)"
+            )
     return errors

@@ -645,127 +645,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/executor-definitions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Executor Definitions */
-    get: operations['list_executor_definitions_api_executor_definitions_get']
-    put?: never
-    /** Create Executor Definition */
-    post: operations['create_executor_definition_api_executor_definitions_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Executor Definition */
-    get: operations['get_executor_definition_api_executor_definitions__executor_id__get']
-    put?: never
-    post?: never
-    /** Archive Executor Definition */
-    delete: operations['archive_executor_definition_api_executor_definitions__executor_id__delete']
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/copy': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Copy Executor Definition */
-    post: operations['copy_executor_definition_api_executor_definitions__executor_id__copy_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/draft': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /** Save Executor Definition Draft */
-    put: operations['save_executor_definition_draft_api_executor_definitions__executor_id__draft_put']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/publish': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Publish Executor Definition */
-    post: operations['publish_executor_definition_api_executor_definitions__executor_id__publish_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/rollback': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Rollback Executor Definition */
-    post: operations['rollback_executor_definition_api_executor_definitions__executor_id__rollback_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/versions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Executor Definition Versions */
-    get: operations['list_executor_definition_versions_api_executor_definitions__executor_id__versions_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/executors': {
     parameters: {
       query?: never
@@ -2788,6 +2667,19 @@ export interface components {
       /** Worker Id */
       worker_id: string
     }
+    /**
+     * CodePoolStatus
+     * @description The single implicit code pool (P-0.5): instance-wide capacity, this
+     *     workspace's running count, and the globally available slots.
+     */
+    CodePoolStatus: {
+      /** Available */
+      available: number
+      /** Capacity */
+      capacity: number
+      /** Running */
+      running: number
+    }
     /** ConnectionCreate */
     ConnectionCreate: {
       /**
@@ -2916,228 +2808,17 @@ export interface components {
       /** Target Node Key */
       target_node_key?: string | null
     }
-    /** ExecutorAllocationRequest */
-    ExecutorAllocationRequest: {
-      /** Concurrency Limit */
-      concurrency_limit: number
-      /** Executor Id */
-      executor_id: string
-    }
-    /** ExecutorAllocationResponse */
-    ExecutorAllocationResponse: {
-      /** Concurrency Limit */
-      concurrency_limit: number
-      /** Executor Id */
-      executor_id: string
-      /** Workspace Id */
-      workspace_id: string
-    }
-    /** ExecutorArchiveResponse */
-    ExecutorArchiveResponse: {
-      /** Archived */
-      archived: number
-    }
-    /** ExecutorCapabilityResponse */
-    ExecutorCapabilityResponse: {
-      /** Model */
-      model?: string | null
-      /** Name */
-      name: string
-      /** Provider */
-      provider?: string | null
-      /** Skill */
-      skill?: string | null
-      /** Skill Commit */
-      skill_commit?: string | null
-      /** Skill Ref */
-      skill_ref?: string | null
-      /** Thinking */
-      thinking?: string | null
-      /** Tools */
-      tools?: string[]
-    }
-    /** ExecutorCatalogResponse */
+    /**
+     * ExecutorCatalogResponse
+     * @description Execution catalog for Studio (P-0.5 step 2: Agents only).
+     *
+     *     The ``executors`` half retired with the executor concept (schema v47);
+     *     the response type keeps the pre-retirement name until the step-3
+     *     contract cleanup.
+     */
     ExecutorCatalogResponse: {
       /** Agents */
       agents?: components['schemas']['AgentDefinitionResponse'][]
-      /** Executors */
-      executors: components['schemas']['ExecutorDefinitionResponse'][]
-    }
-    /** ExecutorCopyRequest */
-    ExecutorCopyRequest: {
-      /** New Executor Id */
-      new_executor_id: string
-    }
-    /** ExecutorCreateRequest */
-    ExecutorCreateRequest: {
-      /** Capabilities */
-      capabilities?: {
-        [key: string]: {
-          [key: string]: unknown
-        }
-      }
-      /** Executor Id */
-      executor_id: string
-      /** Global Capacity */
-      global_capacity: number
-      /** Kind */
-      kind: string
-    }
-    /**
-     * ExecutorDefinitionPayload
-     * @description Editable executor definition fields (raw executor config shape).
-     *
-     *     Kept deliberately loose: the full typed parse (kind dispatch, path safety,
-     *     config_schema contract) happens in ``ExecutorDefinitionService.save_draft``
-     *     via ``load_executor_definitions``, which is the single validation source.
-     */
-    ExecutorDefinitionPayload: {
-      /** Capabilities */
-      capabilities?: {
-        [key: string]: {
-          [key: string]: unknown
-        }
-      }
-      /** Global Capacity */
-      global_capacity: number
-      /** Kind */
-      kind: string
-    }
-    /** ExecutorDefinitionResponse */
-    ExecutorDefinitionResponse: {
-      /** Capabilities */
-      capabilities: string[]
-      /** Capability Details */
-      capability_details?: components['schemas']['ExecutorCapabilityResponse'][]
-      /** Global Capacity */
-      global_capacity: number
-      /** Id */
-      id: string
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: 'code' | 'pi' | 'openclaw'
-    }
-    /** ExecutorDetailResponse */
-    ExecutorDetailResponse: {
-      /** Executor Id */
-      executor_id: string
-      latest?: components['schemas']['ExecutorVersionResponse'] | null
-      published?: components['schemas']['ExecutorVersionResponse'] | null
-    }
-    /** ExecutorListItem */
-    ExecutorListItem: {
-      /** Capabilities */
-      capabilities: string[]
-      /** Executor Id */
-      executor_id: string
-      /** Global Capacity */
-      global_capacity: number
-      /** Has Draft */
-      has_draft: boolean
-      /** Kind */
-      kind: string
-      /** Published At */
-      published_at?: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: 'draft' | 'published' | 'archived'
-      /** Version */
-      version: number
-    }
-    /** ExecutorListResponse */
-    ExecutorListResponse: {
-      /** Executors */
-      executors: components['schemas']['ExecutorListItem'][]
-    }
-    /** ExecutorRollbackRequest */
-    ExecutorRollbackRequest: {
-      /** Version */
-      version: number
-    }
-    /** ExecutorRuntimeStatus */
-    ExecutorRuntimeStatus: {
-      /** Available */
-      available: number
-      /** Binding Count */
-      binding_count: number
-      /** Executor Id */
-      executor_id: string
-      /** Global Capacity */
-      global_capacity: number
-      /** Kind */
-      kind: string
-      /** Running */
-      running: number
-      /** Workspace Limit */
-      workspace_limit: number
-    }
-    /** ExecutorStatusSummary */
-    ExecutorStatusSummary: {
-      /** Executors */
-      executors: components['schemas']['ExecutorRuntimeStatus'][]
-    }
-    /** ExecutorVersionResponse */
-    ExecutorVersionResponse: {
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /** Created By */
-      created_by: string
-      /** Definition */
-      definition: {
-        [key: string]: unknown
-      }
-      /** Definition Hash */
-      definition_hash: string
-      /** Executor Id */
-      executor_id: string
-      /** Id */
-      id: string
-      /** Published At */
-      published_at?: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: 'draft' | 'published' | 'archived'
-      /** Version */
-      version: number
-    }
-    /** ExecutorVersionSummary */
-    ExecutorVersionSummary: {
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /** Created By */
-      created_by: string
-      /** Definition Hash */
-      definition_hash: string
-      /** Executor Id */
-      executor_id: string
-      /** Id */
-      id: string
-      /** Published At */
-      published_at?: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: 'draft' | 'published' | 'archived'
-      /** Version */
-      version: number
-    }
-    /** ExecutorVersionsResponse */
-    ExecutorVersionsResponse: {
-      /** Versions */
-      versions: components['schemas']['ExecutorVersionSummary'][]
     }
     /** FailedNodeRunItem */
     FailedNodeRunItem: {
@@ -3228,6 +2909,8 @@ export interface components {
     InstanceSettingsResponse: {
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Code Capacity */
+      code_capacity: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
@@ -3246,6 +2929,8 @@ export interface components {
     InstanceSettingsUpdate: {
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Code Capacity */
+      code_capacity: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
@@ -3722,15 +3407,6 @@ export interface components {
       queued_max: number
       /** Total Tokens */
       total_tokens: number
-    }
-    /** NodeBindingRequest */
-    NodeBindingRequest: {
-      /** Executor Id */
-      executor_id: string
-      /** Node Key */
-      node_key: string
-      /** Workflow Key */
-      workflow_key: string
     }
     /** NodeLimitRequest */
     NodeLimitRequest: {
@@ -5358,12 +5034,8 @@ export interface components {
       agent_capacity?: number | null
       /** Description */
       description?: string | null
-      /** Executor Allocations */
-      executor_allocations?: components['schemas']['ExecutorAllocationRequest'][]
       /** Name */
       name?: string | null
-      /** Node Bindings */
-      node_bindings?: components['schemas']['NodeBindingRequest'][]
       /** Node Limits */
       node_limits?: components['schemas']['NodeLimitRequest'][]
       settings: components['schemas']['WorkspaceConfigurationSettingsRequest']
@@ -5420,14 +5092,17 @@ export interface components {
         [key: string]: unknown
       }
     }
-    /** WorkspaceExecutorConfigurationResponse */
+    /**
+     * WorkspaceExecutorConfigurationResponse
+     * @description Workspace execution configuration (P-0.5: node limits + Agent capacity).
+     *
+     *     Allocations and bindings retired with the executor concept (schema v47);
+     *     the response type keeps the pre-retirement route/type names until the
+     *     step-3 contract cleanup.
+     */
     WorkspaceExecutorConfigurationResponse: {
       /** Agent Capacity */
       agent_capacity?: number | null
-      /** Allocations */
-      allocations: components['schemas']['ExecutorAllocationResponse'][]
-      /** Bindings */
-      bindings: components['schemas']['NodeBindingRequest'][]
       /** Migration Warnings */
       migration_warnings: string[]
       /** Node Limits */
@@ -5644,7 +5319,7 @@ export interface components {
     }
     /** WorkspaceStatsResponse */
     WorkspaceStatsResponse: {
-      executor_status: components['schemas']['ExecutorStatusSummary']
+      code_pool: components['schemas']['CodePoolStatus']
       /** Job Stats */
       job_stats: {
         [key: string]: number
@@ -6993,288 +6668,6 @@ export interface operations {
         }
         content: {
           'text/event-stream': unknown
-        }
-      }
-    }
-  }
-  list_executor_definitions_api_executor_definitions_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorListResponse']
-        }
-      }
-    }
-  }
-  create_executor_definition_api_executor_definitions_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorCreateRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_executor_definition_api_executor_definitions__executor_id__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  archive_executor_definition_api_executor_definitions__executor_id__delete: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorArchiveResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  copy_executor_definition_api_executor_definitions__executor_id__copy_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorCopyRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_executor_definition_draft_api_executor_definitions__executor_id__draft_put: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorDefinitionPayload']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  publish_executor_definition_api_executor_definitions__executor_id__publish_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  rollback_executor_definition_api_executor_definitions__executor_id__rollback_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorRollbackRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  list_executor_definition_versions_api_executor_definitions__executor_id__versions_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionsResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

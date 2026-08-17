@@ -1,6 +1,5 @@
 from fastapi import APIRouter
 
-from server.app.executors._pi_skill import build_skill_manager
 from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.skill_contracts import (
     SkillTagsResponse,
@@ -9,6 +8,7 @@ from server.app.routes.skill_contracts import (
 )
 from server.app.services.skill_validator import SkillValidator
 from server.app.settings import Settings
+from server.app.skills.runtime import build_skill_manager
 
 
 def create_skills_router(settings: Settings) -> APIRouter:

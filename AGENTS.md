@@ -82,18 +82,21 @@
   token 解析；公开端点仅限 `/api/health` 与 `/api/auth/login|bootstrap`。
 - 测试中受保护 API 走 `client` fixture（自动 bootstrap admin 并带 CSRF
   header）；匿名行为用 `anon_client`。不留 auth 开关。
-- Workspace Executor 扩展顺序：capability → executor → allocation → binding → node limit（仅 code executor）。
+- Workspace 执行面扩展顺序：capability →（Agent 定义 或 node code）→ node limit（节点级并发）。
+  executor 定义 / allocation / binding 概念已随 P-0.5 退役（schema v47 drop 两表）：非 Agent
+  路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`，lease 行写常量 `'code'`
+  （EXEC-CODE-POOL-001）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
-- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
-- `code` executor 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
+- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
+- code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
   DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变、
   job intake 冻结代码版本（EXEC-CODE-002），禁止任何运行时 API 增删改 repo 文件。
-  出厂 executor 目录钉在 `server/app/executors/builtin_definitions.py`，经种子流发布为 DB
-  `versioned_entities`（Studio 可改，admin 编辑不被种子覆盖）。`workflow_nodes/` 只剩示例
+  `workflow_nodes/` 只剩示例
   workflow 的两个 git 评审种子源（启动时 seed-if-absent 发布为 global 作用域 node_code，
-  `server/app/services/demo_node_seed.py`）。存量带 `path` 键的 executor 定义在加载时容忍剥离
-  + warning（实体不可变，不回写）。
+  `server/app/services/demo_node_seed.py`）；示例 workflow 的出厂 Agent 模板钉在
+  `server/app/agent_catalog_builtin.py`（workspace 作用域 seed-if-absent，admin 编辑不被
+  种子覆盖）。
   节点入口推荐 `def run(ctx)` + 节点 SDK 的 `@entrypoint` 装饰器（经典
   `run(job, job_dir, runtime)` 签名继续受支持）；节点内部的通用脚手架统一走节点 SDK
   `workspace_libs/node_sdk.py` 的 `NodeContext`（artifact 读写、service_config 合并、
@@ -117,10 +120,13 @@
   沙箱；Worker 与 Host 的容量按 kind 分池（`max_concurrency` /
   `max_code_concurrency`）各自记账各自强制。
 - 节点可调参数经 `AgentDefinition.config_schema` 声明（`server/app/config_schema.py`
-  子集）；executor 节点经 capability 的 `config_schema`
-  声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
-  workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
-  （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
+  子集）；code 节点经节点 `config_schema:` 块声明（随 revision 快照版本化）。优先级
+  = agent 定义 → 节点 config_schema（executor 层声明已随 P-0.5 退役）；平台保留执行键
+  `timeout_seconds`（integer，default 600，ge 1）/ `sandbox_network`（boolean，
+  default false）自动合并进每个 code 路由节点的有效 schema（节点 config_schema
+  不得重声明；v47 收割已把原 executor 层的 timeout/network 值搬到节点 `config`）。解析链
+  defaults → 节点 `config` → workspace 覆盖，intake 冻结；manifest 仅携带白名单
+  非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`。
 - velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
   runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
   （`versioned_entities` 表，workspace 作用域（schema v46，解析严格限定本

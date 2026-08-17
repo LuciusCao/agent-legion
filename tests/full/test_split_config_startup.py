@@ -28,10 +28,8 @@ def test_repository_split_configuration_builds_application(tmp_path: Path, monke
         monkeypatch.setenv(key, "")
     settings = load_settings(data_dir=tmp_path / "settings-data")
     assert settings.executor_runtime.workflows.enabled is True
-    # Executor definitions are DB-backed (schema v30): load_settings starts
-    # empty, create_app seeds + hydrates them from versioned_entities.
-    assert settings.executor_definitions == {}
+    # Executor definitions are retired (schema v47, P-0.5): the implicit code
+    # pool is sized from the instance code_capacity (default 16).
     app = create_app(data_dir=tmp_path / "app-data", start_worker=False)
-    assert app.state.settings.executor_definitions
+    assert app.state.settings.executor_runtime.code_capacity == 16
     assert app.state.settings.config["data_dir"] == "data"
-    assert app.state.executor_registry is not None

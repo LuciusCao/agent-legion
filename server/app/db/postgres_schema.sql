@@ -23,6 +23,11 @@ alter table workspaces add column if not exists node_config_json text not null d
 -- stored values, only the column default is dropped.
 alter table workspaces alter column default_workflow_key drop default;
 
+-- Executor allocations/bindings (retired at schema v47): the tables are
+-- still created here so the historical v17/v18 data migrations can replay
+-- on fresh databases; migrate_executor_retirement harvests their contents
+-- and drops both at the end of the migration chain (same pattern as the
+-- workspaces.cms_config_json column, created here and dropped post-chain).
 create table if not exists workspace_executor_allocations (
   workspace_id text not null references workspaces(id) on delete cascade,
   executor_id text not null,
@@ -486,18 +491,6 @@ create index if not exists idx_node_run_token_usage_job_id on node_run_token_usa
 create index if not exists idx_node_run_token_usage_created_at on node_run_token_usage(created_at);
 create index if not exists idx_artifact_refs_hash on artifact_refs(hash);
 
--- One-time seed (schema v6): the legacy per-workspace `pi` executor
--- allocation was the de-facto workspace-level Agent limit before
--- workspace_agent_capacities existed. This runs only inside the
--- version-gated replay (once per SCHEMA_VERSION bump) and uses
--- `on conflict do nothing`, so values an operator later edits through
--- workspace settings are never overwritten by a later replay.
-insert into workspace_agent_capacities(workspace_id, max_concurrency)
-select workspace_id, concurrency_limit
-from workspace_executor_allocations
-where executor_id = 'pi'
-on conflict(workspace_id) do nothing;
-
 -- Failure classification (schema v9): persisted category/detail for failed
 -- node runs, mirrored onto job_nodes so detail views read them directly.
 alter table node_runs add column if not exists failure_category text not null default '';
@@ -659,14 +652,14 @@ create unique index if not exists workflow_node_codes_published
   where status = 'published';
 
 -- Versioned entities (schema v26): unified draft → published → archived
--- lifecycle storage for custom node codes ('node_code'), Agent definitions
--- ('agent'), and executor definitions ('executor', schema v30). workspace_id
--- is NULL for global entities (executors, factory demo node codes); Agents
+-- lifecycle storage for custom node codes ('node_code') and Agent definitions
+-- ('agent'; executor definitions joined at v30 and retired at v47).
+-- workspace_id is NULL for global entities (factory demo node codes); Agents
 -- are workspace-scoped since schema v46. NULLS NOT DISTINCT keeps the
 -- uniqueness guarantees meaningful for those rows (PostgreSQL 15+).
 create table if not exists versioned_entities (
   id text primary key,
-  entity_type text not null check(entity_type in ('node_code', 'agent', 'executor')),
+  entity_type text not null check(entity_type in ('node_code', 'agent')),
   workspace_id text references workspaces(id) on delete cascade,
   entity_key text not null,
   version integer not null,

@@ -1,8 +1,5 @@
 import type { WorkflowDefinitionRecord } from '../../types'
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import { selectedNodeDetails } from './workflowStudioModel'
 import { StudioAgentPanelToggle } from './StudioAgentPanelToggle'
@@ -11,7 +8,6 @@ import styles from './WorkflowNodeDetailView.module.css'
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   nodeKey: string
-  executorCatalog: ExecutorDefinition[]
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
@@ -48,7 +44,6 @@ export function WorkflowNodeDetailView(props: Props) {
       <div className={styles.body}>
         <WorkflowNodeInspector
           workflow={props.workflow}
-          executorCatalog={props.executorCatalog}
           agentCatalog={props.agentCatalog}
           selectedNodeKey={props.nodeKey}
           definitionYaml={props.definitionYaml}

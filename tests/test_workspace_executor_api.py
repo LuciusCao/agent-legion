@@ -17,24 +17,8 @@ def test_list_executors_endpoint(client):
     assert agent["runtime"] == "velites"
     assert agent["provider"] is None
     assert agent["model"] is None
-    executors = {item["id"]: item for item in data["executors"]}
-    code_executor = executors["code-default"]
-    assert code_executor["kind"] == "code"
-    assert code_executor["global_capacity"] == 16
-    assert code_executor["capabilities"] == [
-        "intake_knowledge_points",
-        "publish_content",
-    ]
-    assert {
-        "name": "intake_knowledge_points",
-        "skill": None,
-        "tools": [],
-        "provider": None,
-        "model": None,
-        "thinking": None,
-        "skill_ref": None,
-        "skill_commit": None,
-    } in code_executor["capability_details"]
+    # P-0.5（schema v47）：executor 半区随概念退役移除。
+    assert "executors" not in data
 
 
 def test_get_configured_skill_detail(client_factory, tmp_path, monkeypatch):
@@ -95,11 +79,10 @@ def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(cli
     workspace_id = workspace_response.json()["workspace"]["id"]
 
     # The legacy workspace_agent_assignments table is removed by V005, so no
-    # migration warnings are produced.
+    # migration warnings are produced. P-0.5 (schema v47): allocations and
+    # bindings are gone; only node limits remain.
     response = client.get(f"/api/workspaces/{workspace_id}/executor-configuration")
     assert response.status_code == 200
     data = response.json()
-    assert data["allocations"] == []
-    assert data["bindings"] == []
     assert data["node_limits"] == []
     assert data["migration_warnings"] == []

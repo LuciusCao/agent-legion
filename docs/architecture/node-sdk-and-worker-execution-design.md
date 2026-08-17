@@ -7,6 +7,12 @@ path 绑定机制（EXEC-CODE-001 legacy）已退役——本文 §2「内置节
 §5 的双路径对比、§7.2 的「内置读 repo 文件」均为历史记录，现行语义：
 所有节点代码以 DB 发布文本（workspace 版本或 demo 的 global 出厂种子）
 在 velites 沙箱执行（Host 与 Worker 一致），runtime 键集合见 §3。
+**2026-08-17 更新（P-0.5，schema v47）**：executor 定义 / allocation /
+binding 概念整体退役——非 Agent 路由节点一律进隐含 code 池（容量 =
+实例设置 `code_capacity`），节点可调参数声明层只剩 agent 定义与节点
+`config_schema:` 块（executor 兜底已删），现行语义以 invariants 的
+EXEC-CODE-POOL-001 / EXEC-CAPACITY-001 为准；本文「executor 契约」
+相关表述指收敛后的 `executors/code.py` + `executors/contracts.py`。
 日期：2026-08-12
 关联：Issue #30（code 节点 Host→Worker）、Issue #82（节点 SDK）、
 EXEC-CODE-001/002/003、CONFIG-MANIFEST-001、VAULT-SECRET-001、

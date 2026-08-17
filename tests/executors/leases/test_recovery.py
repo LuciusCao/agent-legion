@@ -13,8 +13,8 @@ from server.app.executors.models import (
 )
 from server.app.jobs import JobQueries
 from tests.executors.leases.helpers import (
-    _bind_executor_to_node,
     _claim_request,
+    _set_node_limit,
     _setup_workspace,
 )
 
@@ -125,15 +125,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
     workspace_id, job_id = _setup_workspace(
         queries, "ws-requeue", "exec-requeue", 1, node_keys=["node_a", "node_b"]
     )
-    _bind_executor_to_node(
-        queries,
-        workspace_id,
-        "exec-requeue",
-        1,
-        node_key="node_b",
-        local_limit=1,
-        workflow_key="demo_workflow",
-    )
+    _set_node_limit(queries, workspace_id, "demo_workflow", "node_b", 1)
     with queries.connect() as conn:
         conn.execute(
             "update job_nodes set status='completed' where job_id=%s and node_key=%s",
@@ -343,15 +335,6 @@ def test_recover_skips_job_when_lease_claimed_concurrently(
         2,
         node_keys=["node_a", "node_b"],
         local_limit=None,
-    )
-    _bind_executor_to_node(
-        queries,
-        workspace_id,
-        "exec-recover-race",
-        2,
-        node_key="node_b",
-        local_limit=None,
-        workflow_key="demo_workflow",
     )
     # Orphaned state: job running, node_a running with no lease; node_b pending.
     with queries.connect() as conn:

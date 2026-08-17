@@ -17,7 +17,6 @@ def workspace_settings_payload_with_schemas(
     workflows: WorkflowCatalogService,
     agent_definitions: Mapping[str, AgentDefinition],
     workspace: dict[str, Any],
-    executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Settings payload plus the node config schemas for the current workflow."""
     payload = workspace_settings_payload(workspace)
@@ -29,9 +28,7 @@ def workspace_settings_payload_with_schemas(
         except NotFoundError:
             definition = None
         if definition is not None:
-            schemas = workflow_node_config_schemas(
-                definition, agent_definitions, executor_definitions
-            )
+            schemas = workflow_node_config_schemas(definition, agent_definitions)
     payload["nodeConfigSchemas"] = schemas
     node_config = payload.get("nodeConfig")
     payload["nodeConfig"] = mask_node_config_secrets(

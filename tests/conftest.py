@@ -1,4 +1,3 @@
-import copy
 import json
 import os
 from contextlib import contextmanager
@@ -27,11 +26,6 @@ from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import reset_published_agent_cache
-from server.app.services.executor_definition_service import (
-    ExecutorDefinitionService,
-    reset_published_executor_cache,
-    seed_builtin_executor_definitions,
-)
 from server.app.services.skill_source_store import SkillSourceStore
 from server.app.services.workflow_catalog import seed_builtin_workflow_catalog
 from server.app.settings import load_settings
@@ -45,13 +39,9 @@ from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_
 # ensure_active_revision).
 
 
-# Test executor catalog: the built-in factory definitions (retired
-# config/workflow.yaml executors section) seeded via ExecutorDefinitionService
-# after every TRUNCATE, mirroring the app startup seed so published executor
-# definitions exist before any app hydration reads them.
-def _seed_executor_definitions() -> None:
-    service = ExecutorDefinitionService(TEST_DATABASE_URL)
-    seed_builtin_executor_definitions(service)
+# Test executor catalog: none. Executor definitions are retired (schema v47,
+# P-0.5): the v47 migration harvests their declarations onto workflow
+# revision nodes, and the runtime registry is the single implicit code pool.
 
 
 # Test demo node codes: the demo workflow's two code nodes are global
@@ -187,14 +177,11 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_agent_request_kind_schema.py",
         "tests/db/test_auth_scoped_tokens_migration.py",
         "tests/db/test_studio_chat_schema.py",
-        "tests/db/test_code_executor_migration.py",
         "tests/db/test_custom_node_codes_migration.py",
-        "tests/db/test_executor_asr_config_schema_migration.py",
-        "tests/db/test_executor_entity_type_migration.py",
+        "tests/db/test_executor_retirement_migration.py",
         "tests/db/test_external_connections_migration.py",
         "tests/db/test_hmac_connection_type_migration.py",
         "tests/db/test_job_status_counts_migration.py",
-        "tests/db/test_local_executor_removal_migration.py",
         "tests/db/test_monitoring_hotpath_indexes.py",
         "tests/db/test_node_cms_config_migration.py",
         "tests/db/test_postgres_runtime.py",
@@ -228,6 +215,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/test_workspace_secrets.py",
         "tests/test_cors.py",
         "tests/test_workflow_draft_compare.py",
+        "tests/routes/test_workflow_draft_validate.py",
         "tests/test_workspace_executor_configuration_flow.py",
         "tests/test_workspace_job_control_flow.py",
         "tests/test_workspace_settings_api.py",
@@ -557,8 +545,6 @@ def _isolate_postgres_database(request):
     if fresh:
         _rebuild_schema()
         reset_published_agent_cache()
-        reset_published_executor_cache()
-        _seed_executor_definitions()
         _seed_demo_node_codes()
         _seed_skill_sources()
         _seed_workflow_catalog()
@@ -567,9 +553,7 @@ def _isolate_postgres_database(request):
         close_database_pools()
         replayed = _reset_schema_data()
         reset_published_agent_cache()
-        reset_published_executor_cache()
         if not replayed:
-            _seed_executor_definitions()
             _seed_demo_node_codes()
             _seed_skill_sources()
             _seed_workflow_catalog()
@@ -753,10 +737,6 @@ def _build_shared_client(tmp_path_factory, dir_name: str):
 
     data_dir = tmp_path_factory.mktemp(dir_name)
     app = create_app(data_dir=data_dir, start_worker=False)
-    # Baseline for the per-test shared-app invariant check below: executor
-    # publish/rollback/archive hot-reloads settings.executor_definitions in
-    # memory, and the per-test DB reset cannot restore that.
-    app.state.executor_definitions_baseline = copy.deepcopy(app.state.settings.executor_definitions)
     return app
 
 
@@ -847,13 +827,6 @@ def _check_shared_app_invariants(app) -> list[str]:
     agents = app.state.agent_manager.agents
     if agents:
         errors.append(f"agent_manager.agents not empty after test: {agents!r}")
-    current = app.state.settings.executor_definitions
-    if current != app.state.executor_definitions_baseline:
-        errors.append(
-            "settings.executor_definitions diverged from the seeded baseline "
-            "(executor publish/rollback/archive hot-reloads the shared app; "
-            "use client_factory(fresh=True))"
-        )
     return errors
 
 

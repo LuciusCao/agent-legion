@@ -33,13 +33,6 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
               name: workspaceName,
               description: workspaceDescription,
               settings,
-              executor_allocations: executorConfiguration.allocations.map(
-                (allocation) => ({
-                  executor_id: allocation.executor_id,
-                  concurrency_limit: allocation.concurrency_limit,
-                })
-              ),
-              node_bindings: executorConfiguration.bindings,
               node_limits: executorConfiguration.node_limits,
               // null = unset：省略该字段，PUT 保留后端已存的 agent_capacity。
               ...(executorConfiguration.agent_capacity != null

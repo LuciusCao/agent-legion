@@ -57,12 +57,11 @@ def seed_demo_workspace_agent_definitions(
     """Publish each built-in demo agent into the workspace when absent.
 
     Called when a workspace binds the demo workflow (workspace create /
-    workflow switch). Seed-if-absent, mirroring the executor seed
-    (``executor_definition_service.seed_builtin_executor_definitions``): an
-    agent the admin already touched in this workspace (published a new
-    definition, or archived every version to disable it) is never overwritten
-    or resurrected — only a completely absent entity key gets the factory
-    definition. Returns the agent IDs seeded this run.
+    workflow switch). Seed-if-absent: an agent the admin already touched in
+    this workspace (published a new definition, or archived every version to
+    disable it) is never overwritten or resurrected — only a completely
+    absent entity key gets the factory definition. Returns the agent IDs
+    seeded this run.
     """
     service = AgentService(database_dsn, workspace_id)
     seeded: list[str] = []

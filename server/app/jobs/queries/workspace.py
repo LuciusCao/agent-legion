@@ -6,10 +6,9 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from server.app.executors._lease_control import active_lease_counts
-from server.app.jobs.executor_configuration import (
-    get_workspace_executor_configuration,
-    replace_workspace_executor_configuration,
+from server.app.jobs.node_limits import (
+    get_workspace_node_limits,
+    replace_workspace_node_limits,
 )
 from server.app.jobs.queries.base import JobQueriesBase
 
@@ -195,8 +194,6 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         default_entity: str,
         resource_config: dict[str, Any],
         intake_config: dict[str, Any],
-        executor_allocations: Sequence[Mapping[str, Any]] | None = None,
-        node_bindings: Sequence[Mapping[str, Any]] | None = None,
         node_limits: Sequence[Mapping[str, Any]] | None = None,
     ) -> dict[str, Any]:
         clean_name = name.strip()
@@ -226,11 +223,9 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                     workspace_id,
                 ),
             )
-            replace_workspace_executor_configuration(
+            replace_workspace_node_limits(
                 conn,
                 workspace_id,
-                executor_allocations or [],
-                node_bindings or [],
                 node_limits or [],
             )
             row = conn.execute("select * from workspaces where id=%s", (workspace_id,)).fetchone()
@@ -269,11 +264,9 @@ class WorkspaceQueriesMixin(JobQueriesBase):
             if cursor.rowcount == 0:
                 raise ValueError("Workspace not found")
 
-    def get_workspace_executor_configuration(
-        self, workspace_id: str
-    ) -> dict[str, list[dict[str, Any]]]:
+    def get_workspace_node_limits(self, workspace_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            return get_workspace_executor_configuration(conn, workspace_id)
+            return get_workspace_node_limits(conn, workspace_id)
 
     def get_workspace_agent_capacity(self, workspace_id: str) -> int | None:
         """Current workspace-level Agent concurrency limit; None when unset."""
@@ -299,43 +292,24 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 (workspace_id, max_concurrency),
             )
 
-    def get_workspace_executor_runtime_counts(self, workspace_id: str) -> list[dict[str, Any]]:
-        """Return per-executor allocation, binding, and active-lease counts.
+    def get_code_pool_counts(self, workspace_id: str) -> dict[str, int]:
+        """Active code-pool lease counts: this workspace's and the global total.
 
-        The result is a list of dicts with ``executor_id``, ``workspace_limit``,
-        ``running`` (active leases for this workspace), ``global_running`` (active
-        leases across all workspaces), and ``binding_count`` (bindings in this
-        workspace for this executor). Global capacities and executor kinds are
-        intentionally left to the caller so the repository stays decoupled from
-        runtime executor definitions.
+        Only local code-pool leases (executor_id 'code') count; Worker-claimed
+        executions are capacity-accounted on the Worker side (P-0.5).
         """
         with self._connect_read() as conn:
-            config = get_workspace_executor_configuration(conn, workspace_id)
-            binding_counts: dict[str, int] = {}
-            for binding in config["bindings"]:
-                binding_counts[binding["executor_id"]] = (
-                    binding_counts.get(binding["executor_id"], 0) + 1
-                )
-
-            result: list[dict[str, Any]] = []
-            for allocation in config["allocations"]:
-                executor_id = allocation["executor_id"]
-                counts = active_lease_counts(conn, executor_id)
-                result.append(
-                    {
-                        "executor_id": executor_id,
-                        "workspace_limit": allocation["concurrency_limit"],
-                        "running": counts.get(workspace_id, 0),
-                        "global_running": counts.get("global", 0),
-                        "binding_count": binding_counts.get(executor_id, 0),
-                    }
-                )
-            return result
-
-    def replace_workspace_executor_configuration(
-        self, workspace_id, allocations, bindings, node_limits
-    ):
-        with self.connect() as conn:
-            replace_workspace_executor_configuration(
-                conn, workspace_id, allocations, bindings, node_limits
-            )
+            rows = conn.execute(
+                """
+                select workspace_id, count(*) as cnt
+                from executor_leases
+                where executor_id='code' and status='active' and expires_at>current_timestamp
+                group by workspace_id
+                """
+            ).fetchall()
+        counts = {"running": 0, "global_running": 0}
+        for row in rows:
+            if str(row["workspace_id"]) == workspace_id:
+                counts["running"] = int(row["cnt"])
+            counts["global_running"] += int(row["cnt"])
+        return counts

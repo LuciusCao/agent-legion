@@ -1,20 +1,17 @@
-"""Code-capability node code resolution for the dispatch path.
+"""Node code resolution for the code-pool dispatch path.
 
-Extracted from ``schedule.py`` to keep it within its size budget. Resolves
-the node code text for code-kind executors (frozen job pin → workspace
-published → global factory seed, EXEC-CODE-002; #96 retired the repo-file
-path binding) and fails fast when a capability has no code to run.
+Extracted from ``schedule.py`` to keep it within its size budget. Every
+executor-routed node is code-routed (P-0.5): the code text resolves frozen
+job pin → workspace published → global factory seed (EXEC-CODE-002; #96
+retired the repo-file path binding), and a node without any published code
+fails fast as a configuration error.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from server.app.executors.config import CodeExecutorConfig
-from server.app.services.node_code_resolution import (
-    require_runnable_capability,
-    resolve_dispatch_node_code,
-)
+from server.app.services.node_code_resolution import resolve_dispatch_node_code
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -26,21 +23,14 @@ def resolve_code_node_dispatch(
     workspace_id: str,
     workflow_key: str,
     node: WorkflowNode,
-    executor_id: str,
     batch_payload: dict[str, Any] | None,
-) -> str | None:
-    """Return the node code text for a code-executor node, or None for
-    non-code executors.
+) -> str:
+    """Return the node code text, or raise ValueError when unrunnable.
 
-    Non-code executors short-circuit to None without a DB read. Frozen job
-    version wins over the workspace published version, then the global
-    factory seed; a frozen-pin hash mismatch raises ValueError (fail closed,
-    EXEC-CODE-003), and a capability without any published code raises
-    ValueError (EXEC-CODE-002) — the caller fails the node as a config error.
+    A frozen job pin fails closed: a hash mismatch raises, and a pinned
+    version missing at BOTH scopes is data corruption and raises too — never
+    silently substituted with the current published code (EXEC-CODE-003).
     """
-    definition = worker.registry.definitions().get(executor_id)
-    if not isinstance(definition, CodeExecutorConfig):
-        return None
     frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
     node_code = resolve_dispatch_node_code(
         worker.job_db.path,
@@ -50,5 +40,9 @@ def resolve_code_node_dispatch(
         node.key,
         frozen_pins.get(node.key),
     )
-    require_runnable_capability(definition.capabilities, node.capability, node_code)
+    if node_code is None:
+        raise ValueError(
+            f"capability {node.capability!r} has no published node code "
+            "(workspace version or global factory seed, EXEC-CODE-002)"
+        )
     return node_code

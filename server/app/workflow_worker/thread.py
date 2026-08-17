@@ -10,7 +10,6 @@ from server.app.agent_broker import AgentDispatchService
 from server.app.agent_broker.code_dispatch import CodeDispatchService
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
@@ -18,7 +17,6 @@ from server.app.jobs import JobQueries
 from server.app.services.agent_service import has_published_agent_definitions
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_pass
-from server.app.workflow_worker.catalog_reconcile import maybe_reconcile_catalogs
 from server.app.workflow_worker.catalog_scan import (
     collect_runnable_workspace_jobs,
     load_workflow_scan_entries,
@@ -28,7 +26,7 @@ from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
 from server.app.workflow_worker.mark_scan import MarkStore
 from server.app.workflow_worker.pass_log import log_pass_end, log_pass_start, pass_logger
-from server.app.workflow_worker.pools import ensure_pools, executor_capacities
+from server.app.workflow_worker.pools import ensure_pools
 from server.app.workflow_worker.ready import build_ready_queues
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflow_worker.schedule import claim_ready_queues
@@ -42,7 +40,6 @@ class WorkflowWorkerThread:
         self,
         job_db: JobQueries,
         leases: ExecutorLeaseRepository,
-        registry: ExecutorRegistry,
         runtime: ExecutionRuntime,
         settings: Settings,
         workspace_worker_control: Any | None = None,
@@ -52,8 +49,6 @@ class WorkflowWorkerThread:
     ):
         self.job_db = job_db
         self.leases = leases
-        self.registry = registry
-        self.executor_registry = registry  # compatibility alias for tests/lifespan
         self.runtime = runtime
         self.settings = settings
         self.workspace_worker_control = workspace_worker_control
@@ -65,21 +60,14 @@ class WorkflowWorkerThread:
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
         # Scan-list snapshot (definitions, definitionless_keys), swapped
-        # atomically by reload_scan_entries; never mutated in place (the
-        # ExecutorRegistry.replace_definitions pattern). Readers take the
-        # tuple first, then unpack, so a mid-swap pass never sees a
+        # atomically by reload_scan_entries; never mutated in place. Readers
+        # take the tuple first, then unpack, so a mid-swap pass never sees a
         # half-applied pair.
         self._scan_entries: tuple[list[WorkflowDefinition], list[str]] = ([], [])
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
-        # execution_id -> (executor_id, lease_id) for in-flight claims, so a
-        # pool dropped by hot archive can finish leases of futures that never
-        # started (pools.finish_unstarted_claims).
+        # execution_id -> (executor_id, lease_id) for in-flight claims.
         self._future_claims: dict[str, tuple[str, str]] = {}
-        # Monotonic timestamp of the last low-frequency catalog reconcile
-        # (catalog_reconcile.maybe_reconcile_catalogs); starts "just ran" so
-        # the first reconcile happens one interval after start.
-        self._last_catalog_reconcile = time.monotonic()
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
         # Cross-pass caches: parsed workflow definitions by definition hash,
@@ -125,9 +113,6 @@ class WorkflowWorkerThread:
     def _pool_for(self, executor_id: str) -> ThreadPoolExecutor:
         return self._pools[executor_id]
 
-    def _executor_capacities(self) -> dict[str, int]:
-        return executor_capacities(self)
-
     def start(self) -> None:
         self.reload_scan_entries()
 
@@ -149,14 +134,15 @@ class WorkflowWorkerThread:
         self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
-        maybe_reconcile_catalogs(self)
         if not any(self._scan_entries):
             return False
 
         self._ensure_pools()
         reap_futures(self)
 
-        snapshot = load_capacity_snapshot(self.leases.path, self._executor_capacities())
+        snapshot = load_capacity_snapshot(
+            self.leases.path, self.settings.executor_runtime.code_capacity
+        )
         if not snapshot.has_any_capacity() and not has_published_agent_definitions(
             self.settings.database_url
         ):

@@ -9,40 +9,25 @@ import {
 } from './useWorkspaceSettingsQuery'
 import { useSettingStore } from '../stores/settingStore'
 import { api } from '../api'
-import {
-  getExecutorCatalog,
-  getWorkspaceExecutorConfiguration,
-} from '../api/executorApi'
+import { getWorkspaceExecutorConfiguration } from '../api/executorApi'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
 vi.mock('../api/executorApi', () => ({
-  getExecutorCatalog: vi.fn(),
   getWorkspaceExecutorConfiguration: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
-const mockGetExecutorCatalog = vi.mocked(getExecutorCatalog)
 const mockGetWorkspaceExecutorConfiguration = vi.mocked(
   getWorkspaceExecutorConfiguration
 )
 
-const catalogExecutor = {
-  id: 'code-default',
-  kind: 'code' as const,
-  capabilities: ['execute_local'],
-  global_capacity: 4,
-}
-
 const executorConfig = {
-  allocations: [
-    { executor_id: 'code-default', workspace_id: 'ws1', concurrency_limit: 3 },
-  ],
-  bindings: [],
   node_limits: [],
   migration_warnings: ['legacy migration'],
+  agent_capacity: null,
 }
 
 function mockSnapshotApi(workspaceName = '空间一') {
@@ -76,7 +61,6 @@ function mockSnapshotApi(workspaceName = '空间一') {
     }
     return Promise.resolve({})
   })
-  mockGetExecutorCatalog.mockResolvedValue({ executors: [catalogExecutor] })
   mockGetWorkspaceExecutorConfiguration.mockResolvedValue(executorConfig)
 }
 
@@ -103,8 +87,6 @@ function resetStore() {
     isDirty: false,
     saveError: null,
     executorConfiguration: {
-      allocations: [],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
       agent_capacity: null,
@@ -116,7 +98,6 @@ function resetStore() {
 describe('useWorkspaceSettingsQuery', () => {
   beforeEach(() => {
     mockApi.mockReset()
-    mockGetExecutorCatalog.mockReset()
     mockGetWorkspaceExecutorConfiguration.mockReset()
     resetStore()
   })
@@ -137,10 +118,6 @@ describe('useWorkspaceSettingsQuery', () => {
     expect(snapshot.settings.entityType).toBe('knowledge')
     expect(snapshot.settings.intakeModes).toEqual(['direct_ids'])
     expect(snapshot.settings.labelOverrides).toEqual({ direct_ids: '输入 ID' })
-    expect(snapshot.executorCatalog).toEqual([catalogExecutor])
-    expect(snapshot.executorConfiguration.allocations).toEqual(
-      executorConfig.allocations
-    )
     expect(snapshot.executorConfiguration.migration_warnings).toEqual([
       'legacy migration',
     ])
@@ -152,10 +129,7 @@ describe('useWorkspaceSettingsQuery', () => {
       Object.assign(new Error('Not Found'), { status: 404 })
     )
     mockApi.mockResolvedValue({})
-    mockGetExecutorCatalog.mockResolvedValue({ executors: [] })
     mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
-      allocations: [],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
     })
@@ -196,10 +170,7 @@ describe('useWorkspaceSettingsQuery', () => {
     mockApi.mockRejectedValue(
       Object.assign(new Error('HTTP 500'), { status: 500 })
     )
-    mockGetExecutorCatalog.mockResolvedValue({ executors: [] })
     mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
-      allocations: [],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
     })
@@ -216,7 +187,6 @@ describe('useWorkspaceSettingsQuery', () => {
 describe('useSettingStoreHydration', () => {
   beforeEach(() => {
     mockApi.mockReset()
-    mockGetExecutorCatalog.mockReset()
     mockGetWorkspaceExecutorConfiguration.mockReset()
     resetStore()
   })
@@ -235,7 +205,6 @@ describe('useSettingStoreHydration', () => {
     expect(state.workspaceId).toBe('ws1')
     expect(state.originalWorkspaceName).toBe('空间一')
     expect(state.originalSettings?.workflowKey).toBe('knowledge_content')
-    expect(state.executorConfiguration.allocations).toHaveLength(1)
     expect(state.isDirty).toBe(false)
   })
 
@@ -307,10 +276,7 @@ describe('useSettingStoreHydration', () => {
 
   it('writes saveError when the snapshot load fails', async () => {
     mockApi.mockRejectedValue(new Error('HTTP 500: Internal Server Error'))
-    mockGetExecutorCatalog.mockResolvedValue({ executors: [] })
     mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
-      allocations: [],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
     })

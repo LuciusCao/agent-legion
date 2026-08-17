@@ -1,31 +1,14 @@
-from typing import Literal
-
 from pydantic import BaseModel, Field
 
 from server.app.routes.agent_catalog_contracts import AgentDefinitionResponse
 
 
-class ExecutorCapabilityResponse(BaseModel):
-    name: str
-    # The code capability ``path`` (and its timeout display) retired with the
-    # path binding (#96): node code lives in the DB catalog, not the repo.
-    skill: str | None = None
-    tools: list[str] = Field(default_factory=list)
-    provider: str | None = None
-    model: str | None = None
-    thinking: str | None = None
-    skill_ref: str | None = None
-    skill_commit: str | None = None
-
-
-class ExecutorDefinitionResponse(BaseModel):
-    id: str
-    kind: Literal["code", "pi", "openclaw"]
-    global_capacity: int = Field(ge=1)
-    capabilities: list[str]
-    capability_details: list[ExecutorCapabilityResponse] = Field(default_factory=list)
-
-
 class ExecutorCatalogResponse(BaseModel):
-    executors: list[ExecutorDefinitionResponse]
+    """Execution catalog for Studio (P-0.5 step 2: Agents only).
+
+    The ``executors`` half retired with the executor concept (schema v47);
+    the response type keeps the pre-retirement name until the step-3
+    contract cleanup.
+    """
+
     agents: list[AgentDefinitionResponse] = Field(default_factory=list)

@@ -15,7 +15,8 @@ from server.app.services.agent_version_pins import (
     agent_version_pin,
     resolve_dispatch_agent_definition,
 )
-from server.app.services.node_config import batch_source_payload, dispatch_effective_config
+from server.app.services.node_config import dispatch_effective_config
+from server.app.services.node_config_batch import batch_source_payload
 from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode

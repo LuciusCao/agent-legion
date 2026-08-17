@@ -3,18 +3,15 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { LocalNodeLimitSection } from './LocalNodeLimitSection'
 import { useSettingStore } from '../stores/settingStore'
 
-const catalog = [
+// Agent 路由（review_keywords）经 agentRoutes 快照标注；其余节点一律 code 池。
+const agentRoutes = [
   {
-    id: 'code-default',
-    kind: 'code' as const,
-    capabilities: ['fetch_items', 'clean_items', 'mark_question'],
-    global_capacity: 4,
-  },
-  {
-    id: 'pi-review',
-    kind: 'pi' as const,
-    capabilities: ['review_keywords'],
-    global_capacity: 2,
+    workflow_key: 'sample_workflow',
+    node_key: 'review_keywords',
+    node_label: '审核关键词',
+    capability: 'review_keywords',
+    agent_id: 'reviewer-v1',
+    agent_skill: 'demo/review',
   },
 ]
 
@@ -48,24 +45,15 @@ const workflowDefinition = {
       inputs: ['keywords.json'],
       outputs: ['keywords_review.json'],
     },
-    {
-      key: 'unbound_node',
-      label: '未绑定节点',
-      capability: 'mark_question',
-      after: [],
-      inputs: [],
-      outputs: [],
-    },
   ],
 }
 
-// executorCatalog/workflowDefinition 已迁入 react-query；mock 快照 hook，
+// workflowDefinition/agentRoutes 已迁入 react-query；mock 快照 hook，
 // draft（executorConfiguration）仍写 store。
 vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
   useWorkspaceSettingsSnapshot: () => ({
     workflowDefinition,
-    executorCatalog: catalog,
-    agentRoutes: [],
+    agentRoutes,
   }),
 }))
 
@@ -80,30 +68,6 @@ describe('LocalNodeLimitSection', () => {
         workflowKey: 'sample_workflow',
       },
       executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 4,
-          },
-          {
-            executor_id: 'pi-review',
-            workspace_id: 'ws1',
-            concurrency_limit: 2,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'fetch_items',
-            executor_id: 'code-default',
-          },
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'review_keywords',
-            executor_id: 'pi-review',
-          },
-        ],
         node_limits: [
           {
             workflow_key: 'sample_workflow',
@@ -112,32 +76,17 @@ describe('LocalNodeLimitSection', () => {
           },
         ],
         migration_warnings: [],
+        agent_capacity: null,
       },
     })
   })
 
-  it('only renders nodes currently bound to a code executor', () => {
+  it('renders code-pool nodes and hides agent-routed ones', () => {
     render(<LocalNodeLimitSection />)
 
     expect(screen.getByText('获取题目')).toBeInTheDocument()
-    expect(screen.queryByText('清洗与解析')).not.toBeInTheDocument()
+    expect(screen.getByText('清洗与解析')).toBeInTheDocument()
     expect(screen.queryByText('审核关键词')).not.toBeInTheDocument()
-    expect(screen.queryByText('未绑定节点')).not.toBeInTheDocument()
-  })
-
-  it('does not render agent-bound or unbound nodes', () => {
-    render(<LocalNodeLimitSection />)
-
-    expect(screen.queryByText('审核关键词')).not.toBeInTheDocument()
-    expect(screen.queryByText('未绑定节点')).not.toBeInTheDocument()
-  })
-
-  it('sets the input max to the bound executor workspace allocation', () => {
-    render(<LocalNodeLimitSection />)
-
-    const input = screen.getByLabelText('获取题目 并发上限') as HTMLInputElement
-    expect(input).toBeTruthy()
-    expect(input).toHaveAttribute('max', '4')
   })
 
   it('updates the node limit through the store', async () => {
@@ -172,28 +121,7 @@ describe('LocalNodeLimitSection', () => {
     })
   })
 
-  it('adds a limit row when a new code-bound node appears', async () => {
-    useSettingStore.setState({
-      executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 4,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'clean_items',
-            executor_id: 'code-default',
-          },
-        ],
-        node_limits: [],
-        migration_warnings: [],
-      },
-    })
-
+  it('adds a limit row for a previously unlimited code node', async () => {
     render(<LocalNodeLimitSection />)
 
     const input = screen.getByLabelText(
@@ -205,6 +133,11 @@ describe('LocalNodeLimitSection', () => {
       expect(
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
+        {
+          workflow_key: 'sample_workflow',
+          node_key: 'fetch_items',
+          concurrency_limit: 2,
+        },
         {
           workflow_key: 'sample_workflow',
           node_key: 'clean_items',

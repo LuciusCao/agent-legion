@@ -5,7 +5,6 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import require_admin
-from server.app.executors._pi_skill import build_skill_manager
 from server.app.routes.skill_source_contracts import (
     SkillSourceEntry,
     SkillSourcesResponse,
@@ -15,6 +14,7 @@ from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import Settings
 from server.app.skills.config import SkillsConfig, SkillSourceConfig
 from server.app.skills.lock import refresh_lock
+from server.app.skills.runtime import build_skill_manager
 
 
 def _merged_view(store: SkillSourceStore) -> SkillSourcesResponse:

@@ -9,17 +9,10 @@ import type { useWorkflowStudio } from './useWorkflowStudio'
 import type { StudioPanelFocus } from './useWorkflowStudioPageView'
 import { WorkflowDefinitionEditor } from './WorkflowDefinitionEditor'
 import { WorkflowStudioChangesView } from './WorkflowStudioChangesView'
-import {
-  ManagedAgentsPanel,
-  ManagedExecutorsPanel,
-} from './WorkflowStudioManagedPanels'
+import { ManagedAgentsPanel } from './WorkflowStudioManagedPanels'
 import styles from './WorkflowStudioGlobalDialog.module.css'
 
-export type WorkflowStudioGlobalMode =
-  | 'changes'
-  | 'yaml'
-  | 'agents'
-  | 'executors'
+export type WorkflowStudioGlobalMode = 'changes' | 'yaml' | 'agents'
 
 type Props = {
   mode: WorkflowStudioGlobalMode | null
@@ -51,16 +44,11 @@ export function WorkflowStudioGlobalDialog(props: Props) {
           ? 'YAML 高级编辑'
           : mode === 'agents'
             ? 'Agent 管理'
-            : mode === 'executors'
-              ? 'Executor 管理'
-              : '变更与校验'}
+            : '变更与校验'}
       </DialogTitle>
       <DialogContent dividers className={styles.content}>
         {mode === 'agents' && (
           <ManagedAgentsPanel focusId={props.panelFocus.agents} />
-        )}
-        {mode === 'executors' && (
-          <ManagedExecutorsPanel focusId={props.panelFocus.executors} />
         )}
         {mode === 'changes' && (
           <WorkflowStudioChangesView

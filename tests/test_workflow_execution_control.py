@@ -6,14 +6,12 @@ from typing import Any
 import pytest
 
 from server.app.db.schema import init_db
-from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import (
     ClaimedExecution,
     ExecutionResult,
     LeaseClaimRequest,
 )
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
@@ -187,25 +185,6 @@ def _setup_workspace(
         queries.set_job_execution_target(job_id, target_node_key)
 
     with queries.connect() as conn:
-        for node in definition.nodes.values():
-            conn.execute(
-                """
-                insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (%s, %s, %s, %s)
-                on conflict(workspace_id, workflow_key, node_key) do update set
-                  executor_id=excluded.executor_id
-                """,
-                (workspace_id, definition.key, node.key, executor_id),
-            )
-        conn.execute(
-            """
-            insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (%s, %s, %s)
-            on conflict(workspace_id, executor_id) do update set
-              concurrency_limit=excluded.concurrency_limit
-            """,
-            (workspace_id, executor_id, 10),
-        )
         for node in definition.nodes.values():
             conn.execute(
                 """
@@ -447,24 +426,10 @@ def _make_worker(
     queries: JobQueries,
     definitions: list[WorkflowDefinition],
 ) -> WorkflowWorkerThread:
-    executor_def = CodeExecutorConfig(
-        kind="code",
-        global_capacity=2,
-        capabilities={
-            node.capability: CodeCapabilityConfig()
-            for definition in definitions
-            for node in definition.nodes.values()
-        },
-    )
-    registry = ExecutorRegistry(
-        executors={"code-default": _FakeExecutor("code-default")},
-        global_capacities={"code-default": 2},
-        definitions={"code-default": executor_def},
-    )
     leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=_FakeExecutor("code"),
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
     )
@@ -477,12 +442,10 @@ def _make_worker(
         jobs_dir=tmp_path / "jobs",
         config={},
         database_url=str(queries.path),
-        executor_definitions=registry.definitions(),
     )
     return WorkflowWorkerThread(
         job_db=queries,
         leases=leases,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )
@@ -533,25 +496,6 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
     queries.set_job_execution_target(job_id, "target")
 
     with queries.connect() as conn:
-        for node in definition.nodes.values():
-            conn.execute(
-                """
-                insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (%s, %s, %s, %s)
-                on conflict(workspace_id, workflow_key, node_key) do update set
-                  executor_id=excluded.executor_id
-                """,
-                (workspace_id, "branched", node.key, "code-default"),
-            )
-        conn.execute(
-            """
-            insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (%s, %s, %s)
-            on conflict(workspace_id, executor_id) do update set
-              concurrency_limit=excluded.concurrency_limit
-            """,
-            (workspace_id, "code-default", 10),
-        )
         for node in definition.nodes.values():
             conn.execute(
                 """
