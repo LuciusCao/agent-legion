@@ -1,0 +1,13 @@
+.codeToolbar {
+  display: flex;
+  justify-content: flex-end;
+}
+.wideViewButton {
+  border: 1px solid #cfcfcf;
+  border-radius: 6px;
+  background: #fff;
+  color: #1565c0;
+  font-size: 12px;
+  padding: 3px 10px;
+  cursor: pointer;
+}

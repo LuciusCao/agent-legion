@@ -1,0 +1,64 @@
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #ffffff;
+  border-bottom: 1px solid #e0e0e0;
+  min-height: 48px;
+  padding: 0 12px 0 20px;
+}
+.title {
+  flex: 1 1 auto;
+  font-size: 16px;
+  font-weight: 500;
+}
+.codeBody {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  background: #fafafa;
+  height: calc(100dvh - 49px);
+}
+.code {
+  margin: 0;
+  padding: 12px 0;
+  font-size: 13px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  line-height: 1.55;
+}
+.line {
+  display: flex;
+  min-height: calc(1em * 1.55);
+}
+.line:hover {
+  background: #f0f4ff;
+}
+.lineNo {
+  flex: none;
+  width: 56px;
+  padding-right: 16px;
+  text-align: right;
+  color: #9e9e9e;
+  user-select: none;
+}
+.lineText {
+  flex: 1 1 auto;
+  white-space: pre;
+  padding-right: 24px;
+}
+.keyword {
+  color: #d73a49;
+}
+.string {
+  color: #032f62;
+}
+.comment {
+  color: #6a737d;
+  font-style: italic;
+}
+.number {
+  color: #005cc5;
+}
+.decorator {
+  color: #6f42c1;
+}

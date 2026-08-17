@@ -1,69 +1,31 @@
-import { DagGraph } from '../../components/dag/DagGraph'
-import { WorkflowDagFullscreenButton } from './components/WorkflowDagFullscreenButton'
+import { useState } from 'react'
 import { WorkflowStudioMobileNav } from './WorkflowStudioMobileNav'
-import { WorkflowStudioInspectorPanel } from './WorkflowStudioSidePanels'
+import { WorkflowStudioSplitLayout } from './WorkflowStudioSplitLayout'
 import { useWorkflowStudioMobilePanel } from './useWorkflowStudioMobilePanel'
-import { useStudioRightPanelTab } from './chat/useStudioRightPanelTab'
 import type { StudioLayoutProps } from './workflowStudioLayoutProps'
-import canvasStyles from '../WorkflowStudioPageCanvas.module.css'
-import canvasToolbarStyles from '../WorkflowStudioPageCanvasToolbar.module.css'
-import pageStyles from '../WorkflowStudioPageResponsive.module.css'
 
+/** 左右分栏入口：右半 Agent 对话默认展开、可收起；点节点时详情在 Agent
+ * 展开时替换左半 DAG、收起时占右半（DAG 保留）。移动端退化为
+ * 画布/编辑节点/Agent 三面板切换。 */
 export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
   const { mobilePanel, setMobilePanel } = useWorkflowStudioMobilePanel(
     props.selectedNodeKey
   )
-  // 右栏 tab 状态提升到这一层：「Agent 助手」tab 选中时即使没有选中节点，
-  // 侧栏也保持打开；选中节点自动切回节点配置 tab（保持既有交互）。
-  const rightPanel = useStudioRightPanelTab(props.setSelectedNodeKey)
-
-  const graphActive = mobilePanel === 'graph'
-  const inspectorActive = mobilePanel === 'editor'
-  const inspectorOpen = props.selectedNodeKey !== null || rightPanel.chatOpen
+  const [agentOpen, setAgentOpen] = useState(true)
 
   return (
     <>
       <WorkflowStudioMobileNav
         value={mobilePanel}
-        editorAvailable={inspectorOpen}
+        editorAvailable={props.selectedNodeKey !== null}
         onChange={setMobilePanel}
       />
-      <div
-        className={`${pageStyles.layout}${inspectorOpen ? ` ${pageStyles.withInspector}` : ''}`}
-      >
-        <main
-          className={`${canvasStyles.canvas}${graphActive ? ` ${pageStyles.activePanel}` : ''}`}
-          data-mobile-panel="graph"
-        >
-          <div
-            data-canvas-toolbar
-            className={canvasToolbarStyles.canvasToolbar}
-          >
-            <WorkflowDagFullscreenButton
-              onClick={() => props.setDagFullscreenOpen(true)}
-            />
-          </div>
-          {props.workflow && (
-            <DagGraph
-              nodes={props.nodes}
-              edges={props.edges}
-              selectedNode={props.selectedNodeKey}
-              onSelectedNodeChange={rightPanel.selectNode}
-              hideNodeDetails
-            />
-          )}
-        </main>
-        {inspectorOpen && (
-          <WorkflowStudioInspectorPanel
-            props={props}
-            active={inspectorActive}
-            rightPanelTab={rightPanel.tab}
-            onRightPanelTabChange={rightPanel.setTab}
-            onSelectNode={rightPanel.selectNode}
-            onClose={rightPanel.closePanel}
-          />
-        )}
-      </div>
+      <WorkflowStudioSplitLayout
+        props={props}
+        mobilePanel={mobilePanel}
+        agentOpen={agentOpen}
+        onToggleAgent={() => setAgentOpen((open) => !open)}
+      />
     </>
   )
 }

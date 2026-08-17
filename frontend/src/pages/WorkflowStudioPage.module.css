@@ -13,5 +13,6 @@
   overflow: hidden;
 }
 .withInspector {
-  grid-template-columns: minmax(0, 1fr) 360px;
+  /* 未拖过分隔条时 :root 不设 --studio-right-width，回落 1fr：左右严格 1:1 */
+  grid-template-columns: minmax(0, 1fr) 6px var(--studio-right-width, 1fr);
 }

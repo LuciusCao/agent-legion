@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { WorkflowNodeCodeSection } from './WorkflowNodeCodeSection'
 import { api } from '../../api'
 import { useSettingStore } from '../../stores/settingStore'
@@ -139,6 +145,27 @@ describe('WorkflowNodeCodeSection', () => {
     expect(
       screen.getByRole('button', { name: 'fork 为自定义节点' })
     ).toBeInTheDocument()
+  })
+
+  it('opens the wide-view dialog with line numbers and closes it', async () => {
+    renderSection()
+    await screen.findByText(/内置/)
+
+    fireEvent.click(screen.getByRole('button', { name: '宽视图' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('节点代码 · fetch_items')
+    expect(dialog).toHaveTextContent('def run(job, job_dir, runtime):')
+    // 行号渲染（两行代码 → 至少出现行号 1 和 2）。
+    expect(within(dialog).getByText('1')).toBeInTheDocument()
+    expect(within(dialog).getByText('2')).toBeInTheDocument()
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: '关闭代码宽视图' })
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
   })
 
   it('forks the builtin code into a draft via PUT', async () => {
