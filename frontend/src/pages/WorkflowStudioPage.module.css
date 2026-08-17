@@ -13,6 +13,8 @@
   overflow: hidden;
 }
 .withInspector {
-  /* 未拖过分隔条时 :root 不设 --studio-right-width，回落 1fr：左右严格 1:1 */
+  /* 未拖过分隔条时 :root 不设 --studio-right-width，回落 1fr：左右严格 1:1。
+   * 右轨道保持裸 1fr（minmax(auto,1fr)），内容防爆靠 colRight 的
+   * min-width:0（WorkflowStudioSplitLayout.module.css），本行不能超 80 列。 */
   grid-template-columns: minmax(0, 1fr) 6px var(--studio-right-width, 1fr);
 }

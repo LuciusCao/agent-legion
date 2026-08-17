@@ -10,6 +10,10 @@
   }
   .colRight {
     grid-column: 3;
+    /* 右轨道是 minmax(auto, 1fr)（WorkflowStudioPage.module.css）：不钉
+     * min-width:0 的话，chat 长工具名/JSON 等不可断内容会把轨道撑过 1fr，
+     * 右栏随对话自增宽、左栏被挤没。 */
+    min-width: 0;
   }
   .canvasReplaced {
     display: none;
