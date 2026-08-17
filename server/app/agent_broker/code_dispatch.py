@@ -36,7 +36,7 @@ from server.app.agent_workers import CODE_PROTOCOL_VERSION as _CODE_PROTOCOL_VER
 from server.app.agent_workers import ONLINE_THRESHOLD_SECONDS as _ONLINE_THRESHOLD_SECONDS
 from server.app.config_schema import node_safe_settings_config
 from server.app.db.transaction import read_connection
-from server.app.executors.config import CodeCapabilityConfig
+from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactStore

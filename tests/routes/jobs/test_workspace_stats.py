@@ -40,11 +40,11 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
     assert body["workflow_label"] == "教学视频脚本与题目生成（示例）"
     assert body["job_stats"]["pending"] == 2
     assert "queued" not in body["job_stats"]
-    assert body["executor_status"]["executors"] == []
+    assert body["code_pool"] == {"capacity": 16, "running": 0, "available": 16}
     assert body["latest_run"] is None
 
 
-def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_factory):
+def test_workspace_stats_code_pool_reflects_leases(client_factory):
     with client_factory(workflows_enabled=True) as c:
         job_db = c.app.state.job_db
         ws = c.post(
@@ -55,18 +55,6 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_
             },
         ).json()
         ws_id = ws["workspace"]["id"]
-        job_db.replace_workspace_executor_configuration(
-            ws_id,
-            allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
-            bindings=[
-                {
-                    "workflow_key": "education_video_problems_generation",
-                    "node_key": "review_keywords",
-                    "executor_id": "code-default",
-                }
-            ],
-            node_limits=[],
-        )
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
@@ -75,19 +63,32 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(client_
                 "knowledge_point_ids": ["Q301"],
             },
         )
+        # A live code-pool lease moves running/available (P-0.5: single pool).
+        from server.app.executors.leases import ExecutorLeaseRepository
+        from server.app.executors.models import LeaseClaimRequest
+
+        job_id = job_db.list_jobs(workspace_id=ws_id)[0]["id"]
+        repo = ExecutorLeaseRepository(job_db.path, data_dir=job_db.jobs_dir.parent)
+        claim = repo.try_claim(
+            LeaseClaimRequest(
+                executor_id="code",
+                global_capacity=16,
+                workspace_id=ws_id,
+                job_id=str(job_id),
+                workflow_key="education_video_problems_generation",
+                node_key="intake_knowledge_points",
+                capability="intake_knowledge_points",
+                local_node_limit=None,
+                lease_ttl_seconds=60,
+                log_path="logs/run.log",
+            )
+        )
+        assert claim is not None
         stats = c.get(f"/api/workspaces/{ws_id}/stats")
 
     assert stats.status_code == 200
     body = stats.json()
-    executors = body["executor_status"]["executors"]
-    assert len(executors) == 1
-    assert executors[0]["executor_id"] == "code-default"
-    assert executors[0]["kind"] == "code"
-    assert executors[0]["global_capacity"] == 16
-    assert executors[0]["workspace_limit"] == 4
-    assert executors[0]["running"] == 0
-    assert executors[0]["available"] == 4
-    assert executors[0]["binding_count"] == 1
+    assert body["code_pool"] == {"capacity": 16, "running": 1, "available": 15}
 
 
 def test_workspace_stats_latest_run_reflects_node_runs(client_factory):

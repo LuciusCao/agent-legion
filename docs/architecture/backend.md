@@ -123,15 +123,6 @@ server/app/
 | DELETE | `/admin/connections/{key}` | `delete_connection` | routes/connections.py |
 | POST | `/admin/connections/{key}/test` | `test_connection` | routes/connections.py |
 | GET | `/dashboard/events` | `dashboard_events` | routes/dashboard_events.py |
-| GET | `/executor-definitions` | `list_executor_definitions` | routes/executor_definitions.py |
-| POST | `/executor-definitions` | `create_executor_definition` | routes/executor_definitions.py |
-| GET | `/executor-definitions/{executor_id}` | `get_executor_definition` | routes/executor_definitions.py |
-| GET | `/executor-definitions/{executor_id}/versions` | `list_executor_definition_versions` | routes/executor_definitions.py |
-| PUT | `/executor-definitions/{executor_id}/draft` | `save_executor_definition_draft` | routes/executor_definitions.py |
-| POST | `/executor-definitions/{executor_id}/publish` | `publish_executor_definition` | routes/executor_definitions.py |
-| POST | `/executor-definitions/{executor_id}/rollback` | `rollback_executor_definition` | routes/executor_definitions.py |
-| POST | `/executor-definitions/{executor_id}/copy` | `copy_executor_definition` | routes/executor_definitions.py |
-| DELETE | `/executor-definitions/{executor_id}` | `archive_executor_definition` | routes/executor_definitions.py |
 | GET | `/workspaces/{workspace_id}/failed-node-runs` | `list_failed_node_runs` | routes/failed_node_runs.py |
 | POST | `/workspaces/{workspace_id}/jobs/rerun-by-failure` | `rerun_jobs_by_failure_category` | routes/failed_node_runs.py |
 | GET | `/admin/instance-settings` | `get_instance_settings` | routes/instance_settings.py |
@@ -251,12 +242,7 @@ server/app/
 |------|------|------|------|
 | AgentEnqueueConfig | BaseModel | workers: int, max_pending: int | app/agent_broker/dispatch_pool.py |
 | AgentDefinition | BaseModel | capability: str, runtime: Literal['pi', 'openclaw', 'velites'], skill: str, t... | app/agent_catalog.py |
-| CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/code_config.py |
-| CodeExecutorConfig | BaseModel | kind: Literal['code'], global_capacity: int, capabilities: dict[str, CodeCapa... | app/executors/code_config.py |
-| PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
-| OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
-| PiExecutorConfig | BaseModel | kind: Literal['pi'], global_capacity: int, capabilities: dict[str, PiCapabili... | app/executors/config.py |
-| OpenClawExecutorConfig | BaseModel | kind: Literal['openclaw'], agent_id: str, global_capacity: int, capabilities:... | app/executors/config.py |
+| CodeCapabilityConfig | BaseModel | timeout_seconds: int, sandbox_network: bool, config_schema: dict[str, Any] | app/executors/contracts.py |
 | PiRuntimeConfig | BaseModel | flavor: Literal['pi', 'velites'], binary: str, provider: str, model: str, thi... | app/executors/runtime_config.py |
 | OpenClawSkillSafetyRepo | BaseModel | path: str | app/executors/runtime_config.py |
 | OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[OpenClawSkillSafetyRepo] | app/executors/runtime_config.py |
@@ -312,29 +298,15 @@ server/app/
 | ConnectionTypeView | BaseModel | type: str, description: str, required_config_keys: list[str], secret_keys: li... | app/routes/connections_contracts.py |
 | ConnectionTypesResponse | BaseModel | types: list[ConnectionTypeView] | app/routes/connections_contracts.py |
 | ConnectionTestResponse | BaseModel | ok: bool, message: str | app/routes/connections_contracts.py |
-| ExecutorCapabilityResponse | BaseModel | name: str, skill: str | None, tools: list[str], provider: str | None, model: ... | app/routes/executor_catalog_contracts.py |
-| ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['code', 'pi', 'openclaw'], global_capacity: int, capab... | app/routes/executor_catalog_contracts.py |
-| ExecutorCatalogResponse | BaseModel | executors: list[ExecutorDefinitionResponse], agents: list[AgentDefinitionResp... | app/routes/executor_catalog_contracts.py |
-| ExecutorAllocationRequest | BaseModel | executor_id: str, concurrency_limit: int | app/routes/executor_contracts.py |
-| NodeBindingRequest | BaseModel | workflow_key: str, node_key: str, executor_id: str | app/routes/executor_contracts.py |
+| ExecutorCatalogResponse | BaseModel | agents: list[AgentDefinitionResponse] | app/routes/executor_catalog_contracts.py |
 | NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/executor_contracts.py |
-| WorkspaceExecutorConfigurationResponse | BaseModel | allocations: list[ExecutorAllocationResponse], bindings: list[NodeBindingRequ... | app/routes/executor_contracts.py |
+| WorkspaceExecutorConfigurationResponse | BaseModel | node_limits: list[NodeLimitRequest], migration_warnings: list[str], agent_cap... | app/routes/executor_contracts.py |
 | WorkspaceAgentRouteEntry | BaseModel | workflow_key: str, node_key: str, node_label: str, capability: str, agent_id:... | app/routes/executor_contracts.py |
 | WorkspaceAgentRoutesResponse | BaseModel | routes: list[WorkspaceAgentRouteEntry] | app/routes/executor_contracts.py |
 | WorkspaceSettingsPayload | BaseModel | entityType: str, intakeModes: list[str], labelOverrides: dict[str, str], work... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/executor_contracts.py |
 | WorkspaceConfigurationResponse | BaseModel | workspace: WorkspaceRecord, settings: WorkspaceSettingsPayload, executor_conf... | app/routes/executor_contracts.py |
-| ExecutorDefinitionPayload | BaseModel | kind: str, global_capacity: int, capabilities: dict[str, dict[str, Any]] | app/routes/executor_definition_contracts.py |
-| ExecutorCopyRequest | BaseModel | new_executor_id: str | app/routes/executor_definition_contracts.py |
-| ExecutorRollbackRequest | BaseModel | version: int | app/routes/executor_definition_contracts.py |
-| ExecutorVersionResponse | BaseModel | id: str, executor_id: str, version: int, status: Literal['draft', 'published'... | app/routes/executor_definition_contracts.py |
-| ExecutorVersionSummary | BaseModel | id: str, executor_id: str, version: int, status: Literal['draft', 'published'... | app/routes/executor_definition_contracts.py |
-| ExecutorListItem | BaseModel | executor_id: str, kind: str, global_capacity: int, capabilities: list[str], v... | app/routes/executor_definition_contracts.py |
-| ExecutorListResponse | BaseModel | executors: list[ExecutorListItem] | app/routes/executor_definition_contracts.py |
-| ExecutorDetailResponse | BaseModel | executor_id: str, latest: ExecutorVersionResponse | None, published: Executor... | app/routes/executor_definition_contracts.py |
-| ExecutorVersionsResponse | BaseModel | versions: list[ExecutorVersionSummary] | app/routes/executor_definition_contracts.py |
-| ExecutorArchiveResponse | BaseModel | archived: int | app/routes/executor_definition_contracts.py |
 | FailedNodeRunItem | BaseModel | job_id: str, node_key: str, node_run_id: int, workflow_key: str, failure_cate... | app/routes/failed_node_run_contracts.py |
 | FailedNodeRunsResponse | BaseModel | runs: list[FailedNodeRunItem] | app/routes/failed_node_run_contracts.py |
 | InstanceOpenClawSkillSafetyRepo | BaseModel | path: str | app/routes/instance_openclaw_contracts.py |
@@ -359,8 +331,7 @@ server/app/
 | ArtifactResponse | BaseModel | name: str, content: str | app/routes/job_contracts.py |
 | WorkspaceRunsResponse | BaseModel | runs: list[dict[str, Any]] | app/routes/job_contracts.py |
 | WorkspaceDagResponse | BaseModel | workflow: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/job_contracts.py |
-| ExecutorRuntimeStatus | BaseModel | executor_id: str, kind: str, global_capacity: int, workspace_limit: int, runn... | app/routes/job_contracts.py |
-| ExecutorStatusSummary | BaseModel | executors: list[ExecutorRuntimeStatus] | app/routes/job_contracts.py |
+| CodePoolStatus | BaseModel | capacity: int, running: int, available: int | app/routes/job_contracts.py |
 | WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, workflow_key: str, workflow_label: str, job_sta... | app/routes/job_contracts.py |
 | DeleteWorkspaceResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
 | ExecutionControlSummaryResponse | BaseModel | mode: Literal['full', 'until_node'], target_node_key: str | None, paused: boo... | app/routes/job_execution_control_contracts.py |

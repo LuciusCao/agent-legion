@@ -7,7 +7,11 @@ capability 不再声明 `path`，所有节点代码（含 demo 两个节点）�
 `workflow_nodes/` 只剩这两个 git 评审的种子源文件。本文 §2 的双类治理表、
 解析优先级第 3 级「内置路径」、§6/§7 中基于 path 的表述均为历史记录；
 现行语义以 `config/architecture/architecture-invariants.yaml` 的
-EXEC-CODE-001/002/003 为准。
+EXEC-CODE-001/002/003 为准。**P-0.5（2026-08-17，schema v47）**：executor
+定义 / allocation / binding 概念整体退役（两表 drop），非 Agent 路由节点一律
+进隐含 code 池，节点 `config_schema:` 块成为 code 节点唯一的参数声明层
+（executor 兜底已删）；本文 §2 解析优先级与绑定链中经 executor 定义的表述
+均为历史记录，现行语义以 EXEC-CODE-POOL-001 / CONFIG-MANIFEST-001 为准。
 日期：2026-08-04
 关联：EXEC-CODE-001、CONFIG-MANIFEST-001、VAULT-SECRET-001
 

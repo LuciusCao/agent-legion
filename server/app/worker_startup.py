@@ -6,8 +6,8 @@ from functools import partial
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
 from server.app.agent_broker.code_dispatch import CodeDispatchService
 from server.app.events.agents import AgentStatusManager
+from server.app.executors.code import CodeExecutor
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.sweeper import SweeperThread
 from server.app.jobs import JobQueries
@@ -26,7 +26,6 @@ def start_worker_threads(
     *,
     job_db: JobQueries,
     executor_leases: ExecutorLeaseRepository,
-    executor_registry: ExecutorRegistry,
     agent_broker: AgentExecutionBroker,
     workspace_worker_control: WorkspaceWorkerControl,
     agent_manager: AgentStatusManager,
@@ -44,9 +43,17 @@ def start_worker_threads(
     worker_startup: dict[str, str] = {}
     if not WorkflowWorkerThread.is_enabled(settings):
         return None, None, worker_startup
+    # P-0.5: the single implicit code pool — one CodeExecutor, assembled
+    # directly; the executor registry/kinds machinery is retired (v47).
+    code_executor = CodeExecutor(
+        repo_root=settings.root_dir,
+        settings_config=settings.config,
+        job_db=job_db,
+        cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
+    )
     execution_runtime = ExecutionRuntime(
         executor_leases,
-        executor_registry,
+        code_executor,
         heartbeat_interval_seconds=settings.executor_runtime.heartbeat_interval_seconds,
         lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
         heartbeat_failure_threshold=settings.executor_runtime.heartbeat_failure_threshold,
@@ -73,7 +80,6 @@ def start_worker_threads(
     workflow_worker_thread = WorkflowWorkerThread(
         job_db=job_db,
         leases=executor_leases,
-        registry=executor_registry,
         runtime=execution_runtime,
         settings=settings,
         workspace_worker_control=workspace_worker_control,

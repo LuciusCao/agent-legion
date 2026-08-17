@@ -41,19 +41,14 @@ const workflow = {
 
 describe('buildDagNodes', () => {
   it('puts outline and executor information directly on graph nodes', () => {
-    const nodes = buildDagNodes(workflow, [
-      {
-        id: 'code-default',
-        kind: 'code',
-        capabilities: ['fetch', 'classify', 'finish'],
-        global_capacity: 4,
-      },
-    ])
+    // P-0.5：无 Agent 路由的节点一律标记为 code 池节点。
+    const nodes = buildDagNodes(workflow)
 
     expect(nodes[0]).toMatchObject({
       key: 'start',
       capability: 'fetch',
       executorKind: 'code',
+      executorId: 'code',
     })
     expect(nodes[1].topologyBadges).toContain('branch')
     expect(nodes[2]).toMatchObject({
@@ -62,46 +57,28 @@ describe('buildDagNodes', () => {
     })
   })
 
-  it('resolves agent, executor binding and unbound state per node', () => {
-    const nodes = buildDagNodes(
-      workflow,
-      [
+  it('resolves agent routing and code-pool fallback per node', () => {
+    const nodes = buildDagNodes(workflow, {
+      agents: [
         {
-          id: 'code-default',
-          kind: 'code',
-          capabilities: ['fetch'],
-          global_capacity: 4,
+          id: 'classifier-v1',
+          runtime: 'pi',
+          capability: 'classify',
+          skill: 'ns/classify',
+          tools: [],
+          requires_labels: {},
+          provider: 'deepseek',
+          model: 'm',
+          thinking: 'low',
+          skill_ref: null,
+          skill_commit: null,
         },
       ],
-      {
-        bindings: [
-          {
-            workflow_key: 'wf',
-            node_key: 'start',
-            executor_id: 'code-default',
-          },
-        ],
-        agents: [
-          {
-            id: 'classifier-v1',
-            runtime: 'pi',
-            capability: 'classify',
-            skill: 'ns/classify',
-            tools: [],
-            requires_labels: {},
-            provider: 'deepseek',
-            model: 'm',
-            thinking: 'low',
-            skill_ref: null,
-            skill_commit: null,
-          },
-        ],
-      }
-    )
+    })
 
     expect(nodes[0]).toMatchObject({
       key: 'start',
-      executorId: 'code-default',
+      executorId: 'code',
       agentId: null,
       executorUnbound: false,
     })
@@ -114,8 +91,8 @@ describe('buildDagNodes', () => {
     expect(nodes[2]).toMatchObject({
       key: 'done',
       agentId: null,
-      executorId: null,
-      executorUnbound: true,
+      executorId: 'code',
+      executorUnbound: false,
     })
   })
 })

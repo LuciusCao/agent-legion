@@ -40,10 +40,10 @@ def claim_executor_node(
 ) -> bool:
     """Buffer an executor claim for the pass-end batch lease; False on capacity loss."""
     workspace_id = workspace["id"]
-    global_capacity = worker.registry.global_capacity(executor_id)
-    if global_capacity is None:
-        return False
-    if not snapshot.has_capacity(executor_id, workspace_id):
+    # Single implicit code pool (P-0.5): the capacity comes from the instance
+    # settings code_capacity, never from a caller-chosen executor definition.
+    global_capacity = worker.settings.executor_runtime.code_capacity
+    if not snapshot.has_capacity(workspace_id, workflow_key, node.key):
         return False
 
     worker._pending_claims.append(
@@ -78,5 +78,5 @@ def claim_executor_node(
             node_code=node_code,
         )
     )
-    snapshot.record_claim(executor_id, workspace_id)
+    snapshot.record_claim(workspace_id, workflow_key, node.key)
     return True

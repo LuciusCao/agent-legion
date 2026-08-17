@@ -15,11 +15,11 @@ import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../types'
 import { useUiStore } from '../stores/uiStore'
 import { api, deleteWorkspace, fetchWorkflows } from '../api'
+import { expectConsoleWarning } from '../test-setup'
 import { useSettingStoreHydration } from '../hooks/useWorkspaceSettingsQuery'
 import type { WorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
-import { expectConsoleWarning } from '../test-setup'
 
-// 服务端快照（executorCatalog/agentRoutes）与工作流定义已迁入 react-query；
+// 服务端快照（agentRoutes）与工作流定义已迁入 react-query；
 // 本测试 mock 两个 query hook，draft 状态仍直接写 store。
 const mockQueryData = vi.hoisted(() => ({
   settingsSnapshot: { current: null as WorkspaceSettingsSnapshot | null },
@@ -36,8 +36,6 @@ vi.mock('../hooks/useWorkspaceSettingsQuery', () => ({
   })),
   useWorkspaceSettingsSnapshot: vi.fn(() => ({
     workflowDefinition: mockQueryData.workflowDefinition.current,
-    executorCatalog:
-      mockQueryData.settingsSnapshot.current?.executorCatalog ?? [],
     agentRoutes: mockQueryData.settingsSnapshot.current?.agentRoutes ?? [],
   })),
 }))
@@ -76,13 +74,10 @@ function setSnapshot(partial: Partial<WorkspaceSettingsSnapshot>) {
       workflowKey: '',
     },
     executorConfiguration: {
-      allocations: [],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
       agent_capacity: null,
     },
-    executorCatalog: [],
     agentRoutes: [],
     ...partial,
   }
@@ -112,13 +107,11 @@ const defaultState: SettingState = {
   isSaving: false,
   saveError: null,
   executorConfiguration: {
-    allocations: [],
-    bindings: [],
     node_limits: [],
     migration_warnings: [],
+    agent_capacity: null,
   },
   originalExecutorConfiguration: null,
-  pendingAllocationRemoval: null,
   setWorkspaceId: vi.fn(),
   setWorkspaceName: vi.fn((name: string) => {
     useSettingStore.setState({ workspaceName: name, isDirty: true })
@@ -132,11 +125,6 @@ const defaultState: SettingState = {
       isDirty: true,
     }))
   }),
-  setExecutorAllocation: vi.fn(),
-  requestExecutorRemoval: vi.fn(),
-  confirmExecutorRemoval: vi.fn(),
-  cancelExecutorRemoval: vi.fn(),
-  setNodeBinding: vi.fn(),
   setNodeLimit: vi.fn(),
   setAgentCapacity: vi.fn(),
   hydrateSettings: vi.fn(),
@@ -204,36 +192,7 @@ describe('SettingsPage', () => {
         },
       ],
     })
-    setSnapshot({
-      executorCatalog: [
-        {
-          id: 'code-default',
-          kind: 'code',
-          capabilities: ['fetch_items'],
-          global_capacity: 4,
-        },
-      ],
-    })
-    useSettingStore.setState({
-      executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 4,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'question_content',
-            node_key: 'fetch_items',
-            executor_id: 'code-default',
-          },
-        ],
-        node_limits: [],
-        migration_warnings: [],
-      },
-    })
+    setSnapshot({ agentRoutes: [] })
     renderPage()
     await act(async () => {})
 
@@ -242,7 +201,6 @@ describe('SettingsPage', () => {
       '基本信息',
       '接入与资源',
       '工作流',
-      '执行器',
       'Agent 与 Worker',
       'Agent 默认配置',
       '代码节点并发',
@@ -260,7 +218,6 @@ describe('SettingsPage', () => {
       '基础信息',
       '接入与资源',
       '工作流',
-      '执行器',
       'Agent 与 Worker',
       'Agent 默认配置',
       '危险操作',
@@ -412,7 +369,8 @@ describe('SettingsPage', () => {
     expect(checkbox.checked).toBe(false)
   })
 
-  it('renders executor binding section between allocation and local limit sections', async () => {
+  it('renders the code node concurrency section for code-pool nodes', async () => {
+    // P-0.5：无 Agent 路由的节点一律进 code 池，节点并发区直接列出。
     setWorkflowDefinition({
       key: 'question_content',
       label: '题目内容生成',
@@ -429,66 +387,27 @@ describe('SettingsPage', () => {
         },
       ],
     })
-    setSnapshot({
-      executorCatalog: [
-        {
-          id: 'code-default',
-          kind: 'code',
-          capabilities: ['fetch_items'],
-          global_capacity: 4,
-        },
-      ],
-    })
-    useSettingStore.setState({
-      executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 4,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'question_content',
-            node_key: 'fetch_items',
-            executor_id: 'code-default',
-          },
-        ],
-        node_limits: [],
-        migration_warnings: [],
-      },
-    })
+    setSnapshot({ agentRoutes: [] })
     renderPage()
     await act(async () => {})
 
     const headings = screen.getAllByRole('heading')
     const labels = headings.map((h) => h.textContent)
-    expect(labels.indexOf('节点绑定')).toBeGreaterThan(
-      labels.indexOf('执行器分配')
-    )
+    expect(labels).toContain('代码节点并发')
+    expect(labels).not.toContain('执行器')
     expect(labels.indexOf('代码节点并发')).toBeGreaterThan(
-      labels.indexOf('节点绑定')
+      labels.indexOf('Agent 默认配置')
     )
   })
 
-  it('saves the complete executor aggregate in one PUT request', async () => {
+  it('saves node limits in one PUT request', async () => {
     const settings: WorkspaceSettings = {
       entityType: 'question',
       intakeModes: [],
       labelOverrides: {},
       workflowKey: 'sample_workflow',
     }
-    setSnapshot({
-      executorCatalog: [
-        {
-          id: 'code-default',
-          kind: 'code' as const,
-          capabilities: ['fetch_items'],
-          global_capacity: 4,
-        },
-      ],
-    })
+    setSnapshot({ agentRoutes: [] })
     setWorkflowDefinition({
       key: 'sample_workflow',
       label: '示例工作流',
@@ -514,19 +433,15 @@ describe('SettingsPage', () => {
       settings,
       originalSettings: settings,
       executorConfiguration: {
-        allocations: [],
-        bindings: [],
         node_limits: [],
         migration_warnings: [],
+        agent_capacity: null,
       },
       originalExecutorConfiguration: {
-        allocations: [],
-        bindings: [],
         node_limits: [],
         migration_warnings: [],
+        agent_capacity: null,
       },
-      setExecutorAllocation: originalActions.setExecutorAllocation,
-      setNodeBinding: originalActions.setNodeBinding,
       setNodeLimit: originalActions.setNodeLimit,
       saveAll: originalActions.saveAll,
     })
@@ -540,20 +455,6 @@ describe('SettingsPage', () => {
       workspace: { name: 'Flow Workspace', description: '' },
       settings,
       executor_configuration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 1,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'fetch_items',
-            executor_id: 'code-default',
-          },
-        ],
         node_limits: [
           {
             workflow_key: 'sample_workflow',
@@ -568,46 +469,9 @@ describe('SettingsPage', () => {
     renderPage()
     await act(async () => {})
 
-    await waitFor(() => {
-      expect(
-        screen.getByRole('checkbox', { name: '分配 code-default' })
-      ).toBeInTheDocument()
-    })
-
-    const switchEl = screen.getByRole('checkbox', {
-      name: '分配 code-default',
-    })
-    await act(async () => {
-      fireEvent.click(switchEl)
-    })
-
-    await waitFor(() => {
-      expect(
-        useSettingStore.getState().executorConfiguration.allocations
-      ).toHaveLength(1)
-    })
-
-    const select = screen.getByRole('combobox', {
-      name: '绑定 fetch_items',
-    })
-    await act(async () => {
-      fireEvent.mouseDown(select)
-    })
-    await act(async () => {
-      fireEvent.click(
-        screen.getByRole('option', { name: 'code-default (code)' })
-      )
-    })
-
-    await waitFor(() => {
-      expect(
-        useSettingStore.getState().executorConfiguration.bindings
-      ).toHaveLength(1)
-    })
-
-    const limitInput = screen.getByLabelText(
+    const limitInput = (await screen.findByLabelText(
       '获取题目 并发上限'
-    ) as HTMLInputElement
+    )) as HTMLInputElement
     await act(async () => {
       fireEvent.change(limitInput, { target: { value: '2' } })
     })
@@ -640,16 +504,6 @@ describe('SettingsPage', () => {
     expect(body).toMatchObject({
       name: 'Flow Workspace',
       description: '',
-      executor_allocations: [
-        { executor_id: 'code-default', concurrency_limit: 1 },
-      ],
-      node_bindings: [
-        {
-          workflow_key: 'sample_workflow',
-          node_key: 'fetch_items',
-          executor_id: 'code-default',
-        },
-      ],
       node_limits: [
         {
           workflow_key: 'sample_workflow',
@@ -658,132 +512,11 @@ describe('SettingsPage', () => {
         },
       ],
     })
+    expect('executor_allocations' in body).toBe(false)
+    expect('node_bindings' in body).toBe(false)
     // Generous timeout: this full-page interaction chain exceeds vitest's
     // 5s default on loaded parallel-gate machines (local gate flake 2026-08-01).
   }, 30000)
-
-  it('confirms executor allocation removal from SettingsPage', async () => {
-    setSnapshot({
-      executorCatalog: [
-        {
-          id: 'code-default',
-          kind: 'code' as const,
-          capabilities: ['fetch_items'],
-          global_capacity: 4,
-        },
-      ],
-    })
-    setWorkflowDefinition({
-      key: 'sample_workflow',
-      label: '示例工作流',
-      intake: { modes: [] },
-      edges: [],
-      nodes: [
-        {
-          key: 'fetch_items',
-          label: '获取题目',
-          capability: 'fetch_items',
-          after: [],
-          inputs: [],
-          outputs: ['questions.json'],
-        },
-      ],
-    })
-    useSettingStore.setState({
-      ...defaultState,
-      executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 2,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'fetch_items',
-            executor_id: 'code-default',
-          },
-        ],
-        node_limits: [],
-        migration_warnings: [],
-      },
-      originalExecutorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 2,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'fetch_items',
-            executor_id: 'code-default',
-          },
-        ],
-        node_limits: [],
-        migration_warnings: [],
-      },
-      requestExecutorRemoval: originalActions.requestExecutorRemoval,
-      confirmExecutorRemoval: originalActions.confirmExecutorRemoval,
-      cancelExecutorRemoval: originalActions.cancelExecutorRemoval,
-    })
-
-    renderPage()
-    await act(async () => {})
-
-    const switchEl = screen.getByRole('checkbox', {
-      name: '分配 code-default',
-    })
-    await act(async () => {
-      fireEvent.click(switchEl)
-    })
-
-    await waitFor(() => {
-      expect(
-        screen.getByText('移除执行器会同时清除以下节点绑定')
-      ).toBeInTheDocument()
-      expect(
-        screen.getByText('sample_workflow / fetch_items')
-      ).toBeInTheDocument()
-    })
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('取消'))
-    })
-    await waitFor(() => {
-      expect(
-        useSettingStore.getState().executorConfiguration.allocations
-      ).toHaveLength(1)
-      expect(
-        useSettingStore.getState().executorConfiguration.bindings
-      ).toHaveLength(1)
-      expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
-    })
-
-    await act(async () => {
-      fireEvent.click(switchEl)
-    })
-    await waitFor(() => {
-      expect(screen.getByText('确认')).toBeInTheDocument()
-    })
-
-    await act(async () => {
-      fireEvent.click(screen.getByText('确认'))
-    })
-    await waitFor(() => {
-      expect(
-        useSettingStore.getState().executorConfiguration.allocations
-      ).toEqual([])
-      expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
-        []
-      )
-      expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
-    })
-  })
 
   it('shows delete workspace button for non-default workspace', async () => {
     renderPage()

@@ -38,11 +38,6 @@ def catalog(settings):
 
 @pytest.fixture
 def workspace_service(job_db, settings, agent_manager):
-    # The bare settings fixture does not hydrate executor definitions
-    # (create_app does); pull the conftest-seeded catalog in explicitly.
-    from server.app.services.executor_definition_service import hydrate_executor_definitions
-
-    hydrate_executor_definitions(settings)
     return WorkspaceConfigurationService(
         job_db, settings, agent_manager, WorkflowCatalogService(settings)
     )
@@ -148,7 +143,7 @@ def test_first_draft_publish_creates_revision_for_registered_key(
     # workspace (registered keys get no automatic demo seed).
     seed_workspace_agent_definitions(workspace["id"])
 
-    ok, errors = publish_workflow_draft(job_db, workspace["id"], _DRAFT_YAML, {})
+    ok, errors = publish_workflow_draft(job_db, workspace["id"], _DRAFT_YAML)
 
     assert (ok, errors) == (True, [])
     active = job_db.get_active_workflow_revision(workspace["id"], _REGISTERED_KEY)
@@ -166,20 +161,18 @@ def test_replace_configuration_without_executor_payload_works_definitionless(
         workspace["id"],
         workspace_patch={"name": "Renamed"},
         settings_patch={},
-        executor_allocations=[],
-        node_bindings=[],
         node_limits=[],
     )
 
     assert result["workspace"]["name"] == "Renamed"
 
 
-def test_replace_configuration_saves_executor_payload_definitionless(
+def test_replace_configuration_saves_node_limits_definitionless(
     catalog, workspace_service, job_db
 ) -> None:
-    """Registered workflow without a catalog definition: executor payloads are
-    saved (allocations validated, bindings unchecked) so the first draft
-    publish — which requires bindings — is no longer a chicken-and-egg."""
+    """Registered workflow without a catalog definition: node limits are
+    saved with the node existence checks deferred to publish-time validation
+    (P-0.5: limits are the only per-node execution knob left)."""
     catalog.register(_REGISTERED_KEY, "Acme Quiz")
     workspace = workspace_service.create({"name": "Acme", "default_workflow_key": _REGISTERED_KEY})
 
@@ -187,68 +180,63 @@ def test_replace_configuration_saves_executor_payload_definitionless(
         workspace["id"],
         workspace_patch={},
         settings_patch={},
-        executor_allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
-        node_bindings=[
+        node_limits=[
             {
                 "workflow_key": _REGISTERED_KEY,
                 "node_key": "parse",
-                "executor_id": "code-default",
+                "concurrency_limit": 1,
             }
         ],
-        node_limits=[],
     )
 
     configuration = result["executor_configuration"]
     assert [
-        (row["executor_id"], row["concurrency_limit"]) for row in configuration["allocations"]
-    ] == [("code-default", 1)]
-    assert [
-        (row["workflow_key"], row["node_key"], row["executor_id"])
-        for row in configuration["bindings"]
-    ] == [(_REGISTERED_KEY, "parse", "code-default")]
+        (row["workflow_key"], row["node_key"], row["concurrency_limit"])
+        for row in configuration["node_limits"]
+    ] == [(_REGISTERED_KEY, "parse", 1)]
 
 
-def test_replace_configuration_definitionless_rejects_unknown_executor(
+def test_replace_configuration_rejects_node_limit_above_code_capacity(
     catalog, workspace_service
 ) -> None:
     catalog.register(_REGISTERED_KEY, "Acme Quiz")
     workspace = workspace_service.create({"name": "Acme", "default_workflow_key": _REGISTERED_KEY})
 
-    with pytest.raises(InvalidOperationError, match="Unknown Executor"):
+    with pytest.raises(InvalidOperationError, match="code pool capacity"):
         workspace_service.replace_configuration(
             workspace["id"],
             workspace_patch={},
             settings_patch={},
-            executor_allocations=[{"executor_id": "no-such-executor", "concurrency_limit": 1}],
-            node_bindings=[],
-            node_limits=[],
+            node_limits=[
+                {
+                    "workflow_key": _REGISTERED_KEY,
+                    "node_key": "parse",
+                    "concurrency_limit": 999,
+                }
+            ],
         )
 
 
-def test_first_publish_uses_bindings_saved_before_definition(
+def test_first_publish_uses_node_code_saved_before_definition(
     catalog, workspace_service, job_db, settings
 ) -> None:
-    """Full first-publish chain for a registered workflow over code-executor
-    nodes: register → create workspace → save binding → publish draft v1."""
+    """Full first-publish chain for a registered workflow over code-pool
+    nodes (P-0.5): register → create workspace → publish node code → publish
+    draft v1."""
+    from server.app.services.node_codes import NodeCodeService
+
     catalog.register(_REGISTERED_KEY, "Acme Quiz")
     workspace = workspace_service.create({"name": "Acme", "default_workflow_key": _REGISTERED_KEY})
-    workspace_service.replace_configuration(
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(
         workspace["id"],
-        workspace_patch={},
-        settings_patch={},
-        executor_allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
-        node_bindings=[
-            {
-                "workflow_key": _REGISTERED_KEY,
-                "node_key": "parse",
-                "executor_id": "code-default",
-            }
-        ],
-        node_limits=[],
+        _REGISTERED_KEY,
+        "parse",
+        "def run(job, job_dir, runtime):\n    pass\n",
+        "test seed",
     )
+    codes.publish(workspace["id"], _REGISTERED_KEY, "parse")
 
-    # publish_content is a code-default capability with no published Agent in
-    # the test seed, so the publish validator requires the saved binding.
     draft_yaml = """
 key: acme_quiz_flow
 label: Acme Quiz Flow
@@ -256,9 +244,7 @@ nodes:
   parse:
     capability: publish_content
 """
-    ok, errors = publish_workflow_draft(
-        job_db, workspace["id"], draft_yaml, settings.executor_definitions
-    )
+    ok, errors = publish_workflow_draft(job_db, workspace["id"], draft_yaml)
 
     assert (ok, errors) == (True, [])
     active = job_db.get_active_workflow_revision(workspace["id"], _REGISTERED_KEY)

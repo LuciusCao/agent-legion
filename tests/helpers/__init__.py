@@ -38,9 +38,11 @@ def make_workflow_worker(
 
     definition = load_builtin_definition(workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    # Executor definitions are DB-backed: hydrate the seeded catalog (the app
-    # does this in create_app; this helper builds the registry directly).
-    app_main.hydrate_executor_definitions(settings)
+    # Executor definitions are retired (P-0.5); only the demo node codes
+    # still seed (the app does this in create_app; this helper mirrors it).
+    from server.app.services.demo_node_seed import seed_demo_node_codes
+
+    seed_demo_node_codes(settings)
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {
@@ -53,11 +55,18 @@ def make_workflow_worker(
         }
     )
 
-    registry = app_main.build_executor_registry(settings, queries)
+    # P-0.5: 单一隐含 code 池，直接装配。
+    from server.app.executors.code import CodeExecutor
+
+    executor = CodeExecutor(
+        repo_root=settings.root_dir,
+        settings_config=settings.config,
+        job_db=queries,
+    )
     leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
     )
@@ -65,7 +74,6 @@ def make_workflow_worker(
     worker = WorkflowWorkerThread(
         job_db=queries,
         leases=leases,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )
@@ -101,9 +109,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
-    # The fake root has no workflow_nodes/: skip the executor definition
-    # hydration (SPA tests never dispatch jobs).
-    monkeypatch.setattr(app_main, "hydrate_executor_definitions", lambda settings: None)
+    # The fake root has no workflow_nodes/: skip the demo node-code seeding
+    # (SPA tests never dispatch jobs).
+    monkeypatch.setattr(app_main, "seed_demo_node_codes", lambda settings: None)
     return root_dir, data_dir
 
 

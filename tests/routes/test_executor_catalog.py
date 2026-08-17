@@ -7,36 +7,14 @@ def _create_workspace(client) -> str:
     return str(response.json()["workspace"]["id"])
 
 
-def test_executor_catalog_contains_only_host_executors(client_factory):
+def test_executor_catalog_exposes_only_agents(client_factory):
+    """P-0.5（schema v47）：executors 半区随概念退役，catalog 只剩 Agent。"""
     with client_factory() as client:
         workspace_id = _create_workspace(client)
         response = client.get("/api/executors", params={"workspace_id": workspace_id})
 
     assert response.status_code == 200
-    executors = response.json()["executors"]
-    assert [executor["id"] for executor in executors] == ["code-default"]
-
-
-def test_executor_catalog_reflects_published_edits(client_factory):
-    """Editing the DB published definition via the management API shows in the catalog."""
-    # fresh=True: publish hot-reloads the app's in-memory executor registry;
-    # on the worker-session shared app that mutation would leak into later
-    # tests (the per-test reset only restores DB state, not app.state).
-    edited = {
-        "kind": "code",
-        "global_capacity": 4,
-        "capabilities": {"publish_content": {"path": "workflow_nodes/example_publish.py"}},
-    }
-    with client_factory(fresh=True) as client:
-        workspace_id = _create_workspace(client)
-        assert (
-            client.put("/api/executor-definitions/code-default/draft", json=edited).status_code
-            == 200
-        )
-        assert client.post("/api/executor-definitions/code-default/publish").status_code == 200
-        response = client.get("/api/executors", params={"workspace_id": workspace_id})
-
-    assert response.status_code == 200
-    executors = {executor["id"]: executor for executor in response.json()["executors"]}
-    assert executors["code-default"]["global_capacity"] == 4
-    assert executors["code-default"]["capabilities"] == ["publish_content"]
+    data = response.json()
+    assert "executors" not in data
+    agent_ids = {agent["id"] for agent in data["agents"]}
+    assert "example-review-questions-v1" in agent_ids

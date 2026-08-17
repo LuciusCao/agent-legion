@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import uuid
 
-from server.app.executors.models import LeaseClaimRequest
+from server.app.executors.models import CODE_EXECUTOR_ID, LeaseClaimRequest
 from server.app.jobs import JobQueries
 
 
 def _setup_workspace(
     queries: JobQueries,
     name: str,
-    executor_id: str,
-    workspace_limit: int,
+    executor_id: str = CODE_EXECUTOR_ID,
+    workspace_limit: int | None = None,
     node_key: str = "review_keywords",
     local_limit: int | None = 1,
     workflow_key: str = "demo_workflow",
     node_keys: list[str] | None = None,
 ) -> tuple[str, str]:
+    # executor_id/workspace_limit are legacy inert parameters (P-0.5): the
+    # single implicit code pool needs no allocation/binding rows; only the
+    # per-node limit insert survives.
+    del executor_id, workspace_limit
     workspace = queries.create_workspace(name=name, default_workflow_key=workflow_key)
     workspace_id = workspace["id"]
     job_id = _create_job_in_workspace(
@@ -25,15 +29,8 @@ def _setup_workspace(
         workflow_key=workflow_key,
         node_keys=node_keys,
     )
-    _bind_executor_to_node(
-        queries,
-        workspace_id,
-        executor_id,
-        workspace_limit,
-        node_key=node_key,
-        local_limit=local_limit,
-        workflow_key=workflow_key,
-    )
+    if local_limit is not None:
+        _set_node_limit(queries, workspace_id, workflow_key, node_key, local_limit)
     return workspace_id, job_id
 
 
@@ -56,51 +53,30 @@ def _create_job_in_workspace(
     return str(job["id"])
 
 
-def _bind_executor_to_node(
+def _set_node_limit(
     queries: JobQueries,
     workspace_id: str,
-    executor_id: str,
-    workspace_limit: int,
-    node_key: str = "review_keywords",
-    local_limit: int | None = 1,
-    workflow_key: str = "demo_workflow",
+    workflow_key: str,
+    node_key: str,
+    concurrency_limit: int,
 ) -> None:
     with queries.connect() as conn:
         conn.execute(
             """
-            insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (%s, %s, %s)
-            on conflict(workspace_id, executor_id) do update set
-              concurrency_limit=excluded.concurrency_limit
-            """,
-            (workspace_id, executor_id, workspace_limit),
-        )
-        conn.execute(
-            """
-            insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
+            insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
             values (%s, %s, %s, %s)
             on conflict(workspace_id, workflow_key, node_key) do update set
-              executor_id=excluded.executor_id
+              concurrency_limit=excluded.concurrency_limit
             """,
-            (workspace_id, workflow_key, node_key, executor_id),
+            (workspace_id, workflow_key, node_key, concurrency_limit),
         )
-        if local_limit is not None:
-            conn.execute(
-                """
-                insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
-                values (%s, %s, %s, %s)
-                on conflict(workspace_id, workflow_key, node_key) do update set
-                  concurrency_limit=excluded.concurrency_limit
-                """,
-                (workspace_id, workflow_key, node_key, local_limit),
-            )
 
 
 def _claim_request(
     workspace_id: str,
     job_id: str,
     node_key: str = "review_keywords",
-    executor_id: str = "code-default",
+    executor_id: str = CODE_EXECUTOR_ID,
     global_capacity: int = 2,
     local_node_limit: int | None = 1,
     ttl: int = 60,

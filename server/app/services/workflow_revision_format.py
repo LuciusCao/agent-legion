@@ -121,6 +121,8 @@ def definition_to_yaml(definition: WorkflowDefinition) -> str:
             raw_node["execution"] = execution
         if node.config:
             raw_node["config"] = node.config
+        if node.config_schema:
+            raw_node["config_schema"] = node.config_schema
         payload["nodes"][key] = raw_node
     for edge in definition.edges:
         raw_edge: dict[str, Any] = {"from": edge.source, "to": edge.target}

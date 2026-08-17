@@ -82,7 +82,6 @@ class JobIntakeService:
                 definition,
                 published_agent_definitions(self.settings.database_url, workspace_id),
                 workspace,
-                self.settings.executor_definitions,
             )
         except ValueError as exc:
             raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc

@@ -56,9 +56,6 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
         {"version": 1},
     ),
     ("DELETE", "/api/agent-definitions/{agent_id}?workspace_id={workspace_id}", None),
-    ("POST", "/api/executor-definitions/{executor_id}/publish", None),
-    ("POST", "/api/executor-definitions/{executor_id}/rollback", {"version": 1}),
-    ("DELETE", "/api/executor-definitions/{executor_id}", None),
     # Job lifecycle and execution triggers (P0-1/P1-1).
     ("DELETE", "/api/jobs/{job_id}", None),
     ("DELETE", "/api/workspaces/{workspace_id}/jobs/batch", None),
@@ -149,9 +146,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/agent-definitions"): "creates a draft",
     ("PUT", "/api/agent-definitions/{agent_id}/draft"): "draft write",
     ("POST", "/api/agent-definitions/{agent_id}/copy"): "creates a draft",
-    ("POST", "/api/executor-definitions"): "creates a draft",
-    ("PUT", "/api/executor-definitions/{executor_id}/draft"): "draft write",
-    ("POST", "/api/executor-definitions/{executor_id}/copy"): "creates a draft",
     ("POST", "/api/skills/validate"): "validate only",
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun/preview"): "preview only",
     # Scoped-only tool surface (require_studio_agent_scope): these endpoints
@@ -262,9 +256,6 @@ def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) ->
         json={},
     )
     assert agent_draft.status_code not in (401, 403) and agent_draft.status_code < 500
-
-    executor_draft = scoped.put("/api/executor-definitions/exec-x/draft", json={})
-    assert executor_draft.status_code not in (401, 403) and executor_draft.status_code < 500
 
 
 def test_unknown_scope_type_is_also_rejected_on_effecting_endpoints(client, job_db) -> None:

@@ -121,19 +121,7 @@ const baseStats: WorkspaceStats = {
   workflow_key: 'question_content',
   workflow_label: 'Question Content',
   job_stats: { pending: 1, running: 2, completed: 3, failed: 1 },
-  executor_status: {
-    executors: [
-      {
-        executor_id: 'code-default',
-        kind: 'code',
-        global_capacity: 16,
-        workspace_limit: 4,
-        running: 1,
-        available: 3,
-        binding_count: 1,
-      },
-    ],
-  },
+  code_pool: { capacity: 16, running: 1, available: 15 },
   latest_run: null,
 }
 
@@ -280,13 +268,11 @@ describe('WorkspaceMainPage', () => {
       isSaving: false,
       saveError: null,
       executorConfiguration: {
-        allocations: [],
-        bindings: [],
         node_limits: [],
         migration_warnings: [],
+        agent_capacity: null,
       },
       originalExecutorConfiguration: null,
-      pendingAllocationRemoval: null,
     })
   })
 

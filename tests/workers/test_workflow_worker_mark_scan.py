@@ -17,12 +17,8 @@ from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
 from server.app.workflow_worker.mark_scan import MarkStore
 from tests.helpers.executor_worker import (
-    allocate,
-    bind,
-    local_def,
     local_node,
     make_definition,
-    make_registry,
     make_worker,
 )
 from tests.postgres_support import TEST_DATABASE_URL
@@ -220,15 +216,10 @@ def _setup_worker(tmp_path: Path, job_count: int, capacity: int):
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     block_event = threading.Event()
-    registry = make_registry(
-        {"code-default": BlockingExecutor("code-default", block_event)},
-        {"code-default": local_def(capacity, {"fetch"})},
-    )
+    executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])
     _make_jobs(job_db, ws["id"], job_count)
-    bind(job_db, ws["id"], "test", "fetch", "code-default")
-    allocate(job_db, ws["id"], "code-default", capacity)
-    worker = make_worker(tmp_path, db_path, registry, [definition])
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=capacity)
     return worker, ws, block_event
 
 
@@ -241,7 +232,7 @@ def test_worker_second_pass_scans_delta_only(
     delta_calls = _spy(monkeypatch, worker.job_db, "list_changed_job_marks")
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("code-default")["global"] == 2
+    assert worker.leases.active_counts("code")["global"] == 2
     # Both jobs are running: no new claims, but the scan still happens via delta.
     assert worker._poll() is False
     assert full_calls["count"] == 1
@@ -258,7 +249,7 @@ def test_worker_delta_picks_up_new_job(tmp_path: Path) -> None:
     assert worker._poll() is True
     _make_jobs(worker.job_db, ws["id"], 1, prefix="N")
     assert worker._poll() is True
-    assert worker.leases.active_counts("code-default")["global"] == 2
+    assert worker.leases.active_counts("code")["global"] == 2
 
     block_event.set()
     worker.stop()

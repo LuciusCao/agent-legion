@@ -6,7 +6,7 @@ import pytest
 
 from server.app.executors.models import ExecutionContext
 from server.app.skills.manager import SkillManager
-from tests.executors.adapters.helpers import _make_skill_manager
+from tests.helpers.skill_manager import _make_skill_manager
 
 
 @pytest.fixture

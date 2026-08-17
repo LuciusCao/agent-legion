@@ -27,8 +27,9 @@ def test_build_openapi_schema_is_deterministic_and_portable(tmp_path):
     assert "WorkspaceExecutorConfigurationResponse" in schemas
     workspace_config = schemas["WorkspaceConfigurationRequest"]
     workspace_config_props = workspace_config.get("properties", {})
-    assert "executor_allocations" in workspace_config_props
-    assert "node_bindings" in workspace_config_props
+    # P-0.5: allocations/bindings retired with the executor concept (v47).
+    assert "executor_allocations" not in workspace_config_props
+    assert "node_bindings" not in workspace_config_props
     assert "node_limits" in workspace_config_props
     assert "agents" not in workspace_config_props
     assert str(tmp_path) not in json.dumps(first, sort_keys=True)

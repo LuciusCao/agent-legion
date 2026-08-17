@@ -113,7 +113,7 @@ describe('DashboardPage', () => {
     mockFetchWorkspaceStats.mockResolvedValue({
       workflow_label: '题目理解',
       job_stats: { running: 1, completed: 2, failed: 0 },
-      executor_status: { executors: [] },
+      code_pool: { capacity: 16, running: 0, available: 16 },
     } as unknown as WorkspaceStats)
 
     render(

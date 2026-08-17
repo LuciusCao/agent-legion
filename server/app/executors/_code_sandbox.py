@@ -190,7 +190,10 @@ def execute_custom_sandboxed(
     command = [velites, "sandbox", "wrap", "--cwd", str(context.job_dir)]
     for root in _read_roots(executor):
         command += ["--allow-read", root]
-    if executor._capabilities[context.capability].sandbox_network:
+    # Network opt-in travels the node config chain (P-0.5): the resolved
+    # node config wins; anything else denies (the sandbox default).
+    sandbox_network = context.node_config.get("sandbox_network")
+    if sandbox_network is True:
         command.append("--allow-network")
     command += [
         "--",

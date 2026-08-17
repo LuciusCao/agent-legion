@@ -202,23 +202,9 @@ def test_node_code_template_endpoint(client) -> None:
 def test_get_code_pathless_capability_returns_none_origin(client_factory, job_db) -> None:
     from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 
-    # fresh=True: creating+publishing an executor definition hot-reloads the
-    # app's in-memory executor registry; on the worker-session shared app that
-    # mutation would leak into later tests (the per-test reset only restores
-    # DB state, not app.state).
+    # P-0.5: a capability needs no executor definition at all — a node
+    # without any published code simply reports origin "none".
     with client_factory(fresh=True) as client:
-        created = client.post(
-            "/api/executor-definitions",
-            json={
-                "executor_id": "code-custom",
-                "kind": "code",
-                "global_capacity": 1,
-                "capabilities": {"custom_only": {}},
-            },
-        )
-        assert created.status_code == 200
-        assert client.post("/api/executor-definitions/code-custom/publish").status_code == 200
-
         job_db.create_workspace("default", default_workflow_key="custom_wf")
         definition = workflow_definition_from_yaml_string(
             "key: custom_wf\nlabel: Custom\nnodes:\n  do_custom:\n    capability: custom_only\n"

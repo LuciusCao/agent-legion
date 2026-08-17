@@ -236,8 +236,14 @@ def test_workspace_settings_nodes_round_trip(tmp_path):
         assert settings["nodeConfig"] == {}
         # write_script comes from the Agent catalog; intake_knowledge_points
         # is an executor capability whose schema is declared in the built-in
-        # executor definitions (D15).
-        assert set(settings["nodeConfigSchemas"]) == {"write_script", "intake_knowledge_points"}
+        # executor definitions (D15). publish_content declares no parameters,
+        # but as a code-routed node it still carries the platform-reserved
+        # execution keys (timeout_seconds/sandbox_network, P-0.5 step 1).
+        assert set(settings["nodeConfigSchemas"]) == {
+            "write_script",
+            "intake_knowledge_points",
+            "publish_content",
+        }
 
         saved = c.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",

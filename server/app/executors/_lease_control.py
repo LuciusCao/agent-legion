@@ -144,15 +144,9 @@ def _pause_job_on_target_completion(
 
 
 def active_lease_counts(conn: DatabaseConnection, executor_id: str) -> dict[str, int]:
+    """Active lease counts for the pool: ``global`` plus one key per workspace."""
     now_str = database_timestamp(datetime.now(UTC))
     counts: dict[str, int] = {"global": 0}
-
-    allocated = conn.execute(
-        "select workspace_id from workspace_executor_allocations where executor_id=%s",
-        (executor_id,),
-    ).fetchall()
-    for row in allocated:
-        counts[row["workspace_id"]] = 0
 
     global_row = conn.execute(
         """

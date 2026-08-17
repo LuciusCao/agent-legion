@@ -29,7 +29,6 @@ from .agents import create_agents_router
 from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .connections import create_connections_router
-from .executor_definitions import create_executor_definitions_router
 from .instance_settings import create_instance_settings_router
 from .job_route_group import include_job_routes
 from .metrics import create_metrics_router
@@ -122,7 +121,6 @@ def create_router(
     secured(create_workflow_revisions_router(job_db, settings))
     secured(create_workflow_node_codes_router(job_db, settings))
     secured(create_agent_definitions_router(job_db, settings))
-    secured(create_executor_definitions_router(job_db, settings))
     secured(create_skills_router(settings))
     secured(create_workspace_configuration_router(workspace_configuration, settings))
     executors_router = create_workspace_executors_router(

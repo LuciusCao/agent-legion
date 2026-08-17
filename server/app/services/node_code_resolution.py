@@ -1,7 +1,6 @@
 """Dispatch-time node code resolution (EXEC-CODE-002, split from
-``node_codes`` for the size budget): intake freeze pins, the frozen →
-workspace-published → global-seed dispatch chain, and the runnable-capability
-guard.
+``node_codes`` for the size budget): intake freeze pins and the frozen →
+workspace-published → global-seed dispatch chain.
 """
 
 from __future__ import annotations
@@ -125,15 +124,3 @@ def resolve_dispatch_node_code(
     if published is None:
         published = service.get_global_published(workflow_key, node_key)
     return str(published["code"]) if published is not None else None
-
-
-def require_runnable_capability(
-    capabilities: dict[str, Any], capability: str, node_code: str | None
-) -> None:
-    """A capability with no published node code (either scope) has nothing to
-    run: fail fast with a config error."""
-    if capability in capabilities and node_code is None:
-        raise ValueError(
-            f"capability {capability!r} has no published node code "
-            "(workspace version or global factory seed, EXEC-CODE-002)"
-        )

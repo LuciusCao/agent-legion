@@ -16,7 +16,7 @@ import uuid
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.executors._pi_skill import resolve_skill_dir
+from server.app.skills.runtime import resolve_skill_dir
 
 if TYPE_CHECKING:
     from server.app.skills.manager import SkillManager

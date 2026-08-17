@@ -87,18 +87,13 @@ class WorkspaceDagResponse(BaseModel):
     nodes: list[dict[str, Any]]
 
 
-class ExecutorRuntimeStatus(BaseModel):
-    executor_id: str
-    kind: str
-    global_capacity: int
-    workspace_limit: int
+class CodePoolStatus(BaseModel):
+    """The single implicit code pool (P-0.5): instance-wide capacity, this
+    workspace's running count, and the globally available slots."""
+
+    capacity: int
     running: int
     available: int
-    binding_count: int
-
-
-class ExecutorStatusSummary(BaseModel):
-    executors: list[ExecutorRuntimeStatus]
 
 
 class WorkspaceStatsResponse(BaseModel):
@@ -107,7 +102,7 @@ class WorkspaceStatsResponse(BaseModel):
     workflow_key: str
     workflow_label: str
     job_stats: dict[str, int]
-    executor_status: ExecutorStatusSummary
+    code_pool: CodePoolStatus
     latest_run: dict[str, Any] | None
 
 

@@ -16,7 +16,6 @@ from server.app.executors.models import (
     ExecutionContext,
     ExecutionResult,
 )
-from server.app.workflow_worker.agent_status import agent_status_scope
 
 if TYPE_CHECKING:
     from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -46,19 +45,18 @@ def submit_claim(
 def run_claim(
     worker: WorkflowWorkerThread, claim: ClaimedExecution, context: ExecutionContext
 ) -> ExecutionResult | None:
-    with agent_status_scope(worker.agent_manager, worker.registry, claim, context):
-        try:
-            return worker.runtime.run(claim, context)
-        except Exception as exc:
-            logger.exception("workflow execution %s failed", claim.execution_id)
-            result = ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message=str(exc),
-                log_path=str(context.log_path),
-            )
-            worker.leases.finish(claim.lease_id, result)
-            return result
+    try:
+        return worker.runtime.run(claim, context)
+    except Exception as exc:
+        logger.exception("workflow execution %s failed", claim.execution_id)
+        result = ExecutionResult(
+            status="failed",
+            exit_code=1,
+            error_message=str(exc),
+            log_path=str(context.log_path),
+        )
+        worker.leases.finish(claim.lease_id, result)
+        return result
 
 
 def reap_futures(worker: WorkflowWorkerThread) -> None:

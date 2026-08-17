@@ -66,7 +66,7 @@ exemptions:
     package after rollout.
   owner: config
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 195
+  ceiling: 190
 - check: architecture.file_budget
   path: server/app/routes/__init__.py
   reason: Composition adds the Agent Worker control-plane router, the artifact
@@ -120,21 +120,12 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-08-05-agent-config-governance.md
   ceiling: 135
 - check: architecture.file_budget
-  path: server/app/db/schema.py
-  reason: Schema v45 (studio_chat_context) adds one migration import and one
-    migrate call to the version chain; the module is the single wiring point
-    for the idempotent DDL replay and grows by two lines per schema version.
-  owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
-  ceiling: 80
-- check: architecture.file_budget
   path: server/app/db/migrations/__init__.py
-  reason: Schema v45 (studio_chat_context) adds one import and one __all__
-    entry to the migration export list; the module is the flat export point
-    for the idempotent migration chain and grows by two lines per version.
+  reason: The module is the flat export point for the idempotent migration
+    chain and grows by two lines per schema version (v47 executor_retirement).
   owner: workspace-executor
   remove_when: docs/architecture/studio-phase3-implementation-plan.md
-  ceiling: 34
+  ceiling: 45
 - check: architecture.file_budget
   path: server/app/main.py
   reason: Phase 3 chunk 4 wires the StudioChatService (construction, app

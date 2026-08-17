@@ -198,7 +198,7 @@ class NodeCodeService:
     def seed_global(self, workflow_key: str, node_key: str, code: str, change_note: str) -> bool:
         """Publish *code* as the global (workspace-NULL) version when absent.
 
-        Seed-if-absent, mirroring ``seed_builtin_executor_definitions``: a
+        Seed-if-absent: a
         global entity the operator somehow already touched is never
         overwritten. Returns True when a version was published this call.
         """

@@ -120,7 +120,6 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    job_db = app.state.job_db
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
@@ -132,20 +131,6 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
             },
         ).json()
         job_id = created["jobs"][0]["id"]
-        job_db.replace_workspace_executor_configuration(
-            ws_id,
-            allocations=[
-                {"executor_id": "code-default", "concurrency_limit": 1},
-            ],
-            bindings=[
-                {
-                    "workflow_key": "education_video_problems_generation",
-                    "node_key": "publish_content",
-                    "executor_id": "code-default",
-                },
-            ],
-            node_limits=[],
-        )
         response = c.get(f"/api/jobs/{job_id}")
 
     assert response.status_code == 200
@@ -153,7 +138,8 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
     assert nodes["review_script"]["executor_id"] is None
     assert nodes["review_script"]["executor_kind"] is None
     assert nodes["review_script"]["agent_id"] == "example-review-script-v1"
-    assert nodes["publish_content"]["executor_id"] == "code-default"
+    # P-0.5：非 Agent 路由节点投影为常量 code 池。
+    assert nodes["publish_content"]["executor_id"] == "code"
     assert nodes["publish_content"]["executor_kind"] == "code"
 
 
