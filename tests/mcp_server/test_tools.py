@@ -130,10 +130,16 @@ def test_save_agent_definition_draft_default_tools(recorded) -> None:
     _run_tool(
         server,
         "save_agent_definition_draft",
-        {"agent_id": "a-1", "capability": "cap", "runtime": "pi", "skill": "s/k"},
+        {
+            "workspace_id": "ws-1",
+            "agent_id": "a-1",
+            "capability": "cap",
+            "runtime": "pi",
+            "skill": "s/k",
+        },
     )
     assert calls[0]["method"] == "PUT"
-    assert calls[0]["url"].endswith("/agent-definitions/a-1/draft")
+    assert calls[0]["url"].endswith("/workspaces/ws-1/agent-definitions/a-1/draft")
     assert calls[0]["json"] == {
         "capability": "cap",
         "runtime": "pi",

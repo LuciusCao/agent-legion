@@ -3,8 +3,7 @@
 Each tool forwards to one ``/api/studio-agent/tools/*`` endpoint of a running
 Agent Legion backend, authenticated with a studio-agent scoped token
 (STUDIO-AGENT-001). Tools return the response body as text; non-2xx responses
-come back as ``HTTP <code>: <body>`` text instead of raising, so a failed
-call never crashes the MCP session.
+come back as ``HTTP <code>: <body>`` text instead of raising.
 """
 
 from __future__ import annotations
@@ -127,18 +126,19 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
 
     @mcp.tool()
     def save_agent_definition_draft(
+        workspace_id: str,
         agent_id: str,
         capability: str,
         runtime: str,
         skill: str,
         tools: list[str] | None = None,
     ) -> str:
-        """Save a draft Agent definition binding a capability to a runtime and
-        skill. runtime is one of: pi, openclaw, velites. Draft only — a human
-        publishes the definition in Studio before any job can use it."""
+        """Save a draft Agent definition (workspace-scoped) binding a capability
+        to a runtime and skill. runtime is one of: pi, openclaw, velites.
+        Draft only — a human publishes it in Studio before any job can use it."""
         return client.call(
             "PUT",
-            f"/agent-definitions/{agent_id}/draft",
+            f"/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
             {
                 "capability": capability,
                 "runtime": runtime,

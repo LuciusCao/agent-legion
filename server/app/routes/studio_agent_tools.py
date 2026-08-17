@@ -1,11 +1,10 @@
 """Studio-agent tool surface (phase 3 chunk 3, decision §0.2).
 
-Dedicated tool endpoints for the built-in Studio authoring agent. Every
-endpoint requires a studio-agent scoped token (``require_studio_agent_scope``)
-— full user sessions and admin sessions are refused, and the surface exposes
-only draft/validate/register-request operations plus reads; effecting
-operations (publish/rollback/archive) stay on the human-facing routers behind
-``reject_studio_agent_scope`` (STUDIO-AGENT-001).
+Tool endpoints for the built-in Studio authoring agent: every endpoint
+requires a studio-agent scoped token (full user/admin sessions are refused),
+and the surface exposes only draft/validate/register-request operations plus
+reads; effecting operations (publish/rollback/archive) stay on the
+human-facing routers behind ``reject_studio_agent_scope`` (STUDIO-AGENT-001).
 """
 
 from typing import Annotated, Any
@@ -128,11 +127,12 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
             raise_job_http_error(exc)
         return WorkflowNodeCodeVersionResponse(**row)
 
-    @router.put(
-        "/studio-agent/tools/agent-definitions/{agent_id}/draft",
+    @workspace_scoped.put(
+        "/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
         response_model=AgentVersionResponse,
     )
     def save_agent_definition_draft(
+        workspace_id: str,
         agent_id: str,
         payload: AgentDefinitionPayload,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
@@ -140,7 +140,9 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         require_workflows_enabled(settings)
         definition = _parse_agent_definition(payload)
         try:
-            entity = _service().save_agent_definition_draft(agent_id, definition, str(user["id"]))
+            entity = _service().save_agent_definition_draft(
+                workspace_id, agent_id, definition, str(user["id"])
+            )
         except JobServiceError as exc:
             raise_job_http_error(exc)
         return _agent_version_response(entity)
