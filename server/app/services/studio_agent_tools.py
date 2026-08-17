@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_service import AgentService
-from server.app.services.job_errors import NotFoundError
+from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.node_codes import NodeCodeService
 from server.app.services.versioned_entities import VersionedEntity
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -94,8 +94,27 @@ class StudioAgentToolsService:
         code: str,
         change_note: str | None,
         user_id: str,
+        expected_capability: str | None = None,
     ) -> dict[str, Any]:
-        self._node_capability(workspace_id, workflow_key, node_key)
+        revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
+        if revision is None:
+            if expected_capability is None:
+                raise NotFoundError("No active workflow revision")
+            # Skeleton draft for a node the not-yet-published workflow draft
+            # will introduce; there is no revision to validate against.
+        else:
+            definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+            node = definition.nodes.get(node_key)
+            if node is None:
+                if expected_capability is None:
+                    raise NotFoundError(f"Unknown workflow node: {node_key}")
+                # New node key on an existing revision: same skeleton rule.
+            elif expected_capability is not None and expected_capability != node.capability:
+                raise InvalidOperationError(
+                    f"Node {node_key} capability mismatch: the active workflow revision "
+                    f"binds {node.capability!r}, but expected_capability declares "
+                    f"{expected_capability!r}"
+                )
         return self._node_code_service().save_draft(
             workspace_id,
             workflow_key,

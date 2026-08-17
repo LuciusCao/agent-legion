@@ -27,11 +27,11 @@ from server.app.routes.agent_definition_contracts import (
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.studio_agent_tool_contracts import (
     StudioAgentActiveWorkflowResponse,
+    StudioAgentNodeCodeDraftRequest,
     StudioAgentWorkflowRegisterRequest,
 )
 from server.app.routes.workflow_draft_compare_contracts import WorkflowDraftCompareResponse
 from server.app.routes.workflow_node_code_contracts import (
-    WorkflowNodeCodeDraftRequest,
     WorkflowNodeCodeResponse,
     WorkflowNodeCodeVersionResponse,
 )
@@ -112,7 +112,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         workspace_id: str,
         workflow_key: str,
         node_key: str,
-        payload: WorkflowNodeCodeDraftRequest,
+        payload: StudioAgentNodeCodeDraftRequest,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
     ) -> WorkflowNodeCodeVersionResponse:
         require_workflows_enabled(settings)
@@ -124,6 +124,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
                 payload.code,
                 payload.change_note,
                 str(user["id"]),
+                expected_capability=payload.expected_capability,
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

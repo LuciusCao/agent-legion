@@ -110,15 +110,24 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         node_key: str,
         code: str,
         change_note: str = "",
+        expected_capability: str | None = None,
     ) -> str:
         """Save a draft of a code node's Python source (the module must expose
         ``run(job, job_dir, runtime)``). This only creates a draft version —
         a human reviews and publishes it in Studio; the draft never runs in
-        production jobs by itself."""
+        production jobs by itself. Pass expected_capability to declare the
+        capability you believe the node binds: an existing node whose
+        capability differs is rejected with a clear error; a node that does
+        not exist yet (new node, or no published revision at all) is only
+        accepted when expected_capability is set, creating a skeleton draft
+        ahead of the workflow draft that introduces the node."""
+        body: dict[str, Any] = {"code": code, "change_note": change_note or None}
+        if expected_capability is not None:
+            body["expected_capability"] = expected_capability
         return client.call(
             "PUT",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
-            {"code": code, "change_note": change_note or None},
+            body,
         )
 
     @mcp.tool()
