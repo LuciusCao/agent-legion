@@ -5,7 +5,7 @@ _ALLOWED_SCHEMES = {"http", "https"}
 
 
 def validate_download_url(url: str) -> None:
-    # Keep in sync with workspace_libs/http_client.py::validate_download_url
+    # Keep in sync with workspace_libs/download.py::validate_download_url
     # (the SDK side cannot import server.app, so the guard is duplicated).
     if not url:
         raise ValueError("Invalid URL: empty")
