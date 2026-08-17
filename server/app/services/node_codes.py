@@ -220,5 +220,10 @@ class NodeCodeService:
             # Startup race: a second Host process passed the emptiness check
             # concurrently and won the write. The entity is seeded either
             # way, so treat the conflict as "already seeded".
+            # Residual window: a loser whose save_draft lands only after the
+            # winner's draft+publish committed allocates v2 and publishing it
+            # archives the winner's v1. Accepted as harmless — concurrent
+            # seeds carry identical factory content and the window exists
+            # only on first startup of an un-seeded database.
             return False
         return True

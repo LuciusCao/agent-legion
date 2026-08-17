@@ -11,6 +11,10 @@ reset would let a trailing chunk start a tail-only orphan row, and a slot
 attached after a reset would make the next turn's first chunk overwrite the
 previous turn's row in place (#98).
 
+Residual window, stated honestly: chunks carry no turn id, so a trailing chunk
+arriving after the next turn's reset is taken as that turn's first chunk and
+seeds a tail-only orphan row; inherent without ACP turn-tagged chunks.
+
 The state lives on SessionRuntime and is guarded by the runtime lock; the
 first-chunk create+attach is a single critical section so a turn-start reset
 can never land between them and leak a stale open id into the next turn.
