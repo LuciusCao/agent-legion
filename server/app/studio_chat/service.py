@@ -416,6 +416,12 @@ class StudioChatService:
             # turn-start reset landing between them would leave a stale open
             # id whose next chunk would overwrite the previous turn's
             # message row in place (#98).
+            # Maintenance constraint: this section covers one DB INSERT plus
+            # a bus.publish (_append_message). It is safe today only because
+            # EventBus.publish is non-blocking and takes no other lock — do
+            # NOT add blocking calls (network, subprocess, additional locks)
+            # here; every streaming chunk of every session on this runtime
+            # serializes through this lock.
             open_id, full_text = runtime.stream.append(kind, text)
             if open_id is None:
                 message = self._append_message(session_id, kind, "agent", {"text": full_text})

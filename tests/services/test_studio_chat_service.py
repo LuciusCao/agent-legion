@@ -781,6 +781,7 @@ def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
         real_append = job_db.append_studio_chat_message
         create_started = threading.Event()
         proceed = threading.Event()
+        reset_at_lock = threading.Event()
         errors: list[BaseException] = []
 
         def blocking_append(*args, **kwargs):
@@ -797,6 +798,15 @@ def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
 
         def turn_start_reset() -> None:
             try:
+                # Signal right before contending for the runtime lock: the
+                # create thread already holds it (create_started), so this
+                # marks the reset attempt about to block. "Already blocked"
+                # is not observable without instrumenting the lock; the gap
+                # between this set and the acquire is a handful of bytecode
+                # ops, and even a preemption there still yields the correct
+                # order (reset after attach) — the event only guarantees the
+                # race is genuinely exercised, without a fixed sleep.
+                reset_at_lock.set()
                 with runtime.lock:
                     runtime.stream.reset()
             except BaseException as exc:  # surfaced after join
@@ -811,7 +821,7 @@ def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
         # create+attach finished, then clear the freshly attached id.
         reset_thread = threading.Thread(target=turn_start_reset)
         reset_thread.start()
-        time.sleep(0.2)  # let the reset attempt reach the runtime lock
+        assert reset_at_lock.wait(timeout=10)
         proceed.set()
         chunk_thread.join(timeout=10)
         reset_thread.join(timeout=10)
