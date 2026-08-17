@@ -99,8 +99,10 @@ LLM_GATEWAY_TOKEN="<random-shared-token>" \
   uv run python scripts/remote/llm_gateway.py --host <laptop-tailnet-ip> --port 8788
 ```
 
-Alternatively `make llm-gateway` reads the provider credentials from the local
-Pi `models.json` (`LLM_GATEWAY_PROVIDER` / `PI_MODELS_JSON`). Both
+Alternatively `make llm-gateway` reads the provider credentials from a Pi
+`models.json`; the path is machine-specific and must be passed explicitly
+(`make llm-gateway PI_MODELS_JSON=~/.pi/agent/models.json`, optionally with
+`LLM_GATEWAY_PROVIDER`). Both
 `REMOTE_LLM_*` environment variables are required in the env-var form; the
 gateway refuses to start without them. Do not inline real keys into shared
 terminal history — export them from a local-only shell or a `.env` you

@@ -17,9 +17,6 @@ frontend/dist/
 coverage/
 .DS_Store
 config/workflow.yaml.bak-*
-tools/content-uploader/config.dev.yaml
-tools/content-uploader/config.prod.yaml
-tools/content-uploader/config.yaml
 stress-results/
 test-results/
 e2e-results/

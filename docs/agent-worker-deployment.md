@@ -209,7 +209,7 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 
 ### 开发 worktree 的本地 Worker 检查单
 
-在开发 worktree 里起本地栈（`make dev-backend` + `make dev-worker`）时，job 一直停在 `queued` 或秒败，按顺序查这三处——`scripts/init-worktree.sh` 已尽量自动化，但各自有时机前提：
+在开发 worktree 里起本地栈（`make dev-up`，或分开 `make dev-backend` + `make dev-worker`）时，job 一直停在 `queued` 或秒败，按顺序查这三处——`scripts/init-worktree.sh` 已尽量自动化，但各自有时机前提：
 
 1. **Workspace 调度默认暂停**：后端每次启动都把全部 workspace 重置为暂停（刻意设计，防止重启后任务不受控自跑），unknown workspace 也默认暂停。init 脚本的「恢复 workspace 调度」步骤只在后端已建表 seed 之后才能生效；如果你是先 init 后首次启动后端，**启动后重跑一次 init 脚本**（幂等），或在 workspace 控制台手动恢复。症状：workflow worker 日志每 3 秒一轮但 `jobs=0`。
 2. **Worker 未声明 capabilities/models**：claim 按「runtime + capability + model」三元组逐 Worker 匹配，未声明即判「无 Worker 可认领」，job 秒败并带 `not declared by any Worker` 错误。init 脚本会从基准 worktree 种子 `config/agent-worker.yaml`（含完整声明）；注意生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 config 文件不生效，要走控制台或 `PUT /api/config`。
