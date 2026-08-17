@@ -49,7 +49,10 @@ _SERVER_REPO_ROOT = Path(__file__).resolve().parents[3]
 # yaml-independent config modules, workspace_libs) plus the demo workflow's
 # example assets (workflow_nodes holds the demo seed sources, examples/ holds
 # the demo knowledge markdown). Deliberately excludes the repo root itself,
-# `.env`, `deploy/` and `data/` (secrets and runtime data).
+# `.env`, `deploy/` and `data/` (secrets and runtime data). The `config`
+# entry relies on CONFIG-YAML-001: tracked config yaml must never carry
+# secret values (they live in the vault / instance settings), so granting the
+# sandbox read access to `config/` exposes no credentials.
 _REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config", "workspace_libs", "examples")
 
 _RESULT_BASENAME = ".custom_node_result.json"

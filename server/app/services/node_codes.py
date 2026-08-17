@@ -25,8 +25,10 @@ from typing import Any
 
 from server.app.db.connection import DatabaseDsn
 from server.app.services.job_errors import (
+    ConflictError,
     CustomNodesDisabledError,
     InvalidOperationError,
+    NotFoundError,
 )
 from server.app.services.versioned_entities import EntityType, VersionedEntity, VersionedEntityStore
 
@@ -115,12 +117,18 @@ class NodeCodeService:
         return _to_row(entity) if entity else None
 
     def get_code_by_version(
-        self, workspace_id: str, workflow_key: str, node_key: str, version: int
+        self, workspace_id: str | None, workflow_key: str, node_key: str, version: int
     ) -> dict[str, Any] | None:
         """Return any version row (including archived) — frozen jobs read these."""
         self._require_enabled()
         entity = self._store.get_version(_entity_key(workflow_key, node_key), version, workspace_id)
         return _to_row(entity) if entity else None
+
+    def get_global_code_by_version(
+        self, workflow_key: str, node_key: str, version: int
+    ) -> dict[str, Any] | None:
+        """Return the global (workspace-NULL) row at *version*, or None."""
+        return self.get_code_by_version(None, workflow_key, node_key, version)
 
     def list_versions(
         self, workspace_id: str, workflow_key: str, node_key: str
@@ -199,12 +207,18 @@ class NodeCodeService:
         if self._store.list_versions(entity_key, None):
             return False
         validate_node_code(code)
-        self._store.save_draft(
-            entity_key,
-            {"code": code, "change_note": change_note},
-            code_hash(code),
-            None,
-            "system",
-        )
-        self._store.publish(entity_key, None)
+        try:
+            self._store.save_draft(
+                entity_key,
+                {"code": code, "change_note": change_note},
+                code_hash(code),
+                None,
+                "system",
+            )
+            self._store.publish(entity_key, None)
+        except (ConflictError, NotFoundError):
+            # Startup race: a second Host process passed the emptiness check
+            # concurrently and won the write. The entity is seeded either
+            # way, so treat the conflict as "already seeded".
+            return False
         return True

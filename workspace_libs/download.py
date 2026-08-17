@@ -16,6 +16,10 @@ import requests
 
 _ALLOWED_SCHEMES = {"http", "https"}
 
+# Hard ceiling on a single download: an unbounded stream from a malicious or
+# broken endpoint could fill the disk hosting the job directory.
+DEFAULT_MAX_BYTES = 10 * 1024**3
+
 
 def validate_download_url(url: str) -> None:
     """SSRF guard for user-influenced download URLs (scheme/host/IP checks).
@@ -58,12 +62,16 @@ def download_file(
     expected: str = "video",
     timeout: int = 120,
     chunk_size: int = 1024 * 1024,
+    max_bytes: int = DEFAULT_MAX_BYTES,
 ) -> None:
     """Stream *url* to *output_path* with an SSRF guard and content-type gate.
 
-    An existing non-empty output short-circuits (retry-safe); a failed
-    download removes the partial file so a retry never sees a truncated
-    artifact.
+    An existing non-empty output short-circuits (retry-safe). The stream
+    lands in a ``<name>.tmp`` sibling and is atomically renamed into place
+    only on completion, so even a SIGKILL mid-stream (executor timeout)
+    leaves at most a ``.tmp`` file behind — a retry never mistakes a
+    truncated artifact for a finished one. Streams larger than *max_bytes*
+    fail and clean up instead of filling the job-dir disk.
     """
     validate_download_url(url)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -82,12 +90,17 @@ def download_file(
             content_type.startswith(prefix) for prefix in allowed_content_type_prefixes
         ):
             raise ValueError(f"Expected {expected} content, got {content_type}")
+        tmp_path = output_path.with_name(f"{output_path.name}.tmp")
         try:
-            with output_path.open("wb") as handle:
+            written = 0
+            with tmp_path.open("wb") as handle:
                 for chunk in response.iter_content(chunk_size=chunk_size):
                     if chunk:
+                        written += len(chunk)
+                        if written > max_bytes:
+                            raise ValueError(f"download exceeds the {max_bytes}-byte limit")
                         handle.write(chunk)
+            tmp_path.replace(output_path)
         except Exception:
-            if output_path.exists():
-                output_path.unlink()
+            tmp_path.unlink(missing_ok=True)
             raise

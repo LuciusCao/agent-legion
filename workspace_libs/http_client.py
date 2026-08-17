@@ -102,6 +102,9 @@ def fetch_json(
     not a silent follow.
     """
     try:
+        # Note for node authors: request exceptions embed the full URL
+        # *including the query string*, so never put secrets in ``params`` —
+        # they would leak into error messages and from there into job logs.
         resp = requests.get(
             url,
             params=params,
