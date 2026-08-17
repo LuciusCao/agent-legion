@@ -234,6 +234,39 @@ def test_download_file_cleans_partial_on_failure(
     with pytest.raises(requests.ConnectionError):
         download_file("https://cdn.example.com/v.mp4", out)
     assert not out.exists()
+    assert not (tmp_path / "o.bin.tmp").exists()
+
+
+def test_download_file_writes_via_tmp_then_renames(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """The stream lands in ``<name>.tmp`` and is renamed on completion, so a
+    SIGKILL mid-stream (executor timeout) leaves no truncated file at the
+    final path; a stale .tmp from such a kill never short-circuits a retry."""
+    out = tmp_path / "source.mp4"
+    tmp = tmp_path / "source.mp4.tmp"
+    tmp.write_bytes(b"stale")
+    resp = _stream_response([])
+
+    def streaming_iter(chunk_size: int) -> Any:
+        assert not out.exists()  # nothing visible at the final path mid-stream
+        yield b"full"
+
+    resp.iter_content = streaming_iter
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: resp)
+    download_file("https://cdn.example.com/v.mp4", out)
+    assert out.read_bytes() == b"full"
+    assert not tmp.exists()
+
+
+def test_download_file_enforces_max_bytes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """An oversized stream fails and cleans up instead of filling the disk."""
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: _stream_response([b"ab", b"cd"]))
+    out = tmp_path / "o.bin"
+    with pytest.raises(ValueError, match="byte limit"):
+        download_file("https://cdn.example.com/v.mp4", out, max_bytes=3)
+    assert not out.exists()
+    assert not (tmp_path / "o.bin.tmp").exists()
 
 
 def test_download_file_custom_content_type_prefixes(
