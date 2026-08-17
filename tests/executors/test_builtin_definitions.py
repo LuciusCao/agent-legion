@@ -10,12 +10,13 @@ key — the demo node code reaches the DB via the global factory seed instead.
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 import pytest
 
 from server.app.executors.builtin_definitions import BUILTIN_EXECUTOR_DEFINITIONS
-from server.app.executors.code_config import CodeExecutorConfig
+from server.app.executors.code_config import CodeExecutorConfig, strip_retired_path_keys
 from server.app.executors.definitions import load_executor_definitions
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -54,6 +55,28 @@ def test_legacy_path_keys_are_stripped_at_load() -> None:
     }
     definitions = load_executor_definitions(legacy)
     assert set(definitions["code-default"].capabilities) == {"fetch_items"}
+
+
+@pytest.mark.no_db
+def test_path_strip_warning_logged_once_per_executor(caplog) -> None:
+    """The ~5s published-catalog cache re-strips legacy keys on every
+    refresh; the warning fires once per executor per process, not per parse,
+    so a stale stored definition cannot spam the logs."""
+    legacy = {
+        "kind": "code",
+        "global_capacity": 4,
+        "capabilities": {"fetch_items": {"path": "workflow_nodes/example_intake.py"}},
+    }
+    with caplog.at_level(logging.WARNING, logger="server.app.executors.code_config"):
+        strip_retired_path_keys("code-warn-dedup-a", dict(legacy))
+        strip_retired_path_keys("code-warn-dedup-a", dict(legacy))
+        strip_retired_path_keys("code-warn-dedup-b", dict(legacy))
+    warnings = [
+        record
+        for record in caplog.records
+        if "dropped retired capability path key" in record.getMessage()
+    ]
+    assert len(warnings) == 2  # one per executor, not per call
 
 
 @pytest.mark.no_db
