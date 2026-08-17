@@ -55,7 +55,7 @@ class WorkspaceConfigurationService:
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
             self.workflows,
-            published_agent_definitions(self.settings.database_url),
+            published_agent_definitions(self.settings.database_url, str(workspace["id"])),
             workspace,
             self.settings.executor_definitions,
         )
@@ -141,7 +141,9 @@ class WorkspaceConfigurationService:
             node_limits=node_limits,
             agent_capabilities={
                 definition.capability
-                for definition in published_agent_definitions(self.settings.database_url).values()
+                for definition in published_agent_definitions(
+                    self.settings.database_url, workspace_id
+                ).values()
             },
         )
         name_value = workspace_patch.get("name")
@@ -221,7 +223,7 @@ class WorkspaceConfigurationService:
             workspace = update_workspace_node_config(
                 self.job_db,
                 self.workflows,
-                published_agent_definitions(self.settings.database_url),
+                published_agent_definitions(self.settings.database_url, workspace_id),
                 workspace,
                 patch,
                 self.settings.executor_definitions,

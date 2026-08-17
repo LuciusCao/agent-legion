@@ -82,8 +82,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     from server.app import main as app_main
     from tests.postgres_support import TEST_DATABASE_URL
 
-    # The app boots against the isolated test schema; conftest already seeded
-    # the published Agent catalog there via AgentService.
+    # The app boots against the isolated test schema; Agent definitions are
+    # workspace-scoped (schema v46), seeded per workspace by the tests that
+    # need them (tests/helpers.seed_workspace_agent_definitions).
     def fake_load_settings(
         data_dir: Path | None = None, config_path: Path | None = None
     ) -> Settings:
@@ -121,15 +122,31 @@ def wait_for_predicate(
         time.sleep(interval)
 
 
-def replace_agent_catalog(definitions: dict[str, Any]) -> None:
-    """Archive every live Agent version, then insert *definitions* as published.
+def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
+    """Seed the built-in demo Agent definitions into *workspace_id*.
+
+    Agent definitions are workspace-scoped (schema v46): the conftest reset no
+    longer seeds a global catalog, so tests that run the demo workflow end to
+    end instantiate the factory templates into their own workspace here.
+    """
+    from server.app.agent_catalog_builtin import seed_demo_workspace_agent_definitions
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    return seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
+
+
+def replace_agent_catalog(workspace_ids: str | list[str], definitions: dict[str, Any]) -> None:
+    """Archive every live Agent version in the given workspaces, then insert
+    *definitions* as published into each of them.
 
     Mirrors the retired ``sync_agent_definitions`` replace semantics for
-    tests: after the call exactly the given catalog is published. An empty
-    mapping leaves no published Agents (the old empty-catalog guard went away
-    with the YAML sync). Writes go straight to versioned_entities so tests
-    can stage catalogs the service-level publish guard would reject (e.g.
-    two published Agents sharing one capability for dual-runtime fleets).
+    tests, workspace-scoped (schema v46): after the call exactly the given
+    catalog is published in each listed workspace. An empty mapping leaves no
+    published Agents in those workspaces. Missing workspace rows are created
+    (the versioned_entities workspace FK requires the row first). Writes go
+    straight to versioned_entities so tests can stage catalogs the
+    service-level publish guard would reject (e.g. two published Agents
+    sharing one capability for dual-runtime fleets).
     """
     import json as _json
 
@@ -138,37 +155,49 @@ def replace_agent_catalog(definitions: dict[str, Any]) -> None:
     from server.app.services.agent_service import reset_published_agent_cache
     from tests.postgres_support import TEST_DATABASE_URL
 
+    ids = [workspace_ids] if isinstance(workspace_ids, str) else list(workspace_ids)
     with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute(
-            "update versioned_entities set status='archived'"
-            " where entity_type='agent' and status in ('draft', 'published')"
-        )
-        for agent_id, definition in definitions.items():
-            assert isinstance(definition, AgentDefinition)
-            latest = conn.execute(
-                "select max(version) as v from versioned_entities"
-                " where entity_type='agent' and workspace_id is null and entity_key=%s",
-                (agent_id,),
-            ).fetchone()
-            version = int(latest["v"]) + 1 if latest is not None and latest["v"] is not None else 1
-            canonical = _json.dumps(
-                definition.model_dump(mode="json"),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
+        for workspace_id in ids:
+            conn.execute(
+                "insert into workspaces(id, name, default_workflow_key)"
+                " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+                (workspace_id,),
             )
             conn.execute(
-                "insert into versioned_entities("
-                "id, entity_type, workspace_id, entity_key, version, status,"
-                " definition_json, definition_hash, created_by, created_at, published_at)"
-                " values (%s, 'agent', null, %s, %s, 'published', %s, %s, 'test-seed',"
-                " current_timestamp, current_timestamp)",
-                (
-                    f"agent:{agent_id}:v{version}",
-                    agent_id,
-                    version,
-                    canonical,
-                    definition.definition_hash(),
-                ),
+                "update versioned_entities set status='archived'"
+                " where entity_type='agent' and workspace_id=%s"
+                " and status in ('draft', 'published')",
+                (workspace_id,),
             )
+            for agent_id, definition in definitions.items():
+                assert isinstance(definition, AgentDefinition)
+                latest = conn.execute(
+                    "select max(version) as v from versioned_entities"
+                    " where entity_type='agent' and workspace_id=%s and entity_key=%s",
+                    (workspace_id, agent_id),
+                ).fetchone()
+                version = (
+                    int(latest["v"]) + 1 if latest is not None and latest["v"] is not None else 1
+                )
+                canonical = _json.dumps(
+                    definition.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                conn.execute(
+                    "insert into versioned_entities("
+                    "id, entity_type, workspace_id, entity_key, version, status,"
+                    " definition_json, definition_hash, created_by, created_at, published_at)"
+                    " values (%s, 'agent', %s, %s, %s, 'published', %s, %s, 'test-seed',"
+                    " current_timestamp, current_timestamp)",
+                    (
+                        f"agent:{workspace_id}:{agent_id}:v{version}",
+                        workspace_id,
+                        agent_id,
+                        version,
+                        canonical,
+                        definition.definition_hash(),
+                    ),
+                )
     reset_published_agent_cache()

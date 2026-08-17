@@ -27,7 +27,7 @@ def _agent_catalog():
     catalog = {"agent-x": MagicMock(config_schema={})}
     with patch(
         "server.app.workflow_worker.agent_claim.resolve_dispatch_agent_definition",
-        side_effect=lambda _dsn, agent_id, _pin: catalog.get(agent_id),
+        side_effect=lambda _dsn, _workspace_id, agent_id, _pin: catalog.get(agent_id),
     ):
         yield
 

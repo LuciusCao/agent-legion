@@ -80,7 +80,7 @@ class JobIntakeService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                published_agent_definitions(self.settings.database_url),
+                published_agent_definitions(self.settings.database_url, workspace_id),
                 workspace,
                 self.settings.executor_definitions,
             )

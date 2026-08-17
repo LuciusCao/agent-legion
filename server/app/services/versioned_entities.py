@@ -3,8 +3,9 @@
 One table (``versioned_entities``) backs the draft → published → archived
 lifecycle of every versioned definition: custom node codes (``node_code``),
 Agent definitions (``agent``), and executor definitions (``executor``).
-``workspace_id`` is NULL for global entities (agents, executors); node codes
-stay workspace-scoped. Versions are immutable:
+``workspace_id`` is NULL for global entities (executors, factory demo node
+codes); Agent definitions are workspace-scoped since schema v46 and node
+codes stay workspace-scoped. Versions are immutable:
 publishing archives the previously published row (the partial unique index
 guarantees at most one published row per entity), and rollback re-publishes
 an old definition as a new version.
@@ -77,7 +78,7 @@ def _serialize_definition(definition: dict[str, Any]) -> str:
     return json.dumps(definition, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-# Partial unique index guarding one published Agent per capability.
+# Partial unique index guarding one published Agent per capability per workspace.
 _CAPABILITY_INDEX = "versioned_entities_published_capability"
 
 
@@ -88,7 +89,7 @@ def _integrity_conflict(exc: IntegrityError, entity_type: EntityType) -> Conflic
     if constraint == _CAPABILITY_INDEX:
         return ConflictError(
             f"capability is already published by another {entity_type};"
-            " exactly one published entity per capability"
+            " exactly one published entity per capability in the workspace"
         )
     return ConflictError("entity version allocated concurrently; retry")
 

@@ -90,7 +90,7 @@ def claim_agent_node(
     pin = agent_version_pin(batch_payload, node.key)
     try:
         definition_config = resolve_dispatch_agent_definition(
-            worker.settings.database_url, agent_id, pin
+            worker.settings.database_url, str(workspace_id), agent_id, pin
         )
     except ValueError as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
@@ -102,7 +102,9 @@ def claim_agent_node(
             workflow_key,
             node,
             log_path,
-            f"Invalid Agent route {agent_id!r}",
+            f"Agent {agent_id!r} has no published definition in workspace {workspace_id!r};"
+            " agent definitions are workspace-scoped (schema v46) — create one in"
+            " Studio (Agent 管理) for this workspace",
         )
     if pin is not None and definition_config.capability != node.capability:
         return fail_node_config(
