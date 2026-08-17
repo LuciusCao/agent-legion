@@ -661,8 +661,9 @@ create unique index if not exists workflow_node_codes_published
 -- Versioned entities (schema v26): unified draft → published → archived
 -- lifecycle storage for custom node codes ('node_code'), Agent definitions
 -- ('agent'), and executor definitions ('executor', schema v30). workspace_id
--- is NULL for global entities; NULLS NOT DISTINCT keeps the uniqueness
--- guarantees meaningful for those rows (PostgreSQL 15+).
+-- is NULL for global entities (executors, factory demo node codes); Agents
+-- are workspace-scoped since schema v46. NULLS NOT DISTINCT keeps the
+-- uniqueness guarantees meaningful for those rows (PostgreSQL 15+).
 create table if not exists versioned_entities (
   id text primary key,
   entity_type text not null check(entity_type in ('node_code', 'agent', 'executor')),
@@ -680,6 +681,15 @@ create table if not exists versioned_entities (
 create unique index if not exists versioned_entities_published
   on versioned_entities(entity_type, workspace_id, entity_key) nulls not distinct
   where status = 'published';
+-- Capability uniqueness for published Agents, per workspace (schema v46):
+-- workspace routes derive from the capability alone, so two published Agents
+-- of one workspace sharing a capability would make routing ambiguous. The
+-- service layer checks first; this partial index is the real guard. Agent
+-- rows are always workspace-scoped (the v46 migration deleted the global
+-- rows), so workspace_id is never NULL under this predicate.
+create unique index if not exists versioned_entities_published_capability
+  on versioned_entities(workspace_id, (definition_json::jsonb->>'capability'))
+  where entity_type = 'agent' and status = 'published';
 create index if not exists idx_versioned_entities_type_key
   on versioned_entities(entity_type, entity_key);
 

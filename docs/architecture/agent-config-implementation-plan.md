@@ -161,7 +161,7 @@ class ExecutionRequest:
 create table if not exists versioned_entities (
   id text primary key,
   entity_type text not null check(entity_type in ('node_code', 'agent')),
-  workspace_id text,               -- NULL 表示全局 Agent
+  workspace_id text,               -- Agent 自 schema v46 起为 workspace 作用域；NULL 仅用于全局 executor/出厂 node_code
   entity_key text not null,
   version integer not null,
   status text not null check(status in ('draft', 'published', 'archived')),

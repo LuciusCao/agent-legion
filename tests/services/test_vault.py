@@ -170,10 +170,16 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     # The bare settings fixture does not hydrate executor definitions
     # (create_app does); the node config schema chain needs the seeded catalog.
     hydrate_executor_definitions(settings)
+    workspace = job_db.create_workspace(
+        "vault-freeze", default_workflow_key="education_video_problems_generation"
+    )
+    definition = WorkflowCatalogService(settings).definition("education_video_problems_generation")
+    # ensure_active_revision seeds the demo agents into this workspace (v46).
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     # The demo nodes declare no secret fields; republish the write_script
     # agent with a secret field so the intake freeze chain still has a
     # schema-declared node secret to divert into the vault.
-    agent_service = AgentService(settings.database_url)
+    agent_service = AgentService(settings.database_url, workspace["id"])
     agent_service.save_draft(
         "example-write-script-v1",
         AgentDefinition(
@@ -191,15 +197,10 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
         created_by="test-seed",
     )
     agent_service.publish("example-write-script-v1")
-    workspace = job_db.create_workspace(
-        "vault-freeze", default_workflow_key="education_video_problems_generation"
-    )
-    definition = WorkflowCatalogService(settings).definition("education_video_problems_generation")
-    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     update_workspace_node_config(
         job_db,
         WorkflowCatalogService(settings),
-        published_agent_definitions(settings.database_url),
+        published_agent_definitions(settings.database_url, workspace["id"]),
         job_db.get_workspace(workspace["id"]),
         {
             "nodeConfig": {

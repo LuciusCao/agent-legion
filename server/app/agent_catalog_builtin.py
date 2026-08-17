@@ -1,12 +1,11 @@
-"""Built-in Agent definitions: the demo workflow's factory agent catalog.
+"""Built-in Agent definition templates for the demo workflow.
 
-Agents have no legacy yaml seed (the retired ``agents:`` section was never
-transcribed into code): this module pins the factory definitions for the
-open-source demo workflow ``education_video_problems_generation`` so a fresh
-deployment can run the example out of the box. The seed path
-(``agent_service.seed_builtin_agent_definitions``) publishes each definition
-only when the agent id has no versioned row at all, so admin edits and
-archivals are never overwritten or resurrected.
+Agent definitions are workspace-scoped (schema v46): nothing here is seeded
+globally anymore. This module pins the factory *templates* for the
+open-source demo workflow ``education_video_problems_generation``; the demo
+seed (``seed_demo_workspace_agent_definitions``) instantiates them into a
+workspace that binds the demo workflow, seed-if-absent, so admin edits and
+archivals inside the workspace are never overwritten or resurrected.
 
 Execution configuration (provider/model/thinking) is deliberately NOT part of
 these definitions — it resolves per node from node ``execution.*`` overrides
@@ -22,6 +21,8 @@ from server.app.db.connection import DatabaseDsn
 from server.app.services.agent_service import AgentService
 
 _DEMO_SKILL_PREFIX = "education-video-problems-generation"
+
+DEMO_WORKFLOW_KEY = "education_video_problems_generation"
 
 BUILTIN_AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
     agent_id: AgentDefinition(capability=capability, runtime="velites", skill=skill)
@@ -50,17 +51,20 @@ BUILTIN_AGENT_DEFINITIONS: dict[str, AgentDefinition] = {
 }
 
 
-def seed_builtin_agent_definitions(database_dsn: DatabaseDsn) -> list[str]:
-    """Publish each built-in agent that has no versioned row yet.
+def seed_demo_workspace_agent_definitions(
+    database_dsn: DatabaseDsn, workspace_id: str
+) -> list[str]:
+    """Publish each built-in demo agent into the workspace when absent.
 
-    Seed-if-absent, mirroring the executor seed
+    Called when a workspace binds the demo workflow (workspace create /
+    workflow switch). Seed-if-absent, mirroring the executor seed
     (``executor_definition_service.seed_builtin_executor_definitions``): an
-    agent the admin already touched (published a new definition, or archived
-    every version to disable it) is never overwritten or resurrected — only a
-    completely absent entity key gets the factory definition. Returns the
-    agent IDs seeded this run.
+    agent the admin already touched in this workspace (published a new
+    definition, or archived every version to disable it) is never overwritten
+    or resurrected — only a completely absent entity key gets the factory
+    definition. Returns the agent IDs seeded this run.
     """
-    service = AgentService(database_dsn)
+    service = AgentService(database_dsn, workspace_id)
     seeded: list[str] = []
     for agent_id, definition in BUILTIN_AGENT_DEFINITIONS.items():
         if service.list_versions(agent_id):

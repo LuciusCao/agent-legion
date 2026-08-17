@@ -14,6 +14,9 @@ import {
 
 const originalFetch = global.fetch
 
+const WS = 'ws1'
+const WS_QUERY = '?workspace_id=ws1'
+
 afterEach(() => {
   global.fetch = originalFetch
   vi.restoreAllMocks()
@@ -34,11 +37,11 @@ describe('agentDefinitions api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await fetchAgentDefinitions()
+    const result = await fetchAgentDefinitions(WS)
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions',
+      `/api/agent-definitions${WS_QUERY}`,
       expect.anything()
     )
   })
@@ -48,11 +51,11 @@ describe('agentDefinitions api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await fetchAgentDefinition('a b')
+    const result = await fetchAgentDefinition(WS, 'a b')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions/a%20b',
+      `/api/agent-definitions/a%20b${WS_QUERY}`,
       expect.anything()
     )
   })
@@ -62,11 +65,11 @@ describe('agentDefinitions api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await fetchAgentVersions('agent-1')
+    const result = await fetchAgentVersions(WS, 'agent-1')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions/agent-1/versions',
+      `/api/agent-definitions/agent-1/versions${WS_QUERY}`,
       expect.anything()
     )
   })
@@ -83,11 +86,11 @@ describe('agentDefinitions api', () => {
       skill: 'demo_workflow/generate_key_info',
       tools: ['read'],
     }
-    const result = await createAgentDefinition(body)
+    const result = await createAgentDefinition(WS, body)
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions',
+      `/api/agent-definitions${WS_QUERY}`,
       expect.objectContaining({ method: 'POST', body: JSON.stringify(body) })
     )
   })
@@ -102,11 +105,11 @@ describe('agentDefinitions api', () => {
       runtime: 'velites' as const,
       skill: 'some/skill',
     }
-    const result = await saveAgentDraft('agent-1', body)
+    const result = await saveAgentDraft(WS, 'agent-1', body)
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions/agent-1/draft',
+      `/api/agent-definitions/agent-1/draft${WS_QUERY}`,
       expect.objectContaining({ method: 'PUT', body: JSON.stringify(body) })
     )
   })
@@ -116,11 +119,11 @@ describe('agentDefinitions api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await publishAgent('agent-1')
+    const result = await publishAgent(WS, 'agent-1')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions/agent-1/publish',
+      `/api/agent-definitions/agent-1/publish${WS_QUERY}`,
       expect.objectContaining({ method: 'POST' })
     )
   })
@@ -130,11 +133,11 @@ describe('agentDefinitions api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await rollbackAgent('agent-1', 2)
+    const result = await rollbackAgent(WS, 'agent-1', 2)
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions/agent-1/rollback',
+      `/api/agent-definitions/agent-1/rollback${WS_QUERY}`,
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ version: 2 }),
@@ -147,11 +150,11 @@ describe('agentDefinitions api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await copyAgent('agent-1', 'agent-2')
+    const result = await copyAgent(WS, 'agent-1', 'agent-2')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions/agent-1/copy',
+      `/api/agent-definitions/agent-1/copy${WS_QUERY}`,
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({ new_agent_id: 'agent-2' }),
@@ -164,11 +167,11 @@ describe('agentDefinitions api', () => {
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
 
-    const result = await archiveAgent('agent-1')
+    const result = await archiveAgent(WS, 'agent-1')
 
     expect(result).toEqual(payload)
     expect(fetchMock).toHaveBeenCalledWith(
-      '/api/agent-definitions/agent-1',
+      `/api/agent-definitions/agent-1${WS_QUERY}`,
       expect.objectContaining({ method: 'DELETE' })
     )
   })

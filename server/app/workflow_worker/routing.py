@@ -74,10 +74,19 @@ def _resolve_uncached(
         # projection, not by any node-level declaration.
         if route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
-            definition_config = published_agent_definitions(worker.settings.database_url).get(
-                agent_id
-            )
-            if definition_config is None or definition_config.capability != capability:
+            definition_config = published_agent_definitions(
+                worker.settings.database_url, workspace_id
+            ).get(agent_id)
+            if definition_config is None:
+                return NodeRoute(
+                    "error",
+                    error_message=(
+                        f"Agent {agent_id!r} has no published definition in workspace"
+                        f" {workspace_id!r}; agent definitions are workspace-scoped"
+                        " (schema v46) — create one in Studio (Agent 管理) for this workspace"
+                    ),
+                )
+            if definition_config.capability != capability:
                 return NodeRoute("error", error_message=f"Invalid Agent route {agent_id!r}")
             if worker.agent_dispatch is None:
                 raise RuntimeError("Agent dispatch service is not configured")

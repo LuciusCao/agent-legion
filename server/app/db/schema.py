@@ -5,6 +5,7 @@ from pathlib import Path
 from server.app.db.connection import DatabaseConnection, DatabaseDsn
 from server.app.db.migrations import (
     migrate_agent_catalog_cutover,
+    migrate_agent_workspace_scope,
     migrate_code_executor_bindings,
     migrate_custom_node_codes,
     migrate_executor_asr_config_schema,
@@ -24,7 +25,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 45
+SCHEMA_VERSION = 46
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 # Vault (schema v16): idempotent DDL lives here because the architecture gate
@@ -42,7 +43,7 @@ create table if not exists workspace_secrets (
 
 
 def migrate_workspace_secrets(conn: DatabaseConnection) -> None:
-    """Create the workspace_secrets vault table (v16); idempotent on replay."""
+    # Create the workspace_secrets vault table (v16); idempotent on replay.
     conn.execute(_WORKSPACE_SECRETS_DDL)
 
 
@@ -85,8 +86,9 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_scoped_token_origin(conn)
             migrate_studio_chat_tables(conn)
             migrate_studio_chat_context(conn)
+            migrate_agent_workspace_scope(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "studio_chat_context"),
+                (SCHEMA_VERSION, "agent_workspace_scope"),
             )

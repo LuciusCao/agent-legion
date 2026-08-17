@@ -15,6 +15,7 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.storage_paths import make_data_relative, resolve_job_dir
+from tests.helpers import seed_workspace_agent_definitions
 
 
 @pytest.fixture
@@ -672,11 +673,15 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
 
 
 def _insert_agent_request(job_db, execution_id: str, job, node_key: str) -> None:
+    # Agent definitions are workspace-scoped (schema v46): seed the demo
+    # templates into the job's workspace before reading the published hash.
+    seed_workspace_agent_definitions(str(job["workspace_id"]))
     with job_db.connect() as conn:
         definition = conn.execute(
             "select definition_hash from versioned_entities"
-            " where entity_type='agent' and workspace_id is null"
-            " and entity_key='example-write-script-v1' and status='published'"
+            " where entity_type='agent' and workspace_id=%s"
+            " and entity_key='example-write-script-v1' and status='published'",
+            (job["workspace_id"],),
         ).fetchone()
         conn.execute(
             "insert into agent_execution_requests(execution_id, workspace_id, job_id, workflow_key,"

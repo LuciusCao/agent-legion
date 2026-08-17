@@ -58,14 +58,16 @@ def _insert_job_rows(
         )
 
 
-def _seed_definition(agent_id: str = "generator-v1") -> AgentDefinition:
+def _seed_definition(
+    agent_id: str = "generator-v1", workspace_id: str = "test-workspace"
+) -> AgentDefinition:
     definition = AgentDefinition(
         capability="generate",
         runtime="pi",
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    replace_agent_catalog({agent_id: definition})
+    replace_agent_catalog(workspace_id, {agent_id: definition})
     return definition
 
 

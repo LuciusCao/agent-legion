@@ -35,7 +35,8 @@ type Props = {
 export function WorkflowNodeBindingEditor(props: Props) {
   const { node } = props
   const workflowKey = props.workflowKey
-  const catalog = useExecutorCatalog()
+  const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined
+  const catalog = useExecutorCatalog(workspaceId)
   const executorConfiguration = useSettingStore((s) => s.executorConfiguration)
   const isSaving = useSettingStore((s) => s.isSaving)
   const setNodeBinding = useSettingStore((s) => s.setNodeBinding)

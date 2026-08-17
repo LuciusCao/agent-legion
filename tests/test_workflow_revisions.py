@@ -26,7 +26,11 @@ from server.app.workflows.definition import (
     workflow_definition_from_dict,
     workflow_definition_from_mapping,
 )
-from tests.helpers import load_builtin_definition, replace_agent_catalog
+from tests.helpers import (
+    load_builtin_definition,
+    replace_agent_catalog,
+    seed_workspace_agent_definitions,
+)
 from tests.helpers.auth import authenticate_client
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -36,6 +40,9 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
     )
+    # Agent definitions are workspace-scoped (schema v46): seed the demo
+    # templates into this workspace so its routes resolve.
+    seed_workspace_agent_definitions(workspace["id"])
     definition = load_builtin_definition("education_video_problems_generation")
     service = WorkflowRevisionService(queries)
 
@@ -168,6 +175,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
     )
+    seed_workspace_agent_definitions(workspace["id"])
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
@@ -209,6 +217,7 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
     )
+    seed_workspace_agent_definitions(workspace["id"])
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
@@ -233,7 +242,7 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     }
     monkeypatch.setattr(
         "server.app.services.workflow_revisions.published_agent_definitions",
-        lambda _dsn: ambiguous,
+        lambda _dsn, _workspace_id: ambiguous,
     )
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
@@ -260,12 +269,14 @@ def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
     )
+    seed_workspace_agent_definitions(workspace["id"])
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)
     )
-    # Simulate the empty-catalog regression: every published definition archived.
-    replace_agent_catalog({})
+    # Simulate the empty-catalog regression: every published definition of the
+    # workspace archived (catalogs are workspace-scoped, schema v46).
+    replace_agent_catalog(workspace["id"], {})
 
     with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
         service.reconcile_active_agent_routes()
@@ -280,6 +291,7 @@ def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Pat
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
     )
+    seed_workspace_agent_definitions(workspace["id"])
     service = WorkflowRevisionService(queries)
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=False)

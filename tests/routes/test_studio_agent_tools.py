@@ -51,7 +51,7 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             f"{base}/workflows/wf/nodes/node/code/draft",
             {"code": "not python"},
         ),
-        ("PUT", "/api/studio-agent/tools/agent-definitions/agent-x/draft", {}),
+        ("PUT", f"{base}/agent-definitions/agent-x/draft", {}),
         ("POST", "/api/studio-agent/tools/workflows/register", {"key": "k", "label": "K"}),
         ("GET", f"{base}/workflow/active", None),
         ("GET", "/api/studio-agent/tools/workflows", None),
@@ -287,10 +287,12 @@ def test_save_node_code_draft_rejects_invalid_code(client, job_db) -> None:
 
 
 def test_save_agent_definition_draft_attributes_studio_agent(client, job_db) -> None:
+    workspace_id = _create_workspace(client)
     scoped, admin_id = _scoped_client(client, job_db)
 
     saved = scoped.put(
-        "/api/studio-agent/tools/agent-definitions/studio-test-agent/draft",
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        "/agent-definitions/studio-test-agent/draft",
         json={
             "capability": "studio_test_capability",
             "runtime": "pi",
@@ -307,9 +309,11 @@ def test_save_agent_definition_draft_attributes_studio_agent(client, job_db) -> 
 
 
 def test_save_agent_definition_draft_rejects_invalid_payload(client, job_db) -> None:
+    workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
     response = scoped.put(
-        "/api/studio-agent/tools/agent-definitions/studio-test-agent/draft",
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        "/agent-definitions/studio-test-agent/draft",
         json={"capability": "", "runtime": "pi", "skill": "studio/test"},
     )
     assert response.status_code == 422

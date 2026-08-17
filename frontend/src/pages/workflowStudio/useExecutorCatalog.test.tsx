@@ -33,7 +33,7 @@ describe('useExecutorCatalog', () => {
 
   it('returns executors and agents from the catalog', async () => {
     mockGetCatalog.mockResolvedValue({ executors: [executor], agents: [] })
-    const { result } = renderHook(() => useExecutorCatalog(), {
+    const { result } = renderHook(() => useExecutorCatalog('ws1'), {
       wrapper: wrapper(createTestQueryClient()),
     })
 
@@ -44,7 +44,7 @@ describe('useExecutorCatalog', () => {
 
   it('keeps the error state and recovers via retry instead of swallowing failures', async () => {
     mockGetCatalog.mockRejectedValueOnce(new Error('boom'))
-    const { result } = renderHook(() => useExecutorCatalog(), {
+    const { result } = renderHook(() => useExecutorCatalog('ws1'), {
       wrapper: wrapper(createTestQueryClient()),
     })
 
@@ -64,7 +64,7 @@ describe('useExecutorCatalog', () => {
   it('refetches when the studioExecutorCatalog key is invalidated', async () => {
     mockGetCatalog.mockResolvedValue({ executors: [executor], agents: [] })
     const client = createTestQueryClient()
-    const { result } = renderHook(() => useExecutorCatalog(), {
+    const { result } = renderHook(() => useExecutorCatalog('ws1'), {
       wrapper: wrapper(client),
     })
 
@@ -73,7 +73,7 @@ describe('useExecutorCatalog', () => {
 
     await act(async () => {
       await client.invalidateQueries({
-        queryKey: extraQueryKeys.studioExecutorCatalog(),
+        queryKey: extraQueryKeys.studioExecutorCatalog('ws1'),
       })
     })
 

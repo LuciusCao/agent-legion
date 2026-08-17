@@ -17,6 +17,7 @@ from server.app.services.workflow_catalog_store import (
 )
 from server.app.services.workflow_draft_publish import publish_workflow_draft
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
+from tests.helpers import seed_workspace_agent_definitions
 from tests.postgres_support import TEST_DATABASE_URL
 
 _REGISTERED_KEY = "acme_quiz_flow"
@@ -142,6 +143,10 @@ def test_first_draft_publish_creates_revision_for_registered_key(
 ) -> None:
     catalog.register(_REGISTERED_KEY, "Acme Quiz")
     workspace = workspace_service.create({"name": "Acme", "default_workflow_key": _REGISTERED_KEY})
+    # The draft's write_script capability routes to an Agent: agent catalogs
+    # are workspace-scoped (schema v46), so seed the demo templates into this
+    # workspace (registered keys get no automatic demo seed).
+    seed_workspace_agent_definitions(workspace["id"])
 
     ok, errors = publish_workflow_draft(job_db, workspace["id"], _DRAFT_YAML, {})
 

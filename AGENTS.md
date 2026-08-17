@@ -123,9 +123,11 @@
   （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
 - velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
   runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
-  （`versioned_entities` 表，经 Studio「Agent 管理」/ `/api/agent-definitions`
-  管理，draft → published → archived 生命周期，版本不可变，灰度/回退走
-  publish/rollback），不再走 yaml——`agents:` 段与 `workflows.pi` 块已退役，
+  （`versioned_entities` 表，workspace 作用域（schema v46，解析严格限定本
+  workspace、零全局兜底），经 Studio「Agent 管理」/ `/api/agent-definitions`
+  （`workspace_id` 查询参数）管理，draft → published → archived 生命周期，
+  版本不可变，灰度/回退走 publish/rollback），不再走 yaml——`agents:` 段与
+  `workflows.pi` 块已退役，
   出现在任何 split yaml 启动即报错（fail-fast 带迁移指引）。runtime 直接钉死
   命令构建器与二进制（pi → pi argv，velites → velites argv；openclaw 未实现
   即报错），没有 flavor 之类的实现选择层。pi 作为可选 runtime 长期保留
@@ -141,8 +143,10 @@
   workspace Settings 默认（`default_agent_*` 三列）→ 报错，无 yaml/全局兜底；
   manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
   覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
-  只允许一个 published Agent（DB partial unique index 兜底）。测试的 Agent
-  目录由 `tests/conftest.py` 经 AgentService 播种，不从 yaml sync。
+  在每个 workspace 只允许一个 published Agent（DB partial unique index 兜底）。
+  测试的 Agent 目录由 `tests/helpers.seed_workspace_agent_definitions` 按测试所属
+  workspace 播种（API 创建并绑定 demo workflow 的 workspace 由
+  ensure_active_revision 自动 seed），不从 yaml sync。
 - 多步变更必须先全部校验/备妥再统一应用：中间结果放临时变量，全部成功后
   一次性赋值生效，禁止半应用状态；跨进程/跨事务动作（killpg、目录迁移、
   重排队）前必须重新校验目标身份与状态。这是代码评审最高发的缺陷族。

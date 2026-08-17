@@ -22,7 +22,6 @@ os.environ["AGENT_LEGION_SKIP_MODULE_APP"] = "1"
 import psycopg
 from psycopg import sql
 
-from server.app.agent_catalog_builtin import seed_builtin_agent_definitions
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 from server.app.events.agents import AgentStatusManager
@@ -38,13 +37,12 @@ from server.app.services.workflow_catalog import seed_builtin_workflow_catalog
 from server.app.settings import load_settings
 from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
-
-# Test Agent catalog: mirrors the app startup seed (create_app) — the
-# built-in demo workflow agents are seed-if-absent in production, so test DBs
-# carry them too. Seeded via AgentService after every TRUNCATE so published
-# definitions exist for route resolution and dispatch.
-def _seed_agent_definitions() -> None:
-    seed_builtin_agent_definitions(TEST_DATABASE_URL)
+# Test Agent catalog: Agent definitions are workspace-scoped (schema v46), so
+# there is no global seed here — workspaces do not exist at schema-reset time.
+# Tests seed the built-in demo agents into their own workspace via
+# tests/helpers.seed_workspace_agent_definitions (API-created workspaces
+# binding the demo workflow get the demo seed automatically through
+# ensure_active_revision).
 
 
 # Test executor catalog: the built-in factory definitions (retired
@@ -185,6 +183,7 @@ _POSTGRES_TEST_FILES = frozenset(
     {
         "tests/ci/test_executor_worker_stress.py",
         "tests/db/test_agent_catalog_cutover_migration.py",
+        "tests/db/test_agent_workspace_scope_migration.py",
         "tests/db/test_agent_request_kind_schema.py",
         "tests/db/test_auth_scoped_tokens_migration.py",
         "tests/db/test_studio_chat_schema.py",
@@ -558,7 +557,6 @@ def _isolate_postgres_database(request):
     if fresh:
         _rebuild_schema()
         reset_published_agent_cache()
-        _seed_agent_definitions()
         reset_published_executor_cache()
         _seed_executor_definitions()
         _seed_demo_node_codes()
@@ -571,7 +569,6 @@ def _isolate_postgres_database(request):
         reset_published_agent_cache()
         reset_published_executor_cache()
         if not replayed:
-            _seed_agent_definitions()
             _seed_executor_definitions()
             _seed_demo_node_codes()
             _seed_skill_sources()

@@ -7,7 +7,6 @@ import pytest
 
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
-from tests.helpers import replace_agent_catalog
 from tests.helpers.executor_worker import (
     allocate,
     bind,
@@ -89,10 +88,8 @@ def _count_calls(monkeypatch: pytest.MonkeyPatch, obj: object, attr: str) -> dic
 def test_saturated_executor_skips_scan_and_claims(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    # The saturated fast path requires zero agent work: with the catalog now
-    # DB-global (conftest seeds 9 published Agents), archive it so the
-    # no-capacity/no-agents early exit applies.
-    replace_agent_catalog({})
+    # The saturated fast path requires zero agent work anywhere: catalogs are
+    # workspace-scoped (schema v46), so no seeded Agents exist at all here.
     worker, _ws, block_event = _setup(tmp_path, capacity=1, workspace_limit=1, job_count=2)
 
     assert worker._poll() is True

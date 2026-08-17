@@ -1,6 +1,16 @@
+def _create_workspace(client) -> str:
+    response = client.post(
+        "/api/workspaces",
+        json={"name": "catalog-ws", "default_workflow_key": "education_video_problems_generation"},
+    )
+    assert response.status_code == 200, response.text
+    return str(response.json()["workspace"]["id"])
+
+
 def test_executor_catalog_contains_only_host_executors(client_factory):
     with client_factory() as client:
-        response = client.get("/api/executors")
+        workspace_id = _create_workspace(client)
+        response = client.get("/api/executors", params={"workspace_id": workspace_id})
 
     assert response.status_code == 200
     executors = response.json()["executors"]
@@ -18,12 +28,13 @@ def test_executor_catalog_reflects_published_edits(client_factory):
         "capabilities": {"publish_content": {"path": "workflow_nodes/example_publish.py"}},
     }
     with client_factory(fresh=True) as client:
+        workspace_id = _create_workspace(client)
         assert (
             client.put("/api/executor-definitions/code-default/draft", json=edited).status_code
             == 200
         )
         assert client.post("/api/executor-definitions/code-default/publish").status_code == 200
-        response = client.get("/api/executors")
+        response = client.get("/api/executors", params={"workspace_id": workspace_id})
 
     assert response.status_code == 200
     executors = {executor["id"]: executor for executor in response.json()["executors"]}
