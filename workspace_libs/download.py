@@ -9,6 +9,7 @@ library + ``requests`` only, never import ``server.app.*``.
 from __future__ import annotations
 
 import ipaddress
+import uuid
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -39,8 +40,7 @@ def validate_download_url(url: str) -> None:
     hostname = parsed.hostname
     if hostname is None:
         raise ValueError("Invalid URL: missing hostname")
-    hostname_lower = hostname.lower()
-    if hostname_lower in {"localhost", "0.0.0.0"}:
+    if hostname.lower() in {"localhost", "0.0.0.0"}:
         raise ValueError(f"Invalid URL: blocked host {hostname}")
     try:
         addr = ipaddress.ip_address(hostname)
@@ -67,11 +67,13 @@ def download_file(
     """Stream *url* to *output_path* with an SSRF guard and content-type gate.
 
     An existing non-empty output short-circuits (retry-safe). The stream
-    lands in a ``<name>.tmp`` sibling and is atomically renamed into place
-    only on completion, so even a SIGKILL mid-stream (executor timeout)
-    leaves at most a ``.tmp`` file behind — a retry never mistakes a
-    truncated artifact for a finished one. Streams larger than *max_bytes*
-    fail and clean up instead of filling the job-dir disk.
+    lands in a unique ``<name>.<uuid>.tmp`` sibling (concurrent downloads
+    to the same output never share and truncate one tmp; the last rename
+    wins the final path) and is atomically renamed into place only on
+    completion, so even a SIGKILL mid-stream (executor timeout) leaves at
+    most a ``.tmp`` file behind — a retry never mistakes a truncated
+    artifact for a finished one. Streams larger than *max_bytes* fail and
+    clean up instead of filling the job-dir disk.
     """
     validate_download_url(url)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -86,11 +88,9 @@ def download_file(
             )
         response.raise_for_status()
         content_type = response.headers.get("content-type", "")
-        if content_type and not any(
-            content_type.startswith(prefix) for prefix in allowed_content_type_prefixes
-        ):
+        if content_type and not content_type.startswith(allowed_content_type_prefixes):
             raise ValueError(f"Expected {expected} content, got {content_type}")
-        tmp_path = output_path.with_name(f"{output_path.name}.tmp")
+        tmp_path = output_path.with_name(f"{output_path.name}.{uuid.uuid4().hex}.tmp")
         try:
             written = 0
             with tmp_path.open("wb") as handle:
