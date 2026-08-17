@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock
@@ -234,18 +235,19 @@ def test_download_file_cleans_partial_on_failure(
     with pytest.raises(requests.ConnectionError):
         download_file("https://cdn.example.com/v.mp4", out)
     assert not out.exists()
-    assert not (tmp_path / "o.bin.tmp").exists()
+    assert not list(tmp_path.glob("o.bin.*.tmp"))
 
 
 def test_download_file_writes_via_tmp_then_renames(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    """The stream lands in ``<name>.tmp`` and is renamed on completion, so a
-    SIGKILL mid-stream (executor timeout) leaves no truncated file at the
-    final path; a stale .tmp from such a kill never short-circuits a retry."""
+    """The stream lands in a unique ``<name>.<pid>.<uuid>.tmp`` sibling and
+    is renamed on completion, so a SIGKILL mid-stream (executor timeout)
+    leaves no truncated file at the final path; a stale .tmp orphan from
+    such a kill never short-circuits a retry (and is left behind)."""
     out = tmp_path / "source.mp4"
-    tmp = tmp_path / "source.mp4.tmp"
-    tmp.write_bytes(b"stale")
+    stale = tmp_path / "source.mp4.1234.deadbeef.tmp"
+    stale.write_bytes(b"stale")
     resp = _stream_response([])
 
     def streaming_iter(chunk_size: int) -> Any:
@@ -256,7 +258,8 @@ def test_download_file_writes_via_tmp_then_renames(
     monkeypatch.setattr(requests, "get", lambda *a, **kw: resp)
     download_file("https://cdn.example.com/v.mp4", out)
     assert out.read_bytes() == b"full"
-    assert not tmp.exists()
+    # The fresh unique tmp was renamed away; the pre-existing orphan stays.
+    assert [p.name for p in tmp_path.glob("source.mp4.*.tmp")] == [stale.name]
 
 
 def test_download_file_enforces_max_bytes(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -266,7 +269,85 @@ def test_download_file_enforces_max_bytes(monkeypatch: pytest.MonkeyPatch, tmp_p
     with pytest.raises(ValueError, match="byte limit"):
         download_file("https://cdn.example.com/v.mp4", out, max_bytes=3)
     assert not out.exists()
-    assert not (tmp_path / "o.bin.tmp").exists()
+    assert not list(tmp_path.glob("o.bin.*.tmp"))
+
+
+def test_download_file_allows_exactly_max_bytes(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """A stream of exactly max_bytes succeeds: the limit is exclusive."""
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: _stream_response([b"ab", b"cd"]))
+    out = tmp_path / "o.bin"
+    download_file("https://cdn.example.com/v.mp4", out, max_bytes=4)
+    assert out.read_bytes() == b"abcd"
+
+
+def test_download_file_tmp_name_unique_per_call(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Each call streams into its own tmp file (pid+uuid suffix)."""
+    seen_tmps: list[str] = []
+    resp = _stream_response([])
+
+    def streaming_iter(chunk_size: int) -> Any:
+        seen_tmps.extend(p.name for p in tmp_path.glob("source.mp4.*.tmp"))
+        yield b"x"
+
+    resp.iter_content = streaming_iter
+    monkeypatch.setattr(requests, "get", lambda *a, **kw: resp)
+    out = tmp_path / "source.mp4"
+    for _ in range(2):
+        download_file("https://cdn.example.com/v.mp4", out)
+        out.unlink()
+    assert len(seen_tmps) == 2
+    assert len(set(seen_tmps)) == 2
+
+
+def test_download_file_concurrent_same_output_path(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Two threads downloading to the same output_path must not share one
+    tmp file: each keeps its own, both complete, and the final content is
+    one thread's intact payload (last atomic rename wins)."""
+    barrier = threading.Barrier(2, timeout=10)
+    payload_by_ident: dict[int, bytes] = {}
+
+    def fake_get(*a: Any, **kw: Any) -> MagicMock:
+        payload = threading.get_ident().to_bytes(8, "big")  # distinct per thread
+        payload_by_ident[threading.get_ident()] = payload
+        resp = _stream_response([])
+
+        def streaming_iter(chunk_size: int) -> Any:
+            barrier.wait()  # hold both threads mid-stream with open tmp files
+            yield payload
+
+        resp.iter_content = streaming_iter
+        return resp
+
+    monkeypatch.setattr(requests, "get", fake_get)
+    out = tmp_path / "source.mp4"
+    errors: list[BaseException] = []
+    threads = [
+        threading.Thread(
+            target=lambda: _download_catching("https://cdn.example.com/v.mp4", out, errors)
+        )
+        for _ in range(2)
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+    assert not any(thread.is_alive() for thread in threads)
+    assert not errors
+    assert out.read_bytes() in set(payload_by_ident.values())
+    assert not list(tmp_path.glob("source.mp4.*.tmp"))
+
+
+def _download_catching(url: str, out: Path, errors: list[BaseException]) -> None:
+    try:
+        download_file(url, out)
+    except BaseException as exc:  # surfaced after join
+        errors.append(exc)
 
 
 def test_download_file_custom_content_type_prefixes(

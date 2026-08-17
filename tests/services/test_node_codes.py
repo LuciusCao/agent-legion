@@ -313,8 +313,15 @@ def test_frozen_pin_matching_neither_scope_still_fails_closed(
 def test_seed_global_tolerates_concurrent_seed_race(service, monkeypatch) -> None:
     """Two Host processes starting together both pass the emptiness check;
     the loser's insert hits the version-allocation unique index
-    (ConflictError). Treat it as already seeded instead of crashing startup,
-    and never overwrite the winner's code."""
+    (ConflictError). Treat it as already seeded instead of crashing startup.
+
+    Honest scope: "already seeded" is not a guarantee the winner's row
+    stays published. If the loser's save_draft lands only AFTER the
+    winner's draft+publish committed, it allocates v2, publishes it, and
+    archives the winner's v1 — the loser overwrites the winner. This is
+    accepted: concurrent seeds carry identical factory content (same
+    source file), so the published code is the same either way, and the
+    window exists only on first startup of an un-seeded database."""
     import server.app.services.versioned_entities as versioned_entities
 
     assert service.seed_global(WF, NODE, GLOBAL_CODE, "test seed")
