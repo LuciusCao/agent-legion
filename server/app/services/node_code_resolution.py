@@ -6,7 +6,6 @@ guard.
 
 from __future__ import annotations
 
-import logging
 from typing import Any
 
 from server.app.db.connection import DatabaseDsn
@@ -15,11 +14,8 @@ from server.app.services.node_codes import (
     NodeCodeService,
     _entity_key,
     _split_entity_key,
-    _to_row,
 )
 from server.app.services.versioned_entities import VersionedEntityStore
-
-logger = logging.getLogger(__name__)
 
 
 def freeze_node_code_versions(
@@ -74,9 +70,9 @@ def _get_pinned_rows(
     row = service.get_code_by_version(workspace_id, workflow_key, node_key, version)
     if row is not None:
         rows.append(row)
-    entity = service._store.get_version(_entity_key(workflow_key, node_key), version, None)
-    if entity is not None:
-        rows.append(_to_row(entity))
+    row = service.get_global_code_by_version(workflow_key, node_key, version)
+    if row is not None:
+        rows.append(row)
     return rows
 
 
@@ -90,6 +86,10 @@ def resolve_dispatch_node_code(
 ) -> str | None:
     """Dispatch-time code text: frozen job pin → workspace published → global
     factory seed → None (unrunnable; the caller fails the node).
+
+    A frozen pin fails closed: a hash mismatch raises, and a pinned version
+    missing at BOTH scopes is data corruption and raises too — never silently
+    substituted with the current published code.
 
     One DB read per dispatch, same cadence as the vault secret resolution it
     runs next to; the 30s route cache in ``routing.py`` only covers executor
@@ -113,13 +113,13 @@ def resolve_dispatch_node_code(
             raise ValueError(
                 f"frozen node code hash mismatch for {workflow_key}/{node_key} v{frozen['version']}"
             )
-        logger.warning(
-            "frozen node code version missing, falling back to published: "
-            "workspace=%s workflow=%s node=%s version=%s",
-            workspace_id,
-            workflow_key,
-            node_key,
-            frozen.get("version"),
+        # The frozen version vanished at BOTH scopes: versioned entities are
+        # immutable, so this means data corruption. Fail closed — silently
+        # substituting the current published code would run code the job
+        # never froze.
+        raise ValueError(
+            f"frozen node code version missing for {workflow_key}/{node_key} "
+            f"v{frozen.get('version')} (data corruption)"
         )
     published = service.get_effective_code(workspace_id, workflow_key, node_key)
     if published is None:
