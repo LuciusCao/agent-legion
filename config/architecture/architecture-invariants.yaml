@@ -284,7 +284,7 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the Agent Catalog (versioned_entities, published via AgentService); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Workers separately declare the node capabilities and provider/model pairs they can execute, alongside runtimes, labels, protocol version, and machine-wide max_concurrency."
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Workers separately declare the node capabilities and provider/model pairs they can execute, alongside runtimes, labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -293,6 +293,12 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/test_executor_catalog_service.py::test_catalog_exposes_published_agent_definitions
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_service.py
+        gate: quick
+      - kind: integration
+        target: tests/db/test_agent_workspace_scope_migration.py
         gate: quick
       - kind: integration
         target: tests/test_agent_broker.py::test_worker_registration_declares_runtime_and_machine_capacity

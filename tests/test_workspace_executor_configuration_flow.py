@@ -122,8 +122,9 @@ def test_get_filters_retired_executor_residue(tmp_path) -> None:
 def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> None:
     client = flow_client
 
-    # 1. Read global Executor catalog.
-    catalog_response = client.get("/api/executors")
+    # 1. Read the Executor catalog (the Agent half is workspace-scoped since
+    # schema v46, so the endpoint takes a workspace_id query parameter).
+    catalog_response = client.get("/api/executors", params={"workspace_id": "ws-none"})
     assert catalog_response.status_code == 200
     catalog = catalog_response.json()["executors"]
     executor_ids = {executor["id"] for executor in catalog}

@@ -62,7 +62,7 @@ def fail_unclaimable_model_requests(broker: AgentExecutionBroker) -> list[str]:
                    wr.definition_json as revision_definition_json
             from agent_execution_requests r
             join versioned_entities d
-              on d.entity_type='agent' and d.workspace_id is null
+              on d.entity_type='agent' and d.workspace_id=r.workspace_id
              and d.entity_key=r.agent_id and d.definition_hash=r.agent_definition_hash
              -- Mirrors the claim candidate join: quality replay pins match
              -- their immutable version row, unpinned match published.

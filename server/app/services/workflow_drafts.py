@@ -48,7 +48,7 @@ def validate_workflow_for_publish(
     }
     allocated = {allocation["executor_id"] for allocation in configuration.get("allocations", [])}
     capability_counts: dict[str, int] = {}
-    for agent_definition in published_agent_definitions(job_db.path).values():
+    for agent_definition in published_agent_definitions(job_db.path, workspace_id).values():
         capability_counts[agent_definition.capability] = (
             capability_counts.get(agent_definition.capability, 0) + 1
         )

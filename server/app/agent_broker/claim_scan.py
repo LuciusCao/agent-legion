@@ -116,7 +116,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
                  coalesce(d.definition_json, '{}') as definition_json
           from agent_execution_requests r2
           left join versioned_entities d
-            on r2.kind='agent' and d.entity_type='agent' and d.workspace_id is null
+            on r2.kind='agent' and d.entity_type='agent' and d.workspace_id=r2.workspace_id
            and d.entity_key=r2.agent_id and d.definition_hash=r2.agent_definition_hash
            -- Quality replay pins match their immutable version row (any
            -- status); unpinned requests match the currently published row.

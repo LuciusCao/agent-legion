@@ -23,15 +23,17 @@ def vault_key(monkeypatch):
     return key
 
 
-@pytest.fixture
-def secret_node_schema():
+def _publish_secret_node_schema(workspace_id: str) -> None:
     """Publish a test agent version whose capability schema declares a secret field.
 
     The demo nodes declare no secret fields, so the generic node-config vault
     diversion mechanism is exercised through a republished write_script agent
-    declaring a ``secret: true`` field.
+    declaring a ``secret: true`` field. Agent definitions are workspace-scoped
+    (schema v46): the workspace already holds the demo-seeded v1 (workspaces
+    binding the demo workflow get the factory templates at binding time), so
+    this publishes v2 inside it.
     """
-    service = AgentService(TEST_DATABASE_URL)
+    service = AgentService(TEST_DATABASE_URL, workspace_id)
     service.save_draft(
         "example-write-script-v1",
         AgentDefinition(
@@ -156,10 +158,9 @@ def test_secrets_non_member_gets_404(admin_client, vault_key):
     )
 
 
-def test_node_config_secret_saved_to_vault_not_settings(
-    admin_client, app, vault_key, secret_node_schema
-):
+def test_node_config_secret_saved_to_vault_not_settings(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
+    _publish_secret_node_schema(workspace_id)
 
     saved = admin_client.patch(
         f"/api/workspaces/{workspace_id}/settings/nodes",
@@ -195,10 +196,9 @@ def test_node_config_secret_saved_to_vault_not_settings(
     ]
 
 
-def test_node_config_resave_without_secret_keeps_ref(
-    admin_client, app, vault_key, secret_node_schema
-):
+def test_node_config_resave_without_secret_keeps_ref(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
+    _publish_secret_node_schema(workspace_id)
     patch = {"nodeConfig": {"write_script": {"token": PLAINTEXT}}}
     assert (
         admin_client.patch(f"/api/workspaces/{workspace_id}/settings/nodes", json=patch).status_code
@@ -217,8 +217,9 @@ def test_node_config_resave_without_secret_keeps_ref(
     }
 
 
-def test_node_config_masked_echo_keeps_stored_ref(admin_client, app, vault_key, secret_node_schema):
+def test_node_config_masked_echo_keeps_stored_ref(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
+    _publish_secret_node_schema(workspace_id)
     assert (
         admin_client.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
@@ -242,10 +243,9 @@ def test_node_config_masked_echo_keeps_stored_ref(admin_client, app, vault_key, 
     }
 
 
-def test_node_config_empty_secret_clears_vault_entry(
-    admin_client, app, vault_key, secret_node_schema
-):
+def test_node_config_empty_secret_clears_vault_entry(admin_client, app, vault_key):
     workspace_id = _create_workspace(admin_client)
+    _publish_secret_node_schema(workspace_id)
     assert (
         admin_client.patch(
             f"/api/workspaces/{workspace_id}/settings/nodes",
@@ -283,12 +283,13 @@ def test_node_config_empty_secret_clears_vault_entry(
     assert config["token"] == {"secret_set": False}
 
 
-def test_node_config_save_without_master_key_fails(admin_client, monkeypatch, secret_node_schema):
+def test_node_config_save_without_master_key_fails(admin_client, monkeypatch):
     # See test_secret_put_requires_master_key: patch the resolver, not env.
     monkeypatch.setattr(
         "server.app.services.vault.resolve_master_key", lambda *_args, **_kwargs: None
     )
     workspace_id = _create_workspace(admin_client)
+    _publish_secret_node_schema(workspace_id)
 
     response = admin_client.patch(
         f"/api/workspaces/{workspace_id}/settings/nodes",

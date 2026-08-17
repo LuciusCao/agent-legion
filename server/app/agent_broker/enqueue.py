@@ -86,18 +86,18 @@ def _validate_agent_route(conn: Any, request: AgentExecutionRequest) -> int:
         # (any status — archived/draft replays are the use case).
         definition = conn.execute(
             "select definition_hash from versioned_entities"
-            " where entity_type='agent' and workspace_id is null"
+            " where entity_type='agent' and workspace_id=%s"
             " and entity_key=%s and version=%s",
-            (request.agent_id, request.pinned_agent_version),
+            (request.workspace_id, request.agent_id, request.pinned_agent_version),
         ).fetchone()
         if definition is None or definition["definition_hash"] != request.agent_definition_hash:
             raise ValueError("pinned Agent version is unavailable or changed before enqueue")
     else:
         definition = conn.execute(
             "select definition_hash from versioned_entities"
-            " where entity_type='agent' and workspace_id is null"
+            " where entity_type='agent' and workspace_id=%s"
             " and entity_key=%s and status='published'",
-            (request.agent_id,),
+            (request.workspace_id, request.agent_id),
         ).fetchone()
         if definition is None or definition["definition_hash"] != request.agent_definition_hash:
             raise ValueError("Agent definition is unavailable or changed before enqueue")

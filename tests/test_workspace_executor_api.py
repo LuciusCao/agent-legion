@@ -1,5 +1,13 @@
 def test_list_executors_endpoint(client):
-    response = client.get("/api/executors")
+    # Agent 半区是 workspace 作用域（schema v46）：创建绑定 demo workflow 的
+    # workspace（绑定时自动 seed demo agent 模板）后按其 scope 读取目录。
+    created = client.post(
+        "/api/workspaces",
+        json={"name": "catalog-ws", "default_workflow_key": "education_video_problems_generation"},
+    )
+    assert created.status_code == 200, created.text
+    workspace_id = created.json()["workspace"]["id"]
+    response = client.get("/api/executors", params={"workspace_id": workspace_id})
     assert response.status_code == 200
     data = response.json()
     agent = next(item for item in data["agents"] if item["id"] == "example-review-questions-v1")

@@ -9,7 +9,6 @@ import {
   rollbackExecutor,
   saveExecutorDraft,
 } from '../../api'
-import { extraQueryKeys } from '../../lib/queryKeysExtra'
 import {
   createTestQueryClient,
   TestQueryProvider,
@@ -172,7 +171,7 @@ describe('ExecutorsPanel', () => {
     )
     await waitFor(() =>
       expect(invalidateSpy).toHaveBeenCalledWith({
-        queryKey: extraQueryKeys.studioExecutorCatalog(),
+        queryKey: ['studioExecutorCatalog'],
       })
     )
   })

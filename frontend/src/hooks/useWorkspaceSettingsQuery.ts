@@ -54,7 +54,7 @@ async function fetchWorkspaceSettingsSnapshot(
       api<
         Partial<WorkspaceSettings> | { settings: Partial<WorkspaceSettings> }
       >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
-      getExecutorCatalog(),
+      getExecutorCatalog(workspaceId),
       getWorkspaceExecutorConfiguration(workspaceId),
       api<WorkspaceAgentRoutesResponse>(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/agent-routes`

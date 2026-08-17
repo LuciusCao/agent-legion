@@ -6,7 +6,6 @@ from pathlib import Path
 from fastapi import FastAPI
 
 from server.app.agent_broker import AgentDispatchService, AgentExecutionBroker
-from server.app.agent_catalog_builtin import seed_builtin_agent_definitions
 from server.app.agent_completion import AgentCompletionHandler
 from server.app.agent_workers import AgentWorkerRegistry
 from server.app.auth.service import build_auth_service
@@ -68,10 +67,10 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # 'executor'): seed-if-absent the built-in catalog, then hydrate from the
     # published rows (publish/rollback/archive hot-reload the registry).
     hydrate_executor_definitions(settings)
-    # Agent definitions never had a yaml-era code seed; seed-if-absent the
-    # built-in demo agents so a fresh deployment can run the example workflow.
-    # Admin-published versions and archived agents are never resurrected.
-    seed_builtin_agent_definitions(settings.database_url)
+    # Agent definitions are workspace-scoped (schema v46): there is no global
+    # seed. Workspaces binding the built-in demo workflow get the factory
+    # agent templates instantiated seed-if-absent at binding time
+    # (WorkflowRevisionService.ensure_active_revision).
     # Workflow catalog keys live in the DB (workflow_catalog, schema v40):
     # upsert the built-in rows from the code registry; registered keys persist.
     WorkflowCatalogService.seed_builtin(settings.database_url)

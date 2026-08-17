@@ -5,8 +5,10 @@ import type {
   WorkspaceExecutorConfiguration,
 } from '../types/executorTypes'
 
-export const getExecutorCatalog = () =>
-  api<ExecutorCatalogResponse>('/api/executors')
+export const getExecutorCatalog = (workspaceId: string) =>
+  api<ExecutorCatalogResponse>(
+    `/api/executors?workspace_id=${encodeURIComponent(workspaceId)}`
+  )
 
 export const getSkillDetail = (skillKey: string) =>
   api<SkillDetail>(

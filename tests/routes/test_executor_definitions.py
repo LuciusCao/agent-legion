@@ -166,7 +166,9 @@ def test_legacy_path_key_is_stripped_at_load(client) -> None:
     assert client.post(BASE, json={"executor_id": "code-legacy", **payload}).status_code == 200
     assert client.post(f"{BASE}/code-legacy/publish").status_code == 200
 
-    catalog = client.get("/api/executors")
+    # The catalog's Agent half is workspace-scoped (schema v46): the required
+    # workspace_id query parameter scopes it (admin sessions pass any id).
+    catalog = client.get("/api/executors", params={"workspace_id": "ws-none"})
     assert catalog.status_code == 200
     executors = {e["id"]: e for e in catalog.json()["executors"]}
     details = executors["code-legacy"]["capability_details"]

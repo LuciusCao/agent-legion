@@ -76,7 +76,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     from server.app.agent_catalog import AgentDefinition
     from server.app.services.agent_service import AgentService
 
-    agent_service = AgentService(settings.database_url)
+    agent_service = AgentService(settings.database_url, workspace_id)
     agent_service.save_draft(
         "example-write-script-v1",
         AgentDefinition(
@@ -97,7 +97,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     update_workspace_node_config(
         job_db,
         catalog,
-        published_agent_definitions(settings.database_url),
+        published_agent_definitions(settings.database_url, workspace_id),
         job_db.get_workspace(workspace_id),
         {"nodeConfig": {"write_script": {"connection": CONNECTION_KEY}}},
         settings.executor_definitions,

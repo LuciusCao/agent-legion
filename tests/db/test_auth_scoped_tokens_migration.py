@@ -77,7 +77,7 @@ def test_v41_database_upgrades_via_init_db() -> None:
     assert row["workspace_id"] is None
     assert "idx_auth_scoped_tokens_id" in indexes
     assert migration is not None
-    assert migration["name"] == "studio_chat_context"
+    assert migration["name"] == "agent_workspace_scope"
 
     # Idempotent on replay (init_db runs at every backend startup).
     init_db(TEST_DATABASE_URL)

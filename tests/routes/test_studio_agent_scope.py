@@ -49,9 +49,13 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", f"{_NODE_CODE}/publish", None),
     ("POST", f"{_NODE_CODE}/rollback", {"version": 1}),
     ("DELETE", _NODE_CODE, None),
-    ("POST", "/api/agent-definitions/{agent_id}/publish", None),
-    ("POST", "/api/agent-definitions/{agent_id}/rollback", {"version": 1}),
-    ("DELETE", "/api/agent-definitions/{agent_id}", None),
+    ("POST", "/api/agent-definitions/{agent_id}/publish?workspace_id={workspace_id}", None),
+    (
+        "POST",
+        "/api/agent-definitions/{agent_id}/rollback?workspace_id={workspace_id}",
+        {"version": 1},
+    ),
+    ("DELETE", "/api/agent-definitions/{agent_id}?workspace_id={workspace_id}", None),
     ("POST", "/api/executor-definitions/{executor_id}/publish", None),
     ("POST", "/api/executor-definitions/{executor_id}/rollback", {"version": 1}),
     ("DELETE", "/api/executor-definitions/{executor_id}", None),
@@ -166,7 +170,7 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ): "scoped-only tool surface",
     (
         "PUT",
-        "/api/studio-agent/tools/agent-definitions/{agent_id}/draft",
+        "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
     ): "scoped-only tool surface",
     ("POST", "/api/studio-agent/tools/workflows/register"): "scoped-only tool surface",
     # SPA mount's API 404 catch-all (server/app/spa.py).
@@ -252,7 +256,11 @@ def test_scoped_token_allowed_on_draft_and_validate_endpoints(client, job_db) ->
     )
     assert node_draft.status_code not in (401, 403) and node_draft.status_code < 500
 
-    agent_draft = scoped.put("/api/agent-definitions/agent-x/draft", json={})
+    agent_draft = scoped.put(
+        "/api/agent-definitions/agent-x/draft",
+        params={"workspace_id": workspace_id},
+        json={},
+    )
     assert agent_draft.status_code not in (401, 403) and agent_draft.status_code < 500
 
     executor_draft = scoped.put("/api/executor-definitions/exec-x/draft", json={})
@@ -395,6 +403,8 @@ def test_every_write_endpoint_guarded_or_explicitly_exempt(client) -> None:
     set equalities, so a dropped guard or a stale entry also fails."""
     routes = _write_route_dependencies(client.app)
     guarded = {key for key, names in routes.items() if "reject_studio_agent_scope" in names}
-    effecting = {(method, template) for method, template, _ in _EFFECTING_WRITE_ROUTES}
+    effecting = {
+        (method, template.split("?")[0]) for method, template, _ in _EFFECTING_WRITE_ROUTES
+    }
     assert guarded == effecting
     assert set(routes) - guarded == set(_EXEMPT_WRITE_ROUTES)

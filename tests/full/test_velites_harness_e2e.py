@@ -293,7 +293,7 @@ def test_velites_runtime_agent_worker_chain_end_to_end(tmp_path: Path, job_db) -
             runtime="velites",
             skill="demo_workflow/generate_key_info",
         )
-        replace_agent_catalog({"velites-agent": definition})
+        replace_agent_catalog("test-workspace", {"velites-agent": definition})
         _insert_job_rows(
             job_db,
             job_id="job-1",

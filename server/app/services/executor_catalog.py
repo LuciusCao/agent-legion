@@ -37,20 +37,23 @@ def executor_capability_detail(
 def execution_catalog(
     settings: Settings,
     skills: SkillCatalogService,
+    workspace_id: str,
     agent_definitions: Mapping[str, AgentDefinition] | None = None,
     executor_definitions: Mapping[str, ExecutorConfig] | None = None,
 ) -> dict[str, list[dict[str, Any]]]:
     """Catalog of executor + Agent definitions for Studio display.
 
-    Both halves come from the published DB catalog (versioned_entities) so
-    Studio shows the live DB values; ``settings.executor_definitions`` is the
+    The Agent half is workspace-scoped (schema v46): Studio shows the
+    workspace's own published definitions, with no global fallback. Both
+    halves come from the published DB catalog (versioned_entities) so Studio
+    shows the live DB values; ``settings.executor_definitions`` is the
     startup-hydrated snapshot of the same rows. The old global
     provider/model/thinking projection (retired ``workflows.pi``) is gone:
     execution defaults are workspace-scoped now, so the Studio "继承默认"
     hints read the workspace settings payload's agentDefaults instead.
     """
     if agent_definitions is None:
-        agent_definitions = published_agent_definitions(settings.database_url)
+        agent_definitions = published_agent_definitions(settings.database_url, workspace_id)
     if executor_definitions is None:
         executor_definitions = published_executor_definitions(settings.database_url)
     return {
@@ -91,5 +94,5 @@ class ExecutorCatalogService:
         self.settings = settings
         self.skills = SkillCatalogService(settings.database_url)
 
-    def catalog(self) -> dict[str, Any]:
-        return execution_catalog(self.settings, self.skills)
+    def catalog(self, workspace_id: str) -> dict[str, Any]:
+        return execution_catalog(self.settings, self.skills, workspace_id)
