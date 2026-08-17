@@ -1,7 +1,7 @@
 import { Tab, Tabs } from '@mui/material'
 import styles from './WorkflowStudioMobileNav.module.css'
 
-export type StudioMobilePanel = 'graph' | 'editor'
+export type StudioMobilePanel = 'graph' | 'editor' | 'agent'
 
 type Props = {
   value: StudioMobilePanel
@@ -25,6 +25,7 @@ export function WorkflowStudioMobileNav({
     >
       <Tab value="graph" label="画布" />
       <Tab value="editor" label="编辑节点" disabled={!editorAvailable} />
+      <Tab value="agent" label="Agent" />
     </Tabs>
   )
 }
