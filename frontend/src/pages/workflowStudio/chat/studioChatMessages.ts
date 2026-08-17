@@ -329,6 +329,20 @@ export function textContent(message: ChatMessage): string {
   return asText(asRecord(message.content)?.text)
 }
 
+const TERMINAL = new Set(['turn_end', 'error', 'session_closed'])
+
+/** 仍在流式聚合的 agent text 消息 id：从尾部扫描，先撞到 turn 终止事件
+ * （turn_end/error/session_closed）则全部完成返回 null，先撞到 agent
+ * text 则该条仍在流式。 */
+export function streamingTextId(messages: ChatMessage[]): string | null {
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    const m = messages[i]
+    if (m.kind === 'status' && TERMINAL.has(statusEvent(m).event)) return null
+    if (m.kind === 'text' && m.role === 'agent') return m.id
+  }
+  return null
+}
+
 function decisionText(resolved: Record<string, unknown>): string {
   const decision = asRecord(resolved.decision)
   if (!decision) return '已处理'

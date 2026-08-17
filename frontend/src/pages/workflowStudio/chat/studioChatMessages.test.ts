@@ -10,6 +10,7 @@ import {
   parseFirstJson,
   permissionResolutionText,
   planEntries,
+  streamingTextId,
   upsertMessage,
 } from './studioChatMessages'
 
@@ -264,5 +265,32 @@ describe('misc readers', () => {
 
   it('tracks maxSeq for incremental refills', () => {
     expect(maxSeq([message('text', 'user', { text: 'a' })])).toBe(seq)
+  })
+})
+
+describe('streamingTextId', () => {
+  const turnEnd = () =>
+    message('status', 'system', { event: 'turn_end', stop_reason: 'end' })
+
+  it('returns the last agent text message with no terminal status after it', () => {
+    const first = message('text', 'agent', { text: '第一轮' })
+    const second = message('text', 'agent', { text: '第二轮' })
+    expect(streamingTextId([first, turnEnd(), second])).toBe(second.id)
+  })
+
+  it.each(['turn_end', 'error', 'session_closed'])(
+    'returns null once %s closed the stream slot',
+    (event) => {
+      const text = message('text', 'agent', { text: '好了' })
+      const status = message('status', 'system', { event })
+      expect(streamingTextId([text, status])).toBeNull()
+    }
+  )
+
+  it('ignores user text messages and historical loads without status events', () => {
+    const agentText = message('text', 'agent', { text: '答' })
+    const userText = message('text', 'user', { text: '问' })
+    expect(streamingTextId([agentText, turnEnd(), userText])).toBeNull()
+    expect(streamingTextId([userText, agentText])).toBe(agentText.id)
   })
 })
