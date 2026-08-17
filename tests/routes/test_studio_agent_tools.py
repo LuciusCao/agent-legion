@@ -117,11 +117,38 @@ def test_get_active_revision_returns_definition_and_yaml(client, job_db) -> None
 
     assert response.status_code == 200, response.text
     payload = response.json()
+    assert payload["state"] == "active"
+    assert payload["workflow_key"] == _WORKFLOW_KEY
     assert payload["revision"]["version"] == 1
     assert payload["revision"]["status"] == "active"
     assert payload["workflow"]["key"] == _WORKFLOW_KEY
     assert payload["workflow"]["nodes"]
     assert f"key: {_WORKFLOW_KEY}" in payload["definition_yaml"]
+
+
+def test_get_active_revision_empty_state_for_unpublished_workflow(client, job_db) -> None:
+    """A workspace whose workflow was never published gets a structured empty
+    state (200) instead of a 404, so the agent can start the from-scratch
+    authoring flow."""
+    scoped, _ = _scoped_client(client, job_db)
+    registered = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "studio_empty_flow", "label": "Studio Empty Flow"},
+    )
+    assert registered.status_code == 200, registered.text
+    workspace = job_db.create_workspace("ws-empty", default_workflow_key="studio_empty_flow")
+    workspace_id = str(workspace["id"])
+
+    response = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "state": "empty",
+        "workflow_key": "studio_empty_flow",
+        "revision": None,
+        "workflow": None,
+        "definition_yaml": None,
+    }
 
 
 def test_get_active_revision_404_for_unknown_workspace(client, job_db) -> None:
@@ -421,6 +448,55 @@ def test_compare_workflow_404_for_unknown_workspace(client, job_db) -> None:
     assert response.status_code == 404
 
 
+def test_compare_workflow_without_baseline_returns_full_draft_preview(client, job_db) -> None:
+    """Tool-surface compare on a never-published workflow (registered key, no
+    revision): instead of a revision error the draft is diffed against an
+    empty base, so the agent can preview the full from-scratch shape."""
+    scoped, _ = _scoped_client(client, job_db)
+    registered = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "studio_fresh_flow", "label": "Studio Fresh Flow"},
+    )
+    assert registered.status_code == 200, registered.text
+    workspace = job_db.create_workspace("ws-fresh", default_workflow_key="studio_fresh_flow")
+    workspace_id = str(workspace["id"])
+
+    response = scoped.post(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/compare",
+        json={
+            "definition_yaml": (
+                "key: studio_fresh_flow\n"
+                "label: Studio Fresh Flow\n"
+                "nodes:\n"
+                "  publish_content:\n"
+                "    capability: publish_content\n"
+            )
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["valid"] is True
+    assert payload["errors"] == []
+    assert payload["base_revision"] is None
+    assert payload["draft_workflow"] == {
+        "key": "studio_fresh_flow",
+        "label": "Studio Fresh Flow",
+        "version": 0,
+    }
+    assert payload["creates_revision"] is True
+    assert payload["summary"]["node_changes"] == [
+        {
+            "type": "added",
+            "node_key": "publish_content",
+            "label": "publish_content",
+            "fields": [],
+            "risk": "info",
+        }
+    ]
+    assert any(flag["code"] == "no_baseline" for flag in payload["summary"]["risk_flags"])
+
+
 def test_save_node_code_draft_404_for_unknown_node(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)
@@ -430,6 +506,74 @@ def test_save_node_code_draft_404_for_unknown_node(client, job_db) -> None:
         json={"code": _NODE_CODE},
     )
     assert response.status_code == 404
+
+
+def test_save_node_code_draft_expected_capability_match_and_mismatch(client, job_db) -> None:
+    workspace_id = _create_workspace(client)
+    scoped, _ = _scoped_client(client, job_db)
+    url = (
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/workflows/{_WORKFLOW_KEY}/nodes/{_NODE_KEY}/code/draft"
+    )
+
+    matched = scoped.put(
+        url,
+        json={"code": _NODE_CODE, "expected_capability": "intake_knowledge_points"},
+    )
+    assert matched.status_code == 200, matched.text
+    assert matched.json()["status"] == "draft"
+
+    mismatched = scoped.put(
+        url,
+        json={"code": _NODE_CODE, "expected_capability": "some_other_capability"},
+    )
+    assert mismatched.status_code == 400
+    detail = mismatched.json()["detail"]
+    assert "intake_knowledge_points" in detail
+    assert "some_other_capability" in detail
+
+
+def test_save_node_code_draft_expected_capability_allows_new_node(client, job_db) -> None:
+    """A node key absent from the active revision gets a skeleton draft when
+    expected_capability declares the intent (the workflow draft introducing
+    the node is published later by the human)."""
+    workspace_id = _create_workspace(client)
+    scoped, admin_id = _scoped_client(client, job_db)
+
+    saved = scoped.put(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        f"/workflows/{_WORKFLOW_KEY}/nodes/brand_new_node/code/draft",
+        json={"code": _NODE_CODE, "expected_capability": "brand_new_capability"},
+    )
+
+    assert saved.status_code == 200, saved.text
+    payload = saved.json()
+    assert payload["status"] == "draft"
+    assert payload["created_by"] == f"studio-agent:{admin_id}"
+
+
+def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> None:
+    """From-scratch flow: no active revision at all. expected_capability gates
+    the skeleton draft; without it the historic 404 stands."""
+    scoped, _ = _scoped_client(client, job_db)
+    registered = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "studio_skeleton_flow", "label": "Studio Skeleton Flow"},
+    )
+    assert registered.status_code == 200, registered.text
+    workspace = job_db.create_workspace("ws-skeleton", default_workflow_key="studio_skeleton_flow")
+    workspace_id = str(workspace["id"])
+    url = (
+        f"/api/studio-agent/tools/workspaces/{workspace_id}"
+        "/workflows/studio_skeleton_flow/nodes/first_node/code/draft"
+    )
+
+    rejected = scoped.put(url, json={"code": _NODE_CODE})
+    assert rejected.status_code == 404
+
+    saved = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": "first_capability"})
+    assert saved.status_code == 200, saved.text
+    assert saved.json()["status"] == "draft"
 
 
 class _FailingReloadWorker:

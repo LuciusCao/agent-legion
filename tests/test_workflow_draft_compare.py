@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
+from server.app.services.workflow_draft_compare import compare_workflow_draft
 from server.app.services.workflow_revision_format import definition_to_yaml
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import WorkflowCondition
@@ -269,6 +270,47 @@ def test_compare_missing_active_revision_returns_revision_error(tmp_path):
     assert result["summary"] is None
     assert len(result["errors"]) == 1
     assert result["errors"][0]["category"] == "revision"
+
+
+def test_compare_allow_missing_baseline_previews_full_draft(tmp_path):
+    """allow_missing_baseline=True (studio-agent tool surface): a never-published
+    workflow diffs against an empty base — every node/edge/intake field shows
+    as added and a no_baseline flag explains the preview mode."""
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    workspace = app.state.job_db.create_workspace(
+        "Empty",
+        default_workflow_key="education_video_problems_generation",
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    raw = definition_to_yaml(definition)
+
+    result = compare_workflow_draft(
+        app.state.job_db,
+        workspace["id"],
+        raw,
+        allow_missing_baseline=True,
+    )
+
+    assert result["valid"] is True
+    assert result["errors"] == []
+    assert result["base_revision"] is None
+    assert result["draft_workflow"] == {
+        "key": definition.key,
+        "label": definition.label,
+        "version": 0,
+    }
+    assert result["creates_revision"] is True
+    node_changes = result["summary"]["node_changes"]
+    assert len(node_changes) == len(definition.nodes)
+    assert all(change["type"] == "added" for change in node_changes)
+    edge_changes = result["summary"]["edge_changes"]
+    assert len(edge_changes) == len(definition.edges)
+    assert all(change["type"] == "added" for change in edge_changes)
+    assert any(
+        flag["code"] == "no_baseline" and flag["severity"] == "info"
+        for flag in result["summary"]["risk_flags"]
+    )
 
 
 def test_compare_rejects_draft_key_mismatch(app_with_workspace):

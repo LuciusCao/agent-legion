@@ -4337,6 +4337,36 @@ export interface components {
       /** Valid */
       valid: boolean
     }
+    /**
+     * StudioAgentActiveWorkflowResponse
+     * @description ``state="empty"`` (not 404) when no default key or no published revision.
+     */
+    StudioAgentActiveWorkflowResponse: {
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      revision?: components['schemas']['WorkflowRevisionSummary'] | null
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'active' | 'empty'
+      workflow?: components['schemas']['WorkflowDefinitionResponse'] | null
+      /** Workflow Key */
+      workflow_key?: string | null
+    }
+    /**
+     * StudioAgentNodeCodeDraftRequest
+     * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
+     *     its presence authorizes a skeleton draft for a not-yet-published node.
+     */
+    StudioAgentNodeCodeDraftRequest: {
+      /** Change Note */
+      change_note?: string | null
+      /** Code */
+      code: string
+      /** Expected Capability */
+      expected_capability?: string | null
+    }
     /** StudioAgentRegistryEntry */
     StudioAgentRegistryEntry: {
       /** Args */
@@ -8005,7 +8035,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['ActiveWorkflowRevisionResponse']
+          'application/json': components['schemas']['StudioAgentActiveWorkflowResponse']
         }
       }
       /** @description Validation Error */
@@ -8135,7 +8165,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['WorkflowNodeCodeDraftRequest']
+        'application/json': components['schemas']['StudioAgentNodeCodeDraftRequest']
       }
     }
     responses: {
