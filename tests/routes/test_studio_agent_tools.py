@@ -117,11 +117,38 @@ def test_get_active_revision_returns_definition_and_yaml(client, job_db) -> None
 
     assert response.status_code == 200, response.text
     payload = response.json()
+    assert payload["state"] == "active"
+    assert payload["workflow_key"] == _WORKFLOW_KEY
     assert payload["revision"]["version"] == 1
     assert payload["revision"]["status"] == "active"
     assert payload["workflow"]["key"] == _WORKFLOW_KEY
     assert payload["workflow"]["nodes"]
     assert f"key: {_WORKFLOW_KEY}" in payload["definition_yaml"]
+
+
+def test_get_active_revision_empty_state_for_unpublished_workflow(client, job_db) -> None:
+    """A workspace whose workflow was never published gets a structured empty
+    state (200) instead of a 404, so the agent can start the from-scratch
+    authoring flow."""
+    scoped, _ = _scoped_client(client, job_db)
+    registered = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "studio_empty_flow", "label": "Studio Empty Flow"},
+    )
+    assert registered.status_code == 200, registered.text
+    workspace = job_db.create_workspace("ws-empty", default_workflow_key="studio_empty_flow")
+    workspace_id = str(workspace["id"])
+
+    response = scoped.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active")
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {
+        "state": "empty",
+        "workflow_key": "studio_empty_flow",
+        "revision": None,
+        "workflow": None,
+        "definition_yaml": None,
+    }
 
 
 def test_get_active_revision_404_for_unknown_workspace(client, job_db) -> None:

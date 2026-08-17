@@ -4337,6 +4337,28 @@ export interface components {
       /** Valid */
       valid: boolean
     }
+    /**
+     * StudioAgentActiveWorkflowResponse
+     * @description Active-revision read with a structured empty state instead of a 404.
+     *
+     *     ``state="empty"`` means the workspace exists but has no default workflow
+     *     key or no published revision yet — the agent should switch to the
+     *     from-scratch authoring flow rather than treat it as an error. Unknown
+     *     workspaces still 404 (workspace existence is not leaked).
+     */
+    StudioAgentActiveWorkflowResponse: {
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      revision?: components['schemas']['WorkflowRevisionSummary'] | null
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'active' | 'empty'
+      workflow?: components['schemas']['WorkflowDefinitionResponse'] | null
+      /** Workflow Key */
+      workflow_key?: string | null
+    }
     /** StudioAgentRegistryEntry */
     StudioAgentRegistryEntry: {
       /** Args */
@@ -7966,7 +7988,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['ActiveWorkflowRevisionResponse']
+          'application/json': components['schemas']['StudioAgentActiveWorkflowResponse']
         }
       }
       /** @description Validation Error */
