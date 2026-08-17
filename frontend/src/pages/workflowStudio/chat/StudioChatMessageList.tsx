@@ -4,10 +4,12 @@ import {
   permissionResolutionText,
   planEntries,
   statusEvent,
+  streamingTextId,
   textContent,
   type ChatMessage,
   type ToolCallView,
 } from './studioChatMessages'
+import { StudioChatTextBubble } from './StudioChatTextBubble'
 import { StudioChatToolCallCard } from './StudioChatToolCallCard'
 import { StudioChatPermission } from './StudioChatPermission'
 import { StudioChatThought } from './StudioChatThought'
@@ -120,9 +122,10 @@ function MessageItem({
 }) {
   const { chat } = props
   if (message.kind === 'text') {
-    const className =
-      message.role === 'user' ? styles.bubbleUser : styles.bubbleAgent
-    return <div className={className}>{textContent(message)}</div>
+    // 流式中的 agent 文本保持纯文本；空闲时 busy=false 全部视为已完成
+    // （含后端重启丢失 turn_end 的兜底）。
+    const streaming = chat.busy && message.id === streamingTextId(chat.messages)
+    return <StudioChatTextBubble message={message} streaming={streaming} />
   }
   if (message.kind === 'thought') {
     return <StudioChatThought text={textContent(message)} />
