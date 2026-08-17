@@ -149,7 +149,7 @@ describe('WorkflowNodeCodeSection', () => {
 
   it('opens the wide-view dialog with line numbers and closes it', async () => {
     renderSection()
-    await screen.findByText(/内置/)
+    await screen.findByText(/出厂版本/)
 
     fireEvent.click(screen.getByRole('button', { name: '宽视图' }))
 
