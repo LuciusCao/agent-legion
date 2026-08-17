@@ -185,3 +185,58 @@ def test_baseline_schema_carries_the_workspace_scoped_index() -> None:
     assert "workspace_id" in definition
     assert "capability" in definition
     assert "entity_type = 'agent'" in definition or "entity_type = 'agent'::text" in definition
+
+
+@pytest.mark.fresh_schema
+def test_upgrade_from_v45_with_legacy_global_index() -> None:
+    """v45 → v46 upgrade path: the legacy capability-only unique index must
+    not block the per-workspace copies.
+
+    Regression test: with the pre-fix ordering (copy before the index swap),
+    a real upgrade crashed with UniqueViolation because the copies share
+    capabilities with the not-yet-deleted global rows. The migration tests
+    above never covered this — fresh_schema builds start from the v46
+    baseline, where the legacy index never exists. Here we rebuild the v45
+    shape by hand (drop the new index, recreate the legacy one), seed v45
+    data, then replay init_db exactly as a backend restart after deploy does.
+    """
+    from server.app.db.schema import SCHEMA_VERSION, init_db
+
+    with write_transaction(TEST_DATABASE_URL) as conn:
+        conn.execute("drop index if exists versioned_entities_published_capability")
+        # The v45 index: capability-only, global (init_db's baseline replay
+        # skips recreating the v46 shape because the name already exists).
+        conn.execute(
+            "create unique index versioned_entities_published_capability"
+            " on versioned_entities((definition_json::jsonb->>'capability'))"
+            " where entity_type = 'agent' and status = 'published'"
+        )
+        _seed_workspace(conn, "ws-up-a")
+        _seed_workspace(conn, "ws-up-b")
+        _seed_global_agent(conn, "writer", "write_script")
+        _seed_revision(conn, "ws-up-a", "flow-a", ["write_script"])
+        _seed_revision(conn, "ws-up-b", "flow-b", ["write_script"])
+        # Pretend v46 was never applied so init_db replays the full upgrade.
+        conn.execute("delete from schema_migrations where version=%s", (SCHEMA_VERSION,))
+
+    init_db(TEST_DATABASE_URL)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        for workspace_id in ("ws-up-a", "ws-up-b"):
+            rows = _agent_rows(conn, workspace_id)
+            assert [(row["entity_key"], row["version"], row["status"]) for row in rows] == [
+                ("writer", 1, "published")
+            ]
+        assert _agent_rows(conn, None) == []
+        indexdef = str(
+            conn.execute(
+                "select indexdef from pg_indexes"
+                " where schemaname = current_schema()"
+                " and indexname = 'versioned_entities_published_capability'"
+            ).fetchone()["indexdef"]
+        )
+        assert "workspace_id" in indexdef
+        migration = conn.execute(
+            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
+        ).fetchone()
+    assert migration["name"] == "agent_workspace_scope"
