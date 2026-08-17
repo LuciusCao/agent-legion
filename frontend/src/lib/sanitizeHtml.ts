@@ -23,11 +23,18 @@ function ensureHookInstalled(): void {
   })
 }
 
-export function sanitizeHtml(html: string): string {
+const BASE_TAGS = 'p br strong em ul ol li span div img'.split(' ')
+
+// Markdown rendering (Studio chat agent bubbles) passes extra tags/attrs
+// (code/pre/headings/a+href); the base profile stays tight for RichText.
+export function sanitizeHtml(
+  html: string,
+  extra?: { tags?: string[]; attrs?: string[] }
+): string {
   ensureHookInstalled()
   return DOMPurify.sanitize(html, {
-    ALLOWED_TAGS: 'p br strong em ul ol li span div img'.split(' '),
-    ALLOWED_ATTR: ['src', 'alt', 'referrerpolicy'],
+    ALLOWED_TAGS: [...BASE_TAGS, ...(extra?.tags ?? [])],
+    ALLOWED_ATTR: ['src', 'alt', 'referrerpolicy', ...(extra?.attrs ?? [])],
     // Disallowed tags are unwrapped, keeping their child nodes — including
     // raw-text elements like iframe/script, whose text stays inert.
     KEEP_CONTENT: true,
