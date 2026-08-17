@@ -4359,6 +4359,24 @@ export interface components {
       /** Workflow Key */
       workflow_key?: string | null
     }
+    /**
+     * StudioAgentNodeCodeDraftRequest
+     * @description Node-code draft write with an optional capability declaration.
+     *
+     *     ``expected_capability`` lets the agent declare the capability it believes
+     *     the node binds: for a node present in the active revision it is validated
+     *     (mismatch is a clear 400); for a node that does not exist yet (no active
+     *     revision, or a new node key) its presence authorizes creating a skeleton
+     *     draft ahead of the workflow draft that will introduce the node.
+     */
+    StudioAgentNodeCodeDraftRequest: {
+      /** Change Note */
+      change_note?: string | null
+      /** Code */
+      code: string
+      /** Expected Capability */
+      expected_capability?: string | null
+    }
     /** StudioAgentRegistryEntry */
     StudioAgentRegistryEntry: {
       /** Args */
@@ -8118,7 +8136,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['WorkflowNodeCodeDraftRequest']
+        'application/json': components['schemas']['StudioAgentNodeCodeDraftRequest']
       }
     }
     responses: {

@@ -114,6 +114,20 @@ def test_save_node_code_draft_empty_note_becomes_null(recorded) -> None:
     args = {"workspace_id": "ws-1", "workflow_key": "wf", "node_key": "node", "code": "x"}
     _run_tool(server, "save_node_code_draft", args)
     assert calls[0]["json"]["change_note"] is None
+    assert "expected_capability" not in calls[0]["json"]
+
+
+def test_save_node_code_draft_forwards_expected_capability(recorded) -> None:
+    server, calls = recorded
+    args = {
+        "workspace_id": "ws-1",
+        "workflow_key": "wf",
+        "node_key": "node",
+        "code": "def run(job, job_dir, runtime):\n    return {}\n",
+        "expected_capability": "publish_content",
+    }
+    _run_tool(server, "save_node_code_draft", args)
+    assert calls[0]["json"]["expected_capability"] == "publish_content"
 
 
 def test_get_node_code(recorded) -> None:
