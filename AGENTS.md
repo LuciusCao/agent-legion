@@ -16,7 +16,7 @@
 - 测试并行度默认克制：后端 pytest-xdist 默认 min(4, 核数)（`AGENT_LEGION_TEST_WORKERS` 覆盖），前端 vitest 经 gate 脚本默认 `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖；直接 `npm run test` 不带 cap），rust lane cargo `-j` 默认 min(4, 核数)（`AGENT_LEGION_RUST_WORKERS` 覆盖）；CI 4 核 runner 上这些默认值与不设上限时的并行度相当。多 worktree 并行开发时如仍抢 CPU，把这些 env 再调低（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化（后来者等待，崩溃残留自动回收）；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist worker schema 固定为 gw0..gwN，两个进程并发会互相 TRUNCATE（现场症状：随机测试报 "Bootstrap is only available before the first user exists" 等 setup 错误，单跑必过）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
-- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 拿正式代码与 `make native-prod-up/down` 启停服务（prod-up 启动前会经 `scripts/ensure-velites.sh` 按 velites/ 源码指纹检测并自动重建过期的 velites 二进制）。所有修复与调试（含 Docker 容器调试）必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令（`native-prod-*` / `stack-prod-*`）只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
+- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 拿正式代码与 `make prod-up` / `make prod-down` 启停服务（prod-up 启动前会经 `scripts/ensure-velites.sh` 按 velites/ 源码指纹检测并自动重建过期的 velites 二进制）。所有修复与调试（含 Docker 容器调试）必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令（`prod-up` / `prod-down`，含 `docker` 参数形态与 `stack-prod-up.sh`）只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
 
 ## 2. Agent Tool Discipline
 

@@ -59,9 +59,10 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
 | `init-worktree.sh` | 一键初始化新 worktree（复制 .env、派生并创建专属 Postgres 库、生成 deploy/secrets、种子 worker 配置、恢复 workspace 调度；幂等，macOS）。 |
-| `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。 |
-| `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、ASR 模型预热、全 stack 健康等待（仅 prod worktree 使用）。 |
-| `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。 |
+| `dev_stack.sh` | 开发环境一键启停（`make dev-up` / `dev-down` / `dev-status`）：后台编排 backend + frontend + worker（复用 Makefile `dev-*` target），幂等，日志在 `data/logs/dev-*.log`，up 完成后打印各服务 URL。 |
+| `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。由 `make prod-up` / `make prod-down` 调用。 |
+| `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、ASR 模型预热、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
+| `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 
 ## 一次性与运维脚本
