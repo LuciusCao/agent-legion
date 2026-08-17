@@ -1,12 +1,12 @@
 import { Button } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
-import type { ExecutorRuntimeStatus } from '../types/workspaceTypes'
+import type { CodePoolStatus } from '../types/workspaceTypes'
 
 type WorkspaceCardProps = {
   name: string
   workflowLabel: string
   jobStats: Record<string, number>
-  executorStatus: ExecutorRuntimeStatus[]
+  codePool: CodePoolStatus | undefined
   onClick: () => void
 }
 
@@ -14,21 +14,16 @@ export default function WorkspaceCard({
   name,
   workflowLabel,
   jobStats,
-  executorStatus,
+  codePool,
   onClick,
 }: WorkspaceCardProps) {
   const total = Object.values(jobStats).reduce((a, b) => a + b, 0)
   const running = jobStats['running'] || 0
   const completed = jobStats['completed'] || 0
   const failed = jobStats['failed'] || 0
-  const executorRunning = executorStatus.reduce(
-    (sum, e) => sum + (e.running || 0),
-    0
-  )
-  const executorAvailable = executorStatus.reduce(
-    (sum, e) => sum + (e.available || 0),
-    0
-  )
+  // P-0.5：单一隐含 code 池，容量为实例级；running 是本工作区的在跑数。
+  const executorRunning = codePool?.running ?? 0
+  const executorAvailable = codePool?.available ?? 0
 
   return (
     <div

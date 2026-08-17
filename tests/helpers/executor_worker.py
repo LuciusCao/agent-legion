@@ -3,9 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.executors.config import CodeExecutorConfig, ExecutorConfig, PiExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
@@ -32,22 +30,6 @@ def make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
     )
 
 
-def local_def(capacity: int, capabilities: set[str]) -> Any:
-    return {
-        "kind": "code",
-        "global_capacity": capacity,
-        "capabilities": {cap: {} for cap in capabilities},
-    }
-
-
-def pi_def(capacity: int, capabilities: dict[str, str]) -> Any:
-    return {
-        "kind": "pi",
-        "global_capacity": capacity,
-        "capabilities": {cap: {"skill": skill} for cap, skill in capabilities.items()},
-    }
-
-
 def make_pi_skill(skill_root: Path, skill: str) -> None:
     """Create a minimal Pi skill directory tree for tests."""
     skill_dir = skill_root / skill
@@ -61,76 +43,24 @@ def make_pi_skill(skill_root: Path, skill: str) -> None:
     )
 
 
-def make_registry(
-    executors: dict[str, Any],
-    definitions: dict[str, Any],
-) -> ExecutorRegistry:
-    """Build an ExecutorRegistry from code and/or pi executor definitions."""
-
-    def _build_config(eid: str) -> ExecutorConfig:
-        kind = definitions[eid]["kind"]
-        if kind == "pi":
-            return PiExecutorConfig(**definitions[eid])
-        return CodeExecutorConfig(**definitions[eid])
-
-    return ExecutorRegistry(
-        executors=executors,
-        global_capacities={eid: definitions[eid]["global_capacity"] for eid in definitions},
-        definitions={eid: _build_config(eid) for eid in definitions},
-    )
-
-
-def allocate(
-    job_db: JobQueries,
-    workspace_id: str,
-    executor_id: str,
-    concurrency_limit: int,
-) -> None:
-    with job_db.connect() as conn:
-        conn.execute(
-            """
-            insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit)
-            values (%s, %s, %s)
-            on conflict(workspace_id, executor_id) do update set concurrency_limit=excluded.concurrency_limit
-            """,
-            (workspace_id, executor_id, concurrency_limit),
-        )
-
-
-def bind(
-    job_db: JobQueries,
-    workspace_id: str,
-    workflow_key: str,
-    node_key: str,
-    executor_id: str,
-) -> None:
-    with job_db.connect() as conn:
-        conn.execute(
-            """
-            insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
-            values (%s, %s, %s, %s)
-            on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
-            """,
-            (workspace_id, workflow_key, node_key, executor_id),
-        )
-
-
 def make_worker(
     tmp_path: Path,
     db_path: Path,
-    registry: ExecutorRegistry,
+    executor: Any,
     definitions: list[WorkflowDefinition],
     *,
+    code_capacity: int = 2,
     heartbeat_interval_seconds: float = 1,
     lease_ttl_seconds: float = 5,
     cancellation_grace_seconds: float = 0.5,
     executor_runtime: ExecutorRuntimeConfig | None = None,
 ) -> WorkflowWorkerThread:
+    """Single code pool worker (P-0.5): the executor instance runs every claim."""
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(db_path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=heartbeat_interval_seconds,
         lease_ttl_seconds=lease_ttl_seconds,
         cancellation_grace_seconds=cancellation_grace_seconds,
@@ -144,39 +74,34 @@ def make_worker(
         jobs_dir=tmp_path / "jobs",
         config={"workflows": {"enabled": True}},
         database_url=str(db_path),
-        executor_definitions=registry.definitions(),
         executor_runtime=executor_runtime
         or ExecutorRuntimeConfig.model_validate(
-            {"workflows": {"enabled": True}, "openclaw": {"command_template": ["openclaw"]}}
+            {
+                "workflows": {"enabled": True},
+                "openclaw": {"command_template": ["openclaw"]},
+                "code_capacity": code_capacity,
+            }
         ),
     )
     worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )
-    # Post-#96 every code node needs published code to dispatch; the fake
-    # executors in these tests never read the text, so seed a global no-op
-    # version for every code-capability node of the scanned definitions.
+    # Every non-Agent-routed node runs as code (P-0.5) and needs published
+    # code to dispatch; the fake executors in these tests never read the
+    # text, so seed a global no-op version for every scanned node.
     from server.app.services.node_codes import NodeCodeService
 
-    code_capabilities = {
-        capability
-        for definition in registry.definitions().values()
-        if getattr(definition, "kind", None) == "code"
-        for capability in definition.capabilities
-    }
     codes = NodeCodeService(str(db_path))
     for definition in definitions:
         for node in definition.nodes.values():
-            if node.capability in code_capabilities:
-                codes.seed_global(
-                    definition.key,
-                    node.key,
-                    "def run(job, job_dir, runtime):\n    pass\n",
-                    "test seed",
-                )
+            codes.seed_global(
+                definition.key,
+                node.key,
+                "def run(job, job_dir, runtime):\n    pass\n",
+                "test seed",
+            )
     worker._scan_entries = (definitions, [])
     return worker

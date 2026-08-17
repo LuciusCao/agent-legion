@@ -29,15 +29,6 @@ def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Pa
         node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-    with job_db.connect() as conn:
-        conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (ws["id"], "test", "fetch", "code-default"),
-        )
-        conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
-            (ws["id"], "code-default", 2),
-        )
     _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])

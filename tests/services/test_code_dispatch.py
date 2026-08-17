@@ -26,7 +26,7 @@ from server.app.agent_broker.code_dispatch import (
 )
 from server.app.agent_broker.code_eligibility import is_worker_eligible
 from server.app.agent_workers import AgentWorkerRegistry
-from server.app.executors.config import CodeCapabilityConfig
+from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.vault import VaultService
 from server.app.settings import Settings

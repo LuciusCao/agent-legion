@@ -28,11 +28,7 @@ from server.app.workflows.sharding import (
     on_shard_finished,
 )
 from tests.helpers.executor_worker import (
-    allocate,
-    bind,
-    local_def,
     make_definition,
-    make_registry,
     make_worker,
 )
 from tests.postgres_support import TEST_DATABASE_URL
@@ -302,14 +298,6 @@ def _make_e2e(tmp_path: Path, definition, executor, *, capacity: int = 10):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     workspace = job_db.create_workspace("ws", default_workflow_key="test")
-    capabilities = {node.capability for node in definition.nodes.values()}
-    registry = make_registry(
-        {"code-default": executor},
-        {"code-default": local_def(capacity, capabilities)},
-    )
-    allocate(job_db, workspace["id"], "code-default", capacity)
-    for node in definition.nodes.values():
-        bind(job_db, workspace["id"], "test", node.key, "code-default")
     job = job_db.create_job(
         workflow_key="test",
         source_type="question",
@@ -319,7 +307,7 @@ def _make_e2e(tmp_path: Path, definition, executor, *, capacity: int = 10):
         node_keys=list(definition.nodes),
         workspace_id=workspace["id"],
     )
-    worker = make_worker(tmp_path, db_path, registry, [definition])
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=capacity)
     job_dir = job_storage_dir(tmp_path / "jobs", workspace["id"], str(job["id"]))
     return worker, job_db, job, job_dir
 

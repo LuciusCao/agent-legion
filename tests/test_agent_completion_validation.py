@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
-from tests.executors.adapters.helpers import _make_skill_manager
+from tests.helpers.skill_manager import _make_skill_manager
 
 _VALIDATE_OK = "import sys\nsys.exit(0)\n"
 _VALIDATE_REJECT = (

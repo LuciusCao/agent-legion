@@ -1,33 +1,19 @@
 import { useMemo } from 'react'
-import { useWorkspaceSettingsQuery } from '../../hooks/useWorkspaceSettingsQuery'
 import type { WorkflowDefinitionRecord } from '../../types'
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { buildDagEdges, buildDagNodes } from './workflowStudioDag'
-import type { StudioNodeRouting } from './workflowStudioRouting'
 
-const EMPTY_BINDINGS: StudioNodeRouting['bindings'] = []
-
-// DAG 节点绑定摘要的数据组装：bindings 来自 workspace 设置快照（与设置页共享
-// react-query 缓存，绑定保存后失效自动刷新），agents 来自 executor catalog。
+// DAG 节点路由摘要的数据组装：agents 来自 workspace 级 catalog（P-0.5：无
+// Agent 路由的节点一律进入隐含 code 池，不再有 executor 绑定）。
 export function useStudioDag(
-  workspaceId: string | undefined,
   workflow: WorkflowDefinitionRecord | null,
-  executorCatalog: ExecutorDefinition[],
   agentCatalog: AgentDefinition[]
 ) {
-  const { data: snapshot } = useWorkspaceSettingsQuery(workspaceId)
-  const bindings = snapshot?.executorConfiguration.bindings ?? EMPTY_BINDINGS
   return useMemo(
     () => ({
-      nodes: buildDagNodes(workflow, executorCatalog, {
-        bindings,
-        agents: agentCatalog,
-      }),
+      nodes: buildDagNodes(workflow, { agents: agentCatalog }),
       edges: buildDagEdges(workflow),
     }),
-    [workflow, executorCatalog, agentCatalog, bindings]
+    [workflow, agentCatalog]
   )
 }

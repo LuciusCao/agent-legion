@@ -4,13 +4,18 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
-from server.app.services.workspace_executor_filter import filter_known_executors
 
 if TYPE_CHECKING:
     from server.app.settings import Settings
 
 
 class WorkspaceExecutorConfigurationService:
+    """Workspace execution configuration read model (P-0.5: node limits only).
+
+    The class/route names keep the pre-retirement wording until the step-3
+    contract cleanup; allocations and bindings no longer exist (schema v47).
+    """
+
     def __init__(self, job_db: JobQueries, settings: Settings | None = None) -> None:
         self.job_db = job_db
         self._settings = settings
@@ -18,12 +23,8 @@ class WorkspaceExecutorConfigurationService:
     def get(self, workspace_id: str) -> dict[str, Any]:
         if self.job_db.get_workspace(workspace_id) is None:
             raise NotFoundError("Workspace not found")
-        configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
-        # Read the live settings at call time: executor publish/rollback/
-        # archive hot-reloads settings.executor_definitions, so a dict
-        # captured at construction would filter out freshly published IDs.
-        definitions = self._settings.executor_definitions if self._settings else None
-        configuration = filter_known_executors(configuration, definitions)
-        result: dict[str, Any] = {**configuration, "migration_warnings": []}
-        result["agent_capacity"] = self.job_db.get_workspace_agent_capacity(workspace_id)
-        return result
+        return {
+            "node_limits": self.job_db.get_workspace_node_limits(workspace_id),
+            "migration_warnings": [],
+            "agent_capacity": self.job_db.get_workspace_agent_capacity(workspace_id),
+        }

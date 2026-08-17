@@ -381,8 +381,8 @@ def test_expire_stale_releases_expired_leases(
 def test_active_counts_reflects_released_leases(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
-    workspace_id, job_id = _setup_workspace(queries, "ws-counts", "code-default", workspace_limit=2)
-    executor_id = "code-default"
+    workspace_id, job_id = _setup_workspace(queries, "ws-counts", "code", workspace_limit=2)
+    executor_id = "code"
     claim = repo_a.try_claim(
         _claim_request(workspace_id, job_id, executor_id=executor_id, global_capacity=2)
     )
@@ -395,4 +395,6 @@ def test_active_counts_reflects_released_leases(
     repo_a.finish(claim.lease_id, ExecutionResult(status="completed", exit_code=0))
     counts_after = repo_a.active_counts(executor_id)
     assert counts_after["global"] == 0
-    assert counts_after[workspace_id] == 0
+    # Workspaces without active leases simply do not appear (P-0.5: the
+    # allocation table that used to pre-seed zero rows is gone).
+    assert counts_after.get(workspace_id, 0) == 0

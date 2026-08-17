@@ -2,7 +2,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.events.agents import AgentStatusManager
-from server.app.executors.registry import ExecutorRegistry
+from server.app.executors.code import CodeExecutor
 from server.app.executors.sweeper import SweeperThread
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from tests.helpers import setup_spa_app
@@ -12,12 +12,9 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
     from server.app import main
 
     calls = []
-    received_registry = None
 
     def patched_workflow_start(self):
         calls.append("workflow")
-        nonlocal received_registry
-        received_registry = self.executor_registry
 
     monkeypatch.setattr(WorkflowWorkerThread, "start", patched_workflow_start)
 
@@ -35,8 +32,8 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
         pass  # lifespan startup runs here
 
     assert "workflow" in calls
-    assert isinstance(app.state.executor_registry, ExecutorRegistry)
-    assert app.state.executor_registry is received_registry
+    # P-0.5: the composition root assembles the single code-pool executor.
+    assert isinstance(app.state.code_executor, CodeExecutor)
 
 
 def test_lifespan_sweeper_disabled_by_settings(tmp_path, monkeypatch):

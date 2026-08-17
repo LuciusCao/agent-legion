@@ -11,7 +11,7 @@ from pathlib import Path
 import pytest
 
 from server.app.executors.code import CodeExecutor
-from server.app.executors.config import CodeCapabilityConfig
+from server.app.executors.contracts import CodeCapabilityConfig
 from server.app.executors.models import ExecutionContext
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -98,20 +98,8 @@ def _source(body: str) -> str:
     return textwrap.dedent(body)
 
 
-def _executor(
-    *,
-    timeout_seconds: int = 60,
-    sandbox_network: bool = False,
-) -> CodeExecutor:
-    return CodeExecutor(
-        "code-default",
-        {
-            "fetch_items": CodeCapabilityConfig(
-                timeout_seconds=timeout_seconds, sandbox_network=sandbox_network
-            )
-        },
-        repo_root=REPO_ROOT,
-    )
+def _executor() -> CodeExecutor:
+    return CodeExecutor(repo_root=REPO_ROOT)
 
 
 def _run(executor: CodeExecutor, context: ExecutionContext, source: str, **over):
@@ -125,16 +113,29 @@ def test_config_rejects_retired_path_key() -> None:
 
 
 def test_supports() -> None:
+    # Single implicit code pool (P-0.5): the adapter accepts any capability;
+    # dispatch fails nodes without published node code earlier (EXEC-CODE-002).
     executor = _executor()
     assert executor.supports("fetch_items")
-    assert not executor.supports("other")
+    assert executor.supports("other")
 
 
-def test_execute_missing_capability(context: ExecutionContext) -> None:
-    executor = _executor()
-    result = executor.execute(replace(context, capability="missing"))
-    assert result.status == "failed"
-    assert "not supported" in result.error_message
+def test_execute_unknown_capability_runs_with_platform_defaults(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """No capability declaration is needed (P-0.5): the run falls back to the
+    platform default timeout/network and executes the published code text."""
+    _sandboxed(monkeypatch)
+    result = _run(
+        _executor(),
+        context,
+        """
+        def run(job, job_dir, runtime):
+            (job_dir / "out.json").write_text("{}", encoding="utf-8")
+        """,
+        capability="missing",
+    )
+    assert result.status == "completed"
 
 
 def test_execute_without_node_code_is_a_config_error(context: ExecutionContext) -> None:
@@ -200,7 +201,7 @@ def test_execute_timeout_kills_child(
 ) -> None:
     _sandboxed(monkeypatch)
     result = _run(
-        _executor(timeout_seconds=1),
+        _executor(),
         context,
         """
         import time
@@ -208,6 +209,7 @@ def test_execute_timeout_kills_child(
         def run(job, job_dir, runtime):
             time.sleep(60)
         """,
+        node_config={"timeout_seconds": 1},
     )
     assert result.status == "failed"
     assert "timed out after 1s" in result.error_message
@@ -325,7 +327,7 @@ def test_custom_sandbox_env_is_whitelisted(
 def test_custom_sandbox_denies_network_by_default(
     context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """Outbound network is denied unless the capability opts in (EXEC-CODE-003)."""
+    """Outbound network is denied unless the node opts in (EXEC-CODE-003, P-0.5)."""
     _sandboxed(monkeypatch)
     source = _source(
         """
@@ -340,8 +342,13 @@ def test_custom_sandbox_denies_network_by_default(
     assert denied.status == "failed"
     assert _NET_ERROR in denied.error_message
 
-    allowed = _executor(sandbox_network=True).execute(
-        replace(context, node_code=source, execution_id="exec-net")
+    allowed = _executor().execute(
+        replace(
+            context,
+            node_code=source,
+            execution_id="exec-net",
+            node_config={"sandbox_network": True},
+        )
     )
     assert allowed.status == "failed"
     # With network allowed the failure is a plain connection refusal, not EPERM.
@@ -668,3 +675,64 @@ def test_sandboxed_node_can_use_framework_modules(
 
     data = json.loads((context.job_dir / "out.json").read_text(encoding="utf-8"))
     assert data == {"auth": "Bearer tok", "subs": 1}
+
+
+# ---------------------------------------------------------------------------
+# P-0.5: timeout/sandbox_network come from the resolved node config
+# (reserved execution keys); the platform defaults (600s / deny) are the only
+# fallback — the executor capability layer is retired (step 3).
+
+
+def test_execute_timeout_comes_from_node_config(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The dispatch-resolved node config carries the timeout; missing or
+    invalid reserved keys fall back to the platform default (600s)."""
+    _sandboxed(monkeypatch)
+    result = _run(
+        _executor(),
+        context,
+        """
+        import time
+
+        def run(job, job_dir, runtime):
+            time.sleep(60)
+        """,
+        node_config={"timeout_seconds": 1},
+    )
+    assert result.status == "failed"
+    assert "timed out after 1s" in result.error_message
+
+
+def test_sandbox_network_opt_in_comes_from_node_config(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """sandbox_network=true in the resolved node config opts the node into
+    network access; anything else keeps the sandbox default (deny)."""
+    _sandboxed(monkeypatch)
+    source = _source(
+        """
+        import urllib.request
+
+        def run(job, job_dir, runtime):
+            urllib.request.urlopen("http://127.0.0.1:9/", timeout=2)
+        """
+    )
+
+    denied = _executor().execute(
+        replace(context, node_code=source, node_config={"sandbox_network": False})
+    )
+    assert denied.status == "failed"
+    assert _NET_ERROR in denied.error_message
+
+    # With network allowed the failure is a plain connection refusal, not EPERM.
+    allowed = _executor().execute(
+        replace(
+            context,
+            node_code=source,
+            execution_id="exec-net-node",
+            node_config={"sandbox_network": True},
+        )
+    )
+    assert allowed.status == "failed"
+    assert "Operation not permitted" not in allowed.error_message

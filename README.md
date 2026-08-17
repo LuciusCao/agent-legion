@@ -91,8 +91,8 @@ data/  (videos, logs, packages, jobs, run traces)
 Key design rules (enforced by architecture checks, see
 [AGENTS.md](AGENTS.md) and [docs/architecture/](docs/architecture/)):
 
-- Workflow nodes declare `capability` only — runner, agent, and skill wiring
-  live in the executor layer.
+- Workflow nodes declare `capability` only — agent/skill wiring lives in
+  Agent definitions, and code nodes resolve to published `node_code`.
 - Routes are thin HTTP adapters; business logic lives in services; executors
   acquire capacity exclusively through leases.
 - Frontend transport types are generated from the backend OpenAPI schema
@@ -192,9 +192,10 @@ timing, agent worker limits, `workflows.enabled`, the OpenClaw runtime block
 `global_settings` document `instance` and are edited through the admin API
 `GET/PUT /api/admin/instance-settings`; they hydrate at startup and take
 effect on restart. `AGENT_LEGION_OPENCLAW_CWD` stays as an env override that
-outranks the DB value. Executor definitions (the retired `workflow.yaml`
-`executors` section) live in the DB `versioned_entities` table, seeded from
-the built-in factory catalog at startup and managed in Studio.
+outranks the DB value. Executor definitions are retired (P-0.5, schema v47):
+non-Agent-routed nodes join an implicit code pool whose capacity comes from
+the instance `code_capacity` setting, and node-tunable parameters are
+declared by Agent definitions or the node's own `config_schema:` block.
 
 Secrets are never written to yaml: database URL comes from
 `AGENT_LEGION_DATABASE_URL`, the vault master key from

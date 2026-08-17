@@ -17,8 +17,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     reload,
     fetchRevisionDetail,
   } = useWorkflowStudioData(workspaceId)
-  const { executors: executorCatalog, agents: agentCatalog } =
-    useExecutorCatalog(workspaceId)
+  const { agents: agentCatalog } = useExecutorCatalog(workspaceId)
   const draft = useWorkflowStudioDraft(
     workspaceId,
     originalYaml,
@@ -32,12 +31,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     draft.dirty
   )
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
-  const { nodes, edges } = useStudioDag(
-    workspaceId,
-    draft.visibleWorkflow,
-    executorCatalog,
-    agentCatalog
-  )
+  const { nodes, edges } = useStudioDag(draft.visibleWorkflow, agentCatalog)
   return {
     loadState,
     actionState: actions.actionState,
@@ -45,7 +39,6 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     revision: draft.visibleRevision,
     activeRevision: revision,
     revisions,
-    executorCatalog,
     agentCatalog,
     definitionYaml: draft.definitionYaml,
     setDefinitionYaml: draft.setDraftYaml,

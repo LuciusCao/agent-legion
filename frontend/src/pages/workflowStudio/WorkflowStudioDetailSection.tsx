@@ -1,8 +1,5 @@
 import type { WorkflowDefinitionRecord } from '../../types'
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { WorkflowNodeDetailView } from './WorkflowNodeDetailView'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'
 import sidePanelStyles from '../WorkflowStudioPageSidePanel.module.css'
@@ -11,7 +8,6 @@ import splitStyles from './WorkflowStudioSplitLayout.module.css'
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   nodeKey: string
-  executorCatalog: ExecutorDefinition[]
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
@@ -44,7 +40,6 @@ export function WorkflowStudioDetailSection(props: Props) {
       <WorkflowNodeDetailView
         workflow={props.workflow}
         nodeKey={props.nodeKey}
-        executorCatalog={props.executorCatalog}
         agentCatalog={props.agentCatalog}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}

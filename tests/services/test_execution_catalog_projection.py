@@ -2,7 +2,8 @@
 
 全局 ``workflows.pi`` 投影已随 YAML 退役（agent 配置治理 phase 3）：执行默认
 是 workspace 级配置，全局 catalog 无从投影，前端「继承默认」提示改读
-workspace settings payload 的 agentDefaults。
+workspace settings payload 的 agentDefaults。P-0.5（schema v47）后 catalog
+只剩 Agent 半边：executor 概念整体退役。
 """
 
 from __future__ import annotations
@@ -43,7 +44,7 @@ _AGENTS = {
 
 @pytest.mark.no_db
 def test_catalog_lists_agents_without_execution_projection(tmp_path: Path) -> None:
-    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS, {})
+    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS)
 
     agents = {entry["id"]: entry for entry in catalog["agents"]}
     assert set(agents) == set(_AGENTS)
@@ -59,11 +60,8 @@ def test_catalog_lists_agents_without_execution_projection(tmp_path: Path) -> No
 
 
 @pytest.mark.no_db
-def test_executor_capability_details_have_no_runtime_projection(tmp_path: Path) -> None:
-    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS, {})
+def test_catalog_has_no_executors_half(tmp_path: Path) -> None:
+    """P-0.5（schema v47）：executor 概念退役，catalog 只剩 Agent 半边。"""
+    catalog = execution_catalog(_settings(tmp_path), _StubSkills(), "ws-test", _AGENTS)
 
-    for executor in catalog["executors"]:
-        for detail in executor["capability_details"]:
-            assert "provider" not in detail
-            assert "model" not in detail
-            assert "thinking" not in detail
+    assert set(catalog) == {"agents"}

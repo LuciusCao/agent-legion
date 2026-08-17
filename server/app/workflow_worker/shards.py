@@ -27,16 +27,13 @@ from typing import TYPE_CHECKING, Any
 from server.app.db.transaction import write_transaction
 from server.app.executors._lease_shards import complete_empty_shard_node
 from server.app.executors.models import (
+    CODE_EXECUTOR_ID,
     ConfigurationFailureRequest,
     ExecutionContext,
     LeaseClaimRequest,
 )
 from server.app.executors.scheduling.capacity import CapacitySnapshot
-from server.app.jobs.queries.workspace_node_bindings import (
-    get_binding,
-    get_local_node_limit,
-    has_local_node_limit,
-)
+from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
 from server.app.workflow_worker.execution import submit_claim
 from server.app.workflows.definition import WorkflowNode
 from server.app.workflows.sharding import (
@@ -69,37 +66,12 @@ def claim_shard_node(
     log_path = worker.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
+    # Shard nodes join the implicit code pool like any other code node
+    # (P-0.5): no binding/allocation lookup remains.
     with worker.job_db._connect_read() as conn:
-        binding = get_binding(conn, workspace_id, workflow_key, node_key)
-        if binding is None:
-            _fail_node(
-                worker, workspace_id, job, workflow_key, node, log_path, "No Executor binding"
-            )
-            return True
-        executor_id = binding["executor_id"]
-        try:
-            executor = worker.registry.require(executor_id, node.capability)
-        except Exception as exc:
-            _fail_node(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
-            return True
-        local_node_limit: int | None = None
-        if executor.kind == "code":
-            local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
-        elif has_local_node_limit(conn, workspace_id, workflow_key, node_key):
-            _fail_node(
-                worker,
-                workspace_id,
-                job,
-                workflow_key,
-                node,
-                log_path,
-                "Node limits are not supported for agent executors",
-            )
-            return True
+        local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
 
-    global_capacity = worker.registry.global_capacity(executor_id)
-    if global_capacity is None:
-        return False
+    global_capacity = worker.settings.executor_runtime.code_capacity
 
     rows = _read_shard_rows(worker, job["id"], node_key)
     if not rows:
@@ -131,13 +103,13 @@ def claim_shard_node(
             continue
         if shard.max_concurrency is not None and running >= shard.max_concurrency:
             break
-        if not snapshot.has_capacity(executor_id, workspace_id):
+        if not snapshot.has_capacity(workspace_id, workflow_key, node_key):
             break
         shard_index = int(row["shard_index"])
         shard_log_path = log_path.with_name(f"{job['id']}-{node_key}-shard-{shard_index}.log")
         claim = worker.leases.try_claim(
             LeaseClaimRequest(
-                executor_id=executor_id,
+                executor_id=CODE_EXECUTOR_ID,
                 global_capacity=global_capacity,
                 workspace_id=workspace_id,
                 job_id=job["id"],
@@ -159,7 +131,7 @@ def claim_shard_node(
         )
         if claim is None:
             break  # capacity lost to a race; the next poll pass re-evaluates
-        snapshot.record_claim(executor_id, workspace_id)
+        snapshot.record_claim(workspace_id, workflow_key, node_key)
         running += 1
         claimed_any = True
         context = ExecutionContext(
@@ -184,7 +156,7 @@ def claim_shard_node(
                 "shard_input": json.loads(row["input_json"]),
             },
         )
-        submit_claim(worker, executor_id, claim, context)
+        submit_claim(worker, CODE_EXECUTOR_ID, claim, context)
     return claimed_any
 
 

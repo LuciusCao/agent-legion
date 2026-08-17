@@ -115,3 +115,33 @@ def test_manifest_safe_config_drops_secret_and_unknown_keys() -> None:
         "credential": "vault:cms-api-key",
     }
     assert manifest_safe_config({}, config) == {}
+
+
+def test_reserved_execution_merge_produces_valid_typed_schema() -> None:
+    """The platform-reserved execution keys (P-0.5) merge into a code node's
+    schema as ordinary typed-subset, non-secret properties."""
+    from server.app.services.node_execution_config import merge_reserved_execution_schema
+
+    merged = merge_reserved_execution_schema(
+        {"type": "object", "properties": {"page_size": {"type": "integer", "default": 50}}}
+    )
+    validate_config_schema(merged)
+    assert config_schema_defaults(merged) == {
+        "page_size": 50,
+        "timeout_seconds": 600,
+        "sandbox_network": False,
+    }
+    cleaned = validate_config_values(
+        merged, {"page_size": 50, "timeout_seconds": 30, "sandbox_network": True}
+    )
+    assert cleaned == {"page_size": 50, "timeout_seconds": 30, "sandbox_network": True}
+    with pytest.raises(ConfigSchemaError, match="must be >= 1"):
+        validate_config_values(merged, {"timeout_seconds": 0})
+    with pytest.raises(ConfigSchemaError, match="must be of type boolean"):
+        validate_config_values(merged, {"sandbox_network": "yes"})
+    # Reserved keys are non-secret: the manifest whitelist passes them
+    # through (CONFIG-MANIFEST-001).
+    assert manifest_safe_config(merged, {"timeout_seconds": 30, "sandbox_network": True}) == {
+        "timeout_seconds": 30,
+        "sandbox_network": True,
+    }

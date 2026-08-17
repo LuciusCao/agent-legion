@@ -57,18 +57,18 @@ invariants:
         gate: quick
 
   - id: EXEC-STATS-001
-    statement: "Workspace runtime stats derive from executor allocations, bindings, active leases, and configured capacities without consulting AgentStatusManager."
+    statement: "Workspace runtime stats report the single implicit code pool (P-0.5: instance code_capacity, per-workspace and global active leases) without consulting AgentStatusManager or any executor configuration table."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_workspace_configuration_service.py::test_executor_stats_report_configured_capacity_and_leases
+        target: tests/test_workspace_configuration_service.py::test_code_pool_stats_report_capacity_and_leases
         gate: quick
       - kind: integration
-        target: tests/test_workspace_configuration_service.py::test_executor_stats_does_not_consult_agent_status_manager
+        target: tests/test_workspace_configuration_service.py::test_code_pool_stats_does_not_consult_agent_status_manager
         gate: quick
       - kind: integration
-        target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_executor_status_reflects_allocations_and_leases
+        target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_code_pool_reflects_leases
         gate: quick
 
   - id: DB-LIFECYCLE-001
@@ -81,7 +81,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CAPACITY-001
-    statement: "Executor global capacity is shared across workspaces and never exceeded."
+    statement: "The implicit code pool capacity (instance settings code_capacity) is shared across workspaces and never exceeded; the lease claim transaction is the authoritative enforcement."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -89,11 +89,14 @@ invariants:
         target: tests/test_workflow_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
         gate: quick
       - kind: integration
-        target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_bounded_fairness
+        target: tests/executors/leases/test_capacity_limits.py::test_workspace_a_can_starve_workspace_b_at_global_capacity
+        gate: quick
+      - kind: integration
+        target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_round_robin_fairness
         gate: full
 
   - id: EXEC-FAIRNESS-001
-    statement: "Runnable workspaces receive bounded scheduling opportunity under contention."
+    statement: "Runnable workspaces receive bounded scheduling opportunity under contention (round-robin only; per-workspace capacity isolation retired with the allocation layer, P-0.5)."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -101,11 +104,29 @@ invariants:
         target: tests/test_workflow_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
         gate: quick
       - kind: integration
-        target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_bounded_fairness
+        target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_round_robin_fairness
         gate: full
       - kind: failure_injection
         target: tests/ci/test_executor_worker_stress.py::test_fairness_under_randomized_insertion_order
         gate: ci_extended
+
+  - id: EXEC-CODE-POOL-001
+    statement: "Every non-Agent-routed node joins the implicit code pool: no executor binding/allocation concept exists (schema v47 dropped both tables), pool capacity comes from the instance settings code_capacity, per-node concurrency is still enforced via workspace_node_limits, and lease rows carry the constant 'code' executor id."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/executors/leases/test_capacity_limits.py::test_claims_write_the_code_pool_executor_id
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_worker_thread_local.py::test_worker_creates_the_single_code_pool
+        gate: quick
+      - kind: integration
+        target: tests/db/test_executor_retirement_migration.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_executor_cancellation_recovery.py
+        gate: full
 
   - id: EXEC-CANCEL-001
     statement: "Adapter-specific cancellation terminates active Pi/OpenClaw subprocess groups and isolated code node subprocesses within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
@@ -352,34 +373,13 @@ invariants:
         target: tests/test_pi_runner.py
         gate: quick
 
-  - id: EXEC-KIND-001
-    statement: "Executor kinds must resolve through the kinds registry (register_kind/build_executor); isinstance dispatch chains over executor config types are forbidden in registry.py."
-    owner: workspace-executor
-    risk: high
-    evidence:
-      - kind: integration
-        target: tests/executors/test_executor_kind_registration.py::test_unknown_kind_rejected_at_config_load
-        gate: quick
-      - kind: contract
-        target: tests/test_architecture_execution_decoupling.py
-        gate: quick
-
   - id: EXEC-CODE-001
-    statement: "The capability 'path' binding to repo-tracked node files is retired (#96): executor definitions never carry a path key (the pydantic model rejects it; the loader tolerates-and-strips legacy stored keys with a warning because versioned entities are immutable), the repo-file module loader and the bare multiprocessing child are gone, and the Studio repo-file viewer (routes/services workflow_node_files) is deleted. The only repo-tracked node code left is the demo workflow's two seed sources under workflow_nodes/ — git-reviewed, CI-gated, read-only for every runtime path — published at startup as global (workspace-NULL) node_code versions via seed-if-absent (server/app/services/demo_node_seed.py), so the demo runs on a fresh deployment with zero per-workspace setup."
+    statement: "The capability 'path' binding to repo-tracked node files is retired (#96): no code-execution parameter carrier ever carries a path key (the pydantic model rejects it), the repo-file module loader and the bare multiprocessing child are gone, and the Studio repo-file viewer (routes/services workflow_node_files) is deleted. The only repo-tracked node code left is the demo workflow's two seed sources under workflow_nodes/ — git-reviewed, CI-gated, read-only for every runtime path — published at startup as global (workspace-NULL) node_code versions via seed-if-absent (server/app/services/demo_node_seed.py), so the demo runs on a fresh deployment with zero per-workspace setup. Executor definitions themselves retired at schema v47 (P-0.5): the single implicit code pool runs every non-Agent-routed node."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
         target: tests/executors/test_code_executor.py
-        gate: quick
-      - kind: integration
-        target: tests/executors/test_executor_kind_registration.py::test_builtin_kinds_registered
-        gate: quick
-      - kind: integration
-        target: tests/executors/test_builtin_definitions.py
-        gate: quick
-      - kind: integration
-        target: tests/services/test_executor_definition_service.py
         gate: quick
       - kind: integration
         target: tests/services/test_demo_node_seed.py
@@ -562,7 +562,7 @@ invariants:
         gate: full
 
   - id: STUDIO-AGENT-001
-    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a fixed non-sliding TTL, and is revocable). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent and executor definitions), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role."
+    statement: "Studio agent conversation runs authenticate with short-lived scoped tokens minted by the server (auth_scoped_tokens persists only sha256 digests; each token binds the initiating user and actor_scope='studio_agent', carries a fixed non-sliding TTL, and is revocable). Run tokens additionally bind the chat session's workspace (schema v45, auth_scoped_tokens.workspace_id): workspace-path tool endpoints refuse a bound token operating on any other workspace with 403, and the session-context endpoint hides foreign (bound) or non-member (unbound) sessions behind 404; unbound self-service tokens (origin='user') follow workspace membership, mirroring require_workspace_access. Scoped tokens resolve only through the Bearer channel, and every effecting endpoint mounts reject_studio_agent_scope to refuse them with 403 while draft/validate endpoints stay reachable. Effecting endpoints comprise the publish/rollback/archive flows (workflow drafts, node code, agent definitions — the executor definition endpoints retired with the executor concept, schema v47), job lifecycle and execution triggers (job delete, rerun/run-to/continue and their batch variants, batch intake, workflow upgrade, quality replays), workspace/secret/package/member/settings/configuration writes, worker pause/resume, and the studio chat effecting endpoints (session create/close, message send/cancel, permission answers, context push — a scoped token must not mint fresh run tokens, self-approve permission prompts, nor rewrite the context it reads back); require_admin additionally refuses any scoped identity outright, so admin endpoints stay unreachable even though a scoped token inherits the initiating user's role."
     owner: security
     risk: high
     evidence:
@@ -604,7 +604,7 @@ invariants:
         gate: quick
 
   - id: CONFIG-MANIFEST-001
-    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload."
+    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload. The schema source priority is Agent Definition → node-declared `config_schema` (workflow YAML, versioned with the revision snapshot; it must not redeclare platform-reserved keys) — the executor capability fallback retired with the executor concept (P-0.5, schema v47); code-routed nodes get the platform-reserved execution keys `timeout_seconds` (integer, default 600, >= 1) and `sandbox_network` (boolean, default false) auto-merged into their effective schema — the v47 harvest moved executor-level timeout/network values onto the revision nodes' config — so timeout/network travel the same freeze chain, and frozen batches predating the reserved keys are padded with the node's own declared values underneath at dispatch (frozen values win)."
     owner: security
     risk: critical
     evidence:
@@ -613,6 +613,9 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/services/test_node_config.py
+        gate: quick
+      - kind: integration
+        target: tests/test_workflow_definition.py
         gate: quick
       - kind: integration
         target: tests/full/test_node_config_manifest.py

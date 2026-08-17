@@ -30,12 +30,11 @@ def claim_lease(
     execution_id = str(uuid.uuid4())
     now = datetime.now(UTC)
 
-    # Capacity is scoped to an executor. Serializing only competing claims for
-    # that executor makes the count-and-insert decision correct across API
-    # replicas without blocking unrelated executors.
+    # Single implicit code pool (P-0.5): every executor-routed node claims
+    # from the same pool, so one lock key serializes all competing claims.
     conn.execute(
         "select pg_advisory_xact_lock(hashtext(%s))",
-        (f"executor-claim:{request.executor_id}",),
+        ("code-pool",),
     )
 
     current_control = _read_job_execution_control(conn, request.job_id)
@@ -46,41 +45,6 @@ def claim_lease(
         # 开始时刻的 updated_at 越过 watermark，见 mark_scan 模块文档），
         # 认领事务内必须以当前 jobs.status 为准。
         return None
-
-    allocation = conn.execute(
-        """
-        select concurrency_limit
-        from workspace_executor_allocations
-        where workspace_id=%s and executor_id=%s
-        """,
-        (request.workspace_id, request.executor_id),
-    ).fetchone()
-    if allocation is None:
-        raise ValueError(
-            f"No allocation for executor {request.executor_id} in workspace {request.workspace_id}"
-        )
-    workspace_limit = allocation["concurrency_limit"]
-    if workspace_limit <= 0:
-        raise ValueError(
-            f"Invalid workspace allocation limit {workspace_limit} for {request.executor_id}"
-        )
-
-    binding = conn.execute(
-        """
-        select executor_id
-        from workspace_node_bindings
-        where workspace_id=%s and workflow_key=%s and node_key=%s
-        """,
-        (request.workspace_id, request.workflow_key, request.node_key),
-    ).fetchone()
-    if binding is None:
-        raise ValueError(
-            f"No binding for node {request.node_key} in {request.workspace_id}/{request.workflow_key}"
-        )
-    if binding["executor_id"] != request.executor_id:
-        raise ValueError(
-            f"Node {request.node_key} is bound to {binding['executor_id']}, not {request.executor_id}"
-        )
 
     if request.local_node_limit is not None:
         limit_row = conn.execute(
@@ -110,20 +74,9 @@ def claim_lease(
         """,
         (request.executor_id, now_str),
     ).fetchone()
-    workspace_count_row = conn.execute(
-        """
-        select count(*) as cnt
-        from executor_leases
-        where workspace_id=%s and executor_id=%s and status='active' and expires_at>%s
-        """,
-        (request.workspace_id, request.executor_id, now_str),
-    ).fetchone()
     global_count = int(global_count_row["cnt"]) if global_count_row is not None else 0
-    workspace_count = int(workspace_count_row["cnt"]) if workspace_count_row is not None else 0
 
     if global_count >= request.global_capacity:
-        return None
-    if workspace_count >= workspace_limit:
         return None
 
     if request.local_node_limit is not None:

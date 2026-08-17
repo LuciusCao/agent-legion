@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from server.app.services.node_codes import NodeCodeService
+from tests.postgres_support import TEST_DATABASE_URL
+
 _DRAFT_YAML = """
 key: test_validate_flow
 label: Test Validate Flow
@@ -16,7 +19,7 @@ def _urls(workspace_id: str) -> tuple[str, str]:
     return f"{base}/validate", f"{base}/publish"
 
 
-def test_validate_reports_binding_errors(client, job_db) -> None:
+def test_validate_reports_unresolvable_code_errors(client, job_db) -> None:
     job_db.create_workspace("ws-validate", default_workflow_key="test_validate_flow")
     validate_url, publish_url = _urls("ws-validate")
 
@@ -25,7 +28,8 @@ def test_validate_reports_binding_errors(client, job_db) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["valid"] is False
-    assert any("missing executor binding" in error for error in body["errors"])
+    # P-0.5: the publish gate is resolvable node code, not executor bindings.
+    assert any("no published node code" in error for error in body["errors"])
 
     # The same set publish would report — and validate persisted nothing.
     publish = client.post(publish_url, json={"definition_yaml": _DRAFT_YAML})
@@ -33,20 +37,17 @@ def test_validate_reports_binding_errors(client, job_db) -> None:
     assert job_db.get_active_workflow_revision("ws-validate", "test_validate_flow") is None
 
 
-def test_validate_clean_with_complete_binding(client, job_db) -> None:
+def test_validate_clean_with_published_node_code(client, job_db) -> None:
     workspace = job_db.create_workspace("ws-validate-ok", default_workflow_key="test_validate_flow")
-    job_db.replace_workspace_executor_configuration(
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(
         workspace["id"],
-        allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
-        bindings=[
-            {
-                "workflow_key": "test_validate_flow",
-                "node_key": "publish_content",
-                "executor_id": "code-default",
-            }
-        ],
-        node_limits=[],
+        "test_validate_flow",
+        "publish_content",
+        "def run(job, job_dir, runtime):\n    pass\n",
+        "test seed",
     )
+    codes.publish(workspace["id"], "test_validate_flow", "publish_content")
     validate_url, _ = _urls("ws-validate-ok")
 
     response = client.post(validate_url, json={"definition_yaml": _DRAFT_YAML})

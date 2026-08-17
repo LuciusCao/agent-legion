@@ -30,7 +30,7 @@ from server.app.jobs.atomic_mutations import prepare_replay_copy
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
-from server.app.services.node_config import batch_source_payload, frozen_node_config
+from server.app.services.node_config_batch import batch_source_payload, frozen_node_config
 from server.app.services.quality_labels import artifact_contents
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot

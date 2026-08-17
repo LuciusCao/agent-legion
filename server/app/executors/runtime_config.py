@@ -3,14 +3,12 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
-from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
 
 logger = logging.getLogger(__name__)
@@ -98,6 +96,10 @@ class ExecutorRuntimeConfig(BaseModel):
     lease_ttl_seconds: int = Field(default=90, ge=1)
     heartbeat_failure_threshold: int = Field(default=3, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
+    # Implicit single code pool capacity (P-0.5): non-Agent-routed nodes all
+    # claim from this pool. Instance-settings managed; takes effect on
+    # restart (no hot reload).
+    code_capacity: int = Field(default=16, gt=0)
     sweeper_enabled: bool = True
     sweeper_interval_seconds: float = Field(default=5.0, gt=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
@@ -140,34 +142,17 @@ def _resolve_executable(value: str) -> Path | None:
     return Path(found) if found else None
 
 
-def validate_runtime(
-    runtime: ExecutorRuntimeConfig,
-    config: dict[str, Any],
-    executor_definitions: Mapping[str, ExecutorConfig] | None = None,
-) -> None:
+def validate_runtime(runtime: ExecutorRuntimeConfig, config: dict[str, Any]) -> None:
     """Validate enabled runtime dependencies at startup.
 
-    Disabled runtimes require nothing. Enabled executors require their executable
-    or working directory to exist. Business integrations (CMS credentials, ASR
-    machine paths) retired with the legacy business workflows: external service
-    endpoints/credentials live on instance-level connections and are injected
-    into node config at dispatch time, so startup has nothing to pre-check for
-    them.
+    Business integrations (CMS credentials, ASR machine paths) retired with the
+    legacy business workflows: external service endpoints/credentials live on
+    instance-level connections and are injected into node config at dispatch
+    time, so startup has nothing to pre-check for them. The pi executor
+    precheck retired with the executor concept (P-0.5, schema v47): agent
+    runtimes are preflighted on the Agent Worker side.
     """
     errors: list[tuple[str, str]] = []
-
-    if runtime.workflows.enabled and any(
-        isinstance(definition, PiExecutorConfig)
-        for definition in (executor_definitions or {}).values()
-    ):
-        # The workflows.pi yaml block is retired: the binary comes from the
-        # hardcoded PiRuntimeConfig default (kept for this retained pi path).
-        pi_binary = str(runtime.workflows.pi.binary or "")
-        if not pi_binary:
-            errors.append(("pi executor binary", "missing pi binary"))
-        else:
-            if _resolve_executable(pi_binary) is None:
-                errors.append(("pi executor binary", "pi binary is not executable or on PATH"))
 
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():

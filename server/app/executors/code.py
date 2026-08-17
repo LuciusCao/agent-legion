@@ -1,4 +1,4 @@
-"""Code executor kind: run DB-published Python node code as DAG nodes.
+"""The code executor: run DB-published Python node code as DAG nodes.
 
 All node code arrives as text on ``ExecutionContext.node_code`` — resolved at
 dispatch from the frozen job version, the workspace's published version, or
@@ -9,9 +9,13 @@ decorated with the node SDK's ``@entrypoint``).
 
 Because node code is DB-backed, it runs inside the velites OS sandbox
 (EXEC-CODE-003, ``velites sandbox wrap``): read-only filesystem except
-``job_dir``/tmp, network denied unless the capability opts in
-(``sandbox_network``), and fail-closed — without a sandbox backend the
-executor refuses to run code at all.
+``job_dir``/tmp, network denied unless the node opts in (``sandbox_network``
+via the resolved node config, P-0.5), and fail-closed — without a sandbox
+backend the executor refuses to run code at all.
+
+P-0.5: this is the only executor — the single implicit code pool
+(CODE_EXECUTOR_ID), assembled directly by the app composition root; the
+kind-registration machinery is gone.
 """
 
 from __future__ import annotations
@@ -26,11 +30,17 @@ from pathlib import Path
 from typing import Any
 
 from server.app.executors._code_sandbox import execute_custom_sandboxed
-from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
-from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
-from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.executors.models import (
+    CODE_EXECUTOR_ID,
+    ExecutionContext,
+    ExecutionResult,
+)
 
 logger = logging.getLogger(__name__)
+
+# Platform fallback for contexts built without dispatch resolution (tests);
+# dispatch always carries the resolved reserved-key values (P-0.5).
+_DEFAULT_TIMEOUT_SECONDS = 600
 
 
 def _failed(context: ExecutionContext, message: str) -> ExecutionResult:
@@ -43,19 +53,16 @@ class CodeExecutor:
     """Adapter that runs DB-published node code inside the velites sandbox."""
 
     kind = "code"
+    id = CODE_EXECUTOR_ID
 
     def __init__(
         self,
-        id: str,
-        capabilities: Mapping[str, CodeCapabilityConfig],
         repo_root: Path,
         settings_config: Mapping[str, Any] | None = None,
         job_db: Any | None = None,
         cancellation_grace_seconds: float = 5,
     ) -> None:
-        self.id = id
         self._repo_root = Path(repo_root).resolve()
-        self._capabilities = dict(capabilities)
         self.settings_config = dict(settings_config) if settings_config is not None else {}
         self.job_db = job_db
         self.cancellation_grace_seconds = cancellation_grace_seconds
@@ -64,7 +71,10 @@ class CodeExecutor:
         self._velites_path: str | None = None
 
     def supports(self, capability: str) -> bool:
-        return capability in self._capabilities
+        # Single implicit code pool (P-0.5): the adapter runs any capability;
+        # dispatch fails nodes without published node code earlier
+        # (EXEC-CODE-002), so there is no capability allowlist left here.
+        return True
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         if context.execution_id in self._cancelled:
@@ -76,10 +86,6 @@ class CodeExecutor:
                 log_path=str(context.log_path),
             )
 
-        cap_config = self._capabilities.get(context.capability)
-        if cap_config is None:
-            return _failed(context, f"capability {context.capability!r} is not supported")
-
         if context.node_code is None:
             # Dispatch resolves code text and fails the node earlier; this is
             # the defensive backstop (EXEC-CODE-002).
@@ -87,7 +93,13 @@ class CodeExecutor:
                 context,
                 f"capability {context.capability!r} has no published node code (EXEC-CODE-002)",
             )
-        return execute_custom_sandboxed(self, context, cap_config.timeout_seconds)
+        # The timeout travels the node config chain (P-0.5): the resolved
+        # node config wins, the platform default is the fallback for contexts
+        # built without dispatch resolution (e.g. tests).
+        timeout = context.node_config.get("timeout_seconds")
+        if not isinstance(timeout, int) or isinstance(timeout, bool) or timeout < 1:
+            timeout = _DEFAULT_TIMEOUT_SECONDS
+        return execute_custom_sandboxed(self, context, timeout)
 
     def cancel(self, execution_id: str) -> None:
         self._cancelled.add(execution_id)
@@ -128,21 +140,3 @@ class CodeExecutor:
             log_path=str(context.log_path),
             produced_artifacts=produced,
         )
-
-
-def build_code_executor(
-    executor_id: str, config: CodeExecutorConfig, deps: RuntimeDependencies
-) -> CodeExecutor:
-    return CodeExecutor(
-        id=executor_id,
-        capabilities=config.capabilities,
-        repo_root=deps.repo_root,
-        settings_config=deps.settings_config,
-        job_db=deps.job_db,
-        cancellation_grace_seconds=deps.cancellation_grace_seconds,
-    )
-
-
-register_kind(
-    ExecutorKind(name="code", config_model=CodeExecutorConfig, factory=build_code_executor)
-)
