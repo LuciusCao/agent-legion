@@ -24,18 +24,19 @@ from server.app.routes.agent_definition_contracts import (
     AgentVersionResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
-from server.app.routes.studio_agent_tool_contracts import StudioAgentWorkflowRegisterRequest
+from server.app.routes.studio_agent_tool_contracts import (
+    StudioAgentActiveWorkflowResponse,
+    StudioAgentNodeCodeDraftRequest,
+    StudioAgentWorkflowRegisterRequest,
+)
 from server.app.routes.workflow_draft_compare_contracts import WorkflowDraftCompareResponse
 from server.app.routes.workflow_node_code_contracts import (
-    WorkflowNodeCodeDraftRequest,
     WorkflowNodeCodeResponse,
     WorkflowNodeCodeVersionResponse,
 )
 from server.app.routes.workflow_revisions_contracts import (
-    ActiveWorkflowRevisionResponse,
     WorkflowDraftRequest,
     WorkflowDraftValidationResponse,
-    WorkflowRevisionSummary,
 )
 from server.app.scheduler_wakeup import notify_schedulable_work, reload_scan_entries_best_effort
 from server.app.services.job_errors import JobServiceError
@@ -110,7 +111,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
         workspace_id: str,
         workflow_key: str,
         node_key: str,
-        payload: WorkflowNodeCodeDraftRequest,
+        payload: StudioAgentNodeCodeDraftRequest,
         user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
     ) -> WorkflowNodeCodeVersionResponse:
         require_workflows_enabled(settings)
@@ -122,6 +123,7 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
                 payload.code,
                 payload.change_note,
                 str(user["id"]),
+                expected_capability=payload.expected_capability,
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)
@@ -179,21 +181,15 @@ def create_studio_agent_tools_router(job_db: JobQueries, settings: Settings) -> 
 
     @workspace_scoped.get(
         "/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
-        response_model=ActiveWorkflowRevisionResponse,
+        response_model=StudioAgentActiveWorkflowResponse,
     )
-    def get_active_revision(workspace_id: str) -> ActiveWorkflowRevisionResponse:
+    def get_active_revision(workspace_id: str) -> StudioAgentActiveWorkflowResponse:
         require_workflows_enabled(settings)
         try:
             payload = _service().get_active_revision(workspace_id)
         except JobServiceError as exc:
             raise_job_http_error(exc)
-        return ActiveWorkflowRevisionResponse(
-            revision=WorkflowRevisionSummary.model_validate(payload["revision"]),
-            workflow=workflow_contracts.WorkflowDefinitionResponse.model_validate(
-                payload["workflow"]
-            ),
-            definition_yaml=str(payload["definition_yaml"]),
-        )
+        return StudioAgentActiveWorkflowResponse.model_validate(payload)
 
     @router.get(
         "/studio-agent/tools/workflows",

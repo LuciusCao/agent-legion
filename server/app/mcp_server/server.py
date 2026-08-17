@@ -1,9 +1,11 @@
 """Thin MCP (stdio) wrapper over the studio-agent tool surface.
 
-Each tool forwards to one ``/api/studio-agent/tools/*`` endpoint of a running
-Agent Legion backend, authenticated with a studio-agent scoped token
-(STUDIO-AGENT-001). Tools return the response body as text; non-2xx responses
-come back as ``HTTP <code>: <body>`` text instead of raising.
+Agent Legion backend via ``tool_client.ToolClient``, authenticated with a
+studio-agent scoped token (STUDIO-AGENT-001). Tools return the response body
+as text; non-2xx responses come back as ``HTTP <code>: <body>`` text instead
+of raising. The only exception is ``get_authoring_guide``, which serves the
+built-in authoring playbook (``authoring_guide.AUTHORING_GUIDE``) locally
+without an HTTP call.
 """
 
 from __future__ import annotations
@@ -11,45 +13,26 @@ from __future__ import annotations
 import sys
 from typing import Any
 
-import requests
 from mcp.server.fastmcp import FastMCP
 
+from server.app.mcp_server.authoring_guide import AUTHORING_GUIDE
 from server.app.mcp_server.config import McpConfigError, McpServerConfig
-
-REQUEST_TIMEOUT_SECONDS = 30
-_TOOLS_PATH = "/api/studio-agent/tools"
-
-
-class _ToolClient:
-    """Authenticated HTTP client for the studio-agent tool surface."""
-
-    def __init__(self, config: McpServerConfig):
-        self._api_base = config.api_base
-        self._headers = {
-            "Authorization": f"Bearer {config.token}",
-            "Content-Type": "application/json",
-        }
-
-    def call(self, method: str, path: str, body: dict[str, Any] | None = None) -> str:
-        try:
-            response = requests.request(
-                method,
-                f"{self._api_base}{_TOOLS_PATH}{path}",
-                json=body,
-                headers=self._headers,
-                timeout=REQUEST_TIMEOUT_SECONDS,
-            )
-        except requests.RequestException as exc:
-            return f"request failed: {exc}"
-        if 200 <= response.status_code < 300:
-            return response.text
-        return f"HTTP {response.status_code}: {response.text}"
+from server.app.mcp_server.tool_client import ToolClient
 
 
 def create_mcp_server(config: McpServerConfig) -> FastMCP:
     """Build the FastMCP server exposing the studio-agent tools."""
     mcp = FastMCP("agent-legion-studio")
-    client = _ToolClient(config)
+    client = ToolClient(config)
+
+    @mcp.tool()
+    def get_authoring_guide() -> str:
+        """The built-in workflow authoring playbook: capability naming, the
+        workflow YAML schema, code-node vs agent-node resolution, the
+        draft → validate → compare → human-publish flow, and common errors.
+        Read this BEFORE authoring from scratch. Served locally — no backend
+        call, always available."""
+        return AUTHORING_GUIDE
 
     @mcp.tool()
     def get_studio_context() -> str:
@@ -72,7 +55,9 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
     def get_active_workflow(workspace_id: str) -> str:
         """Get the active workflow revision of a workspace, including the full
         definition YAML. Read this before drafting changes so the draft builds
-        on what is actually live."""
+        on what is actually live. No published workflow yet yields a structured
+        empty state ({"state": "empty"}) instead of an error — the signal to
+        start the from-scratch flow (see get_authoring_guide)."""
         return client.call("GET", f"/workspaces/{workspace_id}/workflow/active")
 
     @mcp.tool()
@@ -90,7 +75,8 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
     def compare_workflow(workspace_id: str, definition_yaml: str) -> str:
         """Diff a workflow definition YAML draft against the workspace's active
         revision: per-node changes, risk summary, whether it would create a new
-        revision. Persists nothing."""
+        revision. With no published baseline the result is a full-draft preview
+        (everything added, base_revision null). Persists nothing."""
         return client.call(
             "POST",
             f"/workspaces/{workspace_id}/workflow/compare",
@@ -104,15 +90,21 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         node_key: str,
         code: str,
         change_note: str = "",
+        expected_capability: str | None = None,
     ) -> str:
         """Save a draft of a code node's Python source (the module must expose
-        ``run(job, job_dir, runtime)``). This only creates a draft version —
-        a human reviews and publishes it in Studio; the draft never runs in
-        production jobs by itself."""
+        ``run(job, job_dir, runtime)``). Draft only — a human reviews and
+        publishes it in Studio. expected_capability declares the capability you
+        believe the node binds: a mismatch with an existing node is rejected;
+        a node absent from any published revision is accepted only with it
+        (skeleton draft ahead of the workflow draft introducing the node)."""
+        body: dict[str, Any] = {"code": code, "change_note": change_note or None}
+        if expected_capability is not None:
+            body["expected_capability"] = expected_capability
         return client.call(
             "PUT",
             f"/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft",
-            {"code": code, "change_note": change_note or None},
+            body,
         )
 
     @mcp.tool()
