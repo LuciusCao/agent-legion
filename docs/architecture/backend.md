@@ -182,7 +182,7 @@ server/app/
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/validate` | `validate_workflow` | routes/studio_agent_tools.py |
 | POST | `/studio-agent/tools/workspaces/{workspace_id}/workflow/compare` | `compare_workflow` | routes/studio_agent_tools.py |
 | PUT | `/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft` | `save_node_code_draft` | routes/studio_agent_tools.py |
-| PUT | `/studio-agent/tools/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_tools.py |
+| PUT | `/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft` | `save_agent_definition_draft` | routes/studio_agent_tools.py |
 | POST | `/studio-agent/tools/workflows/register` | `register_workflow` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workspaces/{workspace_id}/workflow/active` | `get_active_revision` | routes/studio_agent_tools.py |
 | GET | `/studio-agent/tools/workflows` | `list_workflow_catalog` | routes/studio_agent_tools.py |
