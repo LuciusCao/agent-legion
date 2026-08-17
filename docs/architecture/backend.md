@@ -437,6 +437,7 @@ server/app/
 | StudioAgentTokensResponse | BaseModel | tokens: list[StudioAgentTokenEntry] | app/routes/studio_agent_token_contracts.py |
 | StudioAgentTokenRevokeResponse | BaseModel | id: str, revoked: bool | app/routes/studio_agent_token_contracts.py |
 | StudioAgentWorkflowRegisterRequest | BaseModel | key: str, label: str, description: str | app/routes/studio_agent_tool_contracts.py |
+| StudioAgentActiveWorkflowResponse | BaseModel | state: Literal['active', 'empty'], workflow_key: str | None, revision: Workfl... | app/routes/studio_agent_tool_contracts.py |
 | StudioAgentRegistryEntry | BaseModel | id: str, label: str, command: str, args: list[str] | app/routes/studio_agents_admin_contracts.py |
 | StudioAgentRegistryDocument | BaseModel | api_base: str, agents: list[StudioAgentRegistryEntry] | app/routes/studio_agents_admin_contracts.py |
 | StudioChatAgentOption | BaseModel | id: str, label: str | app/routes/studio_chat_contracts.py |
