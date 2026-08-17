@@ -4339,12 +4339,7 @@ export interface components {
     }
     /**
      * StudioAgentActiveWorkflowResponse
-     * @description Active-revision read with a structured empty state instead of a 404.
-     *
-     *     ``state="empty"`` means the workspace exists but has no default workflow
-     *     key or no published revision yet — the agent should switch to the
-     *     from-scratch authoring flow rather than treat it as an error. Unknown
-     *     workspaces still 404 (workspace existence is not leaked).
+     * @description ``state="empty"`` (not 404) when no default key or no published revision.
      */
     StudioAgentActiveWorkflowResponse: {
       /** Definition Yaml */
@@ -4361,13 +4356,8 @@ export interface components {
     }
     /**
      * StudioAgentNodeCodeDraftRequest
-     * @description Node-code draft write with an optional capability declaration.
-     *
-     *     ``expected_capability`` lets the agent declare the capability it believes
-     *     the node binds: for a node present in the active revision it is validated
-     *     (mismatch is a clear 400); for a node that does not exist yet (no active
-     *     revision, or a new node key) its presence authorizes creating a skeleton
-     *     draft ahead of the workflow draft that will introduce the node.
+     * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
+     *     its presence authorizes a skeleton draft for a not-yet-published node.
      */
     StudioAgentNodeCodeDraftRequest: {
       /** Change Note */
