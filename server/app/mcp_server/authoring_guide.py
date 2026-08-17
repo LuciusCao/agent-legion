@@ -116,11 +116,11 @@ validation:
 - AGENT node: exactly one published AgentDefinition exists for the
   capability. Zero or two published agents for one capability both fail
   validation.
-- CODE node: the workspace binds the node to an executor
-  (Workspace settings → Executor bindings) whose capability list contains
-  it. Otherwise validation reports
-  `missing executor binding for <workflow_key>.<node_key>` — you cannot fix
-  bindings via MCP; surface them to the human.
+- CODE node: every node without an Agent route runs on the implicit code
+  pool (P-0.5); publish validation requires resolvable published node code
+  (workspace version or global factory seed). Otherwise validation reports
+  `no published node code for <workflow_key>.<node_key>` — publish the code
+  with `save_node_code_draft` (skeleton draft + `expected_capability`) first.
 
 `save_node_code_draft` code contract: the module must define a module-level
 `run` function (syntax-checked, max 64 KB). Prefer `def run(ctx)` with the
@@ -142,13 +142,16 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 - `skill`: relative skill path (`group/skill-name`); absolute paths and `..`
   are rejected.
 - `tools`: allowlist, default `["read", "write", "bash"]`.
-- Tunables: the Agent definition (or executor capability) declares a
-  `config_schema` — a JSON-Schema subset: top-level `type: "object"` with
+- Tunables: the Agent definition (or the workflow node's `config_schema:`
+  block) declares a JSON-Schema subset: top-level `type: "object"` with
   `properties`/`required`; property types `string|integer|number|boolean`
   with optional `description`, `default`, `enum`, `minimum`, `maximum`, and
   `secret: true` for sensitive values (secrets never leave the server; nodes
-  read them via `secret_ref`). Values resolve schema defaults → node `config`
-  → workspace override, frozen at job intake.
+  read them via `secret_ref`). `timeout_seconds`/`sandbox_network` are
+  platform-reserved execution keys — never redeclare them in a
+  `config_schema`; set them via node `config:` or workspace overrides.
+  Values resolve schema defaults → node `config` → workspace override,
+  frozen at job intake.
 - Agent execution (`provider`/`model`/`thinking`) resolves node
   `execution.*` overrides → workspace defaults → validation error if unset.
 
@@ -156,8 +159,8 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 
 - `Draft workflow key '...' does not match workspace default workflow key
   '...'` — re-emit the YAML with the workspace's key.
-- `missing executor binding for ...` — binding is human-only; list the exact
-  (workflow, node, capability) triples the human must bind.
+- `no published node code for ...` — publish the node code first
+  (`save_node_code_draft` with `expected_capability`, then publish).
 - `Agent capability X must resolve to exactly one published Agent` — draft
   (or ask the human to publish/archive) an Agent definition for X.
 - `node code must define a module-level 'run' function` / `not valid Python`

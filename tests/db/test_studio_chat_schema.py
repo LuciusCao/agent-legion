@@ -72,7 +72,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "agent_workspace_scope"
+    assert migration["name"] == "executor_retirement"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

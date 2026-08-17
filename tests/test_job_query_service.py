@@ -7,7 +7,7 @@ import pytest
 
 from server.app.executors._lease_transactions import database_timestamp
 from server.app.jobs.storage_layout import job_shard
-from server.app.services.executor_definition_service import hydrate_executor_definitions
+from server.app.services.demo_node_seed import seed_demo_node_codes
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -22,7 +22,7 @@ from tests.helpers import seed_workspace_agent_definitions
 def query_service(job_db, settings):
     # The bare settings fixture does not hydrate executor definitions
     # (create_app does); executor kind resolution needs the seeded catalog.
-    hydrate_executor_definitions(settings)
+    seed_demo_node_codes(settings)
     return JobQueryService(
         job_db,
         settings,
@@ -239,8 +239,9 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
     assert detail["nodes"][0]["label"]
     assert "artifacts" in detail
     for node in detail["nodes"]:
-        assert node["executor_id"] is None
-        assert node["executor_kind"] is None
+        # P-0.5：非 Agent 路由节点投影为常量 code 池。
+        assert node["executor_id"] == "code"
+        assert node["executor_kind"] == "code"
 
 
 def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_service, job_db):
@@ -311,7 +312,9 @@ def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
     assert detail["artifacts"] == ["result.json"]
 
 
-def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_service, job_db):
+def test_job_detail_projects_agent_route_over_code_pool(query_service, job_db):
+    """P-0.5：Agent 路由节点投影 agent_id（executor 字段为空），其余一律
+    常量 code 池，不再读任何 executor 配置。"""
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
@@ -330,69 +333,21 @@ def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_serv
         node_keys=["question_understanding", "assemble_package"],
         workspace_id=workspace["id"],
     )
-    job_db.replace_workspace_executor_configuration(
-        workspace["id"],
-        allocations=[
-            {"executor_id": "code-default", "concurrency_limit": 1},
-        ],
-        bindings=[
-            {
-                "workflow_key": "education_video_problems_generation",
-                "node_key": "assemble_package",
-                "executor_id": "code-default",
-            },
-        ],
-        node_limits=[],
-    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, workflow_key, node_key,"
+            " target_kind, target_id) values (%s, %s, %s, 'agent', 'agent-v1')",
+            (workspace["id"], "education_video_problems_generation", "assemble_package"),
+        )
 
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["executor_id"] is None
-    assert nodes["question_understanding"]["executor_kind"] is None
-    assert nodes["assemble_package"]["executor_id"] == "code-default"
-    assert nodes["assemble_package"]["executor_kind"] == "code"
-
-
-def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_service, job_db):
-    workspace = job_db.create_workspace(
-        "default", default_workflow_key="education_video_problems_generation"
-    )
-    batch = job_db.create_batch(
-        "education_video_problems_generation",
-        "batch_by_ids",
-        {"question_ids": ["Q1"]},
-        workspace_id=workspace["id"],
-    )
-    job = job_db.create_job(
-        workflow_key="education_video_problems_generation",
-        source_type="question",
-        source_id="Q1",
-        batch_id=batch["id"],
-        title="Question 1",
-        node_keys=["assemble_package"],
-        workspace_id=workspace["id"],
-    )
-    job_db.replace_workspace_executor_configuration(
-        workspace["id"],
-        allocations=[
-            {"executor_id": "code-default", "concurrency_limit": 1},
-        ],
-        bindings=[
-            {
-                "workflow_key": "education_video_problems_generation",
-                "node_key": "assemble_package",
-                "executor_id": "code-default",
-            },
-        ],
-        node_limits=[],
-    )
-
-    detail = query_service.detail(job["id"])
-
-    node = detail["nodes"][0]
-    assert node["executor_id"] == "code-default"
-    assert node["executor_kind"] == "code"
+    assert nodes["question_understanding"]["executor_id"] == "code"
+    assert nodes["question_understanding"]["executor_kind"] == "code"
+    assert nodes["assemble_package"]["executor_id"] is None
+    assert nodes["assemble_package"]["executor_kind"] is None
+    assert nodes["assemble_package"]["agent_id"] == "agent-v1"
 
 
 def test_workspace_run_service_filters_runs(query_service, job_db):

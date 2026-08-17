@@ -54,8 +54,6 @@ LAYER1_TABLES: tuple[str, ...] = (
     "workspaces",
     "workspace_members",
     "workspace_agent_capacities",
-    "workspace_executor_allocations",
-    "workspace_node_bindings",
     "workspace_node_capacities",
     "workspace_node_limits",
     "workspace_node_routes",

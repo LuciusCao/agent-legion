@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
@@ -33,20 +31,10 @@ def _make_worker(
     *,
     custom_nodes_enabled: bool = True,
 ) -> WorkflowWorkerThread:
-    executor_def = CodeExecutorConfig(
-        kind="code",
-        global_capacity=2,
-        capabilities={"fetch": CodeCapabilityConfig()},
-    )
-    registry = ExecutorRegistry(
-        executors={"code-default": executor},
-        global_capacities={"code-default": 2},
-        definitions={"code-default": executor_def},
-    )
     leases = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
     )
@@ -59,18 +47,17 @@ def _make_worker(
         jobs_dir=tmp_path / "jobs",
         config={},
         database_url=TEST_DATABASE_URL,
-        executor_definitions=registry.definitions(),
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {"enabled": True, "custom_nodes_enabled": custom_nodes_enabled},
             "openclaw": {"command_template": ["openclaw"]},
+            "code_capacity": 2,
         }
     )
     worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )
@@ -93,15 +80,6 @@ def _prepare_job(tmp_path: Path, node: WorkflowNode, batch_payload: dict | None 
         node_keys=[node.key],
         workspace_id=ws["id"],
     )
-    with job_db.connect() as conn:
-        conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (ws["id"], "test", node.key, "code-default"),
-        )
-        conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
-            (ws["id"], "code-default", 2),
-        )
     return job_db, ws
 
 

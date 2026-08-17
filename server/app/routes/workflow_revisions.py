@@ -99,10 +99,13 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         request: WorkflowDraftRequest,
     ) -> WorkflowDraftValidationResponse:
         require_workflows_enabled(settings)
-        # Same validation set as publish (structure + executor bindings), so
-        # binding/config errors surface here instead of only at publish time.
+        # Same validation set as publish (structure + node code resolvability),
+        # so config errors surface here instead of only at publish time.
         errors = validate_workflow_draft_for_publish(
-            job_db, workspace_id, request.definition_yaml, settings.executor_definitions
+            job_db,
+            workspace_id,
+            request.definition_yaml,
+            settings.executor_runtime.workflows.custom_nodes_enabled,
         )
         return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
 
@@ -120,7 +123,6 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
             job_db,
             workspace_id,
             request.definition_yaml,
-            settings.executor_definitions,
             settings.executor_runtime.workflows.custom_nodes_enabled,
         )
         return WorkflowDraftValidationResponse(valid=valid, errors=errors)

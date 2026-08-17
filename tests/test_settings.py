@@ -4,8 +4,6 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from server.app.executors.definitions import load_executor_definitions
-from server.app.executors.kinds import UnknownExecutorKindError
 from server.app.settings import load_env_file, load_settings
 
 
@@ -208,12 +206,10 @@ def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):
 
 
 def test_load_settings_ignores_executors_yaml_section(tmp_path, monkeypatch):
-    """Executor definitions moved to the DB (schema v30): yaml is inert.
+    """Executor definitions are retired (schema v47, P-0.5): yaml is inert.
 
-    ``load_settings`` no longer parses an ``executors:`` section — the catalog
-    is seeded from the built-in factory definitions and hydrated from
-    versioned_entities at app startup (restart-effective). A stray executors
-    section in an explicit config is ignored rather than validated.
+    A stray ``executors:`` section in an explicit config is ignored rather
+    than validated — there is no executor catalog left to hydrate.
     """
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
@@ -228,7 +224,7 @@ def test_load_settings_ignores_executors_yaml_section(tmp_path, monkeypatch):
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert settings.executor_definitions == {}
+    assert settings.config["data_dir"] == "data"
 
 
 def test_load_settings_rejects_retired_agents_yaml(tmp_path, monkeypatch):
@@ -259,16 +255,6 @@ def test_load_settings_rejects_retired_workflows_pi_yaml(tmp_path, monkeypatch):
 
     with pytest.raises(ValueError, match="workflows.pi"):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-
-def test_load_settings_starts_with_empty_executor_definitions(tmp_path, monkeypatch):
-    """executor_definitions 在 load_settings 时为空：DB hydration 由 create_app 完成。"""
-    config_path = tmp_path / "workflow.yaml"
-    config_path.write_text("data_dir: data\n", encoding="utf-8")
-
-    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
-
-    assert settings.executor_definitions == {}
 
 
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
@@ -338,16 +324,6 @@ def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeyp
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert "command_template" in str(exc_info.value)
-
-
-def test_unknown_executor_kind_rejected_at_definition_load() -> None:
-    """Unknown kinds fail in the definition loader (save_draft validation path)."""
-    with pytest.raises(UnknownExecutorKindError) as exc_info:
-        load_executor_definitions(
-            {"weird-exec": {"kind": "unknown", "global_capacity": 1, "capabilities": {}}}
-        )
-
-    assert "weird-exec" in str(exc_info.value)
 
 
 @pytest.mark.parametrize(

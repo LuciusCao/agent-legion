@@ -9,7 +9,7 @@ import {
 import { ChipList } from './DagNodeChips'
 import { MaterialIcon } from '../MaterialIcon'
 import { DagNodeDefinitionMeta } from './DagNodeDefinitionMeta'
-import { DagNodeExecutorBadge } from './DagNodeExecutorBadge'
+import { DagNodeExecutionBadge } from './DagNodeExecutionBadge'
 import type { ExecutorKind } from '../../types/jobTypes'
 import styles from './DagNode.module.css'
 
@@ -61,7 +61,7 @@ export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
         {data.executorKind && (
           <span className={styles.executorTag}>{data.executorKind}</span>
         )}
-        <DagNodeExecutorBadge data={data} />
+        <DagNodeExecutionBadge data={data} />
         {data.executorUnbound && (
           <span
             className={styles.unboundTag}

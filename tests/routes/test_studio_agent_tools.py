@@ -180,24 +180,23 @@ nodes:
     capability: publish_content
 """
 
-    # No executor binding yet: the publish validation set must surface it.
+    # No published node code yet: the publish validation set must surface it.
     unbound = scoped.post(url, json={"definition_yaml": draft_yaml})
     assert unbound.status_code == 200, unbound.text
     assert unbound.json()["valid"] is False
-    assert any("missing executor binding" in error for error in unbound.json()["errors"])
+    assert any("no published node code" in error for error in unbound.json()["errors"])
 
-    job_db.replace_workspace_executor_configuration(
+    from server.app.services.node_codes import NodeCodeService
+
+    codes = NodeCodeService(job_db.path)
+    codes.save_draft(
         workspace_id,
-        allocations=[{"executor_id": "code-default", "concurrency_limit": 1}],
-        bindings=[
-            {
-                "workflow_key": "studio_validate_flow",
-                "node_key": "publish_content",
-                "executor_id": "code-default",
-            }
-        ],
-        node_limits=[],
+        "studio_validate_flow",
+        "publish_content",
+        "def run(job, job_dir, runtime):\n    pass\n",
+        "test seed",
     )
+    codes.publish(workspace_id, "studio_validate_flow", "publish_content")
     valid = scoped.post(url, json={"definition_yaml": draft_yaml})
     assert valid.status_code == 200
     assert valid.json() == {"valid": True, "errors": []}
@@ -436,7 +435,7 @@ nodes:
     )
     assert response.status_code == 200, response.text
     assert response.json()["valid"] is False
-    assert any("missing executor binding" in error for error in response.json()["errors"])
+    assert any("no published node code" in error for error in response.json()["errors"])
 
 
 def test_compare_workflow_404_for_unknown_workspace(client, job_db) -> None:

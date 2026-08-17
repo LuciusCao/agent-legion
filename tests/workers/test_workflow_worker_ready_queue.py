@@ -11,12 +11,8 @@ from server.app.services.workflow_revision_format import definition_hash, serial
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker import ready_cache as workflow_worker_ready_cache
 from tests.helpers.executor_worker import (
-    allocate,
-    bind,
-    local_def,
     local_node,
     make_definition,
-    make_registry,
     make_worker,
 )
 from tests.postgres_support import TEST_DATABASE_URL
@@ -48,18 +44,13 @@ def _setup(
     tmp_path: Path,
     node_keys: list[str],
     capacity: int,
-    workspace_limit: int,
     job_count: int,
 ):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
     block_event = threading.Event()
-    executor = BlockingExecutor("code-default", block_event)
-    registry = make_registry(
-        {"code-default": executor},
-        {"code-default": local_def(capacity, set(node_keys))},
-    )
+    executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node(key) for key in node_keys])
     snapshot_json = serialize_definition(definition)
     snapshot_hash = definition_hash(snapshot_json)
@@ -75,10 +66,7 @@ def _setup(
             workflow_definition_hash=snapshot_hash,
             workflow_definition_snapshot_json=snapshot_json,
         )
-    for key in node_keys:
-        bind(job_db, ws["id"], "test", key, "code-default")
-    allocate(job_db, ws["id"], "code-default", workspace_limit)
-    worker = make_worker(tmp_path, db_path, registry, [definition])
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=capacity)
     return worker, ws, block_event
 
 
@@ -100,9 +88,7 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
     Snapshot parsing is cached by workflow_definition_hash, so the three jobs
     (sharing one definition) trigger exactly one parse per pass.
     """
-    worker, _ws, block_event = _setup(
-        tmp_path, ["fetch"], capacity=3, workspace_limit=3, job_count=3
-    )
+    worker, _ws, block_event = _setup(tmp_path, ["fetch"], capacity=3, job_count=3)
 
     loader_calls = _count_calls(monkeypatch, worker.job_db, "list_job_nodes_for_jobs")
     snapshot_calls = _count_calls(
@@ -110,7 +96,7 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
     )
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("code-default")["global"] == 3
+    assert worker.leases.active_counts("code")["global"] == 3
     assert len(worker._futures) == 3
     assert loader_calls["count"] == 1
     assert snapshot_calls["count"] == 1
@@ -121,13 +107,11 @@ def test_evaluate_once_per_job_per_pass(tmp_path: Path, monkeypatch: pytest.Monk
 
 def test_no_per_job_node_status_queries(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """The poll pass batches node-status loads instead of one query per job."""
-    worker, _ws, block_event = _setup(
-        tmp_path, ["fetch"], capacity=2, workspace_limit=2, job_count=3
-    )
+    worker, _ws, block_event = _setup(tmp_path, ["fetch"], capacity=2, job_count=3)
     node_calls = _count_calls(monkeypatch, worker.job_db, "list_job_nodes")
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("code-default")["global"] == 2
+    assert worker.leases.active_counts("code")["global"] == 2
     assert node_calls["count"] == 0
 
     block_event.set()
@@ -141,11 +125,7 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
     ws_a = job_db.create_workspace("WS A", default_workflow_key="demo_workflow")
     ws_b = job_db.create_workspace("WS B", default_workflow_key="demo_workflow")
     block_event = threading.Event()
-    executor = BlockingExecutor("code-default", block_event)
-    registry = make_registry(
-        {"code-default": executor},
-        {"code-default": local_def(4, {"fetch"})},
-    )
+    executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])
     for ws, prefix in ((ws_a, "A"), (ws_b, "B")):
         job_db.create_job(
@@ -157,9 +137,7 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
             node_keys=["fetch"],
             workspace_id=ws["id"],
         )
-        bind(job_db, ws["id"], "test", "fetch", "code-default")
-        allocate(job_db, ws["id"], "code-default", 2)
-    worker = make_worker(tmp_path, db_path, registry, [definition])
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=4)
     control = WorkspaceWorkerControl()
     control.pause(ws_a["id"])
     control.resume(ws_b["id"])
@@ -170,7 +148,7 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
     assert [job["source_id"] for _, job in jobs_by_workspace[ws_b["id"]]] == ["B0"]
 
     assert worker._poll() is True
-    counts = worker.leases.active_counts("code-default")
+    counts = worker.leases.active_counts("code")
     assert counts.get(ws_a["id"], 0) == 0
     assert counts.get(ws_b["id"], 0) == 1
 
@@ -180,12 +158,10 @@ def test_paused_workspace_skipped_at_scan(tmp_path: Path) -> None:
 
 def test_multi_ready_node_job_claimed_within_one_pass(tmp_path: Path) -> None:
     """A job with two independent ready nodes has both claimed in one pass."""
-    worker, ws, block_event = _setup(
-        tmp_path, ["left", "right"], capacity=2, workspace_limit=2, job_count=1
-    )
+    worker, ws, block_event = _setup(tmp_path, ["left", "right"], capacity=2, job_count=1)
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("code-default")["global"] == 2
+    assert worker.leases.active_counts("code")["global"] == 2
     assert len(worker._futures) == 2
     job = worker.job_db.list_jobs(workspace_id=ws["id"], workflow_key="test")[0]
     statuses = {

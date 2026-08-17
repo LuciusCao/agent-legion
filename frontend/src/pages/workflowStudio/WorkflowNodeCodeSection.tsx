@@ -4,17 +4,14 @@ import type { components } from '../../generated/api'
 import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../types'
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { WorkflowNodeCodeActions } from './WorkflowNodeCodeActions'
 import { WorkflowNodeCodeEditor } from './WorkflowNodeCodeEditor'
 import { WorkflowNodeCodePreview } from './WorkflowNodeCodePreview'
 import { WorkflowNodeCodeVersions } from './WorkflowNodeCodeVersions'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 import styles from './WorkflowNodeCodeSection.module.css'
-import {
-  fetchNodeCodeTemplate,
-  hasCodeCapability,
-} from './workflowNodeCodeLookup'
+import { fetchNodeCodeTemplate, isCodeNode } from './workflowNodeCodeLookup'
 
 type NodeCodeResponse = components['schemas']['WorkflowNodeCodeResponse']
 
@@ -26,17 +23,14 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 export function WorkflowNodeCodeSection(props: {
   node: WorkflowNodeRecord
-  executorCatalog: ExecutorDefinition[]
-  // 与 binding editor 同一口径：visible workflow 的 key 由 Inspector 逐层
+  agentCatalog: AgentDefinition[]
+  // 与 DAG 展示同一口径：visible workflow 的 key 由 Inspector 逐层
   // 下传，不取 settings 快照（草稿改 key 发布后两者会分叉）。
   workflowKey: string
   readOnly?: boolean
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
-  const codeBound = hasCodeCapability(
-    props.executorCatalog,
-    props.node.capability
-  )
+  const codeBound = isCodeNode(props.agentCatalog, props.node.capability)
 
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [data, setData] = useState<NodeCodeResponse | null>(null)

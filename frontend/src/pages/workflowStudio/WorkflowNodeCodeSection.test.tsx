@@ -11,7 +11,7 @@ import { api } from '../../api'
 import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../types'
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 
 vi.mock('../../api', () => ({
   api: vi.fn(),
@@ -28,13 +28,8 @@ const node: WorkflowNodeRecord = {
   outputs: [],
 }
 
-const codeExecutor: ExecutorDefinition = {
-  id: 'code-default',
-  kind: 'code',
-  global_capacity: 16,
-  capabilities: ['fetch_items'],
-  capability_details: [{ name: 'fetch_items' }],
-}
+// 无 Agent 定义（capability 不匹配）即为 code 节点（P-0.5）。
+const noAgents: AgentDefinition[] = []
 
 const BASE =
   '/api/workspaces/default/workflows/demo_workflow/nodes/fetch_items/code'
@@ -89,7 +84,7 @@ function renderSection(
   return render(
     <WorkflowNodeCodeSection
       node={node}
-      executorCatalog={[codeExecutor]}
+      agentCatalog={noAgents}
       workflowKey="demo_workflow"
       {...overrides}
     />
@@ -107,15 +102,16 @@ describe('WorkflowNodeCodeSection', () => {
     mockApi.mockResolvedValue(builtinResponse)
   })
 
-  it('renders nothing when the capability has no code path', () => {
-    const piExecutor: ExecutorDefinition = {
-      id: 'pi-default',
-      kind: 'pi',
-      global_capacity: 4,
-      capabilities: ['fetch_items'],
-      capability_details: [{ name: 'fetch_items' }],
-    }
-    const { container } = renderSection({ executorCatalog: [piExecutor] })
+  it('renders nothing when the capability is agent-routed', () => {
+    const agents: AgentDefinition[] = [
+      {
+        id: 'agent-v1',
+        capability: 'fetch_items',
+        runtime: 'pi',
+        skill: 'demo/skill',
+      },
+    ]
+    const { container } = renderSection({ agentCatalog: agents })
     expect(container.firstChild).toBeNull()
     expect(mockApi).not.toHaveBeenCalled()
   })
@@ -358,13 +354,6 @@ describe('WorkflowNodeCodeSection', () => {
   })
 
   it('creates a draft from the backend template for a pathless capability', async () => {
-    const pathlessExecutor: ExecutorDefinition = {
-      id: 'code-custom',
-      kind: 'code',
-      global_capacity: 1,
-      capabilities: ['custom_only'],
-      capability_details: [{ name: 'custom_only' }],
-    }
     const pathlessNode: WorkflowNodeRecord = {
       ...node,
       key: 'do_custom',
@@ -383,7 +372,7 @@ describe('WorkflowNodeCodeSection', () => {
     render(
       <WorkflowNodeCodeSection
         node={pathlessNode}
-        executorCatalog={[pathlessExecutor]}
+        agentCatalog={noAgents}
         workflowKey="demo_workflow"
       />
     )
@@ -412,13 +401,6 @@ describe('WorkflowNodeCodeSection', () => {
   })
 
   it('lets a pathless node edit its existing draft', async () => {
-    const pathlessExecutor: ExecutorDefinition = {
-      id: 'code-custom',
-      kind: 'code',
-      global_capacity: 1,
-      capabilities: ['custom_only'],
-      capability_details: [{ name: 'custom_only' }],
-    }
     const pathlessNode: WorkflowNodeRecord = {
       ...node,
       key: 'do_custom',
@@ -436,7 +418,7 @@ describe('WorkflowNodeCodeSection', () => {
     render(
       <WorkflowNodeCodeSection
         node={pathlessNode}
-        executorCatalog={[pathlessExecutor]}
+        agentCatalog={noAgents}
         workflowKey="demo_workflow"
       />
     )

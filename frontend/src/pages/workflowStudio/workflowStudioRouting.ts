@@ -1,16 +1,8 @@
 import type { WorkflowNodeRecord } from '../../types'
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-  WorkspaceExecutorConfiguration,
-} from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import type { ExecutorKind } from '../../types/jobTypes'
 
-export type StudioNodeBinding =
-  WorkspaceExecutorConfiguration['bindings'][number]
-
 export type StudioNodeRouting = {
-  bindings: StudioNodeBinding[]
   agents: AgentDefinition[]
 }
 
@@ -21,12 +13,10 @@ export type ResolvedNodeRouting = {
   executorUnbound: boolean
 }
 
-// 与 dispatch 侧语义对齐：capability 恰有一个 published Agent 时走 Agent 路由；
-// 否则看 workspace 节点绑定；两者皆无则标记未绑定（dispatch 会因缺少绑定失败）。
+// P-0.5：capability 恰有一个 published Agent 时走 Agent 路由；其余一律进入
+// 隐含 code 池（executor 绑定概念已随 schema v47 退役）。
 export function resolveStudioNodeRouting(
-  workflowKey: string,
   node: WorkflowNodeRecord,
-  executors: ExecutorDefinition[],
   routing?: StudioNodeRouting
 ): ResolvedNodeRouting {
   const agent = routing?.agents.find(
@@ -40,18 +30,10 @@ export function resolveStudioNodeRouting(
       executorUnbound: false,
     }
   }
-  const binding = routing?.bindings.find(
-    (entry) => entry.workflow_key === workflowKey && entry.node_key === node.key
-  )
-  const executorKind = executors.find((executor) =>
-    binding
-      ? executor.id === binding.executor_id
-      : executor.capabilities.includes(node.capability)
-  )?.kind
   return {
     agentId: null,
-    executorId: binding?.executor_id ?? null,
-    executorKind,
-    executorUnbound: routing !== undefined && binding === undefined,
+    executorId: 'code',
+    executorKind: 'code',
+    executorUnbound: false,
   }
 }

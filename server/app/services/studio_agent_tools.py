@@ -51,9 +51,12 @@ class StudioAgentToolsService:
     # Write tools (draft/register only — no effecting operations).
 
     def validate_workflow(self, workspace_id: str, definition_yaml: str) -> list[str]:
-        """The full publish validation set (structure + bindings), no writes."""
+        """The full publish validation set (structure + code resolvability)."""
         return validate_workflow_draft_for_publish(
-            self._job_db, workspace_id, definition_yaml, self._settings.executor_definitions
+            self._job_db,
+            workspace_id,
+            definition_yaml,
+            self._settings.executor_runtime.workflows.custom_nodes_enabled,
         )
 
     def compare_workflow(self, workspace_id: str, definition_yaml: str) -> dict[str, Any]:

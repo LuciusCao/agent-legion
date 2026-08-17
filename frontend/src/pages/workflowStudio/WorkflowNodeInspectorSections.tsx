@@ -1,7 +1,4 @@
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { WorkflowNodeCodeSection } from './WorkflowNodeCodeSection'
 import { WorkflowNodeConfigSection } from './WorkflowNodeConfigSection'
@@ -12,7 +9,6 @@ import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 
 export type InspectorSectionProps = {
   details: SelectedWorkflowNodeDetails
-  executorCatalog: ExecutorDefinition[]
   agentCatalog: AgentDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
@@ -35,7 +31,6 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
       />
       <WorkflowNodeExecutionSection
         node={node}
-        executorCatalog={props.executorCatalog}
         agentCatalog={props.agentCatalog}
         definitionYaml={props.definitionYaml}
         setDefinitionYaml={props.setDefinitionYaml}
@@ -45,7 +40,7 @@ export function WorkflowNodeInspectorSections(props: InspectorSectionProps) {
       <WorkflowNodeCodeSection
         key={`code-${node.key}`}
         node={node}
-        executorCatalog={props.executorCatalog}
+        agentCatalog={props.agentCatalog}
         workflowKey={props.workflowKey}
         readOnly={props.readOnly}
       />

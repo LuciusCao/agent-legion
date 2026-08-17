@@ -22,7 +22,6 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   saveError: null,
   executorConfiguration: defaultExecutorConfiguration,
   originalExecutorConfiguration: null,
-  pendingAllocationRemoval: null,
 
   setWorkspaceId(id) {
     set({ workspaceId: id })
@@ -51,7 +50,6 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       const nextExecutorConfiguration = workflowChanged
         ? {
             ...state.executorConfiguration,
-            bindings: [],
             node_limits: [],
           }
         : state.executorConfiguration

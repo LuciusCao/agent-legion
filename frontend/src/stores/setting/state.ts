@@ -25,21 +25,11 @@ export type SettingState = {
   saveError: string | null
   executorConfiguration: WorkspaceExecutorConfiguration
   originalExecutorConfiguration: WorkspaceExecutorConfiguration | null
-  pendingAllocationRemoval: string | null
   setWorkspaceId: (id: string) => void
   setWorkspaceName: (name: string) => void
   setWorkspaceDescription: (description: string) => void
   setSettings: (s: Partial<WorkspaceSettings>) => void
   setAgentCapacity: (capacity: number) => void
-  setExecutorAllocation: (executorId: string, limit: number) => void
-  requestExecutorRemoval: (executorId: string) => void
-  confirmExecutorRemoval: () => void
-  cancelExecutorRemoval: () => void
-  setNodeBinding: (
-    workflowKey: string,
-    nodeKey: string,
-    executorId: string | null
-  ) => void
   setNodeLimit: (
     workflowKey: string,
     nodeKey: string,
@@ -66,8 +56,6 @@ export const defaultSettings: WorkspaceSettings = {
 }
 
 export const defaultExecutorConfiguration: WorkspaceExecutorConfiguration = {
-  allocations: [],
-  bindings: [],
   node_limits: [],
   migration_warnings: [],
   // Workspace-level agent concurrency cap; null = unset = unlimited.
@@ -78,8 +66,6 @@ export function normalizeExecutorConfiguration(
   config: Partial<WorkspaceExecutorConfiguration> | undefined
 ): WorkspaceExecutorConfiguration {
   return {
-    allocations: config?.allocations ?? [],
-    bindings: config?.bindings ?? [],
     node_limits: config?.node_limits ?? [],
     migration_warnings: config?.migration_warnings ?? [],
     agent_capacity: config?.agent_capacity ?? null,

@@ -38,6 +38,18 @@ DEMO_WORKFLOW_DEFINITION: dict[str, Any] = {
             "after": [],
             "inputs": [],
             "outputs": ["knowledge_point.json"],
+            # Node-declared tunables (P-0.5): travels with the revision
+            # snapshot, overridable via node config / workspace overrides.
+            "config_schema": {
+                "type": "object",
+                "properties": {
+                    "knowledge_dir": {
+                        "type": "string",
+                        "default": "examples/education-video-problems-generation",
+                        "description": "知识点 markdown 目录（相对路径按 Host 根目录解析；出厂默认值，可被节点/workspace 覆盖）",
+                    },
+                },
+            },
         },
         "write_script": {
             "label": "撰写教学视频脚本",

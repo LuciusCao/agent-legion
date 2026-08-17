@@ -312,3 +312,104 @@ def test_missing_job_snapshot_returns_none_without_warning(caplog) -> None:
         )
 
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.no_db
+def test_node_config_schema_loads(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_items\n"
+            "config_schema:\n"
+            "  type: object\n"
+            "  properties:\n"
+            "    page_size:\n"
+            "      type: integer\n"
+            "      default: 50"
+        ),
+    )
+    node = load_workflow_definition(path).nodes["one"]
+    assert node.config_schema == {
+        "type": "object",
+        "properties": {"page_size": {"type": "integer", "default": 50}},
+    }
+
+
+@pytest.mark.no_db
+def test_node_config_schema_defaults_to_empty(tmp_path: Path) -> None:
+    path = write_workflow(tmp_path, node_body="capability: fetch_items")
+    assert load_workflow_definition(path).nodes["one"].config_schema == {}
+
+
+@pytest.mark.no_db
+def test_node_config_schema_rejects_invalid_schema(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_items\n"
+            "config_schema:\n"
+            "  properties:\n"
+            "    page_size:\n"
+            "      type: array"
+        ),
+    )
+    with pytest.raises(WorkflowDefinitionError, match="config_schema"):
+        load_workflow_definition(path)
+
+
+@pytest.mark.no_db
+def test_node_config_schema_rejects_reserved_execution_keys(tmp_path: Path) -> None:
+    """timeout_seconds/sandbox_network are platform-reserved (P-0.5): nodes
+    set them via config/workspace overrides, never via config_schema."""
+    for key in ("timeout_seconds", "sandbox_network"):
+        path = write_workflow(
+            tmp_path,
+            node_body=(
+                "capability: fetch_items\n"
+                "config_schema:\n"
+                "  properties:\n"
+                f"    {key}:\n"
+                "      type: integer"
+            ),
+        )
+        with pytest.raises(WorkflowDefinitionError, match="reserved"):
+            load_workflow_definition(path)
+
+
+@pytest.mark.no_db
+def test_node_config_schema_survives_revision_snapshot_round_trip(tmp_path: Path) -> None:
+    """The declaration versions with the revision snapshot (asdict JSON) and
+    with the Studio YAML export."""
+    import json
+
+    from server.app.services.workflow_revision_format import (
+        definition_to_yaml,
+        serialize_definition,
+    )
+    from server.app.workflows.definition import (
+        workflow_definition_from_dict,
+        workflow_definition_from_mapping,
+    )
+
+    schema = {"type": "object", "properties": {"page_size": {"type": "integer", "default": 50}}}
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_items\n"
+            "config_schema:\n"
+            "  type: object\n"
+            "  properties:\n"
+            "    page_size:\n"
+            "      type: integer\n"
+            "      default: 50"
+        ),
+    )
+    definition = load_workflow_definition(path)
+
+    restored = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
+    assert restored.nodes["one"].config_schema == schema
+
+    import yaml
+
+    reloaded = workflow_definition_from_mapping(yaml.safe_load(definition_to_yaml(definition)))
+    assert reloaded.nodes["one"].config_schema == schema

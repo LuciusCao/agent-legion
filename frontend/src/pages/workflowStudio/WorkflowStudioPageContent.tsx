@@ -17,8 +17,7 @@ export function WorkflowStudioPageContent(props: {
   // 会让全部 useStudioNav 消费者无谓重渲染。
   const nav: StudioNav = useMemo(
     () => ({
-      openAgent: (agentId) => view.openPanel('agents', agentId),
-      openExecutor: (executorId) => view.openPanel('executors', executorId),
+      openAgent: (agentId) => view.openPanel(agentId),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- 只依赖稳定化后的 openPanel
     [view.openPanel]

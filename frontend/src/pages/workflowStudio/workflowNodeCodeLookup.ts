@@ -1,20 +1,18 @@
 import { api } from '../../api'
 import type { components } from '../../generated/api'
-import type { ExecutorDefinition } from '../../types/executorTypes'
-import { findCapabilityBindings } from './WorkflowExecutorBindingList'
+import type { AgentDefinition } from '../../types/executorTypes'
 
 type NodeCodeTemplateResponse =
   components['schemas']['WorkflowNodeCodeTemplateResponse']
 
-// A node has viewable/editable code when its capability binds to a kind="code"
-// executor; the code itself is DB-published (workspace version or the global
-// factory seed for demo nodes) — there is no repo path anymore (#96).
-export function hasCodeCapability(
-  executorCatalog: ExecutorDefinition[],
+// P-0.5：无 Agent 路由的节点一律是 code 节点（内置 code 池）；节点代码以
+// DB 发布文本为准（workspace 版本或全局出厂种子），不再有 repo 路径（#96）。
+export function isCodeNode(
+  agentCatalog: AgentDefinition[],
   capability: string
 ): boolean {
-  return findCapabilityBindings(executorCatalog, capability).some(
-    ({ executor }) => executor.kind === 'code'
+  return !agentCatalog.some(
+    (definition) => definition.capability === capability
   )
 }
 

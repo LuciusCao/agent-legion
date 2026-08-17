@@ -58,7 +58,6 @@ export function WorkflowStudioSplitLayout({
         <WorkflowStudioDetailSection
           workflow={props.workflow}
           nodeKey={props.selectedNodeKey}
-          executorCatalog={props.executorCatalog}
           agentCatalog={props.agentCatalog}
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}

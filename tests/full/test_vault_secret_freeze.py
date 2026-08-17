@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.connections import ConnectionService, connection_secret_name
-from server.app.services.executor_definition_service import hydrate_executor_definitions
+from server.app.services.demo_node_seed import seed_demo_node_codes
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -39,7 +39,7 @@ def vault_key(monkeypatch):
 def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -> None:
     # The bare settings fixture does not hydrate executor definitions
     # (create_app does); the node config schema chain needs the seeded catalog.
-    hydrate_executor_definitions(settings)
+    seed_demo_node_codes(settings)
     workspace = job_db.create_workspace(
         "vault-full", default_workflow_key="education_video_problems_generation"
     )
@@ -100,7 +100,6 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
         published_agent_definitions(settings.database_url, workspace_id),
         job_db.get_workspace(workspace_id),
         {"nodeConfig": {"write_script": {"connection": CONNECTION_KEY}}},
-        settings.executor_definitions,
     )
     stored = job_db.get_workspace(workspace_id)["node_config"]
     stored_node = stored["education_video_problems_generation"]["write_script"]

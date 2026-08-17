@@ -6,12 +6,11 @@ once at startup (``create_app``, right after ``JobQueries`` is constructed)
 and takes effect on restart; there is no runtime hot-reload:
 
 - executor runtime scalars plus ``workflows.enabled`` /
-  ``agent_workers.{max_archive_bytes,min_protocol_version}`` and the
-  ``openclaw`` block are merged onto the loaded ``ExecutorRuntimeConfig``
-  (unmanaged sub-blocks keep their loaded values) and re-validated;
-- ``cleanup`` / ``monitoring`` values are written back into
-  ``settings.config`` for construction-time consumers (OpsMetricsService,
-  CleanupConfig, WorkflowMaintenance).
+  ``agent_workers.{max_archive_bytes,min_protocol_version}``, the
+  ``openclaw`` block and ``code_capacity`` are merged onto the loaded
+  ``ExecutorRuntimeConfig`` and re-validated;
+- ``cleanup`` / ``monitoring`` values are written back into ``settings.config``
+  for construction-time consumers (OpsMetricsService, CleanupConfig, WorkflowMaintenance).
 
 ``AGENT_LEGION_OPENCLAW_CWD`` outranks the DB document (re-applied post-merge).
 """
@@ -39,6 +38,7 @@ _EXECUTOR_SCALAR_KEYS = (
     "heartbeat_failure_threshold",
     "sweeper_enabled",
     "sweeper_interval_seconds",
+    "code_capacity",
 )
 
 # Same variable load_settings maps onto config["openclaw"]["cwd"].

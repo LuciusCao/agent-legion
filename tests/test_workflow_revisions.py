@@ -377,7 +377,8 @@ edges: []
     assert any("terminal.outcome" in error for error in errors)
 
 
-def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> None:
+def test_publish_validation_reports_missing_node_code(tmp_path: Path) -> None:
+    """P-0.5: a non-Agent-routed node without resolvable code fails publish."""
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
@@ -388,10 +389,12 @@ def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> 
         definition=definition,
         workspace_id=workspace["id"],
         job_db=queries,
-        settings_executor_definitions={},
+        custom_nodes_enabled=True,
     )
 
-    assert any("executor binding" in error for error in errors)
+    # Bare JobQueries seed no Agent definitions: the demo agent nodes are
+    # unrunnable as code either (no published code), so validation reports.
+    assert any("no published node code" in error for error in errors)
 
 
 def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> None:
@@ -407,7 +410,7 @@ def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> 
         definition=definition,
         workspace_id=workspace["id"],
         job_db=queries,
-        settings_executor_definitions={},
+        custom_nodes_enabled=True,
     )
 
     assert errors

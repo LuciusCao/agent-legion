@@ -1,8 +1,8 @@
 from typing import Any
 
+from server.app.executors.models import CODE_EXECUTOR_ID
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
-from server.app.services.job_node_executor_resolver import resolve_node_executors
 from server.app.services.job_node_ordering import ordered_job_nodes
 from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
@@ -132,20 +132,16 @@ class JobQueryService:
         definition = self._definition_for_job(job)
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = job_nodes_with_definition(nodes, definition)
-        executor_map = resolve_node_executors(
-            str(job["workspace_id"]),
-            str(job["workflow_key"]),
-            self.workspace_executor_config,
-            self.settings,
-        )
         worker_map = claimed_worker_map(self.job_db.path, job_id)
         agent_map = agent_route_map(
             self.job_db.path, str(job["workspace_id"]), str(job["workflow_key"])
         )
         for node in nodes_with_definition:
-            executor_id, executor_kind = executor_map.get(node["node_key"], (None, None))
-            node["executor_id"] = executor_id
-            node["executor_kind"] = executor_kind
+            # P-0.5: non-Agent-routed nodes always run on the implicit code
+            # pool; the projection is a constant, no configuration lookup.
+            is_agent = agent_map.get(node["node_key"]) is not None
+            node["executor_id"] = None if is_agent else CODE_EXECUTOR_ID
+            node["executor_kind"] = None if is_agent else "code"
             node["worker_id"] = worker_map.get(node["node_key"])
             node["agent_id"] = agent_map.get(node["node_key"])
         return {

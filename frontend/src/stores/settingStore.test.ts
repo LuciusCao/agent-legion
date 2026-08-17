@@ -29,17 +29,8 @@ const defaultSettings: WorkspaceSettings = {
   workflowKey: '',
 }
 
+// P-0.5：执行配置只剩节点并发上限 + Agent 容量。
 const initialExecutorConfiguration: WorkspaceExecutorConfiguration = {
-  allocations: [
-    { executor_id: 'code-default', workspace_id: 'ws1', concurrency_limit: 2 },
-  ],
-  bindings: [
-    {
-      workflow_key: 'question_content',
-      node_key: 'ingest',
-      executor_id: 'code-default',
-    },
-  ],
   node_limits: [
     {
       workflow_key: 'question_content',
@@ -48,6 +39,13 @@ const initialExecutorConfiguration: WorkspaceExecutorConfiguration = {
     },
   ],
   migration_warnings: [],
+  agent_capacity: null,
+}
+
+const emptyExecutorConfiguration: WorkspaceExecutorConfiguration = {
+  node_limits: [],
+  migration_warnings: [],
+  agent_capacity: null,
 }
 
 const defaultState: Partial<SettingState> = {
@@ -63,7 +61,6 @@ const defaultState: Partial<SettingState> = {
   saveError: null,
   executorConfiguration: initialExecutorConfiguration,
   originalExecutorConfiguration: null,
-  pendingAllocationRemoval: null,
 }
 
 describe('settingStore', () => {
@@ -93,10 +90,6 @@ describe('settingStore', () => {
     useSettingStore.getState().setSettings({ workflowKey: 'legacy_workflow' })
 
     const state = useSettingStore.getState()
-    expect(state.executorConfiguration.allocations).toEqual(
-      initialExecutorConfiguration.allocations
-    )
-    expect(state.executorConfiguration.bindings).toEqual([])
     expect(state.executorConfiguration.node_limits).toEqual([])
   })
 
@@ -147,26 +140,6 @@ describe('settingStore', () => {
     expect(useSettingStore.getState().isDirty).toBe(false)
   })
 
-  it('isDirty is true when executor allocation limit differs from original', () => {
-    useSettingStore.setState({
-      originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
-    })
-    useSettingStore.getState().setExecutorAllocation('code-default', 5)
-    expect(useSettingStore.getState().isDirty).toBe(true)
-  })
-
-  it('isDirty is true when node binding differs from original', () => {
-    useSettingStore.setState({
-      originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
-    })
-    useSettingStore
-      .getState()
-      .setNodeBinding('question_content', 'ingest', 'other-executor')
-    expect(useSettingStore.getState().isDirty).toBe(true)
-  })
-
   it('isDirty is true when node limit differs from original', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,
@@ -191,14 +164,6 @@ describe('settingStore', () => {
         workflowKey: 'knowledge_content',
       },
       executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 3,
-          },
-        ],
-        bindings: [],
         node_limits: [],
         migration_warnings: [],
         agent_capacity: 7,
@@ -235,20 +200,8 @@ describe('settingStore', () => {
   it('setAgentCapacity updates executorConfiguration and marks dirty', () => {
     useSettingStore.setState({
       originalSettings: defaultSettings,
-      executorConfiguration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-        agent_capacity: null,
-      },
-      originalExecutorConfiguration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-        agent_capacity: null,
-      },
+      executorConfiguration: emptyExecutorConfiguration,
+      originalExecutorConfiguration: emptyExecutorConfiguration,
     })
 
     useSettingStore.getState().setAgentCapacity(5)
@@ -263,8 +216,6 @@ describe('settingStore', () => {
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
       executor_configuration: {
-        allocations: [],
-        bindings: [],
         node_limits: [],
         migration_warnings: [],
         agent_capacity: 6,
@@ -272,8 +223,6 @@ describe('settingStore', () => {
     })
     useSettingStore.setState({
       executorConfiguration: {
-        allocations: [],
-        bindings: [],
         node_limits: [],
         migration_warnings: [],
         agent_capacity: 6,
@@ -291,22 +240,10 @@ describe('settingStore', () => {
     mockApi.mockResolvedValue({
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
-      executor_configuration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-        agent_capacity: null,
-      },
+      executor_configuration: emptyExecutorConfiguration,
     })
     useSettingStore.setState({
-      executorConfiguration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-        agent_capacity: null,
-      },
+      executorConfiguration: emptyExecutorConfiguration,
     })
 
     await useSettingStore.getState().saveAll()
@@ -314,7 +251,7 @@ describe('settingStore', () => {
     expect('agent_capacity' in body).toBe(false)
   })
 
-  it('saveAll sends exactly one PUT body containing executor_allocations, node_bindings, node_limits', async () => {
+  it('saveAll sends exactly one PUT body containing node_limits', async () => {
     mockApi.mockResolvedValue({
       workspace: { name: 'Test', description: 'Desc' },
       settings: {
@@ -323,20 +260,6 @@ describe('settingStore', () => {
         intakeModes: ['direct_ids'],
       },
       executor_configuration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 4,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'question_content',
-            node_key: 'ingest',
-            executor_id: 'code-default',
-          },
-        ],
         node_limits: [
           {
             workflow_key: 'question_content',
@@ -358,27 +281,8 @@ describe('settingStore', () => {
         workflowKey: 'question_content',
         intakeModes: ['direct_ids'],
       },
-      originalExecutorConfiguration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-      },
+      originalExecutorConfiguration: emptyExecutorConfiguration,
       executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 4,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'question_content',
-            node_key: 'ingest',
-            executor_id: 'code-default',
-          },
-        ],
         node_limits: [
           {
             workflow_key: 'question_content',
@@ -387,6 +291,7 @@ describe('settingStore', () => {
           },
         ],
         migration_warnings: [],
+        agent_capacity: null,
       },
     })
     await useSettingStore.getState().saveAll()
@@ -395,23 +300,13 @@ describe('settingStore', () => {
       '/api/workspaces/ws1/configuration',
       expect.objectContaining({
         method: 'PUT',
-        body: expect.stringContaining('"executor_allocations"'),
+        body: expect.stringContaining('"node_limits"'),
       })
     )
     const body = JSON.parse(mockApi.mock.calls[0][1]?.body as string)
     expect(body).toMatchObject({
       name: 'Test',
       description: 'Desc',
-      executor_allocations: [
-        { executor_id: 'code-default', concurrency_limit: 4 },
-      ],
-      node_bindings: [
-        {
-          workflow_key: 'question_content',
-          node_key: 'ingest',
-          executor_id: 'code-default',
-        },
-      ],
       node_limits: [
         {
           workflow_key: 'question_content',
@@ -420,21 +315,16 @@ describe('settingStore', () => {
         },
       ],
     })
+    expect('executor_allocations' in body).toBe(false)
+    expect('node_bindings' in body).toBe(false)
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 
   it('saveAll replaces original snapshots from the response', async () => {
     const responseConfiguration: WorkspaceExecutorConfiguration = {
-      allocations: [
-        {
-          executor_id: 'code-default',
-          workspace_id: 'ws1',
-          concurrency_limit: 4,
-        },
-      ],
-      bindings: [],
       node_limits: [],
       migration_warnings: [],
+      agent_capacity: null,
     }
     mockApi.mockResolvedValue({
       workspace: { name: 'Saved', description: 'Saved Desc' },
@@ -454,33 +344,14 @@ describe('settingStore', () => {
         ...defaultSettings,
         workflowKey: 'question_content',
       },
-      originalExecutorConfiguration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-      },
-      executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 4,
-          },
-        ],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-      },
+      originalExecutorConfiguration: emptyExecutorConfiguration,
+      executorConfiguration: emptyExecutorConfiguration,
     })
     await useSettingStore.getState().saveAll()
     const state = useSettingStore.getState()
     expect(state.workspaceName).toBe('Saved')
     expect(state.originalWorkspaceName).toBe('Saved')
-    expect(state.originalExecutorConfiguration).toEqual({
-      ...responseConfiguration,
-      agent_capacity: null,
-    })
+    expect(state.originalExecutorConfiguration).toEqual(responseConfiguration)
     expect(state.isDirty).toBe(false)
   })
 
@@ -497,13 +368,7 @@ describe('settingStore', () => {
     mockApi.mockResolvedValueOnce({
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
-      executor_configuration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-        agent_capacity: null,
-      },
+      executor_configuration: emptyExecutorConfiguration,
     })
     await expect(useSettingStore.getState().saveAll()).resolves.toBe(true)
 
@@ -528,71 +393,10 @@ describe('settingStore', () => {
     release({
       workspace: { name: 'Test', description: '' },
       settings: defaultSettings,
-      executor_configuration: {
-        allocations: [],
-        bindings: [],
-        node_limits: [],
-        migration_warnings: [],
-        agent_capacity: null,
-      },
+      executor_configuration: emptyExecutorConfiguration,
     })
     await expect(first).resolves.toBe(true)
     expect(useSettingStore.getState().isSaving).toBe(false)
-  })
-
-  it('setExecutorAllocation updates or creates an allocation', () => {
-    useSettingStore.setState({
-      originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
-    })
-    useSettingStore.getState().setExecutorAllocation('code-default', 5)
-    const allocation = useSettingStore
-      .getState()
-      .executorConfiguration.allocations.find(
-        (a) => a.executor_id === 'code-default'
-      )
-    expect(allocation?.concurrency_limit).toBe(5)
-  })
-
-  it('setNodeBinding updates or creates a binding', () => {
-    useSettingStore.setState({
-      originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
-    })
-    useSettingStore
-      .getState()
-      .setNodeBinding('question_content', 'parse', 'other-executor')
-    const binding = useSettingStore
-      .getState()
-      .executorConfiguration.bindings.find(
-        (b) => b.workflow_key === 'question_content' && b.node_key === 'parse'
-      )
-    expect(binding).toEqual({
-      workflow_key: 'question_content',
-      node_key: 'parse',
-      executor_id: 'other-executor',
-    })
-  })
-
-  it('setNodeBinding with null unbinds a node and removes its node limit', () => {
-    useSettingStore.setState({
-      originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
-    })
-    useSettingStore
-      .getState()
-      .setNodeBinding('question_content', 'ingest', null)
-    const state = useSettingStore.getState()
-    expect(
-      state.executorConfiguration.bindings.some(
-        (b) => b.workflow_key === 'question_content' && b.node_key === 'ingest'
-      )
-    ).toBe(false)
-    expect(
-      state.executorConfiguration.node_limits.some(
-        (l) => l.workflow_key === 'question_content' && l.node_key === 'ingest'
-      )
-    ).toBe(false)
   })
 
   it('setNodeLimit updates or creates a node limit', () => {
@@ -623,98 +427,5 @@ describe('settingStore', () => {
             l.workflow_key === 'question_content' && l.node_key === 'ingest'
         )
     ).toBe(false)
-  })
-
-  it('requestExecutorRemoval sets pending allocation removal', () => {
-    useSettingStore.getState().requestExecutorRemoval('code-default')
-    expect(useSettingStore.getState().pendingAllocationRemoval).toBe(
-      'code-default'
-    )
-  })
-
-  it('cancelExecutorRemoval clears pending allocation removal', () => {
-    useSettingStore.setState({ pendingAllocationRemoval: 'code-default' })
-    useSettingStore.getState().cancelExecutorRemoval()
-    expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
-  })
-
-  it('confirmExecutorRemoval removes allocation, dependent bindings, and node limits only after confirmation', () => {
-    useSettingStore.setState({
-      originalSettings: defaultSettings,
-      originalExecutorConfiguration: initialExecutorConfiguration,
-      executorConfiguration: {
-        allocations: [
-          {
-            executor_id: 'code-default',
-            workspace_id: 'ws1',
-            concurrency_limit: 2,
-          },
-          {
-            executor_id: 'other-executor',
-            workspace_id: 'ws1',
-            concurrency_limit: 1,
-          },
-        ],
-        bindings: [
-          {
-            workflow_key: 'question_content',
-            node_key: 'ingest',
-            executor_id: 'code-default',
-          },
-          {
-            workflow_key: 'question_content',
-            node_key: 'parse',
-            executor_id: 'other-executor',
-          },
-        ],
-        node_limits: [
-          {
-            workflow_key: 'question_content',
-            node_key: 'ingest',
-            concurrency_limit: 1,
-          },
-          {
-            workflow_key: 'question_content',
-            node_key: 'parse',
-            concurrency_limit: 1,
-          },
-        ],
-        migration_warnings: [],
-      },
-      pendingAllocationRemoval: 'code-default',
-    })
-    useSettingStore.getState().confirmExecutorRemoval()
-    const state = useSettingStore.getState()
-    expect(
-      state.executorConfiguration.allocations.some(
-        (a) => a.executor_id === 'code-default'
-      )
-    ).toBe(false)
-    expect(
-      state.executorConfiguration.bindings.some(
-        (b) => b.executor_id === 'code-default'
-      )
-    ).toBe(false)
-    expect(
-      state.executorConfiguration.node_limits.some(
-        (l) => l.node_key === 'ingest'
-      )
-    ).toBe(false)
-    expect(
-      state.executorConfiguration.allocations.some(
-        (a) => a.executor_id === 'other-executor'
-      )
-    ).toBe(true)
-    expect(
-      state.executorConfiguration.bindings.some(
-        (b) => b.executor_id === 'other-executor'
-      )
-    ).toBe(true)
-    expect(
-      state.executorConfiguration.node_limits.some(
-        (l) => l.node_key === 'parse'
-      )
-    ).toBe(true)
-    expect(state.pendingAllocationRemoval).toBeNull()
   })
 })

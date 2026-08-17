@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
-import { useExecutorsStore } from '../stores/executorsStore'
+import { useConnectionStatusStore } from '../stores/connectionStatusStore'
 import type { AgentWorkerSummary as WorkerSummary } from '../api/workerTokens'
 import { createMockAgentsState, createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
@@ -86,7 +86,7 @@ describe('AgentStatusIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockWorkerPausedByWorkspace = {}
-    useExecutorsStore.setState({ connectionStatus: {} })
+    useConnectionStatusStore.setState({ connectionStatus: {} })
     listAgentWorkersMock.mockResolvedValue([])
     mockAgents = [
       makeAgentStatus({
@@ -194,7 +194,9 @@ describe('AgentStatusIndicator', () => {
   })
 
   it('shows a disconnected status dot when the agents channel is closed', () => {
-    useExecutorsStore.setState({ connectionStatus: { agents: 'closed' } })
+    useConnectionStatusStore.setState({
+      connectionStatus: { agents: 'closed' },
+    })
     renderIndicator()
     const dot = screen.getByTestId('agents-connection-status')
     expect(dot).toBeInTheDocument()
@@ -202,7 +204,9 @@ describe('AgentStatusIndicator', () => {
   })
 
   it('shows a connecting status dot when the agents channel is connecting', () => {
-    useExecutorsStore.setState({ connectionStatus: { agents: 'connecting' } })
+    useConnectionStatusStore.setState({
+      connectionStatus: { agents: 'connecting' },
+    })
     renderIndicator()
     const dot = screen.getByTestId('agents-connection-status')
     expect(dot).toBeInTheDocument()
@@ -210,7 +214,7 @@ describe('AgentStatusIndicator', () => {
   })
 
   it('hides the status dot when the agents channel is open', () => {
-    useExecutorsStore.setState({ connectionStatus: { agents: 'open' } })
+    useConnectionStatusStore.setState({ connectionStatus: { agents: 'open' } })
     renderIndicator()
     expect(
       screen.queryByTestId('agents-connection-status')

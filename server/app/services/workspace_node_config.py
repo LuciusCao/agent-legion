@@ -27,7 +27,6 @@ def update_workspace_node_config(
     agent_definitions: Mapping[str, AgentDefinition],
     workspace: dict[str, Any],
     patch: dict[str, Any],
-    executor_definitions: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate and persist per-node overrides for the workspace's workflow.
 
@@ -39,7 +38,7 @@ def update_workspace_node_config(
         raise InvalidOperationError("nodeConfig must be a mapping of node key to values")
     workflow_key = str(workspace.get("default_workflow_key") or "")
     definition = workflows.definition(workflow_key)
-    schemas = workflow_node_config_schemas(definition, agent_definitions, executor_definitions)
+    schemas = workflow_node_config_schemas(definition, agent_definitions)
     vault = VaultService(job_db.path, workflows.settings.config)
     node_config = workspace.get("node_config")
     next_node_config = dict(node_config) if isinstance(node_config, dict) else {}

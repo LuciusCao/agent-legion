@@ -17,7 +17,6 @@ from server.app.agent_broker.code_dispatch import (
     split_manifest_config,
 )
 from server.app.agent_broker.code_eligibility import is_worker_eligible
-from server.app.executors.config import CodeExecutorConfig
 from server.app.services.connection_tokens import (
     ConnectionTokenService,
     inject_connection_config,
@@ -25,6 +24,11 @@ from server.app.services.connection_tokens import (
 from server.app.services.job_errors import JobServiceError
 from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.services.node_config import dispatch_effective_config
+from server.app.services.node_execution_config import (
+    merge_reserved_execution_schema,
+    node_config_reserved_defaults,
+    resolved_code_capability,
+)
 from server.app.services.vault import VaultError, VaultService
 from server.app.workflow_worker.agent_claim import cached_batch_payload, fail_node_config
 from server.app.workflows.definition import WorkflowNode
@@ -43,10 +47,9 @@ def try_claim_code_worker_node(
     job_dir: Path,
     log_path: Path,
     inputs: tuple[str, ...],
-    executor_id: str,
     workflow_key: str,
 ) -> bool:
-    """Route a code-executor candidate to a remote code Worker when possible.
+    """Route a code-pool candidate to a remote code Worker when possible.
 
     True = handled (enqueued, already queued/in flight, or failed as a
     configuration error); False = not Worker-routable right now, the caller
@@ -65,14 +68,6 @@ def try_claim_code_worker_node(
         # batch-2 decision 3).
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
-        return False
-    definition = worker.registry.definitions().get(executor_id)
-    capability_config = (
-        definition.capabilities.get(node.capability)
-        if isinstance(definition, CodeExecutorConfig)
-        else None
-    )
-    if capability_config is None:
         return False
 
     batch_payload = cached_batch_payload(worker, job)
@@ -98,9 +93,15 @@ def try_claim_code_worker_node(
     if not is_worker_eligible(code_text, Path(worker.settings.root_dir)):
         return False
 
-    schema = capability_config.config_schema
+    # P-0.5 step 2: the schema comes from the node-declared config_schema
+    # plus the platform-reserved execution keys; frozen batches predating
+    # them are padded from the node's own declared config values.
+    schema = merge_reserved_execution_schema(node.config_schema)
+    reserved_defaults = node_config_reserved_defaults(node.config)
     try:
-        unresolved = dispatch_effective_config(schema, node, workflow_key, workspace, batch_payload)
+        unresolved = dispatch_effective_config(
+            schema, node, workflow_key, workspace, batch_payload, reserved_defaults
+        )
         config, secret_config = split_manifest_config(schema, unresolved)
     except PlaintextSecretError:
         # Legacy plaintext secrets can never be persisted for a Worker; the
@@ -123,6 +124,10 @@ def try_claim_code_worker_node(
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
+    # The manifest carries the resolved schema/timeout/network (keys
+    # unchanged): the Worker never consults an executor definition (P-0.5).
+    effective_capability = resolved_code_capability(schema, unresolved, reserved_defaults)
+
     if not dispatch.try_mark_in_flight(job_id, node.key):
         return True
 
@@ -130,7 +135,7 @@ def try_claim_code_worker_node(
         try:
             dispatch.enqueue(
                 capability=node.capability,
-                capability_config=capability_config,
+                capability_config=effective_capability,
                 workspace=workspace,
                 job=job,
                 workflow_key=workflow_key,

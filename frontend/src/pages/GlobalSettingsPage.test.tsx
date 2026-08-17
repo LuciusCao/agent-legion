@@ -86,6 +86,7 @@ const instanceSettings: InstanceSettingsResponse = {
   heartbeat_failure_threshold: 3,
   sweeper_enabled: true,
   sweeper_interval_seconds: 60,
+  code_capacity: 16,
   workflows: { enabled: true },
   agent_workers: { max_archive_bytes: 104857600, min_protocol_version: 2 },
   openclaw: {

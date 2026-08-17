@@ -31,6 +31,7 @@ def _payload() -> dict:
         "heartbeat_failure_threshold": 3,
         "sweeper_enabled": True,
         "sweeper_interval_seconds": 5.0,
+        "code_capacity": 16,
         "workflows": {"enabled": True},
         "agent_workers": {"max_archive_bytes": 64 * 1024 * 1024, "min_protocol_version": 1},
         "openclaw": {

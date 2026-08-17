@@ -19,7 +19,7 @@ function DashboardWorkspaceCard({ workspace }: { workspace: WorkspaceRecord }) {
         stats?.workflow_label || workspace.default_workflow_key || ''
       }
       jobStats={stats?.job_stats || {}}
-      executorStatus={stats?.executor_status?.executors || []}
+      codePool={stats?.code_pool}
       onClick={() => navigate(`/workspaces/${workspace.id}`)}
     />
   )

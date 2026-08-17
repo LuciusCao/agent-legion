@@ -14,7 +14,6 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.executors.config import CodeExecutorConfig
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.job_errors import JobServiceError
 from server.app.services.vault import VaultError
@@ -141,24 +140,20 @@ def try_claim_and_submit(
 
     executor_id = resolved.target_id
 
-    # Batch 2: a code-executor candidate with an online code-capable Worker
-    # and a Worker-eligible payload is enqueued to the broker; anything else
-    # falls through to the local executor path below (the safety net).
-    if isinstance(
-        worker.registry.definitions().get(executor_id), CodeExecutorConfig
-    ) and try_claim_code_worker_node(
-        worker, workspace, job, node, job_dir, log_path, inputs, executor_id, workflow_key
+    # Batch 2: a code-pool candidate with an online code-capable Worker and a
+    # Worker-eligible payload is enqueued to the broker; anything else falls
+    # through to the local executor path below (the safety net).
+    if try_claim_code_worker_node(
+        worker, workspace, job, node, job_dir, log_path, inputs, workflow_key
     ):
         return True
 
-    # Cheap gate before config resolution: when the pass snapshot says this
-    # executor/workspace is out of capacity, the claim cannot succeed
-    # (claim_executor_node re-checks authoritatively), so skip the per-pop
-    # batch lookup and config resolution for the thousands of doomed
-    # candidates that pile up behind a saturated executor.
-    if worker.registry.global_capacity(executor_id) is None:
-        return False
-    if not snapshot.has_capacity(executor_id, workspace_id):
+    # Cheap gate before config resolution: when the pass snapshot says the
+    # code pool (or this node's limit) is out of capacity, the claim cannot
+    # succeed (claim_executor_node re-checks authoritatively), so skip the
+    # per-pop batch lookup and config resolution for the thousands of doomed
+    # candidates that pile up behind a saturated pool.
+    if not snapshot.has_capacity(workspace_id, workflow_key, node_key):
         return False
 
     try:
@@ -166,18 +161,17 @@ def try_claim_and_submit(
         # Frozen snapshot → vault secret_refs → connection config + token;
         # all in-memory only (VAULT-SECRET-001, CONFIG-MANIFEST-001).
         node_config = resolve_dispatch_node_config(
-            worker, executor_id, node, workflow_key, workspace_id, workspace, batch_payload
+            worker, node, workflow_key, workspace_id, workspace, batch_payload
         )
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
-    # Node code (EXEC-CODE-002): only code-kind executors carry node code, so
-    # other kinds skip the DB read entirely. Frozen job version wins over the
-    # workspace published version, then the global factory seed; a
-    # frozen-pin hash mismatch fails the node (fail closed, EXEC-CODE-003).
+    # Node code (EXEC-CODE-002): frozen job version wins over the workspace
+    # published version, then the global factory seed; a frozen-pin hash
+    # mismatch fails the node (fail closed, EXEC-CODE-003).
     try:
         node_code = resolve_code_node_dispatch(
-            worker, workspace_id, workflow_key, node, executor_id, batch_payload
+            worker, workspace_id, workflow_key, node, batch_payload
         )
     except ValueError as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))

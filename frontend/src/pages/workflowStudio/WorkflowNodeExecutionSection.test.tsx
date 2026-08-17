@@ -1,16 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../testing/testQueryClient'
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 import { StudioNavContext } from './workflowStudioNav'
 
 vi.mock('../../api/executorApi', () => ({
-  getExecutorCatalog: vi.fn().mockResolvedValue({ executors: [], agents: [] }),
+  getExecutorCatalog: vi.fn().mockResolvedValue({ agents: [] }),
 }))
 
 // 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
@@ -32,20 +29,6 @@ const node: WorkflowNodeRecord = {
   outputs: [],
   terminal: null,
 }
-
-const executorCatalog: ExecutorDefinition[] = [
-  {
-    id: 'code-default',
-    kind: 'code',
-    global_capacity: 16,
-    capabilities: ['fetch_items'],
-    capability_details: [
-      {
-        name: 'fetch_items',
-      },
-    ],
-  },
-]
 
 const agentCatalog: AgentDefinition[] = [
   {
@@ -72,13 +55,7 @@ const editorProps = {
 
 describe('WorkflowNodeExecutionSection', () => {
   it('shows the executor binding for the selected node capability', () => {
-    render(
-      <WorkflowNodeExecutionSection
-        node={node}
-        executorCatalog={executorCatalog}
-        {...editorProps}
-      />
-    )
+    render(<WorkflowNodeExecutionSection node={node} {...editorProps} />)
 
     expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
     expect(screen.getByText('pi')).toBeInTheDocument()
@@ -102,7 +79,6 @@ describe('WorkflowNodeExecutionSection', () => {
     render(
       <WorkflowNodeExecutionSection
         node={node}
-        executorCatalog={executorCatalog}
         agentCatalog={agentCatalog}
         definitionYaml={editorProps.definitionYaml}
         setDefinitionYaml={(value) => {
@@ -134,7 +110,6 @@ describe('WorkflowNodeExecutionSection', () => {
     const { rerender } = render(
       <WorkflowNodeExecutionSection
         node={nodeWithProvider}
-        executorCatalog={executorCatalog}
         agentCatalog={agentCatalog}
         definitionYaml={initialYaml}
         setDefinitionYaml={(value) => {
@@ -152,7 +127,6 @@ describe('WorkflowNodeExecutionSection', () => {
     rerender(
       <WorkflowNodeExecutionSection
         node={nodeWithProvider}
-        executorCatalog={executorCatalog}
         agentCatalog={agentCatalog}
         definitionYaml={nextYaml}
         setDefinitionYaml={(value) => {
@@ -165,29 +139,24 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(screen.getByText('继承全局：deepseek')).toBeInTheDocument()
   })
 
-  it('shows an empty state when no executor supports the capability', () => {
+  it('shows the code-pool state when no agent routes the capability', () => {
     render(
       <TestQueryProvider>
         <WorkflowNodeExecutionSection
           node={{ ...node, capability: 'missing' }}
-          executorCatalog={executorCatalog}
           {...editorProps}
         />
       </TestQueryProvider>
     )
 
-    expect(screen.getByText('未匹配到 executor capability')).toBeInTheDocument()
+    expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
   })
 
   it('jumps to the agent editor from the agent card', () => {
     const openAgent = vi.fn()
     render(
-      <StudioNavContext.Provider value={{ openAgent, openExecutor: () => {} }}>
-        <WorkflowNodeExecutionSection
-          node={node}
-          executorCatalog={executorCatalog}
-          {...editorProps}
-        />
+      <StudioNavContext.Provider value={{ openAgent }}>
+        <WorkflowNodeExecutionSection node={node} {...editorProps} />
       </StudioNavContext.Provider>
     )
 

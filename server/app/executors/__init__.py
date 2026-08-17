@@ -1,12 +1,10 @@
-"""Executor contracts.
+"""Executor primitives: lease models, the adapter contract, the code pool.
 
-Deliberately lightweight: adapter modules (local/pi/openclaw) are NOT imported
-here — they pull in workflow-side runners while those runners import executor
-primitives, so eager adapter imports closed an import cycle. Import
-``server.app.executors.registration`` where kind registration is required.
+P-0.5: exactly one adapter exists (``executors.code``); the pi/openclaw
+adapters and the kind-registration machinery are retired (schema v47).
 """
 
+from server.app.executors.contracts import Executor
 from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.executors.protocol import Executor
 
 __all__ = ["ExecutionContext", "ExecutionResult", "Executor"]

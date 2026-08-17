@@ -11,7 +11,6 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.jobs import JobQueries
 from server.app.services import token_usage_lease
-from tests.helpers.executor_worker import allocate, bind
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -58,9 +57,6 @@ def test_finish_lease_captures_token_usage(lease_repo):
     workflow_key = "demo_workflow"
     node_key = "review_keywords"
     executor_id = "pi-1"
-
-    allocate(job_db, workspace_id, executor_id, 10)
-    bind(job_db, workspace_id, workflow_key, node_key, executor_id)
 
     claimed = repo.try_claim(
         LeaseClaimRequest(
@@ -128,9 +124,6 @@ def test_finish_lease_missing_events_does_not_fail_lease(lease_repo):
     node_key = "review_keywords"
     executor_id = "pi-1"
 
-    allocate(job_db, workspace_id, executor_id, 10)
-    bind(job_db, workspace_id, workflow_key, node_key, executor_id)
-
     claimed = repo.try_claim(
         LeaseClaimRequest(
             executor_id=executor_id,
@@ -172,9 +165,6 @@ def _claim_lease(repo: ExecutorLeaseRepository, job_db: JobQueries, data_dir: Pa
     workflow_key = "demo_workflow"
     node_key = "review_keywords"
     executor_id = "pi-1"
-
-    allocate(job_db, workspace_id, executor_id, 10)
-    bind(job_db, workspace_id, workflow_key, node_key, executor_id)
 
     claimed = repo.try_claim(
         LeaseClaimRequest(
@@ -279,8 +269,6 @@ def test_claim_lease_rejects_terminal_job(lease_repo):
     （mark_scan 文档化缺口），认领事务内必须以当前 jobs.status 为准。"""
     repo, job_db, data_dir = lease_repo
     _setup_workspace_and_job(job_db)
-    allocate(job_db, "ws-1", "pi-1", 10)
-    bind(job_db, "ws-1", "demo_workflow", "review_keywords", "pi-1")
     with job_db.connect() as conn:
         conn.execute("update jobs set status='failed' where id=%s", ("job-1",))
 
