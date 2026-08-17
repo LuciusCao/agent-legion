@@ -130,7 +130,7 @@ describe('WorkflowStudioWorkspace', () => {
     expect(detail).toHaveTextContent('知识视频 DAG / 获取题目')
     expect(screen.getByText('基本设置')).toBeInTheDocument()
     // 等节点代码异步加载落地，避免 act 警告。
-    await screen.findByText(/内置 workflow_nodes/)
+    await screen.findByText(/出厂版本/)
   })
 
   it('puts node detail on the right half next to the DAG when the agent panel is collapsed', async () => {
@@ -145,7 +145,7 @@ describe('WorkflowStudioWorkspace', () => {
       screen.getByRole('complementary', { name: 'Agent 对话面板' })
     ).toHaveAttribute('data-collapsed', 'true')
     expect(screen.getByText('DAG 画布 stub')).toBeInTheDocument()
-    await screen.findByText(/内置 workflow_nodes/)
+    await screen.findByText(/出厂版本/)
   })
 
   it('returns to the DAG via the breadcrumb back button', async () => {
@@ -155,6 +155,6 @@ describe('WorkflowStudioWorkspace', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '返回 DAG' }))
     expect(setSelectedNodeKey).toHaveBeenCalledWith(null)
-    await screen.findByText(/内置 workflow_nodes/)
+    await screen.findByText(/出厂版本/)
   })
 })
