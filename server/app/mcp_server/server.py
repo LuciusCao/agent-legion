@@ -91,7 +91,9 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
     def compare_workflow(workspace_id: str, definition_yaml: str) -> str:
         """Diff a workflow definition YAML draft against the workspace's active
         revision: per-node changes, risk summary, whether it would create a new
-        revision. Persists nothing."""
+        revision. When the workflow was never published (no baseline), the
+        result is a full-draft preview instead: every node/edge/intake field
+        shows as added and base_revision is null. Persists nothing."""
         return client.call(
             "POST",
             f"/workspaces/{workspace_id}/workflow/compare",

@@ -417,6 +417,55 @@ def test_compare_workflow_404_for_unknown_workspace(client, job_db) -> None:
     assert response.status_code == 404
 
 
+def test_compare_workflow_without_baseline_returns_full_draft_preview(client, job_db) -> None:
+    """Tool-surface compare on a never-published workflow (registered key, no
+    revision): instead of a revision error the draft is diffed against an
+    empty base, so the agent can preview the full from-scratch shape."""
+    scoped, _ = _scoped_client(client, job_db)
+    registered = scoped.post(
+        "/api/studio-agent/tools/workflows/register",
+        json={"key": "studio_fresh_flow", "label": "Studio Fresh Flow"},
+    )
+    assert registered.status_code == 200, registered.text
+    workspace = job_db.create_workspace("ws-fresh", default_workflow_key="studio_fresh_flow")
+    workspace_id = str(workspace["id"])
+
+    response = scoped.post(
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/compare",
+        json={
+            "definition_yaml": (
+                "key: studio_fresh_flow\n"
+                "label: Studio Fresh Flow\n"
+                "nodes:\n"
+                "  publish_content:\n"
+                "    capability: publish_content\n"
+            )
+        },
+    )
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    assert payload["valid"] is True
+    assert payload["errors"] == []
+    assert payload["base_revision"] is None
+    assert payload["draft_workflow"] == {
+        "key": "studio_fresh_flow",
+        "label": "Studio Fresh Flow",
+        "version": 0,
+    }
+    assert payload["creates_revision"] is True
+    assert payload["summary"]["node_changes"] == [
+        {
+            "type": "added",
+            "node_key": "publish_content",
+            "label": "publish_content",
+            "fields": [],
+            "risk": "info",
+        }
+    ]
+    assert any(flag["code"] == "no_baseline" for flag in payload["summary"]["risk_flags"])
+
+
 def test_save_node_code_draft_404_for_unknown_node(client, job_db) -> None:
     workspace_id = _create_workspace(client)
     scoped, _ = _scoped_client(client, job_db)

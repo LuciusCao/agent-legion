@@ -25,6 +25,7 @@ from server.app.workflows.definition import WorkflowDefinitionError, workflow_de
 from server.app.workflows.schema import (
     WorkflowDefinition,
     WorkflowEdge,
+    WorkflowIntake,
     WorkflowIntakeMode,
     WorkflowNode,
 )
@@ -400,6 +401,8 @@ def compare_workflow_draft(
     job_db: JobQueries,
     workspace_id: str,
     definition_yaml: str,
+    *,
+    allow_missing_baseline: bool = False,
 ) -> dict[str, Any]:
     try:
         draft = workflow_definition_from_yaml_string(definition_yaml)
@@ -460,7 +463,7 @@ def compare_workflow_draft(
         }
 
     revision = job_db.get_active_workflow_revision(workspace_id, draft.key)
-    if revision is None:
+    if revision is None and not allow_missing_baseline:
         return {
             "valid": False,
             "base_revision": None,
@@ -474,21 +477,34 @@ def compare_workflow_draft(
             ],
         }
 
-    try:
-        base = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
-    except Exception as exc:
-        return {
-            "valid": False,
-            "base_revision": None,
-            "draft_workflow": None,
-            "summary": None,
-            "errors": [
-                {
-                    "category": "schema",
-                    "message": f"Failed to parse active revision: {exc}",
-                }
-            ],
-        }
+    if revision is None:
+        # No-baseline preview (studio-agent from-scratch authoring): diff the
+        # draft against an empty base so a never-published workflow shows its
+        # full shape (every node/edge/intake field reported as added) instead
+        # of failing with a revision error.
+        base = WorkflowDefinition(
+            key=draft.key,
+            label=draft.label,
+            intake=WorkflowIntake(),
+            nodes={},
+            schema_version=draft.schema_version,
+        )
+    else:
+        try:
+            base = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+        except Exception as exc:
+            return {
+                "valid": False,
+                "base_revision": None,
+                "draft_workflow": None,
+                "summary": None,
+                "errors": [
+                    {
+                        "category": "schema",
+                        "message": f"Failed to parse active revision: {exc}",
+                    }
+                ],
+            }
 
     node_changes: list[dict[str, Any]] = []
     edge_changes: list[dict[str, Any]] = []
@@ -500,6 +516,14 @@ def compare_workflow_draft(
     _diff_edges(base, draft, edge_changes, risk_flags)
     _diff_intake(base, draft, intake_changes, risk_flags)
     _diff_metadata(base, draft, metadata_changes, risk_flags)
+    if revision is None:
+        risk_flags.append(
+            {
+                "code": "no_baseline",
+                "severity": "info",
+                "message": "该 workflow 从未发布：与空基线对比，展示草稿全貌（全部节点均为新增）。",
+            }
+        )
 
     risk_level = compute_risk_level(
         node_changes, edge_changes, intake_changes, risk_flags, metadata_changes
@@ -511,16 +535,20 @@ def compare_workflow_draft(
     return {
         "valid": True,
         "creates_revision": creates_revision,
-        "base_revision": {
-            "id": revision["id"],
-            "version": revision["version"],
-            "workflow_key": revision["workflow_key"],
-            "definition_hash": revision["definition_hash"],
-        },
+        "base_revision": (
+            {
+                "id": revision["id"],
+                "version": revision["version"],
+                "workflow_key": revision["workflow_key"],
+                "definition_hash": revision["definition_hash"],
+            }
+            if revision is not None
+            else None
+        ),
         "draft_workflow": {
             "key": draft.key,
             "label": draft.label,
-            "version": revision["version"],
+            "version": int(revision["version"]) if revision is not None else 0,
         },
         "summary": {
             "risk_level": risk_level,
