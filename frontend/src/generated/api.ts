@@ -1074,23 +1074,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/studio-agent/tools/agent-definitions/{agent_id}/draft': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /** Save Agent Definition Draft */
-    put: operations['save_agent_definition_draft_api_studio_agent_tools_agent_definitions__agent_id__draft_put']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/studio-agent/tools/chat-sessions/{session_id}/context': {
     parameters: {
       query?: never
@@ -1136,6 +1119,23 @@ export interface paths {
     put?: never
     /** Register Workflow */
     post: operations['register_workflow_api_studio_agent_tools_workflows_register_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Agent Definition Draft */
+    put: operations['save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put']
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -6071,7 +6071,9 @@ export interface operations {
   }
   list_agent_definitions_api_agent_definitions_get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -6087,11 +6089,22 @@ export interface operations {
           'application/json': components['schemas']['AgentListResponse']
         }
       }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
     }
   }
   create_agent_definition_api_agent_definitions_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -6124,7 +6137,9 @@ export interface operations {
   }
   get_agent_definition_api_agent_definitions__agent_id__get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -6155,7 +6170,9 @@ export interface operations {
   }
   archive_agent_definition_api_agent_definitions__agent_id__delete: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -6186,7 +6203,9 @@ export interface operations {
   }
   copy_agent_definition_api_agent_definitions__agent_id__copy_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -6221,7 +6240,9 @@ export interface operations {
   }
   save_agent_definition_draft_api_agent_definitions__agent_id__draft_put: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -6256,7 +6277,9 @@ export interface operations {
   }
   publish_agent_definition_api_agent_definitions__agent_id__publish_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -6287,7 +6310,9 @@ export interface operations {
   }
   rollback_agent_definition_api_agent_definitions__agent_id__rollback_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -6322,7 +6347,9 @@ export interface operations {
   }
   list_agent_definition_versions_api_agent_definitions__agent_id__versions_get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -7224,7 +7251,9 @@ export interface operations {
   }
   get_executors_api_executors_get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -7238,6 +7267,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ExecutorCatalogResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -7830,41 +7868,6 @@ export interface operations {
       }
     }
   }
-  save_agent_definition_draft_api_studio_agent_tools_agent_definitions__agent_id__draft_put: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['AgentDefinitionPayload']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   get_chat_session_context_api_studio_agent_tools_chat_sessions__session_id__context_get: {
     parameters: {
       query?: never
@@ -7936,6 +7939,42 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowRegisteredResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentDefinitionPayload']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
         }
       }
       /** @description Validation Error */
