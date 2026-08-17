@@ -2,7 +2,7 @@
 
 Spawns ``python -m server.app.mcp_server`` over stdio like a real MCP host
 would, pointed at a local stub HTTP backend (no platform database involved):
-handshake, tools/list discovers the 9 tools, and a tools/call round-trip
+handshake, tools/list discovers the 10 tools, and a tools/call round-trip
 proves the scoped token reaches the backend and the response comes back as
 text.
 """
@@ -93,6 +93,7 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
             assert names == [
                 "compare_workflow",
                 "get_active_workflow",
+                "get_authoring_guide",
                 "get_node_code",
                 "get_studio_context",
                 "list_workflows",
@@ -125,5 +126,10 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
             context = json.loads(await call_text("get_studio_context", {}))
             assert context["workspace_id"] == "ws-1"
             assert context["selected_node_key"] == "node-a"
+
+            # The authoring guide is served locally — the stub backend never
+            # sees a request for it.
+            guide = await call_text("get_authoring_guide", {})
+            assert guide.startswith("# Agent Legion Workflow Authoring Guide")
 
     asyncio.run(asyncio.wait_for(run(), timeout=60))

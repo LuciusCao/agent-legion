@@ -38,12 +38,14 @@ def test_mcp_tools_match_the_real_tool_router(monkeypatch, tmp_path) -> None:
         calls.append({"method": method, "url": url})
         return _FakeResponse()
 
-    monkeypatch.setattr("server.app.mcp_server.server.requests.request", fake_request)
+    monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
     server = create_mcp_server(_CONFIG)
 
     tools = asyncio.run(server.list_tools())
     # 工具面清单变化时同步这里与工具文档（server/app/mcp_server/server.py）。
-    assert len(tools) == 9
+    # get_authoring_guide 是本地静态工具（不发 HTTP），不影响下方
+    # recorded == table 的路由比对。
+    assert len(tools) == 10
     for tool in tools:
         schema = tool.inputSchema
         args = {
