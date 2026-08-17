@@ -102,7 +102,12 @@ Key design rules (enforced by architecture checks, see
 
 ## Quick Start
 
-Prerequisites: Python 3.11+, Node 18+, PostgreSQL, [`uv`](https://docs.astral.sh/uv/).
+Prerequisites: Python 3.11+, Node 18+, PostgreSQL 17 (Homebrew:
+`brew install postgresql@17`), [`uv`](https://docs.astral.sh/uv/). The Docker
+stacks and CI also pin PostgreSQL 17 (`postgres:17.5` / `postgres:17`); the
+prod database still runs 15 and its 15→17 upgrade needs a rehearsed
+dump/restore (not done yet) — see
+[docs/postgresql-runbook.md](docs/postgresql-runbook.md).
 
 ```bash
 uv sync                                     # Python deps
@@ -129,8 +134,11 @@ First start redirects to `/setup` to create the admin user. For production,
 Common tasks have Makefile shortcuts (`make help` lists all):
 
 ```bash
-make dev-backend      # backend dev server
-make dev-frontend     # frontend dev server
+make dev-up           # start backend + frontend + worker in the background (idempotent)
+make dev-status       # show component status and URLs
+make dev-down         # stop everything dev-up started
+make dev-backend      # backend dev server only (foreground)
+make dev-frontend     # frontend dev server only (foreground)
 make import-demo      # import the demo workflow's skills (required before running it)
 make check-quick      # quick quality gate (daily)
 make check            # full quality gate (before handoff)
@@ -138,6 +146,11 @@ make api-generate     # regenerate frontend API types
 make skills-lock      # refresh the DB skill lock (global_settings skill_lock)
 make install-hooks    # install pre-commit / pre-push gates
 ```
+
+`make dev-up` runs the three `dev-*` targets in the background via
+`nohup`, waits for health, and prints each service URL; logs land in
+`data/logs/dev-{backend,frontend,worker}.log`. It is idempotent — re-running
+it skips components already listening on their ports.
 
 ### Demo workflow (education_video_problems_generation)
 
@@ -220,7 +233,7 @@ Two harness runtimes run them:
 - **velites** (production default): a single static Rust binary built from
   `velites/` (`cargo build --release`), emitting the same event stream the host
   consumes. Enable per agent with `runtime: velites` in the Agent definition.
-  `make native-prod-up` runs `scripts/ensure-velites.sh` before starting
+  `make prod-up` runs `scripts/ensure-velites.sh` before starting
   services: it fingerprints the `velites/` source tree (git tree hash) against
   a stamp next to the PATH binary and rebuilds + atomically reinstalls when
   stale, so a pulled-but-never-rebuilt binary cannot drift from the code.

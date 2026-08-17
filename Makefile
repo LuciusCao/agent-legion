@@ -9,7 +9,9 @@ FRONTEND_DIR  ?= frontend
 LLM_GATEWAY_PROVIDER ?= gateway
 LLM_GATEWAY_HOST     ?= 127.0.0.1
 LLM_GATEWAY_PORT     ?= 8788
-PI_MODELS_JSON       ?= $(HOME)/.pi/agent/models.json
+# PI_MODELS_JSON 故意不设默认值：它指向本机 Pi CLI 的 models.json（通常
+# ~/.pi/agent/models.json），属于机器特定路径，必须显式传入。
+PI_MODELS_JSON       ?=
 
 export UV_CACHE_DIR
 
@@ -46,15 +48,32 @@ dev-worker: ## 启动本机 Worker Service 与控制台（macOS 下经 caffeinat
 		--config "$(AGENT_WORKER_CONFIG)" --state-dir "$(AGENT_WORKER_STATE_DIR)" \
 		--host "$(AGENT_WORKER_UI_HOST)" --port "$(AGENT_WORKER_UI_PORT)"
 
+# dev-up/down/status：上面三个 dev-* target 的后台编排（日志 data/logs/dev-*.log）。
+# 端口变量经环境透传，与直接 make dev-backend 等保持一致。
+.PHONY: dev-up
+dev-up: ## 一条起齐开发环境（backend + frontend + worker，后台运行，幂等）
+	DEV_BACKEND_PORT="$(DEV_BACKEND_PORT)" DEV_FRONTEND_PORT="$(DEV_FRONTEND_PORT)" \
+		AGENT_WORKER_UI_PORT="$(AGENT_WORKER_UI_PORT)" ./scripts/dev_stack.sh up
+
+.PHONY: dev-down
+dev-down: ## 停止 dev-up 启动的全部开发进程（幂等）
+	DEV_BACKEND_PORT="$(DEV_BACKEND_PORT)" DEV_FRONTEND_PORT="$(DEV_FRONTEND_PORT)" \
+		AGENT_WORKER_UI_PORT="$(AGENT_WORKER_UI_PORT)" ./scripts/dev_stack.sh down
+
+.PHONY: dev-status
+dev-status: ## 查看开发环境各组件运行状态与 URL
+	DEV_BACKEND_PORT="$(DEV_BACKEND_PORT)" DEV_FRONTEND_PORT="$(DEV_FRONTEND_PORT)" \
+		AGENT_WORKER_UI_PORT="$(AGENT_WORKER_UI_PORT)" ./scripts/dev_stack.sh status
+
 .PHONY: llm-gateway
-llm-gateway: ## 从 Pi models.json 读取凭据并启动远程 LLM 网关
+llm-gateway: ## 启动远程 LLM 网关（凭据来自 PI_MODELS_JSON 指定的 Pi models.json，必须显式传入）
+	@if [ -z "$(PI_MODELS_JSON)" ]; then \
+		echo "错误：请显式指定 PI_MODELS_JSON=<path>/models.json（Pi CLI 的 provider 配置，通常 ~/.pi/agent/models.json）" >&2; \
+		exit 1; \
+	fi
 	$(UV) run python scripts/remote/llm_gateway.py \
 		--host "$(LLM_GATEWAY_HOST)" --port "$(LLM_GATEWAY_PORT)" \
 		--provider "$(LLM_GATEWAY_PROVIDER)" --models-json "$(PI_MODELS_JSON)"
-
-.PHONY: seed-from-prod
-seed-from-prod: ## 从本机 prod 的 Docker 生产库抽样灌数据到开发库
-	$(UV) run python scripts/seed_from_prod.py
 
 # 本机 compose 覆盖（如 deploy/compose.local.yaml，bind-mount 既有数据目录等
 # 机器特定配置）：存在即自动并入 stack 命令，不存在则只用基础编排。
@@ -65,17 +84,28 @@ COMPOSE_WORKER_FILES := -f deploy/compose.worker.yaml $(if $(wildcard deploy/com
 stack-host-up: ## 部署机：启动 PostgreSQL + Agent Legion Host + 本机 Worker
 	docker compose $(COMPOSE_HOST_FILES) up -d --build
 
-.PHONY: stack-prod-up
-stack-prod-up: ## 一键启动本地生产 stack（secrets 检查 + 模型预热 + 健康等待）
+# 生产环境启停（仅 prod worktree 使用）：默认本机原生形态（后端 8000 含 SPA +
+# worker 8787）；Docker stack 形态收编为参数 `make prod-up docker` /
+# `make prod-down docker`（PostgreSQL + Host + Worker，secrets 预检 + 健康等待）。
+.PHONY: docker
+docker:
+	@:
+
+.PHONY: prod-up
+prod-up: ## 启动生产环境（默认原生形态；`make prod-up docker` 走 Docker stack）
+ifeq ($(filter docker,$(MAKECMDGOALS)),docker)
 	./scripts/stack-prod-up.sh
-
-.PHONY: native-prod-up
-native-prod-up: ## 一键启动原生（非 Docker）生产环境（后端含 SPA + Worker）
+else
 	./scripts/native-prod-up.sh
+endif
 
-.PHONY: native-prod-down
-native-prod-down: ## 停止原生生产环境（先 worker 后后端，SIGTERM 优雅停机）
+.PHONY: prod-down
+prod-down: ## 停止生产环境（默认原生形态，SIGTERM 优雅停机；`make prod-down docker` 停 Docker stack）
+ifeq ($(filter docker,$(MAKECMDGOALS)),docker)
+	docker compose $(COMPOSE_HOST_FILES) down
+else
 	./scripts/native-prod-down.sh
+endif
 
 .PHONY: stack-host-down
 stack-host-down: ## 停止部署机 Agent Legion stack
@@ -160,33 +190,3 @@ api-generate: ## 重新生成前端 API 类型
 install-hooks: ## 安装 worktree 兼容的本地质量门钩子
 	./scripts/install-git-hooks.sh
 
-# 审题信息上传工具
-.PHONY: upload
-upload: ## 上传审题信息包 (WORKSPACE/CONFIG/BATCH/PACKAGE)
-	$(UV) run python tools/comprehension-uploader/run.py upload \
-		$(if $(WORKSPACE),--workspace $(WORKSPACE)) \
-		$(if $(CONFIG),--config $(CONFIG)) \
-		$(if $(BATCH),--batch-id $(BATCH)) \
-		$(ARGS) \
-		$(PACKAGE)
-
-.PHONY: scan-comprehension
-scan-comprehension: ## 扫描审题信息 fingerprint 变化 (CONFIG/OUTPUT)
-	$(UV) run python tools/comprehension-uploader/run.py scan \
-		$(if $(CONFIG),--config $(CONFIG)) \
-		$(if $(OUTPUT),--output $(OUTPUT))
-
-.PHONY: package-comprehension
-package-comprehension: ## 从 comprehension_info.json 生成 package.jsonl (INPUT_DIR/CONFIG/OUTPUT)
-	$(UV) run python tools/comprehension-uploader/run.py package \
-		$(if $(INPUT_DIR),--input-dir $(INPUT_DIR)) \
-		$(if $(CONFIG),--config $(CONFIG)) \
-		$(if $(OUTPUT),--output $(OUTPUT))
-
-.PHONY: upload-workspace-package
-upload-workspace-package: ## 从 workspace zip 直接上传审题信息 (CONFIG/PACKAGE/WORKSPACE/BATCH)
-	$(UV) run python tools/comprehension-uploader/run.py upload \
-		$(if $(CONFIG),--config $(CONFIG)) \
-		$(if $(WORKSPACE),--workspace $(WORKSPACE)) \
-		$(if $(BATCH),--batch-id $(BATCH)) \
-		$(if $(PACKAGE),--workspace-package $(PACKAGE))

@@ -3,7 +3,7 @@
 # 「代码已 pull 但二进制还是旧构建」不会触发任何报错。本脚本用 velites/
 # 源码树的 git tree hash 做指纹，与二进制旁的 stamp 文件对比，不一致（或
 # 二进制缺失）时重新 cargo build --release 并原子替换安装。velites/ 有未
-# 提交改动时指纹不可靠，强制重建。native-prod-up 每次启动前调用本脚本。
+# 提交改动时指纹不可靠，强制重建。make prod-up（原生形态）每次启动前调用本脚本。
 #
 # 用法：
 #   scripts/ensure-velites.sh              安装/刷新 PATH 上的 velites（默认）
