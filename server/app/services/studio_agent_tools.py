@@ -80,7 +80,11 @@ class StudioAgentToolsService:
     def compare_workflow(self, workspace_id: str, definition_yaml: str) -> dict[str, Any]:
         if self._job_db.get_workspace(workspace_id) is None:
             raise NotFoundError("Workspace not found")
-        return compare_workflow_draft(self._job_db, workspace_id, definition_yaml)
+        # The tool surface degrades to a full-draft preview when the workflow
+        # was never published (no baseline to diff against).
+        return compare_workflow_draft(
+            self._job_db, workspace_id, definition_yaml, allow_missing_baseline=True
+        )
 
     def save_node_code_draft(
         self,
