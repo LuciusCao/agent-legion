@@ -1056,7 +1056,7 @@
     "server/app/studio_chat/prompts.py": 66,
     "server/app/studio_chat/registry.py": 67,
     "server/app/studio_chat/runtime.py": 60,
-    "server/app/studio_chat/service.py": 403,
+    "server/app/studio_chat/service.py": 397,
     "server/app/studio_chat/streaming.py": 47,
     "server/app/worker_control.py": 31,
     "server/app/worker_startup.py": 88,
