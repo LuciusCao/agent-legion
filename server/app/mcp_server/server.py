@@ -73,7 +73,10 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
     def get_active_workflow(workspace_id: str) -> str:
         """Get the active workflow revision of a workspace, including the full
         definition YAML. Read this before drafting changes so the draft builds
-        on what is actually live."""
+        on what is actually live. When the workspace has no published workflow
+        yet, the result is a structured empty state ({"state": "empty",
+        "workflow_key": ...}) instead of an error — treat it as the signal to
+        start the from-scratch authoring flow (see get_authoring_guide)."""
         return client.call("GET", f"/workspaces/{workspace_id}/workflow/active")
 
     @mcp.tool()

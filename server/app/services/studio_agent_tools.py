@@ -123,11 +123,19 @@ class StudioAgentToolsService:
         if workspace is None:
             raise NotFoundError("Workspace not found")
         workflow_key = str(workspace.get("default_workflow_key") or "")
-        revision = self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
+        revision = (
+            self._job_db.get_active_workflow_revision(workspace_id, workflow_key)
+            if workflow_key
+            else None
+        )
         if revision is None:
-            raise NotFoundError("No active workflow revision")
+            # Structured empty state (no default workflow key, or no published
+            # revision yet): the agent switches to the from-scratch flow.
+            return {"state": "empty", "workflow_key": workflow_key or None}
         definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
         return {
+            "state": "active",
+            "workflow_key": workflow_key,
             "revision": dict(revision),
             "workflow": workflow_definition_to_response_payload(definition),
             "definition_yaml": definition_to_yaml(definition),
