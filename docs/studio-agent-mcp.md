@@ -82,6 +82,7 @@ curl -b /tmp/al-cookies.txt -X DELETE \
 
 ## 3. 注意
 
+- Agent 定义自 schema v46 起为 workspace 作用域：`save_agent_definition_draft` 的第一个参数是必填的 `workspace_id`（草稿写进该 workspace 的 catalog，带 workspace 绑定的 run token 跨 workspace 调用会被 403）。
 - token 泄露处置：`DELETE /api/studio-agent-tokens/<id>` 吊销即可，即刻生效。
 - token 到期或吊销后 MCP 调用返回 `HTTP 401: ...` 文本，按第 1 节重新铸造并更新配置。
 - 依赖钉在 `mcp>=1.12,<2`：mcp 2.0 移除了 `mcp.server.fastmcp`，独立 fastmcp 3.x 与之不兼容（见 pyproject.toml 注释）。

@@ -4,18 +4,22 @@ Before v46 every Agent definition was global (``workspace_id IS NULL``) and
 capability uniqueness was enforced globally by the partial unique index
 ``versioned_entities_published_capability``. This migration:
 
-1. Copies the globally published Agent definition of every capability a
+1. Drops the legacy global capability index FIRST: on an upgrade (v45 → v46)
+   the old ``versioned_entities_published_capability`` (keyed by capability
+   alone) still exists, and the copies below share capabilities with the
+   not-yet-deleted global rows — the copy would hit a UniqueViolation.
+2. Copies the globally published Agent definition of every capability a
    workspace actually references (workflow revision nodes + materialized
    node routes) into that workspace as version 1 (new row id, same
    ``entity_key``/``definition_json``/``definition_hash``).
-2. Deletes every global Agent row (any status — no global archive is kept).
-3. Replaces the capability index with the per-workspace variant
+3. Deletes every global Agent row (any status — no global archive is kept).
+4. Creates the per-workspace capability index
    ``(workspace_id, definition_json->>'capability')``.
 
-Idempotent on replay: copies are guarded by NOT EXISTS, the delete affects
-zero rows on a second run, and the index swap is drop-if-exists +
-create-if-not-exists. Copying must finish before the index swap so the old
-global rows (NULL workspace_id) never collide with the new workspace rows.
+Idempotent on replay: the drop is if-exists, copies are guarded by NOT
+EXISTS, the delete affects zero rows on a second run, and the index create
+is if-not-exists. The new index is created only after the global rows are
+gone so no workspace_id NULL agent row ever enters it.
 """
 
 from __future__ import annotations
@@ -80,9 +84,11 @@ _DELETE_GLOBAL_AGENTS = (
     "delete from versioned_entities where entity_type='agent' and workspace_id is null"
 )
 
-# Per-workspace capability uniqueness (was global before v46).
-_INDEX_SWAP = """
-drop index if exists versioned_entities_published_capability;
+# Per-workspace capability uniqueness (was global before v46). The legacy
+# index must drop BEFORE the copy: on upgrades it keys capability alone, so
+# the workspace copies would collide with the still-present global rows.
+_DROP_LEGACY_INDEX = "drop index if exists versioned_entities_published_capability"
+_CREATE_WORKSPACE_INDEX = """
 create unique index if not exists versioned_entities_published_capability
   on versioned_entities(workspace_id, (definition_json::jsonb->>'capability'))
   where entity_type = 'agent' and status = 'published'
@@ -90,7 +96,8 @@ create unique index if not exists versioned_entities_published_capability
 
 
 def migrate_agent_workspace_scope(conn: Any) -> None:
-    """Copy referenced global Agents into each workspace, drop the global rows."""
+    """Drop the global index, copy referenced Agents per workspace, delete globals."""
+    conn.execute(_DROP_LEGACY_INDEX)
     conn.execute(_COPY_REFERENCED)
     orphans = conn.execute(_UNRESOLVABLE_REFERENCES).fetchall()
     for row in orphans:
@@ -101,7 +108,4 @@ def migrate_agent_workspace_scope(conn: Any) -> None:
             row["capability"],
         )
     conn.execute(_DELETE_GLOBAL_AGENTS)
-    for statement in _INDEX_SWAP.split(";"):
-        statement = statement.strip()
-        if statement:
-            conn.execute(statement)
+    conn.execute(_CREATE_WORKSPACE_INDEX)
