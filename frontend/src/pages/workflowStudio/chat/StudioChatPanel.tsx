@@ -12,7 +12,7 @@ type Props = {
   onSelectNode?: (nodeKey: string) => void
 }
 
-/** Studio 右栏「Agent 助手」tab：ACP 对话面板。agent 只能产草稿，
+/** Studio 右半的 Agent 对话面板（一等公民分栏，不再是 tab）。agent 只能产草稿，
  * 发布永远由人确认（权限提示条常驻）。 */
 export function StudioChatPanel(props: Props) {
   const workspaceId = useSettingStore((s) => s.workspaceId) ?? undefined

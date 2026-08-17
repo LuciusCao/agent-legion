@@ -1,0 +1,14 @@
+.resizeHandle {
+  cursor: col-resize;
+  background: transparent;
+  transition: background 0.15s;
+}
+.resizeHandle:hover,
+.resizeHandle:active {
+  background: #bbdefb;
+}
+@media (max-width: 900px) {
+  .resizeHandle {
+    display: none;
+  }
+}

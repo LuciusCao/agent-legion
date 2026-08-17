@@ -11,6 +11,10 @@ vi.mock('react-router-dom', () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }))
 
+vi.mock('./workflowStudio/chat/StudioChatPanel', () => ({
+  StudioChatPanel: () => <div>chat panel stub</div>,
+}))
+
 function renderPage() {
   return render(
     <TestQueryProvider>

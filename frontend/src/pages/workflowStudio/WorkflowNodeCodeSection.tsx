@@ -7,6 +7,7 @@ import type { WorkflowNodeRecord } from '../../types'
 import type { ExecutorDefinition } from '../../types/executorTypes'
 import { WorkflowNodeCodeActions } from './WorkflowNodeCodeActions'
 import { WorkflowNodeCodeEditor } from './WorkflowNodeCodeEditor'
+import { WorkflowNodeCodePreview } from './WorkflowNodeCodePreview'
 import { WorkflowNodeCodeVersions } from './WorkflowNodeCodeVersions'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 import styles from './WorkflowNodeCodeSection.module.css'
@@ -166,9 +167,7 @@ export function WorkflowNodeCodeSection(props: {
               onCancel={() => setEditing(false)}
             />
           ) : (
-            <pre className={styles.code}>
-              {data.origin === 'none' ? data.draft_code : data.code}
-            </pre>
+            <WorkflowNodeCodePreview nodeKey={props.node.key} data={data} />
           )}
           {error && (
             <div role="alert" className={styles.error}>

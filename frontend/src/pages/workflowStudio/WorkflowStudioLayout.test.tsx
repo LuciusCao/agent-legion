@@ -2,6 +2,10 @@ import { render, screen, within } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 
+vi.mock('./chat/StudioChatPanel', () => ({
+  StudioChatPanel: () => <div>chat panel stub</div>,
+}))
+
 const workflow = {
   key: 'demo_video_workflow',
   label: '知识视频 DAG',
@@ -79,6 +83,7 @@ describe('WorkflowStudioLayout', () => {
     expect(
       within(mobileNav).getByRole('tab', { name: '编辑节点' })
     ).toBeDisabled()
+    expect(within(mobileNav).getByRole('tab', { name: 'Agent' })).toBeEnabled()
   })
 
   it('opens contextual node editing after a graph node is selected', () => {
