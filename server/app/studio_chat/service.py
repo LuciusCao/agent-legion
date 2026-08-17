@@ -216,6 +216,12 @@ class StudioChatService:
             if status == "closed":
                 raise ConflictError("Chat session is closed")
             raise ConflictError(f"Chat session is busy ({status})")
+        # New turn, new stream rows: reset the coalescing slots at turn START
+        # (not at turn end) so trailing chunks of the finished turn — the ACP
+        # SDK can deliver them after turn_end — keep folding into that turn's
+        # rows instead of starting tail-only orphan rows (#98).
+        with runtime.lock:
+            runtime.stream.reset()
         message = self._append_message(session_id, "text", "user", {"text": text})
         self._publish_session(session_id)
         prompt_text = (STUDIO_AUTHORING_BOOTSTRAP + text) if first_prompt else text
@@ -327,7 +333,6 @@ class StudioChatService:
         return handle_permission_request(self, session_id, tool_call, options)
 
     def _on_turn_end(self, session_id: str, stop_reason: str) -> None:
-        self._close_open_stream_messages(session_id)
         session = self._db.get_studio_chat_session(session_id) or {}
         runtime = self._runtime(session_id)
         mcp_observed = runtime.mcp_observed if runtime is not None else False
@@ -354,7 +359,6 @@ class StudioChatService:
         self._publish_session(session_id)
 
     def _on_error(self, session_id: str, detail: str, *, fatal: bool) -> None:
-        self._close_open_stream_messages(session_id)
         self._append_message(session_id, "status", "system", {"event": "error", "detail": detail})
         current = self._db.get_studio_chat_session(session_id) or {}
         if current.get("status") == "closed":
@@ -408,12 +412,15 @@ class StudioChatService:
         if not text:
             return
         with runtime.lock:
+            # The first-chunk create+attach stays in one critical section: a
+            # turn-start reset landing between them would leave a stale open
+            # id whose next chunk would overwrite the previous turn's
+            # message row in place (#98).
             open_id, full_text = runtime.stream.append(kind, text)
-        if open_id is None:
-            message = self._append_message(session_id, kind, "agent", {"text": full_text})
-            with runtime.lock:
+            if open_id is None:
+                message = self._append_message(session_id, kind, "agent", {"text": full_text})
                 runtime.stream.attach(kind, message["id"])
-            return
+                return
         self._db.update_studio_chat_message_content(open_id, {"text": full_text})
         self._publish(
             session_id,
@@ -422,12 +429,6 @@ class StudioChatService:
                 "message": stream_message_payload(session_id, open_id, kind, full_text),
             },
         )
-
-    def _close_open_stream_messages(self, session_id: str) -> None:
-        runtime = self._runtime(session_id)
-        if runtime is not None:
-            with runtime.lock:
-                runtime.stream.close()
 
     def _is_agent_legion_tool_call(self, payload: dict[str, Any]) -> bool:
         # Match only the structured identity fields (title/kind/name). Never

@@ -4,10 +4,16 @@ ACP streams one ``agent_message_chunk`` / ``agent_thought_chunk`` notification
 per fragment; each kind folds into a single persisted message row per turn
 (create on first chunk, in-place content updates after). The ACP SDK resolves
 the prompt response before the last session/update handler tasks run, so
-buffer-until-turn-end would lose trailing chunks — open rows tolerate any
-ordering, and turn end closes the open slots.
+trailing chunks of a finished turn can arrive after turn end — they keep
+folding into that turn's still-open rows. The slots are therefore reset at
+the START of the next turn (``send_message``), never at turn end: a turn-end
+reset would let a trailing chunk start a tail-only orphan row, and a slot
+attached after a reset would make the next turn's first chunk overwrite the
+previous turn's row in place (#98).
 
-The state lives on SessionRuntime and is guarded by the runtime lock.
+The state lives on SessionRuntime and is guarded by the runtime lock; the
+first-chunk create+attach is a single critical section so a turn-start reset
+can never land between them and leak a stale open id into the next turn.
 """
 
 from __future__ import annotations
@@ -31,7 +37,8 @@ class TurnStreamState:
     def attach(self, kind: str, message_id: str) -> None:
         self.message_ids[kind] = message_id
 
-    def close(self) -> None:
+    def reset(self) -> None:
+        """Start a new turn: drop the previous turn's open slots."""
         self.message_ids.clear()
         self.texts.clear()
 

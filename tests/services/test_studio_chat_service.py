@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -18,6 +19,7 @@ from server.app.studio_chat import service as service_module
 from server.app.studio_chat.acp_session import AcpSessionHandle
 from server.app.studio_chat.prompts import STUDIO_AUTHORING_BOOTSTRAP
 from server.app.studio_chat.registry import StudioAgentRegistryStore
+from server.app.studio_chat.runtime import SessionRuntime
 from server.app.studio_chat.service import StudioChatService
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -698,3 +700,128 @@ def test_handle_cancel_after_loop_closed_is_a_noop() -> None:
     handle._acp_session_id = "acp-1"
 
     handle.cancel()
+
+
+class _StubHandle:
+    """Minimal ACP handle stand-in for tests that drive the service callbacks
+    directly (no subprocess) to control interleaving precisely (#98)."""
+
+    def send_prompt(self, text: str) -> bool:
+        del text
+        return True
+
+    def cancel(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
+def _direct_session(job_db, settings):
+    """Idle session row + registered runtime without an ACP subprocess."""
+    bus = RecordingBus()
+    service = StudioChatService(job_db, settings, bus)
+    workspace_id = job_db.create_workspace(default_workflow_key="demo_workflow", name="Chat WS")[
+        "id"
+    ]
+    user_id = str(job_db.create_user("chat-user", password_hash=None)["id"])
+    session_id = job_db.create_studio_chat_session(workspace_id, user_id, "direct-agent")
+    job_db.update_studio_chat_session(session_id, status="idle")
+    runtime = SessionRuntime(_StubHandle(), token="direct-token")
+    with service._runtimes_lock:
+        service._runtimes[session_id] = runtime
+    return service, session_id, runtime, workspace_id
+
+
+def _chunk(text: str) -> dict:
+    return {
+        "sessionUpdate": "agent_message_chunk",
+        "content": {"type": "text", "text": text},
+    }
+
+
+def _agent_texts(service, session_id: str, workspace_id: str) -> list[str]:
+    return [
+        m["content"]["text"]
+        for m in service.list_messages(session_id, workspace_id)
+        if m["kind"] == "text" and m["role"] == "agent"
+    ]
+
+
+def test_trailing_chunk_after_turn_end_folds_into_finished_turn_row(job_db, settings) -> None:
+    """#98: the ACP SDK can deliver trailing chunks after turn_end. They must
+    keep folding into the finished turn's row — no tail-only orphan row — and
+    the next turn's first chunk must get its own row (slots reset at turn
+    start), never overwrite the previous turn's row in place."""
+    service, session_id, _runtime, workspace_id = _direct_session(job_db, settings)
+    try:
+        service.send_message(session_id, workspace_id, "first")
+        service._on_update(session_id, _chunk("Hello"))
+        service._on_turn_end(session_id, "end_turn")
+
+        # Trailing chunk of the finished turn arriving after turn end.
+        service._on_update(session_id, _chunk(" world"))
+
+        service.send_message(session_id, workspace_id, "second")
+        service._on_update(session_id, _chunk("Second"))
+        service._on_turn_end(session_id, "end_turn")
+
+        assert _agent_texts(service, session_id, workspace_id) == ["Hello world", "Second"]
+    finally:
+        service.shutdown()
+
+
+def test_turn_start_reset_cannot_land_between_stream_create_and_attach(
+    job_db, settings, monkeypatch
+) -> None:
+    """#98 regression: the first-chunk create+attach is one critical section.
+    A turn-start reset landing between them used to leave a stale open id, so
+    the next turn's first chunk updated the previous turn's row in place."""
+    service, session_id, runtime, workspace_id = _direct_session(job_db, settings)
+    try:
+        service.send_message(session_id, workspace_id, "first")
+        real_append = job_db.append_studio_chat_message
+        create_started = threading.Event()
+        proceed = threading.Event()
+        errors: list[BaseException] = []
+
+        def blocking_append(*args, **kwargs):
+            create_started.set()
+            if not proceed.wait(timeout=10):
+                raise RuntimeError("test deadlock: create never released")
+            return real_append(*args, **kwargs)
+
+        def run_chunk() -> None:
+            try:
+                service._on_update(session_id, _chunk("Hello"))
+            except BaseException as exc:  # surfaced after join
+                errors.append(exc)
+
+        def turn_start_reset() -> None:
+            try:
+                with runtime.lock:
+                    runtime.stream.reset()
+            except BaseException as exc:  # surfaced after join
+                errors.append(exc)
+
+        monkeypatch.setattr(job_db, "append_studio_chat_message", blocking_append)
+        chunk_thread = threading.Thread(target=run_chunk)
+        chunk_thread.start()
+        assert create_started.wait(timeout=10)
+
+        # Races the in-flight create: must block on the runtime lock until
+        # create+attach finished, then clear the freshly attached id.
+        reset_thread = threading.Thread(target=turn_start_reset)
+        reset_thread.start()
+        time.sleep(0.2)  # let the reset attempt reach the runtime lock
+        proceed.set()
+        chunk_thread.join(timeout=10)
+        reset_thread.join(timeout=10)
+        assert not chunk_thread.is_alive() and not reset_thread.is_alive()
+        assert not errors
+
+        # The next turn's first chunk must create its own row; the previous
+        # turn's row keeps its text.
+        service._on_update(session_id, _chunk("Second"))
+
+        assert _agent_texts(service, session_id, workspace_id) == ["Hello", "Second"]
+    finally:
+        service.shutdown()

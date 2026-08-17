@@ -36,7 +36,9 @@ class SessionRuntime:
         self.lock = threading.Lock()
         self.pending_permissions: dict[str, PendingPermission] = {}
         # Streaming chunk coalescing (agent text + thought): each kind folds
-        # into one message row per turn; turn end closes the open slots.
+        # into one message row per turn; the slots are reset at turn START
+        # (send_message), so trailing chunks of a finished turn still fold
+        # into that turn's rows (#98).
         self.stream = TurnStreamState()
         self.mcp_observed = False
 
