@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # 初始化新 git worktree 的开发环境（幂等，可重复执行）：
 #   0. 嵌套防护：worktree 必须是主仓库根的平级子目录，嵌套直接报错
-#   1. 从基准 worktree 复制 .env（若本 worktree 缺失）
+#   1. 从基准 worktree 复制 .env（若本 worktree 缺失；无法复制则 fail-fast——
+#      缺 .env 会让后端回落共享默认库/prod）
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
 #   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
 # 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取第一个非 bare 且非当前的 worktree）
@@ -28,14 +29,17 @@ fi
 
 BASE="${1:-}"
 if [[ -z "$BASE" ]]; then
-    # 主仓库可能是 bare（无工作区、无 .env），默认取第一个非 bare 且非当前的 worktree 作基准
-    BASE="$(git worktree list --porcelain | awk -v root="$ROOT" '
+    # 默认取第一个非 bare、非当前、非主仓库根的 worktree 作基准（主仓库根是
+    # bare/无工作区配置，永不适合作基准）。注意选中的基准自身也可能缺 .env，
+    # 由下方 fail-fast 兜底（2026-08-18 事故：基准 asr-openai 缺 .env → 新
+    # worktree 无 .env → 后端回落共享默认库即 prod 库）。
+    BASE="$(git worktree list --porcelain | awk -v root="$ROOT" -v main="$MAIN" '
         /^worktree / {
-            if (wt != "" && !isbare && wt != root) { print wt; found=1; exit }
+            if (wt != "" && !isbare && wt != root && wt != main) { print wt; found=1; exit }
             wt = substr($0, 10); isbare = 0
         }
         /^bare$/ { isbare = 1 }
-        END { if (!found && wt != "" && !isbare && wt != root) print wt }
+        END { if (!found && wt != "" && !isbare && wt != root && wt != main) print wt }
     ')"
 fi
 if [[ -n "$BASE" && "$BASE" == "$ROOT" ]]; then
@@ -53,6 +57,15 @@ if [[ ! -f .env ]]; then
     else
         echo "警告: $BASE/.env 不存在，跳过 .env 复制" >&2
     fi
+fi
+
+# .env 缺失是硬错误：没有它，后端/门禁会回落代码默认的共享库（即 prod 库），
+# 启动迁移直接改写 prod（2026-08-18 事故的另一半根因）。fail-fast，不留
+# 「警告然后继续」的余地。
+if [[ ! -f .env ]]; then
+    echo "错误: .env 缺失且无法从基准 worktree 复制（BASE=${BASE:-未找到}）。" >&2
+    echo "缺少 .env 时后端会回落共享默认库（prod）——请手工从其他 worktree 复制 .env 后重跑本脚本。" >&2
+    exit 1
 fi
 
 # 2. 专属 Postgres 库
