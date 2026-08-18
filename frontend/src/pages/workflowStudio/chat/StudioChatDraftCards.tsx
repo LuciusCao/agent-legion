@@ -37,6 +37,8 @@ export function WorkflowDraftCard(props: WorkflowProps) {
       setCompare(
         await compareWorkflowDraft(props.workspaceId, {
           definition_yaml: props.draft.yaml,
+          // agent 起草场景允许空基线预览（从未发布的 workflow 展示全貌）。
+          allow_missing_baseline: true,
         })
       )
     } catch (error) {

@@ -8,10 +8,6 @@ type Props = {
   workspaceId: string | undefined
   studio: Studio
   scrolled?: boolean
-  onOpenChanges: () => void
-  onOpenYaml: () => void
-  onOpenAgents: () => void
-  onOpenExecutors: () => void
   onValidate: () => void
 }
 
@@ -19,10 +15,6 @@ export function WorkflowStudioAppBar({
   workspaceId,
   studio,
   scrolled,
-  onOpenChanges,
-  onOpenYaml,
-  onOpenAgents,
-  onOpenExecutors,
   onValidate,
 }: Props) {
   const title = useWorkflowStudioAppTitle(workspaceId)
@@ -34,10 +26,6 @@ export function WorkflowStudioAppBar({
       rightActions={
         <WorkflowStudioCommandBarContainer
           studio={studio}
-          onOpenChanges={onOpenChanges}
-          onOpenYaml={onOpenYaml}
-          onOpenAgents={onOpenAgents}
-          onOpenExecutors={onOpenExecutors}
           onValidate={onValidate}
         />
       }

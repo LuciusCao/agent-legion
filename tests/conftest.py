@@ -215,6 +215,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/test_workspace_secrets.py",
         "tests/test_cors.py",
         "tests/test_workflow_draft_compare.py",
+        "tests/routes/test_workflow_draft_publish_routes.py",
         "tests/routes/test_workflow_draft_validate.py",
         "tests/test_workspace_executor_configuration_flow.py",
         "tests/test_workspace_job_control_flow.py",

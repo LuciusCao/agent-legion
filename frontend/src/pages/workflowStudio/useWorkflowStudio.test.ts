@@ -47,6 +47,7 @@ const mocks = {
   fetchActiveWorkflowRevision: vi.fn(),
   fetchWorkflowRevisions: vi.fn(),
   fetchWorkflowRevisionDetail: vi.fn(),
+  fetchWorkspaces: vi.fn(),
   compareWorkflowDraft: vi.fn(),
   publishWorkflowDraft: vi.fn(),
   validateWorkflowDraft: vi.fn(),
@@ -60,6 +61,7 @@ vi.mock('../../api', () => ({
     mocks.fetchWorkflowRevisions(...args),
   fetchWorkflowRevisionDetail: (...args: unknown[]) =>
     mocks.fetchWorkflowRevisionDetail(...args),
+  fetchWorkspaces: (...args: unknown[]) => mocks.fetchWorkspaces(...args),
   compareWorkflowDraft: (...args: unknown[]) =>
     mocks.compareWorkflowDraft(...args),
   publishWorkflowDraft: (...args: unknown[]) =>
@@ -78,6 +80,9 @@ describe('useWorkflowStudio', () => {
     mocks.fetchActiveWorkflowRevision.mockResolvedValue(activeRevisionPayload)
     mocks.fetchWorkflowRevisions.mockResolvedValue({
       revisions: [activeRevisionPayload.revision],
+    })
+    mocks.fetchWorkspaces.mockResolvedValue({
+      workspaces: [{ id: 'ws1', default_workflow_key: 'demo' }],
     })
     mocks.getExecutorCatalog.mockResolvedValue({ executors: [] })
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
@@ -156,10 +161,81 @@ describe('useWorkflowStudio', () => {
     await waitFor(() =>
       expect(mocks.compareWorkflowDraft).toHaveBeenCalledWith('ws1', {
         definition_yaml: 'key: demo\nlabel: Changed\n',
+        allow_missing_baseline: false,
       })
     )
     expect(result.current.compareState).toBe('ready')
     expect(result.current.compareSummary?.nodeChanges).toHaveLength(1)
+  })
+
+  it('merges compare node changes into the DAG as badges and ghost nodes', async () => {
+    // 画布展示 active 基线（只有节点 a）：modified 打在基线节点上，
+    // added 以幽灵节点 + 幽灵边补入。
+    mocks.compareWorkflowDraft.mockResolvedValue({
+      valid: true,
+      creates_revision: true,
+      base_revision: null,
+      draft_workflow: null,
+      summary: {
+        risk_level: 'warning',
+        node_changes: [
+          {
+            type: 'modified',
+            node_key: 'a',
+            label: 'A',
+            fields: ['label'],
+            risk: 'info',
+          },
+          {
+            type: 'added',
+            node_key: 'b',
+            label: 'B',
+            fields: [],
+            risk: 'info',
+          },
+        ],
+        edge_changes: [
+          {
+            type: 'added',
+            source: 'a',
+            target: 'b',
+            before_condition: null,
+            after_condition: null,
+            risk: 'info',
+          },
+        ],
+        intake_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nlabel: Changed\n')
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+
+    await waitFor(() => expect(result.current.compareState).toBe('ready'))
+    const modified = result.current.nodes.find((node) => node.key === 'a')
+    expect(modified).toMatchObject({ changeType: 'modified', ghost: false })
+    const ghost = result.current.nodes.find((node) => node.key === 'b')
+    expect(ghost).toMatchObject({
+      label: 'B',
+      changeType: 'added',
+      ghost: true,
+    })
+    expect(result.current.edges).toContainEqual({
+      from: 'a',
+      to: 'b',
+      ghost: true,
+    })
   })
 
   it('disables publish when compare result is invalid', async () => {
@@ -236,6 +312,7 @@ describe('useWorkflowStudio', () => {
     await waitFor(() =>
       expect(mocks.compareWorkflowDraft).toHaveBeenLastCalledWith('ws1', {
         definition_yaml: 'key: demo\nlabel: Draft 2\n',
+        allow_missing_baseline: false,
       })
     )
     expect(result.current.compareSummary?.nodeChanges[0]?.nodeKey).toBe('b')
@@ -401,5 +478,97 @@ describe('useWorkflowStudio', () => {
     expect(result.current.revisionLoadError).toBe('network error')
     expect(result.current.viewMode).toBe('draft')
     expect(result.current.definitionYaml).toBe(previousDefinitionYaml)
+  })
+
+  const notFoundError = () =>
+    Object.assign(new Error('No active workflow revision'), { status: 404 })
+
+  it('enters empty mode with a template draft when no active revision exists', async () => {
+    mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
+    mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+
+    await waitFor(() => expect(result.current.loadState).toBe('empty'))
+    expect(result.current.definitionYaml).toBe(
+      'key: demo\nlabel: demo\nnodes:\n  start:\n    capability: start\n'
+    )
+    expect(result.current.workflow).toBeNull()
+    expect(result.current.dirty).toBe(false)
+    expect(result.current.canSubmit).toBe(false)
+  })
+
+  it('compares against an empty baseline only in empty mode', async () => {
+    mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
+    mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
+    mocks.compareWorkflowDraft.mockResolvedValue({
+      valid: true,
+      creates_revision: true,
+      base_revision: null,
+      draft_workflow: { key: 'demo', label: 'demo', version: 0 },
+      summary: {
+        risk_level: 'info',
+        node_changes: [
+          {
+            type: 'added',
+            node_key: 'start',
+            label: 'start',
+            fields: [],
+            risk: 'info',
+          },
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('empty'))
+
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nlabel: My Draft\n')
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+
+    await waitFor(() =>
+      expect(mocks.compareWorkflowDraft).toHaveBeenCalledWith('ws1', {
+        definition_yaml: 'key: demo\nlabel: My Draft\n',
+        allow_missing_baseline: true,
+      })
+    )
+    expect(result.current.compareState).toBe('ready')
+    expect(result.current.canPublish).toBe(true)
+  })
+
+  it('stays in error state when the active revision 404s for an unknown workspace', async () => {
+    mocks.fetchActiveWorkflowRevision.mockRejectedValue(notFoundError())
+    mocks.fetchWorkflowRevisions.mockResolvedValue({ revisions: [] })
+    mocks.fetchWorkspaces.mockResolvedValue({ workspaces: [] })
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+
+    await waitFor(() => expect(result.current.loadState).toBe('error'))
+  })
+
+  it('stays in error state for non-404 active revision failures', async () => {
+    mocks.fetchActiveWorkflowRevision.mockRejectedValue(
+      Object.assign(new Error('boom'), { status: 500 })
+    )
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+
+    await waitFor(() => expect(result.current.loadState).toBe('error'))
   })
 })

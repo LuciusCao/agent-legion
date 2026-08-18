@@ -843,6 +843,31 @@ describe('WorkspaceMainPage', () => {
     })
   })
 
+  it('renders a Studio entry card that navigates to the workflow studio', async () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/workflow-studio"
+            element={<div>Studio 页面</div>}
+          />
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceMainPage />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('进入 Studio')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('进入 Studio').click()
+    })
+
+    expect(await screen.findByText('Studio 页面')).toBeInTheDocument()
+  })
+
   it('renders workspace package history dialog when open', async () => {
     mockFetchWorkspacePackages.mockResolvedValue({
       packages: [

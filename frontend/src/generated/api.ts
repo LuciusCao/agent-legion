@@ -4637,6 +4637,11 @@ export interface components {
     }
     /** WorkflowDraftCompareRequest */
     WorkflowDraftCompareRequest: {
+      /**
+       * Allow Missing Baseline
+       * @default false
+       */
+      allow_missing_baseline: boolean
       /** Definition Yaml */
       definition_yaml: string
     }
@@ -5080,6 +5085,12 @@ export interface components {
       resource_config?: {
         [key: string]: unknown
       }
+      /**
+       * Workflow Mode
+       * @default demo
+       * @enum {string}
+       */
+      workflow_mode: 'demo' | 'blank'
     }
     /** WorkspaceDagResponse */
     WorkspaceDagResponse: {

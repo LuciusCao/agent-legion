@@ -10,6 +10,7 @@ import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { MaterialIcon } from '../components/MaterialIcon'
+import { WorkflowStudioButton } from '../components/WorkflowStudioButton'
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -110,15 +111,7 @@ export default function WorkspaceLayout() {
                 >
                   <MaterialIcon name="add_task" />
                 </IconButton>
-                <IconButton
-                  size="small"
-                  aria-label="Workflow Studio"
-                  onClick={() =>
-                    navigate(`/workspaces/${workspaceId}/workflow-studio`)
-                  }
-                >
-                  <MaterialIcon name="account_tree" />
-                </IconButton>
+                <WorkflowStudioButton />
                 <IconButton
                   size="small"
                   aria-label="设置"

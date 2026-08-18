@@ -280,6 +280,7 @@ describe('StudioChatPanel', () => {
     await waitFor(() =>
       expect(mockCompare).toHaveBeenCalledWith('ws1', {
         definition_yaml: yaml,
+        allow_missing_baseline: true,
       })
     )
     expect(await screen.findByText('变更摘要')).toBeInTheDocument()

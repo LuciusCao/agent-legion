@@ -18,7 +18,8 @@ const DEBOUNCE_MS = 400
 export function useWorkflowDraftCompare(
   workspaceId: string | undefined,
   definitionYaml: string,
-  dirty: boolean
+  dirty: boolean,
+  allowMissingBaseline: boolean = false
 ): UseWorkflowDraftCompareResult {
   const [compareState, setCompareState] = useState<CompareState>('idle')
   const [compareResponse, setCompareResponse] =
@@ -48,6 +49,8 @@ export function useWorkflowDraftCompare(
       try {
         const response = await compareWorkflowDraft(workspaceId, {
           definition_yaml: definitionYaml,
+          // 仅空态（从未发布）请求空基线预览；有 active revision 时该值无影响。
+          allow_missing_baseline: allowMissingBaseline,
         })
         if (latestRequest.current !== requestId) return
         setCompareResponse(response)
@@ -64,7 +67,7 @@ export function useWorkflowDraftCompare(
     }, DEBOUNCE_MS)
 
     return () => clearTimeout(timer)
-  }, [workspaceId, definitionYaml, dirty])
+  }, [workspaceId, definitionYaml, dirty, allowMissingBaseline])
 
   return { compareState, compareResponse, compareErrors, compareSummary }
 }

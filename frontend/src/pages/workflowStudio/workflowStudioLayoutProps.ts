@@ -1,4 +1,5 @@
 import type { useWorkflowStudio } from './useWorkflowStudio'
+import type { StudioCanvasMode } from './useWorkflowStudioPageView'
 
 type StudioLayoutState = Omit<
   ReturnType<typeof useWorkflowStudio>,
@@ -8,6 +9,8 @@ type StudioLayoutState = Omit<
 export type StudioLayoutProps = StudioLayoutState & {
   dagFullscreenOpen: boolean
   setDagFullscreenOpen: (open: boolean) => void
+  canvasMode: StudioCanvasMode
+  setCanvasMode: (mode: StudioCanvasMode) => void
   onValidate: () => void
   onPublish: () => void
   onReset: () => void
