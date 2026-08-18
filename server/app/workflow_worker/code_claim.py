@@ -22,6 +22,7 @@ from server.app.services.connection_tokens import (
     inject_connection_config,
 )
 from server.app.services.job_errors import JobServiceError
+from server.app.services.node_code_pins import frozen_dispatch_pin
 from server.app.services.node_code_resolution import resolve_dispatch_node_code
 from server.app.services.node_config import dispatch_effective_config
 from server.app.services.node_execution_config import (
@@ -71,10 +72,10 @@ def try_claim_code_worker_node(
         return False
 
     batch_payload = cached_batch_payload(worker, job)
-    # Same resolution order as the local path: frozen job version → workspace
-    # published → global factory seed (resolve_dispatch_node_code,
-    # EXEC-CODE-002; #96 retired the repo-file path fallback).
-    frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
+    # Same resolution order as the local path: the frozen pin — job snapshot
+    # node_code_pins first (upgrade-aware, #109), batch node_code_versions as
+    # the legacy fallback — then workspace published → global factory seed
+    # (resolve_dispatch_node_code, EXEC-CODE-002).
     try:
         code_text = resolve_dispatch_node_code(
             worker.job_db.path,
@@ -82,7 +83,7 @@ def try_claim_code_worker_node(
             workspace_id,
             workflow_key,
             node.key,
-            frozen_pins.get(node.key),
+            frozen_dispatch_pin(job.get("node_code_pins"), batch_payload, node.key),
         )
         if code_text is None:
             # No published code at either scope: nothing to ship to a Worker;
