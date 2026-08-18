@@ -8,13 +8,15 @@ a location that only exists on the writer's host. Reads stay fail-closed via
 ``resolve_data_path`` and finishes heal rows via ``canonicalize_finish_paths``,
 but runs that never finish keep absolute paths forever. This module surfaces
 the remaining absolute rows at startup (so a shape change is noticed before
-executions stall) and centralizes the "legacy absolute resolved" warning
-emitted by ``storage_paths``.
+executions stall, on a background thread so readiness never waits on it) and
+centralizes the "legacy absolute resolved" warning emitted by
+``storage_paths``.
 """
 
 from __future__ import annotations
 
 import logging
+import threading
 import warnings
 from typing import TYPE_CHECKING
 
@@ -62,3 +64,18 @@ def report_absolute_db_paths(db: JobQueries) -> dict[str, int]:
             ", ".join(f"{name}={count}" for name, count in sorted(dirty.items())),
         )
     return counts
+
+
+def report_absolute_db_paths_background(db: JobQueries) -> None:
+    """Kick the startup report onto a daemon thread; never blocks readiness."""
+
+    # The count queries seq-scan jobs/node_runs; at prod scale (issue #106)
+    # that stalled lifespan startup for minutes, so the report must run off
+    # the startup path. Failures are logged, never raised into the caller.
+    def _run() -> None:
+        try:
+            report_absolute_db_paths(db)
+        except Exception:
+            logger.exception("path-hygiene startup report failed")
+
+    threading.Thread(target=_run, name="path-hygiene-report", daemon=True).start()
