@@ -604,7 +604,7 @@ def build_manifest(...):
 
 ### Phase 4（Day 7）
 
-- [x] 代码清理：pi_config/pi_command_builder/pi_runner 链随保留的本地 pi executor 死路径一并保留（executors/pi.py 仍在引用），仅清除 flavor 时代残留（worker 预检收紧为 runtime 钉死二进制）；load_agent_definitions / sync_agent_definitions / get_agent_definition 已随 Phase 3 删除
+- [x] 代码清理：pi_config/pi_command_builder/pi_runner 链随保留的本地 pi executor 死路径一并保留（executors/pi.py 仍在引用），仅清除 flavor 时代残留（worker 预检收紧为 runtime 钉死二进制）；load_agent_definitions / sync_agent_definitions / get_agent_definition 已随 Phase 3 删除（后记：executors/pi.py 退役后，该链已随 #108 整体删除）
 - [x] 文档更新：backend.md, velites-harness.md, deployment.md, README.md
 - [x] AGENTS.md 更新（由仓库 owner 另行处理，本次不改）
 - [x] 回归测试：全流程

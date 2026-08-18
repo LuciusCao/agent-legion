@@ -362,15 +362,12 @@ invariants:
         gate: quick
 
   - id: EXEC-VALIDATION-001
-    statement: "A node run may complete only after the node skill's deterministic scripts/validate_output.py passes against the job directory: the local Pi runner validates after process exit, and the Host re-validates Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted); validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
+    statement: "A node run may complete only after the node skill's deterministic scripts/validate_output.py passes against the job directory: the Host validates Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted); validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
         target: tests/test_agent_completion_validation.py
-        gate: quick
-      - kind: integration
-        target: tests/test_pi_runner.py
         gate: quick
 
   - id: EXEC-CODE-001

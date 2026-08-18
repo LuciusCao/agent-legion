@@ -9,8 +9,6 @@ from pydantic import ValidationError
 
 from server.app.agent_broker.dispatch import resolve_execution_block
 from server.app.executors.runtime_config import PiRuntimeConfig
-from server.app.workflows.pi_command_builder import build_pi_command
-from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.pi_protocol import (
     PROMPT_INSTRUCTION,
     build_command,
@@ -245,39 +243,3 @@ def test_resolve_execution_fails_fast_on_unknown_runtime() -> None:
     workspace = {"default_agent_provider": "p", "default_agent_model": "m"}
     with pytest.raises(ValueError, match=r"supported runtimes: pi, velites"):
         resolve_execution_block(_node(), workspace, "openclaw")
-
-
-# --- 保留的本地 pi runner 链（PiConfig flavor 解析，不经 broker manifest） ---
-
-
-def test_piconfig_from_config_flavor_parsing() -> None:
-    assert PiConfig.from_config({"binary": "pi"}).flavor == "pi"
-    velites = PiConfig.from_config({"binary": "pi", "flavor": "velites"})
-    assert velites.flavor == "velites"
-    assert velites.binary == "velites"
-    with pytest.raises(ValueError, match="flavor"):
-        PiConfig.from_config({"binary": "pi", "flavor": "rust"})
-
-
-def test_build_pi_command_velites_flavor() -> None:
-    config = PiConfig(
-        binary="velites",
-        flavor="velites",
-        provider="gateway",
-        model="kimi-k2.6",
-        thinking="low",
-        timeout_seconds=300,
-    )
-    cmd = build_pi_command(
-        config,
-        tools=["read", "write"],
-        expected_outputs=["out.json"],
-        node_config={"max_turns": 4},
-        **KW,
-    )
-    assert cmd[0] == "velites"
-    assert cmd[cmd.index("--timeout-seconds") + 1] == "300"
-    assert cmd[cmd.index("--require-output") + 1] == "out.json"
-    assert cmd[cmd.index("--max-turns") + 1] == "4"
-    for flag in PI_ONLY_FLAGS:
-        assert flag not in cmd
