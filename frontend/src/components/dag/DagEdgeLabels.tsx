@@ -11,7 +11,12 @@ export function buildRfEdges(edges: DagGraphEdge[]): Edge[] {
     style: {
       stroke: '#9ca3af',
       strokeWidth: 2,
-      strokeDasharray: edge.conditional ? '6 4' : undefined,
+      strokeDasharray: edge.conditional
+        ? '6 4'
+        : edge.ghost
+          ? '3 3'
+          : undefined,
+      opacity: edge.ghost ? 0.5 : undefined,
     },
     labelStyle: { fill: '#374151', fontSize: 12, fontWeight: 600 },
     labelBgStyle: { fill: '#ffffff', fillOpacity: 0.9 },

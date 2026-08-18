@@ -1,23 +1,17 @@
 import json
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 
 import server.app.routes.workflow_contracts as workflow_contracts
-from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.workflow_draft_compare import create_workflow_draft_compare_router
+from server.app.routes.workflow_draft_publish import create_workflow_draft_publish_router
 from server.app.routes.workflow_revisions_contracts import (
     ActiveWorkflowRevisionResponse,
-    WorkflowDraftRequest,
-    WorkflowDraftValidationResponse,
     WorkflowRevisionDetailResponse,
     WorkflowRevisionsResponse,
     WorkflowRevisionSummary,
-)
-from server.app.services.workflow_draft_publish import (
-    publish_workflow_draft,
-    validate_workflow_draft_for_publish,
 )
 from server.app.services.workflow_revision_format import (
     definition_to_yaml,
@@ -90,42 +84,6 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
             definition_yaml=definition_to_yaml(definition),
         )
 
-    @router.post(
-        "/workspaces/{workspace_id}/workflow-drafts/validate",
-        response_model=WorkflowDraftValidationResponse,
-    )
-    def validate_workflow_draft(
-        workspace_id: str,
-        request: WorkflowDraftRequest,
-    ) -> WorkflowDraftValidationResponse:
-        require_workflows_enabled(settings)
-        # Same validation set as publish (structure + node code resolvability),
-        # so config errors surface here instead of only at publish time.
-        errors = validate_workflow_draft_for_publish(
-            job_db,
-            workspace_id,
-            request.definition_yaml,
-            settings.executor_runtime.workflows.custom_nodes_enabled,
-        )
-        return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
-
-    @router.post(
-        "/workspaces/{workspace_id}/workflow-drafts/publish",
-        response_model=WorkflowDraftValidationResponse,
-        dependencies=[Depends(reject_studio_agent_scope)],
-    )
-    def publish_draft(
-        workspace_id: str,
-        request: WorkflowDraftRequest,
-    ) -> WorkflowDraftValidationResponse:
-        require_workflows_enabled(settings)
-        valid, errors = publish_workflow_draft(
-            job_db,
-            workspace_id,
-            request.definition_yaml,
-            settings.executor_runtime.workflows.custom_nodes_enabled,
-        )
-        return WorkflowDraftValidationResponse(valid=valid, errors=errors)
-
+    router.include_router(create_workflow_draft_publish_router(job_db, settings))
     router.include_router(create_workflow_draft_compare_router(job_db, settings))
     return router

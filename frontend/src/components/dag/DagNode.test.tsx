@@ -148,4 +148,28 @@ describe('DagNode', () => {
 
     expect(screen.getByText('不适用')).toBeInTheDocument()
   })
+
+  it.each([
+    ['added', '新增'],
+    ['modified', '已改'],
+    ['removed', '已删'],
+  ] as const)('renders the %s change badge as %s', (changeType, label) => {
+    renderWithProvider({ ...baseData, changeType })
+    expect(
+      screen.getByTestId(`dag-change-badge-${changeType}`)
+    ).toHaveTextContent(label)
+  })
+
+  it('renders no change badge without a change type', () => {
+    renderWithProvider(baseData)
+    expect(
+      screen.queryByTestId('dag-change-badge-added')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('dag-change-badge-modified')
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('dag-change-badge-removed')
+    ).not.toBeInTheDocument()
+  })
 })

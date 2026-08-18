@@ -53,6 +53,8 @@ const baseProps = {
   closeReviewDialog: vi.fn(),
   dagFullscreenOpen: false,
   setDagFullscreenOpen: vi.fn(),
+  canvasMode: 'dag' as const,
+  setCanvasMode: vi.fn(),
   onValidate: vi.fn(),
   onPublish: vi.fn(),
   onReset: vi.fn(),
@@ -84,6 +86,27 @@ describe('WorkflowStudioLayout', () => {
       within(mobileNav).getByRole('tab', { name: '编辑节点' })
     ).toBeDisabled()
     expect(within(mobileNav).getByRole('tab', { name: 'Agent' })).toBeEnabled()
+  })
+
+  it('renders the empty-state guidance and the workspace editor in empty mode', () => {
+    render(
+      <WorkflowStudioLayout
+        {...baseProps}
+        loadState="empty"
+        workflow={null}
+        revision={null}
+        activeRevision={null}
+        revisions={[]}
+      />
+    )
+
+    expect(screen.getByRole('status')).toHaveTextContent(
+      '还没有已发布的 workflow'
+    )
+    // 空态下编辑区照常渲染，用户直接改模板草稿。
+    expect(
+      screen.getByRole('tablist', { name: 'Workflow studio panels' })
+    ).toBeInTheDocument()
   })
 
   it('opens contextual node editing after a graph node is selected', () => {

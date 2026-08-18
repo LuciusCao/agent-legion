@@ -9,6 +9,7 @@ import {
 } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
 import { useCreateWorkspace } from '../hooks/useWorkspaceMutations'
+import { BlankWorkflowCheckbox } from './settings/BlankWorkflowCheckbox'
 import { WorkflowSection } from './settings/WorkflowSection'
 
 type Props = {
@@ -20,12 +21,14 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   const createWorkspace = useCreateWorkspace()
   const [name, setName] = useState('')
   const [workflowKey, setWorkflowKey] = useState('')
+  const [blankMode, setBlankMode] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   function handleClose() {
     setName('')
     setWorkflowKey('')
+    setBlankMode(false)
     setError(null)
     onClose()
   }
@@ -36,7 +39,11 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
     setError(null)
     setCreating(true)
     try {
-      await createWorkspace.mutateAsync({ name: name.trim(), workflowKey })
+      await createWorkspace.mutateAsync({
+        name: name.trim(),
+        workflowKey,
+        workflowMode: blankMode ? 'blank' : 'demo',
+      })
       handleClose()
     } catch (err) {
       setError(String(err))
@@ -64,6 +71,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
             workflowKey={workflowKey}
             onChange={setWorkflowKey}
           />
+          <BlankWorkflowCheckbox checked={blankMode} onChange={setBlankMode} />
           {error && (
             <div style={{ color: '#ba1a1a', fontSize: 12 }}>{error}</div>
           )}

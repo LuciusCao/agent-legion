@@ -1,34 +1,16 @@
 import { memo } from 'react'
 import { Handle, Position, NodeProps, type Node } from '@xyflow/react'
-import {
-  formatDuration,
-  STATUS_ICON,
-  STATUS_LABEL,
-  type DagNodeStatus,
-} from '../dagNodeStatus'
+import { formatDuration, STATUS_ICON, STATUS_LABEL } from '../dagNodeStatus'
 import { ChipList } from './DagNodeChips'
 import { MaterialIcon } from '../MaterialIcon'
+import { DagNodeChangeBadge } from './DagNodeChangeBadge'
 import { DagNodeDefinitionMeta } from './DagNodeDefinitionMeta'
 import { DagNodeExecutionBadge } from './DagNodeExecutionBadge'
-import type { ExecutorKind } from '../../types/jobTypes'
+import type { DagNodeData } from './dagNodeTypes'
+import badgeStyles from './DagNodeChangeBadge.module.css'
 import styles from './DagNode.module.css'
 
-export interface DagNodeData extends Record<string, unknown> {
-  label: string
-  status: DagNodeStatus
-  duration?: number
-  executorKind?: ExecutorKind | null
-  executorId?: string | null
-  agentId?: string | null
-  workerId?: string | null
-  nodeKey?: string
-  capability?: string
-  executorUnbound?: boolean
-  topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
-  terminalOutcome?: string
-  inputs: string[]
-  outputs: string[]
-}
+export type { DagNodeData } from './dagNodeTypes'
 
 export type DagNodeType = Node<DagNodeData, 'dagNode'>
 
@@ -44,6 +26,7 @@ export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
         styles.node,
         styles[data.status],
         selected ? styles.selected : '',
+        data.ghost ? badgeStyles.ghost : '',
       ].join(' ')}
     >
       <Handle
@@ -62,6 +45,7 @@ export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
           <span className={styles.executorTag}>{data.executorKind}</span>
         )}
         <DagNodeExecutionBadge data={data} />
+        <DagNodeChangeBadge changeType={data.changeType} />
         {data.executorUnbound && (
           <span
             className={styles.unboundTag}

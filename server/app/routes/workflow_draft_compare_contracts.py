@@ -14,6 +14,9 @@ WorkflowIntakeChangeType = Literal["mode_changed", "field_added", "field_removed
 
 class WorkflowDraftCompareRequest(BaseModel):
     definition_yaml: str
+    # Studio empty mode (never-published workflow) sets this to preview the
+    # draft against an empty baseline instead of failing with a revision error.
+    allow_missing_baseline: bool = False
 
 
 class WorkflowDraftCompareError(BaseModel):

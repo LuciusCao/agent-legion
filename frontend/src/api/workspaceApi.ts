@@ -17,7 +17,8 @@ export async function createWorkspace(
   workflowKey: string,
   resourceConfig: Record<string, unknown> = {},
   defaultEntity: string = 'question',
-  intakeConfig: Record<string, unknown> = {}
+  intakeConfig: Record<string, unknown> = {},
+  workflowMode: 'demo' | 'blank' = 'demo'
 ): Promise<WorkspaceRecord> {
   const result = await api<WorkspaceResponse>('/api/workspaces', {
     method: 'POST',
@@ -27,6 +28,7 @@ export async function createWorkspace(
       resource_config: resourceConfig,
       default_entity: defaultEntity,
       intake_config: intakeConfig,
+      workflow_mode: workflowMode,
     }),
   })
   return result.workspace

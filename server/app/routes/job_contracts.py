@@ -1,4 +1,4 @@
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,6 +30,11 @@ class WorkspaceCreateRequest(BaseModel):
 
     name: str
     default_workflow_key: str
+    # demo (default): bind the catalog definition and seed the active revision
+    # (including factory Agent templates for the built-in demo workflow).
+    # blank: only record the default_workflow_key slot; Studio starts from an
+    # empty draft and the first publish creates revision v1.
+    workflow_mode: Literal["demo", "blank"] = "demo"
     default_entity: str = "question"
     resource_config: dict[str, Any] = Field(default_factory=dict)
     intake_config: dict[str, Any] = Field(default_factory=dict)
