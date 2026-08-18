@@ -130,7 +130,8 @@
 - velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
   runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
   （`versioned_entities` 表，workspace 作用域（schema v46，解析严格限定本
-  workspace、零全局兜底），经 Studio「Agent 管理」/ `/api/agent-definitions`
+  workspace、零全局兜底），经 Studio 节点详情内嵌编辑 / chat 草稿 /
+  `/api/agent-definitions`
   （`workspace_id` 查询参数）管理，draft → published → archived 生命周期，
   版本不可变，灰度/回退走 publish/rollback），不再走 yaml——`agents:` 段与
   `workflows.pi` 块已退役，

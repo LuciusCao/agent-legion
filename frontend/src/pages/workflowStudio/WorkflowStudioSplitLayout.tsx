@@ -42,12 +42,7 @@ export function WorkflowStudioSplitLayout({
       className={`${pageStyles.layout}${split ? ` ${pageStyles.withInspector}` : ''}`}
     >
       <WorkflowStudioCanvasPanel
-        workflow={props.workflow}
-        nodes={props.nodes}
-        edges={props.edges}
-        selectedNodeKey={props.selectedNodeKey}
-        onSelectedNodeChange={props.setSelectedNodeKey}
-        onDagFullscreen={() => props.setDagFullscreenOpen(true)}
+        props={props}
         agentOpen={agentOpen}
         onToggleAgent={onToggleAgent}
         mobileActive={mobilePanel === 'graph'}

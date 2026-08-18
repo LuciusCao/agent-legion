@@ -1,13 +1,23 @@
 import type { useWorkflowStudio } from './useWorkflowStudio'
 import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPanel'
 import { WorkflowValidationPanel } from './WorkflowValidationPanel'
-import styles from './WorkflowStudioGlobalDialog.module.css'
+import styles from './WorkflowStudioChangesView.module.css'
 
 type Studio = ReturnType<typeof useWorkflowStudio>
 
-// 全局对话框「变更与校验」模式的内容：校验结果 + 草稿对比摘要。
+/** 变更视图实际消费的 studio 子集（画布模式与历史全局弹窗共用）。 */
+export type ChangesViewStudio = Pick<
+  Studio,
+  | 'validationMessage'
+  | 'validationErrors'
+  | 'compareErrors'
+  | 'compareSummary'
+  | 'compareState'
+>
+
+// 画布「变更」模式的内容：校验结果 + 草稿对比摘要。
 export function WorkflowStudioChangesView(props: {
-  studio: Studio
+  studio: ChangesViewStudio
   onSelectNode: (nodeKey: string) => void
 }) {
   const { studio, onSelectNode } = props
