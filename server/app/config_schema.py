@@ -53,12 +53,14 @@ def _check_value(path: str, prop: dict[str, Any], value: Any) -> None:
 def _validate_property(path: str, prop: Any) -> None:
     if not isinstance(prop, dict):
         raise ConfigSchemaError(f"{path} must be a mapping")
-    unknown = set(prop) - _PROPERTY_KEYS
+    # runtime_mutable (CONFIG-RUNTIME-MUTABLE-001) opts the key out of the
+    # intake freeze; kept out of _PROPERTY_KEYS only for the file-size budget.
+    unknown = set(prop) - _PROPERTY_KEYS - {"runtime_mutable"}
     if unknown:
         raise ConfigSchemaError(f"{path} has unsupported keys: {sorted(unknown)}")
     if prop.get("type") not in _SCHEMA_TYPES:
         raise ConfigSchemaError(f"{path}.type must be one of {list(_SCHEMA_TYPES)}")
-    for marker in ("secret", "secret_ref"):
+    for marker in ("secret", "secret_ref", "runtime_mutable"):
         if marker in prop and not isinstance(prop[marker], bool):
             raise ConfigSchemaError(f"{path}.{marker} must be a boolean")
     enum = prop.get("enum")

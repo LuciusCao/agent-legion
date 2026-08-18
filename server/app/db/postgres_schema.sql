@@ -498,6 +498,11 @@ alter table node_runs add column if not exists failure_detail text not null defa
 alter table job_nodes add column if not exists failure_category text not null default '';
 alter table job_nodes add column if not exists failure_detail text not null default '';
 create index if not exists idx_node_runs_failure on node_runs(status, failure_category);
+-- Dispatch-time config audit (schema v49, CONFIG-RUNTIME-MUTABLE-001): the
+-- non-secret resolved node config actually used for this run. Frozen keys
+-- repeat the intake snapshot; runtime_mutable keys carry the dispatch-time
+-- re-resolution, so a mid-job switch change stays auditable per attempt.
+alter table node_runs add column if not exists config_snapshot_json text not null default '';
 -- Ops metrics queue summary (schema v48, issue #106): the unclaimable_model
 -- sweep counter filters job_nodes by failure_detail plus a finished_at
 -- range; without an index every collection seq-scans the whole

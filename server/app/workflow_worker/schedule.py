@@ -158,9 +158,12 @@ def try_claim_and_submit(
 
     try:
         batch_payload = cached_batch_payload(worker, job)
-        # Frozen snapshot → vault secret_refs → connection config + token;
-        # all in-memory only (VAULT-SECRET-001, CONFIG-MANIFEST-001).
-        node_config = resolve_dispatch_node_config(
+        # Frozen snapshot (runtime-mutable keys re-resolved live) → vault
+        # secret_refs → connection config + token; all in-memory only
+        # (VAULT-SECRET-001, CONFIG-MANIFEST-001). The non-secret snapshot is
+        # persisted onto the node_runs row as the dispatch-time audit
+        # (CONFIG-RUNTIME-MUTABLE-001).
+        node_config, config_snapshot_json = resolve_dispatch_node_config(
             worker, node, workflow_key, workspace_id, workspace, batch_payload
         )
     except (ValueError, VaultError, JobServiceError) as exc:
@@ -194,6 +197,7 @@ def try_claim_and_submit(
         snapshot,
         node_config,
         node_code,
+        config_snapshot_json,
     )
     if claimed:
         worker._pass_claim_counts[executor_id] = worker._pass_claim_counts.get(executor_id, 0) + 1

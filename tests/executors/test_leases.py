@@ -115,6 +115,39 @@ def test_finish_lease_captures_token_usage(lease_repo):
     assert row["skill_version"] == "v2"
 
 
+def test_claim_persists_config_snapshot(lease_repo):
+    """Dispatch-time config audit (CONFIG-RUNTIME-MUTABLE-001): the resolved
+    non-secret node config rides the claim onto the node_runs row."""
+    repo, job_db, data_dir = lease_repo
+    _setup_workspace_and_job(job_db)
+
+    snapshot = json.dumps({"dry_run": True, "subject_id": "math"}, sort_keys=True)
+    claimed = repo.try_claim(
+        LeaseClaimRequest(
+            executor_id="code",
+            global_capacity=10,
+            workspace_id="ws-1",
+            job_id="job-1",
+            workflow_key="demo_workflow",
+            node_key="review_keywords",
+            capability="review_keywords",
+            local_node_limit=None,
+            lease_ttl_seconds=60,
+            log_path=str(data_dir / "logs" / "run.log"),
+            config_snapshot_json=snapshot,
+        )
+    )
+    assert claimed is not None
+
+    with closing(connect_database(repo.path)) as conn, conn:
+        run = conn.execute(
+            "select config_snapshot_json from node_runs"
+            " where job_id='job-1' and node_key='review_keywords'"
+        ).fetchone()
+    assert run is not None
+    assert run["config_snapshot_json"] == snapshot
+
+
 def test_finish_lease_missing_events_does_not_fail_lease(lease_repo):
     repo, job_db, data_dir = lease_repo
     _setup_workspace_and_job(job_db)
