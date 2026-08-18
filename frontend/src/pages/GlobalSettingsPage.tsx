@@ -20,6 +20,7 @@ import type {
 import { InstanceSettingsSection } from './globalSettings/InstanceSettingsSection'
 import { SkillSourcesSection } from './globalSettings/SkillSourcesSection'
 import { ConnectionsSection } from './globalSettings/ConnectionsSection'
+import { StudioAgentsSection } from './globalSettings/StudioAgentsSection'
 import {
   EMPTY_ROW,
   ModelPricingSection,
@@ -132,6 +133,7 @@ function GlobalSettingsEditor({
       { id: 'instance-settings', label: '实例设置' },
       { id: 'connections', label: '外部服务连接' },
       { id: 'skill-sources', label: 'Skill 源管理' },
+      { id: 'studio-agents', label: 'Studio Agent 管理' },
     ],
     []
   )
@@ -206,6 +208,9 @@ function GlobalSettingsEditor({
           </section>
           <section id="skill-sources">
             <SkillSourcesSection />
+          </section>
+          <section id="studio-agents">
+            <StudioAgentsSection />
           </section>
         </div>
       </div>
