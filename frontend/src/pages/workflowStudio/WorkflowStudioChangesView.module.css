@@ -1,0 +1,17 @@
+.checks {
+  display: grid;
+  grid-template-columns: minmax(0, 0.8fr) minmax(0, 1.2fr);
+  gap: 32px;
+  padding: 16px;
+  overflow: auto;
+}
+
+.checks h3 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+
+.empty {
+  margin: 0;
+  color: #616161;
+}

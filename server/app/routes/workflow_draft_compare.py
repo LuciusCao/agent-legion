@@ -29,6 +29,7 @@ def create_workflow_draft_compare_router(job_db: JobQueries, settings: Settings)
             job_db,
             workspace_id,
             request.definition_yaml,
+            allow_missing_baseline=request.allow_missing_baseline,
         )
         return WorkflowDraftCompareResponse.model_validate(result)
 

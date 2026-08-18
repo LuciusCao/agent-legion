@@ -21,6 +21,8 @@ type Props = {
   workspaceId: string
   /** null = 新建模式 */
   agentId: string | null
+  /** 新建模式下预填的 capability（节点详情内嵌新建时传入） */
+  initialCapability?: string
   onSaved: (agentId: string) => void
   onChanged: () => void
   onArchived: () => void
@@ -37,13 +39,14 @@ function errorMessage(err: unknown): string {
 export function AgentEditor({
   workspaceId,
   agentId,
+  initialCapability,
   onSaved,
   onChanged,
   onArchived,
 }: Props) {
   const creating = agentId === null
   const [agentIdInput, setAgentIdInput] = useState('')
-  const [capability, setCapability] = useState('')
+  const [capability, setCapability] = useState(initialCapability ?? '')
   const [runtime, setRuntime] = useState<AgentRuntime>('pi')
   const [skill, setSkill] = useState('')
   const [tools, setTools] = useState<string[]>(['read', 'write', 'bash'])

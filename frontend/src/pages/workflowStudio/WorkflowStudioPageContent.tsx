@@ -1,8 +1,8 @@
 import { useMemo } from 'react'
 import type { useWorkflowStudio } from './useWorkflowStudio'
 import type { useWorkflowStudioPageView } from './useWorkflowStudioPageView'
-import { StudioNavContext, type StudioNav } from './workflowStudioNav'
-import { WorkflowStudioGlobalDialog } from './WorkflowStudioGlobalDialog'
+import { nodeKeyForAgent, StudioNavContext } from './workflowStudioNav'
+import type { StudioNav } from './workflowStudioNav'
 import { WorkflowStudioLayout } from './WorkflowStudioLayout'
 
 type Studio = ReturnType<typeof useWorkflowStudio>
@@ -13,14 +13,18 @@ export function WorkflowStudioPageContent(props: {
   view: View
 }) {
   const { studio, view } = props
-  // useMemo 稳住 context value：YAML 击键会重渲染本组件，新建的 nav 对象
-  // 会让全部 useStudioNav 消费者无谓重渲染。
+  // Agent 管理弹窗已删除：nav 通道收敛为「选中绑定该 capability 的节点」，
+  // agent 的查看/编辑在节点详情内嵌完成。useMemo 稳住 context value。
+  const { workflow, agentCatalog } = studio
   const nav: StudioNav = useMemo(
     () => ({
-      openAgent: (agentId) => view.openPanel(agentId),
+      openAgent: (agentId) => {
+        const key = nodeKeyForAgent(agentId, workflow, agentCatalog)
+        if (key) studio.setSelectedNodeKey(key)
+      },
     }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只依赖稳定化后的 openPanel
-    [view.openPanel]
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 只依赖 nav 实际消费的稳定字段
+    [workflow, agentCatalog, studio.setSelectedNodeKey]
   )
   return (
     <StudioNavContext.Provider value={nav}>
@@ -28,16 +32,12 @@ export function WorkflowStudioPageContent(props: {
         {...studio}
         dagFullscreenOpen={view.dagFullscreenOpen}
         setDagFullscreenOpen={view.setDagFullscreenOpen}
+        canvasMode={view.canvasMode}
+        setCanvasMode={view.setCanvasMode}
         onValidate={() => void studio.validateDraft()}
         onPublish={() => void studio.requestPublish()}
         onReset={studio.resetDefinition}
-        onShowChanges={() => view.setGlobalMode('changes')}
-      />
-      <WorkflowStudioGlobalDialog
-        mode={view.globalMode}
-        studio={studio}
-        panelFocus={view.panelFocus}
-        onClose={() => view.setGlobalMode(null)}
+        onShowChanges={() => view.setCanvasMode('changes')}
       />
     </StudioNavContext.Provider>
   )

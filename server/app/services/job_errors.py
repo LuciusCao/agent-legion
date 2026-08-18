@@ -20,3 +20,7 @@ class UnsupportedOperationError(JobServiceError):
 
 class CustomNodesDisabledError(JobServiceError):
     """Custom workflow node codes are disabled by configuration (routes map to 403)."""
+
+
+class DraftWorkflowKeyMismatchError(InvalidOperationError):
+    """Draft workflow key does not match the workspace default key (routes map to 422)."""

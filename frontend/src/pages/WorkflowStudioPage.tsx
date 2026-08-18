@@ -17,10 +17,6 @@ export function WorkflowStudioPage() {
           workspaceId={workspaceId}
           studio={studio}
           scrolled={scrolled}
-          onOpenChanges={() => view.setGlobalMode('changes')}
-          onOpenYaml={() => view.setGlobalMode('yaml')}
-          onOpenAgents={() => view.openPanel('agents')}
-          onOpenExecutors={() => view.openPanel('executors')}
           onValidate={() => void view.validateAndShowResult()}
         />
       )}

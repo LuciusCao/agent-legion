@@ -26,6 +26,8 @@ import {
 } from '../dagGraphRelations'
 import styles from './DagGraph.module.css'
 
+export type DagNodeChangeType = 'added' | 'modified' | 'removed'
+
 export interface DagGraphNode {
   key: string
   label: string
@@ -42,6 +44,8 @@ export interface DagGraphNode {
   terminalOutcome?: string
   inputs?: string[]
   outputs?: string[]
+  changeType?: DagNodeChangeType
+  ghost?: boolean
 }
 
 export interface DagGraphEdge {
@@ -49,6 +53,7 @@ export interface DagGraphEdge {
   to: string
   label?: string
   conditional?: boolean
+  ghost?: boolean
 }
 
 export type DagNode = DagGraphNode
@@ -125,6 +130,8 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         terminalOutcome: node.terminalOutcome,
         inputs: node.inputs || [],
         outputs: node.outputs || [],
+        changeType: node.changeType,
+        ghost: node.ghost ?? false,
       },
     }
   })
