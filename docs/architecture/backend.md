@@ -38,7 +38,6 @@ server/app/
 │   ├── definition.py       # 工作流定义解析
 │   ├── scheduler.py        # DAG 调度
 │   ├── workflow_node_execution.py # 节点执行
-│   ├── pi_runner.py        # Pi Agent 运行器
 │   ├── skills.py           # Skill 路径解析 / 契约检查
 │   └── ...
 ├── db/                     # 数据库层

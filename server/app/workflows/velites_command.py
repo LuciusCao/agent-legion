@@ -11,7 +11,7 @@
   （config_schema defaults → 节点 config → workspace 覆盖，intake 冻结后经
   ``manifest["config"]`` 下发，CONFIG-MANIFEST-001 白名单内）；节点未配置则不发，
   这里不硬编码默认值；
-- ``--timeout-seconds`` 与 capability timeout（``pi_runner`` 的外层 kill 时限）取同一值：
+- ``--timeout-seconds`` 与 capability timeout（执行方的外层 kill 时限）取同一值：
   harness 内层 deadline 到期先给模型一个 wrap-up turn 收尾，Host SIGTERM 兜底，
   velites 对 SIGTERM 优雅退出（``agent_end{reason: cancelled}`` + exit 0）。
 """
