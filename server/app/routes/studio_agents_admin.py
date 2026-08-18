@@ -16,18 +16,27 @@ from server.app.routes.studio_agents_admin_contracts import (
     StudioAgentRegistryResponse,
     StudioAgentRegistryUpdate,
 )
+from server.app.studio_chat.availability import AgentAvailabilityProbe
 from server.app.studio_chat.registry import StudioAgentRegistryStore
 
 
 def create_studio_agents_admin_router(job_db: JobQueries) -> APIRouter:
     router = APIRouter()
     store = StudioAgentRegistryStore(job_db.path)
+    availability_probe = AgentAvailabilityProbe()
+
+    def _response(document: dict[str, Any]) -> StudioAgentRegistryResponse:
+        response = StudioAgentRegistryResponse.model_validate(document)
+        response.availability = {
+            a.id: availability_probe.available(a.command) for a in response.agents
+        }
+        return response
 
     @router.get("/admin/studio-agents", response_model=StudioAgentRegistryResponse)
     def get_studio_agents(
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> StudioAgentRegistryResponse:
-        return StudioAgentRegistryResponse.model_validate(store.get())
+        return _response(store.get())
 
     @router.put("/admin/studio-agents", response_model=StudioAgentRegistryResponse)
     def put_studio_agents(
@@ -36,6 +45,6 @@ def create_studio_agents_admin_router(job_db: JobQueries) -> APIRouter:
     ) -> StudioAgentRegistryResponse:
         document = payload.model_dump()
         store.put(document)
-        return StudioAgentRegistryResponse.model_validate(document)
+        return _response(document)
 
     return router
