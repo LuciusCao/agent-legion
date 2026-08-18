@@ -1,7 +1,9 @@
+from typing import Annotated, Any
+
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
-from server.app.auth.dependencies import reject_studio_agent_scope
+from server.app.auth.dependencies import reject_studio_agent_scope, require_admin
 from server.app.events import JobEventManager
 from server.app.events.bus import workspace_channel
 from server.app.routes.dashboard_events import create_dashboard_events_router
@@ -40,7 +42,10 @@ def create_workspaces_router(
             raise_job_http_error(exc)
 
     @guarded.post("/workspaces", response_model=WorkspaceResponse)
-    def create_workspace(payload: WorkspaceCreateRequest) -> WorkspaceResponse:
+    def create_workspace(
+        payload: WorkspaceCreateRequest,
+        _admin: Annotated[dict[str, Any], Depends(require_admin)],
+    ) -> WorkspaceResponse:
         require_workflows_enabled(settings)
         try:
             workspace = service.create(payload.model_dump())
