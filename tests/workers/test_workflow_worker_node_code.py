@@ -6,14 +6,22 @@ seed. With the gate disabled nothing resolves and the node fails closed.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
+from unittest.mock import MagicMock
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
+from server.app.services.node_code_pins import node_code_pins_from_job_snapshot
 from server.app.services.node_codes import NodeCodeService, code_hash
+from server.app.services.workflow_revision_format import (
+    definition_hash,
+    serialize_definition,
+)
 from server.app.settings import Settings
+from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from tests.postgres_support import TEST_DATABASE_URL
@@ -223,3 +231,112 @@ def test_frozen_pin_resolves_global_seed_version(tmp_path: Path) -> None:
 
     assert executor.contexts[0].node_code == CUSTOM_V1
     worker.stop()
+
+
+def _pin(code: str, version: int) -> dict:
+    return {"version": version, "code_hash": code_hash(code)}
+
+
+def _attach_snapshot(job_db: JobQueries, ws: dict, node: WorkflowNode, pins: dict | None) -> dict:
+    """Give the job a workflow snapshot like an upgraded revision's stored
+    definition_json: pure definition plus (optionally) node_code_pins."""
+    pure = serialize_definition(_make_definition([node]))
+    payload = json.loads(pure)
+    if pins is not None:
+        payload["node_code_pins"] = pins
+    snapshot = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    job = job_db.list_jobs(workspace_id=ws["id"])[0]
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set workflow_definition_snapshot_json=%s,"
+            " workflow_definition_hash=%s where id=%s",
+            (snapshot, definition_hash(pure), job["id"]),
+        )
+    return job_db.get_job(job["id"])
+
+
+def _publish_v1_v2(ws: dict) -> None:
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V2, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+
+
+def test_dispatch_prefers_snapshot_pin_over_stale_batch_pin(tmp_path: Path) -> None:
+    """#109: upgrade_workflow refreshed the job snapshot's node_code_pins to
+    v2 while the intake batch still pins v1; dispatch must run v2."""
+    node = _local_node("fetch")
+    batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
+    job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
+    _publish_v1_v2(ws)
+    _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V2, 2)})
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    _dispatch(tmp_path, worker)
+
+    assert executor.contexts[0].node_code == CUSTOM_V2
+    worker.stop()
+
+
+def test_dispatch_falls_back_to_batch_pin_when_snapshot_has_no_pins(tmp_path: Path) -> None:
+    """Legacy compat: a snapshot without node_code_pins falls back to the
+    intake batch's node_code_versions."""
+    node = _local_node("fetch")
+    batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
+    job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
+    _publish_v1_v2(ws)
+    _attach_snapshot(job_db, ws, node, None)
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    _dispatch(tmp_path, worker)
+
+    assert executor.contexts[0].node_code == CUSTOM_V1
+    worker.stop()
+
+
+def test_code_worker_claim_prefers_snapshot_pin_over_stale_batch_pin(tmp_path: Path) -> None:
+    """#109, code-Worker claim path: same pin priority as local dispatch."""
+    node = _local_node("fetch")
+    batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
+    job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
+    _publish_v1_v2(ws)
+    fat = _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V2, 2)})
+    # Mirror what evaluate_job_ready puts on the ready candidate's lean job.
+    job = {
+        **fat,
+        "workflow_definition_snapshot_json": "",
+        "node_code_pins": node_code_pins_from_job_snapshot(fat),
+    }
+    dispatch = MagicMock()
+    dispatch.is_in_flight.return_value = False
+    dispatch.broker.has_active_request.return_value = False
+    dispatch.online_code_worker_available.return_value = True
+    dispatch.try_mark_in_flight.return_value = True
+    dispatch.enqueue_pool.submit.side_effect = lambda fn: (fn(), True)[1]
+    worker = MagicMock()
+    worker.job_db = job_db
+    worker.code_dispatch = dispatch
+    worker._batch_payload_cache = {}
+    worker._pass_claim_counts = {}
+    worker.settings.root_dir = tmp_path
+    worker.settings.config = {}
+    worker.settings.executor_runtime.workflows.custom_nodes_enabled = True
+
+    handled = try_claim_code_worker_node(
+        worker,
+        job_db.get_workspace(ws["id"]),
+        job,
+        node,
+        tmp_path,
+        tmp_path / "claim.log",
+        (),
+        "test",
+    )
+
+    assert handled is True
+    assert dispatch.enqueue.call_args.kwargs["code_text"] == CUSTOM_V2
