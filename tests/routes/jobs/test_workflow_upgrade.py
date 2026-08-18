@@ -121,3 +121,98 @@ def test_upgrade_workflow_route_maps_service_not_found_to_404(tmp_path, monkeypa
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Job not found"
+
+
+def test_batch_upgrade_workflow_route_upgrades_filtered_jobs(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_a = _create_job(c, ws_id, question_id="Q401")
+        job_b = _create_job(c, ws_id, question_id="Q402")
+        excluded = _create_job(c, ws_id, question_id="Q403")
+        current = _publish_next_revision(app, ws_id)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"filter": {"status": "pending"}, "exclude_ids": [excluded]},
+        )
+        excluded_detail = c.get(f"/api/jobs/{excluded}").json()
+
+    assert response.status_code == 200
+    results = {r["job_id"]: r for r in response.json()["results"]}
+    assert set(results) == {job_a, job_b}
+    assert all(r["operation"] == "upgrade_workflow" for r in results.values())
+    assert all(r["status"] == "succeeded" for r in results.values())
+    assert excluded_detail["job"]["workflow_revision_id"] != current["id"]
+
+
+def test_batch_upgrade_workflow_route_reports_per_job_results(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        stale = _create_job(c, ws_id, question_id="Q411")
+        _publish_next_revision(app, ws_id)
+        current = _create_job(c, ws_id, question_id="Q412")
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"job_ids": [stale, current, "missing-job"]},
+        )
+
+    assert response.status_code == 200
+    results = {r["job_id"]: r for r in response.json()["results"]}
+    assert results[stale]["status"] == "succeeded"
+    assert results[current]["status"] == "skipped"
+    assert results[current]["reason_code"] == "already_current"
+    assert results["missing-job"]["status"] == "failed"
+    assert results["missing-job"]["reason_code"] == "not_found"
+
+
+def test_batch_upgrade_workflow_route_rejects_empty_selection(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        _create_job(c, ws_id)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"filter": {"status": "failed"}, "exclude_ids": []},
+        )
+
+    assert response.status_code == 400
+
+
+def test_batch_upgrade_workflow_route_validates_selection_shape(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        missing = c.post(f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow", json={})
+        both = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"job_ids": ["j1"], "filter": {"status": "pending"}},
+        )
+
+    assert missing.status_code == 422
+    assert both.status_code == 422
+
+
+def test_batch_upgrade_workflow_route_requires_workflows_enabled(tmp_path):
+    from fastapi.testclient import TestClient
+
+    app = _build_app(tmp_path)
+    with authenticate_client(TestClient(app)) as c:
+        ws_id = _create_workspace(c)
+        job_id = _create_job(c, ws_id)
+        app.state.settings.executor_runtime.workflows.enabled = False
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-upgrade-workflow",
+            json={"job_ids": [job_id]},
+        )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Workflows are disabled"

@@ -167,7 +167,9 @@ export default function WorkspaceMainPage() {
         <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
 
-      {workspaceId && <StudioEntryCard workspaceId={workspaceId} />}
+      {workspaceId && workspaceStats && !workflowKey && (
+        <StudioEntryCard workspaceId={workspaceId} />
+      )}
 
       <section>
         <JobFilterBar

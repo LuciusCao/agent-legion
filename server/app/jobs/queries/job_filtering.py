@@ -122,22 +122,32 @@ def job_facets(job_db: JobQueries, workspace_id: str, f: JobListFilter) -> dict[
 
     node_where, node_params = _where(workspace_id, replace(f, active_node_key=None))
     with job_db._connect_read() as conn:
+        # Resolve the active node from the job_nodes side: running/failed rows
+        # are a tiny subset, so a per-job lateral over every filtered job is
+        # needlessly expensive at 10万+ job scale (30s on a 259k-job workspace).
+        # distinct-on ordering keeps the original "first running node by id,
+        # else first failed node by id" semantics.
         rows = conn.execute(
-            "select coalesce(r.node_key, f.node_key) as active_node_key, count(*) as cnt"
-            " from jobs"
-            " left join lateral ("
-            "select node_key from job_nodes"
-            " where job_id = jobs.id and status = 'running' order by id limit 1"
-            ") r on true"
-            " left join lateral ("
-            "select node_key from job_nodes"
-            " where job_id = jobs.id and status = 'failed' order by id limit 1"
-            ") f on r.node_key is null"
+            "with picked as ("
+            "select distinct on (job_id) job_id, node_key"
+            " from job_nodes"
+            " where status in ('running', 'failed')"
+            " order by job_id, case when status = 'running' then 0 else 1 end, id"
+            ")"
+            " select p.node_key as active_node_key, count(*) as cnt"
+            " from picked p join jobs on jobs.id = p.job_id"
             f"{node_where}"
             " group by 1",
             node_params,
         )
         node_counts = {row["active_node_key"]: int(row["cnt"]) for row in rows}
+    # Jobs without any running/failed node fall into the None bucket; derive it
+    # from the filtered total instead of scanning every job.
+    no_node = count_jobs_filtered(job_db, workspace_id, replace(f, active_node_key=None)) - sum(
+        node_counts.values()
+    )
+    if no_node:
+        node_counts[None] = no_node
 
     return {
         "total": total,

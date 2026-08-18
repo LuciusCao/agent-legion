@@ -19,6 +19,14 @@ vi.mock('../../../api/failureApi', () => ({
   rerunJobsByFailure: vi.fn(),
 }))
 
+vi.mock('../../../api/jobWorkflowUpgradeApi', () => ({
+  upgradeJobWorkflow: vi.fn(),
+}))
+
+vi.mock('../../../api/jobBatchUpgradeWorkflowApi', () => ({
+  batchUpgradeJobsWorkflow: vi.fn(),
+}))
+
 vi.mock('../../uiStore', () => ({
   useUiStore: {
     getState: vi.fn(),
@@ -34,6 +42,8 @@ import {
   batchRunToJobs,
 } from '../../../api/jobApi'
 import { rerunJobsByFailure } from '../../../api/failureApi'
+import { upgradeJobWorkflow } from '../../../api/jobWorkflowUpgradeApi'
+import { batchUpgradeJobsWorkflow } from '../../../api/jobBatchUpgradeWorkflowApi'
 import { useUiStore } from '../../uiStore'
 
 const mockBatchRerunJobs = vi.mocked(batchRerunJobs)
@@ -42,6 +52,8 @@ const mockClearJobsPackedStatus = vi.mocked(clearJobsPackedStatus)
 const mockPackageJobs = vi.mocked(packageJobs)
 const mockBatchRunToJobs = vi.mocked(batchRunToJobs)
 const mockRerunJobsByFailure = vi.mocked(rerunJobsByFailure)
+const mockBatchUpgradeJobsWorkflow = vi.mocked(batchUpgradeJobsWorkflow)
+const mockUpgradeJobWorkflow = vi.mocked(upgradeJobWorkflow)
 const mockRefreshFirstPage = vi.fn()
 
 const SELECTION_FILTER: JobListFilterParams = {
@@ -107,6 +119,12 @@ describe('batch actions in allMatching selection mode', () => {
     })
     mockBatchRunToJobs.mockResolvedValue(mutationOk)
     mockRerunJobsByFailure.mockResolvedValue({ results: [] })
+    mockBatchUpgradeJobsWorkflow.mockResolvedValue(mutationOk)
+    mockUpgradeJobWorkflow.mockResolvedValue({
+      job_id: 'j1',
+      operation: 'upgrade_workflow',
+      status: 'succeeded',
+    })
   })
 
   it('batchRerun sends the filter payload with exclusions', async () => {
@@ -179,6 +197,28 @@ describe('batch actions in allMatching selection mode', () => {
       { filter: SELECTION_FILTER, excludeIds: ['j9'] },
       undefined
     )
+  })
+
+  it('batchUpgradeWorkflow sends the filter payload with exclusions', async () => {
+    enterAllMatching()
+
+    await useJobStore.getState().batchUpgradeWorkflow('ws1')
+
+    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith('ws1', {
+      filter: SELECTION_FILTER,
+      excludeIds: ['j9'],
+    })
+    expect(mockRefreshFirstPage).toHaveBeenCalledWith('ws1')
+    expect(useJobStore.getState().selectionMode).toBe('explicit')
+  })
+
+  it('batchUpgradeWorkflow keeps per-job calls for explicit ids', async () => {
+    enterAllMatching()
+
+    await useJobStore.getState().batchUpgradeWorkflow('ws1', ['j1'])
+
+    expect(mockBatchUpgradeJobsWorkflow).not.toHaveBeenCalled()
+    expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1')
   })
 
   it('rerunByFailureCategory sends the filter payload with exclusions', async () => {

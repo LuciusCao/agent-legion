@@ -1,10 +1,15 @@
 from contextlib import closing
 from pathlib import Path
 
+import pytest
+
 from server.app.db.connection import connect_database
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.jobs.queries.job_filtering import JobListFilter
+from server.app.services.job_selection_resolver import EmptyJobSelectionError
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
+from server.app.services.job_workflow_upgrade_batch import batch_upgrade
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.helpers import load_builtin_definition
 from tests.postgres_support import TEST_DATABASE_URL
@@ -344,3 +349,94 @@ def test_upgrade_job_workflow_broadcasts_via_event_manager(tmp_path: Path) -> No
     workspace_id, job_id, stats = manager.calls[0]
     assert (workspace_id, job_id) == (workspace["id"], job["id"])
     assert stats == queries.count_jobs_by_status(workspace["id"])
+
+
+def _batch_setup(tmp_path: Path):
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "ws1", default_workflow_key="education_video_problems_generation"
+    )
+    definition = load_builtin_definition("education_video_problems_generation")
+    revisions = WorkflowRevisionService(queries)
+    original = revisions.publish_workspace_revision(workspace["id"], definition)
+    current = revisions.publish_workspace_revision(workspace["id"], definition)
+
+    def _stale_job(source_id: str):
+        return queries.create_job(
+            workflow_key=definition.key,
+            source_type="question",
+            source_id=source_id,
+            batch_id="batch1",
+            title=f"Question {source_id}",
+            node_keys=["fetch_items"],
+            workspace_id=workspace["id"],
+            workflow_revision_id=original["id"],
+            workflow_version=original["version"],
+            workflow_definition_hash=original["definition_hash"],
+            workflow_definition_snapshot_json=original["definition_json"],
+        )
+
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries.path, job_db=queries, data_dir=tmp_path),
+    )
+    return queries, workspace, current, _stale_job, service
+
+
+def test_batch_upgrade_upgrades_explicit_ids(tmp_path: Path) -> None:
+    queries, workspace, current, make_stale, service = _batch_setup(tmp_path)
+    job_a = make_stale("Q1")
+    job_b = make_stale("Q2")
+
+    results = batch_upgrade(service, workspace["id"], [job_a["id"], job_b["id"], job_a["id"]])
+
+    assert [r["job_id"] for r in results] == [job_a["id"], job_b["id"]]
+    assert all(r["status"] == "succeeded" for r in results)
+    for job in (job_a, job_b):
+        assert queries.get_job(job["id"])["workflow_revision_id"] == current["id"]
+
+
+def test_batch_upgrade_resolves_filter_and_exclusions(tmp_path: Path) -> None:
+    queries, workspace, current, make_stale, service = _batch_setup(tmp_path)
+    job_a = make_stale("Q1")
+    excluded = make_stale("Q2")
+
+    results = batch_upgrade(
+        service,
+        workspace["id"],
+        job_filter=JobListFilter(status="pending"),
+        exclude_ids=[excluded["id"]],
+    )
+
+    assert [r["job_id"] for r in results] == [job_a["id"]]
+    assert results[0]["status"] == "succeeded"
+    assert queries.get_job(job_a["id"])["workflow_revision_id"] == current["id"]
+    assert queries.get_job(excluded["id"])["workflow_revision_id"] != current["id"]
+
+
+def test_batch_upgrade_reports_per_job_skips(tmp_path: Path) -> None:
+    _, workspace, current, make_stale, service = _batch_setup(tmp_path)
+    stale = make_stale("Q1")
+    already_current = make_stale("Q2")
+    service.upgrade(workspace["id"], already_current["id"])
+
+    results = batch_upgrade(
+        service, workspace["id"], [stale["id"], already_current["id"], "missing"]
+    )
+
+    by_id = {r["job_id"]: r for r in results}
+    assert by_id[stale["id"]]["status"] == "succeeded"
+    assert by_id[already_current["id"]]["status"] == "skipped"
+    assert by_id[already_current["id"]]["reason_code"] == "already_current"
+    assert by_id["missing"]["status"] == "failed"
+    assert by_id["missing"]["reason_code"] == "not_found"
+    assert stale["workflow_revision_id"] != current["id"]
+
+
+def test_batch_upgrade_raises_on_empty_selection(tmp_path: Path) -> None:
+    _, workspace, _, _, service = _batch_setup(tmp_path)
+
+    with pytest.raises(EmptyJobSelectionError):
+        batch_upgrade(service, workspace["id"], [])
+    with pytest.raises(EmptyJobSelectionError):
+        batch_upgrade(service, workspace["id"], job_filter=JobListFilter(status="failed"))
