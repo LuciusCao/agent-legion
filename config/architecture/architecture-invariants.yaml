@@ -796,7 +796,7 @@ invariants:
         gate: full
 
   - id: EXEC-PATH-STORAGE-001
-    statement: "DB path columns (node_runs.log_path/run_dir/session_dir, jobs.storage_dir) store data-dir-relative paths only — absolute paths are environment-specific and break on deployment shape changes. Every write boundary canonicalizes (job intake, executor claim/finish, agent claim); legacy absolute log_path values frozen in queued manifests are healed at agent claim time without crashing the claim scan; a startup report surfaces any remaining absolute rows; reads stay fail-closed via resolve_data_path."
+    statement: "DB path columns (node_runs.log_path/run_dir/session_dir, jobs.storage_dir) store data-dir-relative paths only — absolute paths are environment-specific and break on deployment shape changes. Every write boundary canonicalizes (job intake, executor claim/finish, agent claim); legacy absolute log_path values frozen in queued manifests are healed at agent claim time without crashing the claim scan; a startup report surfaces any remaining absolute rows and runs on a background thread so lifespan startup/readiness never blocks on the scan (issue #106); reads stay fail-closed via resolve_data_path."
     owner: workspace-executor
     risk: high
     evidence:

@@ -8,12 +8,15 @@ is noticed before executions stall.
 from __future__ import annotations
 
 import logging
+import threading
+import time
 
 import pytest
 
 from server.app.services.path_hygiene import (
     count_absolute_db_paths,
     report_absolute_db_paths,
+    report_absolute_db_paths_background,
     warn_legacy_absolute,
 )
 
@@ -101,3 +104,71 @@ def test_warn_legacy_absolute_logs_and_warns(caplog) -> None:
         warn_legacy_absolute()
 
     assert any("Legacy absolute path stored" in record.getMessage() for record in caplog.records)
+
+
+def test_report_background_returns_while_scan_is_blocked(monkeypatch) -> None:
+    """Issue #106: the startup report must run off the lifespan startup path."""
+    entered = threading.Event()
+    release = threading.Event()
+    finished = threading.Event()
+
+    def _blocking_report(db) -> None:
+        entered.set()
+        release.wait(30)
+        finished.set()
+
+    monkeypatch.setattr(
+        "server.app.services.path_hygiene.report_absolute_db_paths", _blocking_report
+    )
+    started = time.monotonic()
+    report_absolute_db_paths_background(db=None)
+    elapsed = time.monotonic() - started
+
+    assert entered.wait(5), "report thread never started"
+    assert elapsed < 5, "background report blocked the caller (a sync call waits 30s)"
+    release.set()
+    assert finished.wait(5)
+
+
+def test_report_background_logs_failures_without_raising(monkeypatch, caplog) -> None:
+    """A failing scan must surface in logs, never abort app startup."""
+    failed = threading.Event()
+
+    def _boom(db) -> None:
+        failed.set()
+        raise RuntimeError("db gone")
+
+    monkeypatch.setattr("server.app.services.path_hygiene.report_absolute_db_paths", _boom)
+    with caplog.at_level(logging.ERROR, logger="server.app.services.path_hygiene"):
+        report_absolute_db_paths_background(db=None)
+        assert failed.wait(5)
+        deadline = time.monotonic() + 5
+        while not caplog.records and time.monotonic() < deadline:
+            time.sleep(0.01)
+
+    assert any("path-hygiene startup report failed" in r.getMessage() for r in caplog.records)
+
+
+def test_start_worker_threads_kicks_background_report(settings, monkeypatch) -> None:
+    """Lifespan startup wires the background variant, never the sync scan."""
+    from server.app import worker_startup
+
+    settings.executor_runtime.workflows.enabled = False
+    calls: list = []
+    monkeypatch.setattr(
+        worker_startup,
+        "report_absolute_db_paths_background",
+        calls.append,
+    )
+
+    worker_startup.start_worker_threads(
+        settings,
+        job_db=None,
+        executor_leases=None,
+        agent_broker=None,
+        workspace_worker_control=None,
+        agent_manager=None,
+        agent_dispatch=None,
+    )
+
+    assert len(calls) == 1
