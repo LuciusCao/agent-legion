@@ -69,9 +69,10 @@ def test_catalogs_are_workspace_isolated(client, job_db, ws, workspace_id) -> No
     assert client.get(f"{BASE}/agent-a", params={"workspace_id": other}).status_code == 404
 
 
-def test_catalog_enforces_membership_for_non_admin(client, job_db, ws, workspace_id) -> None:
-    """非 admin 鉴权边界：A 的 editor 可读写 A 的 catalog，访问 B 一律 404
-    （admin 在 require_workspace_access 直接放行，上面的用例覆盖不到这里）。"""
+def test_catalog_is_admin_only_for_non_admin(client, job_db, ws, workspace_id) -> None:
+    """非 admin 鉴权边界（P4：Agent catalog 属 Studio 面，admin-only）：
+    A 的 editor 读写 A 的 catalog 一律 403；访问 B（非成员）仍 404
+    （require_workspace_access 先跑，存在性不可枚举）。"""
     client.post(BASE, params=ws, json={"agent_id": "agent-a", **PAYLOAD_V1})
     other = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
     created = client.post("/api/users", json={"username": "editor-a", "password": "pw1"})
@@ -88,8 +89,10 @@ def test_catalog_enforces_membership_for_non_admin(client, job_db, ws, workspace
     assert login.status_code == 200, login.text
     member.headers["x-agent-legion-request"] = "1"
 
-    # 本 workspace（editor 成员）：读 200。
-    assert member.get(BASE, params=ws).status_code == 200
+    # 本 workspace（editor 成员）：读写一律 403（Studio 面 admin-only）。
+    assert member.get(BASE, params=ws).status_code == 403
+    write_own = member.post(BASE, params=ws, json={"agent_id": "agent-y", **PAYLOAD_V1})
+    assert write_own.status_code == 403
     # 别的 workspace：读 404，写 404（存在性不可枚举）。
     assert member.get(BASE, params={"workspace_id": other}).status_code == 404
     write = member.post(

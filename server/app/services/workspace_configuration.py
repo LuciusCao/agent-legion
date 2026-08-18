@@ -74,7 +74,11 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        if definition is not None:
+        # blank workspaces skip the demo seed entirely (active revision and
+        # factory Agent templates); Studio then starts from an empty draft and
+        # the first publish creates revision v1. The default_workflow_key slot
+        # is still recorded so draft/compare/publish keep using it.
+        if definition is not None and payload.get("workflow_mode", "demo") != "blank":
             WorkflowRevisionService(
                 self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
             ).ensure_active_revision(workspace["id"], definition)

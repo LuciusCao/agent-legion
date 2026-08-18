@@ -78,6 +78,18 @@ class ResizeObserverMock {
   globalThis as unknown as { ResizeObserver: typeof ResizeObserver }
 ).ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver
 
+// jsdom 没有 DOMMatrixReadOnly；@xyflow 测量动态加入的节点时只读 m22（缩放）。
+class DOMMatrixReadOnlyMock {
+  m22: number
+
+  constructor(transform: string) {
+    const scale = transform.match(/scale\(([\d.]+)\)/)?.[1]
+    this.m22 = scale === undefined ? 1 : Number(scale)
+  }
+}
+
+Object.assign(globalThis, { DOMMatrixReadOnly: DOMMatrixReadOnlyMock })
+
 class IntersectionObserverMock {
   callback: IntersectionObserverCallback
   entries: IntersectionObserverEntry[] = []

@@ -48,11 +48,38 @@ describe('useWorkspaceMutations', () => {
 
     expect(mockCreateWorkspace).toHaveBeenCalledWith(
       '新空间',
-      'question_content'
+      'question_content',
+      {},
+      'question',
+      {},
+      'demo'
     )
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: queryKeys.workspaces(),
     })
+  })
+
+  it('createWorkspace forwards blank workflow mode', async () => {
+    const ws = makeWorkspace({ id: 'ws-blank', name: '空白空间' })
+    mockCreateWorkspace.mockResolvedValue(ws)
+    const { result } = renderHook(() => useCreateWorkspace(), { wrapper })
+
+    await act(async () => {
+      await result.current.mutateAsync({
+        name: '空白空间',
+        workflowKey: 'question_content',
+        workflowMode: 'blank',
+      })
+    })
+
+    expect(mockCreateWorkspace).toHaveBeenCalledWith(
+      '空白空间',
+      'question_content',
+      {},
+      'question',
+      {},
+      'blank'
+    )
   })
 
   it('createWorkspace propagates API errors', async () => {

@@ -11,7 +11,9 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
         {props.loadState === 'error' && (
           <p>无法加载 active workflow revision</p>
         )}
-        {props.loadState === 'ready' && <WorkflowStudioWorkspace {...props} />}
+        {(props.loadState === 'ready' || props.loadState === 'empty') && (
+          <WorkflowStudioWorkspace {...props} />
+        )}
       </div>
       <WorkflowStudioLayoutDialogs {...props} />
     </>
