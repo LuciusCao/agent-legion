@@ -10,6 +10,7 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
+from server.app.services.node_code_pins import frozen_dispatch_pin
 from server.app.services.node_code_resolution import (
     freeze_node_code_versions,
     resolve_dispatch_node_code,
@@ -332,3 +333,29 @@ def test_seed_global_tolerates_concurrent_seed_race(service, monkeypatch) -> Non
     other = "def run(job, job_dir, runtime):\n    return 'other'\n"
     assert not service.seed_global(WF, NODE, other, "concurrent seed")
     assert service.get_global_published(WF, NODE)["code"] == GLOBAL_CODE
+
+
+@pytest.mark.no_db
+def test_frozen_dispatch_pin_prefers_snapshot_pins() -> None:
+    """#109: the job snapshot's node_code_pins win over the batch payload's
+    node_code_versions (upgrade refreshes only the former)."""
+    snapshot_pins = {"n": {"version": 2, "code_hash": "h2"}}
+    batch_payload = {"node_code_versions": {"n": {"version": 1, "code_hash": "h1"}}}
+
+    assert frozen_dispatch_pin(snapshot_pins, batch_payload, "n") == {
+        "version": 2,
+        "code_hash": "h2",
+    }
+
+
+@pytest.mark.no_db
+def test_frozen_dispatch_pin_falls_back_to_batch_payload() -> None:
+    """Legacy rows (no snapshot pins) keep resolving the intake batch pin."""
+    batch_payload = {"node_code_versions": {"n": {"version": 1, "code_hash": "h1"}}}
+    expected = {"version": 1, "code_hash": "h1"}
+
+    assert frozen_dispatch_pin(None, batch_payload, "n") == expected
+    assert frozen_dispatch_pin({}, batch_payload, "n") == expected
+    assert frozen_dispatch_pin({"other": {"version": 9}}, batch_payload, "n") == expected
+    assert frozen_dispatch_pin({"n": None}, None, "n") is None
+    assert frozen_dispatch_pin(None, None, "n") is None

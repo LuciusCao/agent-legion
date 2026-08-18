@@ -389,7 +389,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-002
-    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and jobs freeze the code version they started with; no runtime path may write repo workflow_nodes/ files. Codes are workspace-scoped with a global (workspace-NULL) factory-seed scope for the demo nodes (#96); dispatch resolves frozen pin → workspace published → global published, and a capability with no published code at either scope fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
+    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and jobs freeze the code version they started with; no runtime path may write repo workflow_nodes/ files. Codes are workspace-scoped with a global (workspace-NULL) factory-seed scope for the demo nodes (#96); dispatch resolves the frozen pin → workspace published → global published, where the frozen pin is the job workflow snapshot's node_code_pins first (refreshed by upgrade_workflow, #109) and the intake batch's node_code_versions only as the legacy fallback, and a capability with no published code at either scope fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
     owner: workspace-executor
     risk: high
     evidence:
@@ -401,6 +401,15 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/workers/test_workflow_worker_node_code.py
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_worker_node_code.py::test_dispatch_prefers_snapshot_pin_over_stale_batch_pin
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_worker_node_code.py::test_dispatch_falls_back_to_batch_pin_when_snapshot_has_no_pins
+        gate: quick
+      - kind: integration
+        target: tests/workers/test_workflow_worker_node_code.py::test_code_worker_claim_prefers_snapshot_pin_over_stale_batch_pin
         gate: quick
       - kind: integration
         target: tests/executors/test_code_executor.py::test_execute_without_node_code_is_a_config_error
