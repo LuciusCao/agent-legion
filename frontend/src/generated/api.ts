@@ -4054,12 +4054,23 @@ export interface components {
       /** Label */
       label: string
     }
-    /** StudioAgentRegistryResponse */
+    /**
+     * StudioAgentRegistryResponse
+     * @description Stored document plus a PATH-probe result per agent id.
+     *
+     *     ``availability`` is response-only (admins see which entries can actually
+     *     launch on this host); it is never persisted and never accepted on PUT,
+     *     so it lives here rather than on the shared document model.
+     */
     StudioAgentRegistryResponse: {
       /** Agents */
       agents?: components['schemas']['StudioAgentRegistryEntry'][]
       /** Api Base */
       api_base: string
+      /** Availability */
+      availability?: {
+        [key: string]: boolean
+      }
     }
     /** StudioAgentRegistryUpdate */
     StudioAgentRegistryUpdate: {
