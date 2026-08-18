@@ -104,14 +104,14 @@ def _revision_payload(conn, revision_id: str) -> dict:
     return json.loads(row["definition_json"])
 
 
-def test_schema_v47_recorded() -> None:
-    assert SCHEMA_VERSION == 47
+def test_schema_v48_recorded() -> None:
+    assert SCHEMA_VERSION == 48
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "executor_retirement"
+    assert row["name"] == "job_nodes_unclaimable_finished_index"
 
 
 @pytest.mark.fresh_schema
