@@ -498,6 +498,16 @@ alter table node_runs add column if not exists failure_detail text not null defa
 alter table job_nodes add column if not exists failure_category text not null default '';
 alter table job_nodes add column if not exists failure_detail text not null default '';
 create index if not exists idx_node_runs_failure on node_runs(status, failure_category);
+-- Ops metrics queue summary (schema v48, issue #106): the unclaimable_model
+-- sweep counter filters job_nodes by failure_detail plus a finished_at
+-- range; without an index every collection seq-scans the whole
+-- (multi-million-row) table. Partial so only the tiny unclaimable slice is
+-- indexed — finished rows overwhelmingly carry other failure_detail values
+-- or none. Serves both the fleet count and the workspace-scoped variant
+-- (the exists probe into jobs resolves by primary key per matching row).
+create index if not exists idx_job_nodes_unclaimable_finished
+  on job_nodes(finished_at)
+  where failure_detail = 'unclaimable_model';
 
 -- Ops metrics (schema v11): minute-granularity host operations samples
 -- (online Workers, claimed executions, token throughput), rolled up to
