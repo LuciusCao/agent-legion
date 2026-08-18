@@ -23,7 +23,10 @@ describe('workflow draft compare api', () => {
     const payload = { changes: [] }
     const fetchMock = mockFetchJson(payload)
     global.fetch = fetchMock
-    const request = { definition_yaml: 'key: wf\nnodes: {}' }
+    const request = {
+      definition_yaml: 'key: wf\nnodes: {}',
+      allow_missing_baseline: false,
+    }
 
     const result = await compareWorkflowDraft('ws 1', request)
 

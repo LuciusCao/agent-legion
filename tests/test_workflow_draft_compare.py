@@ -313,6 +313,41 @@ def test_compare_allow_missing_baseline_previews_full_draft(tmp_path):
     )
 
 
+def test_compare_route_accepts_allow_missing_baseline(tmp_path):
+    """HTTP compare route exposes allow_missing_baseline (Studio empty mode):
+    a never-published workspace previews the draft instead of a revision error."""
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    workspace = app.state.job_db.create_workspace(
+        "Empty",
+        default_workflow_key="education_video_problems_generation",
+    )
+    workspace_id = workspace["id"]
+    definition = load_builtin_definition("education_video_problems_generation")
+    raw = definition_to_yaml(definition)
+
+    with authenticate_client(TestClient(app)) as client:
+        without_flag = client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/compare",
+            json={"definition_yaml": raw},
+        )
+        with_flag = client.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/compare",
+            json={"definition_yaml": raw, "allow_missing_baseline": True},
+        )
+
+    assert without_flag.status_code == 200
+    assert without_flag.json()["valid"] is False
+    assert without_flag.json()["errors"][0]["category"] == "revision"
+    assert with_flag.status_code == 200
+    body = with_flag.json()
+    assert body["valid"] is True
+    assert body["base_revision"] is None
+    assert body["draft_workflow"]["version"] == 0
+    assert len(body["summary"]["node_changes"]) == len(definition.nodes)
+    assert any(flag["code"] == "no_baseline" for flag in body["summary"]["risk_flags"])
+
+
 def test_compare_rejects_draft_key_mismatch(app_with_workspace):
     app, workspace_id = app_with_workspace
     definition = load_builtin_definition("education_video_problems_generation")

@@ -226,6 +226,83 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
     assert response.status_code == 404
 
 
+def test_create_workspace_blank_mode_skips_demo_seed(tmp_path):
+    """workflow_mode='blank': workspace row keeps the default_workflow_key slot,
+    but no active revision and no factory Agent templates are seeded."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        created = c.post(
+            "/api/workspaces",
+            json={
+                "name": "Blank WS",
+                "default_workflow_key": "education_video_problems_generation",
+                "workflow_mode": "blank",
+            },
+        )
+        workspace = created.json()["workspace"]
+        workspace_id = workspace["id"]
+        active = c.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+        agents = c.get("/api/agent-definitions", params={"workspace_id": workspace_id})
+
+    assert created.status_code == 200
+    assert workspace["default_workflow_key"] == "education_video_problems_generation"
+    assert active.status_code == 404
+    assert agents.status_code == 200
+    assert agents.json()["agents"] == []
+
+
+def test_create_workspace_demo_mode_remains_default(tmp_path):
+    """Default (and explicit 'demo') creation keeps seeding the active revision
+    plus the factory Agent templates — zero behavior change."""
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        for payload in (
+            {"name": "Demo Default", "default_workflow_key": "education_video_problems_generation"},
+            {
+                "name": "Demo Explicit",
+                "default_workflow_key": "education_video_problems_generation",
+                "workflow_mode": "demo",
+            },
+        ):
+            created = c.post("/api/workspaces", json=payload)
+            workspace_id = created.json()["workspace"]["id"]
+            active = c.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+            agents = c.get("/api/agent-definitions", params={"workspace_id": workspace_id})
+            assert created.status_code == 200
+            assert active.status_code == 200
+            assert active.json()["revision"]["version"] == 1
+            assert agents.json()["agents"] != []
+
+
+def test_create_workspace_rejects_unknown_workflow_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        response = c.post(
+            "/api/workspaces",
+            json={
+                "name": "Bad Mode",
+                "default_workflow_key": "education_video_problems_generation",
+                "workflow_mode": "custom",
+            },
+        )
+    assert response.status_code == 422
+
+
 def test_create_workspace_stores_default_entity_and_intake_config(tmp_path):
     from server.app.jobs import JobQueries
 
