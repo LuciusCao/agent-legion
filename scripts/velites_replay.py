@@ -6,9 +6,10 @@ each prompt/skill snapshot offline through BOTH Node Pi and velites in isolated
 temp directories, then diffs the event streams and declared outputs. Production
 data is only ever read; nothing touches the database.
 
-Run-dir layouts (``worker/execution_prepare.py`` / ``pi_runner.py``): worker runs
+Run-dir layouts: worker runs (``worker/execution_prepare.py``)
 keep only ``<job_dir>/runs/<node_key>/worker/events.jsonl`` (prompt recovered from
-the first user message's ``<file ...prompt.md>`` attachment); local runs have
+the first user message's ``<file ...prompt.md>`` attachment); legacy local runs
+(produced by the since-deleted ``pi_runner``, #108) have
 ``runs/<node_key>/<run_token>/prompt.md``. Skills resolve from ``--skill-root``
 by node-key leaf name, mirroring ``config/workflow.yaml``.
 

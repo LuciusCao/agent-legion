@@ -91,8 +91,6 @@
     "tests/test_phase5_frontend_architecture.py",
     "tests/test_pi_event_compression.py",
     "tests/test_pi_log_utils.py",
-    "tests/test_pi_prompt.py",
-    "tests/test_pi_runner.py",
     "tests/test_pytest_postgres_boundaries.py",
     "tests/test_quality_gate_scripts.py",
     "tests/test_ratchet_architecture_budgets.py",
