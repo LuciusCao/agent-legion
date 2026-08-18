@@ -6,7 +6,7 @@ import type {
 
 /** 空态引导文案（loadState==='empty' 时由编辑区顶部展示）。 */
 export const EMPTY_WORKFLOW_GUIDANCE =
-  '该 workspace 还没有已发布的 workflow：从模板草稿开始，编辑 YAML 后对比并发布即可创建 v1。'
+  '该 workspace 还没有已发布的 workflow：从模板草稿开始，编辑 YAML 后对比并发布即可创建 v1；节点需要的 Agent 在节点详情内嵌新建，或在右侧 Agent 对话中起草。'
 
 /** Active revision, or null when the workspace has never published one (404). */
 export async function fetchActiveRevisionOrNull(

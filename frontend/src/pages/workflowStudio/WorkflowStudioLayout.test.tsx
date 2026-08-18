@@ -53,6 +53,8 @@ const baseProps = {
   closeReviewDialog: vi.fn(),
   dagFullscreenOpen: false,
   setDagFullscreenOpen: vi.fn(),
+  canvasMode: 'dag' as const,
+  setCanvasMode: vi.fn(),
   onValidate: vi.fn(),
   onPublish: vi.fn(),
   onReset: vi.fn(),

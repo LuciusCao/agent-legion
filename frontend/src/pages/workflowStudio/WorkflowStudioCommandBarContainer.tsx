@@ -3,10 +3,6 @@ import { WorkflowStudioCommandBar } from './WorkflowStudioCommandBar'
 
 type Props = {
   studio: ReturnType<typeof useWorkflowStudio>
-  onOpenChanges: () => void
-  onOpenYaml: () => void
-  onOpenAgents: () => void
-  onOpenExecutors: () => void
   onValidate: () => void
 }
 
@@ -29,10 +25,6 @@ export function WorkflowStudioCommandBarContainer(props: Props) {
       selectedRevisionId={studio.selectedRevisionId}
       isLoadingRevision={studio.isLoadingRevision}
       revisionLoadError={studio.revisionLoadError}
-      onOpenChanges={props.onOpenChanges}
-      onOpenYaml={props.onOpenYaml}
-      onOpenAgents={props.onOpenAgents}
-      onOpenExecutors={props.onOpenExecutors}
       onSelectRevision={studio.selectRevision}
       onValidate={props.onValidate}
       onPublish={() => void studio.requestPublish()}

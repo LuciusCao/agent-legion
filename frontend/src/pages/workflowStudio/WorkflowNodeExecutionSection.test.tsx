@@ -1,13 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { TestQueryProvider } from '../../testing/testQueryClient'
+import { useSettingStore } from '../../stores/settingStore'
 import type { AgentDefinition } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
-import { StudioNavContext } from './workflowStudioNav'
 
 vi.mock('../../api/executorApi', () => ({
   getExecutorCatalog: vi.fn().mockResolvedValue({ agents: [] }),
+}))
+
+// 内嵌编辑器的完整行为由 WorkflowNodeAgentEditor.test.tsx 覆盖。
+vi.mock('./AgentEditor', () => ({
+  AgentEditor: () => <div data-testid="agent-editor-stub" />,
 }))
 
 // 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
@@ -53,9 +58,23 @@ const editorProps = {
   workflowKey: 'demo-wf',
 }
 
+function renderSection(
+  props: React.ComponentProps<typeof WorkflowNodeExecutionSection>
+) {
+  return render(
+    <TestQueryProvider>
+      {<WorkflowNodeExecutionSection {...props} />}
+    </TestQueryProvider>
+  )
+}
+
 describe('WorkflowNodeExecutionSection', () => {
+  beforeEach(() => {
+    useSettingStore.setState({ workspaceId: 'ws1' })
+  })
+
   it('shows the executor binding for the selected node capability', () => {
-    render(<WorkflowNodeExecutionSection node={node} {...editorProps} />)
+    renderSection({ node, ...editorProps })
 
     expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
     expect(screen.getByText('pi')).toBeInTheDocument()
@@ -76,17 +95,15 @@ describe('WorkflowNodeExecutionSection', () => {
 
   it('writes a node model override to workflow YAML', () => {
     let nextYaml = ''
-    render(
-      <WorkflowNodeExecutionSection
-        node={node}
-        agentCatalog={agentCatalog}
-        definitionYaml={editorProps.definitionYaml}
-        setDefinitionYaml={(value) => {
-          nextYaml = value
-        }}
-        workflowKey="demo-wf"
-      />
-    )
+    renderSection({
+      node,
+      agentCatalog,
+      definitionYaml: editorProps.definitionYaml,
+      setDefinitionYaml: (value) => {
+        nextYaml = value
+      },
+      workflowKey: 'demo-wf',
+    })
 
     fireEvent.change(screen.getByLabelText('Model'), {
       target: { value: 'gpt-5' },
@@ -107,17 +124,15 @@ describe('WorkflowNodeExecutionSection', () => {
       },
     }
     const initialYaml = `nodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      provider: deepseek\n`
-    const { rerender } = render(
-      <WorkflowNodeExecutionSection
-        node={nodeWithProvider}
-        agentCatalog={agentCatalog}
-        definitionYaml={initialYaml}
-        setDefinitionYaml={(value) => {
-          nextYaml = value
-        }}
-        workflowKey="demo-wf"
-      />
-    )
+    const { rerender } = renderSection({
+      node: nodeWithProvider,
+      agentCatalog,
+      definitionYaml: initialYaml,
+      setDefinitionYaml: (value) => {
+        nextYaml = value
+      },
+      workflowKey: 'demo-wf',
+    })
 
     fireEvent.change(screen.getByLabelText('Provider'), {
       target: { value: '' },
@@ -125,43 +140,49 @@ describe('WorkflowNodeExecutionSection', () => {
 
     expect(nextYaml).not.toContain('provider:')
     rerender(
-      <WorkflowNodeExecutionSection
-        node={nodeWithProvider}
-        agentCatalog={agentCatalog}
-        definitionYaml={nextYaml}
-        setDefinitionYaml={(value) => {
-          nextYaml = value
-        }}
-        workflowKey="demo-wf"
-      />
+      <TestQueryProvider>
+        <WorkflowNodeExecutionSection
+          node={nodeWithProvider}
+          agentCatalog={agentCatalog}
+          definitionYaml={nextYaml}
+          setDefinitionYaml={(value) => {
+            nextYaml = value
+          }}
+          workflowKey="demo-wf"
+        />
+      </TestQueryProvider>
     )
     expect(screen.getByLabelText('Provider')).toHaveValue('')
     expect(screen.getByText('继承全局：deepseek')).toBeInTheDocument()
   })
 
-  it('shows the code-pool state when no agent routes the capability', () => {
-    render(
-      <TestQueryProvider>
-        <WorkflowNodeExecutionSection
-          node={{ ...node, capability: 'missing' }}
-          {...editorProps}
-        />
-      </TestQueryProvider>
-    )
+  it('shows the code-pool state and the create-agent entry when no agent routes the capability', () => {
+    renderSection({ node: { ...node, capability: 'missing' }, ...editorProps })
 
     expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '为此 capability 新建 Agent' })
+    ).toBeInTheDocument()
   })
 
-  it('jumps to the agent editor from the agent card', () => {
-    const openAgent = vi.fn()
-    render(
-      <StudioNavContext.Provider value={{ openAgent }}>
-        <WorkflowNodeExecutionSection node={node} {...editorProps} />
-      </StudioNavContext.Provider>
-    )
+  it('toggles the embedded agent editor for the bound agent', () => {
+    renderSection({ node, ...editorProps })
 
-    fireEvent.click(screen.getByRole('button', { name: '在 Agent 管理中打开' }))
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '编辑 Agent' }))
+    expect(screen.getByTestId('agent-editor-stub')).toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '收起 Agent 编辑' }))
+    expect(screen.queryByTestId('agent-editor-stub')).not.toBeInTheDocument()
+  })
 
-    expect(openAgent).toHaveBeenCalledWith('question-key-info-v1')
+  it('hides the agent edit and create entries in read-only mode', () => {
+    renderSection({ node, ...editorProps, readOnly: true })
+
+    expect(
+      screen.queryByRole('button', { name: '编辑 Agent' })
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: '为此 capability 新建 Agent' })
+    ).not.toBeInTheDocument()
   })
 })
