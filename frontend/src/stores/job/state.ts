@@ -85,7 +85,7 @@ export interface JobState
   continueJob: (jobId: string) => ContinueJobResult
   batchUpgradeWorkflow: (
     workspaceId: string,
-    jobIds: string[]
+    jobIds?: string[]
   ) => Promise<BatchJobMutationResult>
 }
 export type JobStoreSet = (

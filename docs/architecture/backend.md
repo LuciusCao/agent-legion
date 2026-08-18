@@ -143,6 +143,7 @@ server/app/
 | POST | `/workspaces/{workspace_id}/jobs/batch-rerun/preview` | `preview_batch_rerun_workspace_jobs` | routes/job_rerun_preview.py |
 | POST | `/workspaces/{workspace_id}/events/stress` | `record_stress_events` | routes/job_stress_events.py |
 | POST | `/jobs/{job_id}/upgrade-workflow` | `upgrade_job_workflow` | routes/job_workflow_upgrade.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-upgrade-workflow` | `batch_upgrade_jobs_workflow` | routes/job_workflow_upgrade_batch.py |
 | GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
 | GET | `/jobs/{job_id}` | `get_job` | routes/jobs.py |
 | GET | `/metrics/overview` | `get_metrics_overview` | routes/metrics.py |

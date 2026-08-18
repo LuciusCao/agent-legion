@@ -15,6 +15,9 @@ from server.app.routes.job_rerun_preview import create_batch_rerun_preview_route
 from server.app.routes.job_snapshot import create_job_snapshot_router
 from server.app.routes.job_stress_events import create_job_stress_events_router
 from server.app.routes.job_workflow_upgrade import create_job_workflow_upgrade_router
+from server.app.routes.job_workflow_upgrade_batch import (
+    create_job_workflow_upgrade_batch_router,
+)
 from server.app.routes.jobs import create_jobs_router
 from server.app.routes.token_usage import create_token_usage_router
 from server.app.routes.workspace_runs import create_workspace_runs_router
@@ -64,6 +67,9 @@ def include_job_routes(
         router.include_router(stress_router)
     router.include_router(
         create_job_workflow_upgrade_router(services.queries, services.workflow_upgrade, settings)
+    )
+    router.include_router(
+        create_job_workflow_upgrade_batch_router(services.workflow_upgrade, settings)
     )
     router.include_router(create_job_artifacts_router(services.artifacts, settings, services.logs))
     router.include_router(create_token_usage_router(services.queries, settings))

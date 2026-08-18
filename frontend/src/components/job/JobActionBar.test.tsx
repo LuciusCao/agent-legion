@@ -514,7 +514,7 @@ describe('JobActionBar in allMatching selection mode', () => {
     previewStub.data = undefined
   })
 
-  function renderAllMatching(onRerun = vi.fn()) {
+  function renderAllMatching(onRerun = vi.fn(), onUpgradeWorkflow = vi.fn()) {
     renderWithClient(
       <JobActionBar
         jobs={[
@@ -535,10 +535,10 @@ describe('JobActionBar in allMatching selection mode', () => {
         onPackage={vi.fn()}
         onClearPacked={vi.fn()}
         onDelete={vi.fn()}
-        onUpgradeWorkflow={vi.fn()}
+        onUpgradeWorkflow={onUpgradeWorkflow}
       />
     )
-    return { onRerun }
+    return { onRerun, onUpgradeWorkflow }
   }
 
   it('keeps filter-safe actions enabled and disables per-job actions', () => {
@@ -549,8 +549,25 @@ describe('JobActionBar in allMatching selection mode', () => {
     expect(screen.getByText('打包')).not.toHaveAttribute('disabled')
     expect(screen.getByText('清空打包状态')).not.toHaveAttribute('disabled')
     expect(screen.getByText('重跑')).not.toHaveAttribute('disabled')
+    expect(screen.getByText('升级 workflow')).not.toHaveAttribute('disabled')
     expect(screen.getByText('运行到')).toHaveAttribute('disabled')
-    expect(screen.getByText('升级 workflow')).toHaveAttribute('disabled')
+  })
+
+  it('opens the all-matching upgrade dialog and confirms without job ids', async () => {
+    const { onUpgradeWorkflow } = renderAllMatching()
+
+    await act(async () => {
+      screen.getByText('升级 workflow').click()
+    })
+    expect(
+      screen.getByText(/将对符合筛选条件的 10 个 job 执行 workflow/)
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认升级').click()
+    })
+    // 不带 jobIds：store 在 allMatching 模式下经 selection filter 服务端解析。
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith()
   })
 
   it('opens the all-matching rerun dialog and confirms full scope', async () => {
