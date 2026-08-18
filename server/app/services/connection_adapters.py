@@ -7,8 +7,9 @@ string to a lazy import location so ``server/app`` itself carries no
 vendor-specific knowledge — a workspace-pack type is added by dropping
 an adapter into the pack and registering its import path here.
 
-The platform ships two vendor-neutral built-ins: ``static_bearer`` (a
-ready-made token) and ``hmac_token`` (``connection_adapter_hmac.py``).
+The platform ships vendor-neutral built-ins, each in its own module under
+``server/app/services/``: ``static_bearer`` (a ready-made token),
+``hmac_token`` and ``user_login_jwt`` (two-step user-login JWT exchange).
 """
 
 from __future__ import annotations
@@ -95,32 +96,15 @@ def bearer_probe(config: dict[str, Any], token: str) -> str:
     raise ConnectionAdapterError(f"服务可达但端点响应异常 (HTTP {resp.status_code})")
 
 
-def _static_bearer_authenticate(config: dict[str, Any], secrets: dict[str, str]) -> AcquiredToken:
-    token = str(secrets.get("token") or "").strip()
-    if not token:
-        raise ConnectionAdapterError("static_bearer 连接未配置 token")
-    return AcquiredToken(token=token, expires_at=jwt_expires_at(token))
-
-
-def _static_bearer_probe(config: dict[str, Any], secrets: dict[str, str]) -> str:
-    acquired = _static_bearer_authenticate(config, secrets)
-    return bearer_probe(config, acquired.token)
-
-
-_STATIC_BEARER = ConnectionAdapter(
-    type="static_bearer",
-    description="静态 Bearer token（凭据即 token，不过期或按 JWT exp 缓存）",
-    required_config_keys=(),
-    secret_keys=("token",),
-    authenticate=_static_bearer_authenticate,
-    probe=_static_bearer_probe,
-)
-
 # type → adapter, or (module, attribute) for lazy loading from workspace packs.
 _REGISTRY: dict[str, ConnectionAdapter | tuple[str, str]] = {
-    "static_bearer": _STATIC_BEARER,
-    # Lazy import keeps this module inside its file budget.
+    # Lazy imports keep this module inside its file budget.
+    "static_bearer": ("server.app.services.connection_adapter_static", "STATIC_BEARER_ADAPTER"),
     "hmac_token": ("server.app.services.connection_adapter_hmac", "HMAC_TOKEN_ADAPTER"),
+    "user_login_jwt": (
+        "server.app.services.connection_adapter_user_login",
+        "USER_LOGIN_JWT_ADAPTER",
+    ),
 }
 
 
