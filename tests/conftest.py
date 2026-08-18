@@ -277,7 +277,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_jobs.py",
         "tests/test_jobs_queries.py",
         "tests/test_log_cleanup.py",
-        "tests/test_pi_runner.py",
         "tests/test_relative_path_portability.py",
         "tests/test_run_dir_cleanup.py",
         "tests/test_skill_catalog_service.py",
@@ -298,7 +297,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/workers/test_workflow_worker_thread_local.py",
         "tests/workers/test_workflow_worker_thread_paths.py",
         "tests/workers/test_workflow_worker_thread_pi.py",
-        "tests/workflows/test_pi_runner_token_usage.py",
         "tests/workflows/test_sharding.py",
     }
 )
