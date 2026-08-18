@@ -40,6 +40,10 @@ class BatchJobIdsRequest(JobSelectionMixin):
     pass
 
 
+class BatchUpgradeWorkflowRequest(JobSelectionMixin):
+    pass
+
+
 class RunToRequest(BaseModel):
     target_node_key: str
     start_node_key: str | None = None

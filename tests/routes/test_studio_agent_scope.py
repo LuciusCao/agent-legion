@@ -67,6 +67,7 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
     ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
     ("POST", "/api/jobs/{job_id}/upgrade-workflow", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-upgrade-workflow", None),
     # Workspace, secret, package, member and settings writes.
     ("POST", "/api/workspaces", None),
     ("PATCH", "/api/workspaces/{workspace_id}", None),

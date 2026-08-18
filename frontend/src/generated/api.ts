@@ -1485,6 +1485,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/batch-upgrade-workflow': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Upgrade Jobs Workflow */
+    post: operations['batch_upgrade_jobs_workflow_api_workspaces__workspace_id__jobs_batch_upgrade_workflow_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/clear-packed': {
     parameters: {
       query?: never
@@ -2640,6 +2657,14 @@ export interface components {
       start_node_key?: string | null
       /** Target Node Key */
       target_node_key: string
+    }
+    /** BatchUpgradeWorkflowRequest */
+    BatchUpgradeWorkflowRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
+      /** Job Ids */
+      job_ids?: string[] | null
     }
     /** BootstrapRequest */
     BootstrapRequest: {
@@ -8409,6 +8434,41 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['BatchRunToRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  batch_upgrade_jobs_workflow_api_workspaces__workspace_id__jobs_batch_upgrade_workflow_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchUpgradeWorkflowRequest']
       }
     }
     responses: {
