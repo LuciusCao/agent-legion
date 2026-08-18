@@ -39,13 +39,30 @@ echo "AGENT_LEGION_DATABASE_URL=${AGENT_LEGION_DATABASE_URL-<unset>}" >> "${STUB
 echo "stub-vault-master-key"
 """
 
+# 主仓库根非 bare（普通 checkout，无 .env）的布局加固场景：git worktree list
+# 第一条不带 bare 行时，基准选择也必须跳过主仓库根。
+_GIT_STUB_NONBARE_MAIN = """#!/usr/bin/env bash
+if [[ "$1" == "worktree" && "$2" == "list" ]]; then
+  echo "worktree {main}"
+  echo "HEAD 0000000000000000000000000000000000000000"
+  echo "branch refs/heads/main"
+  echo
+  echo "worktree {main}/.worktrees/develop"
+  echo "HEAD 0000000000000000000000000000000000000000"
+  echo "branch refs/heads/develop"
+  exit 0
+fi
+echo "unexpected git call: $*" >&2
+exit 1
+"""
+
 
 def _write_stub(path: Path, content: str) -> None:
     path.write_text(content)
     path.chmod(path.stat().st_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def _setup(tmp_path: Path, script_rel: str) -> tuple[Path, Path]:
+def _setup(tmp_path: Path, script_rel: str, git_stub: str = _GIT_STUB) -> tuple[Path, Path]:
     """Lay out main/.worktrees/... with the script at script_rel; stub bin dir."""
     main = tmp_path / "main"
     script_path = main / script_rel
@@ -53,7 +70,7 @@ def _setup(tmp_path: Path, script_rel: str) -> tuple[Path, Path]:
     shutil.copy(SCRIPT, script_path)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_stub(bin_dir / "git", _GIT_STUB.format(main=main))
+    _write_stub(bin_dir / "git", git_stub.format(main=main))
     _write_stub(bin_dir / "uv", _UV_STUB)
     return main, bin_dir
 
@@ -194,3 +211,43 @@ def test_resume_uses_worktree_database_url_not_inherited_env(tmp_path: Path) -> 
     logged = stub_log.read_text().splitlines()
     # 最后一次 uv 调用是 workspace 恢复子进程，必须携带新 worktree 的专属 URL。
     assert logged[-1] == ("AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat")
+
+
+def test_nonbare_main_repo_is_skipped_as_base(tmp_path: Path) -> None:
+    """主仓库根非 bare（普通 checkout、无 .env）时不得作为 .env 复制基准。
+
+    加固场景：2026-08-18 事故的实际路径是基准 asr-openai 缺 .env（由
+    fail-fast 兜底），本测试覆盖「主仓库根非 bare 被误选为基准」这一变体。
+    """
+    main, bin_dir = _setup(
+        tmp_path, ".worktrees/flat/scripts/init-worktree.sh", _GIT_STUB_NONBARE_MAIN
+    )
+    develop = main / ".worktrees/develop"
+    develop.mkdir(parents=True)
+    (develop / ".env").write_text("# stub env\n")
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 0, result.stderr
+    env_text = (main / ".worktrees/flat/.env").read_text()
+    assert "# stub env" in env_text  # 复制自 develop 而非主仓库根
+    assert "AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion_flat" in env_text
+
+
+def test_missing_env_fails_fast_without_side_effects(tmp_path: Path) -> None:
+    """无法复制 .env 时 fail-fast：缺 .env 会让后端回落共享默认库（prod）。
+
+    且 fail-fast 必须在建库/生成 secrets 等副作用之前触发。
+    """
+    main, bin_dir = _setup(tmp_path, ".worktrees/flat/scripts/init-worktree.sh")
+    # bare 主仓库 + develop 无 .env：无基准可复制。
+    (main / ".worktrees/develop").mkdir(parents=True)
+
+    result = _run(main / ".worktrees/flat/scripts/init-worktree.sh", bin_dir)
+
+    assert result.returncode == 1
+    assert "错误" in result.stderr
+    assert "prod" in result.stderr
+    worktree = main / ".worktrees/flat"
+    assert not (worktree / ".env").exists()
+    assert not (worktree / "deploy").exists()
