@@ -73,6 +73,9 @@ class JobWorkflowUpgradeService:
 
         definition = workflow_definition_from_dict(json.loads(active["definition_json"]))
         try:
+            # The intake batch's node_code_versions deliberately stay frozen:
+            # the batch payload is shared by every job in the batch, and
+            # dispatch prefers this snapshot's node_code_pins anyway (#109).
             with self.job_db.lease_guarded_mutation(
                 job_id,
                 now,
