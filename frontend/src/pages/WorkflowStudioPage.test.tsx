@@ -1,7 +1,7 @@
 import React from 'react'
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, it, vi } from 'vitest'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
 import { TestQueryProvider } from '../testing/testQueryClient'
 
@@ -9,6 +9,17 @@ vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
   useNavigate: () => vi.fn(),
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
+  Navigate: ({ to }: { to: string }) => (
+    <div data-testid="route-navigate" data-to={to} />
+  ),
+}))
+
+const authState: { user: { role: 'admin' | 'member' } | null } = {
+  user: { role: 'admin' },
+}
+vi.mock('../stores/authStore', () => ({
+  useAuthStore: (selector?: (state: typeof authState) => unknown) =>
+    selector ? selector(authState) : authState,
 }))
 
 vi.mock('./workflowStudio/chat/StudioChatPanel', () => ({
@@ -126,6 +137,19 @@ vi.mock('../api', () => {
 })
 
 describe('WorkflowStudioPage', () => {
+  beforeEach(() => {
+    authState.user = { role: 'admin' }
+  })
+
+  it('redirects non-admin users away from the studio (P4)', () => {
+    authState.user = { role: 'member' }
+    renderPage()
+
+    const redirect = screen.getByTestId('route-navigate')
+    expect(redirect).toHaveAttribute('data-to', '/workspaces/ws1')
+    expect(screen.queryByTestId('app-bar')).not.toBeInTheDocument()
+  })
+
   it('renders the workflow studio shell', async () => {
     renderPage()
 

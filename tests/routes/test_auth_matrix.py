@@ -91,6 +91,73 @@ def test_member_listing_hides_unauthorized_workspaces(client, workspace_id) -> N
     assert member.get("/api/workspaces").status_code == 200
 
 
+def test_workspace_create_is_admin_only(client) -> None:
+    """P4: POST /api/workspaces now mounts require_admin — a member gets 403
+    while the admin session keeps creating workspaces."""
+    _create_member(client)
+    member = _member_client(client)
+    denied = member.post("/api/workspaces", json={"name": "member ws"})
+    assert denied.status_code == 403
+
+    registered = client.post(
+        "/api/workflows",
+        json={"key": "matrix_create_flow", "label": "Matrix Create Flow"},
+    )
+    assert registered.status_code == 200, registered.text
+    allowed = client.post(
+        "/api/workspaces",
+        json={"name": "admin ws", "default_workflow_key": "matrix_create_flow"},
+    )
+    assert allowed.status_code == 200, allowed.text
+
+
+def test_workflow_register_is_admin_only(client) -> None:
+    """register_workflow stays admin-only (P4 regression): a member gets 403
+    on the human-facing POST /api/workflows."""
+    _create_member(client)
+    member = _member_client(client)
+    denied = member.post(
+        "/api/workflows",
+        json={"key": "member_register_flow", "label": "Member Register Flow"},
+    )
+    assert denied.status_code == 403
+
+    allowed = client.post(
+        "/api/workflows",
+        json={"key": "member_register_flow", "label": "Member Register Flow"},
+    )
+    assert allowed.status_code == 200, allowed.text
+
+
+def test_studio_authoring_surface_is_admin_only(client, workspace_id, job_db) -> None:
+    """P4: the Studio authoring APIs refuse non-admin full sessions with 403,
+    even for workspace editors."""
+    member_id = _create_member(client)
+    job_db.upsert_workspace_member(workspace_id, member_id, "editor")
+    editor = _member_client(client)
+
+    assert editor.get(f"/api/workspaces/{workspace_id}/workflow-revisions").status_code == 403
+    assert (
+        editor.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/validate",
+            json={"definition_yaml": "key: k\nlabel: l\nnodes: {}\n"},
+        ).status_code
+        == 403
+    )
+    assert (
+        editor.get(
+            f"/api/workspaces/{workspace_id}/workflows/demo_workflow/nodes/n/code"
+        ).status_code
+        == 403
+    )
+    assert (
+        editor.get("/api/agent-definitions", params={"workspace_id": workspace_id}).status_code
+        == 403
+    )
+    assert editor.get(f"/api/workspaces/{workspace_id}/studio-chat/sessions").status_code == 403
+    assert editor.get("/api/studio-agent-tokens").status_code == 403
+
+
 def test_websocket_requires_session(anon_client, client) -> None:
     with (
         pytest.raises(WebSocketDisconnect),
