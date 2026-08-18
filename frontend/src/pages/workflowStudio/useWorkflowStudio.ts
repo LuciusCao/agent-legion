@@ -1,10 +1,11 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useExecutorCatalog } from './useExecutorCatalog'
 import { useStudioDag } from './useStudioDag'
 import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
 import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
+import { applyCompareChanges } from './workflowStudioDagChanges'
 
 export function useWorkflowStudio(workspaceId: string | undefined) {
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
@@ -32,7 +33,13 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     loadState === 'empty'
   )
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
-  const { nodes, edges } = useStudioDag(draft.visibleWorkflow, agentCatalog)
+  const dag = useStudioDag(draft.visibleWorkflow, agentCatalog)
+  // 草稿对比 diff 合并进 DAG：modified/removed 角标打在基线节点上，
+  // added 以幽灵节点 + 幽灵边补入画布。
+  const { nodes, edges } = useMemo(
+    () => applyCompareChanges(dag.nodes, dag.edges, compare.compareSummary),
+    [dag.nodes, dag.edges, compare.compareSummary]
+  )
   return {
     loadState,
     actionState: actions.actionState,
