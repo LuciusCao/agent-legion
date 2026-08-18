@@ -57,12 +57,24 @@ def clean_env(monkeypatch):
 
 def _insert_workspace(conn, workspace_id: str, node_config: dict) -> None:
     conn.execute(
-        "insert into workspaces(id, name, node_config_json) values (%s, %s, %s)",
+        "insert into workspaces(id, name, node_config_json, default_workflow_key) values (%s, %s, %s, 'question_comprehension_info')",
         (workspace_id, workspace_id, json.dumps(node_config)),
     )
 
 
 def _seed_executor(conn) -> None:
+    # The v47 baseline narrowed the entity_type CHECK without 'executor';
+    # re-widen it to the pre-v47 shape this legacy migration expects (the
+    # fresh_schema marker on the caller restores the baseline afterwards).
+    conn.execute(
+        "alter table versioned_entities"
+        " drop constraint if exists versioned_entities_entity_type_check"
+    )
+    conn.execute(
+        "alter table versioned_entities"
+        " add constraint versioned_entities_entity_type_check"
+        " check(entity_type in ('node_code', 'agent', 'executor'))"
+    )
     conn.execute(
         "delete from versioned_entities where entity_type='executor' and entity_key='code-default'"
     )
@@ -90,6 +102,7 @@ def _node_config(conn, workspace_id: str) -> dict:
     return json.loads(row["node_config_json"])
 
 
+@pytest.mark.fresh_schema
 def test_token_gen_env_becomes_cms_hmac_connection(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("CMS_APP_ID", "app")
@@ -354,6 +367,7 @@ def test_undecryptable_workspace_token_left_untouched(monkeypatch) -> None:
         assert "connection" not in values
 
 
+@pytest.mark.fresh_schema
 def test_idempotent_replay(monkeypatch) -> None:
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.setenv("CMS_TOKEN", "env-token")

@@ -78,14 +78,14 @@ key: v1_test
 label: V1 Test
 schema_version: 1
 nodes:
-  fetch_questions:
+  fetch_items:
     label: Fetch
-    capability: fetch_questions
+    capability: fetch_items
     after: []
-  clean_and_parse:
+  clean_items:
     label: Clean
-    capability: clean_and_parse
-    after: [fetch_questions]
+    capability: clean_items
+    after: [fetch_items]
 """,
         encoding="utf-8",
     )
@@ -93,10 +93,9 @@ nodes:
 
     assert definition.schema_version == 1
     assert any(
-        edge.source == "fetch_questions" and edge.target == "clean_and_parse"
-        for edge in definition.edges
+        edge.source == "fetch_items" and edge.target == "clean_items" for edge in definition.edges
     )
-    assert definition.nodes["clean_and_parse"].after == ["fetch_questions"]
+    assert definition.nodes["clean_items"].after == ["fetch_items"]
 
 
 def test_rejects_v2_with_unknown_edge_node(tmp_path: Path) -> None:

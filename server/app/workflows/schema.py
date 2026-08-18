@@ -63,6 +63,7 @@ class WorkflowNode:
     terminal: WorkflowTerminal | None = None
     execution: WorkflowNodeExecution = field(default_factory=WorkflowNodeExecution)
     config: dict[str, Any] = field(default_factory=dict)
+    config_schema: dict[str, Any] = field(default_factory=dict)
     shard: WorkflowShardSpec | None = None
     reduce: WorkflowReduceSpec | None = None
 

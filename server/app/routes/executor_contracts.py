@@ -3,21 +3,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from server.app.routes.workspace_contracts import WorkspaceRecord
 
 
-class ExecutorAllocationRequest(BaseModel):
-    executor_id: str = Field(min_length=1)
-    concurrency_limit: int = Field(ge=1)
-
-
-class ExecutorAllocationResponse(ExecutorAllocationRequest):
-    workspace_id: str
-
-
-class NodeBindingRequest(BaseModel):
-    workflow_key: str = Field(min_length=1)
-    node_key: str = Field(min_length=1)
-    executor_id: str = Field(min_length=1)
-
-
 class NodeLimitRequest(BaseModel):
     workflow_key: str = Field(min_length=1)
     node_key: str = Field(min_length=1)
@@ -25,8 +10,13 @@ class NodeLimitRequest(BaseModel):
 
 
 class WorkspaceExecutorConfigurationResponse(BaseModel):
-    allocations: list[ExecutorAllocationResponse]
-    bindings: list[NodeBindingRequest]
+    """Workspace execution configuration (P-0.5: node limits + Agent capacity).
+
+    Allocations and bindings retired with the executor concept (schema v47);
+    the response type keeps the pre-retirement route/type names until the
+    step-3 contract cleanup.
+    """
+
     node_limits: list[NodeLimitRequest]
     migration_warnings: list[str]
     agent_capacity: int | None = None
@@ -67,8 +57,6 @@ class WorkspaceConfigurationRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     settings: WorkspaceConfigurationSettingsRequest
-    executor_allocations: list[ExecutorAllocationRequest] = Field(default_factory=list)
-    node_bindings: list[NodeBindingRequest] = Field(default_factory=list)
     node_limits: list[NodeLimitRequest] = Field(default_factory=list)
     # Workspace-level Agent concurrency limit; null/absent leaves it unchanged.
     agent_capacity: int | None = Field(default=None, ge=1)

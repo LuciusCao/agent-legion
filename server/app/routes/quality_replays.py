@@ -8,7 +8,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends
 
-from server.app.auth.dependencies import require_user
+from server.app.auth.dependencies import reject_studio_agent_scope, require_user
 from server.app.routes.job_http import raise_job_http_error
 from server.app.routes.quality_contracts import (
     QualityReplayCreateRequest,
@@ -26,6 +26,7 @@ def create_quality_replays_router(replays: QualityReplayService) -> APIRouter:
     @router.post(
         "/workspaces/{workspace_id}/quality/sample-items/{item_id}/replays",
         response_model=QualityReplayResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def create_replay(
         workspace_id: str,

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from server.app.auth.dependencies import require_admin
-from server.app.executors._pi_skill import build_skill_manager
 from server.app.routes.skill_source_contracts import (
     SkillSourceEntry,
     SkillSourcesResponse,
@@ -15,6 +14,7 @@ from server.app.services.skill_source_store import SkillSourceStore
 from server.app.settings import Settings
 from server.app.skills.config import SkillsConfig, SkillSourceConfig
 from server.app.skills.lock import refresh_lock
+from server.app.skills.runtime import build_skill_manager
 
 
 def _merged_view(store: SkillSourceStore) -> SkillSourcesResponse:
@@ -59,8 +59,12 @@ def create_skill_sources_router(settings: Settings) -> APIRouter:
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> SkillSourcesResponse:
         sources = store.get_sources()
-        if sources is None or skill_key not in sources.skills:
-            raise HTTPException(status_code=404, detail=f"unknown skill key: {skill_key}")
+        if sources is None:
+            # Fresh deployments have no seeded document at all; the first
+            # declared source creates it.
+            sources = SkillsConfig()
+        # Unknown keys are created, not rejected: declaring a brand-new skill
+        # source (business or otherwise) must be possible over the API.
         sources.skills[skill_key] = SkillSourceConfig(repo=payload.repo, ref=payload.ref)
         # No implicit relock: the merged view flags the entry stale until the
         # admin refreshes the lock explicitly.

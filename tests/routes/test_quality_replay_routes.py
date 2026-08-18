@@ -14,10 +14,20 @@ from tests.postgres_support import TEST_DATABASE_URL
 pytestmark = pytest.mark.fresh_schema
 
 
+@pytest.fixture
+def client(client_factory):
+    """Private app per test: these tests write frozen inputs into the app
+    data_dir derived from the function-scoped tmp_path; the worker-session
+    shared app has its own session data_dir, so the replay route would not
+    find the files there."""
+    with client_factory(fresh=True) as c:
+        yield c
+
+
 def _seed(client_tmp_path):
     """Seed a workspace with one completed job + sample item; returns ids."""
     job_db = JobQueries(TEST_DATABASE_URL, client_tmp_path / "jobs")
-    ws = job_db.create_workspace("Replay Routes WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Replay Routes WS")
     workspace_id = str(ws["id"])
     definition = WorkflowDefinition(
         key="test",
@@ -27,7 +37,7 @@ def _seed(client_tmp_path):
             "intake": WorkflowNode(
                 key="intake",
                 label="intake",
-                capability="question_intake",
+                capability="intake_items",
                 outputs=["question.json"],
             ),
             "generate": WorkflowNode(

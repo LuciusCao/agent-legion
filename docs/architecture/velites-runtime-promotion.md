@@ -56,7 +56,7 @@ velites（`velites/` Rust agent harness）已通过金丝雀验证：一天 4.3 
 
 ### 2.5 Worker 侧
 
-- 执行天然 flavor/runtime 无关：`worker/execution_prepare.py:78-87` 对 `command_spec["command"]` 做 `{job_dir}` 等占位符替换，`worker/executor.py:115-116` 直接 `Popen(command)`。Worker 不需要认识 velites，只需要 PATH 上有 argv[0] 的二进制。
+- 执行天然 flavor/runtime 无关：`worker/execution_prepare.py:60-69` 对 `command_spec["command"]` 做 `{job_dir}` 等占位符替换，`worker/execution_run.py:182-183` 直接 `Popen(command)`（原 `worker/executor.py`，批次 2 拆出）。Worker 不需要认识 velites，只需要 PATH 上有 argv[0] 的二进制。
 - 声明链：`worker/config_store.py:40,80` → `worker/host_client.py:70` 注册上送 → Host `agent_workers.py:57-61` 校验落库。
 - UI：`worker/ui/index.html:163-166` 两个 checkbox（pi / OpenClaw）；`worker/ui/app.js:143-144` 回填、`app.js:598` 提交 `data.getAll("runtimes")`——逻辑通用，加 checkbox 即可。
 - 二进制分发现状：手工 `cargo build` + PATH，无交付物机制。
@@ -134,7 +134,7 @@ AgentDefinition.runtime = "openclaw" → 未实现，dispatch fail-fast（现状
 ### 4.5 flavor 收窄与 pi 定位
 
 - **阶段 A（过渡，本计划 Phase 1–2）**：flavor 仍是 runtime=pi agent 的全局实现开关；runtime=velites agent 的 manifest flavor 被 dispatch 钉死。两者并存。
-- **阶段 B（已落地，2026-08-04）**：flavor 正式收窄为"runtime=pi agent 的实现选择层"，AGENTS.md §6 与 velites-harness.md §9 已改写。注意与原文假设的偏差：video_knowledge 4 个 agent 保持 `runtime: pi`（该链路暂无新内容产出，用户决策不迁），故 flavor 的实际消费者**仅剩这 4 个 video agent**而非"无消费者"——在它们迁出或下线前，flavor 仍是活跃实现路径，不能删除；新增 agent 一律直接声明 runtime。
+- **阶段 B（已落地，2026-08-04）**：flavor 正式收窄为"runtime=pi agent 的实现选择层"，AGENTS.md §6 与 velites-harness.md §9 已改写。注意与原文假设的偏差：业务视频线的 4 个 agent 保持 `runtime: pi`（该链路暂无新内容产出，用户决策不迁），故 flavor 的实际消费者**仅剩这 4 个业务 agent**而非"无消费者"——在它们迁出或下线前，flavor 仍是活跃实现路径，不能删除；新增 agent 一律直接声明 runtime。（2026-08 业务剥离后该线已迁出仓库，flavor 层随之无消费者。）
 - **~~阶段 C（pi 退役）~~ 已取消（2026-08-04 用户决策）**：pi 作为可选 runtime **长期保留**（velites 为生产主力，pi 为备选实现与对照基线），flavor 相应长期保留，不做删除规划。原文的阶段 C 删除清单（`PiRuntimeConfig.flavor`、`build_command_for_flavor` 分发层、pi argv 构建、manifest `"pi"` 块改名）仅作存档；若未来出于卫生目的重做其中个别项（如 manifest 块改名 + command_spec version 升级），另行立项评估，与退役无关。
 
 ### 4.6 Worker 侧

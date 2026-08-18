@@ -65,31 +65,6 @@ def test_accepts_imported_named_response_model(tmp_path):
     assert errors == []
 
 
-def test_route_import_baseline_allows_only_recorded_modules(tmp_path):
-    path = tmp_path / "server/app/routes/example.py"
-    write(path, "from server.app.cms.client import CmsClient\n")
-    write_neutral_budget_governance(tmp_path)
-    write_exemptions(
-        tmp_path,
-        [
-            {
-                "check": "architecture.route_import_boundary",
-                "path": "server/app/routes/example.py:server.app.cms.client",
-                "reason": "Test exemption for CMS client import.",
-                "owner": "test",
-                "remove_when": "issues/open/027-P1-split-routes-jobs-refactor.md",
-            }
-        ],
-    )
-    assert not any("route boundary" in error for error in check_repository(tmp_path))
-    write(
-        path,
-        "from server.app.cms.client import CmsClient\n"
-        "from server.app.cms.question import fetch_question_detail\n",
-    )
-    assert any("server.app.cms.question" in error for error in check_repository(tmp_path))
-
-
 def test_scheduler_import_baseline_allows_only_recorded_modules(tmp_path):
     path = tmp_path / "server/app/workflows/scheduler.py"
     write(path, "from server.app.workflows.pi_runner import PiRunner\n")

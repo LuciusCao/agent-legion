@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react'
-import { buildDagEdges, buildDagNodes } from './workflowStudioDag'
+import { useState } from 'react'
 import { useExecutorCatalog } from './useExecutorCatalog'
+import { useStudioDag } from './useStudioDag'
 import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
@@ -17,7 +17,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     reload,
     fetchRevisionDetail,
   } = useWorkflowStudioData(workspaceId)
-  const [executorCatalog, agentCatalog] = useExecutorCatalog()
+  const { agents: agentCatalog } = useExecutorCatalog(workspaceId)
   const draft = useWorkflowStudioDraft(
     workspaceId,
     originalYaml,
@@ -31,12 +31,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     draft.dirty
   )
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
-  const { nodes, edges } = useMemo(() => {
-    return {
-      nodes: buildDagNodes(draft.visibleWorkflow, executorCatalog),
-      edges: buildDagEdges(draft.visibleWorkflow),
-    }
-  }, [draft.visibleWorkflow, executorCatalog])
+  const { nodes, edges } = useStudioDag(draft.visibleWorkflow, agentCatalog)
   return {
     loadState,
     actionState: actions.actionState,
@@ -44,7 +39,6 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     revision: draft.visibleRevision,
     activeRevision: revision,
     revisions,
-    executorCatalog,
     agentCatalog,
     definitionYaml: draft.definitionYaml,
     setDefinitionYaml: draft.setDraftYaml,

@@ -128,7 +128,7 @@ def _insert_request(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws1', 'Test') on conflict(id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'Test', 'demo_workflow') on conflict(id) do nothing"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
@@ -195,7 +195,7 @@ def _insert_revision(job_db, *, revision_id: str, nodes: dict, edges: list) -> N
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ws1', 'Test') on conflict(id) do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'Test', 'demo_workflow') on conflict(id) do nothing"
         )
         conn.execute(
             "insert into workflow_revisions(id, workspace_id, workflow_key, version,"

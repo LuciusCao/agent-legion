@@ -11,10 +11,10 @@ from server.app.agent_broker.broker import AgentExecutionBroker, AgentExecutionR
 from server.app.agent_broker.dispatch_pool import AgentEnqueuePool
 from server.app.agent_catalog import AgentDefinition
 from server.app.config_schema import manifest_safe_config
-from server.app.executors._pi_skill import build_skill_manager, get_skill_version, resolve_skill_dir
 from server.app.executors.models import ExecutionContext
 from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import Settings
+from server.app.skills.runtime import build_skill_manager, get_skill_version, resolve_skill_dir
 from server.app.workflows.pi_protocol import render_command_spec
 from server.app.workflows.schema import WorkflowNode
 

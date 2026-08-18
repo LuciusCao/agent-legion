@@ -101,7 +101,7 @@ def job_patch_query_service(job_db, settings):
 
 def _insert_workspace_job(conn):
     conn.execute(
-        "insert into workspaces(id, name) values ('ws1', 'ws1') on conflict(id) do nothing"
+        "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'education_video_problems_generation') on conflict(id) do nothing"
     )
     conn.execute(
         """
@@ -482,7 +482,9 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
     job_db = JobQueries(db_path, jobs_dir)
 
     with job_db.connect() as conn:
-        conn.execute("insert into workspaces(id, name) values ('ws1', 'ws1')")
+        conn.execute(
+            "insert into workspaces(id, name, default_workflow_key) values ('ws1', 'ws1', 'education_video_problems_generation')"
+        )
         conn.execute(
             """
             insert into jobs(
@@ -654,16 +656,16 @@ def test_record_job_update_uses_event_buffer(fake_job_db):
 
 
 def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service, job_db):
-    job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    job_db.create_workspace("ws1", default_workflow_key="education_video_problems_generation")
     batch1 = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["q1"]},
         workspace_id="ws1",
     )
     job1 = job_db.create_job(
         workspace_id="ws1",
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="q1",
         batch_id=batch1["id"],
@@ -671,14 +673,14 @@ def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service,
         node_keys=["question_understanding"],
     )
     batch2 = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": ["q2"]},
         workspace_id="ws1",
     )
     job2 = job_db.create_job(
         workspace_id="ws1",
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id="q2",
         batch_id=batch2["id"],

@@ -4,27 +4,16 @@ import type { components } from '../../generated/api'
 import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../types'
-import type { ExecutorDefinition } from '../../types/executorTypes'
-import { findCapabilityBindings } from './WorkflowExecutorBindingList'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { WorkflowNodeCodeActions } from './WorkflowNodeCodeActions'
 import { WorkflowNodeCodeEditor } from './WorkflowNodeCodeEditor'
+import { WorkflowNodeCodePreview } from './WorkflowNodeCodePreview'
 import { WorkflowNodeCodeVersions } from './WorkflowNodeCodeVersions'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
 import styles from './WorkflowNodeCodeSection.module.css'
+import { fetchNodeCodeTemplate, isCodeNode } from './workflowNodeCodeLookup'
 
 type NodeCodeResponse = components['schemas']['WorkflowNodeCodeResponse']
-
-// A node has viewable code only when its capability is bound to a kind="code"
-// executor whose capability detail declares a module path.
-export function findNodeCodePath(
-  executorCatalog: ExecutorDefinition[],
-  capability: string
-): string | null {
-  const binding = findCapabilityBindings(executorCatalog, capability).find(
-    ({ executor, detail }) => executor.kind === 'code' && Boolean(detail.path)
-  )
-  return binding?.detail.path ?? null
-}
 
 function codeUrl(workspaceId: string, workflowKey: string, nodeKey: string) {
   return `/api/workspaces/${encodeURIComponent(workspaceId)}/workflows/${encodeURIComponent(workflowKey)}/nodes/${encodeURIComponent(nodeKey)}/code`
@@ -34,15 +23,14 @@ type LoadState = 'loading' | 'ready' | 'error'
 
 export function WorkflowNodeCodeSection(props: {
   node: WorkflowNodeRecord
-  executorCatalog: ExecutorDefinition[]
+  agentCatalog: AgentDefinition[]
+  // 与 DAG 展示同一口径：visible workflow 的 key 由 Inspector 逐层
+  // 下传，不取 settings 快照（草稿改 key 发布后两者会分叉）。
+  workflowKey: string
   readOnly?: boolean
 }) {
   const workspaceId = useSettingStore((s) => s.workspaceId)
-  const workflowKey = useSettingStore((s) => s.settings.workflowKey)
-  const codePath = findNodeCodePath(
-    props.executorCatalog,
-    props.node.capability
-  )
+  const codeBound = isCodeNode(props.agentCatalog, props.node.capability)
 
   const [loadState, setLoadState] = useState<LoadState>('loading')
   const [data, setData] = useState<NodeCodeResponse | null>(null)
@@ -54,14 +42,14 @@ export function WorkflowNodeCodeSection(props: {
   const [confirmingReset, setConfirmingReset] = useState(false)
 
   const url =
-    workspaceId && workflowKey
-      ? codeUrl(workspaceId, workflowKey, props.node.key)
+    workspaceId && props.workflowKey
+      ? codeUrl(workspaceId, props.workflowKey, props.node.key)
       : null
 
   // WorkflowNodeCodeSection is keyed by node in the inspector, so this effect
   // only runs on mount (and after explicit reloads via its own calls).
   const reload = useCallback(() => {
-    if (!url || !codePath) return undefined
+    if (!url || !codeBound) return undefined
     let cancelled = false
     api<NodeCodeResponse>(url)
       .then((result) => {
@@ -77,10 +65,10 @@ export function WorkflowNodeCodeSection(props: {
     return () => {
       cancelled = true
     }
-  }, [url, codePath])
+  }, [url, codeBound])
   useEffect(() => reload(), [reload])
 
-  if (!url || !codePath) return null
+  if (!url || !codeBound) return null
 
   const toast = useUiStore.getState().showToast
   const run = async (action: () => Promise<unknown>, success: string) => {
@@ -100,14 +88,17 @@ export function WorkflowNodeCodeSection(props: {
     }
   }
 
+  const putDraft = (code: string, changeNote: string | null = null) =>
+    api(url, {
+      method: 'PUT',
+      body: JSON.stringify({ code, change_note: changeNote }),
+    })
   const saveDraft = (code: string, changeNote: string) =>
+    run(() => putDraft(code, changeNote || null), '草稿已保存')
+  const createFromTemplate = () =>
     run(
-      () =>
-        api(url, {
-          method: 'PUT',
-          body: JSON.stringify({ code, change_note: changeNote || null }),
-        }),
-      '草稿已保存'
+      async () => putDraft((await fetchNodeCodeTemplate()).code),
+      '已从模板创建草稿'
     )
   const publish = () =>
     run(
@@ -133,7 +124,11 @@ export function WorkflowNodeCodeSection(props: {
     <section className={inspectorStyles.section} aria-label="节点代码">
       <div className={inspectorStyles.sectionTitle}>节点代码</div>
       <div className={styles.path}>
-        {isCustom ? `自定义 v${data?.version}` : `内置 ${codePath}`}
+        {isCustom
+          ? `自定义 v${data?.version}`
+          : data?.origin === 'builtin'
+            ? '出厂版本（全局种子）'
+            : '无代码版本'}
         {data?.has_draft && <span className={styles.badge}>有未发布草稿</span>}
       </div>
       {props.readOnly && (
@@ -161,7 +156,7 @@ export function WorkflowNodeCodeSection(props: {
               onCancel={() => setEditing(false)}
             />
           ) : (
-            <pre className={styles.code}>{data.code}</pre>
+            <WorkflowNodeCodePreview nodeKey={props.node.key} data={data} />
           )}
           {error && (
             <div role="alert" className={styles.error}>
@@ -171,10 +166,12 @@ export function WorkflowNodeCodeSection(props: {
           {writable && !editing && (
             <WorkflowNodeCodeActions
               isCustom={isCustom}
+              hasBuiltin={data?.origin === 'builtin'}
               hasDraft={data.has_draft}
               busy={busy}
               confirmingReset={confirmingReset}
               onEdit={() => setEditing(true)}
+              onCreateFromTemplate={() => void createFromTemplate()}
               onPublish={() => void publish()}
               onToggleVersions={() => setShowVersions((value) => !value)}
               onRequestReset={() => setConfirmingReset(true)}

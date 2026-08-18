@@ -77,8 +77,6 @@ export type WorkspaceRecord = ApiSchemas['WorkspaceRecord']
 export type WorkspaceResponse = ApiSchemas['WorkspaceResponse']
 export type WorkspaceConfigurationResponse =
   ApiSchemas['WorkspaceConfigurationResponse']
-export type WorkspaceSettingsTestResponse =
-  ApiSchemas['WorkspaceSettingsTestResponse']
 export type WorkflowDraftValidationResponse =
   ApiSchemas['WorkflowDraftValidationResponse']
 export type WorkerStatusResponse = ApiSchemas['WorkerStatusResponse']
@@ -134,15 +132,6 @@ export type AgentVersionsResponse = ApiSchemas['AgentVersionsResponse']
 export type AgentDefinitionPayload = ApiSchemas['AgentDefinitionPayload']
 export type AgentCreateRequest = ApiSchemas['AgentCreateRequest']
 export type AgentRuntime = AgentDefinitionPayload['runtime']
-
-export type ExecutorListItem = ApiSchemas['ExecutorListItem']
-export type ExecutorListResponse = ApiSchemas['ExecutorListResponse']
-export type ExecutorDetailResponse = ApiSchemas['ExecutorDetailResponse']
-export type ExecutorVersion = ApiSchemas['ExecutorVersionResponse']
-export type ExecutorVersionSummary = ApiSchemas['ExecutorVersionSummary']
-export type ExecutorVersionsResponse = ApiSchemas['ExecutorVersionsResponse']
-export type ExecutorPayload = ApiSchemas['ExecutorDefinitionPayload']
-export type ExecutorCreateRequest = ApiSchemas['ExecutorCreateRequest']
 
 export type SkillValidateResponse = ApiSchemas['SkillValidateResponse']
 export type SkillTagsResponse = ApiSchemas['SkillTagsResponse']

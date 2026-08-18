@@ -2,11 +2,11 @@ def test_workspace_jobs_snapshot_returns_jobs_stats_and_revision(client_factory)
     with client_factory(workflows_enabled=True) as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
-            "snapshot-ws", default_workflow_key="question_comprehension_info"
+            "snapshot-ws", default_workflow_key="education_video_problems_generation"
         )
         job_db.create_job(
             workspace_id=workspace["id"],
-            workflow_key="question_comprehension_info",
+            workflow_key="education_video_problems_generation",
             source_type="question_id",
             source_id="q1",
             batch_id="",
@@ -35,13 +35,13 @@ def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
     with client_factory(workflows_enabled=True) as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
-            "cursor-ws", default_workflow_key="question_comprehension_info"
+            "cursor-ws", default_workflow_key="education_video_problems_generation"
         )
         created = []
         for i in range(5):
             job = job_db.create_job(
                 workspace_id=workspace["id"],
-                workflow_key="question_comprehension_info",
+                workflow_key="education_video_problems_generation",
                 source_type="question_id",
                 source_id=f"q{i}",
                 batch_id="",
@@ -84,13 +84,13 @@ def test_workspace_jobs_snapshot_returns_newest_first(client_factory):
     with client_factory(workflows_enabled=True) as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
-            "order-ws", default_workflow_key="question_comprehension_info"
+            "order-ws", default_workflow_key="education_video_problems_generation"
         )
         created = []
         for i in range(3):
             job = job_db.create_job(
                 workspace_id=workspace["id"],
-                workflow_key="question_comprehension_info",
+                workflow_key="education_video_problems_generation",
                 source_type="question_id",
                 source_id=f"q{i}",
                 batch_id="",
@@ -116,12 +116,12 @@ def test_workspace_jobs_snapshot_batches_active_revision_lookup(client_factory, 
     with client_factory(workflows_enabled=True) as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
-            "batch-ws", default_workflow_key="question_comprehension_info"
+            "batch-ws", default_workflow_key="education_video_problems_generation"
         )
         for i in range(3):
             job_db.create_job(
                 workspace_id=workspace["id"],
-                workflow_key="question_comprehension_info",
+                workflow_key="education_video_problems_generation",
                 source_type="question_id",
                 source_id=f"q{i}",
                 batch_id="",

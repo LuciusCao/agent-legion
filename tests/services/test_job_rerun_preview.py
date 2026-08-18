@@ -14,10 +14,10 @@ from server.app.services.job_rerun import JobRerunService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 
 _NODE_KEYS = [
-    "fetch_questions",
-    "clean_and_parse",
-    "generate_key_info",
-    "review_key_info",
+    "intake_knowledge_points",
+    "write_script",
+    "review_script",
+    "publish_content",
 ]
 
 _JOB_COUNT = 300
@@ -27,10 +27,10 @@ _MAX_READ_CONNECTIONS = 8
 
 def _seed_failed_jobs(job_db, count: int) -> tuple[str, list[str]]:
     workspace = job_db.create_workspace(
-        "preview-perf", default_workflow_key="question_comprehension_info"
+        "preview-perf", default_workflow_key="education_video_problems_generation"
     )
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [f"Q{i}" for i in range(count)]},
         workspace_id=workspace["id"],
@@ -38,7 +38,7 @@ def _seed_failed_jobs(job_db, count: int) -> tuple[str, list[str]]:
     ids: list[str] = []
     for i in range(count):
         job = job_db.create_job(
-            workflow_key="question_comprehension_info",
+            workflow_key="education_video_problems_generation",
             source_type="question",
             source_id=f"Q{i}",
             batch_id=batch["id"],
@@ -92,7 +92,7 @@ def test_preview_constant_queries_for_large_selection(preview_service, job_db, m
     workspace_id, ids = _seed_failed_jobs(job_db, _JOB_COUNT)
     counter = _count_read_connections(job_db, monkeypatch)
 
-    result = batch_rerun_preview(preview_service, workspace_id, ids, "fetch_questions")
+    result = batch_rerun_preview(preview_service, workspace_id, ids, "intake_knowledge_points")
 
     assert result == {"total_count": _JOB_COUNT, "eligible_count": _JOB_COUNT}
     assert counter["n"] <= _MAX_READ_CONNECTIONS
@@ -101,7 +101,7 @@ def test_preview_constant_queries_for_large_selection(preview_service, job_db, m
 def test_preview_from_failed_node_constant_queries(preview_service, job_db, monkeypatch) -> None:
     workspace_id, ids = _seed_failed_jobs(job_db, _JOB_COUNT)
     for job_id in ids:
-        job_db.update_job_node(job_id, "clean_and_parse", status="failed")
+        job_db.update_job_node(job_id, "write_script", status="failed")
     counter = _count_read_connections(job_db, monkeypatch)
 
     result = batch_rerun_preview(preview_service, workspace_id, ids, from_failed_node=True)

@@ -8,15 +8,14 @@ caller reports them as a failed execution via the upload queue.
 
 from __future__ import annotations
 
-import hashlib
-import json
 import shutil
-import tarfile
 import threading
 from dataclasses import dataclass
-from pathlib import Path, PurePosixPath
+from pathlib import Path
 from typing import Any
 
+from worker.binary_resolution import resolve_binary
+from worker.bundle_io import download_input_artifacts, safe_extract
 from worker.claim_manifest import apply_live_manifest
 from worker.host_client import Client
 
@@ -25,25 +24,6 @@ from worker.host_client import Client
 class PreparedExecution:
     manifest: dict[str, Any]
     command: list[str]
-
-
-def safe_extract(archive: Path, destination: Path) -> dict[str, Any]:
-    with tarfile.open(archive, "r:gz") as tar:
-        for member in tar.getmembers():
-            path = PurePosixPath(member.name)
-            if path.is_absolute() or ".." in path.parts or member.islnk() or member.issym():
-                raise ValueError(f"unsafe Agent bundle member: {member.name!r}")
-        tar.extractall(destination, filter="data")
-    return json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
-
-
-def _sha256(path: Path) -> str:
-    """Streamed digest: artifacts can be multi-GB, never buffer them whole."""
-    digest = hashlib.sha256()
-    with path.open("rb") as handle:
-        for chunk in iter(lambda: handle.read(1 << 20), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def substitute(value: str, paths: dict[str, str]) -> str:
@@ -77,18 +57,7 @@ def prepare_execution(
     with download_slots:
         client.download(str(claim["bundle_url"]), bundle)
     manifest = apply_live_manifest(safe_extract(bundle, extracted), claim)
-    for name, ref in manifest.get("input_artifacts", {}).items():
-        digest = str(ref).split(":", 1)[-1]
-        # 纵深防御：manifest 来自 Host，但落盘路径必须留在 job_dir 内
-        # （同 safe_extract 的 bundle 校验）。
-        relative = PurePosixPath(str(name))
-        if relative.is_absolute() or ".." in relative.parts:
-            raise ValueError(f"unsafe input artifact name: {name!r}")
-        target = job_dir / relative
-        with download_slots:
-            client.download(f"/api/artifacts/{digest}", target)
-        if _sha256(target) != digest:
-            raise RuntimeError(f"artifact digest mismatch: {name}")
+    download_input_artifacts(client, manifest, job_dir, download_slots)
     command_spec = manifest["command_spec"]
     paths = {
         "job_dir": str(job_dir),
@@ -99,4 +68,8 @@ def prepare_execution(
     }
     prompt_file.write_text(substitute(str(command_spec["prompt"]), paths), encoding="utf-8")
     command = [substitute(str(part), paths) for part in command_spec["command"]]
+    if command and "/" not in command[0]:
+        # 与启动预检同一解析（自带副本 data/bin 优先、PATH 兜底）：预检放行
+        # 的 runtime 必须在 spawn 时解析到同一个二进制。
+        command[0] = resolve_binary(command[0]) or command[0]
     return PreparedExecution(manifest=manifest, command=command)

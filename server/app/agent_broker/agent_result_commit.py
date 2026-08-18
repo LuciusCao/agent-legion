@@ -9,12 +9,18 @@ the event loop and stall every heartbeat, claim, and dashboard stream).
 from __future__ import annotations
 
 import uuid
+from pathlib import Path
 from typing import Any
 
 from fastapi import HTTPException
 
 from server.app.agent_broker import AgentExecutionBroker
-from server.app.agent_completion import AgentCompletionHandler, AgentOutcome
+from server.app.agent_broker.result_spool import publish_staged_result
+from server.app.agent_completion import (
+    AgentCompletionHandler,
+    AgentOutcome,
+    report_auth_failure_safe,
+)
 
 
 def commit_agent_result(
@@ -25,9 +31,13 @@ def commit_agent_result(
     lease_id: str,
     outcome: AgentOutcome,
     record: dict[str, Any],
-    body: bytes,
+    staged_body: Path,
 ) -> None:
-    """Persist the archive and commit the terminal state; raises HTTPException."""
+    """Persist the archive and commit the terminal state; raises HTTPException.
+
+    ``staged_body`` is the staging file the route streamed the request body
+    into; it is atomically renamed into place here, and the route reclaims
+    it if this commit never renames it."""
     payload = broker.claimed_payload(execution_id, worker_id)
     if payload is None or str(payload["lease_id"]) != lease_id:
         raise HTTPException(status_code=409, detail="execution is not owned by this Worker")
@@ -37,8 +47,7 @@ def commit_agent_result(
     archive_path = broker.bundle_dir / archive_name
     succeeded = False
     try:
-        archive_path.parent.mkdir(parents=True, exist_ok=True)
-        archive_path.write_bytes(body)
+        publish_staged_result(staged_body, archive_path)
         # finish() commits the lease/node terminal state first; mark_done()
         # then closes the request (bound to lease_id in SQL). A crash
         # between the two leaves a claimed request whose lease is no
@@ -57,6 +66,10 @@ def commit_agent_result(
         if broker.mark_done(execution_id, worker_id, lease_id, record) is None:
             raise HTTPException(status_code=409, detail="execution is no longer owned")
         succeeded = True
+        if outcome.auth_failure_connection:
+            # Batch 2 (design §5.3): the node recorded an upstream auth
+            # failure; the Host performs the privileged invalidation.
+            report_auth_failure_safe(broker.database_dsn, outcome.auth_failure_connection)
     finally:
         # The archive name is unique to this attempt — always reclaim it.
         broker.discard_result_archive(archive_name)

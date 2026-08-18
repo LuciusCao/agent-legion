@@ -1,8 +1,9 @@
 import json
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 import server.app.routes.workflow_contracts as workflow_contracts
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import require_workflows_enabled
 from server.app.routes.workflow_draft_compare import create_workflow_draft_compare_router
@@ -14,8 +15,10 @@ from server.app.routes.workflow_revisions_contracts import (
     WorkflowRevisionsResponse,
     WorkflowRevisionSummary,
 )
-from server.app.services.workflow_draft_publish import publish_workflow_draft
-from server.app.services.workflow_drafts import validate_workflow_definition
+from server.app.services.workflow_draft_publish import (
+    publish_workflow_draft,
+    validate_workflow_draft_for_publish,
+)
 from server.app.services.workflow_revision_format import (
     definition_to_yaml,
     workflow_definition_to_response_payload,
@@ -96,12 +99,20 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         request: WorkflowDraftRequest,
     ) -> WorkflowDraftValidationResponse:
         require_workflows_enabled(settings)
-        errors = validate_workflow_definition(request.definition_yaml)
+        # Same validation set as publish (structure + node code resolvability),
+        # so config errors surface here instead of only at publish time.
+        errors = validate_workflow_draft_for_publish(
+            job_db,
+            workspace_id,
+            request.definition_yaml,
+            settings.executor_runtime.workflows.custom_nodes_enabled,
+        )
         return WorkflowDraftValidationResponse(valid=not errors, errors=errors)
 
     @router.post(
         "/workspaces/{workspace_id}/workflow-drafts/publish",
         response_model=WorkflowDraftValidationResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def publish_draft(
         workspace_id: str,
@@ -112,7 +123,6 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
             job_db,
             workspace_id,
             request.definition_yaml,
-            settings.executor_definitions,
             settings.executor_runtime.workflows.custom_nodes_enabled,
         )
         return WorkflowDraftValidationResponse(valid=valid, errors=errors)

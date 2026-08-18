@@ -110,16 +110,6 @@ class TestWorkspacePipelinePhaseImports:
         )
         assert any("legacy video" in error or "legacy pipeline phase" in error for error in errors)
 
-    def test_allows_workspace_package_import_in_workspace_service(self, tmp_path: Path):
-        errors = run_architecture_check_for_source(
-            "server/app/services/job_execution.py",
-            "from server.app.pipeline.workspace_package import create_workspace_package\n",
-            tmp_path,
-        )
-        assert not any(
-            "legacy video" in error or "legacy pipeline phase" in error for error in errors
-        )
-
 
 def test_video_legacy_current_repository_has_no_errors():
     errors = check_repository(ROOT)

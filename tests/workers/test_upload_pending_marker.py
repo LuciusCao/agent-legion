@@ -24,8 +24,8 @@ class _FakeClient:
     def report(self, execution_id: str, lease_id: str, metadata: dict, archive: Path):
         return 204, b""
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> int:
-        return 204
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
+        return 204, []
 
 
 def _task(work_root: Path, execution_id: str = "exec-1") -> UploadTask:

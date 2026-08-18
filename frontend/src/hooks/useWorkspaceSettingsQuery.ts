@@ -1,10 +1,7 @@
 import { useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '../api'
-import {
-  getExecutorCatalog,
-  getWorkspaceExecutorConfiguration,
-} from '../api/executorApi'
+import { getWorkspaceExecutorConfiguration } from '../api/executorApi'
 import type { components } from '../generated/api'
 import { extraQueryKeys } from '../lib/queryKeysExtra'
 import { useSettingStore } from '../stores/settingStore'
@@ -15,7 +12,6 @@ import {
   type HydrateSettingsInput,
 } from '../stores/setting/state'
 import type { WorkspaceResponse, WorkspaceSettings } from '../types'
-import type { ExecutorDefinition } from '../types/executorTypes'
 
 type WorkspaceAgentRoutesResponse =
   components['schemas']['WorkspaceAgentRoutesResponse']
@@ -25,15 +21,14 @@ export type WorkspaceAgentRouteEntry =
 
 /**
  * settingStore 的服务端快照；draft 字段仍留在 store，快照只经 react-query
- * 缓存共享。executorCatalog/agentRoutes 由消费组件直接从 query data 读取。
+ * 缓存共享。agentRoutes 由消费组件直接从 query data 读取。
  */
 export interface WorkspaceSettingsSnapshot extends HydrateSettingsInput {
-  executorCatalog: ExecutorDefinition[]
   agentRoutes: WorkspaceAgentRouteEntry[]
 }
 
 /**
- * 五个并行请求组装设置快照（原 settingStore.fetchSettings 的语义）：
+ * 四个并行请求组装设置快照（原 settingStore.fetchSettings 的语义）：
  * 404 整体静默（返回 null，调用方不动 store）；agentRoutes 单独降级为空；
  * settings 合并 defaultSettings；executorConfiguration 走 normalize。
  */
@@ -44,7 +39,6 @@ async function fetchWorkspaceSettingsSnapshot(
     const [
       workspaceResult,
       settingsResult,
-      catalogResult,
       executorConfigurationResult,
       agentRoutesResult,
     ] = await Promise.all([
@@ -54,7 +48,6 @@ async function fetchWorkspaceSettingsSnapshot(
       api<
         Partial<WorkspaceSettings> | { settings: Partial<WorkspaceSettings> }
       >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
-      getExecutorCatalog(),
       getWorkspaceExecutorConfiguration(workspaceId),
       api<WorkspaceAgentRoutesResponse>(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/agent-routes`
@@ -71,7 +64,6 @@ async function fetchWorkspaceSettingsSnapshot(
       workspaceName: workspaceData?.name || '',
       workspaceDescription: workspaceData?.description || '',
       settings: { ...defaultSettings, ...data },
-      executorCatalog: catalogResult?.executors ?? [],
       executorConfiguration: normalizeExecutorConfiguration(
         executorConfigurationResult
       ),
@@ -99,7 +91,7 @@ export function useWorkspaceSettingsQuery(
 
 /**
  * 设置页各 section 读取服务端快照的便捷入口：workflowDefinition 按 draft 的
- * workflowKey 取（与 WorkspaceMainPage 共享缓存），executorCatalog/agentRoutes
+ * workflowKey 取（与 WorkspaceMainPage 共享缓存），agentRoutes
  * 取自 settings 快照；未加载时回退空值。
  */
 export function useWorkspaceSettingsSnapshot() {
@@ -109,7 +101,6 @@ export function useWorkspaceSettingsSnapshot() {
   const { data: snapshot } = useWorkspaceSettingsQuery(workspaceId)
   return {
     workflowDefinition: workflowDefinition ?? null,
-    executorCatalog: snapshot?.executorCatalog ?? [],
     agentRoutes: snapshot?.agentRoutes ?? [],
   }
 }

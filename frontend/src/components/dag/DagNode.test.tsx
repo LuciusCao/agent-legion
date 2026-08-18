@@ -89,7 +89,7 @@ describe('DagNode', () => {
       agentId: 'key-info-generator',
       workerId: 'worker-abc123def456',
     })
-    const badge = screen.getByTestId('dag-node-executor-badge')
+    const badge = screen.getByTestId('dag-node-execution-badge')
     expect(badge).toHaveTextContent('abc123de')
     expect(badge).toHaveAttribute(
       'title',
@@ -103,14 +103,14 @@ describe('DagNode', () => {
       executorId: 'code-default',
       workerId: null,
     })
-    const badge = screen.getByTestId('dag-node-executor-badge')
+    const badge = screen.getByTestId('dag-node-execution-badge')
     expect(badge).toHaveTextContent('code-default')
     expect(badge).toHaveAttribute('title', 'code-default')
   })
 
   it('renders the Agent while a request is queued without a Worker', () => {
     renderWithProvider({ ...baseData, agentId: 'key-info-generator' })
-    expect(screen.getByTestId('dag-node-executor-badge')).toHaveTextContent(
+    expect(screen.getByTestId('dag-node-execution-badge')).toHaveTextContent(
       'key-info-generator'
     )
   })
@@ -123,8 +123,19 @@ describe('DagNode', () => {
       workerId: null,
     })
     expect(
-      screen.queryByTestId('dag-node-executor-badge')
+      screen.queryByTestId('dag-node-execution-badge')
     ).not.toBeInTheDocument()
+  })
+
+  it('renders an unbound warning chip when the node has no executor binding', () => {
+    renderWithProvider({
+      ...baseData,
+      agentId: null,
+      executorId: null,
+      workerId: null,
+      executorUnbound: true,
+    })
+    expect(screen.getByText('未绑定')).toBeInTheDocument()
   })
 
   it('renders not applicable node status', () => {

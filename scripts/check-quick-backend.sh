@@ -14,12 +14,9 @@ run_static_checks() {
   echo "=== Architecture Invariant Registry ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.check_invariants
 
-  # Skill repos live at machine-local paths (DB skill sources), so this check
-  # is meaningless on CI runners; set AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK=1 there.
-  if [[ "${AGENT_LEGION_SKIP_SKILLS_SHARED_CHECK:-0}" != "1" ]]; then
-    echo "=== Skill Shared Content Sync ==="
-    UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check-skills-shared.py
-  fi
+  # The business skill shared-assets check (scripts/check-skills-shared.py)
+  # retired with the business skill sources; the script itself leaves with the
+  # business runtime code in P4.
 
   echo "=== MyPy Type Check ==="
   UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app scripts/architecture scripts/quality workflow_nodes
@@ -56,13 +53,16 @@ run_tests() {
   # database URL; this is marker-based membership rather than a file
   # allowlist, and proves the pure layer remains independently runnable.
   #
-  # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism (default: auto =
-  # all cores). Machines running several worktrees at once should set it
-  # (e.g. 3-4) to avoid oversubscribing CPU and the shared Postgres.
+  # AGENT_LEGION_TEST_WORKERS caps pytest-xdist parallelism. Default:
+  # min(4, core count) — enough for a fast gate without oversubscribing
+  # machines that run several worktrees or a frontend lane at the same time
+  # (raise it on a dedicated box; CI 4-vCPU runners are unaffected).
   #
   # --reruns absorbs timing-sensitive flakes under parallel-gate load; a real
   # regression still fails after the single retry (visible as RERUN in output).
-  workers="${AGENT_LEGION_TEST_WORKERS:-auto}"
+  source "$ROOT_DIR/scripts/gate-jobs.sh"
+  default_workers="$(detect_gate_default_jobs)"
+  workers="${AGENT_LEGION_TEST_WORKERS:-$default_workers}"
   telemetry_args=()
   if [[ -n "${AGENT_LEGION_TEST_RESULTS_DIR:-}" ]]; then
     result_name="${AGENT_LEGION_TEST_RESULT_NAME:-backend}"

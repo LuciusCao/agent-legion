@@ -19,7 +19,11 @@ from server.app.services.workflow_revisions import WorkflowRevisionService
 from tests.db.test_postgres_runtime import (
     test_schema_initialization_is_idempotent as _assert_schema_idempotent,
 )
-from tests.helpers import load_builtin_definition, replace_agent_catalog
+from tests.helpers import (
+    load_builtin_definition,
+    replace_agent_catalog,
+    seed_workspace_agent_definitions,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.test_agent_broker import _seed_request
 from tests.test_agent_broker import (
@@ -34,17 +38,21 @@ def test_agent_capacity_matrix_across_workers(job_db) -> None:
 
 @pytest.mark.full_gate
 def test_agent_definition_catalog_snapshot_lifecycle(job_db) -> None:
-    """Publish flow replaces the published catalog; reads enforce exact hashes."""
+    """Publish flow replaces the workspace's published catalog; reads enforce exact hashes."""
+    workspace = job_db.create_workspace(
+        "Catalog WS", default_workflow_key="education_video_problems_generation"
+    )
+    workspace_id = str(workspace["id"])
     first = AgentDefinition(capability="generate", runtime="pi", skill="question/generate")
     second = AgentDefinition(capability="review", runtime="openclaw", skill="question/review")
-    replace_agent_catalog({"generator-v1": first, "reviewer-v1": second})
+    replace_agent_catalog(workspace_id, {"generator-v1": first, "reviewer-v1": second})
 
-    catalog = published_agent_definitions(TEST_DATABASE_URL)
+    catalog = published_agent_definitions(TEST_DATABASE_URL, workspace_id)
     assert catalog == {"generator-v1": first, "reviewer-v1": second}
 
-    replace_agent_catalog({"reviewer-v1": second})
+    replace_agent_catalog(workspace_id, {"reviewer-v1": second})
 
-    catalog = published_agent_definitions(TEST_DATABASE_URL)
+    catalog = published_agent_definitions(TEST_DATABASE_URL, workspace_id)
     assert catalog == {"reviewer-v1": second}
 
 
@@ -84,7 +92,7 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('acl-workspace', 'ACL')"
+            "insert into workspaces(id, name, default_workflow_key) values ('acl-workspace', 'ACL', 'education_video_problems_generation')"
             " on conflict(id) do nothing"
         )
 
@@ -114,19 +122,24 @@ def test_scoped_register_token_lifecycle(job_db) -> None:
 
 @pytest.mark.full_gate
 def test_startup_materializes_agent_routes(client, job_db) -> None:
-    """Startup wiring: the published catalog is visible, and an explicitly
-    created workspace's active revision gets its Agent routes materialized —
-    the two states whose loss caused the 'Executor pi is not registered'
-    incident. No workspace is seeded at startup; the fixture workspace is
-    created and published here, then the startup reconcile is replayed."""
-    expected_agents = set(published_agent_definitions(TEST_DATABASE_URL))
-    assert expected_agents, "test requires a non-empty published Agent catalog"
-
+    """Startup wiring: the workspace's published catalog is visible, and an
+    explicitly created workspace's active revision gets its Agent routes
+    materialized — the two states whose loss caused the 'Executor pi is not
+    registered' incident. No workspace is seeded at startup; the fixture
+    workspace is created and published here, then the startup reconcile is
+    replayed."""
     workspace = job_db.create_workspace(
-        "Route Check", default_workflow_key="question_comprehension_info"
+        "Route Check", default_workflow_key="education_video_problems_generation"
     )
     workspace_id = workspace["id"]
-    definition = load_builtin_definition("question_comprehension_info")
+    # Agent definitions are workspace-scoped (schema v46): the demo seed
+    # instantiates the factory templates into this workspace (the same seed
+    # ensure_active_revision applies when binding the demo workflow).
+    seed_workspace_agent_definitions(workspace_id)
+    expected_agents = set(published_agent_definitions(TEST_DATABASE_URL, workspace_id))
+    assert expected_agents, "test requires a non-empty published Agent catalog"
+
+    definition = load_builtin_definition("education_video_problems_generation")
     revision_service = WorkflowRevisionService(job_db)
     revision_service.publish_workspace_revision(workspace_id, definition)
     revision_service.reconcile_active_agent_routes()
@@ -136,7 +149,8 @@ def test_startup_materializes_agent_routes(client, job_db) -> None:
             row["entity_key"]
             for row in conn.execute(
                 "select entity_key from versioned_entities"
-                " where entity_type='agent' and workspace_id is null and status='published'"
+                " where entity_type='agent' and workspace_id=%s and status='published'",
+                (workspace_id,),
             ).fetchall()
         }
         routes = conn.execute(

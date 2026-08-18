@@ -3,10 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.pipeline.workspace_package import (
-    WORKSPACE_PACKAGE_FILES,
-    create_workspace_package,
-)
 from server.app.services.job_selection_resolver import (
     EmptyJobSelectionError,
     resolve_batch_selection,
@@ -18,6 +14,10 @@ from server.app.services.workspace_package_clear_packed import (
 from server.app.services.workspace_package_contracts import (
     JobPackageItemResult,
     JobPackageResult,
+)
+from server.app.services.workspace_package_create import (
+    WORKSPACE_PACKAGE_FILES,
+    create_workspace_package,
 )
 from server.app.services.workspace_package_lifecycle import (
     WorkspacePackageLifecycleMixin,
@@ -97,6 +97,7 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
         workspace_packages_dir = self.settings.packages_dir / f"workspace-{workspace_id}"
         workspace_packages_dir.mkdir(parents=True, exist_ok=True)
         artifact_names = workspace_artifact_names(
+            self.settings,
             {str(job.get("workflow_key", "")) for job in eligible_jobs},
             set(WORKSPACE_PACKAGE_FILES),
         )

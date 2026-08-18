@@ -9,13 +9,14 @@ from tests.workers.helpers import (
     _local_node,
     _make_definition,
     _make_worker,
+    _seed_trivial_node_code,
 )
 
 
 def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Path) -> None:
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
     executor = RecordingExecutor("code-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -28,15 +29,7 @@ def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Pa
         node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-    with job_db.connect() as conn:
-        conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (ws["id"], "test", "fetch", "code-default"),
-        )
-        conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
-            (ws["id"], "code-default", 2),
-        )
+    _seed_trivial_node_code(db_path, ws["id"], "test", "fetch")
 
     worker = _make_worker(tmp_path, db_path, executor, [definition])
     processed = worker._poll()

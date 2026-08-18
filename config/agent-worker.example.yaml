@@ -5,14 +5,22 @@
 host_url: http://agent-legion-host:8000
 worker_id: home-mac-mini-1
 name: Home Mac mini
-# 可选值：pi / openclaw / velites。声明 velites 需先在 PATH 提供 velites 二进制。
+# 可选值：pi / openclaw / velites。声明 velites 需先提供 velites 二进制：
+# 自带副本 <仓库根>/data/bin/velites（优先）或 PATH；Docker worker 镜像已内置。
 runtimes: [velites]
 max_concurrency: 10
+# code 节点（code executor capability）执行池容量；0 = 只领取 agent 任务。
+# > 0 时启动预检要求 velites 二进制可解析（自带副本 data/bin/velites 优先，
+# PATH 兜底；裸机部署可执行 scripts/ensure-velites.sh --dest data/bin 按平台
+# 构建安置；code 任务统一经 velites sandbox wrap 沙箱执行）；接受的 code
+# capability 与 agent 一样声明在下方 capabilities 列表里（同一通道，Host 按
+# capability 匹配）。
+# max_code_concurrency: 0
 # Worker 执行进程每次启动/重启都先关闭 claim；需通过控制台或 workerctl 主动开启。
 # 关闭后不再 claim 新任务，但不会中断已领取的任务。
 claim_enabled: false
 # 必须与 workflow 节点现有的 capability 完全匹配。
-capabilities: [video_generate, subtitle_review]
+capabilities: [write_script, review_questions]
 # 只有 provider 和 model 都匹配时才会领取任务。
 models:
   - provider: openai

@@ -33,14 +33,14 @@ def execution_service(job_db: JobQueries, settings):
 
 def _create_job(job_db: JobQueries, workspace_id: str, source_id: str) -> dict[str, Any]:
     batch = job_db.create_batch(
-        "question_comprehension_info",
+        "education_video_problems_generation",
         "batch_by_ids",
         {"question_ids": [source_id]},
         workspace_id=workspace_id,
     )
-    definition = load_registered_workflow("question_comprehension_info")
+    definition = load_registered_workflow("education_video_problems_generation")
     return job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="education_video_problems_generation",
         source_type="question",
         source_id=source_id,
         batch_id=batch["id"],
@@ -55,10 +55,12 @@ def _node_statuses(job_db: JobQueries, job_id: str) -> dict[str, str]:
 
 
 def test_run_to_with_start_rejects_failed_upstream(execution_service, job_db):
-    ws = job_db.create_workspace("run-to-guard", default_workflow_key="question_comprehension_info")
+    ws = job_db.create_workspace(
+        "run-to-guard", default_workflow_key="education_video_problems_generation"
+    )
     job = _create_job(job_db, str(ws["id"]), "Q-run-to-stuck")
-    job_db.update_job_node(job["id"], "fetch_questions", status="completed")
-    job_db.update_job_node(job["id"], "clean_and_parse", status="failed")
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="failed")
     job_db.update_job_status(job["id"], "failed", "boom")
     before = _node_statuses(job_db, job["id"])
 
@@ -66,14 +68,14 @@ def test_run_to_with_start_rejects_failed_upstream(execution_service, job_db):
         execution_service.run_to(
             str(ws["id"]),
             job["id"],
-            "generate_key_info",
-            start_node_key="classify_comprehension_eligibility",
+            "publish_content",
+            start_node_key="review_script",
         )
 
     err = exc_info.value
     assert err.status == "skipped"
     assert err.reason_code == "upstream_failed"
-    assert "clean_and_parse" in err.message
+    assert "write_script" in err.message
     # 守卫先于任何写入：节点状态与 run-to 控制位均未变。
     assert _node_statuses(job_db, job["id"]) == before
     control = job_db.get_job_execution_control(job["id"])
@@ -82,22 +84,22 @@ def test_run_to_with_start_rejects_failed_upstream(execution_service, job_db):
 
 def test_run_to_with_start_succeeds_when_upstream_healthy(execution_service, job_db):
     ws = job_db.create_workspace(
-        "run-to-guard-ok", default_workflow_key="question_comprehension_info"
+        "run-to-guard-ok", default_workflow_key="education_video_problems_generation"
     )
     job = _create_job(job_db, str(ws["id"]), "Q-run-to-ok")
-    job_db.update_job_node(job["id"], "fetch_questions", status="completed")
-    job_db.update_job_node(job["id"], "clean_and_parse", status="completed")
+    job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
+    job_db.update_job_node(job["id"], "write_script", status="completed")
 
     result = execution_service.run_to(
         str(ws["id"]),
         job["id"],
-        "generate_key_info",
-        start_node_key="classify_comprehension_eligibility",
+        "publish_content",
+        start_node_key="review_script",
     )
 
     assert result["status"] == "succeeded"
     statuses = _node_statuses(job_db, job["id"])
-    assert statuses["classify_comprehension_eligibility"] == "pending"
-    assert statuses["generate_key_info"] == "stale"
+    assert statuses["review_script"] == "pending"
+    assert statuses["publish_content"] == "stale"
     control = job_db.get_job_execution_control(job["id"])
-    assert control["target_node_key"] == "generate_key_info"
+    assert control["target_node_key"] == "publish_content"

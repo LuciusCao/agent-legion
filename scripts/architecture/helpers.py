@@ -2,36 +2,25 @@ import ast
 
 HTTP_DECORATORS = {"get", "post", "put", "patch", "delete"}
 # Function-body imports count as dependencies in these packages (lazy imports
-# hid the executors/workflows/pipeline tangle from the cycle checker).
+# hid the executors/workflows tangle from the cycle checker).
 # Dotted prefixes, matched with str.startswith.
 FUNCTION_BODY_IMPORT_PACKAGES = (
     "server.app.executors.",
     "server.app.workflows.",
-    "server.app.pipeline.",
 )
 SCHEDULER_FORBIDDEN = (
     "server.app.executors.openclaw_runner",
     "server.app.workflows.pi_runner",
     "server.app.workflows.skills",
-    "server.app.workflows.question_comprehension_info",
-    "server.app.workflows.question_content",
     "executors.openclaw_runner",
     "workflows.pi_runner",
     "workflows.skills",
-    "workflows.question_comprehension_info",
-    "workflows.question_content",
     "pi_runner",
     "openclaw",
     "skills",
-    "question_comprehension_info",
-    "question_content",
     "subprocess",
 )
-ROUTE_FORBIDDEN = (
-    "workspace_libs.cms",
-    "server.app.cms",
-    "cms",
-)
+ROUTE_FORBIDDEN: tuple[str, ...] = ()
 
 
 def imported_modules(tree: ast.AST) -> dict[str, int]:

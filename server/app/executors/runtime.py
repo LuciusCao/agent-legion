@@ -5,8 +5,12 @@ import threading
 from dataclasses import replace
 
 from server.app.executors.cancellation import CancellationToken
-from server.app.executors.models import ClaimedExecution, ExecutionContext, ExecutionResult
-from server.app.executors.protocol import Executor, ExecutorResolver, LeaseRepository
+from server.app.executors.contracts import Executor, LeaseRepository
+from server.app.executors.models import (
+    ClaimedExecution,
+    ExecutionContext,
+    ExecutionResult,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,14 +28,14 @@ class ExecutionRuntime:
     def __init__(
         self,
         leases: LeaseRepository,
-        registry: ExecutorResolver,
+        executor: Executor,
         heartbeat_interval_seconds: float = 10,
         lease_ttl_seconds: int = 90,
         heartbeat_failure_threshold: int = 3,
         cancellation_grace_seconds: float = 5,
     ) -> None:
         self.leases = leases
-        self.registry = registry
+        self.executor = executor
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.lease_ttl_seconds = lease_ttl_seconds
         self.heartbeat_failure_threshold = heartbeat_failure_threshold
@@ -40,7 +44,8 @@ class ExecutionRuntime:
         self._lock = threading.Lock()
 
     def run(self, claim: ClaimedExecution, context: ExecutionContext) -> ExecutionResult | None:
-        executor = self.registry.require(claim.executor_id, claim.capability)
+        # Single implicit code pool (P-0.5): one executor runs everything.
+        executor = self.executor
         token = CancellationToken()
         with self._lock:
             self._active[claim.execution_id] = token

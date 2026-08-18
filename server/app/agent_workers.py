@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from server.app.agent_worker_liveness import WorkerLiveness
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
 
@@ -24,12 +25,16 @@ _MAX_CONCURRENCY = 1024
 _MAX_TOKEN_LABEL_LENGTH = 128
 # A Worker is "online" while its last authenticated call (claim poll every few
 # seconds, or an execution heartbeat) is fresher than this threshold.
-_ONLINE_THRESHOLD_SECONDS = 30
+ONLINE_THRESHOLD_SECONDS = 30
+# Minimum protocol version that may hold kind='code' executions (batch 2):
+# v1 Workers keep the legacy 204 heartbeat and never receive code claims.
+CODE_PROTOCOL_VERSION = 2
 
 
 class AgentWorkerRegistry:
     def __init__(self, database_dsn: DatabaseDsn) -> None:
         self.database_dsn = database_dsn
+        self._liveness = WorkerLiveness()
 
     def issue_token(
         self,
@@ -40,6 +45,7 @@ class AgentWorkerRegistry:
         capabilities: Sequence[str] | None = None,
         models: Sequence[Mapping[str, Any]] | None = None,
         max_concurrency: int,
+        max_code_concurrency: int = 0,
         labels: Mapping[str, Any] | None = None,
         protocol_version: int = 1,
         image_version: str = "",
@@ -53,6 +59,10 @@ class AgentWorkerRegistry:
             raise ValueError(f"worker name exceeds {_MAX_NAME_LENGTH} chars")
         if not 0 < max_concurrency <= _MAX_CONCURRENCY:
             raise ValueError(f"max_concurrency must be between 1 and {_MAX_CONCURRENCY}")
+        if not 0 <= max_code_concurrency <= _MAX_CONCURRENCY:
+            raise ValueError(f"max_code_concurrency must be between 0 and {_MAX_CONCURRENCY}")
+        if max_code_concurrency > 0 and protocol_version < CODE_PROTOCOL_VERSION:
+            raise ValueError(f"code capacity requires protocol_version >= {CODE_PROTOCOL_VERSION}")
         normalized_runtimes = sorted(set(runtimes))
         if not normalized_runtimes or any(
             runtime not in {"pi", "openclaw", "velites"} for runtime in normalized_runtimes
@@ -86,16 +96,17 @@ class AgentWorkerRegistry:
                 """
                 insert into agent_workers(
                   worker_id, name, runtimes_json, capabilities_json, models_json,
-                  max_concurrency, labels_json,
+                  max_concurrency, max_code_concurrency, labels_json,
                   protocol_version, token_hash, allowed_workspaces_json,
                   registered_at, last_seen_at, revoked_at
-                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, null)
+                ) values (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, null)
                 on conflict(worker_id) do update set
                   name=excluded.name,
                   runtimes_json=excluded.runtimes_json,
                   capabilities_json=excluded.capabilities_json,
                   models_json=excluded.models_json,
                   max_concurrency=excluded.max_concurrency,
+                  max_code_concurrency=excluded.max_code_concurrency,
                   labels_json=excluded.labels_json,
                   protocol_version=excluded.protocol_version,
                   token_hash=excluded.token_hash,
@@ -110,6 +121,7 @@ class AgentWorkerRegistry:
                     json.dumps(normalized_capabilities),
                     json.dumps(normalized_models, sort_keys=True),
                     max_concurrency,
+                    max_code_concurrency,
                     json.dumps(normalized_labels, sort_keys=True),
                     protocol_version,
                     token_hash,
@@ -206,12 +218,11 @@ class AgentWorkerRegistry:
             return None
         # Every Worker API call authenticates, and an idle Worker polls claim
         # every few seconds, so this is the liveness signal behind `online`.
-        with write_transaction(self.database_dsn) as conn:
-            conn.execute(
-                "update agent_workers set last_seen_at=current_timestamp where worker_id=%s",
-                (worker_id,),
-            )
-        # Reflect the just-written timestamp so this call already reads online.
+        # The write is throttled (WorkerLiveness): at agent scale a write
+        # transaction per call is the hottest write path on the Host.
+        self._liveness.record_seen(self.database_dsn, worker_id)
+        # Reflect a fresh timestamp so this call already reads online, even
+        # when the throttled write was skipped.
         return _worker_payload({**row, "last_seen_at": datetime.now(UTC)})
 
     def list_workers(self) -> list[dict[str, Any]]:
@@ -225,7 +236,9 @@ class AgentWorkerRegistry:
                 "update agent_workers set revoked_at=current_timestamp where worker_id=%s",
                 (worker_id,),
             )
-            return result.rowcount > 0
+        # Evict the liveness memo entry so the throttle dict stays bounded.
+        self._liveness.discard(worker_id)
+        return result.rowcount > 0
 
 
 def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
@@ -236,7 +249,7 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         last_seen_at = last_seen_at.replace(tzinfo=UTC)
     online = bool(
         last_seen_at is not None
-        and datetime.now(UTC) - last_seen_at <= timedelta(seconds=_ONLINE_THRESHOLD_SECONDS)
+        and datetime.now(UTC) - last_seen_at <= timedelta(seconds=ONLINE_THRESHOLD_SECONDS)
     )
     registered_at = row["registered_at"]
     return {
@@ -246,6 +259,7 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "capabilities": json.loads(row["capabilities_json"] or "[]"),
         "models": json.loads(row["models_json"] or "[]"),
         "max_concurrency": int(row["max_concurrency"]),
+        "max_code_concurrency": int(row["max_code_concurrency"]),
         "labels": json.loads(row["labels_json"]),
         "protocol_version": int(row["protocol_version"]),
         "allowed_workspaces": json.loads(row["allowed_workspaces_json"] or "[]"),

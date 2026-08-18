@@ -14,11 +14,8 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from server.app.jobs.queries.workspace_node_bindings import (
-    get_binding,
-    get_local_node_limit,
-    has_local_node_limit,
-)
+from server.app.executors.models import CODE_EXECUTOR_ID
+from server.app.jobs.queries.workspace_node_limits import get_local_node_limit
 from server.app.services.agent_service import published_agent_definitions
 
 if TYPE_CHECKING:
@@ -74,32 +71,29 @@ def _resolve_uncached(
         # projection, not by any node-level declaration.
         if route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
-            definition_config = published_agent_definitions(worker.settings.database_url).get(
-                agent_id
-            )
-            if definition_config is None or definition_config.capability != capability:
+            definition_config = published_agent_definitions(
+                worker.settings.database_url, workspace_id
+            ).get(agent_id)
+            if definition_config is None:
+                return NodeRoute(
+                    "error",
+                    error_message=(
+                        f"Agent {agent_id!r} has no published definition in workspace"
+                        f" {workspace_id!r}; agent definitions are workspace-scoped"
+                        " (schema v46) — create one in Studio (Agent 管理) for this workspace"
+                    ),
+                )
+            if definition_config.capability != capability:
                 return NodeRoute("error", error_message=f"Invalid Agent route {agent_id!r}")
             if worker.agent_dispatch is None:
                 raise RuntimeError("Agent dispatch service is not configured")
             return NodeRoute("agent", target_id=agent_id)
 
-        binding = get_binding(conn, workspace_id, workflow_key, node_key)
-        if binding is None:
-            return NodeRoute("error", error_message="No Executor binding")
-        executor_id = str(binding["executor_id"])
-        try:
-            executor = worker.registry.require(executor_id, capability)
-        except Exception as exc:
-            return NodeRoute("error", error_message=str(exc))
-        if executor.kind == "code":
-            return NodeRoute(
-                "executor",
-                target_id=executor_id,
-                local_node_limit=get_local_node_limit(conn, workspace_id, workflow_key, node_key),
-            )
-        if has_local_node_limit(conn, workspace_id, workflow_key, node_key):
-            return NodeRoute(
-                "error",
-                error_message="Node limits are not supported for agent executors",
-            )
-        return NodeRoute("executor", target_id=executor_id)
+        # Every non-Agent-routed node joins the implicit code pool (P-0.5):
+        # no executor binding/allocation exists anymore; runnability is
+        # enforced by node-code resolution at dispatch (EXEC-CODE-002).
+        return NodeRoute(
+            "executor",
+            target_id=CODE_EXECUTOR_ID,
+            local_node_limit=get_local_node_limit(conn, workspace_id, workflow_key, node_key),
+        )

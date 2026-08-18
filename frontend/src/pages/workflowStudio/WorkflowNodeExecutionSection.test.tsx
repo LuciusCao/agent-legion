@@ -1,11 +1,14 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
+import { TestQueryProvider } from '../../testing/testQueryClient'
+import type { AgentDefinition } from '../../types/executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
 import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+import { StudioNavContext } from './workflowStudioNav'
+
+vi.mock('../../api/executorApi', () => ({
+  getExecutorCatalog: vi.fn().mockResolvedValue({ agents: [] }),
+}))
 
 // 「继承默认」提示来自 workspace settings 的 agentDefaults（hook 拉取），
 // 不再读 executor catalog 的 agent 条目。
@@ -27,27 +30,12 @@ const node: WorkflowNodeRecord = {
   terminal: null,
 }
 
-const executorCatalog: ExecutorDefinition[] = [
-  {
-    id: 'code-default',
-    kind: 'code',
-    global_capacity: 16,
-    capabilities: ['fetch_questions'],
-    capability_details: [
-      {
-        name: 'fetch_questions',
-        path: 'workflow_nodes/fetch_questions.py',
-      },
-    ],
-  },
-]
-
 const agentCatalog: AgentDefinition[] = [
   {
     id: 'question-key-info-v1',
     runtime: 'pi',
     capability: 'generate_key_info',
-    skill: 'question_comprehension_info/generate_key_info',
+    skill: 'demo_workflow/generate_key_info',
     tools: ['read', 'write', 'bash'],
     requires_labels: {},
     provider: 'deepseek',
@@ -62,22 +50,17 @@ const editorProps = {
   definitionYaml: `nodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
   setDefinitionYaml: () => {},
   agentCatalog,
+  workflowKey: 'demo-wf',
 }
 
 describe('WorkflowNodeExecutionSection', () => {
   it('shows the executor binding for the selected node capability', () => {
-    render(
-      <WorkflowNodeExecutionSection
-        node={node}
-        executorCatalog={executorCatalog}
-        {...editorProps}
-      />
-    )
+    render(<WorkflowNodeExecutionSection node={node} {...editorProps} />)
 
     expect(screen.getByText('question-key-info-v1')).toBeInTheDocument()
     expect(screen.getByText('pi')).toBeInTheDocument()
     expect(
-      screen.getByText('question_comprehension_info/generate_key_info')
+      screen.getByText('demo_workflow/generate_key_info')
     ).toBeInTheDocument()
     expect(screen.getByText('read, write, bash')).toBeInTheDocument()
     expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
@@ -96,12 +79,12 @@ describe('WorkflowNodeExecutionSection', () => {
     render(
       <WorkflowNodeExecutionSection
         node={node}
-        executorCatalog={executorCatalog}
         agentCatalog={agentCatalog}
         definitionYaml={editorProps.definitionYaml}
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
 
@@ -127,12 +110,12 @@ describe('WorkflowNodeExecutionSection', () => {
     const { rerender } = render(
       <WorkflowNodeExecutionSection
         node={nodeWithProvider}
-        executorCatalog={executorCatalog}
         agentCatalog={agentCatalog}
         definitionYaml={initialYaml}
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
 
@@ -144,27 +127,41 @@ describe('WorkflowNodeExecutionSection', () => {
     rerender(
       <WorkflowNodeExecutionSection
         node={nodeWithProvider}
-        executorCatalog={executorCatalog}
         agentCatalog={agentCatalog}
         definitionYaml={nextYaml}
         setDefinitionYaml={(value) => {
           nextYaml = value
         }}
+        workflowKey="demo-wf"
       />
     )
     expect(screen.getByLabelText('Provider')).toHaveValue('')
     expect(screen.getByText('继承全局：deepseek')).toBeInTheDocument()
   })
 
-  it('shows an empty state when no executor supports the capability', () => {
+  it('shows the code-pool state when no agent routes the capability', () => {
     render(
-      <WorkflowNodeExecutionSection
-        node={{ ...node, capability: 'missing' }}
-        executorCatalog={executorCatalog}
-        {...editorProps}
-      />
+      <TestQueryProvider>
+        <WorkflowNodeExecutionSection
+          node={{ ...node, capability: 'missing' }}
+          {...editorProps}
+        />
+      </TestQueryProvider>
     )
 
-    expect(screen.getByText('未匹配到 executor capability')).toBeInTheDocument()
+    expect(screen.getByText('内置 code 池执行')).toBeInTheDocument()
+  })
+
+  it('jumps to the agent editor from the agent card', () => {
+    const openAgent = vi.fn()
+    render(
+      <StudioNavContext.Provider value={{ openAgent }}>
+        <WorkflowNodeExecutionSection node={node} {...editorProps} />
+      </StudioNavContext.Provider>
+    )
+
+    fireEvent.click(screen.getByRole('button', { name: '在 Agent 管理中打开' }))
+
+    expect(openAgent).toHaveBeenCalledWith('question-key-info-v1')
   })
 })

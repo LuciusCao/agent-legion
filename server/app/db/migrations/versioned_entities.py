@@ -6,7 +6,8 @@ from typing import Any
 
 # Versioned entities (schema v26): one table backing the draft → published →
 # archived lifecycle of both custom node codes ('node_code') and Agent
-# definitions ('agent'). workspace_id is NULL for global entities (agents);
+# definitions ('agent'). workspace_id is NULL for global entities (executors
+# and factory demo node codes; Agents are workspace-scoped since v46);
 # node codes stay workspace-scoped. NULLS NOT DISTINCT makes the uniqueness
 # guarantees hold for NULL workspace_id rows as well (PostgreSQL 15+).
 # Idempotent on replay: the data copies are guarded by NOT EXISTS.

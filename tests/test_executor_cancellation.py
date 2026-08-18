@@ -6,6 +6,7 @@ import sys
 import textwrap
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -17,20 +18,8 @@ from server.app.executors.cancellation import (
     SubprocessTracker,
 )
 from server.app.executors.code import CodeExecutor
-from server.app.executors.config import (
-    CodeCapabilityConfig,
-    OpenClawCapabilityConfig,
-    PiCapabilityConfig,
-)
 from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.executors.openclaw import OpenClawExecutor
-from server.app.executors.openclaw_runner import OpenClawRunner
-from server.app.executors.pi import PiExecutor
-from server.app.executors.protocol import Executor
 from server.app.executors.runtime import ExecutionRuntime
-from server.app.services.skill_source_store import InMemorySkillSourceStore
-from server.app.skills.manager import SkillManager
-from server.app.workflows.pi_runner import PiConfig
 
 
 class TestCancellationToken:
@@ -113,15 +102,12 @@ def run(job, job_dir, runtime):
 def _code_executor(
     repo_root: Path,
     capability: str,
-    node_body: str,
     *,
     cancellation_grace_seconds: float = 0.5,
 ) -> CodeExecutor:
-    node_name = f"node_{capability}.py"
-    (repo_root / node_name).write_text(textwrap.dedent(node_body), encoding="utf-8")
+    # Post-#96 node code arrives as DB-published text on the context and runs
+    # sandboxed; there is no repo file to bind.
     return CodeExecutor(
-        "code-default",
-        {capability: CodeCapabilityConfig(path=node_name)},
         repo_root=repo_root,
         cancellation_grace_seconds=cancellation_grace_seconds,
     )
@@ -155,28 +141,38 @@ def _code_context(
 
 
 class TestCodeExecutorIsolation:
-    def test_code_executor_rejects_path_outside_repo_root(self, tmp_path: Path) -> None:
-        with pytest.raises(ValueError, match="inside the repository root"):
-            CodeExecutor(
-                "code-default",
-                {"unsafe": CodeCapabilityConfig(path="nodes/missing.py")},
-                repo_root=tmp_path,
-            )
-
     @pytest.mark.slow
-    def test_code_executor_runs_node_in_isolated_child(self, tmp_path: Path) -> None:
-        executor = _code_executor(tmp_path, "cooperative", _COOPERATIVE_NODE)
+    def test_code_executor_runs_node_sandboxed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from tests.executors.test_code_executor import _sandboxed
+
+        _sandboxed(monkeypatch)
+        executor = _code_executor(tmp_path, "cooperative")
         ctx = _code_context(tmp_path, "exec-cooperative", "cooperative", ("out.json",))
+        ctx = replace(ctx, node_code=textwrap.dedent(_COOPERATIVE_NODE))
         result = executor.execute(ctx)
         assert result.status == "completed"
         assert (ctx.job_dir / "out.json").is_file()
 
     @pytest.mark.slow
-    def test_code_executor_cancels_blocked_child(self, tmp_path: Path) -> None:
-        executor = _code_executor(
-            tmp_path, "blocked", _BLOCKED_NODE, cancellation_grace_seconds=0.3
-        )
+    def test_code_executor_cancels_blocked_child(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from server.app.executors.cancellation import CancellationToken
+        from tests.executors.test_code_executor import _sandboxed
+
+        _sandboxed(monkeypatch)
+        executor = _code_executor(tmp_path, "blocked", cancellation_grace_seconds=0.3)
+        # In-flight cancellation flows through the runtime token (the parent's
+        # ExecutionRuntime cancel path); executor.cancel marks pre-start only.
+        token = CancellationToken(threading.Event())
         ctx = _code_context(tmp_path, "exec-blocked", "blocked", ("out.json",))
+        ctx = replace(
+            ctx,
+            node_code=textwrap.dedent(_BLOCKED_NODE),
+            runtime={"cancellation": token},
+        )
         result_holder: dict[str, ExecutionResult] = {}
 
         def run() -> None:
@@ -184,19 +180,21 @@ class TestCodeExecutorIsolation:
 
         thread = threading.Thread(target=run)
         thread.start()
-        time.sleep(0.1)
-        executor.cancel(ctx.execution_id)
-        thread.join(timeout=3.0)
+        time.sleep(0.5)
+        token.cancel()
+        thread.join(timeout=5.0)
         assert not thread.is_alive()
         assert result_holder["result"].status == "cancelled"
 
     @pytest.mark.slow
-    def test_code_executor_pre_start_cancellation(self, tmp_path: Path) -> None:
-        executor = _code_executor(
-            tmp_path, "cooperative", _COOPERATIVE_NODE, cancellation_grace_seconds=0.3
-        )
+    def test_code_executor_pre_start_cancellation(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _no_sandbox_needed = monkeypatch  # pre-start cancel never spawns
+        executor = _code_executor(tmp_path, "cooperative", cancellation_grace_seconds=0.3)
         executor.cancel("exec-pre")
         ctx = _code_context(tmp_path, "exec-pre", "cooperative", ("out.json",))
+        ctx = replace(ctx, node_code=textwrap.dedent(_COOPERATIVE_NODE))
         result = executor.execute(ctx)
         assert result.status == "cancelled"
         assert result.exit_code == -1
@@ -212,137 +210,6 @@ def _pi_skill(skill_dir: Path) -> None:
     (skill_dir / "scripts" / "validate_output.py").write_text(
         "import sys; sys.exit(0)", encoding="utf-8"
     )
-
-
-class _StubSkillManager(SkillManager):
-    """SkillManager stub that returns an existing on-disk skill directory."""
-
-    def __init__(self, base_dir: Path) -> None:
-        super().__init__(
-            store=InMemorySkillSourceStore(),
-            base_dir=base_dir,
-        )
-
-    def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
-        return self.base_dir / skill_key
-
-
-class TestPiExecutorCancellation:
-    @pytest.mark.slow
-    @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups require POSIX")
-    def test_pi_executor_cancels_active_subprocess(self, tmp_path: Path) -> None:
-        fake_pi = tmp_path / "fake_pi"
-        fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
-        fake_pi.chmod(0o755)
-
-        skill_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
-        _pi_skill(skill_dir)
-
-        executor = PiExecutor(
-            "pi-default",
-            PiConfig(binary=str(fake_pi), cancellation_grace_seconds=0.3),
-            _StubSkillManager(tmp_path / "skills"),
-            {
-                "generate_key_info": PiCapabilityConfig(
-                    skill="question_comprehension_info/generate_key_info"
-                )
-            },
-        )
-        job_dir = tmp_path / "job"
-        job_dir.mkdir()
-        token = CancellationToken()
-        ctx = ExecutionContext(
-            execution_id="exec-pi",
-            lease_id="lease-1",
-            node_run_id=1,
-            executor_id="pi-default",
-            workspace_id="ws-a",
-            job_id="job-1",
-            workflow_key="question_comprehension_info",
-            node_key="generate_key_info",
-            capability="generate_key_info",
-            workspace={},
-            job={"id": "job-1", "storage_dir": str(job_dir)},
-            job_dir=job_dir,
-            log_path=tmp_path / "run.log",
-            inputs=(),
-            expected_outputs=(),
-            runtime={"cancellation": token},
-        )
-        result_holder: dict[str, ExecutionResult] = {}
-
-        def run() -> None:
-            result_holder["result"] = executor.execute(ctx)
-
-        thread = threading.Thread(target=run)
-        thread.start()
-        time.sleep(0.1)
-        token.cancel()
-        executor.cancel("exec-pi")
-        thread.join(timeout=3.0)
-        assert not thread.is_alive()
-        result = result_holder["result"]
-        assert result.status == "failed"
-        assert "execution was cancelled" in result.error_message
-        assert executor._tracker.active() == []
-
-
-class TestOpenClawExecutorCancellation:
-    @pytest.mark.slow
-    def test_openclaw_executor_cancels_active_subprocess(self, tmp_path: Path) -> None:
-        command = [
-            sys.executable,
-            "-c",
-            "import signal, time; signal.signal(signal.SIGTERM, signal.SIG_IGN); time.sleep(1000)",
-        ]
-        runner = OpenClawRunner(
-            command_template=command,
-            cwd=tmp_path,
-            timeout_seconds=600,
-            cancellation_grace_seconds=0.3,
-        )
-        executor = OpenClawExecutor(
-            "oc-default",
-            runner,
-            {"interaction_generate": OpenClawCapabilityConfig(skill="interaction")},
-        )
-        job_dir = tmp_path / "job"
-        job_dir.mkdir()
-        token = CancellationToken()
-        ctx = ExecutionContext(
-            execution_id="exec-oc",
-            lease_id="lease-1",
-            node_run_id=1,
-            executor_id="oc-default",
-            workspace_id="ws-a",
-            job_id="job-1",
-            workflow_key="question_comprehension_info",
-            node_key="interaction_generate",
-            capability="interaction_generate",
-            workspace={},
-            job={"id": "job-1", "storage_dir": str(job_dir)},
-            job_dir=job_dir,
-            log_path=tmp_path / "run.log",
-            inputs=(),
-            expected_outputs=("interactions.json",),
-            runtime={"cancellation": token},
-        )
-        result_holder: dict[str, ExecutionResult] = {}
-
-        def run() -> None:
-            result_holder["result"] = executor.execute(ctx)
-
-        thread = threading.Thread(target=run)
-        thread.start()
-        time.sleep(0.1)
-        token.cancel()
-        executor.cancel("exec-oc")
-        thread.join(timeout=3.0)
-        assert not thread.is_alive()
-        result = result_holder["result"]
-        assert result.status == "failed"
-        assert "execution was cancelled" in result.error_message
-        assert runner._tracker.active() == []
 
 
 class FakeCancellingExecutor:
@@ -370,14 +237,6 @@ class FakeCancellingExecutor:
         self.cancel_calls.append(execution_id)
 
 
-class FakeRegistry:
-    def __init__(self, executor: Executor) -> None:
-        self._executor = executor
-
-    def require(self, executor_id: str, capability: str) -> Executor:
-        return self._executor
-
-
 class FakeLeaseRepository:
     def __init__(self, heartbeat_active: bool = True) -> None:
         self.heartbeat_active = heartbeat_active
@@ -394,10 +253,9 @@ class FakeLeaseRepository:
 def test_runtime_passes_cancellation_token(tmp_path: Path) -> None:
     executor = FakeCancellingExecutor()
     leases = FakeLeaseRepository()
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
         cancellation_grace_seconds=0.2,

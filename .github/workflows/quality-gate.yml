@@ -895,7 +895,7 @@ jobs:
 
   # Image build lane: the Dockerfile is not exercised by any other job, and
   # dependency growth has broken it twice (2026-08: host missing g++ for
-  # editdistance/funasr, worker missing requests). Triggered only by
+  # an sdist-only dependency, worker missing requests). Triggered only by
   # image-relevant path changes (see the changes job filter), so the minute
   # cost stays low; GHA layer cache keeps incremental builds ~5-10 min.
   docker-build:
@@ -907,9 +907,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # 镜像含 torch/CUDA 依赖（funasr 链，单镜像层数 GB 级），ubuntu-latest
-      # 默认 ~14GB 磁盘会在构建中途耗尽（runner 直接死亡、step 无结论、日志
-      # 上传失败，2026-08-06 run 31108609762 实测）。先回收 runner 预装的
+      # torch/CUDA 依赖链（funasr）已移除，镜像体积回落；保留 free-disk-space
+      # 作为磁盘余量兜底（torch 时代 ubuntu-latest ~14GB 曾在构建中途耗尽，
+      # 2026-08-06 run 31108609762 实测），回收 runner 预装的
       # Android/dotnet 等无关负载。
       - uses: jlumbroso/free-disk-space@v1.3.1
         with:

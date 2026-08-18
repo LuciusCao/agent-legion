@@ -7,26 +7,30 @@ from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import Any
 
 from server.app.agent_broker import AgentDispatchService
+from server.app.agent_broker.code_dispatch import CodeDispatchService
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
-from server.app.services.agent_service import published_agent_definitions
+from server.app.services.agent_service import has_published_agent_definitions
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_pass
+from server.app.workflow_worker.catalog_scan import (
+    collect_runnable_workspace_jobs,
+    load_workflow_scan_entries,
+)
 from server.app.workflow_worker.claim_flush import PreparedClaim, flush_prepared_claims
 from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
 from server.app.workflow_worker.mark_scan import MarkStore
 from server.app.workflow_worker.pass_log import log_pass_end, log_pass_start, pass_logger
+from server.app.workflow_worker.pools import ensure_pools
 from server.app.workflow_worker.ready import build_ready_queues
 from server.app.workflow_worker.routing import NodeRoute
 from server.app.workflow_worker.schedule import claim_ready_queues
 from server.app.workflows.definition import WorkflowDefinition
-from server.app.workflows.registry import list_registered_workflows
 
 logger = logging.getLogger(__name__)
 
@@ -36,29 +40,34 @@ class WorkflowWorkerThread:
         self,
         job_db: JobQueries,
         leases: ExecutorLeaseRepository,
-        registry: ExecutorRegistry,
         runtime: ExecutionRuntime,
         settings: Settings,
         workspace_worker_control: Any | None = None,
         agent_manager: Any | None = None,
         agent_dispatch: AgentDispatchService | None = None,
+        code_dispatch: CodeDispatchService | None = None,
     ):
         self.job_db = job_db
         self.leases = leases
-        self.registry = registry
-        self.executor_registry = registry  # compatibility alias for tests/lifespan
         self.runtime = runtime
         self.settings = settings
         self.workspace_worker_control = workspace_worker_control
         self.agent_manager = agent_manager
         self.agent_dispatch = agent_dispatch
+        self.code_dispatch = code_dispatch
         self.stop_event = threading.Event()
         # Set when work finishes or arrives; the poll loop waits on this.
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._definitions: list[WorkflowDefinition] = []
+        # Scan-list snapshot (definitions, definitionless_keys), swapped
+        # atomically by reload_scan_entries; never mutated in place. Readers
+        # take the tuple first, then unpack, so a mid-swap pass never sees a
+        # half-applied pair.
+        self._scan_entries: tuple[list[WorkflowDefinition], list[str]] = ([], [])
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
+        # execution_id -> (executor_id, lease_id) for in-flight claims.
+        self._future_claims: dict[str, tuple[str, str]] = {}
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
         # Cross-pass caches: parsed workflow definitions by definition hash,
@@ -89,21 +98,23 @@ class WorkflowWorkerThread:
         """Wake the poll loop immediately; registered via scheduler_wakeup."""
         self._wake_event.set()
 
+    def reload_scan_entries(self) -> None:
+        """Rebuild the scan list from the catalog, then swap it in one step.
+
+        Called outside the poll thread: at start, and after a workflow
+        registration commits. The pair is fully built before the swap, so
+        a failed reload leaves the previous snapshot untouched.
+        """
+        self._scan_entries = load_workflow_scan_entries(self.settings)
+
     def _ensure_pools(self) -> None:
-        for executor_id in self.registry.definitions():
-            if executor_id not in self._pools:
-                capacity = self.registry.global_capacity(executor_id) or 1
-                self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
+        ensure_pools(self)
 
     def _pool_for(self, executor_id: str) -> ThreadPoolExecutor:
         return self._pools[executor_id]
 
-    def _executor_capacities(self) -> dict[str, int]:
-        return {eid: self.registry.global_capacity(eid) or 0 for eid in self.registry.definitions()}
-
     def start(self) -> None:
-        self._definitions = list_registered_workflows()
-        self._ensure_pools()
+        self.reload_scan_entries()
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -123,15 +134,16 @@ class WorkflowWorkerThread:
         self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
-        if not self._definitions:
+        if not any(self._scan_entries):
             return False
 
-        if not self._pools:
-            self._ensure_pools()
+        self._ensure_pools()
         reap_futures(self)
 
-        snapshot = load_capacity_snapshot(self.leases.path, self._executor_capacities())
-        if not snapshot.has_any_capacity() and not published_agent_definitions(
+        snapshot = load_capacity_snapshot(
+            self.leases.path, self.settings.executor_runtime.code_capacity
+        )
+        if not snapshot.has_any_capacity() and not has_published_agent_definitions(
             self.settings.database_url
         ):
             return False
@@ -182,26 +194,8 @@ class WorkflowWorkerThread:
 
     def _runnable_workspaces(
         self,
-    ) -> tuple[list[str], dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]]]:
-        workspace_ids: list[str] = []
-        jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]] = {}
-        # is_paused opens a DB connection per call; memoize per pass instead
-        # of paying it once per job.
-        paused: dict[str, bool] = {}
-        for definition in self._definitions:
-            for job in self._mark_store.refresh(self.job_db, definition.key):
-                if not (workspace_id := job.get("workspace_id")):
-                    continue
-                workspace_id = str(workspace_id)
-                if workspace_id not in paused:
-                    paused[workspace_id] = self._is_paused(workspace_id)
-                if paused[workspace_id]:
-                    continue
-                if workspace_id not in jobs_by_workspace:
-                    workspace_ids.append(workspace_id)
-                    jobs_by_workspace[workspace_id] = []
-                jobs_by_workspace[workspace_id].append((definition, job))
-        return workspace_ids, jobs_by_workspace
+    ) -> tuple[list[str], dict[str, list[tuple[WorkflowDefinition | None, dict[str, Any]]]]]:
+        return collect_runnable_workspace_jobs(self)
 
     def stop(self, timeout: float = 3) -> None:
         self.stop_event.set()
@@ -228,6 +222,7 @@ class WorkflowWorkerThread:
                 "%s workflow future(s) still active after shutdown timeout", len(pending)
             )
         self._futures.clear()
+        self._future_claims.clear()
         for pool in self._pools.values():
             pool.shutdown(wait=False, cancel_futures=True)
         self._pools.clear()

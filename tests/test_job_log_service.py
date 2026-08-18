@@ -21,11 +21,9 @@ from tests.postgres_support import TEST_DATABASE_URL
 def _create_job_with_run(
     job_db: JobQueries, settings: Settings, log_path: str | None = None
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    workspace = job_db.create_workspace(
-        "Test WS", default_workflow_key="question_comprehension_info"
-    )
+    workspace = job_db.create_workspace("Test WS", default_workflow_key="demo_workflow")
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question",
         source_id="Q001",
         batch_id="batch-1",
@@ -152,11 +150,9 @@ def test_job_log_service_rejects_run_from_other_job(log_service):
     log_file = logs_root / "run.log"
     log_file.write_text("secret", encoding="utf-8")
 
-    workspace = job_db.create_workspace(
-        "Other WS", default_workflow_key="question_comprehension_info"
-    )
+    workspace = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")
     other_job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question",
         source_id="Q002",
         batch_id="batch-2",
@@ -172,7 +168,7 @@ def test_job_log_service_rejects_run_from_other_job(log_service):
     )
 
     with pytest.raises(NotFoundError, match="Run not found"):
-        service.read("default_question_comprehension_info_Q001", run["id"])
+        service.read("default_demo_workflow_Q001", run["id"])
 
 
 def test_job_log_service_rejects_dotdot_escape(log_service):
@@ -354,9 +350,9 @@ def _create_pi_job(
     job_db: JobQueries,
     settings: Settings,
 ) -> tuple[dict[str, Any], dict[str, Any], Path]:
-    workspace = job_db.create_workspace("Pi WS", default_workflow_key="question_comprehension_info")
+    workspace = job_db.create_workspace("Pi WS", default_workflow_key="demo_workflow")
     job = job_db.create_job(
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         source_type="question",
         source_id="Q100",
         batch_id="batch-pi",

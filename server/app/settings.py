@@ -13,8 +13,6 @@ from server.app.configuration.instance_defaults import (
     apply_instance_config_defaults,
     resolve_worker_register_token,
 )
-from server.app.executors import registration as _registration  # noqa: F401
-from server.app.executors.config import ExecutorConfig
 from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
@@ -38,10 +36,6 @@ class Settings:
     config: dict[str, Any]
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
     cors: CorsSettings = field(default_factory=CorsSettings)
-    executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
-    # executor_definitions starts empty: the catalog lives in the DB
-    # (versioned_entities, entity_type 'executor') and create_app hydrates it
-    # after seeding the built-in factory definitions (restart-effective).
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -85,11 +79,6 @@ def _csv_parser(value: str) -> list[str]:
 # ``_apply_database_url_env`` below, which applies the authoritative
 # AGENT_LEGION_DATABASE_URL override.
 _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
-    "AGENT_LEGION_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
-    "AGENT_LEGION_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
-    "AGENT_LEGION_ASR_WHISPER_VAD_MODEL": (("asr", "whisper", "vad_model"), _path_parser),
-    "AGENT_LEGION_ASR_SENSEVOICE_SCRIPT": (("asr", "sensevoice", "script"), _path_parser),
-    "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
     "AGENT_LEGION_CUSTOM_NODES_ENABLED": (
         ("workflows", "custom_nodes_enabled"),
         _bool_parser,
@@ -232,9 +221,4 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
 
 def validate_settings(settings: Settings) -> None:
     """Validate runtime dependencies after settings are constructed."""
-    validate_runtime(
-        settings.executor_runtime,
-        settings.config,
-        settings.executor_definitions,
-        repo_root=settings.root_dir,
-    )
+    validate_runtime(settings.executor_runtime, settings.config)

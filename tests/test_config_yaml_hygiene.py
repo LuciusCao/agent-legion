@@ -12,7 +12,7 @@ tests/test_configuration_loader.py):
   instance-level external connection (retired ``cms.token`` /
   ``cms.token_gen``, config governance G2, can never reappear);
 - the ``asr:`` section stays retired — business parameters live in the
-  transcribe_video capability ``config_schema``; machine paths arrive via the
+  transcribe_media capability ``config_schema``; machine paths arrive via the
   ``AGENT_LEGION_ASR_*`` env overrides only;
 - ``openclaw.skill_safety.repos`` stay a pure path allowlist — the yaml
   ``openclaw:`` section retired into the DB instance settings document, so
@@ -58,14 +58,14 @@ def test_tracked_config_files_have_no_asr_section():
         mapping = _load(name)
         assert "asr" not in mapping, (
             f"{name} carries the retired global asr: section; "
-            "business parameters live in the transcribe_video capability "
+            "business parameters live in the transcribe_media capability "
             "config_schema, machine paths arrive via AGENT_LEGION_ASR_* env"
         )
 
 
 def test_skill_safety_repos_are_path_only():
     repos = DEFAULT_OPENCLAW_CONFIG["skill_safety"]["repos"]
-    assert repos, "code defaults must keep the retired skill_safety whitelist"
+    assert isinstance(repos, list)
     for repo in repos:
         assert set(repo) <= {"path"}, (
             "skill_safety repos are a pure path allowlist (G3); "

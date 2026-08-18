@@ -7,8 +7,8 @@ import pytest
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 
-WF = "question_comprehension_info"
-NODE = "fetch_questions"
+WF = "education_video_problems_generation"
+NODE = "intake_knowledge_points"
 BASE = f"/api/workspaces/default/workflows/{WF}/nodes/{NODE}/code"
 CUSTOM_V1 = "def run(job, job_dir, runtime):\n    return 'v1'\n"
 CUSTOM_V2 = "def run(job, job_dir, runtime):\n    return 'v2'\n"
@@ -28,7 +28,8 @@ def test_get_builtin_code(workspace_with_revision) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["origin"] == "builtin"
-    assert body["path"] == "workflow_nodes/question_intake.py"
+    assert "path" not in body
+    # origin=builtin is now backed by the global factory seed (#96).
     assert "def run(" in body["code"]
     assert body["version"] is None
     assert body["has_draft"] is False
@@ -112,9 +113,13 @@ def test_unknown_node_is_404(workspace_with_revision) -> None:
     assert workspace_with_revision.get(url).status_code == 404
 
 
-def test_gate_disabled_is_403(workspace_with_revision) -> None:
-    workspace_with_revision.app.state.settings.executor_runtime.workflows.custom_nodes_enabled = (
-        False
+def test_gate_disabled_is_403(workspace_with_revision, monkeypatch) -> None:
+    # client is the worker-session shared app: monkeypatch restores the flag
+    # after the test instead of leaking custom_nodes_enabled=False into it.
+    monkeypatch.setattr(
+        workspace_with_revision.app.state.settings.executor_runtime.workflows,
+        "custom_nodes_enabled",
+        False,
     )
 
     assert workspace_with_revision.get(BASE).status_code == 403
@@ -180,3 +185,36 @@ def test_viewer_reads_but_cannot_write(workspace_with_revision, client, job_db) 
     assert viewer.post(f"{BASE}/publish").status_code == 403
     assert viewer.post(f"{BASE}/rollback", json={"version": 1}).status_code == 403
     assert viewer.delete(BASE).status_code == 403
+
+
+def test_node_code_template_endpoint(client) -> None:
+    response = client.get("/api/workflow-node-code-template")
+
+    assert response.status_code == 200
+    code = response.json()["code"]
+    assert "from workspace_libs.node_sdk import NodeContext, entrypoint" in code
+    assert "@entrypoint" in code
+    assert "def run(ctx: NodeContext)" in code
+    # The template must stay directly runnable as a node module.
+    compile(code, "<template>", "exec")
+
+
+def test_get_code_pathless_capability_returns_none_origin(client_factory, job_db) -> None:
+    from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
+
+    # P-0.5: a capability needs no executor definition at all — a node
+    # without any published code simply reports origin "none".
+    with client_factory(fresh=True) as client:
+        job_db.create_workspace("default", default_workflow_key="custom_wf")
+        definition = workflow_definition_from_yaml_string(
+            "key: custom_wf\nlabel: Custom\nnodes:\n  do_custom:\n    capability: custom_only\n"
+        )
+        WorkflowRevisionService(job_db).ensure_active_revision("default", definition)
+
+        response = client.get("/api/workspaces/default/workflows/custom_wf/nodes/do_custom/code")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["origin"] == "none"
+    assert body["code"] == ""
+    assert "path" not in body

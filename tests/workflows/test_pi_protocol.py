@@ -19,7 +19,7 @@ MANIFEST = {
     "expected_outputs": ["out.json"],
     "additional_prompt": "be careful",
     "tools": ["read", "write"],
-    "skill": "video_knowledge/gen",
+    "skill": "demo_video_workflow/gen",
     "skill_version": "v1",
     "run_token": "tok123",
     "execution": {

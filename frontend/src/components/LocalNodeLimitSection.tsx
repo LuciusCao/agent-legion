@@ -4,28 +4,23 @@ import { useWorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery
 
 export function LocalNodeLimitSection() {
   const { executorConfiguration, setNodeLimit } = useSettingStore()
-  const { workflowDefinition, executorCatalog } = useWorkspaceSettingsSnapshot()
+  const { workflowDefinition, agentRoutes } = useWorkspaceSettingsSnapshot()
 
   if (!workflowDefinition) return null
 
   const workflowKey = workflowDefinition.key
-  const allocatedMap = new Map(
-    executorConfiguration.allocations.map((a) => [
-      a.executor_id,
-      a.concurrency_limit,
-    ])
+  // P-0.5：无 Agent 路由的节点一律进入内置 code 池；并发上限保存时由后端
+  // 按实例 code_capacity 校验。
+  const agentRouted = new Set(
+    agentRoutes
+      .filter((route) => route.workflow_key === workflowKey)
+      .map((route) => route.node_key)
+  )
+  const codeNodes = workflowDefinition.nodes.filter(
+    (node) => !agentRouted.has(node.key)
   )
 
-  const localBoundNodes = workflowDefinition.nodes.filter((node) => {
-    const binding = executorConfiguration.bindings.find(
-      (b) => b.workflow_key === workflowKey && b.node_key === node.key
-    )
-    if (!binding) return false
-    const executor = executorCatalog.find((e) => e.id === binding.executor_id)
-    return executor?.kind === 'code'
-  })
-
-  if (localBoundNodes.length === 0) return null
+  if (codeNodes.length === 0) return null
 
   return (
     <div>
@@ -47,11 +42,7 @@ export function LocalNodeLimitSection() {
           gap: 12,
         }}
       >
-        {localBoundNodes.map((node) => {
-          const binding = executorConfiguration.bindings.find(
-            (b) => b.workflow_key === workflowKey && b.node_key === node.key
-          )
-          const max = binding ? (allocatedMap.get(binding.executor_id) ?? 1) : 1
+        {codeNodes.map((node) => {
           const limit = executorConfiguration.node_limits.find(
             (l) => l.workflow_key === workflowKey && l.node_key === node.key
           )
@@ -68,7 +59,7 @@ export function LocalNodeLimitSection() {
               <span style={{ fontSize: 14, minWidth: 120 }}>{node.label}</span>
               <TextField
                 type="number"
-                inputProps={{ min: 1, max }}
+                inputProps={{ min: 1 }}
                 label={`${node.label} 并发上限`}
                 value={limit?.concurrency_limit ?? ''}
                 onChange={(event: React.ChangeEvent<HTMLInputElement>) => {
@@ -83,14 +74,6 @@ export function LocalNodeLimitSection() {
                 size="small"
                 sx={{ width: 140 }}
               />
-              <span
-                style={{
-                  fontSize: 12,
-                  color: '#43474e',
-                }}
-              >
-                上限: {max}
-              </span>
             </div>
           )
         })}

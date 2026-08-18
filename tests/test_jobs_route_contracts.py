@@ -19,6 +19,7 @@ from server.app.routes.job_view_contracts import (
 
 EXPECTED_OPERATIONS = {
     ("get", "/api/workflows"): "WorkflowsListResponse",
+    ("post", "/api/workflows"): "WorkflowRegisteredResponse",
     ("get", "/api/workflows/{workflow_key}"): "WorkflowResponse",
     ("get", "/api/workspaces"): "WorkspacesResponse",
     ("post", "/api/workspaces"): "WorkspaceResponse",
@@ -29,10 +30,6 @@ EXPECTED_OPERATIONS = {
     ("get", "/api/workspaces/{workspace_id}/settings"): "WorkspaceSettingsResponse",
     ("put", "/api/workspaces/{workspace_id}/configuration"): "WorkspaceConfigurationResponse",
     ("patch", "/api/workspaces/{workspace_id}/settings/{section}"): "WorkspaceSettingsResponse",
-    (
-        "post",
-        "/api/workspaces/{workspace_id}/settings/test-connection",
-    ): "WorkspaceSettingsTestResponse",
     ("post", "/api/workspaces/{workspace_id}/job-batches"): "JobBatchResponse",
     ("get", "/api/workspaces/{workspace_id}/jobs"): "JobsResponse",
     ("post", "/api/workspaces/{workspace_id}/jobs/batch-rerun"): "BatchJobMutationResponse",
@@ -129,17 +126,16 @@ def test_catch_all_router_does_not_shadow_job_log_endpoint(client):
 def _create_test_job(client):
     ws_response = client.post(
         "/api/workspaces",
-        json={"name": "test_ws", "default_workflow_key": "question_comprehension_info"},
+        json={"name": "test_ws", "default_workflow_key": "education_video_problems_generation"},
     )
     assert ws_response.status_code == 200
     workspace_id = ws_response.json()["workspace"]["id"]
     response = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": ["Q001"],
-            "knowledge_codes": [],
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": ["Q001"],
         },
     )
     assert response.status_code == 200

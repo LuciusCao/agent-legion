@@ -36,17 +36,20 @@ def agent_version_pin(
 
 def resolve_dispatch_agent_definition(
     database_dsn: DatabaseDsn,
+    workspace_id: str,
     agent_id: str,
     pin: Mapping[str, Any] | None,
 ) -> AgentDefinition | None:
     """Resolve the definition for dispatch; a frozen per-run version pin wins.
 
-    Returns None when the unpinned published definition is gone (the caller
-    reports the invalid route); a pin whose agent, version, or definition
-    hash no longer matches raises ValueError so the node fails closed.
+    Resolution is strictly workspace-scoped (schema v46) with no global
+    fallback. Returns None when the unpinned published definition is gone from
+    the workspace (the caller reports the invalid route); a pin whose agent,
+    version, or definition hash no longer matches raises ValueError so the
+    node fails closed.
     """
     if pin is None:
-        return published_agent_definitions(database_dsn).get(agent_id)
+        return published_agent_definitions(database_dsn, workspace_id).get(agent_id)
     pinned_agent = str(pin.get("agent_id") or "")
     if pinned_agent != agent_id:
         raise ValueError(
@@ -54,9 +57,12 @@ def resolve_dispatch_agent_definition(
         )
     version = int(pin.get("version") or 0)
     store = VersionedEntityStore(database_dsn, "agent")
-    entity = store.get_version(agent_id, version, None)
+    entity = store.get_version(agent_id, version, workspace_id)
     if entity is None:
-        raise ValueError(f"pinned Agent version {agent_id!r} v{version} does not exist")
+        raise ValueError(
+            f"pinned Agent version {agent_id!r} v{version} does not exist in workspace"
+            f" {workspace_id!r}"
+        )
     expected_hash = str(pin.get("definition_hash") or "")
     if expected_hash and entity.definition_hash != expected_hash:
         raise ValueError(f"pinned Agent version {agent_id!r} v{version} definition hash mismatch")

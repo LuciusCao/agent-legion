@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -8,7 +7,6 @@ from typing import Any
 
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.builtin import load_builtin_workflow
@@ -29,7 +27,7 @@ def make_workflow_worker(
     tmp_path: Path,
     queries: JobQueries,
     *,
-    workflow_key: str = "question_comprehension_info",
+    workflow_key: str = "education_video_problems_generation",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
 ) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:
@@ -40,9 +38,11 @@ def make_workflow_worker(
 
     definition = load_builtin_definition(workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    # Executor definitions are DB-backed: hydrate the seeded catalog (the app
-    # does this in create_app; this helper builds the registry directly).
-    app_main.hydrate_executor_definitions(settings)
+    # Executor definitions are retired (P-0.5); only the demo node codes
+    # still seed (the app does this in create_app; this helper mirrors it).
+    from server.app.services.demo_node_seed import seed_demo_node_codes
+
+    seed_demo_node_codes(settings)
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {
@@ -55,11 +55,18 @@ def make_workflow_worker(
         }
     )
 
-    registry = app_main.build_executor_registry(settings, queries)
+    # P-0.5: 单一隐含 code 池，直接装配。
+    from server.app.executors.code import CodeExecutor
+
+    executor = CodeExecutor(
+        repo_root=settings.root_dir,
+        settings_config=settings.config,
+        job_db=queries,
+    )
     leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
     )
@@ -67,58 +74,11 @@ def make_workflow_worker(
     worker = WorkflowWorkerThread(
         job_db=queries,
         leases=leases,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )
-    worker._definitions = [definition]
+    worker._scan_entries = ([definition], [])
     return worker, definition
-
-
-class BadProvider(TranscriptionProvider):
-    name = "whisper"
-
-    def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
-        raise RuntimeError("forced failure")
-
-
-class GoodProvider(TranscriptionProvider):
-    name = "sensevoice"
-
-    def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
-        output_path.write_text(
-            "1\n00:00:00,000 --> 00:00:10,000\n第一段讲解。\n\n"
-            "2\n00:00:10,000 --> 00:00:20,000\n第二段讲解。\n",
-            encoding="utf-8",
-        )
-
-
-class ChapterRunner:
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def run(
-        self, phase: Any, video_id: str, video_dir: Path, prompt_dir: Path, log_path: Path
-    ) -> Any:
-        self.calls += 1
-        phase_key = getattr(phase, "key", str(phase))
-        (video_dir / "chapters_raw.json").write_text(
-            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
-            encoding="utf-8",
-        )
-        (video_dir / "chapters.json").write_text(
-            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
-            encoding="utf-8",
-        )
-        return type(
-            "Result",
-            (),
-            {
-                "status": "completed",
-                "error_message": "",
-                "command": ["openclaw", phase_key, video_id],
-            },
-        )()
 
 
 def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
@@ -130,8 +90,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     from server.app import main as app_main
     from tests.postgres_support import TEST_DATABASE_URL
 
-    # The app boots against the isolated test schema; conftest already seeded
-    # the published Agent catalog there via AgentService.
+    # The app boots against the isolated test schema; Agent definitions are
+    # workspace-scoped (schema v46), seeded per workspace by the tests that
+    # need them (tests/helpers.seed_workspace_agent_definitions).
     def fake_load_settings(
         data_dir: Path | None = None, config_path: Path | None = None
     ) -> Settings:
@@ -148,9 +109,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
-    # The fake root has no workflow_nodes/: skip the executor definition
-    # hydration (SPA tests never dispatch jobs).
-    monkeypatch.setattr(app_main, "hydrate_executor_definitions", lambda settings: None)
+    # The fake root has no workflow_nodes/: skip the demo node-code seeding
+    # (SPA tests never dispatch jobs).
+    monkeypatch.setattr(app_main, "seed_demo_node_codes", lambda settings: None)
     return root_dir, data_dir
 
 
@@ -169,15 +130,31 @@ def wait_for_predicate(
         time.sleep(interval)
 
 
-def replace_agent_catalog(definitions: dict[str, Any]) -> None:
-    """Archive every live Agent version, then insert *definitions* as published.
+def seed_workspace_agent_definitions(workspace_id: str) -> list[str]:
+    """Seed the built-in demo Agent definitions into *workspace_id*.
+
+    Agent definitions are workspace-scoped (schema v46): the conftest reset no
+    longer seeds a global catalog, so tests that run the demo workflow end to
+    end instantiate the factory templates into their own workspace here.
+    """
+    from server.app.agent_catalog_builtin import seed_demo_workspace_agent_definitions
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    return seed_demo_workspace_agent_definitions(TEST_DATABASE_URL, workspace_id)
+
+
+def replace_agent_catalog(workspace_ids: str | list[str], definitions: dict[str, Any]) -> None:
+    """Archive every live Agent version in the given workspaces, then insert
+    *definitions* as published into each of them.
 
     Mirrors the retired ``sync_agent_definitions`` replace semantics for
-    tests: after the call exactly the given catalog is published. An empty
-    mapping leaves no published Agents (the old empty-catalog guard went away
-    with the YAML sync). Writes go straight to versioned_entities so tests
-    can stage catalogs the service-level publish guard would reject (e.g.
-    two published Agents sharing one capability for dual-runtime fleets).
+    tests, workspace-scoped (schema v46): after the call exactly the given
+    catalog is published in each listed workspace. An empty mapping leaves no
+    published Agents in those workspaces. Missing workspace rows are created
+    (the versioned_entities workspace FK requires the row first). Writes go
+    straight to versioned_entities so tests can stage catalogs the
+    service-level publish guard would reject (e.g. two published Agents
+    sharing one capability for dual-runtime fleets).
     """
     import json as _json
 
@@ -186,37 +163,49 @@ def replace_agent_catalog(definitions: dict[str, Any]) -> None:
     from server.app.services.agent_service import reset_published_agent_cache
     from tests.postgres_support import TEST_DATABASE_URL
 
+    ids = [workspace_ids] if isinstance(workspace_ids, str) else list(workspace_ids)
     with write_transaction(TEST_DATABASE_URL) as conn:
-        conn.execute(
-            "update versioned_entities set status='archived'"
-            " where entity_type='agent' and status in ('draft', 'published')"
-        )
-        for agent_id, definition in definitions.items():
-            assert isinstance(definition, AgentDefinition)
-            latest = conn.execute(
-                "select max(version) as v from versioned_entities"
-                " where entity_type='agent' and workspace_id is null and entity_key=%s",
-                (agent_id,),
-            ).fetchone()
-            version = int(latest["v"]) + 1 if latest is not None and latest["v"] is not None else 1
-            canonical = _json.dumps(
-                definition.model_dump(mode="json"),
-                ensure_ascii=False,
-                sort_keys=True,
-                separators=(",", ":"),
+        for workspace_id in ids:
+            conn.execute(
+                "insert into workspaces(id, name, default_workflow_key)"
+                " values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
+                (workspace_id,),
             )
             conn.execute(
-                "insert into versioned_entities("
-                "id, entity_type, workspace_id, entity_key, version, status,"
-                " definition_json, definition_hash, created_by, created_at, published_at)"
-                " values (%s, 'agent', null, %s, %s, 'published', %s, %s, 'test-seed',"
-                " current_timestamp, current_timestamp)",
-                (
-                    f"agent:{agent_id}:v{version}",
-                    agent_id,
-                    version,
-                    canonical,
-                    definition.definition_hash(),
-                ),
+                "update versioned_entities set status='archived'"
+                " where entity_type='agent' and workspace_id=%s"
+                " and status in ('draft', 'published')",
+                (workspace_id,),
             )
+            for agent_id, definition in definitions.items():
+                assert isinstance(definition, AgentDefinition)
+                latest = conn.execute(
+                    "select max(version) as v from versioned_entities"
+                    " where entity_type='agent' and workspace_id=%s and entity_key=%s",
+                    (workspace_id, agent_id),
+                ).fetchone()
+                version = (
+                    int(latest["v"]) + 1 if latest is not None and latest["v"] is not None else 1
+                )
+                canonical = _json.dumps(
+                    definition.model_dump(mode="json"),
+                    ensure_ascii=False,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                )
+                conn.execute(
+                    "insert into versioned_entities("
+                    "id, entity_type, workspace_id, entity_key, version, status,"
+                    " definition_json, definition_hash, created_by, created_at, published_at)"
+                    " values (%s, 'agent', %s, %s, %s, 'published', %s, %s, 'test-seed',"
+                    " current_timestamp, current_timestamp)",
+                    (
+                        f"agent:{workspace_id}:{agent_id}:v{version}",
+                        workspace_id,
+                        agent_id,
+                        version,
+                        canonical,
+                        definition.definition_hash(),
+                    ),
+                )
     reset_published_agent_cache()

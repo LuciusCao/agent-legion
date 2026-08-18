@@ -7,11 +7,10 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import VaultService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.services.workspace_connection_test import test_workspace_connection
-from server.app.services.workspace_executor_validation import (
-    validate_workspace_executor_configuration,
-)
 from server.app.services.workspace_node_config import update_workspace_node_config
+from server.app.services.workspace_node_limit_validation import (
+    validate_workspace_node_limits,
+)
 from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.services.workspace_settings_schemas import (
     workspace_settings_payload_with_schemas,
@@ -56,16 +55,15 @@ class WorkspaceConfigurationService:
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
             self.workflows,
-            published_agent_definitions(self.settings.database_url),
+            published_agent_definitions(self.settings.database_url, str(workspace["id"])),
             workspace,
-            self.settings.executor_definitions,
         )
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         return self.job_db.list_workspaces()
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
-        definition = self.workflows.definition(payload["default_workflow_key"])
+        definition = self.workflows.bound_definition(payload["default_workflow_key"])
         try:
             workspace = self.job_db.create_workspace(
                 payload["name"],
@@ -76,9 +74,10 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(
-            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-        ).ensure_active_revision(workspace["id"], definition)
+        if definition is not None:
+            WorkflowRevisionService(
+                self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+            ).ensure_active_revision(workspace["id"], definition)
         return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:
@@ -87,7 +86,7 @@ class WorkspaceConfigurationService:
     def update(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._workspace(workspace_id)
         if payload.get("default_workflow_key") is not None:
-            self.workflows.definition(payload["default_workflow_key"])
+            self.workflows.bound_definition(payload["default_workflow_key"])
         try:
             return self.job_db.update_workspace(
                 workspace_id,
@@ -118,8 +117,6 @@ class WorkspaceConfigurationService:
         workspace_id: str,
         workspace_patch: dict[str, Any],
         settings_patch: dict[str, Any],
-        executor_allocations: list[dict[str, Any]],
-        node_bindings: list[dict[str, Any]],
         node_limits: list[dict[str, Any]],
         agent_capacity: int | None = None,
     ) -> dict[str, Any]:
@@ -128,18 +125,21 @@ class WorkspaceConfigurationService:
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
-        workflow = self.workflows.definition(workflow_key)
-
-        validate_workspace_executor_configuration(
+        workflow = self.workflows.bound_definition(workflow_key)
+        # workflow is None for a registered workflow before its first publish;
+        # the validator then runs only the definition-independent checks, and
+        # publish-time validation enforces node correctness — this unblocks
+        # the first-publish chicken-and-egg.
+        validate_workspace_node_limits(
             workflow=workflow,
-            executor_definitions=self.settings.executor_definitions,
-            allocations=executor_allocations,
-            bindings=node_bindings,
             node_limits=node_limits,
             agent_capabilities={
                 definition.capability
-                for definition in published_agent_definitions(self.settings.database_url).values()
+                for definition in published_agent_definitions(
+                    self.settings.database_url, workspace_id
+                ).values()
             },
+            code_capacity=self.settings.executor_runtime.code_capacity,
         )
         name_value = workspace_patch.get("name")
         name: str = name_value if name_value is not None else str(workspace["name"])
@@ -165,8 +165,6 @@ class WorkspaceConfigurationService:
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
                 resource_config=resource_config,
                 intake_config=intake_config,
-                executor_allocations=executor_allocations,
-                node_bindings=node_bindings,
                 node_limits=node_limits,
             )
             # None means "leave unchanged" — the workspace keeps any
@@ -175,14 +173,17 @@ class WorkspaceConfigurationService:
                 self.job_db.set_workspace_agent_capacity(workspace_id, agent_capacity)
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        WorkflowRevisionService(
-            self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-        ).ensure_active_revision(workspace_id, workflow)
-        executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
+        if workflow is not None:
+            WorkflowRevisionService(
+                self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+            ).ensure_active_revision(workspace_id, workflow)
         return {
             "workspace": saved_workspace,
             "settings": self._payload(saved_workspace),
-            "executor_configuration": {**executor_configuration, "migration_warnings": []},
+            "executor_configuration": {
+                "node_limits": self.job_db.get_workspace_node_limits(workspace_id),
+                "migration_warnings": [],
+            },
             "agent_capacity": self.job_db.get_workspace_agent_capacity(workspace_id),
         }
 
@@ -204,12 +205,12 @@ class WorkspaceConfigurationService:
             )
         elif section == "workflow":
             if patch.get("workflowKey") is not None:
-                definition = self.workflows.definition(patch["workflowKey"])
+                definition = self.workflows.bound_definition(patch["workflowKey"])
             workspace = self.job_db.update_workspace(
                 workspace_id,
                 default_workflow_key=patch.get("workflowKey"),
             )
-            if patch.get("workflowKey") is not None:
+            if patch.get("workflowKey") is not None and definition is not None:
                 WorkflowRevisionService(
                     self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
                 ).ensure_active_revision(workspace_id, definition)
@@ -217,10 +218,9 @@ class WorkspaceConfigurationService:
             workspace = update_workspace_node_config(
                 self.job_db,
                 self.workflows,
-                published_agent_definitions(self.settings.database_url),
+                published_agent_definitions(self.settings.database_url, workspace_id),
                 workspace,
                 patch,
-                self.settings.executor_definitions,
             )
         elif section == "agent-defaults":
             defaults = patch.get("agentDefaults")
@@ -242,13 +242,6 @@ class WorkspaceConfigurationService:
         else:
             raise NotFoundError("Unknown settings section")
         return self._payload(workspace)
-
-    def test_connection(self, workspace_id: str) -> dict[str, Any]:
-        return test_workspace_connection(
-            workspace_id,
-            self._workspace(workspace_id),
-            self.settings,
-        )
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         return build_workspace_stats(

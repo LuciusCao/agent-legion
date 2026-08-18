@@ -33,7 +33,6 @@ _FORBIDDEN_PATTERN_WHITELIST = {
     "server/app/jobs/executor_configuration.py",
     "server/app/workflows/definition.py",
     "server/app/workflows/loader.py",
-    "server/app/pipeline/runners.py",
     # AgentStatusManager payloads key incremental WS envelopes by "agent" (Decision 8
     # of the phase4 agent-collaboration plan); the literal is its own status domain,
     # not a legacy Workflow node declaration.

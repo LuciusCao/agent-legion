@@ -1,11 +1,17 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { WorkflowNodeCodeSection } from './WorkflowNodeCodeSection'
 import { api } from '../../api'
 import { useSettingStore } from '../../stores/settingStore'
 import { useUiStore } from '../../stores/uiStore'
 import type { WorkflowNodeRecord } from '../../types'
-import type { ExecutorDefinition } from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 
 vi.mock('../../api', () => ({
   api: vi.fn(),
@@ -14,26 +20,19 @@ vi.mock('../../api', () => ({
 const mockApi = vi.mocked(api)
 
 const node: WorkflowNodeRecord = {
-  key: 'fetch_questions',
+  key: 'fetch_items',
   label: '获取题目',
-  capability: 'fetch_questions',
+  capability: 'fetch_items',
   after: [],
   inputs: [],
   outputs: [],
 }
 
-const codeExecutor: ExecutorDefinition = {
-  id: 'code-default',
-  kind: 'code',
-  global_capacity: 16,
-  capabilities: ['fetch_questions'],
-  capability_details: [
-    { name: 'fetch_questions', path: 'workflow_nodes/question_intake.py' },
-  ],
-}
+// 无 Agent 定义（capability 不匹配）即为 code 节点（P-0.5）。
+const noAgents: AgentDefinition[] = []
 
 const BASE =
-  '/api/workspaces/default/workflows/question_comprehension_info/nodes/fetch_questions/code'
+  '/api/workspaces/default/workflows/demo_workflow/nodes/fetch_items/code'
 
 const BUILTIN_CODE = 'def run(job, job_dir, runtime):\n    return None\n'
 const CUSTOM_CODE = "def run(job, job_dir, runtime):\n    return 'custom'\n"
@@ -41,7 +40,6 @@ const CUSTOM_CODE = "def run(job, job_dir, runtime):\n    return 'custom'\n"
 const builtinResponse = {
   origin: 'builtin',
   code: BUILTIN_CODE,
-  path: 'workflow_nodes/question_intake.py',
   version: null,
   has_draft: false,
   draft_code: null,
@@ -51,7 +49,6 @@ const builtinResponse = {
 const customResponse = {
   origin: 'custom',
   code: CUSTOM_CODE,
-  path: null,
   version: 1,
   has_draft: false,
   draft_code: null,
@@ -87,7 +84,8 @@ function renderSection(
   return render(
     <WorkflowNodeCodeSection
       node={node}
-      executorCatalog={[codeExecutor]}
+      agentCatalog={noAgents}
+      workflowKey="demo_workflow"
       {...overrides}
     />
   )
@@ -98,23 +96,36 @@ describe('WorkflowNodeCodeSection', () => {
     mockApi.mockReset()
     useSettingStore.setState({ workspaceId: 'default' })
     useSettingStore.getState().setSettings({
-      workflowKey: 'question_comprehension_info',
+      workflowKey: 'demo_workflow',
     })
     useUiStore.setState({ toast: null })
     mockApi.mockResolvedValue(builtinResponse)
   })
 
-  it('renders nothing when the capability has no code path', () => {
-    const piExecutor: ExecutorDefinition = {
-      id: 'pi-default',
-      kind: 'pi',
-      global_capacity: 4,
-      capabilities: ['fetch_questions'],
-      capability_details: [{ name: 'fetch_questions' }],
-    }
-    const { container } = renderSection({ executorCatalog: [piExecutor] })
+  it('renders nothing when the capability is agent-routed', () => {
+    const agents: AgentDefinition[] = [
+      {
+        id: 'agent-v1',
+        capability: 'fetch_items',
+        runtime: 'pi',
+        skill: 'demo/skill',
+      },
+    ]
+    const { container } = renderSection({ agentCatalog: agents })
     expect(container.firstChild).toBeNull()
     expect(mockApi).not.toHaveBeenCalled()
+  })
+
+  it('uses the visible workflow key prop over the settings snapshot', async () => {
+    // 草稿改 key 发布后 settings 快照与 visible workflow 分叉；代码区必须
+    // 跟 binding editor 一样用 Inspector 下传的 key。
+    useSettingStore.getState().setSettings({ workflowKey: 'stale_snapshot' })
+    renderSection({ workflowKey: 'visible_wf' })
+
+    await screen.findByText(/出厂版本/)
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/workspaces/default/workflows/visible_wf/nodes/fetch_items/code'
+    )
   })
 
   it('loads builtin code read-only with a fork entry', async () => {
@@ -126,15 +137,36 @@ describe('WorkflowNodeCodeSection', () => {
       })
     ).toBeInTheDocument()
     expect(mockApi).toHaveBeenCalledWith(BASE)
-    expect(screen.getByText(/内置/)).toBeInTheDocument()
+    expect(screen.getByText(/出厂版本/)).toBeInTheDocument()
     expect(
       screen.getByRole('button', { name: 'fork 为自定义节点' })
     ).toBeInTheDocument()
   })
 
+  it('opens the wide-view dialog with line numbers and closes it', async () => {
+    renderSection()
+    await screen.findByText(/出厂版本/)
+
+    fireEvent.click(screen.getByRole('button', { name: '宽视图' }))
+
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('节点代码 · fetch_items')
+    expect(dialog).toHaveTextContent('def run(job, job_dir, runtime):')
+    // 行号渲染（两行代码 → 至少出现行号 1 和 2）。
+    expect(within(dialog).getByText('1')).toBeInTheDocument()
+    expect(within(dialog).getByText('2')).toBeInTheDocument()
+
+    fireEvent.click(
+      within(dialog).getByRole('button', { name: '关闭代码宽视图' })
+    )
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    )
+  })
+
   it('forks the builtin code into a draft via PUT', async () => {
     renderSection()
-    await screen.findByText(/内置/)
+    await screen.findByText(/出厂版本/)
 
     fireEvent.click(screen.getByRole('button', { name: 'fork 为自定义节点' }))
     const editor = screen.getByLabelText('节点代码内容')
@@ -234,7 +266,7 @@ describe('WorkflowNodeCodeSection', () => {
 
   it('surfaces write permission errors inline', async () => {
     renderSection()
-    await screen.findByText(/内置/)
+    await screen.findByText(/出厂版本/)
 
     fireEvent.click(screen.getByRole('button', { name: 'fork 为自定义节点' }))
     mockApi.mockRejectedValueOnce(new Error('Insufficient workspace role'))
@@ -307,5 +339,96 @@ describe('WorkflowNodeCodeSection', () => {
       screen.queryByRole('button', { name: 'fork 为自定义节点' })
     ).not.toBeInTheDocument()
     expect(screen.getByText(/历史版本查看模式/)).toBeInTheDocument()
+  })
+
+  it('offers 从模板新建 alongside fork for a builtin node', async () => {
+    renderSection()
+    await screen.findByText(/出厂版本/)
+
+    expect(
+      screen.getByRole('button', { name: 'fork 为自定义节点' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '从模板新建' })
+    ).toBeInTheDocument()
+  })
+
+  it('creates a draft from the backend template for a pathless capability', async () => {
+    const pathlessNode: WorkflowNodeRecord = {
+      ...node,
+      key: 'do_custom',
+      capability: 'custom_only',
+    }
+    const noneResponse = {
+      origin: 'none',
+      code: '',
+      version: null,
+      has_draft: false,
+      draft_code: null,
+      draft_version: null,
+    }
+    const templateCode = 'from workspace_libs.node_sdk import NodeContext\n'
+    mockApi.mockResolvedValue(noneResponse)
+    render(
+      <WorkflowNodeCodeSection
+        node={pathlessNode}
+        agentCatalog={noAgents}
+        workflowKey="demo_workflow"
+      />
+    )
+
+    await screen.findByText(/无代码版本/)
+    expect(
+      screen.queryByRole('button', { name: 'fork 为自定义节点' })
+    ).not.toBeInTheDocument()
+
+    mockApi.mockResolvedValueOnce({ code: templateCode })
+    mockApi.mockResolvedValueOnce(versionRow(1, 'draft'))
+    fireEvent.click(screen.getByRole('button', { name: '从模板新建' }))
+
+    await waitFor(() =>
+      expect(useUiStore.getState().toast?.message).toBe('已从模板创建草稿')
+    )
+    const customBase =
+      '/api/workspaces/default/workflows/demo_workflow/nodes/do_custom/code'
+    expect(mockApi.mock.calls[1][0]).toBe('/api/workflow-node-code-template')
+    expect(mockApi.mock.calls[2][0]).toBe(customBase)
+    expect(mockApi.mock.calls[2][1]?.method).toBe('PUT')
+    expect(JSON.parse(String(mockApi.mock.calls[2][1]?.body))).toEqual({
+      code: templateCode,
+      change_note: null,
+    })
+  })
+
+  it('lets a pathless node edit its existing draft', async () => {
+    const pathlessNode: WorkflowNodeRecord = {
+      ...node,
+      key: 'do_custom',
+      capability: 'custom_only',
+    }
+    const templateCode = 'from workspace_libs.node_sdk import NodeContext\n'
+    mockApi.mockResolvedValue({
+      origin: 'none',
+      code: '',
+      version: null,
+      has_draft: true,
+      draft_code: templateCode,
+      draft_version: 1,
+    })
+    render(
+      <WorkflowNodeCodeSection
+        node={pathlessNode}
+        agentCatalog={noAgents}
+        workflowKey="demo_workflow"
+      />
+    )
+
+    await screen.findByText(/有未发布草稿/)
+    expect(
+      screen.queryByRole('button', { name: '从模板新建' })
+    ).not.toBeInTheDocument()
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }))
+
+    expect(screen.getByLabelText('节点代码内容')).toHaveValue(templateCode)
   })
 })

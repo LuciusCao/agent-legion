@@ -38,7 +38,12 @@ PROD_DB_NAME = "agent_legion"
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 DEFAULT_COMPOSE_DIR = "../prod/deploy"
 COMPOSE_FILES = ("compose.host.yaml", "compose.local.yaml")
-PG15_BIN_CANDIDATE = Path("/usr/local/opt/postgresql@15/bin")
+# 目标开发库统一为 PostgreSQL 17（与 Docker stack 的 postgres:17.5 对齐），
+# 客户端工具优先用 Homebrew postgresql@17（Apple Silicon / Intel 两个前缀）。
+PG17_BIN_CANDIDATES: tuple[Path, ...] = (
+    Path("/opt/homebrew/opt/postgresql@17/bin"),
+    Path("/usr/local/opt/postgresql@17/bin"),
+)
 
 SOURCE_DB_USER = "agent_legion"
 SOURCE_DB_NAME = "agent_legion"
@@ -49,8 +54,6 @@ LAYER1_TABLES: tuple[str, ...] = (
     "workspaces",
     "workspace_members",
     "workspace_agent_capacities",
-    "workspace_executor_allocations",
-    "workspace_node_bindings",
     "workspace_node_capacities",
     "workspace_node_limits",
     "workspace_node_routes",
@@ -195,19 +198,19 @@ def compose_base_cmd(compose_dir: Path) -> list[str]:
 
 
 def pg_client_bin(explicit: str | None = None) -> Path:
-    """Prefer the PostgreSQL 15 client tools (target server is 15)."""
+    """Prefer the PostgreSQL 17 client tools (target server is 17)."""
     candidates = []
     if explicit:
         candidates.append(Path(explicit))
     env_dir = os.environ.get("SEED_PG_CLIENT_BIN")
     if env_dir:
         candidates.append(Path(env_dir))
-    candidates.append(PG15_BIN_CANDIDATE)
+    candidates.extend(PG17_BIN_CANDIDATES)
     candidates.append(Path(""))  # PATH lookup
     for cand in candidates:
         if str(cand) == "" or (cand / "psql").is_file():
             return cand
-    raise SeedError("找不到 psql 客户端（尝试过 postgres@15 与 PATH）")
+    raise SeedError("找不到 psql 客户端（尝试过 postgres@17 与 PATH）")
 
 
 # ---------------------------------------------------------------------------
@@ -292,10 +295,11 @@ def target_columns(psql: str, dsn: str, table: str) -> list[str]:
 def restore_plain_sql(psql: str, dsn: str, dump_path: Path) -> None:
     """Restore a plain-format dump with FK triggers disabled.
 
-    The prod container runs PG 17 while the local target is PG 15: custom
-    format v1.16 is unreadable by pg_restore 15, so layer 1 uses plain SQL.
-    PG 17 dumps emit ``SET transaction_timeout`` statements unknown to PG 15;
-    they are header lines outside COPY data and are filtered out on the fly.
+    Source (prod container) and target (local dev) both run PG 17; plain SQL
+    keeps layer 1 agnostic to pg_dump custom-format versions. PG 17 dumps emit
+    ``SET transaction_timeout`` statements; they are header lines outside COPY
+    data and are filtered out on the fly so a newer source dump still loads on
+    an older target.
     ``session_replication_role = replica`` (target user is the local
     superuser) makes the COPY order FK-agnostic.
     """

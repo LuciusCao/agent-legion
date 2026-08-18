@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import stat
 import subprocess
+import time
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -23,7 +25,12 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         # simulated GATE_TIER=smoke run inherits it and the curated tier's
         # contract (never offline-pinned) cannot be verified on CI.
         "AGENT_LEGION_TEST_DATABASE_URL",
+        "AGENT_LEGION_COV",
+        "AGENT_LEGION_FRONTEND_TEST_WORKERS",
+        "AGENT_LEGION_RUST_WORKERS",
+        "AGENT_LEGION_TEST_WORKERS",
         "BACKEND_GATE_PHASE",
+        "COVERAGE_FILE",
         "FRONTEND_API_CHECK",
         "FRONTEND_COVERAGE_BLOB_DIR",
         "FRONTEND_GATE_PHASE",
@@ -32,6 +39,7 @@ def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedP
         "GATE_LANES",
         "GATE_SHARD",
         "GATE_TIER",
+        "KEEP_COVERAGE",
     ):
         process_env.pop(key, None)
     process_env.update(env)
@@ -50,6 +58,8 @@ def test_quick_gate_starts_backend_and_frontend_lanes_concurrently(tmp_path: Pat
     scripts.mkdir()
     quick_gate = scripts / "check-quick.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    # The quick gate sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     marker = tmp_path / "frontend.started"
 
     _write_executable(
@@ -80,6 +90,8 @@ def test_quick_gate_reports_each_lane_status(tmp_path: Path) -> None:
     scripts.mkdir()
     quick_gate = scripts / "check-quick.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    # The quick gate sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 7\n")
     _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
 
@@ -94,6 +106,8 @@ def test_quick_gate_hoists_api_contract_out_of_parallel_static_round(tmp_path: P
     scripts.mkdir()
     quick_gate = scripts / "check-quick.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    # The quick gate sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     gate_log = tmp_path / "gate.log"
 
     _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 0\n")
@@ -117,6 +131,8 @@ def _quick_gate_fixture(scripts: Path) -> Path:
     scripts.mkdir()
     quick_gate = scripts / "check-quick.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    # The quick gate sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 0\n")
     _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
     return quick_gate
@@ -140,6 +156,43 @@ def _init_git_repo(path: Path) -> None:
         check=True,
         capture_output=True,
     )
+
+
+def test_quick_gate_fast_lanes_are_not_padded_by_heartbeat_sleep(tmp_path: Path) -> None:
+    """A lane that finishes in seconds must end the round within ~1s: the
+    heartbeat loop polls in 1s steps instead of sleeping the whole interval."""
+    quick_gate = _quick_gate_fixture(tmp_path / "scripts")
+
+    started = time.monotonic()
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_HEARTBEAT_SECONDS": "20"})
+    elapsed = time.monotonic() - started
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    # The old sleep-then-check loop would pad each of the two rounds by the
+    # full 20s heartbeat interval; the polling loop stays well under one.
+    assert elapsed < 20
+    assert "[gate:" not in result.stdout
+
+
+def test_quick_gate_heartbeat_prints_running_lane_progress(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    # The quick gate sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    _write_executable(
+        scripts / "check-quick-backend.sh",
+        '#!/usr/bin/env bash\necho "backend lane working"\nsleep 6\n',
+    )
+    _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_HEARTBEAT_SECONDS": "2"})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    heartbeat_lines = [line for line in result.stdout.splitlines() if line.startswith("[gate:")]
+    assert heartbeat_lines
+    assert any("backend: backend lane working" in line for line in heartbeat_lines)
 
 
 def test_quick_gate_derives_backend_lane_from_worktree_changes(tmp_path: Path) -> None:
@@ -191,7 +244,10 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
 
     _write_executable(
         scripts / "check-quick.sh",
-        '#!/usr/bin/env bash\nprintf "quick:%s\\n" "${FRONTEND_TEST_MODE:-unset}" >>"$GATE_LOG"\n',
+        "#!/usr/bin/env bash\n"
+        'printf "quick:lanes=%s,cov=%s,mode=%s\\n" '
+        '"${GATE_LANES:-unset}" "${AGENT_LEGION_COV:-unset}" '
+        '"${FRONTEND_TEST_MODE:-unset}" >>"$GATE_LOG"\n',
     )
     _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
     for command in ("uv", "npm"):
@@ -208,11 +264,38 @@ def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8").splitlines()
-    assert calls.count("quick:coverage") == 1
+    quick_calls = [call for call in calls if call.startswith("quick:")]
+    # Issue #92: the coverage-instrumented backend lane runs alone first —
+    # racing the frontend/rust lanes makes pytest-cov/xdist silently lose a
+    # whole worker's coverage data. Frontend/rust follow without backend
+    # coverage (frontend still runs in coverage mode for the partition report).
+    assert quick_calls == [
+        "quick:lanes=backend,cov=1,mode=unset",
+        "quick:lanes=frontend rust,cov=unset,mode=coverage",
+    ]
     assert calls.count("npm:run build:bundle") == 1
     assert not any("test:coverage" in call for call in calls)
     assert any("pytest -q tests/full" in call for call in calls)
     assert any("coverage report" in call for call in calls)
+
+
+def test_quick_gate_cleanup_only_removes_coverage_data_files(tmp_path: Path) -> None:
+    """The cleanup glob must match coverage's parallel suffix
+    (.<host>.<pid>.<random>) only — not every same-prefix sibling."""
+    quick_gate = _quick_gate_fixture(tmp_path / "scripts")
+    cov = tmp_path / ".coverage.fixture"
+    cov.write_text("combined", encoding="utf-8")
+    worker_data = tmp_path / ".coverage.fixture.host.1234.000042"
+    worker_data.write_text("worker", encoding="utf-8")
+    sibling = tmp_path / ".coverage.fixture.log"
+    sibling.write_text("keep", encoding="utf-8")
+
+    result = _run(quick_gate, cwd=tmp_path, env={"COVERAGE_FILE": str(cov)})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert not cov.exists()
+    assert not worker_data.exists()
+    assert sibling.exists()
 
 
 def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> None:
@@ -223,6 +306,8 @@ def test_backend_gate_emits_junit_durations_and_rerun_report(tmp_path: Path) -> 
     fake_bin.mkdir()
     backend_gate = scripts / "check-quick-backend.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    # The backend lane sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -261,6 +346,8 @@ def test_backend_smoke_tier_runs_the_curated_subset(tmp_path: Path) -> None:
     fake_bin.mkdir()
     backend_gate = scripts / "check-quick-backend.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    # The backend lane sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -297,6 +384,8 @@ def test_backend_full_coverage_defers_floor_to_combined_report(tmp_path: Path) -
     fake_bin.mkdir()
     backend_gate = scripts / "check-quick-backend.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    # The backend lane sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -350,7 +439,7 @@ def test_frontend_gate_emits_junit_and_json_reports(tmp_path: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8")
-    assert "run test -- --reporter=default --reporter=junit" in calls
+    assert "run test -- --maxWorkers=4 --reporter=default --reporter=junit" in calls
     assert f"--outputFile.junit={results / 'vitest-junit.xml'}" in calls
     assert "--reporter=json" in calls
     assert f"--outputFile.json={results / 'vitest-results.json'}" in calls
@@ -389,7 +478,7 @@ def test_frontend_gate_shards_project_and_defers_coverage_enforcement(tmp_path: 
 
     assert result.returncode == 0, result.stdout + result.stderr
     calls = gate_log.read_text(encoding="utf-8")
-    assert "run test:coverage -- --project logic" in calls
+    assert "run test:coverage -- --maxWorkers=4 --project logic" in calls
     assert "--reporter=blob" in calls
     assert f"--outputFile.blob={blobs / 'vitest-blob-logic.json'}" in calls
     # A shard's partial coverage cannot meet the global thresholds; the merge
@@ -408,6 +497,8 @@ def _run_backend_gate_with_fake_uv(tmp_path: Path, env: dict[str, str]) -> str:
     fake_bin.mkdir()
     backend_gate = scripts / "check-quick-backend.sh"
     shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-backend.sh", backend_gate)
+    # The backend lane sources the shared job-count helper.
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
     gate_log = tmp_path / "gate.log"
     _write_executable(
         fake_bin / "uv",
@@ -446,3 +537,99 @@ def test_backend_postgres_tier_has_no_shard_plugin_without_gate_shard(tmp_path: 
     assert "scripts.pytest_gate_shard" not in calls
     assert "shard:unset" in calls
     assert "postgres and not repository_gate" in calls
+
+
+def test_backend_test_workers_default_is_capped_at_four(tmp_path: Path) -> None:
+    """The pytest -n default is min(4, core count): present on every test
+    tier invocation, never above 4 (issue #91)."""
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {})
+
+    match = re.search(r"(?:^|\s)-n (\d+)(?:\s|$)", calls)
+    assert match is not None, calls
+    assert 1 <= int(match.group(1)) <= 4
+
+
+def test_backend_test_workers_env_override_wins(tmp_path: Path) -> None:
+    calls = _run_backend_gate_with_fake_uv(tmp_path, {"AGENT_LEGION_TEST_WORKERS": "7"})
+
+    assert re.search(r"(?:^|\s)-n 7(?:\s|$)", calls)
+
+
+def test_frontend_gate_workers_env_override_wins(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    frontend = tmp_path / "frontend"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    frontend.mkdir()
+    fake_bin.mkdir()
+    frontend_gate = scripts / "check-quick-frontend.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick-frontend.sh", frontend_gate)
+    gate_log = tmp_path / "gate.log"
+    _write_executable(
+        fake_bin / "npm",
+        '#!/usr/bin/env bash\nprintf "%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+
+    result = _run(
+        frontend_gate,
+        cwd=tmp_path,
+        env={
+            "AGENT_LEGION_FRONTEND_TEST_WORKERS": "2",
+            "FRONTEND_GATE_PHASE": "test",
+            "GATE_LOG": str(gate_log),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        },
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "run test -- --maxWorkers=2" in gate_log.read_text(encoding="utf-8")
+
+
+def _rust_gate_fixture(tmp_path: Path) -> tuple[Path, Path]:
+    scripts = tmp_path / "scripts"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    fake_bin.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    shutil.copy2(PROJECT_ROOT / "scripts" / "gate-jobs.sh", scripts / "gate-jobs.sh")
+    # The rust lane requires the crate directory to exist.
+    (tmp_path / "velites").mkdir()
+    _write_executable(
+        fake_bin / "cargo",
+        '#!/usr/bin/env bash\nprintf "cargo:%s\\n" "$*" >>"$GATE_LOG"\n',
+    )
+    return quick_gate, fake_bin
+
+
+def _run_rust_gate(tmp_path: Path, env: dict[str, str]) -> str:
+    quick_gate, fake_bin = _rust_gate_fixture(tmp_path)
+    gate_log = tmp_path / "gate.log"
+    result = _run(
+        quick_gate,
+        cwd=tmp_path,
+        env={
+            "GATE_LANES": "rust",
+            "GATE_LOG": str(gate_log),
+            "PATH": f"{fake_bin}:{os.environ['PATH']}",
+            **env,
+        },
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    return gate_log.read_text(encoding="utf-8")
+
+
+def test_rust_lane_workers_default_is_capped_at_four(tmp_path: Path) -> None:
+    calls = _run_rust_gate(tmp_path, {})
+
+    clippy = re.search(r"cargo:clippy .* -j (\d+)", calls)
+    assert clippy is not None, calls
+    assert 1 <= int(clippy.group(1)) <= 4
+    assert re.search(r"cargo:test --locked -j \d+", calls)
+
+
+def test_rust_lane_workers_env_override_wins(tmp_path: Path) -> None:
+    calls = _run_rust_gate(tmp_path, {"AGENT_LEGION_RUST_WORKERS": "3"})
+
+    assert re.search(r"cargo:clippy .* -j 3 ", calls)
+    assert "cargo:test --locked -j 3" in calls

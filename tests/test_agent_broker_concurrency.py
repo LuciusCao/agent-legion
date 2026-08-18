@@ -42,10 +42,10 @@ def _seed_request(
     runtime: str = "pi",
 ) -> str:
     definition = _definition(runtime=runtime)
-    replace_agent_catalog({"generator-v1": definition})
+    replace_agent_catalog(workspace_id, {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (%s, %s) on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow') on conflict(id) do nothing",
             (workspace_id, workspace_id),
         )
         conn.execute(
@@ -344,7 +344,9 @@ def test_workspace_without_capacity_row_is_unlimited(job_db) -> None:
 def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:
     execution_id = _seed_request(job_db, job_id="stale-def-job")
     # Republish the Agent with changed content: the pinned hash is now gone.
-    replace_agent_catalog({"generator-v1": _definition(skill="question/generate-v2")})
+    replace_agent_catalog(
+        "test-workspace", {"generator-v1": _definition(skill="question/generate-v2")}
+    )
     broker = AgentExecutionBroker(TEST_DATABASE_URL, data_dir=job_db.jobs_dir.parent)
 
     assert broker.fail_stale_definition_requests() == [execution_id]

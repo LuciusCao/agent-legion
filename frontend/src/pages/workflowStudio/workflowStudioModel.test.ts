@@ -12,14 +12,14 @@ import type { components } from '../../generated/api'
 type CompareError = components['schemas']['WorkflowDraftCompareError']
 
 const workflow: WorkflowDefinitionRecord = {
-  key: 'question_comprehension_info',
+  key: 'demo_workflow',
   label: '题目审题信息生成 DAG',
   intake: { modes: [] },
   nodes: [
     {
       key: 'classify',
       label: '判断是否适合审题',
-      capability: 'classify_comprehension_eligibility',
+      capability: 'classify_items',
       after: [],
       inputs: ['questions_parsed.json'],
       outputs: ['comprehension_eligibility.json'],
@@ -27,7 +27,7 @@ const workflow: WorkflowDefinitionRecord = {
     {
       key: 'assemble',
       label: '组装审题信息',
-      capability: 'assemble_comprehension_info',
+      capability: 'assemble_items',
       after: [],
       inputs: ['comprehension_eligibility.json'],
       outputs: ['manifest.json'],
@@ -57,7 +57,7 @@ describe('workflowStudioModel', () => {
   it('groups validation errors into yaml, schema, structure, executor, and revision buckets', () => {
     const grouped = groupValidationErrors([
       'Workflow nodes are required',
-      'missing executor binding for question_comprehension_info.fetch_questions',
+      'missing executor binding for demo_workflow.fetch_items',
       'executor local is not allocated to workspace ws1',
       'executor pi does not support capability review_key_info',
       "YAML parse error: could not find expected ':'",

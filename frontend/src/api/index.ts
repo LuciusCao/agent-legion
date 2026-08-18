@@ -16,7 +16,6 @@ export {
 // prettier-ignore
 export { archiveAgent, copyAgent, createAgentDefinition, fetchAgentDefinition, fetchAgentDefinitions, fetchAgentVersions, publishAgent, rollbackAgent, saveAgentDraft } from './agentDefinitions'
 // prettier-ignore
-export { archiveExecutor, copyExecutor, createExecutorDefinition, fetchExecutorDefinition, fetchExecutorDefinitions, fetchExecutorVersions, publishExecutor, rollbackExecutor, saveExecutorDraft } from './executorDefinitions'
 export { fetchSkillTags, validateSkillPath } from './skills'
 export { fetchJobsSnapshot } from './jobSnapshot'
 export { fetchJobFacets } from './jobFacets'

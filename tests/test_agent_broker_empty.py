@@ -16,10 +16,10 @@ def _seed_queued_request(job_db, *, job_id: str, workspace_id: str = "test-works
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    replace_agent_catalog({"generator-v1": definition})
+    replace_agent_catalog(workspace_id, {"generator-v1": definition})
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(

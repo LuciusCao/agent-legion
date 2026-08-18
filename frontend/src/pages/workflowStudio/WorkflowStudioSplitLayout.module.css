@@ -1,0 +1,24 @@
+/* 左右分栏的桌面端放置规则（≤900px 走移动面板切换，见
+ * WorkflowStudioPageResponsive.module.css）。grid 列必须显式钉死：
+ * canvasReplaced/chatCollapsed 的 display:none 会让 auto-placement 错位。 */
+@media (min-width: 901px) {
+  .colLeft {
+    grid-column: 1;
+  }
+  .colHandle {
+    grid-column: 2;
+  }
+  .colRight {
+    grid-column: 3;
+    /* 右轨道是 minmax(auto, 1fr)（WorkflowStudioPage.module.css）：不钉
+     * min-width:0 的话，chat 长工具名/JSON 等不可断内容会把轨道撑过 1fr，
+     * 右栏随对话自增宽、左栏被挤没。 */
+    min-width: 0;
+  }
+  .canvasReplaced {
+    display: none;
+  }
+  .chatCollapsed {
+    display: none;
+  }
+}

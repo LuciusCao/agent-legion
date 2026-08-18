@@ -13,7 +13,7 @@ function makeWorkflow(
   edges: { source: string; target: string }[]
 ): WorkflowDefinitionRecord {
   return {
-    key: 'question_comprehension_info',
+    key: 'demo_workflow',
     label: '题目审题信息生成 DAG',
     intake: { modes: [] },
     nodes: nodes.map((node) => ({
@@ -29,40 +29,38 @@ function makeWorkflow(
 }
 
 describe('workflowStudioTopology', () => {
-  it('orders question_comprehension_info from source to downstream branches to terminal', () => {
+  it('orders demo_workflow from source to downstream branches to terminal', () => {
     const workflow = makeWorkflow(
       [
-        { key: 'fetch_questions' },
-        { key: 'classify_comprehension_eligibility' },
+        { key: 'fetch_items' },
+        { key: 'classify_items' },
         { key: 'generate_key_info' },
         { key: 'review_key_info' },
-        { key: 'assemble_comprehension_info' },
+        { key: 'assemble_items' },
       ],
       [
         {
-          source: 'fetch_questions',
-          target: 'classify_comprehension_eligibility',
+          source: 'fetch_items',
+          target: 'classify_items',
         },
         {
-          source: 'classify_comprehension_eligibility',
+          source: 'classify_items',
           target: 'generate_key_info',
         },
         {
-          source: 'classify_comprehension_eligibility',
+          source: 'classify_items',
           target: 'review_key_info',
         },
-        { source: 'generate_key_info', target: 'assemble_comprehension_info' },
-        { source: 'review_key_info', target: 'assemble_comprehension_info' },
+        { source: 'generate_key_info', target: 'assemble_items' },
+        { source: 'review_key_info', target: 'assemble_items' },
       ]
     )
 
     const result = buildTopologyOrder(workflow)
 
-    expect(result.order[0]).toBe('fetch_questions')
-    expect(result.order[1]).toBe('classify_comprehension_eligibility')
-    expect(result.order[result.order.length - 1]).toBe(
-      'assemble_comprehension_info'
-    )
+    expect(result.order[0]).toBe('fetch_items')
+    expect(result.order[1]).toBe('classify_items')
+    expect(result.order[result.order.length - 1]).toBe('assemble_items')
     expect(result.cyclic).toBe(false)
     expect(result.disconnected).toEqual([])
   })

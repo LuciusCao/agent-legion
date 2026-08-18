@@ -9,7 +9,6 @@ import pytest
 from server.app.agent_catalog import AgentDefinition
 from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
-from tests.helpers import replace_agent_catalog
 
 DEFINITION_V1 = AgentDefinition(
     capability="review_keywords", runtime="velites", skill="question/review_key_info"
@@ -23,19 +22,23 @@ DEFINITION_V2 = AgentDefinition(
 
 
 @pytest.fixture
-def service(job_db):
-    # Isolate from the conftest-seeded catalog: capability-uniqueness checks
-    # must only see the Agents this test publishes.
-    replace_agent_catalog({})
-    return AgentService(job_db.path)
+def workspace_id(job_db) -> str:
+    # A fresh workspace per test: capability-uniqueness checks must only see
+    # the Agents this test publishes (catalogs are workspace-scoped, v46).
+    return job_db.create_workspace("Agent Service WS", default_workflow_key="demo_workflow")["id"]
 
 
-def test_save_draft_then_publish_round_trip(service) -> None:
+@pytest.fixture
+def service(job_db, workspace_id) -> AgentService:
+    return AgentService(job_db.path, workspace_id)
+
+
+def test_save_draft_then_publish_round_trip(service, workspace_id) -> None:
     draft = service.save_draft("agent-a", DEFINITION_V1, "user:u1")
 
     assert draft.version == 1
     assert draft.status == "draft"
-    assert draft.workspace_id is None
+    assert draft.workspace_id == workspace_id
     assert draft.definition_hash == DEFINITION_V1.definition_hash()
     assert service.get_published_definition("agent-a") is None
 
@@ -133,8 +136,8 @@ def test_rollback_rejects_duplicate_capability(service) -> None:
     assert service.get_published_definition("agent-a") == DEFINITION_V1
 
 
-def test_db_index_rejects_second_published_capability(service, job_db) -> None:
-    """DB 层真实 guard：绕过 service 直接写第二行同 capability published 必失败。"""
+def test_db_index_rejects_second_published_capability(service, job_db, workspace_id) -> None:
+    """DB 层真实 guard：绕过 service 直接写同 workspace 第二行同 capability published 必失败。"""
     from psycopg import IntegrityError
 
     service.save_draft("agent-a", DEFINITION_V1, "user:u1")
@@ -145,9 +148,21 @@ def test_db_index_rejects_second_published_capability(service, job_db) -> None:
             "insert into versioned_entities("
             "id, entity_type, workspace_id, entity_key, version, status,"
             " definition_json, definition_hash, created_by)"
-            " values ('agent:agent-b:v1', 'agent', null, 'agent-b', 1, 'published',"
+            " values ('agent:agent-b:v1', 'agent', %s, 'agent-b', 1, 'published',"
             " %s, 'hash-b', 'user:test')",
-            (json.dumps(DEFINITION_V1.model_dump(mode="json")),),
+            (workspace_id, json.dumps(DEFINITION_V1.model_dump(mode="json"))),
+        )
+
+    # 另一个 workspace 的同 capability published 不撞索引（per-workspace 唯一）。
+    other_ws = job_db.create_workspace("Other WS", default_workflow_key="demo_workflow")["id"]
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into versioned_entities("
+            "id, entity_type, workspace_id, entity_key, version, status,"
+            " definition_json, definition_hash, created_by)"
+            " values ('agent:other:agent-b:v1', 'agent', %s, 'agent-b', 1, 'published',"
+            " %s, 'hash-b', 'user:test')",
+            (other_ws, json.dumps(DEFINITION_V1.model_dump(mode="json"))),
         )
 
     # 同一 agent re-publish（先归档旧版再发新版）不撞索引。

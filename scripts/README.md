@@ -27,9 +27,8 @@
 | `check_architecture.py` | 检查模块边界、路由响应模型、源文件体积预算。 |
 | `check_invariants.py` | 校验 `config/architecture/architecture-invariants.yaml` 与 `architecture-exemptions.yaml`。 |
 | `ratchet_architecture_budgets.py` | 更新 `config/architecture/architecture-budgets.json` 基线；拒绝抬高 ceiling。 |
-| `generate_architecture.py` | 从代码 AST 自动生成 `docs/architecture/backend.md`、`frontend.md`、`pipeline.md`、`deployment.md` 的表格章节。 |
+| `generate_architecture.py` | 从代码 AST 自动生成 `docs/architecture/backend.md`、`frontend.md`、`deployment.md` 的表格章节。 |
 | `generate_architecture_frontend.py` | `generate_architecture.py` 的前端路由提取 helper。 |
-| `generate_architecture_pipeline.py` | `generate_architecture.py` 的视频 pipeline 节点提取 helper。 |
 | `check_exemption_age.py` | 提醒移除条件已过期的架构豁免（非阻塞；check.sh / CI 调用）。 |
 
 ## Agent Worker 子系统
@@ -45,6 +44,12 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `verify_specs.py` | 检查 design specs 的引用健康，自动分类到 `specs/`、`completed/`、`archive/`，并生成 `SPEC_HEALTH.md`。 |
 | `check-skills-shared.py` | 校验外部 Pi skill 仓库与项目共享引用文件的一致性。 |
 
+## 示例 workflow
+
+| 脚本 | 用途 |
+|------|------|
+| `import-demo.sh` | 导入示例 workflow（`education_video_problems_generation`）的 4 个示例 skill：复制 `examples/skills/*` 到本机 skill 源目录并逐目录 `git init` + 初始 commit + 打 tag `v1.0.0`（幂等，已有 tag 的 skill 跳过不覆盖）。由 `make import-demo` 调用；测试可用 `AGENT_LEGION_DEMO_SKILLS_DIR` 覆盖目标根目录。 |
+
 ## 迁移与工具
 
 | 脚本 | 用途 |
@@ -54,9 +59,10 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
 | `init-worktree.sh` | 一键初始化新 worktree（复制 .env、派生并创建专属 Postgres 库、生成 deploy/secrets、种子 worker 配置、恢复 workspace 调度；幂等，macOS）。 |
-| `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。 |
-| `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、ASR 模型预热、全 stack 健康等待（仅 prod worktree 使用）。 |
-| `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。 |
+| `dev_stack.sh` | 开发环境一键启停（`make dev-up` / `dev-down` / `dev-status`）：后台编排 backend + frontend + worker（复用 Makefile `dev-*` target），幂等，日志在 `data/logs/dev-*.log`，up 完成后打印各服务 URL。 |
+| `native-prod-up.sh` / `native-prod-down.sh` | 启停原生（非 Docker）生产环境（后端 8000 + worker 8787，前端由后端直接服务 `frontend/dist`；幂等，仅 prod worktree 使用）。由 `make prod-up` / `make prod-down` 调用。 |
+| `stack-prod-up.sh` | 一键启动本地 Docker 生产 stack（PostgreSQL + Host + Worker）：secrets 预检、postgres 健康断言、ASR 模型预热、全 stack 健康等待（仅 prod worktree 使用）。由 `make prod-up docker` 调用，停止用 `make prod-down docker`。 |
+| `seed_from_prod.py` | 从本地 prod Docker stack 的 Postgres 只读导出并种子 develop 库（目标库名为 prod 名或 host 非 loopback 时拒绝执行）。无 make target，直接 `uv run python scripts/seed_from_prod.py` 调用。 |
 | `gc_artifacts.py` | 报告/回收 content-addressed artifact store 中零引用且超过在途宽限期的孤儿 blob（默认 dry-run，`--apply` 回收）。 |
 
 ## 一次性与运维脚本
@@ -67,7 +73,6 @@ Worker 执行进程、Worker Service、Supervisor、配置存储与 CLI 已迁�
 |------|------|----------|
 | `backfill_failure_classification.py` | 为历史 failed `node_runs` 回填 `failure_category`/`failure_detail`（幂等，支持 `--dry-run` / `--include-unknown`）。 | 生产库中无未分类的 failed 行，且分类规则稳定不再需要重评 `unknown`。 |
 | `backfill_worker_output_validation.py` | 补跑 EXEC-VALIDATION-001 之前 Worker 完成节点的输出校验，失败的标记节点/任务 failed（幂等，支持 `--dry-run`）。 | 所有存量 Worker-run 节点完成重校验（无候选行）。 |
-| `compare_skill_cost.py` | 按 skill 版本对比 token 成本与重试行为（共享逻辑在 `_skill_cost_core.py`）。 | skill 成本对账不再需要按版本切片对比。 |
 | `view-session.py` | 将 OpenClaw session JSONL 渲染为人类可读的对话日志。 | OpenClaw runner 退役或控制台内置 session 查看能力。 |
 | `velites_diff_events.py` | 结构对比 Node Pi 与 velites 的 `events.jsonl` 事件流（忽略时序字段与 delta 事件差异）。 | velites 完全替代 Node Pi 且回归基线归档后。 |
 | `migrate_job_dirs_to_shards.py` | 一次性迁移：把扁平 `jobs/<workspace>/<job_id>` 目录改名为分片布局并同步 `jobs.storage_dir`（幂等可重入，`--apply` 需停后端/worker）。 | 生产库不再有 3 段 legacy `storage_dir` 行（全部迁移到 4 段分片布局）。 |

@@ -2,8 +2,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from server.app.db.transaction import write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
+
+
+@pytest.fixture
+def client(client_factory):
+    """Private app per test: OpsMetricsService keeps a 5s in-memory summary
+    cache; on the worker-session shared app it survives across tests and
+    serves stale summaries."""
+    with client_factory(fresh=True) as c:
+        yield c
 
 
 def test_metrics_overview_empty_response_shape(client) -> None:
@@ -80,7 +91,7 @@ def test_metrics_overview_summary_shape_and_window_independence(client) -> None:
     now = datetime.now(UTC).replace(microsecond=0)
     with write_transaction(TEST_DATABASE_URL) as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('ops-ws', 'Ops') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values ('ops-ws', 'Ops', 'demo_workflow') on conflict(id) do nothing",
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"

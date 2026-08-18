@@ -8,7 +8,6 @@ import {
 import { loadActions } from './actions/loadActions'
 import { saveActions } from './actions/saveActions'
 import { executorActions } from './actions/executorActions'
-import { testActions } from './actions/testActions'
 
 export const useSettingStore = create<SettingState>((set, get) => ({
   workspaceId: null,
@@ -19,12 +18,10 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   originalWorkspaceDescription: '',
   originalSettings: null,
   isDirty: false,
-  testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
   executorConfiguration: defaultExecutorConfiguration,
   originalExecutorConfiguration: null,
-  pendingAllocationRemoval: null,
 
   setWorkspaceId(id) {
     set({ workspaceId: id })
@@ -53,7 +50,6 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       const nextExecutorConfiguration = workflowChanged
         ? {
             ...state.executorConfiguration,
-            bindings: [],
             node_limits: [],
           }
         : state.executorConfiguration
@@ -69,5 +65,4 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   ...loadActions(set),
   ...saveActions(set, get),
   ...executorActions(set),
-  ...testActions(set, get),
 }))

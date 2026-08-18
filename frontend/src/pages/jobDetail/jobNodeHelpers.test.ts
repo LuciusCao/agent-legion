@@ -34,7 +34,7 @@ function makeDetail(nodes: JobDetail['nodes']): JobDetail {
     job: {
       id: 'job1',
       workspace_id: 'question_comprehension',
-      workflow_key: 'question_comprehension_info',
+      workflow_key: 'demo_workflow',
       source_type: 'question',
       source_id: 'q1',
       batch_id: 'batch1',
@@ -77,7 +77,7 @@ describe('deriveJobDetailPresentation', () => {
       makeNode('generate_possible_errors', 'completed'),
       makeNode('review_key_info', 'running'),
       makeNode('review_possible_errors', 'pending'),
-      makeNode('assemble_comprehension_info', 'pending'),
+      makeNode('assemble_items', 'pending'),
     ])
 
     const result = deriveJobDetailPresentation(detail)
@@ -94,7 +94,7 @@ describe('deriveJobDetailPresentation', () => {
       makeNode('generate_possible_errors', 'completed'),
       makeNode('review_key_info', 'completed'),
       makeNode('review_possible_errors', 'completed'),
-      makeNode('assemble_comprehension_info', 'pending'),
+      makeNode('assemble_items', 'pending'),
     ])
 
     const result = deriveJobDetailPresentation(detail)
@@ -111,7 +111,7 @@ describe('deriveJobDetailPresentation', () => {
       makeNode('generate_possible_errors', 'pending'),
       makeNode('review_key_info', 'completed'),
       makeNode('review_possible_errors', 'completed'),
-      makeNode('assemble_comprehension_info', 'pending'),
+      makeNode('assemble_items', 'pending'),
     ])
 
     const result = deriveJobDetailPresentation(detail)
@@ -126,7 +126,7 @@ describe('deriveJobDetailPresentation', () => {
       makeNode('generate_possible_errors', 'completed'),
       makeNode('review_key_info', 'failed'),
       makeNode('review_possible_errors', 'failed'),
-      makeNode('assemble_comprehension_info', 'pending'),
+      makeNode('assemble_items', 'pending'),
     ])
 
     const result = deriveJobDetailPresentation(detail)

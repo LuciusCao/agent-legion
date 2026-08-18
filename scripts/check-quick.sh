@@ -100,7 +100,9 @@ COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
 export COVERAGE_FILE
 if [[ -z "${KEEP_COVERAGE:-}" ]]; then
   cleanup_coverage() {
-    rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*
+    # xdist workers write "$COVERAGE_FILE".<host>.<pid>.<random>; require the
+    # two extra dots so an unrelated same-prefix file (e.g. .log) survives.
+    rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*.*.*
   }
   trap cleanup_coverage EXIT
 fi
@@ -119,6 +121,12 @@ echo "=== Parallel Quick Gate ==="
 echo "Parallel static/test rounds; the API contract check runs once between them."
 lanes_started_at=$SECONDS
 
+# Shared per-lane job cap: min(4, core count) keeps parallel lanes polite on
+# machines running several worktrees (per-lane envs override; CI 4-vCPU
+# runners are unaffected).
+source "$ROOT_DIR/scripts/gate-jobs.sh"
+default_gate_jobs="$(detect_gate_default_jobs)"
+
 lane_enabled() {
   [[ "$GATE_LANES" == "static" || " $GATE_LANES " == *" $1 "* ]]
 }
@@ -135,11 +143,15 @@ run_rust_round() {
     return 0
   fi
   cd "$ROOT_DIR/velites"
+  # Cargo defaults to one rustc job per core; keep the gate polite on machines
+  # running several worktrees (AGENT_LEGION_RUST_WORKERS overrides; CI 4-vCPU
+  # runners are unaffected).
+  rust_jobs="${AGENT_LEGION_RUST_WORKERS:-$default_gate_jobs}"
   if [[ "$round" == "static-check" ]]; then
     cargo fmt --all -- --check
-    cargo clippy --all-targets --locked -- -D warnings
+    cargo clippy --all-targets --locked -j "$rust_jobs" -- -D warnings
   else
-    cargo test --locked
+    cargo test --locked -j "$rust_jobs"
   fi
 }
 
@@ -187,6 +199,27 @@ run_round() {
   frontend_status=0
   rust_status=0
   set +e
+  # Heartbeat: lane output goes to log files and is only cat'ed at round end,
+  # so a long round looks silent. Poll once a second so a finished lane exits
+  # the loop within ~1s; print elapsed time plus each running lane's latest
+  # log line only every GATE_HEARTBEAT_SECONDS (default 30).
+  heartbeat_seconds="${GATE_HEARTBEAT_SECONDS:-30}"
+  last_heartbeat=$SECONDS
+  while true; do
+    running=()
+    [[ -n "$backend_pid" ]] && kill -0 "$backend_pid" 2>/dev/null && running+=("backend")
+    [[ -n "$frontend_pid" ]] && kill -0 "$frontend_pid" 2>/dev/null && running+=("frontend")
+    [[ -n "$rust_pid" ]] && kill -0 "$rust_pid" 2>/dev/null && running+=("rust")
+    [[ ${#running[@]} -eq 0 ]] && break
+    sleep 1
+    if (( SECONDS - last_heartbeat >= heartbeat_seconds )); then
+      last_heartbeat=$SECONDS
+      for lane in "${running[@]}"; do
+        last_line="$(tail -n 1 "$log_dir/${lane}-${round}.log" 2>/dev/null | cut -c1-120)"
+        echo "[gate:${round}] $((SECONDS - lanes_started_at))s ${lane}: ${last_line}"
+      done
+    fi
+  done
   if [[ -n "$backend_pid" ]]; then
     wait "$backend_pid"
     backend_status=$?

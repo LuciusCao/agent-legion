@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react'
+import { useMemo } from 'react'
 import { useParams } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
@@ -8,9 +8,7 @@ import { useSettingStoreHydration } from '../hooks/useWorkspaceSettingsQuery'
 import { useWorkflowDefinitionQuery } from '../hooks/useWorkflowDefinitionQuery'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
-import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
 import { AgentRoutingSection } from '../components/AgentRoutingSection'
-import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
@@ -35,11 +33,7 @@ export function SettingsPage() {
     isDirty,
     isSaving,
     saveError,
-    executorConfiguration,
-    testStatus,
     saveAll,
-    testConnection,
-    resetTestStatus,
   } = useSettingStore()
 
   // 服务端快照经 react-query 拉取并水合进 store（切换工作区重置草稿；
@@ -51,38 +45,29 @@ export function SettingsPage() {
   )
   const workflowDefinition = workflowDefinitionData ?? null
 
-  const codeBoundNodeKeys = useMemo(() => {
-    const executorCatalog = settingsSnapshot?.executorCatalog ?? []
+  // P-0.5：无 Agent 路由的节点一律进入隐含 code 池，节点级并发上限只对
+  // code 节点有意义。
+  const codeNodeKeys = useMemo(() => {
     if (!workflowDefinition) return new Set<string>()
-    const allocatedIds = new Set(
-      executorConfiguration.allocations.map((a) => a.executor_id)
+    const agentRouted = new Set(
+      (settingsSnapshot?.agentRoutes ?? [])
+        .filter((r) => r.workflow_key === workflowDefinition.key)
+        .map((r) => r.node_key)
     )
     return new Set(
       workflowDefinition.nodes
-        .filter((node) => {
-          const binding = executorConfiguration.bindings.find(
-            (b) =>
-              b.workflow_key === workflowDefinition.key &&
-              b.node_key === node.key
-          )
-          if (!binding || !allocatedIds.has(binding.executor_id)) return false
-          const executor = executorCatalog.find(
-            (e) => e.id === binding.executor_id
-          )
-          return executor?.kind === 'code'
-        })
+        .filter((node) => !agentRouted.has(node.key))
         .map((node) => node.key)
     )
-  }, [workflowDefinition, executorConfiguration, settingsSnapshot])
+  }, [workflowDefinition, settingsSnapshot])
 
-  const hasCodeNodes = codeBoundNodeKeys.size > 0
+  const hasCodeNodes = codeNodeKeys.size > 0
 
   const navItems = useMemo(
     () => [
       { id: 'basic-info', label: '基础信息' },
       { id: 'intake-config', label: '接入与资源' },
       { id: 'workflow', label: '工作流' },
-      { id: 'executors', label: '执行器' },
       { id: 'agent-workers', label: 'Agent 与 Worker' },
       { id: 'agent-defaults', label: 'Agent 默认配置' },
       ...(isAdmin ? [{ id: 'workspace-members', label: '成员管理' }] : []),
@@ -97,13 +82,7 @@ export function SettingsPage() {
   const { activeSection, contentRef, scrollToSection } =
     useSettingsScrollSpy(navItems)
 
-  useEffect(() => {
-    resetTestStatus()
-  }, [workspaceId, resetTestStatus])
-
   if (!workspaceId) return null
-
-  const isTesting = testStatus.state === 'testing'
 
   const rightActions = (
     <div className={styles.saveButtonWrap}>
@@ -163,12 +142,8 @@ export function SettingsPage() {
           <IntakeConfigSection
             settings={settings}
             workflowDefinition={workflowDefinition}
-            testStatus={testStatus}
             saveError={saveError}
-            isTesting={isTesting}
-            isSaving={isSaving}
             setSettings={setSettings}
-            onTestConnection={testConnection}
           />
 
           <WorkflowSection
@@ -176,12 +151,6 @@ export function SettingsPage() {
             onChange={(key) => setSettings({ workflowKey: key })}
           />
 
-          <section id="executors" className={styles.section}>
-            <h2 className={styles.sectionTitle}>执行器</h2>
-            <hr className={styles.sectionDivider} />
-            <ExecutorAllocationSection />
-            <ExecutorBindingSection />
-          </section>
           <section id="agent-workers" className={styles.section}>
             <h2 className={styles.sectionTitle}>Agent 与 Worker</h2>
             <hr className={styles.sectionDivider} />

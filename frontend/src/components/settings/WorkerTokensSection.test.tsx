@@ -28,7 +28,7 @@ const mockRevokeAgentWorker = vi.mocked(revokeAgentWorker)
 const sampleToken = {
   token_id: 't1',
   label: 'home-mac-mini',
-  workspace_id: 'video_knowledge',
+  workspace_id: 'demo_video_workflow',
   created_at: '2026-07-01T00:00:00Z',
   revoked: false,
 }
@@ -43,6 +43,7 @@ const sampleWorker = {
   capabilities: [],
   labels: {},
   max_concurrency: 2,
+  max_code_concurrency: 0,
   models: [],
   protocol_version: 1,
   registered_at: '2026-07-01T00:00:00Z',
@@ -70,7 +71,7 @@ describe('WorkerTokensSection', () => {
     expect(mockListRegisterTokens).toHaveBeenCalledWith()
     expect(mockListAgentWorkers).toHaveBeenCalledWith()
     expect(screen.getByText('mac-mini')).toBeTruthy()
-    expect(screen.getByText('video_knowledge')).toBeTruthy()
+    expect(screen.getByText('demo_video_workflow')).toBeTruthy()
   })
 
   it('shows runtime, concurrency and workspace scope chips for workers', async () => {
@@ -81,7 +82,7 @@ describe('WorkerTokensSection', () => {
         worker_id: 'w2',
         name: 'scoped-mac',
         online: false,
-        allowed_workspaces: ['video_knowledge', 'question_comprehension'],
+        allowed_workspaces: ['demo_video_workflow', 'demo_workspace'],
       },
     ])
     renderWithClient(<WorkerTokensSection />)
@@ -98,7 +99,7 @@ describe('WorkerTokensSection', () => {
     const scopedItem = screen.getByTestId('worker-w2')
     expect(scopedItem.textContent).toContain('离线')
     expect(scopedItem.textContent).toContain(
-      'video_knowledge, question_comprehension'
+      'demo_video_workflow, demo_workspace'
     )
   })
 

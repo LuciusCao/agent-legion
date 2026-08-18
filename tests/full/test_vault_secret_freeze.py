@@ -17,7 +17,7 @@ from cryptography.fernet import Fernet
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.connections import ConnectionService, connection_secret_name
-from server.app.services.executor_definition_service import hydrate_executor_definitions
+from server.app.services.demo_node_seed import seed_demo_node_codes
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -39,17 +39,16 @@ def vault_key(monkeypatch):
 def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -> None:
     # The bare settings fixture does not hydrate executor definitions
     # (create_app does); the node config schema chain needs the seeded catalog.
-    hydrate_executor_definitions(settings)
+    seed_demo_node_codes(settings)
     workspace = job_db.create_workspace(
-        "vault-full", default_workflow_key="question_comprehension_info"
+        "vault-full", default_workflow_key="education_video_problems_generation"
     )
     workspace_id = str(workspace["id"])
     catalog = WorkflowCatalogService(settings)
-    definition = catalog.definition("question_comprehension_info")
+    definition = catalog.definition("education_video_problems_generation")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
-    # Creating the connection also backfills the ``connection`` property on
-    # the CMS capabilities' config_schema.
+    # Create the connection; the token is diverted to the instance vault.
     connections = ConnectionService(job_db.path, settings.config)
     connections.create(
         CONNECTION_KEY,
@@ -71,18 +70,39 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     assert raw["base_url"] == "http://cms.example.com"
     assert PLAINTEXT not in json.dumps(raw)
 
+    # The demo nodes declare no connection property; republish the write_script
+    # agent with a ``connection`` field so the schema chain accepts the
+    # workspace override (agent config_schema is the D15 declaration point).
+    from server.app.agent_catalog import AgentDefinition
+    from server.app.services.agent_service import AgentService
+
+    agent_service = AgentService(settings.database_url, workspace_id)
+    agent_service.save_draft(
+        "example-write-script-v1",
+        AgentDefinition(
+            capability="write_script",
+            runtime="velites",
+            skill="education-video-problems-generation/write-script",
+            config_schema={
+                "type": "object",
+                "properties": {"connection": {"type": "string"}},
+            },
+        ),
+        created_by="test-seed",
+    )
+    agent_service.publish("example-write-script-v1")
+
     # The node config references the connection by key only — no secret
     # material ever enters the workspace override.
     update_workspace_node_config(
         job_db,
         catalog,
-        published_agent_definitions(settings.database_url),
+        published_agent_definitions(settings.database_url, workspace_id),
         job_db.get_workspace(workspace_id),
-        {"nodeConfig": {"fetch_questions": {"connection": CONNECTION_KEY}}},
-        settings.executor_definitions,
+        {"nodeConfig": {"write_script": {"connection": CONNECTION_KEY}}},
     )
     stored = job_db.get_workspace(workspace_id)["node_config"]
-    stored_node = stored["question_comprehension_info"]["fetch_questions"]
+    stored_node = stored["education_video_problems_generation"]["write_script"]
     assert stored_node["connection"] == CONNECTION_KEY
     assert PLAINTEXT not in json.dumps(stored)
 
@@ -92,18 +112,17 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     result = service.create_batch(
         workspace_id,
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q1"],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q1"],
         },
     )
     batch = job_db.get_batch(str(result["batch"]["id"]))
     payload_text = str(batch["source_payload_json"])
     assert PLAINTEXT not in payload_text
     assert ref_name not in payload_text
-    frozen = json.loads(payload_text)["node_config"]["fetch_questions"]
+    frozen = json.loads(payload_text)["node_config"]["write_script"]
     assert frozen["connection"] == CONNECTION_KEY
 
     # Runtime resolve: the dispatch chain sees the plaintext in memory.

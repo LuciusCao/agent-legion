@@ -3,15 +3,12 @@ from __future__ import annotations
 import logging
 import os
 import shutil
-from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
 
 from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
-from server.app.executors.code_config import validate_code_config_paths
-from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
 
 logger = logging.getLogger(__name__)
@@ -99,6 +96,10 @@ class ExecutorRuntimeConfig(BaseModel):
     lease_ttl_seconds: int = Field(default=90, ge=1)
     heartbeat_failure_threshold: int = Field(default=3, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
+    # Implicit single code pool capacity (P-0.5): non-Agent-routed nodes all
+    # claim from this pool. Instance-settings managed; takes effect on
+    # restart (no hot reload).
+    code_capacity: int = Field(default=16, gt=0)
     sweeper_enabled: bool = True
     sweeper_interval_seconds: float = Field(default=5.0, gt=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
@@ -141,69 +142,21 @@ def _resolve_executable(value: str) -> Path | None:
     return Path(found) if found else None
 
 
-def validate_runtime(
-    runtime: ExecutorRuntimeConfig,
-    config: dict[str, Any],
-    executor_definitions: Mapping[str, ExecutorConfig] | None = None,
-    repo_root: Path | None = None,
-) -> None:
+def validate_runtime(runtime: ExecutorRuntimeConfig, config: dict[str, Any]) -> None:
     """Validate enabled runtime dependencies at startup.
 
-    Disabled runtimes require nothing. Enabled executors require their executable
-    or working directory to exist. The yaml ``asr:`` section is retired: ASR
-    machine paths arrive only via the ``AGENT_LEGION_ASR_*`` env overrides, so
-    when ``config["asr"]`` is present every provided path must resolve (a typo'd
-    env value fails fast); with no ASR env configured nothing is checked and a
-    missing binary surfaces as the provider's FileNotFoundError at transcription
-    time. Missing env-level CMS credentials only log a warning when a CMS-backed
-    resource provider is enabled (workspace vault bindings cannot be pre-checked
-    at startup).
+    Business integrations (CMS credentials, ASR machine paths) retired with the
+    legacy business workflows: external service endpoints/credentials live on
+    instance-level connections and are injected into node config at dispatch
+    time, so startup has nothing to pre-check for them. The pi executor
+    precheck retired with the executor concept (P-0.5, schema v47): agent
+    runtimes are preflighted on the Agent Worker side.
     """
     errors: list[tuple[str, str]] = []
-
-    asr_config = config.get("asr")
-    if isinstance(asr_config, dict) and asr_config:
-        whisper_cfg = asr_config.get("whisper") or {}
-        if not isinstance(whisper_cfg, dict):
-            whisper_cfg = {}
-        sensevoice_cfg = asr_config.get("sensevoice") or {}
-        if not isinstance(sensevoice_cfg, dict):
-            sensevoice_cfg = {}
-        binary = str(whisper_cfg.get("binary") or "")
-        if binary and _resolve_executable(binary) is None:
-            errors.append(("asr.whisper.binary", "whisper binary is not executable or on PATH"))
-        model = str(whisper_cfg.get("model") or "")
-        if model and not _expand(model).is_file():
-            errors.append(("asr.whisper.model", "whisper model does not exist"))
-        vad_model = str(whisper_cfg.get("vad_model") or "")
-        if vad_model and not _expand(vad_model).is_file():
-            errors.append(("asr.whisper.vad_model", "whisper VAD model does not exist"))
-        model_dir = str(sensevoice_cfg.get("model_dir") or "")
-        if model_dir and not _expand(model_dir).is_dir():
-            errors.append(("asr.sensevoice.model_dir", "sensevoice model_dir does not exist"))
-        script = str(sensevoice_cfg.get("script") or "")
-        if script and not _expand(script).is_file():
-            errors.append(("asr.sensevoice.script", "sensevoice script does not exist"))
-
-    if runtime.workflows.enabled and any(
-        isinstance(definition, PiExecutorConfig)
-        for definition in (executor_definitions or {}).values()
-    ):
-        # The workflows.pi yaml block is retired: the binary comes from the
-        # hardcoded PiRuntimeConfig default (kept for this retained pi path).
-        pi_binary = str(runtime.workflows.pi.binary or "")
-        if not pi_binary:
-            errors.append(("pi executor binary", "missing pi binary"))
-        else:
-            if _resolve_executable(pi_binary) is None:
-                errors.append(("pi executor binary", "pi binary is not executable or on PATH"))
 
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
-
-    if repo_root is not None:
-        errors.extend(validate_code_config_paths(executor_definitions or {}, repo_root))
 
     if errors:
         raise StartupValidationError(errors)

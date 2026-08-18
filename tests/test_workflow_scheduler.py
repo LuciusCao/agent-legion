@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 
 from server.app.workflows.conditions import condition_matches, selected_edges
 from server.app.workflows.definition import (
@@ -18,7 +19,7 @@ from tests.helpers import load_builtin_definition
 
 
 def _definition():
-    return load_builtin_definition("question_comprehension_info")
+    return load_builtin_definition("education_video_problems_generation")
 
 
 def test_find_ready_nodes_starts_with_root(tmp_path):
@@ -27,43 +28,45 @@ def test_find_ready_nodes_starts_with_root(tmp_path):
 
     ready = find_ready_nodes(definition, nodes, artifact_dir=tmp_path)
 
-    assert [node.key for node in ready] == ["fetch_questions"]
+    assert [node.key for node in ready] == ["intake_knowledge_points"]
 
 
 def test_find_ready_nodes_requires_inputs(tmp_path):
     definition = _definition()
     nodes = {key: "pending" for key in definition.nodes}
-    nodes["fetch_questions"] = "completed"
+    nodes["intake_knowledge_points"] = "completed"
 
     assert find_ready_nodes(definition, nodes, artifact_dir=tmp_path) == []
 
-    (tmp_path / "questions.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "knowledge_point.json").write_text("{}", encoding="utf-8")
     ready = find_ready_nodes(definition, nodes, artifact_dir=tmp_path)
 
-    assert [node.key for node in ready] == ["clean_and_parse"]
+    assert [node.key for node in ready] == ["write_script", "generate_questions"]
 
 
-def test_parallel_ready_nodes_after_understanding(tmp_path):
+def test_parallel_ready_nodes_after_intake(tmp_path):
     definition = _definition()
     nodes = {key: "pending" for key in definition.nodes}
-    nodes["fetch_questions"] = "completed"
-    nodes["clean_and_parse"] = "completed"
-    (tmp_path / "questions.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "questions_parsed.json").write_text("{}", encoding="utf-8")
+    nodes["intake_knowledge_points"] = "completed"
+    nodes["write_script"] = "completed"
+    nodes["generate_questions"] = "completed"
+    (tmp_path / "knowledge_point.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "script.md").write_text("x", encoding="utf-8")
+    (tmp_path / "exercises.json").write_text("{}", encoding="utf-8")
 
     ready = find_ready_nodes(definition, nodes, artifact_dir=tmp_path)
 
-    assert [node.key for node in ready] == ["classify_comprehension_eligibility"]
+    assert [node.key for node in ready] == ["review_script", "review_questions"]
 
 
 def test_downstream_nodes_are_recursive():
     definition = _definition()
 
-    downstream = downstream_nodes(definition, "clean_and_parse")
+    downstream = downstream_nodes(definition, "write_script")
 
-    assert "generate_key_info" in downstream
-    assert "review_possible_errors" in downstream
-    assert "assemble_comprehension_info" in downstream
+    assert "review_script" in downstream
+    assert "publish_content" in downstream
+    assert "generate_questions" not in downstream
 
 
 def test_summarize_job_status():
@@ -132,37 +135,73 @@ def test_summarize_job_status_treats_not_applicable_as_terminal():
     assert summarize_job_status(["pending", "not_applicable"]) == "queued"
 
 
+def _write_branching_definition(path: Path) -> None:
+    path.write_text(
+        """
+key: branching
+label: Branching
+schema_version: 2
+nodes:
+  root:
+    label: Root
+    capability: root
+  gate:
+    label: Gate
+    capability: gate
+    after: [root]
+  good:
+    label: Good
+    capability: good
+    after: [gate]
+  leaf:
+    label: Leaf
+    capability: leaf
+    after: [good]
+  skipped:
+    label: Skipped
+    capability: skipped
+edges:
+  - {from: gate, to: good, when: {artifact: decision.json, path: "$.eligible", equals: true}}
+  - {from: gate, to: skipped, when: {artifact: decision.json, path: "$.eligible", equals: false}}
+  - {from: good, to: leaf}
+""",
+        encoding="utf-8",
+    )
+
+
 def test_evaluate_branches_marks_unselected_branch_not_applicable(tmp_path):
-    definition = load_builtin_definition("question_comprehension_info")
-    (tmp_path / "comprehension_eligibility.json").write_text(
-        json.dumps({"question_id": "Q1", "eligible": False}),
+    path = tmp_path / "branching.yaml"
+    _write_branching_definition(path)
+    definition = load_workflow_definition(path)
+    (tmp_path / "decision.json").write_text(
+        json.dumps({"eligible": False}),
         encoding="utf-8",
     )
     statuses = {key: "pending" for key in definition.nodes}
-    statuses["fetch_questions"] = "completed"
-    statuses["clean_and_parse"] = "completed"
-    statuses["classify_comprehension_eligibility"] = "completed"
+    statuses["root"] = "completed"
+    statuses["gate"] = "completed"
 
     result = evaluate_branches(definition, statuses, tmp_path)
 
-    assert "generate_key_info" in result.not_applicable
-    assert "review_key_info" in result.not_applicable
-    assert "assemble_comprehension_info" in result.not_applicable
-    assert "finalize_non_uploadable" not in result.not_applicable
+    assert "good" in result.not_applicable
+    assert "leaf" in result.not_applicable
+    assert "skipped" not in result.not_applicable
 
 
 def test_evaluate_branches_marks_node_not_applicable_when_all_incoming_conditions_false(tmp_path):
-    definition = load_builtin_definition("question_comprehension_info")
-    (tmp_path / "comprehension_eligibility.json").write_text(
-        json.dumps({"question_id": "Q1", "eligible": False}),
+    path = tmp_path / "branching.yaml"
+    _write_branching_definition(path)
+    definition = load_workflow_definition(path)
+    (tmp_path / "decision.json").write_text(
+        json.dumps({"eligible": False}),
         encoding="utf-8",
     )
     statuses = {key: "pending" for key in definition.nodes}
-    statuses["classify_comprehension_eligibility"] = "completed"
+    statuses["gate"] = "completed"
 
     result = evaluate_branches(definition, statuses, tmp_path)
 
-    assert "generate_key_info" in result.not_applicable
+    assert "good" in result.not_applicable
 
 
 def test_unconditional_fanout_is_not_marked_not_applicable(tmp_path):

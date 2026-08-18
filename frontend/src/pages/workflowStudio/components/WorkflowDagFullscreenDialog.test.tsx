@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { WorkflowDagFullscreenButton } from './WorkflowDagFullscreenButton'
 import { WorkflowDagFullscreenDialog } from './WorkflowDagFullscreenDialog'
+import { buildDagEdges, buildDagNodes } from '../workflowStudioDag'
 import type { WorkflowDefinitionRecord } from '../../../types'
 
 const workflow: WorkflowDefinitionRecord = {
@@ -22,14 +23,8 @@ const workflow: WorkflowDefinitionRecord = {
   edges: [],
 }
 
-const executorCatalog = [
-  {
-    id: 'code-default',
-    kind: 'code' as const,
-    global_capacity: 4,
-    capabilities: ['cap_a'],
-  },
-]
+const nodes = buildDagNodes(workflow)
+const edges = buildDagEdges(workflow)
 
 describe('WorkflowDagFullscreenDialog', () => {
   it('opens fullscreen dialog when button is clicked', async () => {
@@ -47,8 +42,8 @@ describe('WorkflowDagFullscreenDialog', () => {
     render(
       <WorkflowDagFullscreenDialog
         open
-        workflow={workflow}
-        executorCatalog={executorCatalog}
+        nodes={nodes}
+        edges={edges}
         selectedNode={null}
         onSelectedNodeChange={vi.fn()}
         onClose={vi.fn()}
@@ -61,7 +56,8 @@ describe('WorkflowDagFullscreenDialog', () => {
     expect(
       screen.getByRole('button', { name: 'close fullscreen DAG' })
     ).toBeInTheDocument()
-    expect(screen.getByText('code')).toBeInTheDocument()
+    // P-0.5：每个非 Agent 节点都标 code 池，多个节点共享同一标签。
+    expect(screen.getAllByText('code').length).toBeGreaterThan(0)
   })
 
   it('closes dialog and preserves selected node state', async () => {
@@ -71,8 +67,8 @@ describe('WorkflowDagFullscreenDialog', () => {
     render(
       <WorkflowDagFullscreenDialog
         open
-        workflow={workflow}
-        executorCatalog={executorCatalog}
+        nodes={nodes}
+        edges={edges}
         selectedNode="a"
         onSelectedNodeChange={onSelectedNodeChange}
         onClose={onClose}
@@ -94,8 +90,8 @@ describe('WorkflowDagFullscreenDialog', () => {
     const { container } = render(
       <WorkflowDagFullscreenDialog
         open={false}
-        workflow={workflow}
-        executorCatalog={executorCatalog}
+        nodes={nodes}
+        edges={edges}
         selectedNode={null}
         onSelectedNodeChange={vi.fn()}
         onClose={vi.fn()}

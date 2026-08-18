@@ -1,10 +1,12 @@
 """Code defaults for the retired ``config/agent_legion.yaml`` ``openclaw:`` section.
 
-Values equal the last tracked yaml values. The admin-tunable copy lives in
-the DB instance settings document; these defaults back both the typed
-runtime config (filled into the config dict at load) and the default DB
-document. Env overrides (``AGENT_LEGION_OPENCLAW_CWD``) and explicit
-single-file configs win: only missing keys are filled.
+Values equal the last tracked yaml values, with one deliberate exception:
+``skill_safety.repos`` defaults to empty because the platform ships no
+business skills (open-source extraction plan §1.1 #6). The admin-tunable
+copy lives in the DB instance settings document; these defaults back both
+the typed runtime config (filled into the config dict at load) and the
+default DB document. Env overrides (``AGENT_LEGION_OPENCLAW_CWD``) and
+explicit single-file configs win: only missing keys are filled.
 """
 
 from __future__ import annotations
@@ -34,12 +36,10 @@ DEFAULT_OPENCLAW_CONFIG: dict[str, Any] = {
     ],
     "skill_safety": {
         "enabled": True,
-        "repos": [
-            {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_interactions"},
-            {"path": "~/.agents/skills/agent-legion/video_knowledge/review_video_content"},
-            {"path": "~/.agents/skills/agent-legion/video_knowledge/review_subtitles"},
-            {"path": "~/.agents/skills/agent-legion/video_knowledge/generate_chapters"},
-        ],
+        # Empty by default: the platform ships no business skills, so there
+        # is nothing to whitelist out of the box; deployments declare their
+        # own skill paths via the DB instance settings document.
+        "repos": [],
     },
 }
 

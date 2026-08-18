@@ -1,7 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query'
 import { queryKeys } from './queryKeys'
 
-// 与原 executorsStore.refreshWorkers 同档的 750ms 防抖：合并 SSE 事件风暴，
+// 与原 executorsStore.refreshWorkers（现 connectionStatusStore，refreshWorkers 已迁
+// react-query）同档的 750ms 防抖：合并 SSE 事件风暴，
 // 避免每个事件都触发一次 workers refetch。
 const INVALIDATE_DEBOUNCE_MS = 750
 

@@ -131,9 +131,12 @@ def fail_stale_definition_requests(broker: AgentExecutionBroker) -> list[str]:
             select r.execution_id, r.job_id, r.node_key, r.agent_id
             from agent_execution_requests r
             where r.state='queued'
+              -- kind='code' payloads are self-contained: no versioned Agent
+              -- definition exists for them by design (batch 2).
+              and r.kind='agent'
               and not exists (
                   select 1 from versioned_entities d
-                  where d.entity_type='agent' and d.workspace_id is null
+                  where d.entity_type='agent' and d.workspace_id=r.workspace_id
                     and d.entity_key=r.agent_id
                     and d.definition_hash=r.agent_definition_hash
                     -- Quality replay pins stay valid while their immutable

@@ -127,12 +127,12 @@ class TestArtifactBlobRelpath:
 
 class TestJobStorageRelpath:
     def test_uses_storage_dir_from_db(self):
-        rel = job_storage_relpath("jobs/question_comprehension/job-1", "wf", "job-1")
-        assert rel == Path("jobs/question_comprehension/job-1")
+        rel = job_storage_relpath("jobs/demo_workspace/job-1", "wf", "job-1")
+        assert rel == Path("jobs/demo_workspace/job-1")
 
     def test_falls_back_to_workflow_key_and_id(self):
-        rel = job_storage_relpath("", "video_knowledge", "job-9")
-        assert rel == Path("jobs/video_knowledge/job-9")
+        rel = job_storage_relpath("", "demo_video_workflow", "job-9")
+        assert rel == Path("jobs/demo_video_workflow/job-9")
 
     def test_rejects_absolute_and_traversal(self):
         with pytest.raises(SeedError):

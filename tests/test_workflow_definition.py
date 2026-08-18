@@ -32,30 +32,28 @@ def test_workflow_node_requires_non_empty_capability(tmp_path: Path) -> None:
 def test_workflow_node_loads_capability(tmp_path: Path) -> None:
     path = write_workflow(
         tmp_path,
-        node_body="label: Fetch\ncapability: fetch_questions\noutputs: [out.json]",
+        node_body="label: Fetch\ncapability: fetch_items\noutputs: [out.json]",
     )
-    assert load_workflow_definition(path).nodes["one"].capability == "fetch_questions"
+    assert load_workflow_definition(path).nodes["one"].capability == "fetch_items"
 
 
-def test_load_question_comprehension_info_definition():
-    definition = load_builtin_definition("question_comprehension_info")
+def test_load_demo_workflow_definition():
+    definition = load_builtin_definition("education_video_problems_generation")
 
-    assert definition.key == "question_comprehension_info"
-    assert definition.label == "题目审题信息生成 DAG"
-    batch_by_ids = definition.intake.modes["batch_by_ids"]
-    assert batch_by_ids.label == "按题目ID批量"
-    assert batch_by_ids.input_field == "question_ids"
-    batch_by_knowledge = definition.intake.modes["batch_by_knowledge"]
-    assert batch_by_knowledge.label == "按知识点批量"
-    assert batch_by_knowledge.input_field == "knowledge_codes"
-    assert definition.nodes["fetch_questions"].label == "获取题目"
-    assert definition.nodes["clean_and_parse"].label == "清洗与解析"
-    assert definition.nodes["clean_and_parse"].after == ["fetch_questions"]
-    assert definition.nodes["assemble_comprehension_info"].inputs == [
-        "questions_parsed_lean.json",
-        "key_info_reviewed.json",
-        "possible_errors_reviewed.json",
-        "comprehension_difficulty.json",
+    assert definition.key == "education_video_problems_generation"
+    assert definition.label == "教学视频脚本与题目生成（示例）"
+    direct_ids = definition.intake.modes["direct_ids"]
+    assert direct_ids.label == "按知识点批量"
+    assert direct_ids.input_field == "knowledge_point_ids"
+    assert definition.nodes["intake_knowledge_points"].label == "读取知识点"
+    assert definition.nodes["write_script"].label == "撰写教学视频脚本"
+    assert definition.nodes["write_script"].after == ["intake_knowledge_points"]
+    assert definition.nodes["publish_content"].inputs == [
+        "knowledge_point.json",
+        "script.md",
+        "script_review.json",
+        "exercises.json",
+        "exercises_review.json",
     ]
 
 
@@ -188,56 +186,37 @@ nodes:
     assert definition.nodes["one"].label == "步骤一"
 
 
-def test_load_question_comprehension_info_capabilities():
-    definition = load_builtin_definition("question_comprehension_info")
+def test_load_demo_workflow_capabilities():
+    definition = load_builtin_definition("education_video_problems_generation")
 
-    assert definition.key == "question_comprehension_info"
-    assert definition.label == "题目审题信息生成 DAG"
-    assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
+    assert definition.key == "education_video_problems_generation"
+    assert definition.label == "教学视频脚本与题目生成（示例）"
+    assert set(definition.intake.modes) == {"direct_ids"}
 
     assert list(definition.nodes) == [
-        "fetch_questions",
-        "clean_and_parse",
-        "classify_comprehension_eligibility",
-        "generate_key_info",
-        "review_key_info",
-        "generate_possible_errors",
-        "review_possible_errors",
-        "assess_comprehension_difficulty",
-        "assemble_comprehension_info",
-        "finalize_non_uploadable",
+        "intake_knowledge_points",
+        "write_script",
+        "review_script",
+        "generate_questions",
+        "review_questions",
+        "publish_content",
     ]
-    assert definition.nodes["fetch_questions"].capability == "fetch_questions"
-    assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
-    assert (
-        definition.nodes["classify_comprehension_eligibility"].capability
-        == "classify_comprehension_eligibility"
-    )
-    assert definition.nodes["generate_key_info"].after == ["clean_and_parse"]
-    assert definition.nodes["review_key_info"].after == ["generate_key_info"]
-    assert definition.nodes["generate_possible_errors"].after == ["review_key_info"]
-    assert definition.nodes["review_possible_errors"].after == ["generate_possible_errors"]
-    assert definition.nodes["assess_comprehension_difficulty"].after == [
-        "review_key_info",
-        "review_possible_errors",
-    ]
-    assert definition.nodes["assemble_comprehension_info"].after == [
-        "assess_comprehension_difficulty"
-    ]
-    assert definition.nodes["assemble_comprehension_info"].outputs == [
-        "comprehension_info.json",
-        "manifest.json",
-    ]
-    assert definition.nodes["finalize_non_uploadable"].capability == "finalize_non_uploadable"
-    assert definition.nodes["finalize_non_uploadable"].terminal is not None
-    assert definition.nodes["finalize_non_uploadable"].terminal.outcome == "non_uploadable"
+    assert definition.nodes["intake_knowledge_points"].capability == "intake_knowledge_points"
+    assert definition.nodes["write_script"].capability == "write_script"
+    assert definition.nodes["review_script"].after == ["write_script"]
+    assert definition.nodes["generate_questions"].after == ["intake_knowledge_points"]
+    assert definition.nodes["review_questions"].after == ["generate_questions"]
+    assert definition.nodes["publish_content"].after == ["review_script", "review_questions"]
+    assert definition.nodes["publish_content"].outputs == ["publish_payload.json"]
+    assert definition.nodes["publish_content"].terminal is not None
+    assert definition.nodes["publish_content"].terminal.outcome == "published"
 
 
 def test_workflow_node_loads_config_mapping(tmp_path: Path) -> None:
     path = write_workflow(
         tmp_path,
         node_body=(
-            "capability: fetch_questions\noutputs: [out.json]\n"
+            "capability: fetch_items\noutputs: [out.json]\n"
             "config:\n      page_size: 20\n      subject_id: math"
         ),
     )
@@ -246,14 +225,14 @@ def test_workflow_node_loads_config_mapping(tmp_path: Path) -> None:
 
 
 def test_workflow_node_config_defaults_to_empty(tmp_path: Path) -> None:
-    path = write_workflow(tmp_path, node_body="capability: fetch_questions\noutputs: [out.json]")
+    path = write_workflow(tmp_path, node_body="capability: fetch_items\noutputs: [out.json]")
     assert load_workflow_definition(path).nodes["one"].config == {}
 
 
 def test_workflow_node_rejects_non_mapping_config(tmp_path: Path) -> None:
     path = write_workflow(
         tmp_path,
-        node_body="capability: fetch_questions\noutputs: [out.json]\nconfig: [page_size]",
+        node_body="capability: fetch_items\noutputs: [out.json]\nconfig: [page_size]",
     )
     with pytest.raises(WorkflowDefinitionError, match="config must be a mapping"):
         load_workflow_definition(path)
@@ -264,7 +243,7 @@ def test_workflow_node_rejects_retired_resources_key(tmp_path: Path) -> None:
     # the legacy node field so stale DAGs surface immediately.
     path = write_workflow(
         tmp_path,
-        node_body="capability: fetch_questions\noutputs: [out.json]\nresources: [question_detail]",
+        node_body="capability: fetch_items\noutputs: [out.json]\nresources: [question_detail]",
     )
     with pytest.raises(WorkflowDefinitionError, match="'resources' was removed"):
         load_workflow_definition(path)
@@ -278,9 +257,7 @@ def test_node_config_round_trips_through_job_snapshot(tmp_path: Path) -> None:
 
     path = write_workflow(
         tmp_path,
-        node_body=(
-            "capability: fetch_questions\noutputs: [out.json]\nconfig:\n      page_size: 20"
-        ),
+        node_body=("capability: fetch_items\noutputs: [out.json]\nconfig:\n      page_size: 20"),
     )
     definition = load_workflow_definition(path)
     snapshot = serialize_definition(definition)
@@ -294,7 +271,7 @@ def test_legacy_snapshot_without_node_config_still_loads() -> None:
 
     snapshot = (
         '{"key":"test","label":"Test","schema_version":1,'
-        '"nodes":{"one":{"key":"one","label":"One","capability":"fetch_questions",'
+        '"nodes":{"one":{"key":"one","label":"One","capability":"fetch_items",'
         '"after":[],"inputs":[],"outputs":["out.json"],"terminal":null,'
         '"execution":{"provider":"","model":"","thinking":"","prompt":""}}},"edges":[]}'
     )
@@ -335,3 +312,104 @@ def test_missing_job_snapshot_returns_none_without_warning(caplog) -> None:
         )
 
     assert not [r for r in caplog.records if r.levelno >= logging.WARNING]
+
+
+@pytest.mark.no_db
+def test_node_config_schema_loads(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_items\n"
+            "config_schema:\n"
+            "  type: object\n"
+            "  properties:\n"
+            "    page_size:\n"
+            "      type: integer\n"
+            "      default: 50"
+        ),
+    )
+    node = load_workflow_definition(path).nodes["one"]
+    assert node.config_schema == {
+        "type": "object",
+        "properties": {"page_size": {"type": "integer", "default": 50}},
+    }
+
+
+@pytest.mark.no_db
+def test_node_config_schema_defaults_to_empty(tmp_path: Path) -> None:
+    path = write_workflow(tmp_path, node_body="capability: fetch_items")
+    assert load_workflow_definition(path).nodes["one"].config_schema == {}
+
+
+@pytest.mark.no_db
+def test_node_config_schema_rejects_invalid_schema(tmp_path: Path) -> None:
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_items\n"
+            "config_schema:\n"
+            "  properties:\n"
+            "    page_size:\n"
+            "      type: array"
+        ),
+    )
+    with pytest.raises(WorkflowDefinitionError, match="config_schema"):
+        load_workflow_definition(path)
+
+
+@pytest.mark.no_db
+def test_node_config_schema_rejects_reserved_execution_keys(tmp_path: Path) -> None:
+    """timeout_seconds/sandbox_network are platform-reserved (P-0.5): nodes
+    set them via config/workspace overrides, never via config_schema."""
+    for key in ("timeout_seconds", "sandbox_network"):
+        path = write_workflow(
+            tmp_path,
+            node_body=(
+                "capability: fetch_items\n"
+                "config_schema:\n"
+                "  properties:\n"
+                f"    {key}:\n"
+                "      type: integer"
+            ),
+        )
+        with pytest.raises(WorkflowDefinitionError, match="reserved"):
+            load_workflow_definition(path)
+
+
+@pytest.mark.no_db
+def test_node_config_schema_survives_revision_snapshot_round_trip(tmp_path: Path) -> None:
+    """The declaration versions with the revision snapshot (asdict JSON) and
+    with the Studio YAML export."""
+    import json
+
+    from server.app.services.workflow_revision_format import (
+        definition_to_yaml,
+        serialize_definition,
+    )
+    from server.app.workflows.definition import (
+        workflow_definition_from_dict,
+        workflow_definition_from_mapping,
+    )
+
+    schema = {"type": "object", "properties": {"page_size": {"type": "integer", "default": 50}}}
+    path = write_workflow(
+        tmp_path,
+        node_body=(
+            "capability: fetch_items\n"
+            "config_schema:\n"
+            "  type: object\n"
+            "  properties:\n"
+            "    page_size:\n"
+            "      type: integer\n"
+            "      default: 50"
+        ),
+    )
+    definition = load_workflow_definition(path)
+
+    restored = workflow_definition_from_dict(json.loads(serialize_definition(definition)))
+    assert restored.nodes["one"].config_schema == schema
+
+    import yaml
+
+    reloaded = workflow_definition_from_mapping(yaml.safe_load(definition_to_yaml(definition)))
+    assert reloaded.nodes["one"].config_schema == schema

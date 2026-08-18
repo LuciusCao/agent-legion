@@ -1,11 +1,9 @@
 import json
 import subprocess
 import threading
-from pathlib import Path
 
 from server.app.events.agents import AgentStatus, AgentStatusManager
-from server.app.executors.openclaw_runner import OpenClawRunner
-from server.app.pipeline.runners import list_openclaw_agents
+from server.app.openclaw_agents import list_openclaw_agents
 
 
 def _agent_dict(**kwargs):
@@ -278,42 +276,6 @@ def test_concurrent_set_idle_clears_all_busy_video_ids():
     assert manager.is_video_busy("video_3") is False
 
 
-def test_openclaw_runner_extracts_agent_id_from_command_template():
-    runner = OpenClawRunner(
-        command_template=[
-            "openclaw",
-            "agent",
-            "--local",
-            "--agent",
-            "main",
-            "--message",
-            "{prompt_text}",
-            "--json",
-        ],
-        cwd=Path("."),
-        timeout_seconds=600,
-    )
-    assert runner.agent_id == "main"
-
-
-def test_openclaw_runner_extracts_agent_id_returns_empty_when_missing():
-    runner = OpenClawRunner(
-        command_template=["openclaw", "agent", "--local", "--message", "{prompt_text}", "--json"],
-        cwd=Path("."),
-        timeout_seconds=600,
-    )
-    assert runner.agent_id == ""
-
-
-def test_openclaw_runner_extracts_agent_id_at_end_of_list():
-    runner = OpenClawRunner(
-        command_template=["openclaw", "--agent", "ops"],
-        cwd=Path("."),
-        timeout_seconds=600,
-    )
-    assert runner.agent_id == "ops"
-
-
 def test_workspace_isolated_pi_status():
     manager = AgentStatusManager()
     manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
@@ -409,3 +371,38 @@ def test_set_busy_and_idle_are_thread_safe():
     assert len(agents) == 1
     assert agents[0]["task_count"] == 0
     assert agents[0]["busy"] is False
+
+
+def test_list_openclaw_agents_success(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd, 0, stdout=json.dumps([{"id": "main"}, {"id": "aux"}]), stderr=""
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    agents = list_openclaw_agents()
+    assert agents == [{"id": "main"}, {"id": "aux"}]
+
+
+def test_list_openclaw_agents_failure(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 1, stdout="", stderr="err")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert list_openclaw_agents() == []
+
+
+def test_list_openclaw_agents_invalid_json(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(cmd, 0, stdout="not json", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert list_openclaw_agents() == []
+
+
+def test_list_openclaw_agents_exception(monkeypatch):
+    def fake_run(cmd, **kwargs):
+        raise OSError("no openclaw")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    assert list_openclaw_agents() == []

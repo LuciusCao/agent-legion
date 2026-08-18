@@ -17,7 +17,7 @@ intake:
 nodes:
   fetch:
     label: Fetch
-    capability: fetch_questions
+    capability: fetch_items
     after: []
     inputs: []
     outputs:

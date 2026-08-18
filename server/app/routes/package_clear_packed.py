@@ -1,5 +1,6 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
+from ..auth.dependencies import reject_studio_agent_scope
 from ..services.job_packages import JobPackageService
 from ..services.job_selection_resolver import EmptyJobSelectionError
 from .package_contracts import (
@@ -13,6 +14,7 @@ def register_clear_packed_route(router: APIRouter, job_packages: JobPackageServi
     @router.post(
         "/workspaces/{workspace_id}/jobs/clear-packed",
         response_model=WorkspacePackageStatusResetResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def clear_workspace_jobs_packed_status(
         workspace_id: str, request: WorkspacePackageRequest

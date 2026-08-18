@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from typing import Annotated
+
+from fastapi import APIRouter, Query
 
 from server.app.routes.executor_catalog_contracts import ExecutorCatalogResponse
 from server.app.routes.executor_contracts import (
@@ -22,9 +24,12 @@ def create_workspace_executors_router(
     router = APIRouter()
 
     @router.get("/executors", response_model=ExecutorCatalogResponse)
-    def get_executors() -> ExecutorCatalogResponse:
+    def get_executors(workspace_id: Annotated[str, Query()]) -> ExecutorCatalogResponse:
+        # The Agent half of the catalog is workspace-scoped (schema v46), so
+        # the required workspace_id query parameter doubles as the membership
+        # scope enforced by the router-level workspace-access dependency.
         require_workflows_enabled(settings)
-        return ExecutorCatalogResponse(**catalog.catalog())
+        return ExecutorCatalogResponse(**catalog.catalog(workspace_id))
 
     @router.get(
         "/workspaces/{workspace_id}/executor-configuration",

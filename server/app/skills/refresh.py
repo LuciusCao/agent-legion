@@ -27,7 +27,11 @@ def refresh_source(
     in_place = manager._is_in_place_source(repo, cache_dir)
     if not cache_dir.exists():
         if in_place:
-            raise SkillRepoError(f"local skill repo not found: {cache_dir}")
+            raise SkillRepoError(
+                f"local skill repo not found: {cache_dir} "
+                "（示例 workflow 的 skill 请先运行 make import-demo 导入；"
+                "其他 skill 请确认本地仓库路径与 skill 源配置一致）"
+            )
         cache_dir.parent.mkdir(parents=True, exist_ok=True)
         manager._run_git(["clone", repo, str(cache_dir)])
         # A fresh clone may lack commits the old repo held (e.g. locked

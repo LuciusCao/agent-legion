@@ -15,7 +15,7 @@ const settings = {
   entityType: 'video',
   intakeModes: [],
   labelOverrides: {},
-  workflowKey: 'video_knowledge',
+  workflowKey: 'demo_video_workflow',
   resources: {},
 }
 

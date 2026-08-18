@@ -14,16 +14,16 @@ from collections import deque
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from server.app.executors.config import CodeExecutorConfig
 from server.app.executors.scheduling.capacity import CapacitySnapshot
 from server.app.services.job_errors import JobServiceError
-from server.app.services.node_codes import resolve_dispatch_node_code
 from server.app.services.vault import VaultError
 from server.app.workflow_worker.agent_claim import (
     cached_batch_payload,
     claim_agent_node,
     fail_node_config,
 )
+from server.app.workflow_worker.code_claim import try_claim_code_worker_node
+from server.app.workflow_worker.code_dispatch import resolve_code_node_dispatch
 from server.app.workflow_worker.dispatch_config import resolve_dispatch_node_config
 from server.app.workflow_worker.executor_claim import claim_executor_node
 from server.app.workflow_worker.routing import resolve_node_route
@@ -140,14 +140,20 @@ def try_claim_and_submit(
 
     executor_id = resolved.target_id
 
-    # Cheap gate before config resolution: when the pass snapshot says this
-    # executor/workspace is out of capacity, the claim cannot succeed
-    # (claim_executor_node re-checks authoritatively), so skip the per-pop
-    # batch lookup and config resolution for the thousands of doomed
-    # candidates that pile up behind a saturated executor.
-    if worker.registry.global_capacity(executor_id) is None:
-        return False
-    if not snapshot.has_capacity(executor_id, workspace_id):
+    # Batch 2: a code-pool candidate with an online code-capable Worker and a
+    # Worker-eligible payload is enqueued to the broker; anything else falls
+    # through to the local executor path below (the safety net).
+    if try_claim_code_worker_node(
+        worker, workspace, job, node, job_dir, log_path, inputs, workflow_key
+    ):
+        return True
+
+    # Cheap gate before config resolution: when the pass snapshot says the
+    # code pool (or this node's limit) is out of capacity, the claim cannot
+    # succeed (claim_executor_node re-checks authoritatively), so skip the
+    # per-pop batch lookup and config resolution for the thousands of doomed
+    # candidates that pile up behind a saturated pool.
+    if not snapshot.has_capacity(workspace_id, workflow_key, node_key):
         return False
 
     try:
@@ -155,31 +161,20 @@ def try_claim_and_submit(
         # Frozen snapshot → vault secret_refs → connection config + token;
         # all in-memory only (VAULT-SECRET-001, CONFIG-MANIFEST-001).
         node_config = resolve_dispatch_node_config(
-            worker, executor_id, node, workflow_key, workspace_id, workspace, batch_payload
+            worker, node, workflow_key, workspace_id, workspace, batch_payload
         )
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
-    # Custom node code (EXEC-CODE-002): only code-kind executors can carry
-    # custom code, so other kinds skip the DB read entirely. Frozen job
-    # version wins over the current published version; None keeps builtin.
-    # A frozen-pin hash mismatch fails the node (fail closed, EXEC-CODE-003).
-    node_code = None
-    if isinstance(worker.settings.executor_definitions.get(executor_id), CodeExecutorConfig):
-        frozen_pins = (batch_payload or {}).get("node_code_versions") or {}
-        try:
-            node_code = resolve_dispatch_node_code(
-                worker.job_db.path,
-                worker.settings.executor_runtime.workflows.custom_nodes_enabled,
-                workspace_id,
-                workflow_key,
-                node_key,
-                frozen_pins.get(node_key),
-            )
-        except ValueError as exc:
-            return fail_node_config(
-                worker, workspace_id, job, workflow_key, node, log_path, str(exc)
-            )
+    # Node code (EXEC-CODE-002): frozen job version wins over the workspace
+    # published version, then the global factory seed; a frozen-pin hash
+    # mismatch fails the node (fail closed, EXEC-CODE-003).
+    try:
+        node_code = resolve_code_node_dispatch(
+            worker, workspace_id, workflow_key, node, batch_payload
+        )
+    except ValueError as exc:
+        return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
     claimed = claim_executor_node(
         worker,

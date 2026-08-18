@@ -15,7 +15,8 @@ from server.app.services.agent_version_pins import (
     agent_version_pin,
     resolve_dispatch_agent_definition,
 )
-from server.app.services.node_config import batch_source_payload, dispatch_effective_config
+from server.app.services.node_config import dispatch_effective_config
+from server.app.services.node_config_batch import batch_source_payload
 from server.app.skills.errors import SkillRepoError
 from server.app.workflow_worker.agent_gate import agent_claim_allowed
 from server.app.workflows.definition import WorkflowNode
@@ -90,7 +91,7 @@ def claim_agent_node(
     pin = agent_version_pin(batch_payload, node.key)
     try:
         definition_config = resolve_dispatch_agent_definition(
-            worker.settings.database_url, agent_id, pin
+            worker.settings.database_url, str(workspace_id), agent_id, pin
         )
     except ValueError as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
@@ -102,7 +103,9 @@ def claim_agent_node(
             workflow_key,
             node,
             log_path,
-            f"Invalid Agent route {agent_id!r}",
+            f"Agent {agent_id!r} has no published definition in workspace {workspace_id!r};"
+            " agent definitions are workspace-scoped (schema v46) — create one in"
+            " Studio (Agent 管理) for this workspace",
         )
     if pin is not None and definition_config.capability != node.capability:
         return fail_node_config(
