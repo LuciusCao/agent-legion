@@ -34,6 +34,15 @@ vi.mock('../api/skillSources', () => ({
   relockSkillSources: vi.fn(),
 }))
 
+vi.mock('../api/studioAgents', () => ({
+  getStudioAgents: vi.fn().mockResolvedValue({
+    api_base: 'http://127.0.0.1:8000',
+    agents: [],
+    availability: {},
+  }),
+  updateStudioAgents: vi.fn(),
+}))
+
 vi.mock('../api/connections', () => ({
   getConnections: vi.fn().mockResolvedValue({ connections: [] }),
   getConnectionTypes: vi.fn().mockResolvedValue({ types: [] }),
@@ -144,6 +153,7 @@ describe('GlobalSettingsPage', () => {
       '实例设置',
       '外部服务连接',
       'Skill 源管理',
+      'Studio Agent 管理',
     ]) {
       expect(
         within(nav).getByRole('button', { name: label })

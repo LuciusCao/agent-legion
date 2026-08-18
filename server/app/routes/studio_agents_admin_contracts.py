@@ -36,7 +36,14 @@ class StudioAgentRegistryDocument(BaseModel):
 
 
 class StudioAgentRegistryResponse(StudioAgentRegistryDocument):
-    pass
+    """Stored document plus a PATH-probe result per agent id.
+
+    ``availability`` is response-only (admins see which entries can actually
+    launch on this host); it is never persisted and never accepted on PUT,
+    so it lives here rather than on the shared document model.
+    """
+
+    availability: dict[str, bool] = Field(default_factory=dict)
 
 
 class StudioAgentRegistryUpdate(StudioAgentRegistryDocument):
