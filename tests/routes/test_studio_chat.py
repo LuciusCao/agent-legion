@@ -160,18 +160,21 @@ def test_non_member_gets_404(client, job_db, tmp_path) -> None:
     )
 
 
-def test_viewer_reads_but_cannot_write(client, job_db, tmp_path) -> None:
+def test_non_admin_member_gets_403(client, job_db, tmp_path) -> None:
+    """Studio chat is part of the Studio authoring surface (P4): a workspace
+    member — even an editor — gets 403 on reads and writes alike; only
+    admins (and scoped tokens under STUDIO-AGENT-001) may use it."""
     _register_fake_agent(client, tmp_path)
     workspace_id = _create_workspace(client)
     session_id = _create_session(client, workspace_id)
     member, member_id = _member_client(client)
-    job_db.upsert_workspace_member(workspace_id, member_id, "viewer")
+    job_db.upsert_workspace_member(workspace_id, member_id, "editor")
     try:
         base = f"/api/workspaces/{workspace_id}/studio-chat"
-        assert member.get(f"{base}/sessions").status_code == 200
-        assert member.get(f"{base}/sessions/{session_id}").status_code == 200
-        assert member.get(f"{base}/sessions/{session_id}/messages").status_code == 200
-        assert member.get(f"{base}/agents").status_code == 200
+        assert member.get(f"{base}/sessions").status_code == 403
+        assert member.get(f"{base}/sessions/{session_id}").status_code == 403
+        assert member.get(f"{base}/sessions/{session_id}/messages").status_code == 403
+        assert member.get(f"{base}/agents").status_code == 403
         assert (
             member.post(f"{base}/sessions/{session_id}/messages", json={"text": "hi"}).status_code
             == 403

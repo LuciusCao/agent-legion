@@ -30,6 +30,14 @@ vi.mock('react-router-dom', async () => {
   }
 })
 
+const authState: { user: { role: 'admin' | 'member' } | null } = {
+  user: { role: 'admin' },
+}
+vi.mock('../stores/authStore', () => ({
+  useAuthStore: (selector?: (state: typeof authState) => unknown) =>
+    selector ? selector(authState) : authState,
+}))
+
 const ws1 = makeWorkspace({
   id: 'ws-1',
   name: 'Test Workspace',
@@ -47,6 +55,7 @@ describe('DashboardPage', () => {
     mockFetchWorkflows.mockClear()
     navigate.mockClear()
     EventSourceMock.reset()
+    authState.user = { role: 'admin' }
   })
 
   it('renders Agent Legion title', () => {
@@ -80,6 +89,16 @@ describe('DashboardPage', () => {
       fireEvent.click(screen.getByText('新建 Workspace'))
     })
     expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('hides the create workspace button for non-admin users (P4)', () => {
+    authState.user = { role: 'member' }
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+    expect(screen.queryByText('新建 Workspace')).not.toBeInTheDocument()
   })
 
   it('fetches workspaces on mount', async () => {
