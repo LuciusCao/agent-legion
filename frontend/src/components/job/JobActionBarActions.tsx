@@ -5,6 +5,7 @@ import { JobRerunDialog } from '../JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobActionBarUpgrade } from './JobActionBarUpgrade'
 import { JobAllMatchingRerunDialog } from './JobAllMatchingRerunDialog'
+import { JobAllMatchingUpgradeDialog } from './JobAllMatchingUpgradeDialog'
 import {
   canContinueJob,
   computeActionDisabled,
@@ -53,6 +54,7 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
   } = props
   const [rerunOpen, setRerunOpen] = useState(false)
   const [runToOpen, setRunToOpen] = useState(false)
+  const [upgradeOpen, setUpgradeOpen] = useState(false)
   const allMatching = allMatchingCount != null
   const disabled = allMatching
     ? allMatchingDisabled(allMatchingCount, loading)
@@ -75,13 +77,13 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
       <div className={styles.actions}>
         {isBatch &&
           (allMatching ? (
-            <Tooltip title={ALL_MATCHING_TOOLTIP}>
-              <span>
-                <Button variant="outlined" disabled>
-                  升级 workflow
-                </Button>
-              </span>
-            </Tooltip>
+            <Button
+              variant="outlined"
+              onClick={() => setUpgradeOpen(true)}
+              disabled={loading || allMatchingCount === 0 || !onUpgradeWorkflow}
+            >
+              升级 workflow
+            </Button>
           ) : (
             <JobActionBarUpgrade
               jobs={jobs}
@@ -177,6 +179,14 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
         onClose={() => setRunToOpen(false)}
         onConfirm={handleRunTo}
       />
+      {allMatching && (
+        <JobAllMatchingUpgradeDialog
+          open={upgradeOpen}
+          count={allMatchingCount ?? 0}
+          onClose={() => setUpgradeOpen(false)}
+          onConfirm={() => onUpgradeWorkflow?.()}
+        />
+      )}
     </>
   )
 }

@@ -18,7 +18,7 @@ export function useWorkspacePackageActions(workspaceId: string | undefined) {
     await batchClearPacked(workspaceId)
   }
 
-  const handleUpgradeWorkflow = async (jobIds: string[]) => {
+  const handleUpgradeWorkflow = async (jobIds?: string[]) => {
     if (!workspaceId) return
     await batchUpgradeWorkflow(workspaceId, jobIds)
   }
