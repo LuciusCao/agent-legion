@@ -15,6 +15,7 @@ import {
   batchRunToJobs,
 } from '../api/jobApi'
 import { upgradeJobWorkflow } from '../api/jobWorkflowUpgradeApi'
+import { batchUpgradeJobsWorkflow } from '../api/jobBatchUpgradeWorkflowApi'
 import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 import type { JobSummary } from '../types'
@@ -32,6 +33,7 @@ const mockBatchDeleteJobs = vi.fn()
 const mockPackageJobs = vi.fn()
 const mockBatchRunToJobs = vi.fn()
 const mockUpgradeJobWorkflow = vi.fn()
+const mockBatchUpgradeJobsWorkflow = vi.fn()
 
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
@@ -66,6 +68,12 @@ vi.mock('../api/jobApi', () => ({
 vi.mock('../api/jobWorkflowUpgradeApi', () => ({
   upgradeJobWorkflow: (...args: Parameters<typeof upgradeJobWorkflow>) =>
     mockUpgradeJobWorkflow(...args),
+}))
+
+vi.mock('../api/jobBatchUpgradeWorkflowApi', () => ({
+  batchUpgradeJobsWorkflow: (
+    ...args: Parameters<typeof batchUpgradeJobsWorkflow>
+  ) => mockBatchUpgradeJobsWorkflow(...args),
 }))
 
 function renderPage(workspaceId = 'ws1') {
@@ -174,6 +182,7 @@ describe('WorkspaceMainPage', () => {
     mockPackageJobs.mockReset()
     mockBatchRunToJobs.mockReset()
     mockUpgradeJobWorkflow.mockReset()
+    mockBatchUpgradeJobsWorkflow.mockReset()
 
     mockFetchJobsSnapshot.mockImplementation(() =>
       Promise.resolve({
@@ -814,7 +823,7 @@ describe('WorkspaceMainPage', () => {
     expect(useJobStore.getState().selectionMode).toBe('allMatching')
     expect(screen.getByText(/已选择 25 项/)).toBeInTheDocument()
     expect(screen.getByText('运行到')).toHaveAttribute('disabled')
-    expect(screen.getByText('升级 workflow')).toHaveAttribute('disabled')
+    expect(screen.getByText('升级 workflow')).not.toHaveAttribute('disabled')
 
     await act(async () => {
       screen.getByText('删除').click()
@@ -843,7 +852,70 @@ describe('WorkspaceMainPage', () => {
     })
   })
 
-  it('renders a Studio entry card that navigates to the workflow studio', async () => {
+  it('upgrades all matching jobs via the batch endpoint after confirmation', async () => {
+    mockBatchUpgradeJobsWorkflow.mockResolvedValueOnce({
+      results: [
+        { job_id: 'j1', operation: 'upgrade_workflow', status: 'succeeded' },
+      ],
+    })
+    const seed = [
+      makeJob({ id: 'j1', status: 'failed' }),
+      makeJob({ id: 'j2', status: 'failed', source_id: 'Q2' }),
+    ]
+    useJobStore.setState({
+      jobs: seed,
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    seedJobs(seed)
+    await loadJobsViaSSE()
+    act(() => {
+      useJobStore.setState({ totalJobs: 25 })
+    })
+
+    await act(async () => {
+      screen.getByText('全选').click()
+    })
+
+    expect(useJobStore.getState().selectionMode).toBe('allMatching')
+    expect(screen.getByText('升级 workflow')).not.toHaveAttribute('disabled')
+
+    await act(async () => {
+      screen.getByText('升级 workflow').click()
+    })
+    expect(
+      screen.getByText(/将对符合筛选条件的 25 个 job 执行 workflow/)
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认升级').click()
+    })
+
+    expect(mockBatchUpgradeJobsWorkflow).toHaveBeenCalledWith('ws1', {
+      filter: {
+        status: null,
+        search: null,
+        workflow_version: null,
+        workflow_version_none: false,
+        active_node_key: null,
+      },
+      excludeIds: [],
+    })
+    await waitFor(() => {
+      expect(useJobStore.getState().selectionMode).toBe('explicit')
+    })
+  })
+
+  it('renders a Studio entry card for a workspace without a published workflow', async () => {
+    mockFetchWorkspaceStats.mockResolvedValue({
+      ...baseStats,
+      workflow_key: null,
+      workflow_label: null,
+    } as unknown as WorkspaceStats)
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
@@ -859,13 +931,22 @@ describe('WorkspaceMainPage', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('进入 Studio')).toBeInTheDocument()
+    expect(await screen.findByText('进入 Studio')).toBeInTheDocument()
 
     await act(async () => {
       screen.getByText('进入 Studio').click()
     })
 
     expect(await screen.findByText('Studio 页面')).toBeInTheDocument()
+  })
+
+  it('hides the Studio entry card when the workspace has a published workflow', async () => {
+    renderPage()
+
+    await waitFor(() => {
+      expect(mockFetchWorkspaceStats).toHaveBeenCalled()
+    })
+    expect(screen.queryByText('进入 Studio')).not.toBeInTheDocument()
   })
 
   it('renders workspace package history dialog when open', async () => {
