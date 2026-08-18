@@ -168,6 +168,76 @@ describe('useWorkflowStudio', () => {
     expect(result.current.compareSummary?.nodeChanges).toHaveLength(1)
   })
 
+  it('merges compare node changes into the DAG as badges and ghost nodes', async () => {
+    // 画布展示 active 基线（只有节点 a）：modified 打在基线节点上，
+    // added 以幽灵节点 + 幽灵边补入。
+    mocks.compareWorkflowDraft.mockResolvedValue({
+      valid: true,
+      creates_revision: true,
+      base_revision: null,
+      draft_workflow: null,
+      summary: {
+        risk_level: 'warning',
+        node_changes: [
+          {
+            type: 'modified',
+            node_key: 'a',
+            label: 'A',
+            fields: ['label'],
+            risk: 'info',
+          },
+          {
+            type: 'added',
+            node_key: 'b',
+            label: 'B',
+            fields: [],
+            risk: 'info',
+          },
+        ],
+        edge_changes: [
+          {
+            type: 'added',
+            source: 'a',
+            target: 'b',
+            before_condition: null,
+            after_condition: null,
+            risk: 'info',
+          },
+        ],
+        intake_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'), {
+      wrapper: queryClientWrapper,
+    })
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nlabel: Changed\n')
+    })
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+
+    await waitFor(() => expect(result.current.compareState).toBe('ready'))
+    const modified = result.current.nodes.find((node) => node.key === 'a')
+    expect(modified).toMatchObject({ changeType: 'modified', ghost: false })
+    const ghost = result.current.nodes.find((node) => node.key === 'b')
+    expect(ghost).toMatchObject({
+      label: 'B',
+      changeType: 'added',
+      ghost: true,
+    })
+    expect(result.current.edges).toContainEqual({
+      from: 'a',
+      to: 'b',
+      ghost: true,
+    })
+  })
+
   it('disables publish when compare result is invalid', async () => {
     mocks.compareWorkflowDraft.mockResolvedValue({
       valid: false,

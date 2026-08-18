@@ -2,6 +2,7 @@ import { Chip } from '@mui/material'
 import type { WorkflowRevisionSummary } from '../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
+import { WorkflowStudioChangeCountChip } from './WorkflowStudioChangeCountChip'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
 import { WorkflowStudioGlobalActions } from './WorkflowStudioGlobalActions'
 import styles from './WorkflowStudioCommandBar.module.css'
@@ -81,6 +82,7 @@ export function WorkflowStudioCommandBar({
       <span className={styles.meta}>{modeText}</span>
       <div className={styles.status}>
         <Chip size="small" label={syncText} />
+        <WorkflowStudioChangeCountChip summary={compareSummary} />
         {compareState === 'loading' && <Chip size="small" label="计算变更" />}
         {risk && <Chip size="small" color="warning" label={risk} />}
         {hasPreservedDraft && <Chip size="small" label="已保留当前草稿" />}
