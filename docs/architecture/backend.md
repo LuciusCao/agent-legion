@@ -542,7 +542,7 @@ server/app/
 
 Intake 模式的候选解析由 `server/app/services/job_intake_registry.py` 的 `RESOLVERS` 声明式注册表决定，每个 `(entity, mode)` 对应一个 `ResolverSpec`（`phase` / `resource_key` / `handler`）。平台只内置 direct resolver（`phase=None`，不访问外部资源，按输入值直接 fan-out）；需要访问外部系统的解析一律下沉到 DAG 首节点执行期（节点 config + 实例级外部服务连接注入，见下文 Secrets Vault 的运行时解析），intake 本身不感知业务实体类型。
 
-接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 `connection` 键（实例级外部服务连接 key）与业务参数。Intake 快照只冻结 `node_config` 与 `secret_ref`。
+接入新内容类型只需两步：在 `RESOLVERS` 注册 resolver、为 DAG 首节点绑定 capability 并在其 `config_schema` 声明 `connection` 键（实例级外部服务连接 key）与业务参数。Intake 快照只冻结 `node_config` 与 `secret_ref`；声明 `runtime_mutable: true` 的运行开关键不受冻结约束，每次 dispatch 按同一解析链重取 workspace 覆盖并落 `node_runs.config_snapshot_json` 审计（CONFIG-RUNTIME-MUTABLE-001）。
 
 ## Database
 

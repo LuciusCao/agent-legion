@@ -13,11 +13,18 @@ from server.app.services.node_config import (
     workspace_node_overrides,
 )
 from server.app.services.node_config_batch import frozen_node_config
+from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.services.node_execution_config import (
     merge_reserved_execution_schema,
     reserved_execution_defaults,
 )
-from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from server.app.workflows.node_config_schema import load_node_config_schema
+from server.app.workflows.schema import (
+    WorkflowDefinition,
+    WorkflowDefinitionError,
+    WorkflowIntake,
+    WorkflowNode,
+)
 
 SCHEMA = {
     "type": "object",
@@ -119,6 +126,93 @@ def test_dispatch_effective_config_prefers_frozen_snapshot() -> None:
     frozen = {"node_config": {"generate": {"page_size": 7}}}
     assert dispatch_effective_config(SCHEMA, node, "wf", workspace, frozen) == {"page_size": 7}
     assert dispatch_effective_config(SCHEMA, node, "wf", workspace, None) == {"page_size": 10}
+
+
+MUTABLE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "subject_id": {"type": "string", "enum": ["math", "physics"]},
+        "dry_run": {"type": "boolean", "default": False, "runtime_mutable": True},
+        "max_retries": {"type": "integer", "default": 0, "runtime_mutable": True},
+    },
+}
+
+
+def test_runtime_mutable_keys_reads_marker() -> None:
+    assert runtime_mutable_keys(MUTABLE_SCHEMA) == frozenset({"dry_run", "max_retries"})
+    assert runtime_mutable_keys(SCHEMA) == frozenset()
+    assert runtime_mutable_keys({}) == frozenset()
+    assert runtime_mutable_keys({"properties": "not-a-mapping"}) == frozenset()
+
+
+def test_runtime_mutable_keys_ignore_reserved_execution_keys() -> None:
+    # Platform-reserved execution keys always stay intake-frozen, even when a
+    # hand-built schema marks them (node config_schemas cannot redeclare them
+    # at all — the workflow loader rejects that).
+    marked = {
+        "properties": {
+            "timeout_seconds": {"type": "integer", "runtime_mutable": True},
+            "sandbox_network": {"type": "boolean", "runtime_mutable": True},
+            "dry_run": {"type": "boolean", "runtime_mutable": True},
+        }
+    }
+    assert runtime_mutable_keys(marked) == frozenset({"dry_run"})
+
+
+def test_runtime_mutable_keys_re_resolve_for_existing_job() -> None:
+    # The workspace override changed AFTER intake: the next node execution of
+    # the already-intaken job picks it up for marked keys only; unmarked keys
+    # keep the frozen intake value.
+    node = _definition().nodes["generate"]
+    frozen = {
+        "node_config": {"generate": {"subject_id": "math", "dry_run": False, "max_retries": 1}}
+    }
+    workspace = {
+        "node_config": {
+            "wf": {"generate": {"subject_id": "physics", "dry_run": True, "max_retries": 3}}
+        }
+    }
+    effective = dispatch_effective_config(MUTABLE_SCHEMA, node, "wf", workspace, frozen)
+    assert effective == {"subject_id": "math", "dry_run": True, "max_retries": 3}
+
+
+def test_runtime_mutable_falls_back_when_override_removed() -> None:
+    # The post-intake override was removed again: live re-resolution falls
+    # back to the node config layer and schema defaults.
+    node = _definition({"dry_run": True}).nodes["generate"]
+    frozen = {"node_config": {"generate": {"dry_run": False, "max_retries": 1}}}
+    effective = dispatch_effective_config(MUTABLE_SCHEMA, node, "wf", None, frozen)
+    assert effective == {"dry_run": True, "max_retries": 0}
+
+
+def test_runtime_mutable_live_re_resolution_is_validated() -> None:
+    node = _definition().nodes["generate"]
+    frozen = {"node_config": {"generate": {"max_retries": 1}}}
+    workspace = {"node_config": {"wf": {"generate": {"max_retries": "many"}}}}
+    with pytest.raises(ConfigSchemaError, match="must be of type integer"):
+        dispatch_effective_config(MUTABLE_SCHEMA, node, "wf", workspace, frozen)
+
+
+def test_reserved_execution_keys_stay_frozen_at_dispatch() -> None:
+    node = _definition({"timeout_seconds": 30}).nodes["generate"]
+    schema = merge_reserved_execution_schema(
+        {"properties": {"dry_run": {"type": "boolean", "runtime_mutable": True}}}
+    )
+    frozen = {"node_config": {"generate": {"timeout_seconds": 30, "dry_run": False}}}
+    workspace = {"node_config": {"wf": {"generate": {"timeout_seconds": 5, "dry_run": True}}}}
+    effective = dispatch_effective_config(schema, node, "wf", workspace, frozen)
+    assert effective["timeout_seconds"] == 30
+    assert effective["dry_run"] is True
+
+
+def test_node_config_schema_rejects_reserved_keys_marked_mutable() -> None:
+    raw = {
+        "config_schema": {
+            "properties": {"timeout_seconds": {"type": "integer", "runtime_mutable": True}}
+        }
+    }
+    with pytest.raises(WorkflowDefinitionError, match="platform-reserved"):
+        load_node_config_schema(raw, "intake")
 
 
 def test_resolve_workflow_node_configs_rejects_invalid_override() -> None:
