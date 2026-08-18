@@ -4,6 +4,7 @@ import { Button } from '@mui/material'
 import { useWorkspaces } from '../hooks/useWorkspaces'
 import { useWorkspaceStats } from '../hooks/useWorkspaceStats'
 import { useDashboardEvents } from '../hooks/useDashboardEvents'
+import { useAuthStore } from '../stores/authStore'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
 import { UserMenu } from '../components/UserMenu'
@@ -28,6 +29,8 @@ function DashboardWorkspaceCard({ workspace }: { workspace: WorkspaceRecord }) {
 export function DashboardPage() {
   const { data: workspaces = [] } = useWorkspaces()
   const [dialogOpen, setDialogOpen] = useState(false)
+  // POST /api/workspaces 已 require_admin（P4）：非 admin 隐藏创建入口。
+  const isAdmin = useAuthStore((s) => s.user?.role === 'admin')
 
   useDashboardEvents()
 
@@ -44,9 +47,11 @@ export function DashboardPage() {
         <h1 style={{ margin: 0, fontSize: 28 }}>Agent Legion</h1>
         <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
           <UserMenu />
-          <Button variant="contained" onClick={() => setDialogOpen(true)}>
-            新建 Workspace
-          </Button>
+          {isAdmin && (
+            <Button variant="contained" onClick={() => setDialogOpen(true)}>
+              新建 Workspace
+            </Button>
+          )}
         </div>
       </div>
 

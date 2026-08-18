@@ -63,6 +63,14 @@ vi.mock('../stores/uiStore', () => ({
   },
 }))
 
+const authState: { user: { role: 'admin' | 'member' } | null } = {
+  user: { role: 'admin' },
+}
+vi.mock('../stores/authStore', () => ({
+  useAuthStore: (selector?: (state: typeof authState) => unknown) =>
+    selector ? selector(authState) : authState,
+}))
+
 describe('WorkspaceLayout', () => {
   beforeEach(() => {
     mockNavigate.mockClear()
@@ -70,6 +78,7 @@ describe('WorkspaceLayout', () => {
     setWorkspacePackageDialogOpenMock.mockClear()
     setTokenUsageDialogOpenMock.mockClear()
     fetchWorkerStatusMock.mockResolvedValue(undefined)
+    authState.user = { role: 'admin' }
   })
 
   it('renders app bar with workspace name and no workflow tag', async () => {
@@ -144,6 +153,21 @@ describe('WorkspaceLayout', () => {
     )
     fireEvent.click(screen.getByLabelText('Workflow Studio'))
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/workflow-studio')
+  })
+
+  it('hides the workflow studio button for non-admin users (P4)', () => {
+    authState.user = { role: 'member' }
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    expect(screen.queryByLabelText('Workflow Studio')).not.toBeInTheDocument()
   })
 
   it('navigates to home when home button is clicked', () => {

@@ -76,7 +76,9 @@ def test_unknown_token_id_gets_404(client) -> None:
     assert client.delete("/api/studio-agent-tokens/no-such-id").status_code == 404
 
 
-def test_cross_user_revoke_returns_404(client) -> None:
+def test_non_admin_member_gets_403(client) -> None:
+    """Token management is admin-only (P4): a member cannot mint their way
+    onto the Studio tool surface, nor list/revoke tokens."""
     minted = _mint(client)
     created = client.post(
         "/api/users", json={"username": "member1", "password": "pw1"}, headers=CSRF
@@ -87,10 +89,9 @@ def test_cross_user_revoke_returns_404(client) -> None:
     assert login.status_code == 200, login.text
     member.headers["x-agent-legion-request"] = "1"
 
-    # Another user's token is indistinguishable from an unknown id.
-    assert member.delete(f"/api/studio-agent-tokens/{minted['id']}").status_code == 404
-    # And the other user's list stays empty.
-    assert member.get("/api/studio-agent-tokens").json()["tokens"] == []
+    assert member.post("/api/studio-agent-tokens", json={}).status_code == 403
+    assert member.get("/api/studio-agent-tokens").status_code == 403
+    assert member.delete(f"/api/studio-agent-tokens/{minted['id']}").status_code == 403
 
 
 def test_minted_token_calls_tool_surface(client) -> None:

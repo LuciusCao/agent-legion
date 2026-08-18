@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends
 from ..agent_broker import AgentExecutionBroker
 from ..agent_completion import AgentCompletionHandler
 from ..agent_workers import AgentWorkerRegistry
+from ..auth.studio_authoring import require_studio_authoring
 from ..auth.workspace_access import require_workspace_access
 from ..events import JobEventManager
 from ..events.agents import AgentStatusManager
@@ -84,6 +85,10 @@ def create_router(
     def secured(sub_router: APIRouter) -> None:
         router.include_router(sub_router, dependencies=[Depends(require_workspace_access)])
 
+    def studio_secured(sub_router: APIRouter) -> None:
+        deps = [Depends(require_workspace_access), Depends(require_studio_authoring)]
+        router.include_router(sub_router, dependencies=deps)
+
     router.include_router(create_common_router())
     router.include_router(create_agents_router(agent_manager))
     router.include_router(create_token_usage_pricing_router(job_db, settings))
@@ -118,9 +123,9 @@ def create_router(
     )
     secured(workspaces_router)
     secured(create_workspace_settings_router(workspace_configuration, settings))
-    secured(create_workflow_revisions_router(job_db, settings))
-    secured(create_workflow_node_codes_router(job_db, settings))
-    secured(create_agent_definitions_router(job_db, settings))
+    studio_secured(create_workflow_revisions_router(job_db, settings))
+    studio_secured(create_workflow_node_codes_router(job_db, settings))
+    studio_secured(create_agent_definitions_router(job_db, settings))
     secured(create_skills_router(settings))
     secured(create_workspace_configuration_router(workspace_configuration, settings))
     executors_router = create_workspace_executors_router(
@@ -133,7 +138,8 @@ def create_router(
     secured(create_studio_agent_tokens_router(job_db))
     if studio_chat_service is not None:
         router.include_router(create_studio_agents_admin_router(job_db))
-        secured(create_studio_chat_router(studio_chat_service, job_event_manager=job_event_manager))
+        chat = create_studio_chat_router(studio_chat_service, job_event_manager=job_event_manager)
+        studio_secured(chat)
     job_group = APIRouter(dependencies=[Depends(require_workspace_access)])
     include_job_routes(
         job_group,
