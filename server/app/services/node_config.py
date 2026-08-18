@@ -7,7 +7,9 @@ capability fallback retired with the executor concept, schema v47);
 code-routed nodes also get the platform-reserved execution keys merged in
 (``node_execution_config``). The resolved map is frozen into the intake
 batch payload; dispatch reads the frozen value and only forwards
-schema-whitelisted, non-secret keys (CONFIG-MANIFEST-001).
+schema-whitelisted, non-secret keys (CONFIG-MANIFEST-001). Keys declared
+``runtime_mutable: true`` are overlaid with a live re-resolution at dispatch
+(CONFIG-RUNTIME-MUTABLE-001, ``node_config_runtime``).
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from server.app.config_schema import (
     validate_config_values,
 )
 from server.app.services.node_config_batch import frozen_node_config
+from server.app.services.node_config_runtime import runtime_mutable_keys
 from server.app.services.node_execution_config import merge_reserved_execution_schema
 from server.app.services.node_secrets import strip_secret_fields
 from server.app.workflows.schema import WorkflowDefinition, WorkflowNode
@@ -171,11 +174,19 @@ def dispatch_effective_config(
     snapshots predating the reserved execution keys get *fallback_defaults*
     underneath (frozen values always win), so in-flight old jobs keep their
     node-declared timeout/network behavior (P-0.5).
+
+    Frozen snapshots are overlaid with a live re-resolution of the keys
+    declared ``runtime_mutable: true`` (CONFIG-RUNTIME-MUTABLE-001); everything
+    else — including the platform-reserved execution keys — stays frozen.
     """
     frozen = frozen_node_config(batch_payload, node.key)
-    if frozen is not None:
-        if fallback_defaults:
-            return {**fallback_defaults, **frozen}
-        return frozen
+    if frozen is None:
+        overrides = workspace_node_overrides(workspace, workflow_key)
+        return resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))
+    effective = {**fallback_defaults, **frozen} if fallback_defaults else dict(frozen)
+    mutable = runtime_mutable_keys(config_schema)
+    if not mutable:
+        return effective
     overrides = workspace_node_overrides(workspace, workflow_key)
-    return resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))
+    live = resolve_node_config(config_schema, node.config, overrides.get(node.key, {}))
+    return {**effective, **{key: live[key] for key in mutable if key in live}}

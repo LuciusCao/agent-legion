@@ -83,6 +83,9 @@ class LeaseClaimRequest:
     target_node_key: str | None = None
     allowed_node_keys: tuple[str, ...] = ()
     shard_index: int | None = None
+    # Non-secret resolved node config at dispatch (CONFIG-RUNTIME-MUTABLE-001
+    # audit); persisted onto the node_runs row created by the claim.
+    config_snapshot_json: str = ""
 
 
 @dataclass(frozen=True)

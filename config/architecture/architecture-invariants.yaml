@@ -613,7 +613,7 @@ invariants:
         gate: quick
 
   - id: CONFIG-MANIFEST-001
-    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload. The schema source priority is Agent Definition → node-declared `config_schema` (workflow YAML, versioned with the revision snapshot; it must not redeclare platform-reserved keys) — the executor capability fallback retired with the executor concept (P-0.5, schema v47); code-routed nodes get the platform-reserved execution keys `timeout_seconds` (integer, default 600, >= 1) and `sandbox_network` (boolean, default false) auto-merged into their effective schema — the v47 harvest moved executor-level timeout/network values onto the revision nodes' config — so timeout/network travel the same freeze chain, and frozen batches predating the reserved keys are padded with the node's own declared values underneath at dispatch (frozen values win)."
+    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload (keys declared `runtime_mutable: true` are the only exception — they are re-resolved at dispatch, CONFIG-RUNTIME-MUTABLE-001). The schema source priority is Agent Definition → node-declared `config_schema` (workflow YAML, versioned with the revision snapshot; it must not redeclare platform-reserved keys) — the executor capability fallback retired with the executor concept (P-0.5, schema v47); code-routed nodes get the platform-reserved execution keys `timeout_seconds` (integer, default 600, >= 1) and `sandbox_network` (boolean, default false) auto-merged into their effective schema — the v47 harvest moved executor-level timeout/network values onto the revision nodes' config — so timeout/network travel the same freeze chain, and frozen batches predating the reserved keys are padded with the node's own declared values underneath at dispatch (frozen values win)."
     owner: security
     risk: critical
     evidence:
@@ -629,6 +629,24 @@ invariants:
       - kind: integration
         target: tests/full/test_node_config_manifest.py
         gate: full
+
+  - id: CONFIG-RUNTIME-MUTABLE-001
+    statement: "Node config keys are intake-frozen by default (job reproducibility); a config_schema property declared `runtime_mutable: true` opts out of the freeze and is re-resolved at every dispatch along the usual chain (schema defaults → node config → workspace override), so run switches (dry_run, upload_enabled, ...) take effect on the next node execution of an already-intaken job. The platform-reserved execution keys `timeout_seconds`/`sandbox_network` always stay frozen: node config_schemas cannot redeclare them (the loader rejects that) and the marker is ignored even on hand-built schemas. The audit trail is per-attempt: the non-secret resolved config used for a run is persisted onto node_runs.config_snapshot_json (schema v49) — the local code pool carries it on the lease claim, the code-Worker/Agent paths persist the enqueue-time manifest config (secrets never leave the Host, CONFIG-MANIFEST-001; the manifest whitelist governs which keys may leave the server, runtime_mutable only governs resolution timing)."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_config_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_node_config.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_leases.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_code_claim.py
+        gate: quick
 
   - id: VAULT-SECRET-001
     statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens. The code→Worker path extends the same boundary across machines: queued code manifests and bundles are stored secret-free (secret keys are stripped at enqueue; a plaintext secret value makes the node ineligible for Worker dispatch), the Host resolves vault refs and injects plaintext only into the claim/download response over the existing HTTPS channel, and the Worker holds secrets in memory only — passed to the child via stdin, never written to disk or logs, with a defensive scrub (strip_secret_config) before any persistence. The runtime settings snapshot crossing the same boundary is section-whitelisted (node_safe_settings_config in server/app/config_schema.py): only the business sections the node SDK service_config actually consumes (asr) are included — vault/auth/database/agent_workers sections never enter the manifest, the sandbox stdin payload, or the database."
