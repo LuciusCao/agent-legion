@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from server.app.services.node_code_pins import node_code_pins_from_job_snapshot
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
@@ -104,7 +105,14 @@ def evaluate_job_ready(
             and node.key in pending_shard_nodes
         ):
             statuses[node.key] = "pending"
-    lean_job = {**job, "workflow_definition_snapshot_json": ""}
+    # The multi-KB snapshot text is dropped, but its small node_code_pins
+    # stay on the lean job: dispatch prefers them (upgrade-aware, #109) over
+    # the intake batch's node_code_versions.
+    lean_job = {
+        **job,
+        "workflow_definition_snapshot_json": "",
+        "node_code_pins": node_code_pins_from_job_snapshot(job),
+    }
     candidates: list[ReadyCandidate] = []
     for node in find_ready_nodes(definition, statuses, job_dir):
         if node.key in allowed:
