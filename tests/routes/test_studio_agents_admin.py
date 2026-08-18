@@ -38,16 +38,32 @@ def test_anonymous_and_member_are_rejected(client, anon_client) -> None:
     assert member.put(REGISTRY_URL, json=_document()).status_code == 403
 
 
+def _strip_availability(payload: dict) -> dict[str, bool]:
+    availability = payload.pop("availability")
+    assert all(isinstance(value, bool) for value in availability.values())
+    return availability
+
+
 def test_default_document_and_roundtrip(client) -> None:
     response = client.get(REGISTRY_URL)
     assert response.status_code == 200
-    assert response.json() == {"api_base": "http://127.0.0.1:8000", "agents": []}
+    assert response.json() == {
+        "api_base": "http://127.0.0.1:8000",
+        "agents": [],
+        "availability": {},
+    }
 
     document = _document()
     response = client.put(REGISTRY_URL, json=document)
     assert response.status_code == 200, response.text
-    assert response.json() == document
-    assert client.get(REGISTRY_URL).json() == document
+    payload = response.json()
+    availability = _strip_availability(payload)
+    assert set(availability) == {"kimi-acp"}
+    assert payload == document
+    payload = client.get(REGISTRY_URL).json()
+    availability = _strip_availability(payload)
+    assert set(availability) == {"kimi-acp"}
+    assert payload == document
 
 
 def test_validation_rejects_bad_documents(client) -> None:
