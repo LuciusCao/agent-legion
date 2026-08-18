@@ -12,7 +12,12 @@ from server.app.jobs.queries.job_nodes import JobNodeQueriesMixin
 from server.app.jobs.queries.job_rerun_states import JobRerunStateQueriesMixin
 from server.app.jobs.queries.job_scan_delta import JobScanDeltaMixin
 from server.app.jobs.queries.job_scan_marks import JobScanMarksMixin
+from server.app.jobs.queries.scoped_token_management import (
+    ScopedTokenManagementQueriesMixin,
+)
+from server.app.jobs.queries.scoped_tokens import ScopedTokenQueriesMixin
 from server.app.jobs.queries.status import JobStatusQueriesMixin
+from server.app.jobs.queries.studio_chat import StudioChatQueriesMixin
 from server.app.jobs.queries.workflow_revisions import WorkflowRevisionQueriesMixin
 from server.app.jobs.queries.workspace import WorkspaceQueriesMixin
 from server.app.jobs.queries.workspace_packages import WorkspacePackageQueriesMixin
@@ -20,6 +25,9 @@ from server.app.jobs.queries.workspace_packages import WorkspacePackageQueriesMi
 
 class JobQueries(
     AuthQueriesMixin,
+    ScopedTokenQueriesMixin,
+    ScopedTokenManagementQueriesMixin,
+    StudioChatQueriesMixin,
     WorkspacePackageQueriesMixin,
     WorkspaceQueriesMixin,
     BatchQueriesMixin,

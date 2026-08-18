@@ -65,7 +65,7 @@ def test_cms_auth_errors():
         "cms_auth",
     )
     assert classify_failure(1, "CMS token expired") == ("technical", "cms_auth")
-    # question_intake fail-fast on in-band CMS error payloads (schema v34).
+    # intake_items fail-fast on in-band CMS error payloads (schema v34).
     assert classify_failure(
         1, "CmsClientError: CMS 返回错误: code=10015 message=JWT验证失败 (question_id=q-1)"
     ) == ("technical", "cms_auth")
@@ -373,10 +373,10 @@ def test_executor_binding_failures_are_technical():
 def test_skill_setup_failures_are_technical_skill_config():
     assert classify_failure(
         None,
-        "skill 'video_knowledge/review_subtitles' config differs from the published skill lock",
+        "skill 'demo_video_workflow/review_subtitles' config differs from the published skill lock",
     ) == ("technical", "skill_config")
     assert classify_failure(
-        None, "skill missing references/output-contract.md: 'video_knowledge/review_subtitles'"
+        None, "skill missing references/output-contract.md: 'demo_video_workflow/review_subtitles'"
     ) == ("technical", "skill_config")
     assert classify_failure(None, "git command failed: git -C /skills/x checkout abc123") == (
         "technical",

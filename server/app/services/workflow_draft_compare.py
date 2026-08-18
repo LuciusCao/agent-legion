@@ -21,10 +21,11 @@ from server.app.services.workflow_draft_compare_support import (
 )
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.services.workflow_revision_change import structural_revision_changed
-from server.app.workflows.definition import workflow_definition_from_dict
+from server.app.workflows.definition import WorkflowDefinitionError, workflow_definition_from_dict
 from server.app.workflows.schema import (
     WorkflowDefinition,
     WorkflowEdge,
+    WorkflowIntake,
     WorkflowIntakeMode,
     WorkflowNode,
 )
@@ -396,93 +397,96 @@ def _diff_intake(
                 )
 
 
+def _invalid_compare(error: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "valid": False,
+        "base_revision": None,
+        "draft_workflow": None,
+        "summary": None,
+        "errors": [error],
+    }
+
+
+# Explains the no-baseline preview mode inside every such compare result.
+_NO_BASELINE_FLAG = {
+    "code": "no_baseline",
+    "severity": "info",
+    "message": "该 workflow 从未发布：与空基线对比，展示草稿全貌（全部节点均为新增）。",
+}
+
+
+def _base_revision_summary(revision: dict[str, Any] | None) -> dict[str, Any] | None:
+    if revision is None:
+        return None
+    return {
+        "id": revision["id"],
+        "version": revision["version"],
+        "workflow_key": revision["workflow_key"],
+        "definition_hash": revision["definition_hash"],
+    }
+
+
 def compare_workflow_draft(
     job_db: JobQueries,
     workspace_id: str,
     definition_yaml: str,
+    *,
+    allow_missing_baseline: bool = False,
 ) -> dict[str, Any]:
     try:
         draft = workflow_definition_from_yaml_string(definition_yaml)
-    except yaml.YAMLError as exc:
-        return {
-            "valid": False,
-            "base_revision": None,
-            "draft_workflow": None,
-            "summary": None,
-            "errors": [yaml_error_to_dict(exc)],
-        }
+    except WorkflowDefinitionError as exc:
+        # YAML parse failures arrive wrapped (see workflow_drafts); keep the
+        # yaml error category so callers can distinguish syntax vs schema issues.
+        if isinstance(exc.__cause__, yaml.YAMLError):
+            return _invalid_compare(yaml_error_to_dict(exc.__cause__))
+        return _invalid_compare({"category": "schema", "message": str(exc)})
     except Exception as exc:
-        return {
-            "valid": False,
-            "base_revision": None,
-            "draft_workflow": None,
-            "summary": None,
-            "errors": [{"category": "schema", "message": str(exc)}],
-        }
+        return _invalid_compare({"category": "schema", "message": str(exc)})
 
     workspace = job_db.get_workspace(workspace_id)
     if workspace is None:
-        return {
-            "valid": False,
-            "base_revision": None,
-            "draft_workflow": None,
-            "summary": None,
-            "errors": [
-                {
-                    "category": "revision",
-                    "message": f"Workspace {workspace_id} not found",
-                }
-            ],
-        }
+        return _invalid_compare(
+            {"category": "revision", "message": f"Workspace {workspace_id} not found"}
+        )
 
     default_workflow_key = str(workspace.get("default_workflow_key") or "")
     if draft.key != default_workflow_key:
-        return {
-            "valid": False,
-            "base_revision": None,
-            "draft_workflow": None,
-            "summary": None,
-            "errors": [
-                {
-                    "category": "schema",
-                    "message": (
-                        f"Draft workflow key '{draft.key}' does not match "
-                        f"workspace default workflow key '{default_workflow_key}'"
-                    ),
-                }
-            ],
-        }
+        return _invalid_compare(
+            {
+                "category": "schema",
+                "message": (
+                    f"Draft workflow key '{draft.key}' does not match "
+                    f"workspace default workflow key '{default_workflow_key}'"
+                ),
+            }
+        )
 
     revision = job_db.get_active_workflow_revision(workspace_id, draft.key)
-    if revision is None:
-        return {
-            "valid": False,
-            "base_revision": None,
-            "draft_workflow": None,
-            "summary": None,
-            "errors": [
-                {
-                    "category": "revision",
-                    "message": f"No active workflow revision for {draft.key}",
-                }
-            ],
-        }
+    if revision is None and not allow_missing_baseline:
+        return _invalid_compare(
+            {"category": "revision", "message": f"No active workflow revision for {draft.key}"}
+        )
 
-    try:
-        base = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
-    except Exception as exc:
-        return {
-            "valid": False,
-            "base_revision": None,
-            "draft_workflow": None,
-            "summary": None,
-            "errors": [
-                {
-                    "category": "schema",
-                    "message": f"Failed to parse active revision: {exc}",
-                }
-            ],
-        }
+    if revision is None:
+        # No-baseline preview (studio-agent from-scratch authoring): diff the
+        # draft against an empty base so a never-published workflow shows its
+        # full shape (every node/edge/intake field reported as added) instead
+        # of failing with a revision error.
+        base = WorkflowDefinition(
+            key=draft.key,
+            label=draft.label,
+            intake=WorkflowIntake(),
+            nodes={},
+            schema_version=draft.schema_version,
+        )
+    else:
+        try:
+            base = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+        except Exception as exc:
+            return _invalid_compare(
+                {"category": "schema", "message": f"Failed to parse active revision: {exc}"}
+            )
 
     node_changes: list[dict[str, Any]] = []
     edge_changes: list[dict[str, Any]] = []
@@ -494,6 +498,8 @@ def compare_workflow_draft(
     _diff_edges(base, draft, edge_changes, risk_flags)
     _diff_intake(base, draft, intake_changes, risk_flags)
     _diff_metadata(base, draft, metadata_changes, risk_flags)
+    if revision is None:
+        risk_flags.append(dict(_NO_BASELINE_FLAG))
 
     risk_level = compute_risk_level(
         node_changes, edge_changes, intake_changes, risk_flags, metadata_changes
@@ -505,16 +511,11 @@ def compare_workflow_draft(
     return {
         "valid": True,
         "creates_revision": creates_revision,
-        "base_revision": {
-            "id": revision["id"],
-            "version": revision["version"],
-            "workflow_key": revision["workflow_key"],
-            "definition_hash": revision["definition_hash"],
-        },
+        "base_revision": _base_revision_summary(revision),
         "draft_workflow": {
             "key": draft.key,
             "label": draft.label,
-            "version": revision["version"],
+            "version": int(revision["version"]) if revision is not None else 0,
         },
         "summary": {
             "risk_level": risk_level,

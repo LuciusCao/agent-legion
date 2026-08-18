@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.jobs.executor_configuration import replace_workspace_executor_configuration
+from server.app.jobs.node_limits import replace_workspace_node_limits
 from server.app.jobs.queries import JobQueries
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -15,113 +15,68 @@ def queries(tmp_path: Path) -> JobQueries:
     return JobQueries(db_path, jobs_dir)
 
 
-def test_get_workspace_executor_configuration_empty(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
+def test_get_workspace_node_limits_empty(queries: JobQueries) -> None:
+    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
 
-    assert queries.get_workspace_executor_configuration(workspace["id"]) == {
-        "allocations": [],
-        "bindings": [],
-        "node_limits": [],
-    }
+    assert queries.get_workspace_node_limits(workspace["id"]) == []
 
 
-def test_replace_executor_configuration_is_authoritative(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
-    queries.replace_workspace_executor_configuration(
+def test_replace_node_limits_is_authoritative(queries: JobQueries) -> None:
+    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
+    queries.update_workspace_configuration(
         workspace["id"],
-        allocations=[{"executor_id": "code-default", "concurrency_limit": 4}],
-        bindings=[
-            {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
-                "executor_id": "code-default",
-            }
-        ],
+        name="Math",
+        description="",
+        default_workflow_key="demo_workflow",
+        default_entity="question",
+        resource_config={},
+        intake_config={},
         node_limits=[
             {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
+                "workflow_key": "demo_workflow",
+                "node_key": "fetch_items",
                 "concurrency_limit": 2,
             }
         ],
     )
-    queries.replace_workspace_executor_configuration(
-        workspace["id"], allocations=[], bindings=[], node_limits=[]
+    queries.update_workspace_configuration(
+        workspace["id"],
+        name="Math",
+        description="",
+        default_workflow_key="demo_workflow",
+        default_entity="question",
+        resource_config={},
+        intake_config={},
+        node_limits=[],
     )
 
-    assert queries.get_workspace_executor_configuration(workspace["id"]) == {
-        "allocations": [],
-        "bindings": [],
-        "node_limits": [],
-    }
+    assert queries.get_workspace_node_limits(workspace["id"]) == []
 
 
-def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
-    original_allocations = [{"executor_id": "code-default", "concurrency_limit": 4}]
-    original_bindings = [
-        {
-            "workflow_key": "question_comprehension_info",
-            "node_key": "fetch_questions",
-            "executor_id": "code-default",
-        }
-    ]
+def test_replace_node_limits_rollback(queries: JobQueries) -> None:
+    workspace = queries.create_workspace("Math", default_workflow_key="demo_workflow")
     original_node_limits = [
         {
-            "workflow_key": "question_comprehension_info",
-            "node_key": "fetch_questions",
+            "workflow_key": "demo_workflow",
+            "node_key": "fetch_items",
             "concurrency_limit": 2,
         }
     ]
-    queries.replace_workspace_executor_configuration(
-        workspace["id"],
-        allocations=original_allocations,
-        bindings=original_bindings,
-        node_limits=original_node_limits,
-    )
+    with queries.connect() as conn:
+        replace_workspace_node_limits(conn, workspace["id"], original_node_limits)
 
     with pytest.raises(RuntimeError), queries.connect() as conn:
-        replace_workspace_executor_configuration(
+        replace_workspace_node_limits(
             conn,
             workspace["id"],
-            allocations=[{"executor_id": "pi-default", "concurrency_limit": 8}],
-            bindings=[
+            [
                 {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "fetch_questions",
-                    "executor_id": "pi-default",
-                }
-            ],
-            node_limits=[
-                {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "fetch_questions",
+                    "workflow_key": "demo_workflow",
+                    "node_key": "fetch_items",
                     "concurrency_limit": 1,
                 }
             ],
         )
-        raise RuntimeError("caller aborts after allocation deletion")
+        raise RuntimeError("caller aborts after the delete")
 
-    assert queries.get_workspace_executor_configuration(workspace["id"]) == {
-        "allocations": [
-            {
-                "workspace_id": workspace["id"],
-                "executor_id": "code-default",
-                "concurrency_limit": 4,
-            }
-        ],
-        "bindings": [
-            {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
-                "executor_id": "code-default",
-            }
-        ],
-        "node_limits": [
-            {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "fetch_questions",
-                "concurrency_limit": 2,
-            }
-        ],
-    }
+    assert queries.get_workspace_node_limits(workspace["id"]) == original_node_limits

@@ -52,11 +52,6 @@ def test_create_validates_key_and_type(service) -> None:
         service.create("ok-key", "no_such_type", "", {})
 
 
-def test_create_requires_adapter_config_keys(service) -> None:
-    with pytest.raises(InvalidOperationError, match="app_id"):
-        service.create("cms-x", "cms_hmac", "", {"nonce": "n", "token_url": "http://t"})
-
-
 def test_create_conflict(service) -> None:
     _create_static(service)
     with pytest.raises(ConflictError):

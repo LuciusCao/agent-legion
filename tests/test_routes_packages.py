@@ -9,20 +9,26 @@ from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.fixture
-def workspace_client(client):
+def workspace_client(client_factory, monkeypatch):
     """Ensure workflows are enabled and provide a helper to create workspaces/jobs."""
-    client.app.state.settings.config.setdefault("workflows", {})["enabled"] = True
-    return client
+    # Private app per test: these tests assert on exact file counts under the
+    # app data_dir, and workspace ids are name-derived, so the worker-session
+    # shared app's data_dir residue would leak between identically-named
+    # workspaces across tests/files.
+    with client_factory(fresh=True) as client:
+        monkeypatch.setitem(
+            client.app.state.settings.config.setdefault("workflows", {}), "enabled", True
+        )
+        yield client
 
 
 def _create_completed_job(client: TestClient, workspace_id: str, question_id: str = "Q001"):
     created = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": [question_id],
-            "knowledge_codes": [],
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": [question_id],
         },
     )
     assert created.status_code == 200
@@ -45,7 +51,10 @@ def _create_completed_job(client: TestClient, workspace_id: str, question_id: st
 def test_list_workspace_packages_empty_for_new_workspace(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "Empty Packages WS", "default_workflow_key": "question_comprehension_info"},
+        json={
+            "name": "Empty Packages WS",
+            "default_workflow_key": "education_video_problems_generation",
+        },
     )
     assert ws.status_code == 200
     ws_id = ws.json()["workspace"]["id"]
@@ -58,7 +67,10 @@ def test_list_workspace_packages_empty_for_new_workspace(workspace_client):
 def test_create_workspace_package_job_accepted(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "Package Job WS", "default_workflow_key": "question_comprehension_info"},
+        json={
+            "name": "Package Job WS",
+            "default_workflow_key": "education_video_problems_generation",
+        },
     )
     ws_id = ws.json()["workspace"]["id"]
     job_id = _create_completed_job(workspace_client, ws_id, "Q101")
@@ -85,7 +97,7 @@ def test_create_workspace_package_job_accepted(workspace_client):
 def test_create_workspace_package_job_rejects_no_job_ids(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "No Jobs WS", "default_workflow_key": "question_comprehension_info"},
+        json={"name": "No Jobs WS", "default_workflow_key": "education_video_problems_generation"},
     )
     ws_id = ws.json()["workspace"]["id"]
 
@@ -100,17 +112,19 @@ def test_create_workspace_package_job_rejects_no_job_ids(workspace_client):
 def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "Incomplete WS", "default_workflow_key": "question_comprehension_info"},
+        json={
+            "name": "Incomplete WS",
+            "default_workflow_key": "education_video_problems_generation",
+        },
     )
     ws_id = ws.json()["workspace"]["id"]
 
     created = workspace_client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": ["Q201"],
-            "knowledge_codes": [],
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
+            "knowledge_point_ids": ["Q201"],
         },
     )
     job_id = created.json()["jobs"][0]["id"]
@@ -130,7 +144,7 @@ def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
 def test_workspace_package_download_rejects_path_traversal(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "Traverse WS", "default_workflow_key": "question_comprehension_info"},
+        json={"name": "Traverse WS", "default_workflow_key": "education_video_problems_generation"},
     )
     ws_id = ws.json()["workspace"]["id"]
 
@@ -147,7 +161,7 @@ def test_workspace_package_download_rejects_path_traversal(workspace_client):
 def test_workspace_package_download_rejects_subdirectory(workspace_client, tmp_path):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "Subdir WS", "default_workflow_key": "question_comprehension_info"},
+        json={"name": "Subdir WS", "default_workflow_key": "education_video_problems_generation"},
     )
     ws_id = ws.json()["workspace"]["id"]
 
@@ -163,7 +177,10 @@ def test_workspace_package_download_rejects_subdirectory(workspace_client, tmp_p
 def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "Lifecycle WS", "default_workflow_key": "question_comprehension_info"},
+        json={
+            "name": "Lifecycle WS",
+            "default_workflow_key": "education_video_problems_generation",
+        },
     )
     ws_id = ws.json()["workspace"]["id"]
     job_id = _create_completed_job(workspace_client, ws_id, "Q501")
@@ -217,7 +234,10 @@ def test_create_packages_router_builds_default_job_package_service(job_db, setti
 def test_list_workspace_packages_skips_bad_paths(workspace_client):
     ws = workspace_client.post(
         "/api/workspaces",
-        json={"name": "Bad Paths WS", "default_workflow_key": "question_comprehension_info"},
+        json={
+            "name": "Bad Paths WS",
+            "default_workflow_key": "education_video_problems_generation",
+        },
     )
     assert ws.status_code == 200
     ws_id = ws.json()["workspace"]["id"]

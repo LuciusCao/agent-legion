@@ -12,7 +12,7 @@ vi.mock('../api', () => ({
   fetchWorkspaceStats: vi.fn(),
   createWorkspace: vi.fn(),
   fetchWorkflows: vi.fn().mockResolvedValue({
-    workflows: [{ key: 'question_comprehension_info', label: '题目审题信息' }],
+    workflows: [{ key: 'demo_workflow', label: '题目审题信息' }],
   }),
 }))
 
@@ -33,7 +33,7 @@ vi.mock('react-router-dom', async () => {
 const ws1 = makeWorkspace({
   id: 'ws-1',
   name: 'Test Workspace',
-  default_workflow_key: 'question_comprehension_info',
+  default_workflow_key: 'demo_workflow',
 })
 
 describe('DashboardPage', () => {
@@ -113,7 +113,7 @@ describe('DashboardPage', () => {
     mockFetchWorkspaceStats.mockResolvedValue({
       workflow_label: '题目理解',
       job_stats: { running: 1, completed: 2, failed: 0 },
-      executor_status: { executors: [] },
+      code_pool: { capacity: 16, running: 0, available: 16 },
     } as unknown as WorkspaceStats)
 
     render(
@@ -129,9 +129,9 @@ describe('DashboardPage', () => {
     mockFetchWorkspaces.mockResolvedValue({
       workspaces: [
         makeWorkspace({
-          id: 'video_knowledge',
+          id: 'demo_video_workflow',
           name: 'Video Knowledge',
-          default_workflow_key: 'video_knowledge',
+          default_workflow_key: 'demo_video_workflow',
         }),
       ],
     })
@@ -142,7 +142,7 @@ describe('DashboardPage', () => {
       </MemoryRouter>
     )
     fireEvent.click(await screen.findByText('Video Knowledge'))
-    expect(navigate).toHaveBeenCalledWith('/workspaces/video_knowledge')
+    expect(navigate).toHaveBeenCalledWith('/workspaces/demo_video_workflow')
   })
 
   it('navigates to workspace when clicking workspace card', async () => {

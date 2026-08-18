@@ -17,29 +17,21 @@ def build_workspace_stats(
     if not workflow_key:
         raise InvalidOperationError("Workspace workflow is not set")
     latest_run = job_db.get_latest_node_run_for_workspace(workspace_id)
-    executors = []
-    for count in job_db.get_workspace_executor_runtime_counts(workspace_id):
-        definition = settings.executor_definitions.get(count["executor_id"])
-        global_capacity = definition.global_capacity if definition is not None else 0
-        global_available = global_capacity - count["global_running"]
-        available = max(0, min(count["workspace_limit"] - count["running"], global_available))
-        executors.append(
-            {
-                "executor_id": count["executor_id"],
-                "kind": definition.kind if definition is not None else "unknown",
-                "global_capacity": global_capacity,
-                "workspace_limit": count["workspace_limit"],
-                "running": count["running"],
-                "available": available,
-                "binding_count": count["binding_count"],
-            }
-        )
+    # Single implicit code pool (P-0.5): capacity comes from the instance
+    # settings; availability is global (the pool is shared across workspaces).
+    capacity = settings.executor_runtime.code_capacity
+    counts = job_db.get_code_pool_counts(workspace_id)
+    code_pool = {
+        "capacity": capacity,
+        "running": counts["running"],
+        "available": max(0, capacity - counts["global_running"]),
+    }
     return {
         "workspace_id": workspace_id,
         "name": workspace.get("name", ""),
         "workflow_key": workflow_key,
-        "workflow_label": workflows.definition(str(workflow_key)).label,
+        "workflow_label": workflows.label_of(str(workflow_key)),
         "job_stats": job_db.count_jobs_by_status(workspace_id),
-        "executor_status": {"executors": executors},
+        "code_pool": code_pool,
         "latest_run": dict(latest_run) if latest_run else None,
     }

@@ -16,4 +16,8 @@ export const queryKeys = {
     ['jobArtifact', jobId, name, version] as const,
   jobVideoDetail: (jobId: string, version: string) =>
     ['jobVideoDetail', jobId, version] as const,
+  studioChatAgents: (workspaceId: string) =>
+    ['studio-chat-agents', workspaceId] as const,
+  studioChatSessions: (workspaceId: string) =>
+    ['studio-chat-sessions', workspaceId] as const,
 }

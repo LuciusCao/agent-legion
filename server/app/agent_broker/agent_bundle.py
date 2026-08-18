@@ -46,6 +46,15 @@ def build_agent_bundle(
         tar.addfile(info, io.BytesIO(data))
 
 
+# Code bundle member names (batch 2 contract, consumed by worker/code_runner).
+CODE_BUNDLE_NODE_FILE = "node_code.py"
+CODE_BUNDLE_LIBS_DIR = "workspace_libs"
+# Result-archive member carrying the node's captured stdout/stderr for
+# kind='code' results (batch 2 decision 10); the Host promotes it to the
+# run's canonical log path.
+CODE_RESULT_LOG_MEMBER = "node.log"
+
+
 def extract_agent_result(archive_path: Path, job_dir: Path) -> None:
     with tarfile.open(archive_path, "r:gz") as tar:
         for member in _safe_members(tar):

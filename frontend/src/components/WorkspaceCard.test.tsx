@@ -8,17 +8,7 @@ function createProps(overrides = {}) {
     name: 'Test Workspace',
     workflowLabel: 'Test Workflow',
     jobStats: { running: 2, completed: 5, failed: 1 },
-    executorStatus: [
-      {
-        executor_id: 'code-default',
-        kind: 'code',
-        global_capacity: 16,
-        workspace_limit: 4,
-        running: 2,
-        available: 1,
-        binding_count: 1,
-      },
-    ],
+    codePool: { capacity: 16, running: 2, available: 14 },
     onClick: vi.fn(),
     ...overrides,
   }
@@ -47,7 +37,7 @@ describe('WorkspaceCard', () => {
   it('renders executor status correctly', () => {
     render(<WorkspaceCard {...createProps()} />)
     const executorsSection = screen.getByText('执行器').parentElement!
-    expect(executorsSection.textContent).toContain('2/1')
+    expect(executorsSection.textContent).toContain('2/14')
   })
 
   it('calls onClick when clicked', () => {

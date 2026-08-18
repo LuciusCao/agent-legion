@@ -17,6 +17,8 @@ const runtimes: AgentRuntime[] = ['pi', 'openclaw', 'velites']
 const toolOptions = ['read', 'write', 'bash']
 
 type Props = {
+  /** 当前 workspace（Agent 定义为 workspace 作用域，schema v46） */
+  workspaceId: string
   /** null = 新建模式 */
   agentId: string | null
   onSaved: (agentId: string) => void
@@ -33,6 +35,7 @@ function errorMessage(err: unknown): string {
  * 保存一份新草稿再发布。
  */
 export function AgentEditor({
+  workspaceId,
   agentId,
   onSaved,
   onChanged,
@@ -57,7 +60,7 @@ export function AgentEditor({
 
   const load = useCallback(() => {
     if (creating) return Promise.resolve()
-    return fetchAgentDefinition(agentId)
+    return fetchAgentDefinition(workspaceId, agentId)
       .then((detail) => {
         const draft = detail.latest?.status === 'draft' ? detail.latest : null
         const source = draft ?? detail.published ?? detail.latest
@@ -81,7 +84,7 @@ export function AgentEditor({
       .catch((err) => {
         setError(errorMessage(err))
       })
-  }, [agentId, creating])
+  }, [workspaceId, agentId, creating])
 
   useEffect(() => {
     // The parent keys this component by agent id, so the load runs once
@@ -136,14 +139,14 @@ export function AgentEditor({
     try {
       if (creating) {
         const newAgentId = agentIdInput.trim()
-        const created = await createAgentDefinition({
+        const created = await createAgentDefinition(workspaceId, {
           agent_id: newAgentId,
           ...payload,
         })
         showToast(`Agent「${created.agent_id}」草稿已创建`, 'success')
         onSaved(created.agent_id)
       } else {
-        await saveAgentDraft(agentId, payload)
+        await saveAgentDraft(workspaceId, agentId, payload)
         setHasDraft(true)
         showToast('草稿已保存', 'success')
         onChanged()
@@ -160,7 +163,7 @@ export function AgentEditor({
     setError('')
     setBusy(true)
     try {
-      await publishAgent(agentId)
+      await publishAgent(workspaceId, agentId)
       setHasDraft(false)
       showToast('已发布', 'success')
       onChanged()
@@ -177,7 +180,7 @@ export function AgentEditor({
     setError('')
     setBusy(true)
     try {
-      await archiveAgent(agentId)
+      await archiveAgent(workspaceId, agentId)
       showToast('已归档', 'success')
       onArchived()
     } catch (err) {
@@ -307,6 +310,7 @@ export function AgentEditor({
       </div>
       {!creating && (
         <AgentVersionsDialog
+          workspaceId={workspaceId}
           agentId={agentId}
           open={versionsOpen}
           onClose={() => setVersionsOpen(false)}

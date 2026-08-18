@@ -17,12 +17,8 @@ from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
 from server.app.workflow_worker.mark_scan import MarkStore
 from tests.helpers.executor_worker import (
-    allocate,
-    bind,
-    local_def,
     local_node,
     make_definition,
-    make_registry,
     make_worker,
 )
 from tests.postgres_support import TEST_DATABASE_URL
@@ -81,7 +77,7 @@ def _spy(monkeypatch: pytest.MonkeyPatch, obj: object, attr: str) -> dict[str, i
 def test_delta_query_returns_terminal_rows(tmp_path: Path) -> None:
     """The delta query has no status filter: terminal transitions stay visible."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     job_db.update_job_status(job_id, "completed")
 
@@ -92,7 +88,7 @@ def test_delta_query_returns_terminal_rows(tmp_path: Path) -> None:
 
 def test_store_full_then_delta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     _make_jobs(job_db, ws["id"], 3)
     full_calls = _spy(monkeypatch, job_db, "list_active_job_marks")
     delta_calls = _spy(monkeypatch, job_db, "list_changed_job_marks")
@@ -106,7 +102,7 @@ def test_store_full_then_delta(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
 
 def test_store_delta_sees_new_and_terminal_jobs(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     first, second = _make_jobs(job_db, ws["id"], 2)
     store = MarkStore()
     assert {mark["id"] for mark in store.refresh(job_db, "test")} == {first, second}
@@ -121,7 +117,7 @@ def test_store_keeps_newest_first_order_after_delta(tmp_path: Path) -> None:
     """New jobs arriving via delta must not queue behind the cached backlog:
     claim order follows created_at desc (list_active_job_marks contract)."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     old_ids = _make_jobs(job_db, ws["id"], 2)
     store = MarkStore()
     store.refresh(job_db, "test")
@@ -142,7 +138,7 @@ def test_store_keeps_paused_and_recovers_on_resume(tmp_path: Path) -> None:
     """paused is not terminal: the mark stays cached (downstream is_runnable
     filters it), and a resume bumps updated_at so the delta re-admits it."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     store = MarkStore()
     assert [mark["id"] for mark in store.refresh(job_db, "test")] == [job_id]
@@ -159,7 +155,7 @@ def test_store_keeps_paused_and_recovers_on_resume(tmp_path: Path) -> None:
 def test_store_readmits_rerun_job(tmp_path: Path) -> None:
     """failed -> queued (rerun) must bring the job back via the delta."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     store = MarkStore()
     store.refresh(job_db, "test")
@@ -174,7 +170,7 @@ def test_store_burst_does_not_pin_delta_lower_bound(tmp_path: Path) -> None:
     """Rows sharing one bulk-insert commit timestamp must not be re-fetched
     on every pass once the overlap window has slid past the burst."""
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     _make_jobs(job_db, ws["id"], 3)
 
     seen: list[int] = []
@@ -203,7 +199,7 @@ def test_store_burst_does_not_pin_delta_lower_bound(tmp_path: Path) -> None:
 
 def test_store_deleted_job_pruned_by_full_rescan(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     (job_id,) = _make_jobs(job_db, ws["id"], 1)
     store = MarkStore()
     assert len(store.refresh(job_db, "test")) == 1
@@ -218,17 +214,12 @@ def test_store_deleted_job_pruned_by_full_rescan(tmp_path: Path) -> None:
 def _setup_worker(tmp_path: Path, job_count: int, capacity: int):
     db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Mark Scan WS")
+    ws = job_db.create_workspace(default_workflow_key="demo_workflow", name="Mark Scan WS")
     block_event = threading.Event()
-    registry = make_registry(
-        {"code-default": BlockingExecutor("code-default", block_event)},
-        {"code-default": local_def(capacity, {"fetch"})},
-    )
+    executor = BlockingExecutor("code", block_event)
     definition = make_definition([local_node("fetch")])
     _make_jobs(job_db, ws["id"], job_count)
-    bind(job_db, ws["id"], "test", "fetch", "code-default")
-    allocate(job_db, ws["id"], "code-default", capacity)
-    worker = make_worker(tmp_path, db_path, registry, [definition])
+    worker = make_worker(tmp_path, db_path, executor, [definition], code_capacity=capacity)
     return worker, ws, block_event
 
 
@@ -241,7 +232,7 @@ def test_worker_second_pass_scans_delta_only(
     delta_calls = _spy(monkeypatch, worker.job_db, "list_changed_job_marks")
 
     assert worker._poll() is True
-    assert worker.leases.active_counts("code-default")["global"] == 2
+    assert worker.leases.active_counts("code")["global"] == 2
     # Both jobs are running: no new claims, but the scan still happens via delta.
     assert worker._poll() is False
     assert full_calls["count"] == 1
@@ -258,7 +249,7 @@ def test_worker_delta_picks_up_new_job(tmp_path: Path) -> None:
     assert worker._poll() is True
     _make_jobs(worker.job_db, ws["id"], 1, prefix="N")
     assert worker._poll() is True
-    assert worker.leases.active_counts("code-default")["global"] == 2
+    assert worker.leases.active_counts("code")["global"] == 2
 
     block_event.set()
     worker.stop()

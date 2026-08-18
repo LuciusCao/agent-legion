@@ -34,10 +34,8 @@ agent-legion/
 │       ├── jobs/               # Job 领域查询与类型
 │       ├── executors/          # Executor 配置、runtime、lease 调度
 │       ├── workflows/          # Agent Legion DAG 定义与执行
-│       ├── pipeline/           # 视频处理流水线阶段
 │       ├── configuration/      # 配置加载与 owned-keys 校验
 │       ├── quality/            # 架构不变量与豁免运行时检查
-│       ├── video_capabilities/ # 视频能力合约与投影
 │       ├── skills/             # 外部 Pi skill 管理
 │       ├── agents.py           # Agent 发现与状态跟踪
 │       ├── events/             # 事件子系统：sse.py SSE 广播、bus.py 进程内总线、
@@ -85,10 +83,7 @@ agent-legion/
 │   ├── routes/                 # 路由级测试
 │   ├── full/                   # 高保真完整门测试
 │   └── ci/                     # CI 扩展压力测试
-├── tools/
-│   └── comprehension-uploader/ # 审题信息上传 CLI 工具
-├── workspace_libs/             # workspace pack：外部服务协议代码（平台只认 adapter 协议）
-│   └── cms/                    # CMS 客户端与连接 adapter（static_bearer / cms_hmac）
+├── workspace_libs/             # 节点 SDK 与执行脚手架（code 节点沙箱/Worker 闭包白名单）
 ├── docs/
 │   └── architecture/           # 架构文档
 └── data/                       # 运行时数据（gitignored）

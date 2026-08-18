@@ -17,12 +17,13 @@ from server.app.services.quality_replays import QualityReplayService
 from server.app.services.workflow_revision_format import definition_hash, serialize_definition
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.schema import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from tests.helpers import seed_workspace_agent_definitions
 from tests.postgres_support import TEST_DATABASE_URL
 
 pytestmark = pytest.mark.fresh_schema
 
-AGENT_ID = "question-key-info-v1"  # seeded published v1 by tests/conftest.py
-CAPABILITY = "generate_key_info"
+AGENT_ID = "example-write-script-v1"  # demo template, seeded per workspace (v46)
+CAPABILITY = "write_script"
 
 
 def _definition() -> WorkflowDefinition:
@@ -34,7 +35,7 @@ def _definition() -> WorkflowDefinition:
             "intake": WorkflowNode(
                 key="intake",
                 label="intake",
-                capability="question_intake",
+                capability="intake_items",
                 outputs=["question.json"],
             ),
             "generate": WorkflowNode(
@@ -61,7 +62,9 @@ class _Env:
     def __init__(self, job_db, tmp_path: Path, route_kind: str) -> None:
         self.job_db = job_db
         self.tmp_path = tmp_path
-        ws = job_db.create_workspace("Replay WS")
+        ws = job_db.create_workspace(
+            default_workflow_key="education_video_problems_generation", name="Replay WS"
+        )
         self.workspace_id = str(ws["id"])
         definition = _definition()
         snapshot = serialize_definition(definition)
@@ -83,6 +86,10 @@ class _Env:
         (job_dir / "question.json").write_text('{"q": 1}', encoding="utf-8")
         (job_dir / "key_info.json").write_text('{"key": true}', encoding="utf-8")
         target_id = AGENT_ID if route_kind == "agent" else "code-default"
+        if route_kind == "agent":
+            # Agent definitions are workspace-scoped (schema v46): the demo
+            # templates seed into this workspace before routes reference them.
+            seed_workspace_agent_definitions(self.workspace_id)
         with write_transaction(TEST_DATABASE_URL) as conn:
             conn.execute(
                 "insert into workspace_node_routes("
@@ -259,14 +266,16 @@ def test_agent_version_pin_rejected_for_executor_node(env) -> None:
         env.service().create_replay(env.workspace_id, "item-1", agent_version=1)
 
 
-def _save_draft(capability: str = CAPABILITY) -> AgentDefinition:
+def _save_draft(workspace_id: str, capability: str = CAPABILITY) -> AgentDefinition:
     definition = AgentDefinition(
         capability=capability,
         runtime="velites",
-        skill="question_comprehension_info/generate_key_info",
+        skill="education-video-problems-generation/write-script",
         tools=("read",),
     )
-    AgentService(TEST_DATABASE_URL).save_draft(AGENT_ID, definition, created_by="test")
+    AgentService(TEST_DATABASE_URL, workspace_id).save_draft(
+        AGENT_ID, definition, created_by="test"
+    )
     return definition
 
 
@@ -277,12 +286,12 @@ def test_default_pin_uses_current_published(agent_env) -> None:
     pin = agent_env.copy_batch_payload(replay)["agent_versions"]["generate"]
     assert pin["agent_id"] == AGENT_ID
     assert pin["version"] == 1
-    published = AgentService(TEST_DATABASE_URL).get_published(AGENT_ID)
+    published = AgentService(TEST_DATABASE_URL, agent_env.workspace_id).get_published(AGENT_ID)
     assert pin["definition_hash"] == published.definition_hash
 
 
 def test_explicit_draft_version_pin(agent_env) -> None:
-    draft = _save_draft()
+    draft = _save_draft(agent_env.workspace_id)
     replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=2)
     assert replay["agent_version"] == 2
     pin = agent_env.copy_batch_payload(replay)["agent_versions"]["generate"]
@@ -291,9 +300,9 @@ def test_explicit_draft_version_pin(agent_env) -> None:
 
 
 def test_archived_version_pin_allowed(agent_env) -> None:
-    service = AgentService(TEST_DATABASE_URL)
+    service = AgentService(TEST_DATABASE_URL, agent_env.workspace_id)
     published_v1 = service.get_published(AGENT_ID)
-    _save_draft()
+    _save_draft(agent_env.workspace_id)
     service.publish(AGENT_ID)  # v2 published, v1 archived
     replay = agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=1)
     pin = agent_env.copy_batch_payload(replay)["agent_versions"]["generate"]
@@ -307,7 +316,7 @@ def test_unknown_version_rejected(agent_env) -> None:
 
 
 def test_capability_mismatch_pin_rejected(agent_env) -> None:
-    _save_draft(capability="some_other_capability")
+    _save_draft(agent_env.workspace_id, capability="some_other_capability")
     with pytest.raises(InvalidOperationError, match="does not match node capability"):
         agent_env.service().create_replay(agent_env.workspace_id, "item-1", agent_version=2)
 

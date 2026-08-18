@@ -19,6 +19,7 @@ import pytest
 
 from server.app.agent_broker.agent_bundle import build_agent_bundle
 from worker import executor as agent_worker
+from worker.process_lifecycle import terminate
 from worker.registration_retry import register_with_retry
 from worker.status import ExecutionStatusReporter, read_current_executions, read_runtime_status
 from worker.upload_queue import UploadQueue
@@ -84,10 +85,10 @@ class FakeClient:
             "online": True,
         }
 
-    def heartbeat(self, execution_id: str, lease_id: str) -> int:
+    def heartbeat(self, execution_id: str, lease_id: str) -> tuple[int, list[str]]:
         self.heartbeats += 1
         self.heartbeat_lease_ids.append(lease_id)
-        return self._heartbeat_status
+        return self._heartbeat_status, []
 
     def release_slot(self, execution_id: str, lease_id: str) -> int:
         self.release_calls += 1
@@ -212,12 +213,12 @@ def test_run_execution_transient_heartbeat_error_keeps_beating(tmp_path: Path) -
     client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
     calls = 0
 
-    def flaky(execution_id: str, lease_id: str) -> int:
+    def flaky(execution_id: str, lease_id: str) -> tuple[int, list[str]]:
         nonlocal calls
         calls += 1
         if calls % 2 == 1:
             raise urllib.error.URLError("boom")
-        return 500
+        return 500, []
 
     client.heartbeat = flaky  # type: ignore[method-assign]
     _run(client, tmp_path / "work")
@@ -399,7 +400,7 @@ def test_terminate_never_raises_on_stubborn_process() -> None:
             raise subprocess.TimeoutExpired("cmd", timeout or 0)
 
     # killpg raises ProcessLookupError (suppressed); both waits time out.
-    agent_worker.terminate(StubbornProc(), 0.01)  # type: ignore[arg-type]
+    terminate(StubbornProc(), 0.01)  # type: ignore[arg-type]
 
 
 def test_terminate_kills_sigterm_ignoring_process_group(tmp_path: Path) -> None:
@@ -408,7 +409,7 @@ def test_terminate_kills_sigterm_ignoring_process_group(tmp_path: Path) -> None:
         "#!/usr/bin/env python3\nimport signal, time\nsignal.signal(signal.SIGTERM, signal.SIG_IGN)\ntime.sleep(60)\n",
     )
     proc = subprocess.Popen([script], start_new_session=True)
-    agent_worker.terminate(proc, 0.2)
+    terminate(proc, 0.2)
     assert proc.poll() is not None
 
 
@@ -449,7 +450,19 @@ def test_client_revoke_raises_on_error_status() -> None:
 def test_client_heartbeat_returns_status() -> None:
     client = agent_worker.Client("http://unused")
     client.request = lambda *a, **k: (409, b"")  # type: ignore[method-assign]
-    assert client.heartbeat("exec-1", "lease-1") == 409
+    assert client.heartbeat("exec-1", "lease-1") == (409, [])
+
+
+def test_client_heartbeat_parses_protocol_v2_cancel_body() -> None:
+    # 批次 2：v2 Host 的 heartbeat 应答 200 + 取消列表；v1 的 204 无 body。
+    client = agent_worker.Client("http://unused")
+    client.request = lambda *a, **k: (  # type: ignore[method-assign]
+        200,
+        b'{"cancelled_execution_ids": ["exec-9", "exec-10"]}',
+    )
+    assert client.heartbeat("exec-1", "lease-1") == (200, ["exec-9", "exec-10"])
+    client.request = lambda *a, **k: (204, b"")  # type: ignore[method-assign]
+    assert client.heartbeat("exec-1", "lease-1") == (204, [])
 
 
 def test_client_claim_declares_live_capacity() -> None:
@@ -460,6 +473,39 @@ def test_client_claim_declares_live_capacity() -> None:
     assert client.claim("w1", 70) is None
 
     assert seen == [{"worker_id": "w1", "max_concurrency": 70}]
+
+
+def test_client_claim_declares_code_capacity() -> None:
+    # 批次 2：每次 poll 重声明 code 池容量（Host 记录并强制）。
+    client = agent_worker.Client("http://unused")
+    seen: list[dict] = []
+    client.request = lambda *a, **k: (seen.append(json.loads(k["data"])), (204, b""))[1]  # type: ignore[method-assign]
+
+    assert client.claim("w1", 70, 4) is None
+
+    assert seen == [{"worker_id": "w1", "max_concurrency": 70, "max_code_concurrency": 4}]
+
+
+def test_client_registration_declares_protocol_v2_and_code_capacity() -> None:
+    client = agent_worker.Client("http://unused")
+    seen: list[dict] = []
+    client.request = lambda *a, **k: (  # type: ignore[method-assign]
+        seen.append(json.loads(k["data"])),
+        (201, b'{"worker_token": "tok", "allowed_workspaces": []}'),
+    )[1]
+
+    client.register(
+        {
+            "worker_id": "w1",
+            "runtimes": ["velites"],
+            "max_concurrency": 1,
+            "max_code_concurrency": 3,
+        },
+        "management-token",
+    )
+
+    assert seen[0]["protocol_version"] == 2
+    assert seen[0]["max_code_concurrency"] == 3
 
 
 def test_client_registration_rejects_permanent_http_errors() -> None:
@@ -582,7 +628,11 @@ def test_main_survives_transient_claim_errors(
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
 
-    def flaky_claim(worker_id: str, max_concurrency: int | None = None) -> dict | None:
+    def flaky_claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
         nonlocal claim_calls
         claim_calls += 1
         if claim_calls <= 3:
@@ -604,7 +654,11 @@ def test_main_hot_reloads_claim_switch(monkeypatch: pytest.MonkeyPatch, tmp_path
     fake = FakeClient(tmp_path / "unused.tar.gz")
     claim_calls = 0
 
-    def no_work(worker_id: str, max_concurrency: int | None = None) -> dict | None:
+    def no_work(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
         nonlocal claim_calls
         claim_calls += 1
         return None
@@ -634,7 +688,11 @@ def test_main_hot_resizes_capacity_without_cancelling_active_work(
     claim_calls = 0
     releases: dict[str, threading.Event] = {}
 
-    def claim(worker_id: str, max_concurrency: int | None = None) -> dict:
+    def claim(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict:
         nonlocal claim_calls
         claim_calls += 1
         execution_id = f"exec-{claim_calls}"
@@ -689,7 +747,11 @@ def test_main_exits_cleanly_on_revoked_worker(
 ) -> None:
     fake = FakeClient(tmp_path / "unused.tar.gz")
 
-    def revoked(worker_id: str, max_concurrency: int | None = None) -> dict | None:
+    def revoked(
+        worker_id: str,
+        max_concurrency: int | None = None,
+        max_code_concurrency: int | None = None,
+    ) -> dict | None:
         raise agent_worker.WorkerAuthError("HTTP 409: unknown or revoked")
 
     fake.claim = revoked  # type: ignore[attr-defined]

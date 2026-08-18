@@ -1,4 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { QueryClientProvider } from '@tanstack/react-query'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import {
   archiveAgent,
@@ -9,8 +10,13 @@ import {
   rollbackAgent,
   validateSkillPath,
 } from '../../api'
+import { extraQueryKeys } from '../../lib/queryKeysExtra'
+import { useSettingStore } from '../../stores/settingStore'
+import {
+  createTestQueryClient,
+  TestQueryProvider,
+} from '../../testing/testQueryClient'
 import type { AgentListItem, AgentVersion } from '../../types'
-import { TestQueryProvider } from '../../testing/testQueryClient'
 import { AgentsPanel } from './AgentsPanel'
 
 vi.mock('../../api', () => ({
@@ -63,10 +69,10 @@ const publishedVersion: AgentVersion = {
   published_at: '2026-08-01T01:00:00Z',
 }
 
-function renderPanel() {
+function renderPanel(initialSelectedId: string | null = null) {
   return render(
     <TestQueryProvider>
-      <AgentsPanel />
+      <AgentsPanel initialSelectedId={initialSelectedId} />
     </TestQueryProvider>
   )
 }
@@ -74,6 +80,7 @@ function renderPanel() {
 describe('AgentsPanel', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useSettingStore.setState({ workspaceId: 'ws1' })
     mockList.mockResolvedValue({ agents: [agent] })
     mockDetail.mockResolvedValue({
       agent_id: 'key-info-v1',
@@ -104,11 +111,20 @@ describe('AgentsPanel', () => {
         'generate_key_info'
       )
     )
-    expect(mockDetail).toHaveBeenCalledWith('key-info-v1')
+    expect(mockDetail).toHaveBeenCalledWith('ws1', 'key-info-v1')
     expect(screen.getByLabelText('Agent ID')).toHaveValue('key-info-v1')
     expect(screen.getByLabelText('Skill')).toHaveValue('ns/skill')
     // 无草稿时不可直接发布
     expect(screen.getByRole('button', { name: '发布' })).toBeDisabled()
+  })
+
+  it('opens the focused agent directly when initialSelectedId is given', async () => {
+    renderPanel('key-info-v1')
+
+    await waitFor(() =>
+      expect(screen.getByLabelText('Agent ID')).toHaveValue('key-info-v1')
+    )
+    expect(mockDetail).toHaveBeenCalledWith('ws1', 'key-info-v1')
   })
 
   it('creates a new agent draft after skill validation', async () => {
@@ -142,6 +158,7 @@ describe('AgentsPanel', () => {
 
     await waitFor(() =>
       expect(mockCreate).toHaveBeenCalledWith(
+        'ws1',
         expect.objectContaining({
           agent_id: 'new-agent',
           capability: 'review_key_info',
@@ -159,8 +176,33 @@ describe('AgentsPanel', () => {
     fireEvent.click(await screen.findByRole('button', { name: /key-info-v1/ }))
     fireEvent.click(await screen.findByRole('button', { name: '归档' }))
 
-    await waitFor(() => expect(mockArchive).toHaveBeenCalledWith('key-info-v1'))
+    await waitFor(() =>
+      expect(mockArchive).toHaveBeenCalledWith('ws1', 'key-info-v1')
+    )
     expect(window.confirm).toHaveBeenCalled()
+  })
+
+  it('invalidates the studio executor catalog when agent definitions refresh', async () => {
+    mockArchive.mockResolvedValue({ archived: 2 })
+    const client = createTestQueryClient()
+    const invalidateSpy = vi.spyOn(client, 'invalidateQueries')
+    render(
+      <QueryClientProvider client={client}>
+        <AgentsPanel />
+      </QueryClientProvider>
+    )
+
+    fireEvent.click(await screen.findByRole('button', { name: /key-info-v1/ }))
+    fireEvent.click(await screen.findByRole('button', { name: '归档' }))
+
+    await waitFor(() =>
+      expect(mockArchive).toHaveBeenCalledWith('ws1', 'key-info-v1')
+    )
+    await waitFor(() =>
+      expect(invalidateSpy).toHaveBeenCalledWith({
+        queryKey: extraQueryKeys.studioExecutorCatalog('ws1'),
+      })
+    )
   })
 
   it('rolls back from the versions dialog', async () => {
@@ -188,7 +230,7 @@ describe('AgentsPanel', () => {
     fireEvent.click(screen.getByRole('button', { name: '回滚' }))
 
     await waitFor(() =>
-      expect(mockRollback).toHaveBeenCalledWith('key-info-v1', 1)
+      expect(mockRollback).toHaveBeenCalledWith('ws1', 'key-info-v1', 1)
     )
   })
 })

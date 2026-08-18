@@ -78,6 +78,7 @@ def find_candidate_runs(
             )
             select r.id as run_id, r.job_id, r.node_key, r.skill_version, r.finished_at,
                    j.storage_dir, j.status as job_status, j.workflow_key,
+                   j.workspace_id,
                    j.workflow_definition_snapshot_json,
                    m.manifest_json
             from latest
@@ -113,12 +114,15 @@ def validate_run(
     jobs_dir: Path,
     row: dict[str, Any],
     *,
-    capability_skills: dict[str, str],
+    capability_skills: dict[tuple[str, str], str],
 ) -> tuple[str, str]:
     """Run the skill validator for one candidate; return (verdict, message)."""
     skill = _skill_for_run(row)
     if skill.startswith("capability:"):
-        skill = capability_skills.get(skill.removeprefix("capability:"), "")
+        # Agent definitions are workspace-scoped (schema v46): resolve the
+        # capability inside the run's own workspace, never globally.
+        workspace_id = str(row.get("workspace_id") or "")
+        skill = capability_skills.get((workspace_id, skill.removeprefix("capability:")), "")
     if not skill:
         return "unknown", "no skill resolvable for node"
     job_dir = resolve_job_dir({"id": row["job_id"], "storage_dir": row["storage_dir"]}, jobs_dir)
@@ -270,17 +274,19 @@ def main() -> None:
         base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
     )
 
-    capability_skills: dict[str, str] = {}
+    capability_skills: dict[tuple[str, str], str] = {}
     with read_connection(dsn) as conn:
         for row in conn.execute(
-            "select definition_json from versioned_entities"
-            " where entity_type='agent' and workspace_id is null and status='published'"
+            "select workspace_id, definition_json from versioned_entities"
+            " where entity_type='agent' and status='published'"
         ).fetchall():
             payload = row["definition_json"]
             payload = json.loads(payload) if isinstance(payload, str) else payload
             capability = str(payload.get("capability", ""))
-            if capability:
-                capability_skills[capability] = str(payload.get("skill", ""))
+            if capability and row["workspace_id"]:
+                capability_skills[(str(row["workspace_id"]), capability)] = str(
+                    payload.get("skill", "")
+                )
 
     candidates = find_candidate_runs(dsn, workspace_id=args.workspace_id, since=args.since)
     print(f"candidate worker-completed node runs: {len(candidates)}")

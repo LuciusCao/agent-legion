@@ -45,6 +45,8 @@ class InstanceSettingsDocument(BaseModel):
     heartbeat_failure_threshold: int = Field(ge=1)
     sweeper_enabled: bool
     sweeper_interval_seconds: float = Field(gt=0)
+    # Implicit single code pool capacity (P-0.5); restart-effective.
+    code_capacity: int = Field(gt=0)
     workflows: InstanceWorkflowsSettings
     agent_workers: InstanceAgentWorkersSettings
     openclaw: InstanceOpenClawSettings

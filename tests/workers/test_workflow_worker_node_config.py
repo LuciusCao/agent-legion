@@ -1,4 +1,4 @@
-"""Dispatch-time executor node config injection (spec D15)."""
+"""Dispatch-time code-pool node config injection (spec D15, P-0.5)."""
 
 from __future__ import annotations
 
@@ -6,12 +6,11 @@ from pathlib import Path
 
 from cryptography.fernet import Fernet
 
-from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
+from server.app.services.node_codes import NodeCodeService
 from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -34,25 +33,11 @@ def _make_worker(
     executor: RecordingExecutor,
     definitions: list[WorkflowDefinition],
 ) -> WorkflowWorkerThread:
-    executor_def = CodeExecutorConfig(
-        kind="code",
-        global_capacity=2,
-        capabilities={
-            "fetch": CodeCapabilityConfig(
-                path="workflow_nodes/question_intake.py", config_schema=SCHEMA
-            ),
-        },
-    )
-    registry = ExecutorRegistry(
-        executors={"code-default": executor},
-        global_capacities={"code-default": 2},
-        definitions={"code-default": executor_def},
-    )
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(TEST_DATABASE_URL, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
     )
@@ -65,22 +50,21 @@ def _make_worker(
         jobs_dir=tmp_path / "jobs",
         config={},
         database_url=TEST_DATABASE_URL,
-        executor_definitions=registry.definitions(),
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "workflows": {"enabled": True},
             "openclaw": {"command_template": ["openclaw"]},
+            "code_capacity": 2,
         }
     )
     worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )
-    worker._definitions = definitions
+    worker._scan_entries = (definitions, [])
     return worker
 
 
@@ -101,26 +85,25 @@ def _prepare_job(
         node_keys=[node.key],
         workspace_id=ws["id"],
     )
-    with job_db.connect() as conn:
-        conn.execute(
-            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (%s, %s, %s, %s)",
-            (ws["id"], "test", node.key, "code-default"),
-        )
-        conn.execute(
-            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (%s, %s, %s)",
-            (ws["id"], "code-default", 2),
-        )
+    # Since #96 every code node needs published node code to dispatch; the
+    # RecordingExecutor never reads it, so a trivial version is enough.
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    codes.save_draft(
+        ws["id"], "test", node.key, "def run(job, job_dir, runtime):\n    pass\n", "test seed"
+    )
+    codes.publish(ws["id"], "test", node.key)
     return ws, job
 
 
 def test_dispatch_injects_live_node_config_chain(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("code-default")
+    executor = RecordingExecutor("code")
     node = WorkflowNode(
         key="fetch",
         label="fetch",
         capability="fetch",
         config={"bank_version": "v9"},
+        config_schema=SCHEMA,
         outputs=["output.json"],
     )
     definition = _make_definition([node])
@@ -133,15 +116,23 @@ def test_dispatch_injects_live_node_config_chain(tmp_path: Path) -> None:
     for future in worker._futures.values():
         future.result(timeout=5)
 
-    # schema default ← workflow node config ← workspace override
-    assert executor.contexts[0].node_config == {"bank_version": "v9", "country_id": "9"}
+    # schema default ← workflow node config ← workspace override; the
+    # platform-reserved execution keys merge in with platform defaults.
+    assert executor.contexts[0].node_config == {
+        "bank_version": "v9",
+        "country_id": "9",
+        "timeout_seconds": 600,
+        "sandbox_network": False,
+    }
     worker.stop()
 
 
 def test_dispatch_prefers_frozen_batch_node_config(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("code-default")
-    node = _local_node("fetch")
+    executor = RecordingExecutor("code")
+    node = _local_node(
+        "fetch",
+    )
     ws = job_db.create_workspace("Test WS", default_workflow_key="test")
     batch = job_db.create_batch(
         "test",
@@ -158,15 +149,63 @@ def test_dispatch_prefers_frozen_batch_node_config(tmp_path: Path) -> None:
     for future in worker._futures.values():
         future.result(timeout=5)
 
-    # The intake snapshot wins over any live layer, unchanged.
-    assert executor.contexts[0].node_config == {"bank_version": "frozen"}
+    # The intake snapshot wins over any live layer; reserved execution keys
+    # absent from the old frozen payload are padded from the node's declared
+    # config (platform defaults here), frozen values always win (P-0.5).
+    assert executor.contexts[0].node_config == {
+        "bank_version": "frozen",
+        "timeout_seconds": 600,
+        "sandbox_network": False,
+    }
+    worker.stop()
+
+
+def test_dispatch_pads_frozen_batch_with_node_declared_reserved_values(tmp_path: Path) -> None:
+    """v47-harvested nodes carry reserved values in config; a frozen batch
+    predating the reserved keys is padded from them (Step 1 behavior: the
+    executor capability seeded them — Step 2 moved the seed onto the node)."""
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
+    executor = RecordingExecutor("code")
+    node = WorkflowNode(
+        key="fetch",
+        label="fetch",
+        capability="fetch",
+        config={"timeout_seconds": 900, "sandbox_network": True},
+        outputs=["output.json"],
+    )
+    ws = job_db.create_workspace("Test WS", default_workflow_key="test")
+    batch = job_db.create_batch(
+        "test",
+        "batch_by_ids",
+        {"node_config": {"fetch": {"bank_version": "frozen"}}},
+        ws["id"],
+    )
+    _ws, _job = _prepare_job(job_db, node, workspace=ws, batch_id=str(batch["id"]))
+    worker = _make_worker(tmp_path, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    assert worker._poll() is True
+    for future in worker._futures.values():
+        future.result(timeout=5)
+
+    assert executor.contexts[0].node_config == {
+        "bank_version": "frozen",
+        "timeout_seconds": 900,
+        "sandbox_network": True,
+    }
     worker.stop()
 
 
 def test_dispatch_fails_node_on_invalid_workspace_override(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("code-default")
-    node = _local_node("fetch")
+    executor = RecordingExecutor("code")
+    node = WorkflowNode(
+        key="fetch",
+        label="fetch",
+        capability="fetch",
+        config_schema=SCHEMA,
+        outputs=["output.json"],
+    )
     _ws, job = _prepare_job(job_db, node)
     job_db.update_workspace(_ws["id"], node_config={"test": {"fetch": {"nope": 1}}})
     worker = _make_worker(tmp_path, executor, [_make_definition([node])])
@@ -188,8 +227,14 @@ def test_dispatch_resolves_vault_secret_refs_in_memory(tmp_path: Path, monkeypat
     monkeypatch.setenv("AGENT_LEGION_VAULT_MASTER_KEY", Fernet.generate_key().decode())
     monkeypatch.delenv("AGENT_LEGION_VAULT_MASTER_KEY_FILE", raising=False)
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("code-default")
-    node = _local_node("fetch")
+    executor = RecordingExecutor("code")
+    node = WorkflowNode(
+        key="fetch",
+        label="fetch",
+        capability="fetch",
+        config_schema=SCHEMA,
+        outputs=["output.json"],
+    )
     ws, _job = _prepare_job(job_db, node)
     name = "node:test:fetch:token"
     VaultService(TEST_DATABASE_URL, {}).set(ws["id"], name, "dispatch-plain-token")
@@ -208,14 +253,22 @@ def test_dispatch_resolves_vault_secret_refs_in_memory(tmp_path: Path, monkeypat
     assert executor.contexts[0].node_config == {
         "bank_version": "v9",
         "token": "dispatch-plain-token",
+        "timeout_seconds": 600,
+        "sandbox_network": False,
     }
     worker.stop()
 
 
 def test_dispatch_fails_node_on_unresolvable_secret_ref(tmp_path: Path) -> None:
     job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
-    executor = RecordingExecutor("code-default")
-    node = _local_node("fetch")
+    executor = RecordingExecutor("code")
+    node = WorkflowNode(
+        key="fetch",
+        label="fetch",
+        capability="fetch",
+        config_schema=SCHEMA,
+        outputs=["output.json"],
+    )
     ws, job = _prepare_job(job_db, node)
     job_db.update_workspace(
         ws["id"],

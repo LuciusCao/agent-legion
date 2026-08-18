@@ -2,16 +2,32 @@
 
 Design: ``docs/architecture/node-sdk-and-worker-execution-design.md``.
 
-A code node still exposes the module-level ``run(job, job_dir, runtime)``
-entry contract (EXEC-CODE-001/002); the SDK is the adaptation layer nodes use
-*inside* ``run`` so they never hand-roll the scaffolding: JSON artifact IO,
-config merging, cancellation checkpoints, prefetched inputs, and the
-auth-failure back-channel.
+A code node exposes a module-level ``run`` entry; the SDK is the adaptation
+layer nodes use *inside* ``run`` so they never hand-roll the scaffolding:
+JSON artifact IO, config merging, cancellation checkpoints, prefetched
+inputs, and the auth-failure back-channel. The preferred shape is a plain
+business function decorated with ``@entrypoint``::
 
-Layering rule: this module depends on the standard library only. It must never
-import ``server.app.*`` — the SDK is execution-plane code that also runs
-inside the velites sandbox (EXEC-CODE-003) and, eventually, on remote Workers,
-so it cannot drag control-plane dependencies along.
+    from workspace_libs.node_sdk import NodeContext, entrypoint
+
+    @entrypoint
+    def run(ctx: NodeContext) -> None:
+        data = ctx.artifacts.read_json_object("input.json")
+        ctx.artifacts.write_json("output.json", {"echo": data})
+
+The classic ``run(job, job_dir, runtime)`` signature keeps working
+(``NodeContext(job, job_dir, runtime)`` adapts it) — frozen code versions are
+unaffected either way. Nodes that talk to an external HTTP service use
+``workspace_libs.http_client``; media helpers live in
+``workspace_libs.media``. The framework carries no business semantics:
+service-specific URL rules, payload parsing, and quality policy stay in the
+node.
+
+Layering rule: this module depends on the standard library plus sibling
+``workspace_libs`` modules only. It must never import ``server.app.*`` — the
+SDK is execution-plane code that also runs inside the velites sandbox
+(EXEC-CODE-003) and on remote Workers, so it cannot drag control-plane
+dependencies along.
 
 Compatibility promise: custom node code versions are frozen at intake while
 the SDK evolves with the repo, so this API only grows — never remove or rename
@@ -20,23 +36,23 @@ members; breaking changes land under new names.
 
 from __future__ import annotations
 
+import functools
 import json
 import logging
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from workspace_libs._service_config import merge_service_config
+from workspace_libs.node_artifacts import ArtifactStore
+
 # Auth-failure back-channel (design §5.3): the node records the fact, the
 # parent executor performs the privileged token invalidation. The marker lives
-# in a subdirectory so top-level file inventories (e.g. video_package's
+# in a subdirectory so top-level file inventories in node code (an
 # ``iterdir()`` listing) never pick it up.
 NODE_RUNTIME_DIR = ".node_runtime"
 AUTH_FAILURE_MARKER = "auth_failure"
 AUTH_FAILURE_MARKER_PATH = Path(NODE_RUNTIME_DIR) / AUTH_FAILURE_MARKER
-
-# Keys in node_config that reference (or carry) the injected connection; they
-# are selectors, not business overrides, and never merge into service config.
-_CONNECTION_SELECTOR_KEYS = ("connection", "connection_config")
 
 
 def parse_json_object(value: Any) -> dict[str, Any]:
@@ -48,48 +64,6 @@ def parse_json_object(value: Any) -> dict[str, Any]:
     except json.JSONDecodeError:
         return {}
     return loaded if isinstance(loaded, dict) else {}
-
-
-class _ArtifactStore:
-    """Uniform access to the files a node reads and writes under ``job_dir``."""
-
-    def __init__(self, context: NodeContext) -> None:
-        self._context = context
-
-    @property
-    def dir(self) -> Path:
-        return self._context.job_dir
-
-    def path(self, name: str) -> Path:
-        return self._context.job_dir / name
-
-    def read_text(self, name: str) -> str:
-        return self.path(name).read_text(encoding="utf-8")
-
-    def read_json(self, name: str) -> Any:
-        return json.loads(self.read_text(name))
-
-    def read_json_object(self, name: str) -> dict[str, Any]:
-        """Read *name* and require a JSON object (dict) payload."""
-        path = self.path(name)
-        if not path.is_file():
-            raise ValueError(f"Missing input: {name}")
-        content = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(content, dict):
-            raise ValueError(f"Invalid content in {name}")
-        return content
-
-    def write_text(self, name: str, text: str) -> Path:
-        # Writing is the natural stage-commit boundary: checkpoint here so
-        # cancelled executions stop before producing partial output batches.
-        self._context.checkpoint()
-        self._context.job_dir.mkdir(parents=True, exist_ok=True)
-        path = self.path(name)
-        path.write_text(text, encoding="utf-8")
-        return path
-
-    def write_json(self, name: str, payload: Any) -> Path:
-        return self.write_text(name, json.dumps(payload, ensure_ascii=False, indent=2))
 
 
 class NodeContext:
@@ -104,7 +78,7 @@ class NodeContext:
         self._job = job
         self._job_dir = Path(job_dir)
         self._runtime = runtime or {}
-        self.artifacts = _ArtifactStore(self)
+        self.artifacts = ArtifactStore(self)
 
     @property
     def job(self) -> Mapping[str, Any]:
@@ -141,27 +115,7 @@ class NodeContext:
         retired pre-connection credential keys that only apply when no
         connection was injected (legacy frozen payloads).
         """
-        merged: dict[str, Any] = {}
-        if section is not None:
-            settings_config = self._runtime.get("settings_config")
-            if isinstance(settings_config, Mapping):
-                base = settings_config.get(section)
-                if isinstance(base, Mapping):
-                    merged.update(base)
-        node_config = self.config
-        injected = node_config.get("connection_config")
-        has_connection = isinstance(injected, Mapping) and bool(injected)
-        if isinstance(injected, Mapping) and injected:
-            merged.update(
-                {key: value for key, value in injected.items() if value not in (None, "")}
-            )
-        for key, value in node_config.items():
-            if key in _CONNECTION_SELECTOR_KEYS or value in (None, ""):
-                continue
-            if has_connection and key in legacy_keys:
-                continue
-            merged[key] = value
-        return merged
+        return merge_service_config(self._runtime, self.config, section, legacy_keys)
 
     def checkpoint(self) -> None:
         """Raise when cancellation was requested (cooperative cancellation).
@@ -180,6 +134,29 @@ class NodeContext:
         """The prefetched batch row (replaces the retired ``job_db`` read)."""
         batch = self._runtime.get("job_batch")
         return dict(batch) if isinstance(batch, Mapping) else None
+
+    @property
+    def batch_payload(self) -> dict[str, Any]:
+        """Parsed ``source_payload_json`` of the prefetched batch row.
+
+        The dispatch layer prefetches the batch row (nodes hold no database
+        handle, EXEC-CODE-004); runtimes without a prefetch yield ``{}``.
+        """
+        batch = self.batch
+        if not batch:
+            return {}
+        return parse_json_object(batch.get("source_payload_json"))
+
+    @property
+    def root_dir(self) -> Path | None:
+        """Repository/worktree root of the executing host, when provided.
+
+        Injected by the parent executor as the runtime ``root_dir`` key; node
+        code uses it to resolve machine-relative asset paths instead of
+        ``__file__`` (which is meaningless for DB-loaded code text).
+        """
+        root = self._runtime.get("root_dir")
+        return Path(str(root)) if root else None
 
     @property
     def skill_versions(self) -> dict[str, str]:
@@ -208,3 +185,30 @@ class NodeContext:
         marker = self._job_dir / AUTH_FAILURE_MARKER_PATH
         marker.parent.mkdir(parents=True, exist_ok=True)
         marker.write_text(str(self.config.get("connection") or "").strip(), encoding="utf-8")
+
+
+def entrypoint(
+    fn: Callable[[NodeContext], None],
+) -> Callable[[Mapping[str, Any], Path, Mapping[str, Any] | None], None]:
+    """Adapt a ``def run(ctx: NodeContext)`` business function to the executor
+    entry contract ``run(job, job_dir, runtime)``.
+
+    Usage::
+
+        @entrypoint
+        def run(ctx: NodeContext) -> None:
+            ...
+
+    Pure adaptation — no implicit checkpoints or error mapping; the business
+    function's behavior is exactly what it writes. ``functools.wraps`` keeps
+    the module-level name ``run`` so the loader and the draft validator find
+    it unchanged.
+    """
+
+    @functools.wraps(fn)
+    def run(
+        job: Mapping[str, Any], job_dir: Path, runtime: Mapping[str, Any] | None = None
+    ) -> None:
+        fn(NodeContext(job, Path(job_dir), runtime))
+
+    return run

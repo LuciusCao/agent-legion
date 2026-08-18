@@ -5,6 +5,11 @@ from typing import Any, Literal
 
 ExecutionStatus = Literal["completed", "failed", "cancelled"]
 
+# Single implicit code pool (P-0.5): every non-Agent-routed node claims and
+# runs under this executor id. The executor_leases.executor_id column keeps
+# its historical values; new rows always carry this constant.
+CODE_EXECUTOR_ID = "code"
+
 
 @dataclass(frozen=True)
 class ExecutionContext:
@@ -61,6 +66,9 @@ class ExecutionResult:
 
 @dataclass(frozen=True)
 class LeaseClaimRequest:
+    # executor_id is always CODE_EXECUTOR_ID (single code pool, P-0.5);
+    # global_capacity is filled server-side from the instance settings
+    # code_capacity, never chosen by the caller.
     executor_id: str
     global_capacity: int
     workspace_id: str

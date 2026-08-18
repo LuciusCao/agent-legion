@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import logging
-
 import pytest
 
 from server.app.services.job_errors import (
@@ -12,18 +10,20 @@ from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
 )
+from server.app.services.node_code_resolution import (
+    freeze_node_code_versions,
+    resolve_dispatch_node_code,
+)
 from server.app.services.node_codes import (
     MAX_CODE_BYTES,
     NodeCodeService,
     code_hash,
-    freeze_node_code_versions,
-    resolve_dispatch_node_code,
 )
 
 VALID_CODE = "def run(job, job_dir, runtime):\n    return None\n"
 UPDATED_CODE = "async def run(job, job_dir, runtime):\n    return 1\n"
-WF = "question_comprehension_info"
-NODE = "fetch_questions"
+WF = "demo_workflow"
+NODE = "fetch_items"
 
 
 @pytest.fixture
@@ -33,7 +33,7 @@ def service(job_db):
 
 @pytest.fixture
 def workspace_id(job_db):
-    return job_db.create_workspace("node-codes")["id"]
+    return job_db.create_workspace(default_workflow_key="demo_workflow", name="node-codes")["id"]
 
 
 def test_save_draft_creates_version_one_with_hash(service, workspace_id) -> None:
@@ -176,7 +176,7 @@ def test_freeze_node_code_versions_pins_only_published(job_db, service, workspac
     # A draft without publish is not pinned.
     service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
 
-    pins = freeze_node_code_versions(job_db.path, True, workspace_id, WF, [NODE, "download_video"])
+    pins = freeze_node_code_versions(job_db.path, True, workspace_id, WF, [NODE, "fetch_media"])
 
     assert list(pins) == [NODE]
     assert pins[NODE]["version"] == 1
@@ -218,19 +218,17 @@ def test_resolve_dispatch_node_code_rejects_hash_mismatch(job_db, service, works
         resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
 
 
-def test_resolve_dispatch_node_code_warns_and_falls_back_on_missing_version(
-    job_db, service, workspace_id, caplog
+def test_resolve_dispatch_node_code_fails_closed_on_missing_version(
+    job_db, service, workspace_id
 ) -> None:
+    """A frozen version missing at BOTH scopes is data corruption: fail
+    closed instead of silently running the current published code."""
     service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
     service.publish(workspace_id, WF, NODE)
 
     frozen = {"version": 99, "code_hash": "whatever"}
-    with caplog.at_level(logging.WARNING, logger="server.app.services.node_codes"):
-        resolved = resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
-
-    assert resolved == VALID_CODE  # published fallback
-    assert "frozen node code version missing" in caplog.text
-    assert "version=99" in caplog.text
+    with pytest.raises(ValueError, match="frozen node code version missing"):
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
 
 
 def test_save_draft_guard_rejects_concurrently_published_row(
@@ -274,3 +272,63 @@ def test_insert_version_collision_maps_to_conflict_error(
     monkeypatch.setattr(versioned_entities, "_next_version", lambda *args: 1)
     with pytest.raises(ConflictError):
         service.save_draft(workspace_id, WF, NODE, UPDATED_CODE, "user:u1")
+
+
+GLOBAL_CODE = "def run(job, job_dir, runtime):\n    return 'global'\n"
+
+
+def test_frozen_pin_matches_across_scopes_by_hash(job_db, service, workspace_id) -> None:
+    """Pin scope collision (review P1-2): the job froze the global seed v1 at
+    intake; a later workspace publish also numbered v1. The pin's code_hash —
+    not the scope — identifies the frozen code, so the old job must still
+    resolve the global code instead of erroring on the workspace row."""
+    assert service.seed_global(WF, NODE, GLOBAL_CODE, "test seed")
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 1, "code_hash": code_hash(GLOBAL_CODE)}
+    resolved = resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+    assert resolved == GLOBAL_CODE
+
+    # And the workspace pin still resolves the workspace code.
+    frozen_ws = {"version": 1, "code_hash": code_hash(VALID_CODE)}
+    assert (
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen_ws)
+        == VALID_CODE
+    )
+
+
+def test_frozen_pin_matching_neither_scope_still_fails_closed(
+    job_db, service, workspace_id
+) -> None:
+    assert service.seed_global(WF, NODE, GLOBAL_CODE, "test seed")
+    service.save_draft(workspace_id, WF, NODE, VALID_CODE, "user:u1")
+    service.publish(workspace_id, WF, NODE)
+
+    frozen = {"version": 1, "code_hash": "tampered"}
+    with pytest.raises(ValueError, match="hash mismatch"):
+        resolve_dispatch_node_code(job_db.path, True, workspace_id, WF, NODE, frozen)
+
+
+def test_seed_global_tolerates_concurrent_seed_race(service, monkeypatch) -> None:
+    """Two Host processes starting together both pass the emptiness check;
+    the loser's insert hits the version-allocation unique index
+    (ConflictError). Treat it as already seeded instead of crashing startup.
+
+    Honest scope: "already seeded" is not a guarantee the winner's row
+    stays published. If the loser's save_draft lands only AFTER the
+    winner's draft+publish committed, it allocates v2, publishes it, and
+    archives the winner's v1 — the loser overwrites the winner. This is
+    accepted: concurrent seeds carry identical factory content (same
+    source file), so the published code is the same either way, and the
+    window exists only on first startup of an un-seeded database."""
+    import server.app.services.versioned_entities as versioned_entities
+
+    assert service.seed_global(WF, NODE, GLOBAL_CODE, "test seed")
+    # Stale view: the loser still sees an empty entity and re-attempts v1.
+    monkeypatch.setattr(service._store, "list_versions", lambda *args, **kwargs: [])
+    monkeypatch.setattr(versioned_entities, "_next_version", lambda *args: 1)
+
+    other = "def run(job, job_dir, runtime):\n    return 'other'\n"
+    assert not service.seed_global(WF, NODE, other, "concurrent seed")
+    assert service.get_global_published(WF, NODE)["code"] == GLOBAL_CODE

@@ -6,7 +6,12 @@ from server.app.routes.workspace_contracts import WorkspaceRecord
 
 
 class JobBatchRequest(BaseModel):
-    workflow_key: str = "question_comprehension_info"
+    # Intake input fields are workflow-definition-driven (mode.input_field),
+    # so extra fields pass through to the intake service verbatim.
+    model_config = ConfigDict(extra="allow")
+
+    # No platform default workflow: callers must choose explicitly.
+    workflow_key: str
     entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
@@ -56,11 +61,6 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     agentDefaults: dict[str, str] | None = None
 
 
-class WorkspaceSettingsTestResponse(BaseModel):
-    ok: bool
-    message: str
-
-
 class WorkspaceResponse(BaseModel):
     workspace: WorkspaceRecord
 
@@ -87,18 +87,13 @@ class WorkspaceDagResponse(BaseModel):
     nodes: list[dict[str, Any]]
 
 
-class ExecutorRuntimeStatus(BaseModel):
-    executor_id: str
-    kind: str
-    global_capacity: int
-    workspace_limit: int
+class CodePoolStatus(BaseModel):
+    """The single implicit code pool (P-0.5): instance-wide capacity, this
+    workspace's running count, and the globally available slots."""
+
+    capacity: int
     running: int
     available: int
-    binding_count: int
-
-
-class ExecutorStatusSummary(BaseModel):
-    executors: list[ExecutorRuntimeStatus]
 
 
 class WorkspaceStatsResponse(BaseModel):
@@ -107,7 +102,7 @@ class WorkspaceStatsResponse(BaseModel):
     workflow_key: str
     workflow_label: str
     job_stats: dict[str, int]
-    executor_status: ExecutorStatusSummary
+    code_pool: CodePoolStatus
     latest_run: dict[str, Any] | None
 
 

@@ -5,10 +5,11 @@ from typing import Annotated, Any
 from fastapi import Depends, Request
 from fastapi.exceptions import HTTPException
 
+from server.app.auth.scoped_tokens import STUDIO_AGENT_SCOPE
+
 SESSION_COOKIE = "agent_legion_session"
 CSRF_HEADER = "x-agent-legion-request"
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
-_MEMBER_ROLE_RANK = {"viewer": 1, "editor": 2}
 
 
 def extract_session_token(request: Request) -> tuple[str | None, str | None]:
@@ -35,6 +36,9 @@ def get_current_user(request: Request) -> dict[str, Any]:
     if token is None:
         raise HTTPException(status_code=401, detail="Not authenticated")
     user: dict[str, Any] | None = request.app.state.auth_service.authenticate(token)
+    if user is None and channel == "bearer":
+        # Scoped tokens (studio agent runs) authenticate via Bearer only.
+        user = request.app.state.auth_service.authenticate_scoped(token)
     if user is None:
         raise HTTPException(status_code=401, detail="Session expired or revoked")
     if (
@@ -52,30 +56,61 @@ def require_user(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> 
 
 
 def require_admin(user: Annotated[dict[str, Any], Depends(get_current_user)]) -> dict[str, Any]:
+    # A scoped token inherits the initiating user's role; without this check a
+    # token minted for an admin would pass require_admin and reach every admin
+    # endpoint (STUDIO-AGENT-001: scoped identities never take effect).
+    scope = user.get("actor_scope")
+    if scope:
+        detail = (
+            "Studio agent scope cannot use admin endpoints"
+            if scope == STUDIO_AGENT_SCOPE
+            else "Scoped tokens cannot use admin endpoints"
+        )
+        raise HTTPException(status_code=403, detail=detail)
     if user.get("role") != "admin":
         raise HTTPException(status_code=403, detail="Admin role required")
     return user
 
 
-def require_workspace_access(
-    request: Request,
+def reject_studio_agent_scope(
     user: Annotated[dict[str, Any], Depends(get_current_user)],
 ) -> dict[str, Any]:
-    """Workspace membership guard: viewers read, editors write, admins pass.
+    """Effecting-endpoint guard: scoped tokens get 403 (STUDIO-AGENT-001).
 
-    Routes without a workspace_id path parameter only require a logged-in
-    user. Non-members get 404 (not 403) so workspace existence cannot be
-    enumerated.
+    Aligned with require_admin: any non-empty actor_scope is refused, not just
+    the studio-agent scope, so a future scope type cannot silently inherit
+    effecting rights.
     """
-    if user.get("role") == "admin":
-        return user
-    workspace_id = request.path_params.get("workspace_id")
-    if not workspace_id:
-        return user
-    role = request.app.state.job_db.get_workspace_role(str(workspace_id), str(user["id"]))
-    if role is None:
-        raise HTTPException(status_code=404, detail="Workspace not found")
-    minimum = "viewer" if request.method in _SAFE_METHODS else "editor"
-    if _MEMBER_ROLE_RANK.get(role, 0) < _MEMBER_ROLE_RANK[minimum]:
-        raise HTTPException(status_code=403, detail="Insufficient workspace role")
+    scope = user.get("actor_scope")
+    if scope:
+        detail = (
+            "Studio agent scope cannot take effect"
+            if scope == STUDIO_AGENT_SCOPE
+            else "Scoped tokens cannot take effect"
+        )
+        raise HTTPException(status_code=403, detail=detail)
+    return user
+
+
+def require_studio_agent_scope(
+    user: Annotated[dict[str, Any], Depends(get_current_user)],
+) -> dict[str, Any]:
+    """Tool-surface guard: only studio-agent scoped tokens may call the
+    ``/api/studio-agent/tools/*`` endpoints; full user sessions get 403
+    (STUDIO-AGENT-001)."""
+    if user.get("actor_scope") != STUDIO_AGENT_SCOPE:
+        raise HTTPException(status_code=403, detail="Studio agent scoped token required")
+    return user
+
+
+def require_studio_agent_workspace(
+    workspace_id: str,
+    user: Annotated[dict[str, Any], Depends(require_studio_agent_scope)],
+) -> dict[str, Any]:
+    """Refuse a workspace-bound run token operating on another workspace."""
+    # Schema v45 (STUDIO-AGENT-001): unbound self-service tokens keep the
+    # previous membership-only behaviour.
+    bound = user.get("scoped_workspace_id")
+    if bound and bound != workspace_id:
+        raise HTTPException(status_code=403, detail="Scoped token bound to another workspace")
     return user

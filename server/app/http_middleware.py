@@ -4,22 +4,20 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from starlette.datastructures import Headers
+from starlette.middleware.gzip import IdentityResponder
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from server.app.http_gzip import SelectiveGZipResponder
 from server.app.settings import Settings
 
 
-class SelectiveGZipMiddleware:
-    """GZip responses, except Range requests and .zip downloads.
+class SelectiveGZipMiddleware(GZipMiddleware):
+    """GZip responses, except Range requests, .zip downloads, and payloads
+    that are already compressed (application/gzip bundles and archives).
 
-    Range responses (e.g. video seeking) must stay byte-exact, and zip
-    archives are already compressed — gzipping them only burns CPU and
-    strips Content-Length.
+    Range responses (e.g. video seeking) must stay byte-exact; recompressing
+    archives only burns CPU and strips Content-Length.
     """
-
-    def __init__(self, app: ASGIApp, minimum_size: int = 500) -> None:
-        self.app = app
-        self.gzip = GZipMiddleware(app, minimum_size=minimum_size)
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
         if scope["type"] != "http":
@@ -28,7 +26,14 @@ class SelectiveGZipMiddleware:
         if "range" in Headers(scope=scope) or scope["path"].endswith(".zip"):
             await self.app(scope, receive, send)
             return
-        await self.gzip(scope, receive, send)
+        responder: ASGIApp
+        if "gzip" in Headers(scope=scope).get("Accept-Encoding", ""):
+            responder = SelectiveGZipResponder(
+                self.app, self.minimum_size, compresslevel=self.compresslevel
+            )
+        else:
+            responder = IdentityResponder(self.app, self.minimum_size)
+        await responder(scope, receive, send)
 
 
 def add_http_middleware(app: FastAPI, settings: Settings) -> None:

@@ -8,7 +8,6 @@ from pathlib import Path
 import pytest
 
 from server.app.executors.models import ClaimedExecution, ExecutionContext, ExecutionResult
-from server.app.executors.protocol import Executor
 from server.app.executors.runtime import ExecutionRuntime
 
 
@@ -116,16 +115,6 @@ class SequencedLeaseRepository:
         return True
 
 
-class FakeRegistry:
-    """Registry that always returns the configured fake executor."""
-
-    def __init__(self, executor: Executor) -> None:
-        self._executor = executor
-
-    def require(self, executor_id: str, capability: str) -> Executor:
-        return self._executor
-
-
 @pytest.fixture
 def job_dir(tmp_path: Path) -> Path:
     return tmp_path / "job"
@@ -182,10 +171,9 @@ def _run_in_thread(
 def test_runtime_successful_completion(job_dir: Path) -> None:
     executor = FakeExecutor("fake", result=ExecutionResult(status="completed", exit_code=0))
     leases = FakeLeaseRepository()
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=0.01,
         lease_ttl_seconds=30,
     )
@@ -206,10 +194,9 @@ def test_runtime_successful_completion(job_dir: Path) -> None:
 def test_runtime_adapter_exception_normalized_to_failed(job_dir: Path) -> None:
     executor = RaisingExecutor("fake", RuntimeError("adapter boom"))
     leases = FakeLeaseRepository()
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=0.01,
         lease_ttl_seconds=30,
     )
@@ -229,10 +216,9 @@ def test_runtime_adapter_exception_normalized_to_failed(job_dir: Path) -> None:
 def test_runtime_periodic_heartbeat(job_dir: Path) -> None:
     executor = FakeExecutor("fake")
     leases = FakeLeaseRepository()
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=0.01,
         lease_ttl_seconds=30,
     )
@@ -262,10 +248,9 @@ def test_runtime_periodic_heartbeat(job_dir: Path) -> None:
 def test_runtime_lost_lease_cancels_and_fails(job_dir: Path) -> None:
     executor = FakeExecutor("fake")
     leases = FakeLeaseRepository(heartbeat_active=False)
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=0.01,
         lease_ttl_seconds=30,
     )
@@ -294,10 +279,9 @@ def test_runtime_lost_lease_cancels_and_fails(job_dir: Path) -> None:
 def test_runtime_tolerates_transient_heartbeat_failure(job_dir: Path) -> None:
     executor = FakeExecutor("fake")
     leases = SequencedLeaseRepository([False, True, True])
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=0.01,
         lease_ttl_seconds=90,
         heartbeat_failure_threshold=2,
@@ -324,10 +308,9 @@ def test_runtime_tolerates_transient_heartbeat_failure(job_dir: Path) -> None:
 def test_runtime_cancellation_result_finishes_lease(job_dir: Path) -> None:
     executor = FakeExecutor("fake", result=ExecutionResult(status="cancelled", exit_code=-1))
     leases = FakeLeaseRepository()
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=0.01,
         lease_ttl_seconds=30,
     )
@@ -350,10 +333,9 @@ def test_runtime_result_log_path_remains_absolute(job_dir: Path) -> None:
         result=ExecutionResult(status="completed", exit_code=0, log_path=str(context_log_path)),
     )
     leases = FakeLeaseRepository()
-    registry = FakeRegistry(executor)
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=0.01,
         lease_ttl_seconds=30,
     )

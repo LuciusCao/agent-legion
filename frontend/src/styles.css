@@ -265,35 +265,6 @@ h1 {
   margin-right: 16px;
 }
 
-.status-badge {
-  font-size: 12px;
-  padding: 4px 8px;
-  border-radius: 999px;
-  white-space: nowrap;
-  background: #f0f0f0;
-  color: #43474e;
-}
-
-.status-badge.running {
-  background: var(--status-running-bg);
-  color: var(--status-running-text);
-}
-
-.status-badge.failed {
-  background: var(--status-failed-bg);
-  color: var(--status-failed-text);
-}
-
-.status-badge.completed {
-  background: var(--status-completed-bg);
-  color: var(--status-completed-text);
-}
-
-.status-badge.pending {
-  background: var(--status-partial-bg);
-  color: var(--status-partial-text);
-}
-
 /* Detail view */
 .detail-view {
   display: grid;

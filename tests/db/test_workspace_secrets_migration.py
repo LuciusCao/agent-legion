@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from server.app.db.schema import SCHEMA_VERSION, migrate_workspace_secrets
+from server.app.db.migrations import migrate_workspace_secrets
+from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -20,14 +21,14 @@ def test_workspace_secrets_table_exists() -> None:
     assert columns == {"workspace_id", "name", "ciphertext", "created_at", "updated_at"}
 
 
-def test_schema_v38_recorded() -> None:
-    assert SCHEMA_VERSION == 38
+def test_schema_v47_recorded() -> None:
+    assert SCHEMA_VERSION == 47
     with read_connection(TEST_DATABASE_URL) as conn:
         row = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert row is not None
-    assert row["name"] == "monitoring_hotpath_indexes"
+    assert row["name"] == "executor_retirement"
 
 
 def test_schema_v23_workspace_scope_objects_exist() -> None:
@@ -83,7 +84,7 @@ def test_migrate_workspace_secrets_is_idempotent() -> None:
     with write_transaction(TEST_DATABASE_URL) as conn:
         migrate_workspace_secrets(conn)
         conn.execute(
-            "insert into workspaces(id, name) values ('idem-ws', 'idem-ws') on conflict do nothing"
+            "insert into workspaces(id, name, default_workflow_key) values ('idem-ws', 'idem-ws', 'question_comprehension_info') on conflict do nothing"
         )
         conn.execute(
             "insert into workspace_secrets(workspace_id, name, ciphertext)"

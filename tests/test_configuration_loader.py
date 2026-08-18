@@ -66,9 +66,8 @@ def test_retired_agent_legion_yaml_is_rejected_with_migration_guidance(tmp_path:
         load_application_config(tmp_path)
     message = str(exc_info.value)
     assert "agent_legion.yaml" in message
-    assert "transcribe_video" in message
-    assert "AGENT_LEGION_ASR_WHISPER_BINARY" in message
-    assert "AGENT_LEGION_ASR_SENSEVOICE_MODEL_DIR" in message
+    assert "node configuration in Studio" in message
+    assert "instance-settings" in message
 
 
 @pytest.mark.parametrize("text", ["", "[]\n", "value\n"])

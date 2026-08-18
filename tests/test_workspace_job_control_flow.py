@@ -16,10 +16,8 @@ from typing import Any
 
 from fastapi.testclient import TestClient
 
-from server.app.executors.config import CodeCapabilityConfig, CodeExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -71,9 +69,39 @@ def _write_test_workflow(tmp_path: Path) -> Path:
     return path
 
 
+def _patch_workflow(monkeypatch, workflow_path: Path) -> None:
+    """Inject the synthetic test workflow into the catalog service.
+
+    The DB-backed catalog gates workspace binding through ``bound_definition``
+    while runtime fallbacks call ``definition``; both resolve WORKFLOW_KEY to
+    the synthetic file-backed definition here.
+    """
+    _original_definition = WorkflowCatalogService.definition
+    _original_bound = WorkflowCatalogService.bound_definition
+
+    def _patched_definition(self, workflow_key: str):
+        if workflow_key == WORKFLOW_KEY:
+            return load_workflow_definition(workflow_path)
+        return _original_definition(self, workflow_key)
+
+    def _patched_bound(self, workflow_key: str):
+        if workflow_key == WORKFLOW_KEY:
+            return load_workflow_definition(workflow_path)
+        return _original_bound(self, workflow_key)
+
+    monkeypatch.setattr(
+        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
+        _patched_definition,
+    )
+    monkeypatch.setattr(
+        "server.app.services.workflow_catalog.WorkflowCatalogService.bound_definition",
+        _patched_bound,
+    )
+
+
 class _RecordingExecutor:
     kind = "code"
-    id = "code-test"
+    id = "code"
 
     def __init__(self) -> None:
         self.runs: list[dict[str, Any]] = []
@@ -108,41 +136,26 @@ class _RecordingExecutor:
         pass
 
 
-def _make_registry() -> ExecutorRegistry:
-    executor = _RecordingExecutor()
-    definition = CodeExecutorConfig(
-        kind="code",
-        global_capacity=4,
-        capabilities={"any": CodeCapabilityConfig(path="workflow_nodes/question_intake.py")},
-    )
-    return ExecutorRegistry(
-        executors={executor.id: executor},
-        global_capacities={executor.id: 4},
-        definitions={executor.id: definition},
-    )
-
-
 def _make_worker(
     job_db: Any,
     leases: ExecutorLeaseRepository,
-    registry: ExecutorRegistry,
+    executor: Any,
     settings: Any,
     definition: Any,
 ) -> WorkflowWorkerThread:
     runtime = ExecutionRuntime(
         leases=leases,
-        registry=registry,
+        executor=executor,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=30,
     )
     worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
-        registry=registry,
         runtime=runtime,
         settings=settings,
     )
-    worker._definitions = [definition]
+    worker._scan_entries = ([definition], [])
     worker._ensure_pools()
     return worker
 
@@ -161,23 +174,7 @@ def _drain(worker: WorkflowWorkerThread, timeout: float = 5.0) -> None:
 def _configure_workspace(job_db: Any, workspace_id: str, workflow_key: str) -> None:
     node_keys = ["prepare", "branch_a", "branch_b", "merge"]
     with job_db.connect() as conn:
-        conn.execute(
-            """
-            insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
-            values (%s, %s, %s)
-            on conflict(workspace_id, executor_id) do update set concurrency_limit=excluded.concurrency_limit
-            """,
-            (workspace_id, "code-test", 4),
-        )
         for node_key in node_keys:
-            conn.execute(
-                """
-                insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
-                values (%s, %s, %s, %s)
-                on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
-                """,
-                (workspace_id, workflow_key, node_key, "code-test"),
-            )
             conn.execute(
                 """
                 insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
@@ -194,17 +191,7 @@ def _node_statuses(detail: dict[str, Any]) -> dict[str, str]:
 
 def test_workspace_job_control_flow(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _original_definition = WorkflowCatalogService.definition
-
-    def _patched_definition(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_definition(self, workflow_key)
-
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
-        _patched_definition,
-    )
+    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -218,6 +205,22 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         workspace_id = ws_response.json()["workspace"]["id"]
 
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
+
+        # Post-#96 every code node needs published code to dispatch (P-0.5:
+        # no executor-capability fallback); the recording executor never
+        # reads the text.
+        from server.app.services.node_codes import NodeCodeService
+
+        codes = NodeCodeService(app.state.job_db.path)
+        for node_key in ("prepare", "branch_a", "branch_b", "merge"):
+            codes.save_draft(
+                workspace_id,
+                WORKFLOW_KEY,
+                node_key,
+                "def run(job, job_dir, runtime):\n    pass\n",
+                "test seed",
+            )
+            codes.publish(workspace_id, WORKFLOW_KEY, node_key)
 
         batch_response = client.post(
             f"/api/workspaces/{workspace_id}/job-batches",
@@ -241,11 +244,12 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert job_summary["completed_nodes"] == 0
 
         definition = WorkflowCatalogService(app.state.settings).definition(WORKFLOW_KEY)
-        registry = _make_registry()
         leases = ExecutorLeaseRepository(
             app.state.job_db.path, data_dir=app.state.settings.data_dir
         )
-        worker = _make_worker(app.state.job_db, leases, registry, app.state.settings, definition)
+        worker = _make_worker(
+            app.state.job_db, leases, _RecordingExecutor(), app.state.settings, definition
+        )
 
         # 2. run-to claims only the target closure.
         run_to_response = client.post(
@@ -351,17 +355,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
 def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _original_definition = WorkflowCatalogService.definition
-
-    def _patched_definition(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_definition(self, workflow_key)
-
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
-        _patched_definition,
-    )
+    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -374,6 +368,22 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
+
+        # Post-#96 every code node needs published code to dispatch (P-0.5:
+        # no executor-capability fallback); the recording executor never
+        # reads the text.
+        from server.app.services.node_codes import NodeCodeService
+
+        codes = NodeCodeService(app.state.job_db.path)
+        for node_key in ("prepare", "branch_a", "branch_b", "merge"):
+            codes.save_draft(
+                workspace_id,
+                WORKFLOW_KEY,
+                node_key,
+                "def run(job, job_dir, runtime):\n    pass\n",
+                "test seed",
+            )
+            codes.publish(workspace_id, WORKFLOW_KEY, node_key)
 
         batch_response = client.post(
             f"/api/workspaces/{workspace_id}/job-batches",
@@ -404,17 +414,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
 
 def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _original_definition = WorkflowCatalogService.definition
-
-    def _patched_definition(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_definition(self, workflow_key)
-
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
-        _patched_definition,
-    )
+    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -427,6 +427,22 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
+
+        # Post-#96 every code node needs published code to dispatch (P-0.5:
+        # no executor-capability fallback); the recording executor never
+        # reads the text.
+        from server.app.services.node_codes import NodeCodeService
+
+        codes = NodeCodeService(app.state.job_db.path)
+        for node_key in ("prepare", "branch_a", "branch_b", "merge"):
+            codes.save_draft(
+                workspace_id,
+                WORKFLOW_KEY,
+                node_key,
+                "def run(job, job_dir, runtime):\n    pass\n",
+                "test seed",
+            )
+            codes.publish(workspace_id, WORKFLOW_KEY, node_key)
 
         batch_response = client.post(
             f"/api/workspaces/{workspace_id}/job-batches",

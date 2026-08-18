@@ -26,7 +26,7 @@ class TestWorkspaceLegacyVideoBoundary:
             (
                 "server/app/routes/jobs.py",
                 "from fastapi import APIRouter\n"
-                "from server.app.pipeline.download import download_video\n"
+                "from server.app.pipeline.download import fetch_media\n"
                 "router = APIRouter()\n",
                 "download",
             ),
@@ -69,7 +69,7 @@ class TestJobExecutionExecutorBoundary:
             ),
             (
                 "server/app/services/job_rerun.py",
-                "from server.app.executors.registry import ExecutorRegistry\n"
+                "from server.app.executors.contracts import Executor\n"
                 "class JobRerunService:\n"
                 "    pass\n",
             ),

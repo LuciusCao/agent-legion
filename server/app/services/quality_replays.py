@@ -30,7 +30,7 @@ from server.app.jobs.atomic_mutations import prepare_replay_copy
 from server.app.scheduler_wakeup import notify_schedulable_work
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_errors import ConflictError, InvalidOperationError, NotFoundError
-from server.app.services.node_config import batch_source_payload, frozen_node_config
+from server.app.services.node_config_batch import batch_source_payload, frozen_node_config
 from server.app.services.quality_labels import artifact_contents
 from server.app.services.versioned_entities import VersionedEntityStore
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
@@ -225,16 +225,20 @@ class QualityReplayService:
         agent_id = str(route["target_id"])
         store = VersionedEntityStore(self.db_path, "agent")
         entity = (
-            store.get_published(agent_id, None)
+            store.get_published(agent_id, workspace_id)
             if agent_version is None
-            else store.get_version(agent_id, agent_version, None)
+            else store.get_version(agent_id, agent_version, workspace_id)
         )
         if entity is None:
             if agent_version is None:
                 raise InvalidOperationError(
-                    f"Agent {agent_id!r} has no published version to replay with"
+                    f"Agent {agent_id!r} has no published version in workspace"
+                    f" {workspace_id!r} to replay with; agent definitions are"
+                    " workspace-scoped — create one in Studio (Agent 管理) first"
                 )
-            raise NotFoundError(f"Agent {agent_id!r} has no version {agent_version}")
+            raise NotFoundError(
+                f"Agent {agent_id!r} has no version {agent_version} in workspace {workspace_id!r}"
+            )
         capability = str(entity.definition.get("capability") or "")
         if capability != node.capability:
             raise InvalidOperationError(

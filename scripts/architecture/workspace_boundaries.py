@@ -25,11 +25,11 @@ _LEGACY_VIDEO_EXCEPTIONS: set[tuple[str, str]] = set()
 
 _JOB_SERVICE_PREFIX = "server/app/services/job_"
 _DIRECT_EXECUTOR_MODULE_PREFIXES = tuple(
-    """server.app.executors.code server.app.executors.pi server.app.executors.openclaw server.app.executors.runtime server.app.executors.registry server.app.executors.protocol server.app.executors.config""".split()
+    """server.app.executors.code server.app.executors.runtime server.app.executors.contracts""".split()
 )
 
 _GENERATED_JOB_TRANSPORT_NAMES = frozenset(
-    """ArtifactResponse BatchJobIdsRequest BatchJobMutationResponse BatchRunToRequest ContinueJobRequest DeleteJobResponse ExecutionControlSummaryResponse JobBatchRequest JobBatchRerunRequest JobBatchResponse JobDetailResponse JobLogResponse JobMutationResultResponse JobNodeResponse JobNodeSummaryResponse JobSummaryResponse JobsResponse NodeRunResponse RunToRequest WorkspaceDagResponse WorkspacePackageRequest WorkspacePackageResponse WorkspacePackageResultResponse WorkspaceResponse WorkspaceRunsResponse WorkspaceSettingsResponse WorkspaceSettingsSectionRequest WorkspaceSettingsTestResponse WorkspaceStatsResponse WorkspacesResponse""".split()
+    """ArtifactResponse BatchJobIdsRequest BatchJobMutationResponse BatchRunToRequest ContinueJobRequest DeleteJobResponse ExecutionControlSummaryResponse JobBatchRequest JobBatchRerunRequest JobBatchResponse JobDetailResponse JobLogResponse JobMutationResultResponse JobNodeResponse JobNodeSummaryResponse JobSummaryResponse JobsResponse NodeRunResponse RunToRequest WorkspaceDagResponse WorkspacePackageRequest WorkspacePackageResponse WorkspacePackageResultResponse WorkspaceResponse WorkspaceRunsResponse WorkspaceSettingsResponse WorkspaceSettingsSectionRequest WorkspaceStatsResponse WorkspacesResponse""".split()
 )
 
 _DDL_PATTERN = re.compile(
@@ -55,10 +55,6 @@ def _is_workspace_module(rel_path: str) -> bool:
 
 
 def _is_legacy_video_import(module: str) -> bool:
-    if module == "server.app.pipeline.workspace_package" or module.startswith(
-        "server.app.pipeline.workspace_package."
-    ):
-        return False
     if module in _LEGACY_VIDEO_EXACT:
         return True
     return any(module.startswith(prefix) for prefix in _LEGACY_VIDEO_MODULE_PREFIXES)

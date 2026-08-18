@@ -5,7 +5,9 @@ from server.app.storage_paths import resolve_job_dir
 from tests.helpers.auth import authenticate_client
 
 
-def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+def _create_workspace(
+    client, name="default", default_workflow_key="education_video_problems_generation"
+):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
@@ -23,10 +25,9 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q003"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q003"],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
@@ -56,18 +57,17 @@ def test_job_detail_includes_pi_run_trace(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q100"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q100"],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
         run = app.state.job_db.start_node_run(
             job_id,
-            "generate_key_info",
+            "write_script",
             ["pi", "--mode", "json"],
-            "logs/jobs/generate_key_info-events.jsonl",
+            "logs/jobs/write_script-events.jsonl",
             run_dir=str(tmp_path / "run-1"),
             session_dir=str(tmp_path / "run-1" / "session"),
         )
@@ -96,10 +96,9 @@ def test_job_detail_includes_node_dependencies(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q202"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q202"],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
@@ -108,9 +107,9 @@ def test_job_detail_includes_node_dependencies(tmp_path):
     assert response.status_code == 200
     assert all("label" in node for node in response.json()["nodes"])
     nodes = {node["node_key"]: node for node in response.json()["nodes"]}
-    assert nodes["assess_comprehension_difficulty"]["after"] == [
-        "review_key_info",
-        "review_possible_errors",
+    assert nodes["publish_content"]["after"] == [
+        "review_script",
+        "review_questions",
     ]
 
 
@@ -121,42 +120,27 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
-    job_db = app.state.job_db
     with authenticate_client(TestClient(app)) as c:
         ws_id = _create_workspace(c)
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q203"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q203"],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
-        job_db.replace_workspace_executor_configuration(
-            ws_id,
-            allocations=[
-                {"executor_id": "code-default", "concurrency_limit": 1},
-            ],
-            bindings=[
-                {
-                    "workflow_key": "question_comprehension_info",
-                    "node_key": "assemble_comprehension_info",
-                    "executor_id": "code-default",
-                },
-            ],
-            node_limits=[],
-        )
         response = c.get(f"/api/jobs/{job_id}")
 
     assert response.status_code == 200
     nodes = {node["node_key"]: node for node in response.json()["nodes"]}
-    assert nodes["review_key_info"]["executor_id"] is None
-    assert nodes["review_key_info"]["executor_kind"] is None
-    assert nodes["review_key_info"]["agent_id"] == "question-key-info-review-v1"
-    assert nodes["assemble_comprehension_info"]["executor_id"] == "code-default"
-    assert nodes["assemble_comprehension_info"]["executor_kind"] == "code"
+    assert nodes["review_script"]["executor_id"] is None
+    assert nodes["review_script"]["executor_kind"] is None
+    assert nodes["review_script"]["agent_id"] == "example-review-script-v1"
+    # P-0.5：非 Agent 路由节点投影为常量 code 池。
+    assert nodes["publish_content"]["executor_id"] == "code"
+    assert nodes["publish_content"]["executor_kind"] == "code"
 
 
 def test_delete_job_returns_404_for_unknown_job(tmp_path):
@@ -183,27 +167,26 @@ def test_delete_job_rejects_running_job(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q601"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q601"],
             },
         )
-        job_id = f"{ws_id}_question_comprehension_info_Q601"
+        job_id = f"{ws_id}_education_video_problems_generation_Q601"
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
         (storage_dir / "artifact.json").write_text("{}")
         log_dir = app.state.settings.logs_dir / "jobs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"{job_id}-fetch_questions.log"
+        log_path = log_dir / f"{job_id}-intake_knowledge_points.log"
         log_path.write_text("running")
         # Start a node run so _job_has_running_nodes returns True
         app.state.job_db.start_node_run(
             job_id,
-            "fetch_questions",
+            "intake_knowledge_points",
             ["cmd"],
-            f"logs/jobs/{job_id}-fetch_questions.log",
+            f"logs/jobs/{job_id}-intake_knowledge_points.log",
         )
         resp = c.delete(f"/api/jobs/{job_id}")
     assert resp.status_code == 400
@@ -225,25 +208,24 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q602"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q602"],
             },
         )
-        job_id = f"{ws_id}_question_comprehension_info_Q602"
+        job_id = f"{ws_id}_education_video_problems_generation_Q602"
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
         (storage_dir / "artifact.json").write_text("{}")
         log_dir = app.state.settings.logs_dir / "jobs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        (log_dir / f"{job_id}-fetch_questions.log").write_text("ok")
+        (log_dir / f"{job_id}-intake_knowledge_points.log").write_text("ok")
         resp = c.delete(f"/api/jobs/{job_id}")
     assert resp.status_code == 200
     assert resp.json()["deleted"] == job_id
     assert not storage_dir.exists()
-    assert not (log_dir / f"{job_id}-fetch_questions.log").exists()
+    assert not (log_dir / f"{job_id}-intake_knowledge_points.log").exists()
 
 
 def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
@@ -258,17 +240,16 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
         batch = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001"],
             },
         ).json()
         job_id = batch["jobs"][0]["id"]
         run = app.state.job_db.start_node_run(
             job_id,
-            "fetch_questions",
-            ["local", "fetch_questions"],
+            "intake_knowledge_points",
+            ["local", "intake_knowledge_points"],
             "logs/jobs/run.log",
         )
         app.state.job_db.finish_node_run(run["id"], "completed", 0, "")
@@ -283,7 +264,7 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
     assert body["runs"][0]["job_title"] == "Question Q001"
     assert body["runs"][0]["source_id"] == "Q001"
     assert body["runs"][0]["source_type"] == "question"
-    assert body["runs"][0]["node_key"] == "fetch_questions"
+    assert body["runs"][0]["node_key"] == "intake_knowledge_points"
     assert body["runs"][0]["status"] == "completed"
 
 
@@ -299,28 +280,25 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
         batch = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001"],
             },
         ).json()
         job_id = batch["jobs"][0]["id"]
-        run1 = app.state.job_db.start_node_run(job_id, "fetch_questions", ["local"], "logs/a.log")
-        app.state.job_db.finish_node_run(run1["id"], "completed", 0, "")
-        run2 = app.state.job_db.start_node_run(
-            job_id, "assemble_comprehension_info", ["local"], "logs/b.log"
+        run1 = app.state.job_db.start_node_run(
+            job_id, "intake_knowledge_points", ["local"], "logs/a.log"
         )
+        app.state.job_db.finish_node_run(run1["id"], "completed", 0, "")
+        run2 = app.state.job_db.start_node_run(job_id, "publish_content", ["local"], "logs/b.log")
         app.state.job_db.finish_node_run(run2["id"], "failed", 1, "boom")
 
-        response = c.get(
-            f"/api/workspaces/{ws_id}/runs?status=failed&node_key=assemble_comprehension_info"
-        )
+        response = c.get(f"/api/workspaces/{ws_id}/runs?status=failed&node_key=publish_content")
 
     assert response.status_code == 200
     runs = response.json()["runs"]
     assert len(runs) == 1
-    assert runs[0]["node_key"] == "assemble_comprehension_info"
+    assert runs[0]["node_key"] == "publish_content"
     assert runs[0]["status"] == "failed"
     assert runs[0]["error_message"] == "boom"
 
@@ -335,24 +313,28 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         ws_id = c.post(
             "/api/workspaces",
-            json={"name": "Reading DAG", "default_workflow_key": "question_comprehension_info"},
+            json={
+                "name": "Reading DAG",
+                "default_workflow_key": "education_video_problems_generation",
+            },
         ).json()["workspace"]["id"]
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q001", "Q002"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q001", "Q002"],
             },
         )
         response = c.get(f"/api/workspaces/{ws_id}/dag")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["workflow"]["key"] == "question_comprehension_info"
+    assert body["workflow"]["key"] == "education_video_problems_generation"
     assert all("label" in node for node in body["nodes"])
-    fetch_node = next((node for node in body["nodes"] if node["key"] == "fetch_questions"), None)
+    fetch_node = next(
+        (node for node in body["nodes"] if node["key"] == "intake_knowledge_points"), None
+    )
     assert fetch_node is not None
     assert fetch_node["status_counts"]["pending"] == 2
 
@@ -384,25 +366,24 @@ def test_get_job_run_log_returns_redacted_tail(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q1"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_question_comprehension_info_Q1"
-        log_path = log_dir / f"{job_id}-fetch_questions.log"
+        job_id = "test_education_video_problems_generation_Q1"
+        log_path = log_dir / f"{job_id}-intake_knowledge_points.log"
         log_path.write_text("start\nleaked-token\nend\n", encoding="utf-8")
         run = app.state.job_db.start_node_run(
             job_id,
-            "fetch_questions",
+            "intake_knowledge_points",
             ["cmd"],
-            f"logs/jobs/{job_id}-fetch_questions.log",
+            f"logs/jobs/{job_id}-intake_knowledge_points.log",
         )
 
         resp = c.get(f"/api/jobs/{job_id}/runs/{run['id']}/log")
@@ -426,18 +407,17 @@ def test_get_job_run_log_returns_404_for_missing_run(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q1"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_question_comprehension_info_Q1"
+        job_id = "test_education_video_problems_generation_Q1"
         resp = c.get(f"/api/jobs/{job_id}/runs/999999/log")
     assert resp.status_code == 404
 
@@ -452,19 +432,20 @@ def test_get_job_run_log_rejects_escape(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "Test", "default_workflow_key": "education_video_problems_generation"},
         )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q1"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q1"],
             },
         )
-        job_id = "test_question_comprehension_info_Q1"
-        run = app.state.job_db.start_node_run(job_id, "fetch_questions", ["cmd"], "../escape.log")
+        job_id = "test_education_video_problems_generation_Q1"
+        run = app.state.job_db.start_node_run(
+            job_id, "intake_knowledge_points", ["cmd"], "../escape.log"
+        )
         resp = c.get(f"/api/jobs/{job_id}/runs/{run['id']}/log")
     assert resp.status_code == 400
     assert "Invalid log path" in resp.json()["detail"]
@@ -494,15 +475,14 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
     with authenticate_client(TestClient(app)) as c:
         c.post(
             "/api/workspaces",
-            json={"name": "WS", "default_workflow_key": "question_comprehension_info"},
+            json={"name": "WS", "default_workflow_key": "education_video_problems_generation"},
         )
         batch = c.post(
             "/api/workspaces/ws/job-batches",
             json={
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q1"],
-                "knowledge_codes": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q1"],
             },
         ).json()
         job_id = batch["jobs"][0]["id"]

@@ -50,12 +50,7 @@ describe('job batch api', () => {
     const fetchMock = mockFetchJson({ results: [] })
     global.fetch = fetchMock
 
-    await batchRunToJobs(
-      'ws1',
-      'assemble',
-      { jobIds: ['j1'] },
-      'fetch_questions'
-    )
+    await batchRunToJobs('ws1', 'assemble', { jobIds: ['j1'] }, 'fetch_items')
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/ws1/jobs/batch-run-to',
@@ -63,7 +58,7 @@ describe('job batch api', () => {
         body: JSON.stringify({
           job_ids: ['j1'],
           target_node_key: 'assemble',
-          start_node_key: 'fetch_questions',
+          start_node_key: 'fetch_items',
         }),
       })
     )

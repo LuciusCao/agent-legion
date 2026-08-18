@@ -9,14 +9,14 @@
 - worktree 一律建为主仓库根的平级子目录：先 `cd` 到主仓库根（`git worktree list` 的第一个条目），再 `git worktree add .worktrees/<name> -b <branch> <base>`。禁止嵌套（在其他 worktree 里用相对路径 `git worktree add .worktrees/<name>` 会建进当前 worktree 内部）——嵌套会让 `data/`、测试库派生、端口隔离和清理路径全部混乱。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免数据库、视频、日志、package 互相覆盖。
 - 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
-- 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`、缺失时从基准 worktree 种子 `config/agent-worker.yaml`（改写 host_url/worker_id）、恢复 workspace 调度。手工初始化时必须自行补上这两个 secrets 文件。两个 secret 缺失的后果不同：register token 若被 `register_token_file` 显式引用而文件缺失，启动 fail fast（未显式配置时启动只尝试读 repo 默认路径 `deploy/secrets/agent_worker_register_token`，存在才生效）；vault master key 是 env-only（`AGENT_LEGION_VAULT_MASTER_KEY` / `_FILE`），代码没有默认读文件路径，缺 key 服务照常启动，但 vault 写入与 `secret_ref` 解析会抛 `VaultMasterKeyMissingError`。
+- 推荐用 `scripts/init-worktree.sh` 一键完成初始化（幂等）：复制 `.env`（复制源是「第一个非 bare、非当前、非主仓库根的 worktree」；**无法复制到 `.env` 时 fail-fast**——缺 `.env` 会让后端回落代码默认的共享库即 prod 库，2026-08-18 事故根因）、按 worktree 名派生并创建专属 Postgres 库、生成缺失的 `deploy/secrets/agent_worker_register_token` 与 `deploy/secrets/vault_master_key`、缺失时从基准 worktree 种子 `config/agent-worker.yaml`（改写 host_url/worker_id）、恢复 workspace 调度。手工初始化时必须自行补上这两个 secrets 文件。两个 secret 缺失的后果不同：register token 若被 `register_token_file` 显式引用而文件缺失，启动 fail fast（未显式配置时启动只尝试读 repo 默认路径 `deploy/secrets/agent_worker_register_token`，存在才生效）；vault master key 是 env-only（`AGENT_LEGION_VAULT_MASTER_KEY` / `_FILE`），代码没有默认读文件路径，缺 key 服务照常启动，但 vault 写入与 `secret_ref` 解析会抛 `VaultMasterKeyMissingError`。
 - 开发实例两个默认关闭的开关（刻意设计，防失控自跑）：后端每次启动把全部 workspace 重置为暂停，需恢复调度（init 脚本已做，但**必须在后端首次启动建表之后**执行才生效，否则启动后重跑一次脚本）；worker 的 `claim_enabled` 默认 false，启动后经 worker 控制台或 `PUT /api/config` 打开。worker 生效配置是状态副本 `data/agent-worker-service/worker.yaml`，首次导入后改 `config/agent-worker.yaml` 不生效。
 - 新 worktree 必须配置独立 Postgres 数据库：在 `.env` 中加 `AGENT_LEGION_DATABASE_URL` 指向专属库（`database.url` 为 env-only，代码默认库是共享库，不要依赖默认值）。共享库会让任一 worktree 的进程启动（含质量门里的 `export_openapi`）清掉其他实例的 `worker_control_state` 等运行时状态。
 - 测试库无需手动配置：`tests/postgres_support.py` 按 worktree 目录名派生专属测试库（`agent_legion_test_<worktree>`）并在首次测试运行时自动建库；只有需要覆盖时才设 `AGENT_LEGION_TEST_DATABASE_URL`。
-- 多 worktree 并行开发时，必须在每个 worktree 的 shell 里 `export AGENT_LEGION_TEST_WORKERS=4`（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。不设置时 pytest `-n auto` 会让每个 worktree 吃满所有核，互相拖慢并打满共享 Postgres。
+- 测试并行度默认克制：后端 pytest-xdist 默认 min(4, 核数)（`AGENT_LEGION_TEST_WORKERS` 覆盖），前端 vitest 经 gate 脚本默认 `--maxWorkers=4`（`AGENT_LEGION_FRONTEND_TEST_WORKERS` 覆盖；直接 `npm run test` 不带 cap），rust lane cargo `-j` 默认 min(4, 核数)（`AGENT_LEGION_RUST_WORKERS` 覆盖）；CI 4 核 runner 上这些默认值与不设上限时的并行度相当。多 worktree 并行开发时如仍抢 CPU，把这些 env 再调低（建议值 ≈ CPU 核数 ÷ 并行 worktree 数）。
 - 同一 worktree 内不允许并发跑测试：`check-quick.sh` 已用 `.quick-gate.lock` 串行化（后来者等待，崩溃残留自动回收）；直接 `uv run pytest` 不受锁保护，必须自己确保没有其他测试进程在跑——测试库按 worktree 共享、xdist worker schema 固定为 gw0..gwN，两个进程并发会互相 TRUNCATE（现场症状：随机测试报 "Bootstrap is only available before the first user exists" 等 setup 错误，单跑必过）。
 - 不要污染主工作区或他人 worktree 的运行时数据。
-- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 拿正式代码与 `make native-prod-up/down` 启停服务（prod-up 启动前会经 `scripts/ensure-velites.sh` 按 velites/ 源码指纹检测并自动重建过期的 velites 二进制）。所有修复与调试（含 Docker 容器调试）必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令（`native-prod-*` / `stack-prod-*`）只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
+- 生产 worktree（如 `.worktrees/prod`）禁止 debug 与改代码：只允许 `git pull` 拿正式代码与 `make prod-up` / `make prod-down` 启停服务（prod-up 启动前会经 `scripts/ensure-velites.sh` 按 velites/ 源码指纹检测并自动重建过期的 velites 二进制）。所有修复与调试（含 Docker 容器调试）必须在 develop worktree 进行，经 PR → main → prod pull 到达生产。生产命令（`prod-up` / `prod-down`，含 `docker` 参数形态与 `stack-prod-up.sh`）只在 prod worktree 跑，在其他 worktree 跑会抢生产端口并连错数据库。
 
 ## 2. Agent Tool Discipline
 
@@ -58,8 +58,8 @@
 - 后端测试隔离基于 TRUNCATE：每个 xdist worker 每 session 只建一次 schema，每个测试
   清空所有表（`tests/conftest.py`）。改动 DDL 的测试必须加 `@pytest.mark.fresh_schema`
   走完整重建。本地 quick gate 默认不带覆盖率（`AGENT_LEGION_COV=1` 开启；85% floor 由
-  CI 与 `./scripts/check.sh` 强制）。多 worktree 并行时用 `AGENT_LEGION_TEST_WORKERS`
-  限制 pytest worker 数（默认 `-n auto` 吃满所有核）。
+  CI 与 `./scripts/check.sh` 强制）。pytest worker 数默认 min(4, 核数)，用
+  `AGENT_LEGION_TEST_WORKERS` 覆盖。
 - 新测试必须放进对应子系统子目录（如 `tests/services/`、`tests/scripts/`），不要新增
   `tests/` 根目录文件（静态检查 `scripts/architecture/test_placement.py` 强制，基线
   `config/architecture/test-root-files-baseline.json`）；确定不碰数据库的纯静态测试可加
@@ -82,36 +82,58 @@
   token 解析；公开端点仅限 `/api/health` 与 `/api/auth/login|bootstrap`。
 - 测试中受保护 API 走 `client` fixture（自动 bootstrap admin 并带 CSRF
   header）；匿名行为用 `anon_client`。不留 auth 开关。
-- Workspace Executor 扩展顺序：capability → executor → allocation → binding → node limit（仅 code executor）。
+- Workspace 执行面扩展顺序：capability →（Agent 定义 或 node code）→ node limit（节点级并发）。
+  executor 定义 / allocation / binding 概念已随 P-0.5 退役（schema v47 drop 两表）：非 Agent
+  路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`，lease 行写常量 `'code'`
+  （EXEC-CODE-POOL-001）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
-- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.pi` / `.openclaw` / `.runtime` / `.registry`。
-- `code` executor 节点：capability 定义的 `path`（仓库相对路径）绑定 `workflow_nodes/` 下的
-  Python 文件，文件暴露模块级 `run(job, job_dir, runtime)`。`config/workflow.yaml` 已退役，
-  出厂 executor 目录钉在 `server/app/executors/builtin_definitions.py`，经种子流发布为 DB
-  `versioned_entities`（Studio 可改，admin 编辑不被种子覆盖）。path 禁止绝对路径与 `..`
-  （EXEC-CODE-001），内置节点代码变更必须入库经 git review 与 CI。
-  节点内部的通用脚手架统一走节点 SDK `workspace_libs/node_sdk.py` 的 `NodeContext`
-  （artifact 读写、service_config 合并、checkpoint、auth 上报），不要在新节点里手写
+- Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
+- code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
+  DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变、
+  job intake 冻结代码版本（EXEC-CODE-002），禁止任何运行时 API 增删改 repo 文件。
+  `workflow_nodes/` 只剩示例
+  workflow 的两个 git 评审种子源（启动时 seed-if-absent 发布为 global 作用域 node_code，
+  `server/app/services/demo_node_seed.py`）；示例 workflow 的出厂 Agent 模板钉在
+  `server/app/agent_catalog_builtin.py`（workspace 作用域 seed-if-absent，admin 编辑不被
+  种子覆盖）。
+  节点入口推荐 `def run(ctx)` + 节点 SDK 的 `@entrypoint` 装饰器（经典
+  `run(job, job_dir, runtime)` 签名继续受支持）；节点内部的通用脚手架统一走节点 SDK
+  `workspace_libs/node_sdk.py` 的 `NodeContext`（artifact 读写、service_config 合并、
+  checkpoint、batch_payload、auth 上报）与姊妹模块 `workspace_libs/http_client.py`
+  （联网机制）/ `workspace_libs/download.py`（SSRF 守卫 + 流式下载）/
+  `workspace_libs/media.py`（SRT/ffprobe）——框架层不收业务语义（服务特定的
+  URL 规则、payload 解析、质量阈值留在节点里）。不要在新节点里手写
   JSON 读写/配置合并/取消检查；节点运行时不含 DB 句柄或 DSN——batch、skill_versions 等
   DB 派生输入由父进程预取进 runtime，特权动作（连接 token 失效）由节点写 marker、
   父进程执行（EXEC-CODE-004，设计见
   `docs/architecture/node-sdk-and-worker-execution-design.md`）。
-- 节点代码变更只有两条通道：内置节点走 git（EXEC-CODE-001）；自定义节点代码只存
-  `workflow_node_codes` 表、经发布流生效、版本不可变、job intake 冻结代码版本
-  （EXEC-CODE-002），禁止任何运行时 API 增删改 repo `workflow_nodes/` 文件。
-  自定义节点执行必须经 `velites sandbox wrap` OS 沙箱，沙箱不可用即拒绝执行
-  （fail-closed，EXEC-CODE-003）；开关 `workflows.custom_nodes_enabled`。
+- 所有节点代码执行必须经 `velites sandbox wrap` OS 沙箱，沙箱不可用即拒绝执行
+  （fail-closed，EXEC-CODE-003；#96 后 Host 本地也不再有裸子进程路径）；开关
+  `workflows.custom_nodes_enabled`。
+- code 节点上 Worker（批次 2，协议 v2，EXEC-CODE-WORKER-001）：worker-eligible =
+  对解析后代码文本做静态 import 闭包扫描，闭包 ⊆ `workspace_libs` + stdlib
+  （+ requests）才可上 Worker；示例 workflow 的两个纯 stdlib 节点全部
+  Worker-eligible。
+  无在线 code Worker 时 dispatch 探测并回落本地 executor（兜底=本地，不做
+  queued 超时回落）。Worker 上所有 code 执行（内置与自定义）统一过 velites
+  沙箱；Worker 与 Host 的容量按 kind 分池（`max_concurrency` /
+  `max_code_concurrency`）各自记账各自强制。
 - 节点可调参数经 `AgentDefinition.config_schema` 声明（`server/app/config_schema.py`
-  子集）；executor 节点经 capability 的 `config_schema`
-  声明（agent 优先、executor 兜底）。解析链 defaults → 节点 `config` →
-  workspace 覆盖，intake 冻结；manifest 仅携带白名单非敏感键
-  （CONFIG-MANIFEST-001），敏感参数标记 `secret`。
+  子集）；code 节点经节点 `config_schema:` 块声明（随 revision 快照版本化）。优先级
+  = agent 定义 → 节点 config_schema（executor 层声明已随 P-0.5 退役）；平台保留执行键
+  `timeout_seconds`（integer，default 600，ge 1）/ `sandbox_network`（boolean，
+  default false）自动合并进每个 code 路由节点的有效 schema（节点 config_schema
+  不得重声明；v47 收割已把原 executor 层的 timeout/network 值搬到节点 `config`）。解析链
+  defaults → 节点 `config` → workspace 覆盖，intake 冻结；manifest 仅携带白名单
+  非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`。
 - velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
   runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
-  （`versioned_entities` 表，经 Studio「Agent 管理」/ `/api/agent-definitions`
-  管理，draft → published → archived 生命周期，版本不可变，灰度/回退走
-  publish/rollback），不再走 yaml——`agents:` 段与 `workflows.pi` 块已退役，
+  （`versioned_entities` 表，workspace 作用域（schema v46，解析严格限定本
+  workspace、零全局兜底），经 Studio「Agent 管理」/ `/api/agent-definitions`
+  （`workspace_id` 查询参数）管理，draft → published → archived 生命周期，
+  版本不可变，灰度/回退走 publish/rollback），不再走 yaml——`agents:` 段与
+  `workflows.pi` 块已退役，
   出现在任何 split yaml 启动即报错（fail-fast 带迁移指引）。runtime 直接钉死
   命令构建器与二进制（pi → pi argv，velites → velites argv；openclaw 未实现
   即报错），没有 flavor 之类的实现选择层。pi 作为可选 runtime 长期保留
@@ -127,8 +149,10 @@
   workspace Settings 默认（`default_agent_*` 三列）→ 报错，无 yaml/全局兜底；
   manifest 只携带解析后的 `execution.*` 块（enqueue 冻结 + claim 重解析，节点
   覆盖随 revision 升级实时生效，EXEC-RUNTIME-DISPATCH-001）。一个 capability
-  只允许一个 published Agent（DB partial unique index 兜底）。测试的 Agent
-  目录由 `tests/conftest.py` 经 AgentService 播种，不从 yaml sync。
+  在每个 workspace 只允许一个 published Agent（DB partial unique index 兜底）。
+  测试的 Agent 目录由 `tests/helpers.seed_workspace_agent_definitions` 按测试所属
+  workspace 播种（API 创建并绑定 demo workflow 的 workspace 由
+  ensure_active_revision 自动 seed），不从 yaml sync。
 - 多步变更必须先全部校验/备妥再统一应用：中间结果放临时变量，全部成功后
   一次性赋值生效，禁止半应用状态；跨进程/跨事务动作（killpg、目录迁移、
   重排队）前必须重新校验目标身份与状态。这是代码评审最高发的缺陷族。
@@ -139,16 +163,11 @@
 # Wrong: Workflow leaks implementation details.
 review_keywords:
   runner: pi
-  skill: question_comprehension_info/review_key_info
+  skill: education-video-problems-generation/review-questions
 
 # Correct: Workflow declares business capability only.
 review_keywords:
   capability: review_keywords
-```
-
-```python
-# Wrong: Generic Workspace route imports a legacy video pipeline phase.
-from server.app.pipeline.download import download_video
 ```
 
 ```python
@@ -191,22 +210,13 @@ CodeExecutor(...).execute(context)
   split yaml 写 `openclaw:` 撞 owned-key 校验报错；`openclaw.skill_safety`
   写 `ref` 在启动校验与实例设置 API（422）都会被拒（G3，ref 以 DB
   `skill_lock` 文档为唯一权威）。`asr` 段已随 `config/agent_legion.yaml`
-  整体退役（文件存在即启动报错，带迁移指引）：业务参数
-  `provider` / `timeout_seconds` 在 `transcribe_video` capability 的
-  config_schema（Studio 节点/workspace 配置覆盖），机器路径只走 env
-  `AGENT_LEGION_ASR_*`。
+  整体退役（文件存在即启动报错，带迁移指引）：业务参数与机器路径
+  随业务转录节点一并迁出，平台不再有 ASR 配置通道。
   `vault` / `auth` 段为 env-only，写进任何 split yaml 会触发 owned-key 校验失败
   （CONFIG-YAML-001）。
 - OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。
 
-## 9. Video Knowledge Workspace
-
-- Knowledge video work lives in the `video_knowledge` workspace workflow.
-- Job Detail video UI uses `VideoContentPanel`.
-- Do not add new `/api/videos` or `/video-hive` behavior.
-- Do not read legacy video tables in runtime paths.
-
-## 10. Where to look next
+## 9. Where to look next
 
 - 项目结构 / 运行细节：[README.md](README.md) / [docs/architecture/](docs/architecture/)
 - 远程执行运维手册：[docs/remote-execution-runbook.md](docs/remote-execution-runbook.md)

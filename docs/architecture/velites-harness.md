@@ -369,7 +369,7 @@ workspace `default_agent_*` → 报错，无全局兜底。manifest 的执行块
 `docs/remote-execution-runbook.md` §6。
 
 **flavor 的退役（2026-08-05）**：`workflows.pi.flavor` 实现选择层已随 yaml
-块一并删除。此前保持 `runtime: pi` 的 4 个 video_knowledge agent 已由
+块一并删除。此前保持 `runtime: pi` 的 4 个业务视频 agent 已由
 schema v27 migration 翻转为 `runtime: velites`（新发 published 版本、归档
 旧版）。`PiRuntimeConfig` 只剩硬编码默认（flavor="pi"），专供保留的本地
 pi executor 死路径（`executors/pi.py` + PiRunner）。

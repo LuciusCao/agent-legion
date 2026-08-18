@@ -1,15 +1,11 @@
 import type { WorkflowDefinitionRecord } from '../../types'
-import type {
-  AgentDefinition,
-  ExecutorDefinition,
-} from '../../types/executorTypes'
+import type { AgentDefinition } from '../../types/executorTypes'
 import { WorkflowInspectorEmptyState } from './WorkflowInspectorOverviewFallback'
 import { selectedNodeDetails } from './workflowStudioModel'
 import { WorkflowNodeInspectorBody } from './WorkflowNodeInspectorBody'
 
 type Props = {
   workflow: WorkflowDefinitionRecord | null
-  executorCatalog: ExecutorDefinition[]
   agentCatalog: AgentDefinition[]
   selectedNodeKey: string | null
   definitionYaml: string
@@ -27,10 +23,10 @@ export function WorkflowNodeInspector(props: Props) {
   return (
     <WorkflowNodeInspectorBody
       details={details}
-      executorCatalog={props.executorCatalog}
       agentCatalog={props.agentCatalog}
       definitionYaml={props.definitionYaml}
       setDefinitionYaml={props.setDefinitionYaml}
+      workflowKey={workflow.key}
       readOnly={props.readOnly}
       onClose={props.onClose}
     />

@@ -72,9 +72,9 @@ def _setup(tmp_path: Path) -> tuple[Path, dict[str, str], Path]:
     return main, env, log
 
 
-def _run(main: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+def _run(main: Path, env: dict[str, str], *args: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["bash", "scripts/ensure-velites.sh"],
+        ["bash", "scripts/ensure-velites.sh", *args],
         cwd=main,
         env=env,
         capture_output=True,
@@ -145,3 +145,27 @@ def test_fails_when_rebuild_needed_but_cargo_missing(tmp_path: Path) -> None:
     result = _run(main, env)
     assert result.returncode == 1
     assert "cargo 不可用" in result.stderr
+
+
+def test_dest_installs_into_target_dir_regardless_of_path(tmp_path: Path) -> None:
+    """--dest DIR：跳过 PATH 探测，安装到 DIR/velites（Worker 自带副本通道）。"""
+    main, env, log = _setup(tmp_path)
+    # PATH 上放一个既有 velites，验证 --dest 不落在它上面。
+    path_velites = Path(env["PATH"].split(":")[0]) / "velites"
+    _write_stub(path_velites, "#!/usr/bin/env bash\n")
+    result = _run(main, env, "--dest", "data/bin")
+    assert result.returncode == 0, result.stderr
+    bundled = main / "data" / "bin" / "velites"
+    assert bundled.read_text() == "binary-for-hash-v1\n"
+    assert (main / "data" / "bin" / "velites.src-stamp").read_text() == "hash-v1\n"
+    assert "cargo build --release --locked" in log.read_text()
+
+
+def test_dest_skips_rebuild_when_stamp_matches(tmp_path: Path) -> None:
+    main, env, log = _setup(tmp_path)
+    assert _run(main, env, "--dest", "data/bin").returncode == 0
+    log.write_text("")
+    result = _run(main, env, "--dest", "data/bin")
+    assert result.returncode == 0, result.stderr
+    assert "跳过构建" in result.stdout
+    assert log.read_text() == ""

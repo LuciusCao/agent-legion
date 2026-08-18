@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 
 class WorkflowMaintenance:
-    """Periodic old-log cleanup for the workflow worker."""
+    """Periodic maintenance for the workflow worker: old-log cleanup, token purge."""
 
     def __init__(self, job_db: JobQueries, settings: Settings) -> None:
         self.job_db = job_db
@@ -42,6 +42,9 @@ class WorkflowMaintenance:
             )
             if logs or run_dirs:
                 logger.info("Cleaned up %s old logs and %s old run directories", logs, run_dirs)
+            tokens = self.job_db.delete_expired_scoped_tokens()
+            if tokens:
+                logger.info("Purged %s expired scoped tokens", tokens)
         except Exception:
             logger.exception("Failed to clean up old logs")
         finally:

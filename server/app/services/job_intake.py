@@ -13,13 +13,12 @@ from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_enqueue import enqueue_intake_batch
 from server.app.services.job_intake_registry import RESOLVERS
 from server.app.services.job_intake_resolution import normalize_values
-from server.app.services.job_intake_video import write_video_input
 from server.app.services.job_intake_workspace import (
     enabled_intake_modes,
     get_workspace,
     singular_field_name,
 )
-from server.app.services.node_codes import freeze_node_code_versions
+from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
@@ -74,8 +73,6 @@ class JobIntakeService:
 
         workspace_entity = str(workspace.get("default_entity") or "question")
         entity = (payload.get("entity") or workspace_entity).strip() or "question"
-        if entity == "video" and workflow_key != "video_knowledge":
-            raise InvalidOperationError("Unsupported entity and intake mode combination")
         spec = RESOLVERS.get((entity, mode.key))
         if spec is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
@@ -83,9 +80,8 @@ class JobIntakeService:
         try:
             node_config = resolve_workflow_node_configs(
                 definition,
-                published_agent_definitions(self.settings.database_url),
+                published_agent_definitions(self.settings.database_url, workspace_id),
                 workspace,
-                self.settings.executor_definitions,
             )
         except ValueError as exc:
             raise InvalidOperationError(f"Invalid node configuration: {exc}") from exc
@@ -133,12 +129,7 @@ class JobIntakeService:
         )
 
         if not candidates:
-            if entity == "video" and resolved_any:
-                return {"created_count": 0, "jobs": []}
-            detail = "No tasks were resolved from input"
-            if spec.key.startswith("cms.") and mode.input_field == "knowledge_codes":
-                detail += f". Checked {len(input_values)} knowledge code(s) via CMS; ensure the codes are correct and the resource API URL is configured."
-            raise InvalidOperationError(detail)
+            raise InvalidOperationError("No tasks were resolved from input")
 
         if mode.input_field == "question_ids":
             resolved_ids = input_values
@@ -180,10 +171,6 @@ class JobIntakeService:
         )
         if jobs:
             notify_schedulable_work()
-
-        if entity == "video" and workflow_key == "video_knowledge":
-            for candidate, job in zip(candidates, jobs, strict=True):
-                write_video_input(resolve_job_dir(job, self.settings.jobs_dir), candidate)
 
         for job in jobs:
             job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))

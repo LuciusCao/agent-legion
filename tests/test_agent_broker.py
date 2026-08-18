@@ -33,7 +33,7 @@ def _insert_job_rows(
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values (%s, 'Test') on conflict(id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, 'Test', 'demo_workflow') on conflict(id) do nothing",
             (workspace_id,),
         )
         conn.execute(
@@ -76,7 +76,7 @@ def _seed_request(
         requires_labels={"arch": "arm64"},
     )
     catalog = definitions or {agent_id: definition}
-    replace_agent_catalog(catalog)
+    replace_agent_catalog(workspace_id, catalog)
     _insert_job_rows(
         job_db,
         job_id=job_id,
@@ -384,7 +384,7 @@ def test_worker_registration_stores_and_refreshes_allowed_workspaces(job_db) -> 
     _seed_request(job_db, job_id="job-1")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('other-workspace', 'Other')"
+            "insert into workspaces(id, name, default_workflow_key) values ('other-workspace', 'Other', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
@@ -530,7 +530,7 @@ def test_idle_claim_poll_registers_worker_panel_rows(job_db) -> None:
     broker = _broker(job_db.jobs_dir.parent, agent_status=manager)
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspaces(id, name) values ('idle-workspace', 'Idle')"
+            "insert into workspaces(id, name, default_workflow_key) values ('idle-workspace', 'Idle', 'demo_workflow')"
             " on conflict(id) do nothing"
         )
 
@@ -880,7 +880,7 @@ def test_stale_pi_and_fresh_velites_requests_coexist_during_migration(job_db) ->
         skill="question/generate",
         requires_labels={"arch": "arm64"},
     )
-    replace_agent_catalog({"generator-v1": velites_definition})
+    replace_agent_catalog("test-workspace", {"generator-v1": velites_definition})
     _insert_job_rows(
         job_db,
         job_id="job-new",

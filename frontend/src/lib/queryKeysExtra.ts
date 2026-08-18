@@ -2,10 +2,12 @@
  * query key 工厂扩展（queryKeys.ts 已达体积预算，后续新 key 统一放这里）。
  * 与 lib/queryKeys.ts 同一约定：相同 key 的多个 useQuery 合并为一次请求。
  */
+const k = (name: string, id: string) => [name, id] as const
+
 export const extraQueryKeys = {
   users: () => ['users'] as const,
   // 单个 workspace 记录（AddDialog 与 useWorkspaceDisplayName 共享）。
-  workspace: (id: string) => ['workspace', id] as const,
+  workspace: (id: string) => k('workspace', id),
   workspaceMembers: (workspaceId: string) =>
     ['workspaceMembers', workspaceId] as const,
   workerTokens: () => ['workerTokens'] as const,
@@ -15,10 +17,8 @@ export const extraQueryKeys = {
   connections: () => ['connections'] as const,
   connectionTypes: () => ['connectionTypes'] as const,
   // SettingsPage 与 WorkspaceMainPage 经同一 key 共享工作流定义缓存。
-  workflowDefinition: (workflowKey: string) =>
-    ['workflowDefinition', workflowKey] as const,
-  workspaceSettings: (workspaceId: string) =>
-    ['workspaceSettings', workspaceId] as const,
+  workflowDefinition: (key: string) => k('workflowDefinition', key),
+  workspaceSettings: (ws: string) => k('workspaceSettings', ws),
   failedNodeRuns: (
     workspaceId: string,
     workflowKey: string | null | undefined
@@ -38,11 +38,13 @@ export const extraQueryKeys = {
     ['runTokenUsage', jobId, runId, runStatus] as const,
   workflowStudioData: (workspaceId: string) =>
     ['workflowStudioData', workspaceId] as const,
-  agentDefinitions: () => ['agentDefinitions'] as const,
-  agentVersions: (agentId: string) => ['agentVersions', agentId] as const,
-  executorDefinitions: () => ['executorDefinitions'] as const,
-  executorVersions: (executorId: string) =>
-    ['executorVersions', executorId] as const,
+  agentDefinitions: (workspaceId: string) => k('agentDefinitions', workspaceId),
+  // Studio DAG/Inspector 共享的 Agent 目录（P-0.5：executors 半区已退役）；
+  // 面板发布/归档后失效重取。
+  studioExecutorCatalog: (workspaceId: string) =>
+    ['studioExecutorCatalog', workspaceId] as const,
+  agentVersions: (workspaceId: string, agentId: string) =>
+    ['agentVersions', workspaceId, agentId] as const,
   qualityBatches: (workspaceId: string) =>
     ['qualityBatches', workspaceId] as const,
   qualityBatchDetail: (workspaceId: string, batchId: string) =>

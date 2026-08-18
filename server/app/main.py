@@ -14,20 +14,18 @@ from server.app.events import JobEventManager
 from server.app.events.agents import AgentStatusManager
 from server.app.events.aggregator import build_workspace_event_aggregator
 from server.app.events.bus import InProcessEventBus
-from server.app.executors.executor_registry_factory import build_executor_registry
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.pi import build_skill_manager
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.jobs import JobQueries
-from server.app.pipeline.runners import list_openclaw_agents
+from server.app.openclaw_agents import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.routes.auth import create_auth_router
 from server.app.scheduler_wakeup import unregister_wakeup
 from server.app.services.artifact_orphan_gc import ArtifactOrphanGcThread
 from server.app.services.artifact_store import ArtifactStore
+from server.app.services.demo_node_seed import seed_demo_node_codes
 from server.app.services.executor_catalog import ExecutorCatalogService
-from server.app.services.executor_definition_service import hydrate_executor_definitions
 from server.app.services.instance_settings import apply_instance_settings
 from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
@@ -43,9 +41,11 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import load_settings, validate_settings
+from server.app.skills.runtime import build_skill_manager
 from server.app.skills.seed import seed_skill_sources
 from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
+from server.app.studio_chat.service import StudioChatService
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.worker_startup import start_worker_threads
 from server.app.workflow_worker.thread import WorkflowWorkerThread
@@ -62,10 +62,17 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # Hydrate instance-level settings from the DB before any service reads
     # them (executor runtime, cleanup/monitoring config).
     apply_instance_settings(settings, job_db.path)
-    # Executor definitions live in the DB (versioned_entities, entity_type
-    # 'executor'): seed-if-absent the built-in catalog, then hydrate from the
-    # published rows (restart-effective, no hot rebuild).
-    hydrate_executor_definitions(settings)
+    # Executor definitions are retired (schema v47, P-0.5); only the demo
+    # workflow's global node_code versions still seed from the git-reviewed
+    # workflow_nodes/ sources (#96).
+    seed_demo_node_codes(settings)
+    # Agent definitions are workspace-scoped (schema v46): there is no global
+    # seed. Workspaces binding the built-in demo workflow get the factory
+    # agent templates instantiated seed-if-absent at binding time
+    # (WorkflowRevisionService.ensure_active_revision).
+    # Workflow catalog keys live in the DB (workflow_catalog, schema v40):
+    # upsert the built-in rows from the code registry; registered keys persist.
+    WorkflowCatalogService.seed_builtin(settings.database_url)
     # Skill sources/lock retired from tracked yaml into global_settings:
     # import-once the legacy files when present, else seed the built-in
     # constants; with rows present this is a no-op (DB is authoritative).
@@ -91,9 +98,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     )
     agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
     skill_manager = build_skill_manager(settings.database_url)
-    executor_registry = build_executor_registry(
-        settings, job_db, artifact_store=artifact_store, skill_manager=skill_manager
-    )
 
     executor_leases = ExecutorLeaseRepository(
         job_db.path,
@@ -104,6 +108,12 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     )
     agent_worker_registry = AgentWorkerRegistry(job_db.path)
     ops_metrics = OpsMetricsService(job_db.path, settings.config)
+    # Studio chat (phase 3 chunk 4): ACP conversation sessions, one agent
+    # subprocess per session; in-process only, reaped in the lifespan finally.
+    studio_chat_service = StudioChatService(job_db, settings, job_event_manager.bus)
+    # PATH-level availability of every registered chat agent: warms the probe
+    # cache and logs the entries the picker will hide on this host.
+    studio_chat_service.warm_availability_probe()
     agent_completion = AgentCompletionHandler(
         executor_leases,
         artifact_store,
@@ -132,13 +142,17 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
                 settings,
                 job_db=job_db,
                 executor_leases=executor_leases,
-                executor_registry=executor_registry,
                 agent_broker=agent_broker,
                 workspace_worker_control=workspace_worker_control,
                 agent_manager=agent_manager,
                 agent_dispatch=agent_dispatch,
             )
             app.state.worker_startup = worker_status
+            # Routes pick the thread up here to trigger scan-list reloads
+            # (workflow registration hot refresh).
+            app.state.workflow_worker = workflow_worker_thread
+            if workflow_worker_thread is not None:
+                app.state.code_executor = workflow_worker_thread.runtime.executor
             # Orphan GC shares the sweeper ownership rule: exactly one
             # replica (sweeper_enabled) reclaims, the rest stay idle.
             if settings.executor_runtime.sweeper_enabled:
@@ -149,6 +163,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             yield
         finally:
             await background_tasks.stop(app)
+            # Reap chat sessions before closing DB pools: teardown revokes
+            # scoped tokens and settles permission waiters via the DB.
+            studio_chat_service.shutdown()
             for thread in (sweeper_thread, artifact_gc_thread):
                 if thread is not None:
                     thread.stop()
@@ -162,7 +179,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.settings = settings
     app.state.job_db = job_db
     app.state.auth_service = build_auth_service(job_db, settings.config)
-    app.state.executor_registry = executor_registry
     app.state.agent_broker = agent_broker
     app.state.agent_dispatch = agent_dispatch
     app.state.agent_worker_registry = agent_worker_registry
@@ -172,14 +188,13 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
     app.state.job_event_manager = job_event_manager
+    app.state.studio_chat_service = studio_chat_service
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
     app.state.workspace_event_aggregator = workspace_event_aggregator
     workflow_catalog = WorkflowCatalogService(settings)
     executor_catalog = ExecutorCatalogService(settings)
-    workspace_executor_configuration = WorkspaceExecutorConfigurationService(
-        job_db, settings.executor_definitions
-    )
+    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, workflow_catalog
     )
@@ -207,6 +222,7 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             quality_labels=QualityLabelService(job_db.path, artifact_store),
             quality_stats=QualityStatsService(job_db.path),
             quality_replays=QualityReplayService(job_db, artifact_store),
+            studio_chat_service=studio_chat_service,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")

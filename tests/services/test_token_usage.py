@@ -211,7 +211,7 @@ def test_persist_node_run_usage_creates_row(tmp_path):
     with closing(connect_database(db_path)) as conn:
         # Insert required parent rows.
         conn.execute(
-            "insert into workspaces(id, name) values (%s, %s) on conflict (id) do nothing",
+            "insert into workspaces(id, name, default_workflow_key) values (%s, %s, 'demo_workflow') on conflict (id) do nothing",
             ("ws-1", "Test"),
         )
         conn.execute(

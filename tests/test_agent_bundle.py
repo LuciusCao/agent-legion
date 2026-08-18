@@ -11,7 +11,7 @@ from server.app.agent_broker.agent_bundle import (
     build_agent_bundle,
     extract_agent_result,
 )
-from server.app.agent_completion import _unpack_result
+from server.app.agent_broker.result_unpack import unpack_agent_result
 
 
 def test_agent_bundle_contains_manifest_and_skill_snapshot(tmp_path: Path) -> None:
@@ -62,7 +62,7 @@ def test_result_unpack_promotes_only_expected_outputs(tmp_path: Path) -> None:
         },
     )
 
-    _unpack_result(archive, job_dir, ("expected.json",))
+    unpack_agent_result(archive, job_dir, ("expected.json",))
 
     # Only the declared output is promoted; worker run logs (events.jsonl) and
     # undeclared files never land in the job dir, and staging leaves nothing.

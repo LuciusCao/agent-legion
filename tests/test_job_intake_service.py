@@ -8,7 +8,9 @@ from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 
 
-def _create_workspace_with_revision(job_db, settings, workflow_key="question_comprehension_info"):
+def _create_workspace_with_revision(
+    job_db, settings, workflow_key="education_video_problems_generation"
+):
     workspace = job_db.create_workspace("default", default_workflow_key=workflow_key)
     definition = WorkflowCatalogService(settings).definition(workflow_key)
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
@@ -28,11 +30,10 @@ def test_job_intake_creates_direct_id_jobs(job_db, settings):
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q1", "Q1", " Q2 "],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q1", "Q1", " Q2 "],
         },
     )
 
@@ -40,10 +41,14 @@ def test_job_intake_creates_direct_id_jobs(job_db, settings):
     assert [job["source_id"] for job in result["jobs"]] == ["Q1", "Q2"]
     assert [job["storage_dir"] for job in result["jobs"]] == [
         str(
-            job_storage_dir(settings.jobs_dir, "default", "default_question_comprehension_info_Q1")
+            job_storage_dir(
+                settings.jobs_dir, "default", "default_education_video_problems_generation_Q1"
+            )
         ),
         str(
-            job_storage_dir(settings.jobs_dir, "default", "default_question_comprehension_info_Q2")
+            job_storage_dir(
+                settings.jobs_dir, "default", "default_education_video_problems_generation_Q2"
+            )
         ),
     ]
     for job in result["jobs"]:
@@ -55,9 +60,9 @@ def test_job_intake_rejects_missing_workspace(intake_service):
         intake_service.create_batch(
             "missing",
             {
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q1"],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q1"],
                 "knowledge_codes": [],
             },
         )
@@ -66,16 +71,16 @@ def test_job_intake_rejects_missing_workspace(intake_service):
 def test_job_intake_rejects_disabled_mode(intake_service):
     workspace = intake_service.job_db.get_workspace("default")
     workspace = intake_service.job_db.update_workspace(
-        workspace["id"], intake_config={"enabled_modes": ["batch_by_knowledge"]}
+        workspace["id"], intake_config={"enabled_modes": []}
     )
 
     with pytest.raises(InvalidOperationError, match="Intake mode is disabled"):
         intake_service.create_batch(
             workspace["id"],
             {
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": ["Q1"],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": ["Q1"],
                 "knowledge_codes": [],
             },
         )
@@ -86,23 +91,23 @@ def test_job_intake_rejects_unsupported_entity_mode(intake_service):
         intake_service.create_batch(
             "default",
             {
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
                 "entity": "unknown_entity",
-                "question_ids": ["Q1"],
+                "knowledge_point_ids": ["Q1"],
                 "knowledge_codes": [],
             },
         )
 
 
 def test_job_intake_requires_at_least_one_value(intake_service):
-    with pytest.raises(InvalidOperationError, match="At least one question"):
+    with pytest.raises(InvalidOperationError, match="At least one knowledge_point_id"):
         intake_service.create_batch(
             "default",
             {
-                "workflow_key": "question_comprehension_info",
-                "source_kind": "batch_by_ids",
-                "question_ids": [],
+                "workflow_key": "education_video_problems_generation",
+                "source_kind": "direct_ids",
+                "knowledge_point_ids": [],
                 "knowledge_codes": [],
             },
         )
@@ -120,21 +125,19 @@ def test_job_intake_dedups_across_batches_without_full_row_load(job_db, settings
     first = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q1", "Q2"],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q1", "Q2"],
         },
     )
     second = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q2", "Q3"],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q2", "Q3"],
         },
     )
 
@@ -149,11 +152,10 @@ def test_list_job_dedup_keys_returns_only_key_columns(job_db, settings):
     service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q1", "Q2"],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q1", "Q2"],
         },
     )
 
@@ -173,27 +175,23 @@ def test_job_intake_dedups_candidates_across_chunk_boundaries(job_db, settings, 
     monkeypatch.setattr(job_intake_chunks, "INTAKE_RESOLUTION_CHUNK_SIZE", 2)
 
     def fake_expand(entity, input_values, source_kind):
-        # Node-phase intake keeps question candidates opaque, so cross-chunk
-        # dedup is exercised through a resolver that expands codes into
-        # overlapping question ids (one shared id per chunk).
+        # Cross-chunk dedup is exercised through a resolver that expands input
+        # values into overlapping ids (one shared id per chunk).
         return [
             candidate(entity, f"Q-{code}", f"Question {code}", source_kind, code)
             for code in input_values
         ] + [candidate(entity, "Q-shared", "Shared", source_kind, input_values[0])]
 
-    spec = RESOLVERS[("question", "batch_by_knowledge")]
-    monkeypatch.setitem(
-        RESOLVERS, ("question", "batch_by_knowledge"), replace(spec, handler=fake_expand)
-    )
+    spec = RESOLVERS[("question", "direct_ids")]
+    monkeypatch.setitem(RESOLVERS, ("question", "direct_ids"), replace(spec, handler=fake_expand))
 
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_knowledge",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": [],
-            "knowledge_codes": ["K1", "K2", "K3", "K4", "K5"],
+            "knowledge_point_ids": ["K1", "K2", "K3", "K4", "K5"],
         },
     )
 
@@ -210,11 +208,10 @@ def test_job_intake_handles_large_batch_across_default_chunks(job_db, settings):
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": question_ids,
-            "knowledge_codes": [],
+            "knowledge_point_ids": question_ids,
         },
     )
 
@@ -230,22 +227,21 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
     codes = NodeCodeService(job_db.path)
     codes.save_draft(
         workspace["id"],
-        "question_comprehension_info",
-        "fetch_questions",
+        "education_video_problems_generation",
+        "intake_knowledge_points",
         "def run(job, job_dir, runtime):\n    return None\n",
         "user:u1",
     )
-    codes.publish(workspace["id"], "question_comprehension_info", "fetch_questions")
+    codes.publish(workspace["id"], "education_video_problems_generation", "intake_knowledge_points")
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q1"],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q1"],
         },
     )
 
@@ -254,24 +250,26 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
 
     payload = json.loads(batch["source_payload_json"])
     pins = payload["node_code_versions"]
-    assert pins["fetch_questions"]["version"] == 1
-    assert len(pins["fetch_questions"]["code_hash"]) == 64
+    assert pins["intake_knowledge_points"]["version"] == 1
+    assert len(pins["intake_knowledge_points"]["code_hash"]) == 64
     # Nodes without published custom code are not pinned.
-    assert "clean_and_parse" not in pins
+    assert "write_script" not in pins
 
 
-def test_job_intake_freezes_empty_when_no_custom_codes(job_db, settings):
+def test_job_intake_freezes_global_factory_seed_pins(job_db, settings):
+    """Post-#96: the demo workflow's global factory-seeded node codes are
+    pinned like workspace-published ones (jobs freeze the code they start
+    with); agent nodes are never pinned."""
     _create_workspace_with_revision(job_db, settings)
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
+            "workflow_key": "education_video_problems_generation",
+            "source_kind": "direct_ids",
             "entity": "question",
-            "question_ids": ["Q1"],
-            "knowledge_codes": [],
+            "knowledge_point_ids": ["Q1"],
         },
     )
 
@@ -279,4 +277,8 @@ def test_job_intake_freezes_empty_when_no_custom_codes(job_db, settings):
     import json
 
     payload = json.loads(batch["source_payload_json"])
-    assert payload["node_code_versions"] == {}
+    pins = payload["node_code_versions"]
+    assert set(pins) == {"intake_knowledge_points", "publish_content"}
+    for pin in pins.values():
+        assert pin["version"] == 1
+        assert len(pin["code_hash"]) == 64

@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { api } from '../api'
 import { createRealtimeChannel, type RealtimeChannel } from '../lib/realtime'
 import { parseAgentsWsMessage, upsertAgent } from '../lib/agentsWsMessages'
-import { useExecutorsStore } from './executorsStore'
+import { useConnectionStatusStore } from './connectionStatusStore'
 import type { AgentStatus, WorkerStatusResponse } from '../types'
 
 export interface AgentsState {
@@ -32,7 +32,9 @@ export const useAgentsStore = create<AgentsState>((set, get) => ({
       url: `${protocol}//${location.host}/api/agents`,
       protocol: 'ws',
       onStatus: (status) => {
-        useExecutorsStore.getState().setConnectionStatus('agents', status)
+        useConnectionStatusStore
+          .getState()
+          .setConnectionStatus('agents', status)
       },
       onEvent: (_type, data) => {
         try {

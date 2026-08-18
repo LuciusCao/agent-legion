@@ -50,6 +50,7 @@ left join lateral (
   select ve.version
   from versioned_entities ve
   where ve.entity_type = 'agent'
+    and ve.workspace_id = jobs.workspace_id
     and ve.definition_hash = req.agent_definition_hash
   order by ve.version desc
   limit 1

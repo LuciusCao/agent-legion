@@ -39,17 +39,21 @@ from server.app.executors.models import ExecutionContext, ExecutionResult
 if TYPE_CHECKING:
     from server.app.executors.code import CodeExecutor
 
-# Real repository root hosting the ``server`` package (the sandboxed child
-# imports ``server.app.*`` from here); differs from the executor's configured
-# ``repo_root`` only in tests, where capabilities point into tmp dirs.
+# Real repository root hosting the ``workspace_libs`` package (the sandboxed
+# child imports ``workspace_libs.*`` from here); differs from the executor's
+# configured ``repo_root`` only in tests, where capabilities point into tmp
+# dirs.
 _SERVER_REPO_ROOT = Path(__file__).resolve().parents[3]
 
-# Repo subdirectories the child must READ to import server/workflow_nodes
-# helpers and load yaml-indepedent config modules. workspace_libs holds the
-# CMS client the builtin intake/download nodes use, so custom forks of those
-# nodes import it too. Deliberately excludes the repo root itself, `.env`,
-# `deploy/` and `data/` (secrets and runtime data).
-_REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config", "workspace_libs")
+# Repo subdirectories the child must READ: import roots (server helpers,
+# yaml-independent config modules, workspace_libs) plus the demo workflow's
+# example assets (workflow_nodes holds the demo seed sources, examples/ holds
+# the demo knowledge markdown). Deliberately excludes the repo root itself,
+# `.env`, `deploy/` and `data/` (secrets and runtime data). The `config`
+# entry relies on CONFIG-YAML-001: tracked config yaml must never carry
+# secret values (they live in the vault / instance settings), so granting the
+# sandbox read access to `config/` exposes no credentials.
+_REPO_READ_SUBDIRS = ("server", "workflow_nodes", "config", "workspace_libs", "examples")
 
 _RESULT_BASENAME = ".custom_node_result.json"
 
@@ -186,15 +190,21 @@ def execute_custom_sandboxed(
     command = [velites, "sandbox", "wrap", "--cwd", str(context.job_dir)]
     for root in _read_roots(executor):
         command += ["--allow-read", root]
-    if executor._capabilities[context.capability].sandbox_network:
+    # Network opt-in travels the node config chain (P-0.5): the resolved
+    # node config wins; anything else denies (the sandbox default).
+    sandbox_network = context.node_config.get("sandbox_network")
+    if sandbox_network is True:
         command.append("--allow-network")
     command += [
         "--",
         sys.executable,
         "-m",
-        "server.app.executors._code_child",
+        "workspace_libs.code_child",
         str(result_path),
     ]
+    # worker/code_runner.py 的 build_sandbox_argv/child_env/_read_roots 从本
+    # 文件复制适配（Worker 上全部 code 执行统一过沙箱，批次 2）——改 argv/
+    # 环境/payload 契约时两边同步。
 
     log_fd = os.open(str(context.log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
     try:

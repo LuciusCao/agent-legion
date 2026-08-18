@@ -1,6 +1,7 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import FileResponse
 
+from ..auth.dependencies import reject_studio_agent_scope
 from ..jobs import JobQueries
 from ..security import validate_package_filename
 from ..services.job_packages import (
@@ -61,6 +62,7 @@ def create_packages_router(
     @router.delete(
         "/workspaces/{workspace_id}/packages/{package_id:int}",
         response_model=WorkspacePackageDeleteResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def delete_workspace_package_route(
         workspace_id: str, package_id: int
@@ -76,6 +78,7 @@ def create_packages_router(
     @router.patch(
         "/workspaces/{workspace_id}/packages/{package_id:int}",
         response_model=WorkspacePackageUpdateResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def update_workspace_package_route(
         workspace_id: str, package_id: int, body: WorkspacePackageUpdate
@@ -96,7 +99,11 @@ def create_packages_router(
             locked=body.locked if body.locked is not None else None,
         )
 
-    @router.post("/workspaces/{workspace_id}/jobs/package", response_model=WorkspacePackageResponse)
+    @router.post(
+        "/workspaces/{workspace_id}/jobs/package",
+        response_model=WorkspacePackageResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
+    )
     def package_workspace_jobs(
         workspace_id: str, request: WorkspacePackageRequest
     ) -> WorkspacePackageResponse:

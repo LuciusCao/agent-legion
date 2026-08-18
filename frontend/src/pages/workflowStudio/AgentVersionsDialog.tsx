@@ -21,6 +21,8 @@ const statusLabels: Record<AgentVersionSummary['status'], string> = {
 }
 
 type Props = {
+  /** 当前 workspace（Agent 定义为 workspace 作用域，schema v46） */
+  workspaceId: string
   agentId: string
   open: boolean
   onClose: () => void
@@ -29,6 +31,7 @@ type Props = {
 
 /** Agent 版本历史：列出所有版本，回滚会以目标版本生成新草稿。 */
 export function AgentVersionsDialog({
+  workspaceId,
   agentId,
   open,
   onClose,
@@ -39,8 +42,8 @@ export function AgentVersionsDialog({
     isLoading: loading,
     error: queryError,
   } = useQuery({
-    queryKey: extraQueryKeys.agentVersions(agentId),
-    queryFn: () => fetchAgentVersions(agentId),
+    queryKey: extraQueryKeys.agentVersions(workspaceId, agentId),
+    queryFn: () => fetchAgentVersions(workspaceId, agentId),
     enabled: open,
   })
   const error = toErrorMessage(queryError)
@@ -53,7 +56,7 @@ export function AgentVersionsDialog({
     setActionError('')
     setBusy(true)
     try {
-      await rollbackAgent(agentId, version)
+      await rollbackAgent(workspaceId, agentId, version)
       onRolledBack()
     } catch (err) {
       setActionError(err instanceof Error ? err.message : '回滚失败')

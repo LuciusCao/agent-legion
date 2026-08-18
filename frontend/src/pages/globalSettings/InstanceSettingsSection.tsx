@@ -18,124 +18,10 @@ import {
   openClawFormValues,
 } from './OpenClawInstanceFields'
 import type { InstanceFormValues } from './OpenClawInstanceFields'
+import { FIELD_GROUPS, fieldDef } from './instanceSettingsFields'
 import styles from '../GlobalSettingsPage.module.css'
 
-interface NumberFieldDef {
-  path: string
-  label: string
-  integer: boolean
-}
-
-interface ToggleDef {
-  path: string
-  label: string
-}
-
-interface FieldGroup {
-  title: string
-  fields: NumberFieldDef[]
-  toggles: ToggleDef[]
-}
-
-const FIELD_GROUPS: FieldGroup[] = [
-  {
-    title: '清理',
-    fields: [
-      {
-        path: 'cleanup.log_retention_days',
-        label: '日志保留天数',
-        integer: true,
-      },
-      {
-        path: 'cleanup.run_dir_retention_days',
-        label: '运行目录保留天数',
-        integer: true,
-      },
-      {
-        path: 'cleanup.interval_seconds',
-        label: '清理间隔（秒）',
-        integer: true,
-      },
-    ],
-    toggles: [],
-  },
-  {
-    title: '监控',
-    fields: [
-      {
-        path: 'monitoring.sample_interval_seconds',
-        label: '采样间隔（秒）',
-        integer: false,
-      },
-      {
-        path: 'monitoring.retention_days',
-        label: '数据保留天数',
-        integer: true,
-      },
-    ],
-    toggles: [],
-  },
-  {
-    title: '心跳与租约',
-    fields: [
-      {
-        path: 'heartbeat_interval_seconds',
-        label: '心跳间隔（秒）',
-        integer: false,
-      },
-      { path: 'lease_ttl_seconds', label: '租约 TTL（秒）', integer: true },
-      {
-        path: 'heartbeat_failure_threshold',
-        label: '心跳失败阈值',
-        integer: true,
-      },
-    ],
-    toggles: [],
-  },
-  {
-    title: 'Sweeper',
-    fields: [
-      {
-        path: 'sweeper_interval_seconds',
-        label: '扫描间隔（秒）',
-        integer: false,
-      },
-    ],
-    toggles: [{ path: 'sweeper_enabled', label: '启用 sweeper' }],
-  },
-  {
-    title: '功能开关',
-    fields: [],
-    toggles: [{ path: 'workflows.enabled', label: '启用工作流' }],
-  },
-  {
-    title: 'Worker 限制',
-    fields: [
-      {
-        path: 'agent_workers.max_archive_bytes',
-        label: '归档大小上限（字节）',
-        integer: true,
-      },
-      {
-        path: 'agent_workers.min_protocol_version',
-        label: '最低协议版本',
-        integer: true,
-      },
-    ],
-    toggles: [],
-  },
-]
-
 type FormValues = InstanceFormValues
-
-function fieldDef(path: string): NumberFieldDef {
-  for (const group of FIELD_GROUPS) {
-    for (const field of group.fields) {
-      if (field.path === path) return field
-    }
-  }
-  throw new Error(`unknown instance settings field: ${path}`)
-}
 
 function toFormValues(doc: InstanceSettingsResponse): FormValues {
   return {
@@ -153,6 +39,7 @@ function toFormValues(doc: InstanceSettingsResponse): FormValues {
     heartbeat_failure_threshold: String(doc.heartbeat_failure_threshold),
     sweeper_enabled: doc.sweeper_enabled,
     sweeper_interval_seconds: String(doc.sweeper_interval_seconds),
+    code_capacity: String(doc.code_capacity),
     'workflows.enabled': doc.workflows.enabled,
     'agent_workers.max_archive_bytes': String(
       doc.agent_workers.max_archive_bytes
@@ -206,6 +93,7 @@ function buildPayload(values: FormValues): InstanceSettingsUpdate {
     ),
     sweeper_enabled: Boolean(values.sweeper_enabled),
     sweeper_interval_seconds: parseNumber(values, 'sweeper_interval_seconds'),
+    code_capacity: parseNumber(values, 'code_capacity'),
     workflows: { enabled: Boolean(values['workflows.enabled']) },
     agent_workers: {
       max_archive_bytes: parseNumber(values, 'agent_workers.max_archive_bytes'),

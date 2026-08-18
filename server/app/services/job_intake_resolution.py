@@ -3,8 +3,6 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from server.app.services.job_errors import UnsupportedOperationError
-
 logger = logging.getLogger(__name__)
 
 
@@ -47,35 +45,27 @@ def resolve_direct_candidates(
     ]
 
 
-def resolve_cms_question_opaque_candidates(
+def resolve_opaque_candidates(
     entity: str,
     input_values: list[str],
     source_kind: str,
 ) -> list[dict[str, Any]]:
-    """Build opaque question candidates without calling CMS.
+    """Fan out opaque candidates carrying ``source_ref`` for node-phase resolution.
 
-    Node-phase resolution: the first DAG node (``workflow_nodes/question_intake.py``)
-    resolves ids / knowledge codes against the CMS at execution time (binding +
-    vault chain), so intake only fans out one candidate per input value,
-    deduped by value.
+    Intake does not talk to any external service here: the first DAG node
+    resolves ``source_ref`` against its configured connection at execution
+    time, so intake only fans out one deduped candidate per input value.
     """
-    if entity != "question":
-        raise UnsupportedOperationError(f"{entity} resolver not yet implemented")
-
-    candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
-    for value in input_values:
+    candidates: list[dict[str, Any]] = []
+    for value in normalize_values(input_values):
         if value in seen:
             continue
         seen.add(value)
+        extras: dict[str, Any] = {"source_ref": value}
+        if entity == "video":
+            extras.update(source_url="", source_uuid="", content_type="knowledge")
         candidates.append(
-            candidate(
-                entity,
-                value,
-                f"Question {value}",
-                source_kind,
-                value,
-                source_ref=value,
-            )
+            candidate(entity, value, f"{entity.title()} {value}", source_kind, value, **extras)
         )
     return candidates

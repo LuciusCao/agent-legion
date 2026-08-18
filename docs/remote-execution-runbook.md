@@ -99,8 +99,10 @@ LLM_GATEWAY_TOKEN="<random-shared-token>" \
   uv run python scripts/remote/llm_gateway.py --host <laptop-tailnet-ip> --port 8788
 ```
 
-Alternatively `make llm-gateway` reads the provider credentials from the local
-Pi `models.json` (`LLM_GATEWAY_PROVIDER` / `PI_MODELS_JSON`). Both
+Alternatively `make llm-gateway` reads the provider credentials from a Pi
+`models.json`; the path is machine-specific and must be passed explicitly
+(`make llm-gateway PI_MODELS_JSON=~/.pi/agent/models.json`, optionally with
+`LLM_GATEWAY_PROVIDER`). Both
 `REMOTE_LLM_*` environment variables are required in the env-var form; the
 gateway refuses to start without them. Do not inline real keys into shared
 terminal history — export them from a local-only shell or a `.env` you
@@ -150,16 +152,66 @@ essentials, for orientation:
   `/api/agent-executions/{id}/heartbeat` and `/api/agent-executions/{id}/result`.
   Registration carries `protocol_version` and `image_version`; the Host rejects
   workers below `agent_workers.min_protocol_version` (DB instance settings,
-  `/api/admin/instance-settings`).
-- Concurrency is bounded by two layers only: the workflow Agent node's
-  workspace-level `max_concurrency`, and each Worker's local
-  `max_concurrency`. Upgrade order is Host first, then Workers.
+  `/api/admin/instance-settings`). Current protocol is **v2**: it adds
+  `kind: "code"` claims (see below) and heartbeat response bodies carrying
+  explicit cancellation lists. Compatibility matrix:
+
+  | Host \ Worker | v1 Worker | v2 Worker |
+  | --- | --- | --- |
+  | **v1 Host** | agent-only (unchanged) | agent-only — the v2 Worker degrades gracefully (extra register/claim fields ignored, heartbeat 204 accepted) |
+  | **v2 Host** | agent-only — never receives code claims, heartbeat stays an empty 204 | full — agent + code pools, heartbeat 200 + cancellation body |
+
+  The Host's `min_protocol_version` remains 1; raising it is an emergency
+  escape hatch, not part of a normal upgrade.
+- Concurrency is bounded in two independent pools per Worker: Agent executions
+  by the workflow's workspace-level `max_concurrency` and the Worker's local
+  `max_concurrency`; code executions by the Worker's local
+  `max_code_concurrency` only (code requests do not consume workspace Agent
+  capacity). The Host accounts and enforces the two pools separately, so long
+  code tasks never starve Agent claims. Upgrade order is Host first, then
+  Workers.
 
 **Capacity planning.** Budget ~200 MB RAM per concurrent Agent process
 (measured pi RSS: settled ~150 MB, peak ~187 MB, 90-second sample). Long-run
 peak RSS is still unmeasured — calibrate with full-duration jobs before
 raising `max_concurrency`, and keep OS headroom:
 `max_concurrency = floor((RAM - OS reserve) / measured peak)`.
+
+**Code execution pool (protocol v2).** Self-contained workflow code nodes
+(static import closure ⊆ `workspace_libs` + stdlib + `requests`;
+all in-repo demo nodes qualify) can be dispatched
+to Workers: the Host ships the node code text plus a sha256 `code_hash` and a
+`workspace_libs` snapshot in the bundle, and the Worker executes it inside the
+same `velites sandbox wrap` OS sandbox used for custom nodes. To opt a Worker
+in:
+
+- declare the accepted code capabilities in the same `capabilities` list as
+  Agent capabilities (no separate field; the Host matches by capability), and
+- set `max_code_concurrency > 0` (0 = never receives code claims, the
+  default). This field is **deliberately not hot-reloaded**: changing it via
+  the console / `PUT /api/config` restarts the execution process, so the
+  startup preflight re-runs — and refuses to start (exit code 2) when code
+  capacity is declared without a resolvable `velites` binary. Never bypass
+  this by editing the state-copy YAML under a running process.
+
+The Worker does **not** require a preinstalled velites: binary resolution is
+shared between the startup preflight and the code runner
+(`worker/binary_resolution.py::resolve_binary`) and checks the bundled copy
+`<repo>/data/bin/velites` before PATH. Docker worker images already ship
+velites; bare-metal deployments install the bundled copy with
+`./scripts/ensure-velites.sh --dest data/bin` (fingerprint-gated rebuild, run
+on a machine with the same OS/arch as the Worker; ship per-platform binaries
+when packaging). Only when neither location yields a binary does the
+fail-closed semantics trigger.
+
+When no online code-capable Worker exists, dispatch falls back to the local
+Host executor — code tasks never rot in a queue waiting for a Worker.
+
+**Secret boundary for code tasks.** Node secrets (vault-resolved connection
+credentials) are injected into the claim response only — queued manifests and
+bundles are stored secret-free. The Worker holds them in memory only, passes
+them to the sandboxed child via stdin, and scrubs them before any persistence;
+they never touch the Worker filesystem or logs.
 
 ## 6. Migrating an Agent between runtimes (pi ↔ velites)
 
@@ -178,9 +230,10 @@ flipping the field:
   whose runtime no non-revoked Worker declares is failed by the unclaimable
   sweeper with an explicit runtime reason. Declare `velites` in the Worker
   fleet (`runtimes` in the Worker console/config) first; the Worker startup
-  preflight refuses to start (exit code 2) when a declared runtime's binary is
-  missing from PATH, so a fleet that claims velites without the binary fails
-  loudly at boot instead of stranding claimed executions.
+  preflight refuses to start (exit code 2) when a declared runtime's binary
+  is missing (neither the bundled `data/bin/<binary>` copy nor PATH), so a
+  fleet that claims velites without the binary fails loudly at boot instead
+  of stranding claimed executions.
 - **Changing `runtime` changes `definition_hash`.** Queued requests pinned to
   the old hash are failed as stale by the stale-definition sweeper. Migrate
   off-peak with the queue drained; re-submit staled jobs under the normal
@@ -209,7 +262,7 @@ flipping the field:
 | --- | --- | --- |
 | Worker stays up but reports registration unavailable | Host unreachable or returning 5xx | The Worker retries registration in-process; verify `host_url` and the §3 smoke test, then inspect Host logs if 5xx persists |
 | Worker becomes unhealthy with registration rejected | Registration token mismatch or Worker revoked | `make stack-logs STACK=worker`; verify the token file and registration status |
-| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary is not on PATH (e.g. `velites` declared but not installed) | Install the binary (`cargo build --release` in `velites/`, on PATH) or drop the runtime from the Worker's `runtimes`, then restart |
+| Worker exits with code 2 and logs `启动预检失败` / startup preflight failure | A declared runtime's binary cannot be resolved (e.g. `velites` declared but not installed), or `max_code_concurrency > 0` without `velites` | Install the binary — either on PATH (`cargo build --release` in `velites/`) or as the bundled copy (`./scripts/ensure-velites.sh --dest data/bin`, per-platform) — drop the runtime from the Worker's `runtimes`, or set `max_code_concurrency: 0`, then restart |
 | Registration returns 401 | `AGENT_LEGION_WORKER_REGISTER_TOKEN(_FILE)` on the Host does not match the worker's token file | Re-copy `deploy/secrets/agent_worker_register_token` to the worker machine (deployment doc §4) |
 | Registration returns 400 `unsupported Agent Worker protocol` | Worker's `protocol_version` below `agent_workers.min_protocol_version` | Rebuild the worker image from the current repo; lower the minimum only as a short emergency escape hatch |
 | Claim returns 204 forever | No queued executions compatible with the worker's runtimes/labels | Check the workflow's Agent node routing and the worker's declared `runtimes` / `labels` |
@@ -238,7 +291,11 @@ flipping the field:
   YAML, images (`.dockerignore` excludes `**/secrets` and `**/.env`), or logs.
 - **Worker hygiene:** no credentials, secret-bearing prompts, or API keys in
   worker logs; the Worker workdir volume holds only transient execution data
-  and may be cleaned per retention policy.
+  and may be cleaned per retention policy. Code executions receive
+  vault-resolved node secrets over the claim response; they are held in memory
+  only, fed to the child via stdin, and scrubbed before any persistence — a
+  secret value must never appear in the workdir volume or logs (enforced by
+  `strip_secret_config`, tested by `test_secrets_stay_off_disk`).
 - **Worker labels:** labels travel in the register payload and are listed by
   `GET /api/agent-workers`. They are routing metadata — never put secrets,
   tokens, or other sensitive values into label keys or values.

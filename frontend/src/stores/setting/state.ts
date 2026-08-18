@@ -12,11 +12,6 @@ export interface HydrateSettingsInput {
   executorConfiguration: WorkspaceExecutorConfiguration
 }
 
-export type TestStatus = {
-  state: 'idle' | 'testing' | 'success' | 'failed'
-  message?: string
-}
-
 export type SettingState = {
   workspaceId: string | null
   workspaceName: string
@@ -28,33 +23,21 @@ export type SettingState = {
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
-  testStatus: TestStatus
   executorConfiguration: WorkspaceExecutorConfiguration
   originalExecutorConfiguration: WorkspaceExecutorConfiguration | null
-  pendingAllocationRemoval: string | null
   setWorkspaceId: (id: string) => void
   setWorkspaceName: (name: string) => void
   setWorkspaceDescription: (description: string) => void
   setSettings: (s: Partial<WorkspaceSettings>) => void
   setAgentCapacity: (capacity: number) => void
-  setExecutorAllocation: (executorId: string, limit: number) => void
-  requestExecutorRemoval: (executorId: string) => void
-  confirmExecutorRemoval: () => void
-  cancelExecutorRemoval: () => void
-  setNodeBinding: (
-    workflowKey: string,
-    nodeKey: string,
-    executorId: string | null
-  ) => void
   setNodeLimit: (
     workflowKey: string,
     nodeKey: string,
     limit: number | null
   ) => void
   hydrateSettings: (workspaceId: string, snapshot: HydrateSettingsInput) => void
-  saveAll: () => Promise<void>
-  testConnection: () => Promise<void>
-  resetTestStatus: () => void
+  // 返回是否真正保存成功（重入守卫拒绝或请求失败均为 false）。
+  saveAll: () => Promise<boolean>
 }
 
 export type SettingStoreSet = (
@@ -73,8 +56,6 @@ export const defaultSettings: WorkspaceSettings = {
 }
 
 export const defaultExecutorConfiguration: WorkspaceExecutorConfiguration = {
-  allocations: [],
-  bindings: [],
   node_limits: [],
   migration_warnings: [],
   // Workspace-level agent concurrency cap; null = unset = unlimited.
@@ -85,8 +66,6 @@ export function normalizeExecutorConfiguration(
   config: Partial<WorkspaceExecutorConfiguration> | undefined
 ): WorkspaceExecutorConfiguration {
   return {
-    allocations: config?.allocations ?? [],
-    bindings: config?.bindings ?? [],
     node_limits: config?.node_limits ?? [],
     migration_warnings: config?.migration_warnings ?? [],
     agent_capacity: config?.agent_capacity ?? null,

@@ -143,6 +143,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/admin/studio-agents': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Studio Agents */
+    get: operations['get_studio_agents_api_admin_studio_agents_get']
+    /** Put Studio Agents */
+    put: operations['put_studio_agents_api_admin_studio_agents_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/admin/token-usage-pricing': {
     parameters: {
       query?: never
@@ -627,127 +645,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/executor-definitions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Executor Definitions */
-    get: operations['list_executor_definitions_api_executor_definitions_get']
-    put?: never
-    /** Create Executor Definition */
-    post: operations['create_executor_definition_api_executor_definitions_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Executor Definition */
-    get: operations['get_executor_definition_api_executor_definitions__executor_id__get']
-    put?: never
-    post?: never
-    /** Archive Executor Definition */
-    delete: operations['archive_executor_definition_api_executor_definitions__executor_id__delete']
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/copy': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Copy Executor Definition */
-    post: operations['copy_executor_definition_api_executor_definitions__executor_id__copy_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/draft': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    /** Save Executor Definition Draft */
-    put: operations['save_executor_definition_draft_api_executor_definitions__executor_id__draft_put']
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/publish': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Publish Executor Definition */
-    post: operations['publish_executor_definition_api_executor_definitions__executor_id__publish_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/rollback': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Rollback Executor Definition */
-    post: operations['rollback_executor_definition_api_executor_definitions__executor_id__rollback_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/executor-definitions/{executor_id}/versions': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Executor Definition Versions */
-    get: operations['list_executor_definition_versions_api_executor_definitions__executor_id__versions_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/executors': {
     parameters: {
       query?: never
@@ -953,40 +850,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/jobs/{job_id}/video': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Video Job Detail */
-    get: operations['get_video_job_detail_api_jobs__job_id__video_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/jobs/{job_id}/video/source': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Video Job Source */
-    get: operations['get_video_job_source_api_jobs__job_id__video_source_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/jobs/{job_id}/{invalid_path}': {
     parameters: {
       query?: never
@@ -1049,6 +912,194 @@ export interface paths {
     put?: never
     /** Validate Skill */
     post: operations['validate_skill_api_skills_validate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent-tokens': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Tokens */
+    get: operations['list_tokens_api_studio_agent_tokens_get']
+    put?: never
+    /** Mint Token */
+    post: operations['mint_token_api_studio_agent_tokens_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent-tokens/{token_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** Revoke Token */
+    delete: operations['revoke_token_api_studio_agent_tokens__token_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/chat-sessions/{session_id}/context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Chat Session Context */
+    get: operations['get_chat_session_context_api_studio_agent_tools_chat_sessions__session_id__context_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workflows': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workflow Catalog */
+    get: operations['list_workflow_catalog_api_studio_agent_tools_workflows_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workflows/register': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Register Workflow */
+    post: operations['register_workflow_api_studio_agent_tools_workflows_register_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Agent Definition Draft */
+    put: operations['save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Active Revision */
+    get: operations['get_active_revision_api_studio_agent_tools_workspaces__workspace_id__workflow_active_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/compare': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Compare Workflow */
+    post: operations['compare_workflow_api_studio_agent_tools_workspaces__workspace_id__workflow_compare_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflow/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Validate Workflow */
+    post: operations['validate_workflow_api_studio_agent_tools_workspaces__workspace_id__workflow_validate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Node Code State */
+    get: operations['get_node_code_state_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/studio-agent/tools/workspaces/{workspace_id}/workflows/{workflow_key}/nodes/{node_key}/code/draft': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Save Node Code Draft */
+    put: operations['save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_draft_put']
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -1141,15 +1192,15 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/workflow-nodes/files/{file_path}': {
+  '/api/workflow-node-code-template': {
     parameters: {
       query?: never
       header?: never
       path?: never
       cookie?: never
     }
-    /** Read Workflow Node File */
-    get: operations['read_workflow_node_file_api_workflow_nodes_files__file_path__get']
+    /** Get Node Code Template */
+    get: operations['get_node_code_template_api_workflow_node_code_template_get']
     put?: never
     post?: never
     delete?: never
@@ -1168,7 +1219,8 @@ export interface paths {
     /** List Workflows */
     get: operations['list_workflows_api_workflows_get']
     put?: never
-    post?: never
+    /** Register Workflow */
+    post: operations['register_workflow_api_workflows_post']
     delete?: never
     options?: never
     head?: never
@@ -1726,23 +1778,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/workspaces/{workspace_id}/questions/{question_id}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Question Detail */
-    get: operations['get_question_detail_api_workspaces__workspace_id__questions__question_id__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/workspaces/{workspace_id}/runs': {
     parameters: {
       query?: never
@@ -1812,23 +1847,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/workspaces/{workspace_id}/settings/test-connection': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Test Workspace Connection */
-    post: operations['test_workspace_connection_api_workspaces__workspace_id__settings_test_connection_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/workspaces/{workspace_id}/settings/{section}': {
     parameters: {
       query?: never
@@ -1857,6 +1875,162 @@ export interface paths {
     get: operations['get_workspace_stats_api_workspaces__workspace_id__stats_get']
     put?: never
     post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/agents': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Agents */
+    get: operations['list_agents_api_workspaces__workspace_id__studio_chat_agents_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Sessions */
+    get: operations['list_sessions_api_workspaces__workspace_id__studio_chat_sessions_get']
+    put?: never
+    /** Create Session */
+    post: operations['create_session_api_workspaces__workspace_id__studio_chat_sessions_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Session */
+    get: operations['get_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__get']
+    put?: never
+    post?: never
+    /** Close Session */
+    delete: operations['close_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete']
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/cancel': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Cancel Turn */
+    post: operations['cancel_turn_api_workspaces__workspace_id__studio_chat_sessions__session_id__cancel_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/context': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    /** Update Context */
+    put: operations['update_context_api_workspaces__workspace_id__studio_chat_sessions__session_id__context_put']
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/events': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Session Events */
+    get: operations['session_events_api_workspaces__workspace_id__studio_chat_sessions__session_id__events_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/messages': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Messages */
+    get: operations['list_messages_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_get']
+    put?: never
+    /** Send Message */
+    post: operations['send_message_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/allow-all': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Set Allow All */
+    post: operations['set_allow_all_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions_allow_all_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/studio-chat/sessions/{session_id}/permissions/{request_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Answer Permission */
+    post: operations['answer_permission_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions__request_id__post']
     delete?: never
     options?: never
     head?: never
@@ -2095,6 +2269,11 @@ export interface components {
       execution_id: string
       /** Job Id */
       job_id: string
+      /**
+       * Kind
+       * @default agent
+       */
+      kind: string
       /** Lease Id */
       lease_id: string
       /** Manifest */
@@ -2198,6 +2377,17 @@ export interface components {
       agent_id: string
       latest?: components['schemas']['AgentVersionResponse'] | null
       published?: components['schemas']['AgentVersionResponse'] | null
+    }
+    /**
+     * AgentHeartbeatResponse
+     * @description Protocol v2 heartbeat body: explicit cancellations for this Worker.
+     *
+     *     Only kind='code' executions are listed (batch 2 decision 6); v1 Workers
+     *     get the legacy empty 204 instead.
+     */
+    AgentHeartbeatResponse: {
+      /** Cancelled Execution Ids */
+      cancelled_execution_ids: string[]
     }
     /** AgentListItem */
     AgentListItem: {
@@ -2374,6 +2564,8 @@ export interface components {
       }
       /** Last Seen At */
       last_seen_at: string
+      /** Max Code Concurrency */
+      max_code_concurrency: number
       /** Max Concurrency */
       max_concurrency: number
       /** Models */
@@ -2468,10 +2660,25 @@ export interface components {
     }
     /** ClaimAgentExecutionRequest */
     ClaimAgentExecutionRequest: {
+      /** Max Code Concurrency */
+      max_code_concurrency?: number | null
       /** Max Concurrency */
       max_concurrency?: number | null
       /** Worker Id */
       worker_id: string
+    }
+    /**
+     * CodePoolStatus
+     * @description The single implicit code pool (P-0.5): instance-wide capacity, this
+     *     workspace's running count, and the globally available slots.
+     */
+    CodePoolStatus: {
+      /** Available */
+      available: number
+      /** Capacity */
+      capacity: number
+      /** Running */
+      running: number
     }
     /** ConnectionCreate */
     ConnectionCreate: {
@@ -2601,232 +2808,17 @@ export interface components {
       /** Target Node Key */
       target_node_key?: string | null
     }
-    /** ExecutorAllocationRequest */
-    ExecutorAllocationRequest: {
-      /** Concurrency Limit */
-      concurrency_limit: number
-      /** Executor Id */
-      executor_id: string
-    }
-    /** ExecutorAllocationResponse */
-    ExecutorAllocationResponse: {
-      /** Concurrency Limit */
-      concurrency_limit: number
-      /** Executor Id */
-      executor_id: string
-      /** Workspace Id */
-      workspace_id: string
-    }
-    /** ExecutorArchiveResponse */
-    ExecutorArchiveResponse: {
-      /** Archived */
-      archived: number
-    }
-    /** ExecutorCapabilityResponse */
-    ExecutorCapabilityResponse: {
-      /** Model */
-      model?: string | null
-      /** Name */
-      name: string
-      /** Path */
-      path?: string | null
-      /** Provider */
-      provider?: string | null
-      /** Skill */
-      skill?: string | null
-      /** Skill Commit */
-      skill_commit?: string | null
-      /** Skill Ref */
-      skill_ref?: string | null
-      /** Thinking */
-      thinking?: string | null
-      /** Timeout Seconds */
-      timeout_seconds?: number | null
-      /** Tools */
-      tools?: string[]
-    }
-    /** ExecutorCatalogResponse */
+    /**
+     * ExecutorCatalogResponse
+     * @description Execution catalog for Studio (P-0.5 step 2: Agents only).
+     *
+     *     The ``executors`` half retired with the executor concept (schema v47);
+     *     the response type keeps the pre-retirement name until the step-3
+     *     contract cleanup.
+     */
     ExecutorCatalogResponse: {
       /** Agents */
       agents?: components['schemas']['AgentDefinitionResponse'][]
-      /** Executors */
-      executors: components['schemas']['ExecutorDefinitionResponse'][]
-    }
-    /** ExecutorCopyRequest */
-    ExecutorCopyRequest: {
-      /** New Executor Id */
-      new_executor_id: string
-    }
-    /** ExecutorCreateRequest */
-    ExecutorCreateRequest: {
-      /** Capabilities */
-      capabilities?: {
-        [key: string]: {
-          [key: string]: unknown
-        }
-      }
-      /** Executor Id */
-      executor_id: string
-      /** Global Capacity */
-      global_capacity: number
-      /** Kind */
-      kind: string
-    }
-    /**
-     * ExecutorDefinitionPayload
-     * @description Editable executor definition fields (raw executor config shape).
-     *
-     *     Kept deliberately loose: the full typed parse (kind dispatch, path safety,
-     *     config_schema contract) happens in ``ExecutorDefinitionService.save_draft``
-     *     via ``load_executor_definitions``, which is the single validation source.
-     */
-    ExecutorDefinitionPayload: {
-      /** Capabilities */
-      capabilities?: {
-        [key: string]: {
-          [key: string]: unknown
-        }
-      }
-      /** Global Capacity */
-      global_capacity: number
-      /** Kind */
-      kind: string
-    }
-    /** ExecutorDefinitionResponse */
-    ExecutorDefinitionResponse: {
-      /** Capabilities */
-      capabilities: string[]
-      /** Capability Details */
-      capability_details?: components['schemas']['ExecutorCapabilityResponse'][]
-      /** Global Capacity */
-      global_capacity: number
-      /** Id */
-      id: string
-      /**
-       * Kind
-       * @enum {string}
-       */
-      kind: 'code' | 'pi' | 'openclaw'
-    }
-    /** ExecutorDetailResponse */
-    ExecutorDetailResponse: {
-      /** Executor Id */
-      executor_id: string
-      latest?: components['schemas']['ExecutorVersionResponse'] | null
-      published?: components['schemas']['ExecutorVersionResponse'] | null
-    }
-    /** ExecutorListItem */
-    ExecutorListItem: {
-      /** Capabilities */
-      capabilities: string[]
-      /** Executor Id */
-      executor_id: string
-      /** Global Capacity */
-      global_capacity: number
-      /** Has Draft */
-      has_draft: boolean
-      /** Kind */
-      kind: string
-      /** Published At */
-      published_at?: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: 'draft' | 'published' | 'archived'
-      /** Version */
-      version: number
-    }
-    /** ExecutorListResponse */
-    ExecutorListResponse: {
-      /** Executors */
-      executors: components['schemas']['ExecutorListItem'][]
-    }
-    /** ExecutorRollbackRequest */
-    ExecutorRollbackRequest: {
-      /** Version */
-      version: number
-    }
-    /** ExecutorRuntimeStatus */
-    ExecutorRuntimeStatus: {
-      /** Available */
-      available: number
-      /** Binding Count */
-      binding_count: number
-      /** Executor Id */
-      executor_id: string
-      /** Global Capacity */
-      global_capacity: number
-      /** Kind */
-      kind: string
-      /** Running */
-      running: number
-      /** Workspace Limit */
-      workspace_limit: number
-    }
-    /** ExecutorStatusSummary */
-    ExecutorStatusSummary: {
-      /** Executors */
-      executors: components['schemas']['ExecutorRuntimeStatus'][]
-    }
-    /** ExecutorVersionResponse */
-    ExecutorVersionResponse: {
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /** Created By */
-      created_by: string
-      /** Definition */
-      definition: {
-        [key: string]: unknown
-      }
-      /** Definition Hash */
-      definition_hash: string
-      /** Executor Id */
-      executor_id: string
-      /** Id */
-      id: string
-      /** Published At */
-      published_at?: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: 'draft' | 'published' | 'archived'
-      /** Version */
-      version: number
-    }
-    /** ExecutorVersionSummary */
-    ExecutorVersionSummary: {
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string
-      /** Created By */
-      created_by: string
-      /** Definition Hash */
-      definition_hash: string
-      /** Executor Id */
-      executor_id: string
-      /** Id */
-      id: string
-      /** Published At */
-      published_at?: string | null
-      /**
-       * Status
-       * @enum {string}
-       */
-      status: 'draft' | 'published' | 'archived'
-      /** Version */
-      version: number
-    }
-    /** ExecutorVersionsResponse */
-    ExecutorVersionsResponse: {
-      /** Versions */
-      versions: components['schemas']['ExecutorVersionSummary'][]
     }
     /** FailedNodeRunItem */
     FailedNodeRunItem: {
@@ -2917,6 +2909,8 @@ export interface components {
     InstanceSettingsResponse: {
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Code Capacity */
+      code_capacity: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
@@ -2935,6 +2929,8 @@ export interface components {
     InstanceSettingsUpdate: {
       agent_workers: components['schemas']['InstanceAgentWorkersSettings']
       cleanup: components['schemas']['InstanceCleanupSettings']
+      /** Code Capacity */
+      code_capacity: number
       /** Heartbeat Failure Threshold */
       heartbeat_failure_threshold: number
       /** Heartbeat Interval Seconds */
@@ -2969,11 +2965,10 @@ export interface components {
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
-      /**
-       * Workflow Key
-       * @default question_comprehension_info
-       */
+      /** Workflow Key */
       workflow_key: string
+    } & {
+      [key: string]: unknown
     }
     /**
      * JobBatchRerunPreviewRequest
@@ -3413,15 +3408,6 @@ export interface components {
       /** Total Tokens */
       total_tokens: number
     }
-    /** NodeBindingRequest */
-    NodeBindingRequest: {
-      /** Executor Id */
-      executor_id: string
-      /** Node Key */
-      node_key: string
-      /** Workflow Key */
-      workflow_key: string
-    }
     /** NodeLimitRequest */
     NodeLimitRequest: {
       /** Concurrency Limit */
@@ -3798,49 +3784,6 @@ export interface components {
       /** Success Rate */
       success_rate: number
     }
-    /** QuestionDetailResponse */
-    QuestionDetailResponse: {
-      /** Cms Payload */
-      cms_payload?: {
-        [key: string]: unknown
-      } | null
-      /** Jobs */
-      jobs: {
-        [key: string]: unknown
-      }[]
-      normalized: components['schemas']['QuestionNormalized']
-      /** Question Id */
-      question_id: string
-      /** Title */
-      title: string
-    }
-    /** QuestionNormalized */
-    QuestionNormalized: {
-      /** Analysis */
-      analysis?: unknown | null
-      /** Analysis Steps */
-      analysis_steps?:
-        | {
-            [key: string]: unknown
-          }[][]
-        | null
-      /** Answer */
-      answer?: unknown | null
-      /** Answer Blanks */
-      answer_blanks?:
-        | {
-            [key: string]: unknown
-          }[]
-        | null
-      /** Options */
-      options?:
-        | {
-            [key: string]: unknown
-          }[]
-        | null
-      /** Stem */
-      stem?: string | null
-    }
     /** QueueAlert */
     QueueAlert: {
       /** At */
@@ -3899,6 +3842,11 @@ export interface components {
       labels?: {
         [key: string]: unknown
       }
+      /**
+       * Max Code Concurrency
+       * @default 0
+       */
+      max_code_concurrency: number
       /** Max Concurrency */
       max_concurrency: number
       /** Models */
@@ -4064,6 +4012,320 @@ export interface components {
       tags?: string[]
       /** Valid */
       valid: boolean
+    }
+    /**
+     * StudioAgentActiveWorkflowResponse
+     * @description ``state="empty"`` (not 404) when no default key or no published revision.
+     */
+    StudioAgentActiveWorkflowResponse: {
+      /** Definition Yaml */
+      definition_yaml?: string | null
+      revision?: components['schemas']['WorkflowRevisionSummary'] | null
+      /**
+       * State
+       * @enum {string}
+       */
+      state: 'active' | 'empty'
+      workflow?: components['schemas']['WorkflowDefinitionResponse'] | null
+      /** Workflow Key */
+      workflow_key?: string | null
+    }
+    /**
+     * StudioAgentNodeCodeDraftRequest
+     * @description ``expected_capability``: validated for existing nodes (mismatch -> 400);
+     *     its presence authorizes a skeleton draft for a not-yet-published node.
+     */
+    StudioAgentNodeCodeDraftRequest: {
+      /** Change Note */
+      change_note?: string | null
+      /** Code */
+      code: string
+      /** Expected Capability */
+      expected_capability?: string | null
+    }
+    /** StudioAgentRegistryEntry */
+    StudioAgentRegistryEntry: {
+      /** Args */
+      args?: string[]
+      /** Command */
+      command: string
+      /** Id */
+      id: string
+      /** Label */
+      label: string
+    }
+    /** StudioAgentRegistryResponse */
+    StudioAgentRegistryResponse: {
+      /** Agents */
+      agents?: components['schemas']['StudioAgentRegistryEntry'][]
+      /** Api Base */
+      api_base: string
+    }
+    /** StudioAgentRegistryUpdate */
+    StudioAgentRegistryUpdate: {
+      /** Agents */
+      agents?: components['schemas']['StudioAgentRegistryEntry'][]
+      /** Api Base */
+      api_base: string
+    }
+    /**
+     * StudioAgentTokenEntry
+     * @description Management view of one token — never carries digest or plaintext.
+     */
+    StudioAgentTokenEntry: {
+      /** Created At */
+      created_at: string
+      /** Expires At */
+      expires_at: string
+      /** Id */
+      id: string
+      /** Revoked At */
+      revoked_at: string | null
+    }
+    /** StudioAgentTokenMintRequest */
+    StudioAgentTokenMintRequest: {
+      /**
+       * Ttl Hours
+       * @default 168
+       */
+      ttl_hours: number
+    }
+    /**
+     * StudioAgentTokenMintResponse
+     * @description Mint result; the raw token is returned exactly once, here.
+     */
+    StudioAgentTokenMintResponse: {
+      /** Expires At */
+      expires_at: string
+      /** Id */
+      id: string
+      /** Token */
+      token: string
+    }
+    /** StudioAgentTokenRevokeResponse */
+    StudioAgentTokenRevokeResponse: {
+      /** Id */
+      id: string
+      /** Revoked */
+      revoked: boolean
+    }
+    /** StudioAgentTokensResponse */
+    StudioAgentTokensResponse: {
+      /** Tokens */
+      tokens: components['schemas']['StudioAgentTokenEntry'][]
+    }
+    /** StudioAgentWorkflowRegisterRequest */
+    StudioAgentWorkflowRegisterRequest: {
+      /**
+       * Description
+       * @default
+       */
+      description: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+    }
+    /**
+     * StudioChatAgentOption
+     * @description Picker view of a registry agent: never exposes command/args.
+     */
+    StudioChatAgentOption: {
+      /** Id */
+      id: string
+      /** Label */
+      label: string
+    }
+    /** StudioChatAgentsResponse */
+    StudioChatAgentsResponse: {
+      /** Agents */
+      agents: components['schemas']['StudioChatAgentOption'][]
+    }
+    /** StudioChatAllowAllRequest */
+    StudioChatAllowAllRequest: {
+      /** Enabled */
+      enabled: boolean
+    }
+    /**
+     * StudioChatContextResponse
+     * @description What the get_studio_context MCP tool returns: the session's bound
+     *     workspace, the human's live Studio node selection, and the active
+     *     workflow's structure. ``workflow`` is None when nothing is published yet.
+     */
+    StudioChatContextResponse: {
+      /** Selected Node Key */
+      selected_node_key: string | null
+      workflow: components['schemas']['StudioContextWorkflow'] | null
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /**
+     * StudioChatContextUpdateRequest
+     * @description Human-side context push: the Studio node currently selected (or null).
+     */
+    StudioChatContextUpdateRequest: {
+      /** Selected Node Key */
+      selected_node_key?: string | null
+    }
+    /** StudioChatMessageCreateRequest */
+    StudioChatMessageCreateRequest: {
+      /** Text */
+      text: string
+    }
+    /** StudioChatMessageRecord */
+    StudioChatMessageRecord: {
+      /** Content */
+      content: {
+        [key: string]: unknown
+      }
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'text' | 'tool_call' | 'plan' | 'permission' | 'status' | 'thought'
+      /**
+       * Role
+       * @enum {string}
+       */
+      role: 'user' | 'agent' | 'system'
+      /** Seq */
+      seq: number
+      /** Session Id */
+      session_id: string
+    }
+    /** StudioChatMessageResponse */
+    StudioChatMessageResponse: {
+      message: components['schemas']['StudioChatMessageRecord']
+    }
+    /** StudioChatMessagesResponse */
+    StudioChatMessagesResponse: {
+      /** Messages */
+      messages: components['schemas']['StudioChatMessageRecord'][]
+    }
+    /**
+     * StudioChatPermissionAnswerRequest
+     * @description Human answer to a forwarded permission prompt: pick an option or deny.
+     */
+    StudioChatPermissionAnswerRequest: {
+      /**
+       * Deny
+       * @default false
+       */
+      deny: boolean
+      /** Option Id */
+      option_id?: string | null
+    }
+    /** StudioChatPermissionAnswerResponse */
+    StudioChatPermissionAnswerResponse: {
+      /** Resolved */
+      resolved: string
+    }
+    /** StudioChatSessionCreateRequest */
+    StudioChatSessionCreateRequest: {
+      /** Agent Id */
+      agent_id: string
+      /**
+       * Title
+       * @default
+       */
+      title: string
+    }
+    /** StudioChatSessionRecord */
+    StudioChatSessionRecord: {
+      /** Acp Session Id */
+      acp_session_id: string | null
+      /** Agent Id */
+      agent_id: string
+      /** Allow All Permissions */
+      allow_all_permissions: boolean
+      /** Capability Snapshot */
+      capability_snapshot: {
+        [key: string]: unknown
+      }
+      /** Closed At */
+      closed_at: string | null
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string
+      /** Error Detail */
+      error_detail: string
+      /** Id */
+      id: string
+      /**
+       * Mcp Status
+       * @enum {string}
+       */
+      mcp_status: 'unknown' | 'verified' | 'unverified'
+      /** Selected Node Key */
+      selected_node_key: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status:
+        | 'starting'
+        | 'idle'
+        | 'running'
+        | 'awaiting_permission'
+        | 'closed'
+        | 'error'
+      /** Title */
+      title: string
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string
+      /** User Id */
+      user_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** StudioChatSessionResponse */
+    StudioChatSessionResponse: {
+      session: components['schemas']['StudioChatSessionRecord']
+    }
+    /** StudioChatSessionsResponse */
+    StudioChatSessionsResponse: {
+      /** Sessions */
+      sessions: components['schemas']['StudioChatSessionRecord'][]
+    }
+    /** StudioContextEdge */
+    StudioContextEdge: {
+      /** Source */
+      source: string
+      /** Target */
+      target: string
+    }
+    /** StudioContextNode */
+    StudioContextNode: {
+      /** Capability */
+      capability: string
+      /** Key */
+      key: string
+    }
+    /**
+     * StudioContextWorkflow
+     * @description Structural summary of the workspace's active workflow revision.
+     */
+    StudioContextWorkflow: {
+      /** Edges */
+      edges: components['schemas']['StudioContextEdge'][]
+      /** Nodes */
+      nodes: components['schemas']['StudioContextNode'][]
+      /** Version */
+      version: number
+      /** Workflow Key */
+      workflow_key: string
     }
     /** TokenUsageCostBreakdown */
     TokenUsageCostBreakdown: {
@@ -4309,87 +4571,6 @@ export interface components {
       /** Error Type */
       type: string
     }
-    /** VideoJobArtifactsResponse */
-    VideoJobArtifactsResponse: {
-      /** Chapters */
-      chapters?: {
-        [key: string]: unknown
-      }[]
-      /** Checklist */
-      checklist?: {
-        [key: string]: unknown
-      } | null
-      /** Interactions */
-      interactions?: {
-        [key: string]: unknown
-      }[]
-      /** Metadata */
-      metadata?: {
-        [key: string]: unknown
-      } | null
-      /** Review */
-      review?: {
-        [key: string]: unknown
-      } | null
-      /** Subtitles */
-      subtitles?: components['schemas']['VideoSubtitleResponse'][]
-      /** Upload Params */
-      upload_params?: {
-        [key: string]: unknown
-      } | null
-      /** Video Url */
-      video_url?: string | null
-    }
-    /** VideoJobDetailResponse */
-    VideoJobDetailResponse: {
-      artifacts: components['schemas']['VideoJobArtifactsResponse']
-      input: components['schemas']['VideoJobInputResponse']
-    }
-    /** VideoJobInputResponse */
-    VideoJobInputResponse: {
-      /** Content Type */
-      content_type: string
-      /** Entity Type */
-      entity_type: string
-      /**
-       * External Id
-       * @default
-       */
-      external_id: string
-      /**
-       * Legacy Video Id
-       * @default
-       */
-      legacy_video_id: string
-      /** Schema Version */
-      schema_version: number
-      /**
-       * Source Url
-       * @default
-       */
-      source_url: string
-      /**
-       * Source Uuid
-       * @default
-       */
-      source_uuid: string
-      /**
-       * Title
-       * @default
-       */
-      title: string
-    }
-    /** VideoSubtitleResponse */
-    VideoSubtitleResponse: {
-      /** End */
-      end: number
-      /** Index */
-      index: number
-      /** Start */
-      start: number
-      /** Text */
-      text: string
-    }
     /** WorkerStatusResponse */
     WorkerStatusResponse: {
       /** Paused */
@@ -4579,13 +4760,6 @@ export interface components {
        */
       type: 'modified'
     }
-    /** WorkflowNodeCapabilityReference */
-    WorkflowNodeCapabilityReference: {
-      /** Capability */
-      capability: string
-      /** Executor Id */
-      executor_id: string
-    }
     /** WorkflowNodeChange */
     WorkflowNodeChange: {
       /** Fields */
@@ -4634,9 +4808,7 @@ export interface components {
        * Origin
        * @enum {string}
        */
-      origin: 'builtin' | 'custom'
-      /** Path */
-      path?: string | null
+      origin: 'builtin' | 'custom' | 'none'
       /** Version */
       version?: number | null
     }
@@ -4644,6 +4816,11 @@ export interface components {
     WorkflowNodeCodeRollbackRequest: {
       /** Version */
       version: number
+    }
+    /** WorkflowNodeCodeTemplateResponse */
+    WorkflowNodeCodeTemplateResponse: {
+      /** Code */
+      code: string
     }
     /** WorkflowNodeCodeVersionResponse */
     WorkflowNodeCodeVersionResponse: {
@@ -4713,15 +4890,6 @@ export interface components {
        */
       thinking: string
     }
-    /** WorkflowNodeFileResponse */
-    WorkflowNodeFileResponse: {
-      /** Capabilities */
-      capabilities?: components['schemas']['WorkflowNodeCapabilityReference'][]
-      /** Content */
-      content: string
-      /** Path */
-      path: string
-    }
     /** WorkflowNodeResponse */
     WorkflowNodeResponse: {
       /** After */
@@ -4738,6 +4906,32 @@ export interface components {
       /** Outputs */
       outputs: string[]
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
+    }
+    /** WorkflowRegisterRequest */
+    WorkflowRegisterRequest: {
+      /**
+       * Description
+       * @default
+       */
+      description: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+    }
+    /**
+     * WorkflowRegisteredResponse
+     * @description Registration result: the full catalog entry, provenance included.
+     */
+    WorkflowRegisteredResponse: {
+      /** Description */
+      description: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Origin */
+      origin: string
     }
     /** WorkflowResponse */
     WorkflowResponse: {
@@ -4840,12 +5034,8 @@ export interface components {
       agent_capacity?: number | null
       /** Description */
       description?: string | null
-      /** Executor Allocations */
-      executor_allocations?: components['schemas']['ExecutorAllocationRequest'][]
       /** Name */
       name?: string | null
-      /** Node Bindings */
-      node_bindings?: components['schemas']['NodeBindingRequest'][]
       /** Node Limits */
       node_limits?: components['schemas']['NodeLimitRequest'][]
       settings: components['schemas']['WorkspaceConfigurationSettingsRequest']
@@ -4902,14 +5092,17 @@ export interface components {
         [key: string]: unknown
       }
     }
-    /** WorkspaceExecutorConfigurationResponse */
+    /**
+     * WorkspaceExecutorConfigurationResponse
+     * @description Workspace execution configuration (P-0.5: node limits + Agent capacity).
+     *
+     *     Allocations and bindings retired with the executor concept (schema v47);
+     *     the response type keeps the pre-retirement route/type names until the
+     *     step-3 contract cleanup.
+     */
     WorkspaceExecutorConfigurationResponse: {
       /** Agent Capacity */
       agent_capacity?: number | null
-      /** Allocations */
-      allocations: components['schemas']['ExecutorAllocationResponse'][]
-      /** Bindings */
-      bindings: components['schemas']['NodeBindingRequest'][]
       /** Migration Warnings */
       migration_warnings: string[]
       /** Node Limits */
@@ -5124,16 +5317,9 @@ export interface components {
       /** Workflowkey */
       workflowKey?: string | null
     }
-    /** WorkspaceSettingsTestResponse */
-    WorkspaceSettingsTestResponse: {
-      /** Message */
-      message: string
-      /** Ok */
-      ok: boolean
-    }
     /** WorkspaceStatsResponse */
     WorkspaceStatsResponse: {
-      executor_status: components['schemas']['ExecutorStatusSummary']
+      code_pool: components['schemas']['CodePoolStatus']
       /** Job Stats */
       job_stats: {
         [key: string]: number
@@ -5482,6 +5668,59 @@ export interface operations {
       }
     }
   }
+  get_studio_agents_api_admin_studio_agents_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentRegistryResponse']
+        }
+      }
+    }
+  }
+  put_studio_agents_api_admin_studio_agents_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentRegistryUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentRegistryResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   get_token_usage_pricing_api_admin_token_usage_pricing_get: {
     parameters: {
       query?: never
@@ -5537,7 +5776,9 @@ export interface operations {
   }
   list_agent_definitions_api_agent_definitions_get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -5553,11 +5794,22 @@ export interface operations {
           'application/json': components['schemas']['AgentListResponse']
         }
       }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
     }
   }
   create_agent_definition_api_agent_definitions_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -5590,7 +5842,9 @@ export interface operations {
   }
   get_agent_definition_api_agent_definitions__agent_id__get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -5621,7 +5875,9 @@ export interface operations {
   }
   archive_agent_definition_api_agent_definitions__agent_id__delete: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -5652,7 +5908,9 @@ export interface operations {
   }
   copy_agent_definition_api_agent_definitions__agent_id__copy_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -5687,7 +5945,9 @@ export interface operations {
   }
   save_agent_definition_draft_api_agent_definitions__agent_id__draft_put: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -5722,7 +5982,9 @@ export interface operations {
   }
   publish_agent_definition_api_agent_definitions__agent_id__publish_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -5753,7 +6015,9 @@ export interface operations {
   }
   rollback_agent_definition_api_agent_definitions__agent_id__rollback_post: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -5788,7 +6052,9 @@ export interface operations {
   }
   list_agent_definition_versions_api_agent_definitions__agent_id__versions_get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path: {
         agent_id: string
@@ -5893,11 +6159,13 @@ export interface operations {
     requestBody?: never
     responses: {
       /** @description Successful Response */
-      204: {
+      200: {
         headers: {
           [name: string]: unknown
         }
-        content?: never
+        content: {
+          'application/json': components['schemas']['AgentHeartbeatResponse']
+        }
       }
       /** @description Validation Error */
       422: {
@@ -6404,291 +6672,11 @@ export interface operations {
       }
     }
   }
-  list_executor_definitions_api_executor_definitions_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorListResponse']
-        }
-      }
-    }
-  }
-  create_executor_definition_api_executor_definitions_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorCreateRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_executor_definition_api_executor_definitions__executor_id__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  archive_executor_definition_api_executor_definitions__executor_id__delete: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorArchiveResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  copy_executor_definition_api_executor_definitions__executor_id__copy_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorCopyRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  save_executor_definition_draft_api_executor_definitions__executor_id__draft_put: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorDefinitionPayload']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  publish_executor_definition_api_executor_definitions__executor_id__publish_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  rollback_executor_definition_api_executor_definitions__executor_id__rollback_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ExecutorRollbackRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  list_executor_definition_versions_api_executor_definitions__executor_id__versions_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        executor_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ExecutorVersionsResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   get_executors_api_executors_get: {
     parameters: {
-      query?: never
+      query: {
+        workspace_id: string
+      }
       header?: never
       path?: never
       cookie?: never
@@ -6702,6 +6690,15 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ExecutorCatalogResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -7081,75 +7078,6 @@ export interface operations {
       }
     }
   }
-  get_video_job_detail_api_jobs__job_id__video_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        job_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['VideoJobDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_video_job_source_api_jobs__job_id__video_source_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        job_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'video/mp4': unknown
-        }
-      }
-      /** @description Redirect */
-      302: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   reject_invalid_job_subpath_api_jobs__job_id___invalid_path__get: {
     parameters: {
       query?: never
@@ -7266,6 +7194,381 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['SkillValidateResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_tokens_api_studio_agent_tokens_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentTokensResponse']
+        }
+      }
+    }
+  }
+  mint_token_api_studio_agent_tokens_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentTokenMintRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentTokenMintResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  revoke_token_api_studio_agent_tokens__token_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        token_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentTokenRevokeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_chat_session_context_api_studio_agent_tools_chat_sessions__session_id__context_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatContextResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_workflow_catalog_api_studio_agent_tools_workflows_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowsListResponse']
+        }
+      }
+    }
+  }
+  register_workflow_api_studio_agent_tools_workflows_register_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentWorkflowRegisterRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRegisteredResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        agent_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['AgentDefinitionPayload']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentVersionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_active_revision_api_studio_agent_tools_workspaces__workspace_id__workflow_active_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioAgentActiveWorkflowResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  compare_workflow_api_studio_agent_tools_workspaces__workspace_id__workflow_compare_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftCompareResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  validate_workflow_api_studio_agent_tools_workspaces__workspace_id__workflow_validate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftValidationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_node_code_state_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  save_node_code_draft_api_studio_agent_tools_workspaces__workspace_id__workflows__workflow_key__nodes__node_key__code_draft_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        workflow_key: string
+        node_key: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioAgentNodeCodeDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowNodeCodeVersionResponse']
         }
       }
       /** @description Validation Error */
@@ -7460,13 +7763,11 @@ export interface operations {
       }
     }
   }
-  read_workflow_node_file_api_workflow_nodes_files__file_path__get: {
+  get_node_code_template_api_workflow_node_code_template_get: {
     parameters: {
       query?: never
       header?: never
-      path: {
-        file_path: string
-      }
+      path?: never
       cookie?: never
     }
     requestBody?: never
@@ -7477,16 +7778,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['WorkflowNodeFileResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
+          'application/json': components['schemas']['WorkflowNodeCodeTemplateResponse']
         }
       }
     }
@@ -7507,6 +7799,39 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowsListResponse']
+        }
+      }
+    }
+  }
+  register_workflow_api_workflows_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowRegisterRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRegisteredResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -8809,38 +9134,6 @@ export interface operations {
       }
     }
   }
-  get_question_detail_api_workspaces__workspace_id__questions__question_id__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-        question_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['QuestionDetailResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   list_workspace_runs_api_workspaces__workspace_id__runs_get: {
     parameters: {
       query?: {
@@ -9007,37 +9300,6 @@ export interface operations {
       }
     }
   }
-  test_workspace_connection_api_workspaces__workspace_id__settings_test_connection_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkspaceSettingsTestResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   update_workspace_settings_section_api_workspaces__workspace_id__settings__section__patch: {
     parameters: {
       query?: never
@@ -9092,6 +9354,410 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceStatsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_agents_api_workspaces__workspace_id__studio_chat_agents_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatAgentsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_sessions_api_workspaces__workspace_id__studio_chat_sessions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  create_session_api_workspaces__workspace_id__studio_chat_sessions_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatSessionCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  close_session_api_workspaces__workspace_id__studio_chat_sessions__session_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  cancel_turn_api_workspaces__workspace_id__studio_chat_sessions__session_id__cancel_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_context_api_workspaces__workspace_id__studio_chat_sessions__session_id__context_put: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatContextUpdateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  session_events_api_workspaces__workspace_id__studio_chat_sessions__session_id__events_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/event-stream': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_messages_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_get: {
+    parameters: {
+      query?: {
+        after_seq?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatMessagesResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  send_message_api_workspaces__workspace_id__studio_chat_sessions__session_id__messages_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatMessageCreateRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatMessageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  set_allow_all_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions_allow_all_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatAllowAllRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatSessionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  answer_permission_api_workspaces__workspace_id__studio_chat_sessions__session_id__permissions__request_id__post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        session_id: string
+        request_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['StudioChatPermissionAnswerRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['StudioChatPermissionAnswerResponse']
         }
       }
       /** @description Validation Error */

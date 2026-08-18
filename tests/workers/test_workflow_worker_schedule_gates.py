@@ -27,7 +27,7 @@ def _agent_catalog():
     catalog = {"agent-x": MagicMock(config_schema={})}
     with patch(
         "server.app.workflow_worker.agent_claim.resolve_dispatch_agent_definition",
-        side_effect=lambda _dsn, agent_id, _pin: catalog.get(agent_id),
+        side_effect=lambda _dsn, _workspace_id, agent_id, _pin: catalog.get(agent_id),
     ):
         yield
 
@@ -45,7 +45,7 @@ def _definition(node: WorkflowNode) -> WorkflowDefinition:
 def _worker(tmp_path: Path, route: NodeRoute, node: WorkflowNode) -> MagicMock:
     worker = MagicMock()
     worker.settings.logs_dir = tmp_path
-    worker.settings.executor_definitions = {}
+    worker.code_dispatch = None
     worker._batch_payload_cache = {}
     worker._pass_claim_counts = {}
     worker._agent_pass = AgentPassState()
@@ -53,17 +53,13 @@ def _worker(tmp_path: Path, route: NodeRoute, node: WorkflowNode) -> MagicMock:
     return worker
 
 
-def _snapshot(global_remaining: int, workspace_remaining: int = 0) -> CapacitySnapshot:
-    return CapacitySnapshot(
-        global_remaining={"local-default": global_remaining},
-        workspace_remaining={("local-default", "ws1"): workspace_remaining},
-    )
+def _snapshot(global_remaining: int) -> CapacitySnapshot:
+    return CapacitySnapshot(global_remaining=global_remaining)
 
 
 def test_executor_capacity_gate_skips_batch_lookup(tmp_path: Path) -> None:
     node = _node()
-    worker = _worker(tmp_path, NodeRoute("executor", target_id="local-default"), node)
-    worker.registry.global_capacity.return_value = 2
+    worker = _worker(tmp_path, NodeRoute("executor", target_id="code"), node)
     claimed = try_claim_and_submit(
         worker,
         {"id": "ws1"},
@@ -371,11 +367,16 @@ def test_agent_enqueue_skill_repo_error_fails_node(tmp_path: Path) -> None:
 
 def test_executor_claim_counts_pass_claim(tmp_path: Path) -> None:
     node = _node()
-    worker = _worker(tmp_path, NodeRoute("executor", target_id="local-default"), node)
-    worker.registry.global_capacity.return_value = 2
+    worker = _worker(tmp_path, NodeRoute("executor", target_id="code"), node)
     worker.job_db.get_batch.return_value = {"source_payload_json": "{}"}
 
-    with patch("server.app.workflow_worker.schedule.claim_executor_node", return_value=True):
+    with (
+        patch("server.app.workflow_worker.schedule.claim_executor_node", return_value=True),
+        patch(
+            "server.app.workflow_worker.schedule.resolve_code_node_dispatch",
+            return_value="def run(job, job_dir, runtime):\n    pass\n",
+        ),
+    ):
         claimed = try_claim_and_submit(
             worker,
             {"id": "ws1"},
@@ -385,11 +386,11 @@ def test_executor_claim_counts_pass_claim(tmp_path: Path) -> None:
             tmp_path,
             None,
             None,
-            _snapshot(global_remaining=2, workspace_remaining=2),
+            _snapshot(global_remaining=2),
         )
 
     assert claimed is True
-    assert worker._pass_claim_counts == {"local-default": 1}
+    assert worker._pass_claim_counts == {"code": 1}
 
 
 def test_maintenance_cleanup_runs_off_caller_thread(tmp_path: Path) -> None:

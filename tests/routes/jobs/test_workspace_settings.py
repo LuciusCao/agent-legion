@@ -1,23 +1,6 @@
-from server.app.services.job_errors import InvalidOperationError
-
-
-class _FakeConnectionService:
-    """Stand-in for ConnectionService: canned probe result or failure."""
-
-    def __init__(self, probe_result=None, probe_error=None):
-        self._probe_result = probe_result
-        self._probe_error = probe_error
-
-    def __call__(self, *args, **kwargs):
-        return self
-
-    def probe(self, key):
-        if self._probe_error is not None:
-            raise self._probe_error
-        return self._probe_result
-
-
-def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+def _create_workspace(
+    client, name="default", default_workflow_key="education_video_problems_generation"
+):
     return client.post(
         "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
     ).json()["workspace"]["id"]
@@ -29,7 +12,7 @@ def test_create_workspace_stores_resource_config_override(client_factory):
             "/api/workspaces",
             json={
                 "name": "Math V5",
-                "default_workflow_key": "question_comprehension_info",
+                "default_workflow_key": "education_video_problems_generation",
                 "resource_config": {
                     "resources": {
                         "question_detail": {
@@ -57,7 +40,7 @@ def test_workspace_rejects_legacy_cms_config(client_factory):
             "/api/workspaces",
             json={
                 "name": "Math V5",
-                "default_workflow_key": "question_comprehension_info",
+                "default_workflow_key": "education_video_problems_generation",
                 "cms_config": {"subject_id": "5"},
             },
         )
@@ -91,14 +74,14 @@ def test_workspace_settings_returns_node_config(client_factory):
         ws_id = _create_workspace(c)
         saved = c.patch(
             f"/api/workspaces/{ws_id}/settings/nodes",
-            json={"nodeConfig": {"fetch_questions": {"bank_version": "v6"}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
         )
         assert saved.status_code == 200, saved.text
         response = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
     settings = response.json()["settings"]
-    assert settings["nodeConfig"]["fetch_questions"]["bank_version"] == "v6"
+    assert settings["nodeConfig"]["intake_knowledge_points"]["knowledge_dir"] == "examples/custom"
 
 
 def test_patch_settings_nodes_saves_node_config(client_factory):
@@ -106,48 +89,12 @@ def test_patch_settings_nodes_saves_node_config(client_factory):
         ws_id = _create_workspace(c)
         response = c.patch(
             f"/api/workspaces/{ws_id}/settings/nodes",
-            json={"nodeConfig": {"fetch_questions": {"subject_id": "7"}}},
+            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
         )
         fetched = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
-    assert fetched.json()["settings"]["nodeConfig"]["fetch_questions"]["subject_id"] == "7"
-
-
-def test_test_connection_probes_workspace_connection(client_factory, monkeypatch):
-    monkeypatch.setattr(
-        "server.app.services.workspace_connection_test.ConnectionService",
-        _FakeConnectionService(probe_result={"ok": True, "message": "连接成功 (HTTP 200)"}),
+    assert (
+        fetched.json()["settings"]["nodeConfig"]["intake_knowledge_points"]["knowledge_dir"]
+        == "examples/custom"
     )
-
-    with client_factory(workflows_enabled=True) as c:
-        ws_id = _create_workspace(c)
-        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
-
-    assert response.status_code == 200
-    assert response.json()["ok"] is True
-    # The workspace resolves to the capability's default connection key.
-    assert "cms-internal" in response.json()["message"]
-
-
-def test_test_connection_fails_when_connection_missing(client_factory):
-    with client_factory(workflows_enabled=True) as c:
-        ws_id = _create_workspace(c)
-        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
-
-    assert response.status_code == 404
-    assert "cms-internal" in response.json()["detail"]
-
-
-def test_test_connection_reports_probe_failure(client_factory, monkeypatch):
-    monkeypatch.setattr(
-        "server.app.services.workspace_connection_test.ConnectionService",
-        _FakeConnectionService(probe_error=InvalidOperationError("服务可达但鉴权失败 (HTTP 401)")),
-    )
-
-    with client_factory(workflows_enabled=True) as c:
-        ws_id = _create_workspace(c)
-        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
-
-    assert response.status_code == 400
-    assert "鉴权失败" in response.json()["detail"]

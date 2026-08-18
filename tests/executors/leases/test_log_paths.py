@@ -85,7 +85,7 @@ def test_fail_without_lease_persists_relative_log_path(
     request = ConfigurationFailureRequest(
         workspace_id=workspace_id,
         job_id=job_id,
-        workflow_key="question_comprehension_info",
+        workflow_key="demo_workflow",
         node_key="review_keywords",
         capability="review_keywords",
         log_path=str(absolute_log),

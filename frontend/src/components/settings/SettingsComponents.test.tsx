@@ -2,10 +2,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { IntakeConfigSection } from './IntakeConfigSection'
 import { WorkflowSection } from './WorkflowSection'
-import { ConnectionTestStatus } from './ConnectionTestStatus'
 import { fetchWorkflows } from '../../api'
 import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../../types'
-import type { TestStatus } from '../../stores/settingStore'
 
 vi.mock('../../api', async () => {
   const actual = await vi.importActual<typeof import('../../api')>('../../api')
@@ -41,15 +39,11 @@ const workflowDefinition: WorkflowDefinitionRecord = {
   nodes: [],
 }
 
-const idleStatus: TestStatus = { state: 'idle', message: '' }
-
 describe('IntakeConfigSection', () => {
   const mockSetSettings = vi.fn()
-  const mockTestConnection = vi.fn()
 
   beforeEach(() => {
     mockSetSettings.mockReset()
-    mockTestConnection.mockReset()
   })
 
   it('changes entity type', async () => {
@@ -57,12 +51,8 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        testStatus={idleStatus}
         saveError={null}
-        isTesting={false}
-        isSaving={false}
         setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
       />
     )
 
@@ -87,12 +77,8 @@ describe('IntakeConfigSection', () => {
             modes: [{ key: 'none', label: 'None', input_field: 'x' }],
           },
         }}
-        testStatus={idleStatus}
         saveError={null}
-        isTesting={false}
-        isSaving={false}
         setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
       />
     )
 
@@ -109,12 +95,8 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={{ ...baseSettings, intakeModes: [] }}
         workflowDefinition={workflowDefinition}
-        testStatus={idleStatus}
         saveError={null}
-        isTesting={false}
-        isSaving={false}
         setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
       />
     )
 
@@ -133,12 +115,8 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        testStatus={idleStatus}
         saveError={null}
-        isTesting={false}
-        isSaving={false}
         setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
       />
     )
 
@@ -152,51 +130,13 @@ describe('IntakeConfigSection', () => {
     })
   })
 
-  it('triggers connection test and disables button while testing', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        testStatus={idleStatus}
-        saveError={null}
-        isTesting={true}
-        isSaving={false}
-        setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
-      />
-    )
-
-    expect(screen.getByText('测试中...')).toBeDisabled()
-  })
-
-  it('also disables test button while saving', () => {
-    render(
-      <IntakeConfigSection
-        settings={baseSettings}
-        workflowDefinition={workflowDefinition}
-        testStatus={idleStatus}
-        saveError={null}
-        isTesting={false}
-        isSaving={true}
-        setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
-      />
-    )
-
-    expect(screen.getByText('测试连接')).toBeDisabled()
-  })
-
   it('shows save error when provided', () => {
     render(
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={workflowDefinition}
-        testStatus={idleStatus}
         saveError="保存失败"
-        isTesting={false}
-        isSaving={false}
         setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
       />
     )
 
@@ -208,12 +148,8 @@ describe('IntakeConfigSection', () => {
       <IntakeConfigSection
         settings={baseSettings}
         workflowDefinition={{ ...workflowDefinition, intake: { modes: [] } }}
-        testStatus={idleStatus}
         saveError={null}
-        isTesting={false}
-        isSaving={false}
         setSettings={mockSetSettings}
-        onTestConnection={mockTestConnection}
       />
     )
 
@@ -272,27 +208,5 @@ describe('WorkflowSection', () => {
 
     expect(screen.getByRole('option', { name: '请选择' })).toBeInTheDocument()
     expect(screen.queryByRole('option', { name: 'Q1' })).not.toBeInTheDocument()
-  })
-})
-
-describe('ConnectionTestStatus', () => {
-  it('renders nothing when idle', () => {
-    const { container } = render(<ConnectionTestStatus state="idle" />)
-    expect(container.firstChild).toBeNull()
-  })
-
-  it('renders testing state', () => {
-    render(<ConnectionTestStatus state="testing" />)
-    expect(screen.getByText('测试中...')).toHaveClass('running')
-  })
-
-  it('renders success state with message', () => {
-    render(<ConnectionTestStatus state="success" message="ok" />)
-    expect(screen.getByText('连接成功 · ok')).toHaveClass('status-badge')
-  })
-
-  it('renders failed state without message', () => {
-    render(<ConnectionTestStatus state="failed" />)
-    expect(screen.getByText('连接失败')).toHaveClass('failed')
   })
 })

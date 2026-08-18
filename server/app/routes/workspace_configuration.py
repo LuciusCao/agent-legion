@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.routes.executor_contracts import (
     WorkspaceConfigurationRequest,
     WorkspaceConfigurationResponse,
@@ -18,6 +19,7 @@ def create_workspace_configuration_router(
     @router.put(
         "/workspaces/{workspace_id}/configuration",
         response_model=WorkspaceConfigurationResponse,
+        dependencies=[Depends(reject_studio_agent_scope)],
     )
     def replace_workspace_configuration(
         workspace_id: str,
@@ -31,8 +33,6 @@ def create_workspace_configuration_router(
                     include={"name", "description"}, exclude_unset=True
                 ),
                 settings_patch=payload.settings.model_dump(exclude_unset=True),
-                executor_allocations=[a.model_dump() for a in payload.executor_allocations],
-                node_bindings=[b.model_dump() for b in payload.node_bindings],
                 node_limits=[n.model_dump() for n in payload.node_limits],
                 agent_capacity=payload.agent_capacity,
             )

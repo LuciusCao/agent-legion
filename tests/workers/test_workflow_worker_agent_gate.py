@@ -20,7 +20,7 @@ from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, 
 
 _BATCH = "server.app.workflow_worker.agent_gate.batch.active_request_keys"
 _STOCK = "server.app.workflow_worker.agent_gate.load_stock_snapshot"
-_CATALOG = "server.app.workflow_worker.agent_gate.published_agent_definitions"
+_CATALOG = "server.app.workflow_worker.agent_gate.has_published_agent_definitions"
 
 
 def _node(key: str = "fetch") -> WorkflowNode:
@@ -54,7 +54,7 @@ def test_prepare_skips_queries_without_agent_definitions() -> None:
     )
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
-    with patch(_CATALOG, return_value={}), patch(_BATCH) as batch, patch(_STOCK) as stock:
+    with patch(_CATALOG, return_value=False), patch(_BATCH) as batch, patch(_STOCK) as stock:
         prepare_agent_pass(worker, queues)
 
     batch.assert_not_called()
@@ -83,7 +83,7 @@ def test_prepare_batch_loads_and_filters_by_route_cache() -> None:
     snapshot = StockSnapshot(config=AgentStockConfig())
 
     with (
-        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_CATALOG, return_value=True),
         patch(_BATCH, return_value={("job-agent", "review")}) as batch,
         patch(_STOCK, return_value=snapshot),
     ):
@@ -103,7 +103,7 @@ def test_prepare_skips_stock_when_disabled() -> None:
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
     with (
-        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_CATALOG, return_value=True),
         patch(_BATCH, return_value=set()),
         patch(_STOCK) as stock,
     ):
@@ -122,7 +122,7 @@ def test_stock_snapshot_refreshes_on_interval() -> None:
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
     with (
-        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_CATALOG, return_value=True),
         patch(_BATCH, return_value=set()),
         patch(_STOCK) as stock,
     ):
@@ -162,7 +162,7 @@ def test_stock_reload_clears_enqueued_counter() -> None:
     queues = {"ws1": deque([_candidate(definition, node, "job1")])}
 
     with (
-        patch(_CATALOG, return_value={"agent-x": MagicMock()}),
+        patch(_CATALOG, return_value=True),
         patch(_BATCH, return_value=set()),
         patch(_STOCK) as stock,
     ):
