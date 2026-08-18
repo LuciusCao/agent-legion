@@ -189,6 +189,35 @@ describe('workspace api', () => {
           resource_config: { storage: 's3' },
           default_entity: 'knowledge',
           intake_config: { enabled_modes: ['manual', 'cms'] },
+          workflow_mode: 'demo',
+        }),
+      })
+    )
+  })
+
+  it('forwards blank workflow mode on workspace creation', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          workspace: { id: 'blank_ws', name: 'Blank' },
+        }),
+    } as Response)
+    global.fetch = fetchMock
+
+    await createWorkspace('Blank', 'demo_workflow', {}, 'question', {}, 'blank')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Blank',
+          default_workflow_key: 'demo_workflow',
+          resource_config: {},
+          default_entity: 'question',
+          intake_config: {},
+          workflow_mode: 'blank',
         }),
       })
     )

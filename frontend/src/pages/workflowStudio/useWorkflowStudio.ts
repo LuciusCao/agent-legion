@@ -28,7 +28,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
   const compare = useWorkflowDraftCompare(
     workspaceId,
     draft.draftYaml,
-    draft.dirty
+    draft.dirty,
+    loadState === 'empty'
   )
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
   const { nodes, edges } = useStudioDag(draft.visibleWorkflow, agentCatalog)

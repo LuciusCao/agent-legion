@@ -14,6 +14,7 @@ import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
 import { JobFilterBar } from '../components/job/JobFilterBar'
 import { JobList } from '../components/job/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
+import { StudioEntryCard } from '../components/StudioEntryCard'
 import {
   JobActionBar,
   type JobActionBarFilter,
@@ -165,6 +166,8 @@ export default function WorkspaceMainPage() {
       {workflowError && (
         <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
+
+      {workspaceId && <StudioEntryCard workspaceId={workspaceId} />}
 
       <section>
         <JobFilterBar
