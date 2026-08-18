@@ -125,8 +125,14 @@
   `timeout_seconds`（integer，default 600，ge 1）/ `sandbox_network`（boolean，
   default false）自动合并进每个 code 路由节点的有效 schema（节点 config_schema
   不得重声明；v47 收割已把原 executor 层的 timeout/network 值搬到节点 `config`）。解析链
-  defaults → 节点 `config` → workspace 覆盖，intake 冻结；manifest 仅携带白名单
-  非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`。
+  defaults → 节点 `config` → workspace 覆盖，intake 冻结；例外是声明了
+  `runtime_mutable: true` 的「运行开关」键（如 dry_run）——每次 dispatch/claim 对这些键
+  按同一解析链重取 workspace 最新覆盖，只覆盖被标记的键，平台保留执行键永远冻结
+  （CONFIG-RUNTIME-MUTABLE-001）；每次运行的非敏感 resolved 配置落
+  `node_runs.config_snapshot_json` 审计（本地 code 池随 lease claim 写入，Worker/Agent
+  路径取 enqueue 时 manifest 的 config）。manifest 仅携带白名单
+  非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`——manifest 白名单管敏感键
+  不下发，runtime_mutable 只管解析时机，两者正交。
 - velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
   runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
   （`versioned_entities` 表，workspace 作用域（schema v46，解析严格限定本

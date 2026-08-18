@@ -103,6 +103,16 @@ def test_validate_config_values_rejects_non_mapping() -> None:
         validate_config_values(SCHEMA, ["strict"])
 
 
+def test_validate_config_schema_accepts_runtime_mutable_marker() -> None:
+    validate_config_schema(
+        {"properties": {"dry_run": {"type": "boolean", "runtime_mutable": True}}}
+    )
+    with pytest.raises(ConfigSchemaError, match="runtime_mutable must be a boolean"):
+        validate_config_schema(
+            {"properties": {"dry_run": {"type": "boolean", "runtime_mutable": "yes"}}}
+        )
+
+
 def test_manifest_safe_config_drops_secret_and_unknown_keys() -> None:
     config = {
         "subject_id": "math",

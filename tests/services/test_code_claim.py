@@ -7,6 +7,8 @@ Worker capacity is enforced as two independent pools (agent / code).
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from server.app.agent_broker import AgentExecutionBroker, AgentExecutionRequest
@@ -100,6 +102,25 @@ def test_code_claim_skips_agent_definition_and_returns_kind(job_db) -> None:
         ).fetchone()
     assert lease["executor_id"] == "agent:code:package"
     assert run["status"] == "running"
+
+
+def test_code_claim_records_config_snapshot(job_db) -> None:
+    """The manifest config built at enqueue lands on node_runs as the
+    dispatch-time audit snapshot (CONFIG-RUNTIME-MUTABLE-001)."""
+    broker = _broker(job_db.jobs_dir.parent)
+    _insert_code_job_rows(job_db, job_id="job-1")
+    _enqueue_code(broker, job_id="job-1")
+    _register_code_worker()
+
+    claimed = broker.claim("worker-code")
+
+    assert claimed is not None
+    with job_db._connect_read() as conn:
+        run = conn.execute(
+            "select config_snapshot_json from node_runs where job_id='job-1' and node_key='package'"
+        ).fetchone()
+    assert run is not None
+    assert json.loads(run["config_snapshot_json"]) == {"mode": "fast"}
 
 
 def test_code_claim_requires_declared_code_capacity(job_db) -> None:

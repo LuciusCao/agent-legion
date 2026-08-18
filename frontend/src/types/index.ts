@@ -96,6 +96,7 @@ export type ConfigSchemaProperty = {
   description?: string
   secret?: boolean
   secret_ref?: boolean
+  runtime_mutable?: boolean
 }
 
 export type ConfigSchema = {

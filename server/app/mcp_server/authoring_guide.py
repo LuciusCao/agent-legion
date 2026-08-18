@@ -151,7 +151,10 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   platform-reserved execution keys — never redeclare them in a
   `config_schema`; set them via node `config:` or workspace overrides.
   Values resolve schema defaults → node `config` → workspace override,
-  frozen at job intake.
+  frozen at job intake; a property marked `runtime_mutable: true` (run
+  switches like `dry_run`) opts out of the freeze and is re-resolved
+  against the live workspace override at every dispatch
+  (CONFIG-RUNTIME-MUTABLE-001).
 - Agent execution (`provider`/`model`/`thinking`) resolves node
   `execution.*` overrides → workspace defaults → validation error if unset.
 
