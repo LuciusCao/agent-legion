@@ -9,12 +9,12 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_logs import JobLogService
 from server.app.services.job_queries import JobQueryService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import load_settings
 from server.app.storage_paths import resolve_data_path, resolve_job_dir
+from tests.helpers import publish_builtin_revision
 from tests.postgres_support import TEST_DATABASE_URL
 
 WORKSPACE_ID = "default"
@@ -157,9 +157,11 @@ def test_cross_root_path_portability(portable_roots: tuple[Path, Path]) -> None:
     log_result = log_service.read(JOB_ID, int(run["id"]))
     assert "old_root" in log_result["log"]
 
-    workflows = WorkflowCatalogService(settings)
     workspace_executor_config = WorkspaceExecutorConfigurationService(job_db)
-    job_queries = JobQueryService(job_db, settings, workflows, workspace_executor_config)
+    job_queries = JobQueryService(job_db, settings, workspace_executor_config)
+    # Snapshot-less job: its definition resolves from the workspace's active
+    # revision (schema v50), so publish it before the detail query.
+    publish_builtin_revision(job_db, WORKSPACE_ID)
     job_detail = job_queries.detail(JOB_ID)
     assert job_detail["job"]["storage_dir"] == str(resolved_job_dir)
     assert job_detail["artifacts"] == ["result.json"]

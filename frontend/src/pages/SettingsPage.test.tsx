@@ -14,7 +14,7 @@ import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../types'
 import { useUiStore } from '../stores/uiStore'
-import { api, deleteWorkspace, fetchWorkflows } from '../api'
+import { api, deleteWorkspace } from '../api'
 import { expectConsoleWarning } from '../test-setup'
 import { useSettingStoreHydration } from '../hooks/useWorkspaceSettingsQuery'
 import type { WorkspaceSettingsSnapshot } from '../hooks/useWorkspaceSettingsQuery'
@@ -48,7 +48,6 @@ vi.mock('../hooks/useWorkflowDefinitionQuery', () => ({
 
 vi.mock('../api', () => ({
   api: vi.fn(),
-  fetchWorkflows: vi.fn(),
   fetchWorkspaces: vi.fn(),
   deleteWorkspace: vi.fn(),
   listRegisterTokens: vi.fn().mockResolvedValue([]),
@@ -59,7 +58,6 @@ vi.mock('../api', () => ({
 }))
 
 const mockApi = vi.mocked(api)
-const mockFetchWorkflows = vi.mocked(fetchWorkflows)
 const mockDeleteWorkspace = vi.mocked(deleteWorkspace)
 const mockHydration = vi.mocked(useSettingStoreHydration)
 
@@ -161,8 +159,6 @@ describe('SettingsPage', () => {
     mockHydration.mockClear()
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
-    mockFetchWorkflows.mockReset()
-    mockFetchWorkflows.mockResolvedValue({ workflows: [] })
     mockDeleteWorkspace.mockReset()
     mockDeleteWorkspace.mockResolvedValue(undefined)
   })
@@ -446,9 +442,6 @@ describe('SettingsPage', () => {
       saveAll: originalActions.saveAll,
     })
 
-    mockFetchWorkflows.mockResolvedValueOnce({
-      workflows: [{ key: 'sample_workflow', label: '示例工作流' }],
-    })
     expectConsoleWarning(/out-of-range value/)
 
     mockApi.mockResolvedValueOnce({

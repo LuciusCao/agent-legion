@@ -42,6 +42,8 @@ export interface JobState
   batchClearPackedLoading: boolean
   batchRerunLoading: boolean
   batchRunToLoading: boolean
+  batchPauseLoading: boolean
+  batchResumeLoading: boolean
   continueLoading: boolean
   batchUpgradeWorkflowLoading: boolean
   resetForWorkspace: (workspaceId: string) => void
@@ -82,6 +84,11 @@ export interface JobState
     targetNodeKey: string,
     startNodeKey?: string
   ) => Promise<BatchJobMutationResult>
+  batchPause: (
+    workspaceId: string,
+    reason?: string
+  ) => Promise<BatchJobMutationResult>
+  batchResume: (workspaceId: string) => Promise<BatchJobMutationResult>
   continueJob: (jobId: string) => ContinueJobResult
   batchUpgradeWorkflow: (
     workspaceId: string,

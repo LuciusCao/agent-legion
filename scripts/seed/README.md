@@ -63,11 +63,11 @@ uv run python -m scripts.seed.import_seed \
     --seed seed.json [--workspace "My Team=my_pipeline:entity"]
 ```
 
-七步：workflow 注册（已存在只校验漂移不改动）→ workspace 绑定（已绑定
-的自动纳入；`--workspace` 仅在无绑定时创建）→ Agent 发布（按 workspace
-作用域，内容一致跳过）→ 首版 revision 发布（仅缺失时）→ 节点代码发布
-（文本一致跳过）→ skill 源 upsert + relock（ref 与 lock commit 一致跳过）
-→ 校验报告（有 FAIL 非零退出）。
+六步：workspace 绑定（已绑定的自动纳入；`--workspace` 仅在无绑定时创建，
+blank 模式——schema v50 后 workflow 无注册概念，种子定义经发布流落地）
+→ Agent 发布（按 workspace 作用域，内容一致跳过）→ 首版 revision 发布
+（仅缺失时）→ 节点代码发布（文本一致跳过）→ skill 源 upsert + relock
+（ref 与 lock commit 一致跳过）→ 校验报告（有 FAIL 非零退出）。
 
 幂等语义：每步先内容比较（canonical JSON / 代码文本逐字节 / ref+commit），
 一致即 skip，**不产生新版本**；对同一实例连跑两次，第二次 0 个写动作。
@@ -86,7 +86,7 @@ uv run python -m scripts.seed.import_seed \
 
 发布 workflow 的**首个** revision 要求每个 code 节点已有 published 节点
 代码，而节点代码 API 要求已有 active revision——两者互相前置，因此全新
-workspace + custom-code-only 节点目前无法纯经 API 完成首次引导（step 4
+workspace + custom-code-only 节点目前无法纯经 API 完成首次引导（step 3
 会报 "no published node code"）。已有 active revision 的实例（prod →
 develop 迁移场景）不受影响；全新部署可先在 Studio 手工首发，或等平台
 补引导通道。

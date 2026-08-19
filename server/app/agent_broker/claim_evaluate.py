@@ -169,14 +169,21 @@ def evaluate_candidate(
         return None
 
     log_path = claim_log_path(manifest, broker.data_dir)
+    # Dispatch-time config audit (CONFIG-RUNTIME-MUTABLE-001): the manifest
+    # config is the non-secret resolved config built at enqueue on the Host —
+    # frozen keys repeat the intake snapshot, runtime_mutable keys carry the
+    # enqueue-time re-resolution. Secret values never enter the manifest
+    # (CONFIG-MANIFEST-001), so this is safe to persist.
+    config_snapshot_json = json.dumps(manifest.get("config") or {}, sort_keys=True, default=str)
     run = conn.execute(
         """
         insert into node_runs(
-          job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at
-        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp)
+          job_id, node_key, status, command_json, log_path, run_dir, session_dir,
+          started_at, config_snapshot_json
+        ) values (%s, %s, 'running', '[]', %s, '', '', current_timestamp, %s)
         returning id
         """,
-        (selected["job_id"], selected["node_key"], log_path),
+        (selected["job_id"], selected["node_key"], log_path, config_snapshot_json),
     ).fetchone()
     if run is None:
         raise RuntimeError("node run insert did not return an id")

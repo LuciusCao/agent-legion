@@ -19,9 +19,9 @@ from server.app.services.connection_tokens import ConnectionTokenService
 from server.app.services.connections import ConnectionService, connection_secret_name
 from server.app.services.demo_node_seed import seed_demo_node_codes
 from server.app.services.job_intake import JobIntakeService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
+from tests.helpers import load_builtin_definition
 
 PLAINTEXT = "full-gate-secret-token"
 CONNECTION_KEY = "cms-full"
@@ -44,8 +44,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
         "vault-full", default_workflow_key="education_video_problems_generation"
     )
     workspace_id = str(workspace["id"])
-    catalog = WorkflowCatalogService(settings)
-    definition = catalog.definition("education_video_problems_generation")
+    definition = load_builtin_definition("education_video_problems_generation")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
 
     # Create the connection; the token is diverted to the instance vault.
@@ -96,7 +95,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
     # material ever enters the workspace override.
     update_workspace_node_config(
         job_db,
-        catalog,
+        settings,
         published_agent_definitions(settings.database_url, workspace_id),
         job_db.get_workspace(workspace_id),
         {"nodeConfig": {"write_script": {"connection": CONNECTION_KEY}}},
@@ -108,7 +107,7 @@ def test_secret_ref_freeze_and_runtime_resolution(job_db, settings, vault_key) -
 
     # Intake freeze: the batch payload carries the connection key, never the
     # plaintext or a ref marker.
-    service = JobIntakeService(job_db, settings, catalog)
+    service = JobIntakeService(job_db, settings)
     result = service.create_batch(
         workspace_id,
         {

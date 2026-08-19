@@ -97,14 +97,20 @@ def test_non_admin_member_gets_403(client) -> None:
 def test_minted_token_calls_tool_surface(client) -> None:
     minted = _mint(client)
     bearer = _bearer_client(client, minted["token"])
+    created = client.post("/api/workspaces", json={"name": "Token Surface"})
+    assert created.status_code == 200, created.text
+    workspace_id = created.json()["workspace"]["id"]
 
-    tools = bearer.get("/api/studio-agent/tools/workflows")
+    tools = bearer.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active")
     assert tools.status_code == 200, tools.text
     # The scoped token stays refused on effecting (publish-side) endpoints.
     assert bearer.post("/api/agent-definitions/some-agent/publish").status_code == 403
 
     client.delete(f"/api/studio-agent-tokens/{minted['id']}")
-    assert bearer.get("/api/studio-agent/tools/workflows").status_code == 401
+    assert (
+        bearer.get(f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active").status_code
+        == 401
+    )
 
 
 def test_run_scoped_token_cannot_manage_user_tokens(client, job_db) -> None:

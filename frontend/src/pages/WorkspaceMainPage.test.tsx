@@ -7,7 +7,11 @@ import { useJobStore } from '../stores/jobStore'
 import { useAgentsStore } from '../stores/agentsStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
-import { api, fetchWorkflowDefinition, fetchWorkspacePackages } from '../api'
+import {
+  api,
+  fetchActiveWorkflowRevision,
+  fetchWorkspacePackages,
+} from '../api'
 import {
   batchRerunJobs,
   batchDeleteJobs,
@@ -49,8 +53,8 @@ vi.mock('../api', () => ({
   fetchWorkspacePackages: (
     ...args: Parameters<typeof fetchWorkspacePackages>
   ) => mockFetchWorkspacePackages(...args),
-  fetchWorkflowDefinition: (
-    ...args: Parameters<typeof fetchWorkflowDefinition>
+  fetchActiveWorkflowRevision: (
+    ...args: Parameters<typeof fetchActiveWorkflowRevision>
   ) => mockFetchWorkflowDefinition(...args),
 }))
 
@@ -231,6 +235,7 @@ describe('WorkspaceMainPage', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
       batchRerunLoading: false,
       batchPackageLoading: false,
@@ -402,6 +407,7 @@ describe('WorkspaceMainPage', () => {
       workflow_version: null,
       workflow_version_none: false,
       active_node_key: null,
+      paused: null,
     })
   })
 
@@ -436,6 +442,7 @@ describe('WorkspaceMainPage', () => {
         search: 'algebra',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
 
@@ -455,6 +462,7 @@ describe('WorkspaceMainPage', () => {
       search: '',
       workflowVersion: null,
       activeNodeKey: null,
+      paused: null,
     })
     expect(screen.getByPlaceholderText('搜索 ID / 标题 / 批次')).toHaveValue('')
   })
@@ -505,9 +513,7 @@ describe('WorkspaceMainPage', () => {
     await loadJobsViaSSE()
 
     await waitFor(() =>
-      expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith(
-        'question_content'
-      )
+      expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith('ws1')
     )
 
     await act(async () => {
@@ -625,9 +631,7 @@ describe('WorkspaceMainPage', () => {
     await loadJobsViaSSE()
 
     await waitFor(() =>
-      expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith(
-        'question_content'
-      )
+      expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith('ws1')
     )
 
     await act(async () => {
@@ -844,6 +848,7 @@ describe('WorkspaceMainPage', () => {
         workflow_version: null,
         workflow_version_none: false,
         active_node_key: null,
+        paused: null,
       },
       excludeIds: [],
     })
@@ -902,6 +907,7 @@ describe('WorkspaceMainPage', () => {
         workflow_version: null,
         workflow_version_none: false,
         active_node_key: null,
+        paused: null,
       },
       excludeIds: [],
     })

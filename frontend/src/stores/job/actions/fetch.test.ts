@@ -15,6 +15,7 @@ describe('resetForWorkspace', () => {
         search: 'algebra',
         workflowVersion: 4,
         activeNodeKey: 'review',
+        paused: null,
       },
     })
 
@@ -30,6 +31,7 @@ describe('resetForWorkspace', () => {
       search: '',
       workflowVersion: null,
       activeNodeKey: null,
+      paused: null,
     })
   })
 
@@ -43,6 +45,7 @@ describe('resetForWorkspace', () => {
         search: 'geometry',
         workflowVersion: 3,
         activeNodeKey: 'generate',
+        paused: null,
       },
     })
 

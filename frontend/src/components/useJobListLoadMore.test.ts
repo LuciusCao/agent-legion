@@ -29,6 +29,7 @@ function seedLoadedPage(nextCursor: string | null) {
       search: '',
       workflowVersion: null,
       activeNodeKey: null,
+      paused: null,
     },
   })
 }

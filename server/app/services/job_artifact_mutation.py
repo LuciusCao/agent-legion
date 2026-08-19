@@ -83,6 +83,11 @@ class JobArtifactMutationService:
         closure are staged. This supports targeted rerun-to operations where
         descendants outside the target closure must keep their artifacts.
 
+        Read-modify-write artifacts (declared as both an input and an output of
+        the same node) are never staged: removing them would leave the node
+        waiting forever on an input no rerun producer rewrites (#114). On a
+        successful rerun the node rewrites them, so run semantics are unchanged.
+
         Returns a :class:`StagedOutputs` handle. Callers should invoke
         ``commit()`` after a successful database transaction, or ``rollback()``
         if the transaction fails.
@@ -104,7 +109,8 @@ class JobArtifactMutationService:
 
         outputs: set[str] = set()
         for key in affected_keys:
-            outputs.update(definition.nodes[key].outputs)
+            node = definition.nodes[key]
+            outputs.update(set(node.outputs) - set(node.inputs))
 
         paths = set(outputs)
         paths.update(f"runs/{key}" for key in affected_keys)

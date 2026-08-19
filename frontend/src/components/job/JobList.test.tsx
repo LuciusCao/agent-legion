@@ -87,6 +87,7 @@ describe('JobList', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
   })

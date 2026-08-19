@@ -87,11 +87,23 @@
   路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`，lease 行写常量 `'code'`
   （EXEC-CODE-POOL-001）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
+- Workflow 是 workspace 内部的一份 DAG：全局 workflow_catalog 已随 schema v50 退役
+  （#112，DB-WORKFLOW-CATALOG-001），`workspaces.default_workflow_key` 是普通文本标识，
+  权威定义是该 workspace 的 active revision——节点覆盖校验、settings schema、无快照 job
+  的定义回退、worker 扫描列表全部读它，不再有列表/注册 API；示例 DAG
+  （`server/app/workflows/builtin.py`）只是创建 workspace 时可选的示例模板种子，blank
+  workspace 首次成功 publish 认领草稿的 key。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
-  DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变、
-  job intake 冻结代码版本（EXEC-CODE-002），禁止任何运行时 API 增删改 repo 文件。
+  DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变。
+  #115 起普通 job 不再冻结代码版本：dispatch 解析当前 published（workspace → 全局
+  factory seed），重新发布对进行中 job 的下一次节点执行生效；intake 的
+  `node_code_versions` 与 revision 快照的 `node_code_pins` 只作审计记录与
+  quality replay 的 pin 来源（只有带 `quality_replay` 标记的 batch 按 frozen pin
+  执行并 fail-closed，EXEC-CODE-002/003）。Agent 定义同理：普通 job 从不 pin
+  Agent 版本，dispatch 始终解析本 workspace 当前 published 定义（只有 quality
+  replay 经 `agent_versions` pin）。禁止任何运行时 API 增删改 repo 文件。
   `workflow_nodes/` 只剩示例
   workflow 的两个 git 评审种子源（启动时 seed-if-absent 发布为 global 作用域 node_code，
   `server/app/services/demo_node_seed.py`）；示例 workflow 的出厂 Agent 模板钉在
@@ -125,8 +137,14 @@
   `timeout_seconds`（integer，default 600，ge 1）/ `sandbox_network`（boolean，
   default false）自动合并进每个 code 路由节点的有效 schema（节点 config_schema
   不得重声明；v47 收割已把原 executor 层的 timeout/network 值搬到节点 `config`）。解析链
-  defaults → 节点 `config` → workspace 覆盖，intake 冻结；manifest 仅携带白名单
-  非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`。
+  defaults → 节点 `config` → workspace 覆盖，intake 冻结；例外是声明了
+  `runtime_mutable: true` 的「运行开关」键（如 dry_run）——每次 dispatch/claim 对这些键
+  按同一解析链重取 workspace 最新覆盖，只覆盖被标记的键，平台保留执行键永远冻结
+  （CONFIG-RUNTIME-MUTABLE-001）；每次运行的非敏感 resolved 配置落
+  `node_runs.config_snapshot_json` 审计（本地 code 池随 lease claim 写入，Worker/Agent
+  路径取 enqueue 时 manifest 的 config）。manifest 仅携带白名单
+  非敏感键（CONFIG-MANIFEST-001），敏感参数标记 `secret`——manifest 白名单管敏感键
+  不下发，runtime_mutable 只管解析时机，两者正交。
 - velites（`velites/` crate，自研 Rust harness）：pi、openclaw、velites 是平级
   runtime，由 `AgentDefinition.runtime` 声明。Agent 定义存 DB
   （`versioned_entities` 表，workspace 作用域（schema v46，解析严格限定本

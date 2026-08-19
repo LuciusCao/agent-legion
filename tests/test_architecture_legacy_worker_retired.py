@@ -12,6 +12,7 @@ RETIRED_FILES = [
     "server/app/worker_scheduler.py",
     "server/app/worker_candidates.py",
     "server/app/workflows/executor.py",
+    "server/app/workflows/pi_runner.py",
 ]
 
 RETIRED_MODULE_FRAGMENTS = [
@@ -20,6 +21,7 @@ RETIRED_MODULE_FRAGMENTS = [
     "server.app.worker_scheduler",
     "server.app.worker_candidates",
     "server.app.workflows.executor",
+    "server.app.workflows.pi_runner",
 ]
 
 # Relative imports only refer to the retired top-level module when they sit at

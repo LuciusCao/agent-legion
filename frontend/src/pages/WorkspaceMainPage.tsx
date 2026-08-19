@@ -9,6 +9,7 @@ import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
 import { useWorkspaceStats } from '../hooks/useWorkspaceStats'
 import { useJobFilterRefetch } from '../hooks/useJobFilterRefetch'
 import { useWorkspacePackageActions } from '../hooks/useWorkspacePackageActions'
+import { useWorkspacePauseActions } from '../hooks/useWorkspacePauseActions'
 import { useWorkspaceRerunActions } from '../hooks/useWorkspaceRerunActions'
 import { useWorkspaceSelection } from '../hooks/useWorkspaceSelection'
 import { JobFilterBar } from '../components/job/JobFilterBar'
@@ -58,7 +59,7 @@ export default function WorkspaceMainPage() {
 
   const workflowKey = workspaceStats?.workflow_key
   const { data: workflowDefinitionData, error: workflowQueryError } =
-    useWorkflowDefinitionQuery(workflowKey)
+    useWorkflowDefinitionQuery(workspaceId)
   const workflowDefinition = workflowDefinitionData ?? null
   const workflowError = toErrorMessage(workflowQueryError)
 
@@ -70,7 +71,8 @@ export default function WorkspaceMainPage() {
     filterConfig.status !== null ||
     filterConfig.search.trim() !== '' ||
     filterConfig.workflowVersion !== null ||
-    filterConfig.activeNodeKey !== null
+    filterConfig.activeNodeKey !== null ||
+    filterConfig.paused !== null
   const { selectedJobs, selectedCount, allMatchingCount } =
     useWorkspaceSelection()
 
@@ -91,6 +93,8 @@ export default function WorkspaceMainPage() {
   const handleRunTo = async (targetKey: string, startKey?: string) => {
     if (workspaceId) await batchRunTo(workspaceId, targetKey, startKey)
   }
+
+  const pauseActions = useWorkspacePauseActions(workspaceId)
 
   const { handlePackage, handleClearPacked, handleUpgradeWorkflow } =
     useWorkspacePackageActions(workspaceId)
@@ -141,6 +145,7 @@ export default function WorkspaceMainPage() {
               batchClearPackedLoading ||
               batchDeleteLoading ||
               batchRunToLoading ||
+              pauseActions.pauseLoading ||
               batchUpgradeWorkflowLoading
             }
             filters={filters}
@@ -151,6 +156,8 @@ export default function WorkspaceMainPage() {
             onPackage={handlePackage}
             onClearPacked={handleClearPacked}
             onDelete={() => setDeleteDialogOpen(true)}
+            onPause={pauseActions.handlePause}
+            onResume={pauseActions.handleResume}
             onUpgradeWorkflow={handleUpgradeWorkflow}
           />
           <BatchDeleteDialog

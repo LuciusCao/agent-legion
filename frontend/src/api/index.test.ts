@@ -150,7 +150,7 @@ describe('workspace api', () => {
     )
   })
 
-  it('creates workspace with new entity and intake config fields', async () => {
+  it('creates workspace with the sample template mode', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
       json: () =>
@@ -167,13 +167,7 @@ describe('workspace api', () => {
     } as Response)
     global.fetch = fetchMock
 
-    const workspace = await createWorkspace(
-      'Physics',
-      'demo_workflow',
-      { storage: 's3' },
-      'knowledge',
-      { enabled_modes: ['manual', 'cms'] }
-    )
+    const workspace = await createWorkspace('Physics', 'demo')
 
     expect(workspace.default_entity).toBe('knowledge')
     expect(workspace.intake_config).toEqual({
@@ -185,10 +179,6 @@ describe('workspace api', () => {
         method: 'POST',
         body: JSON.stringify({
           name: 'Physics',
-          default_workflow_key: 'demo_workflow',
-          resource_config: { storage: 's3' },
-          default_entity: 'knowledge',
-          intake_config: { enabled_modes: ['manual', 'cms'] },
           workflow_mode: 'demo',
         }),
       })
@@ -205,7 +195,7 @@ describe('workspace api', () => {
     } as Response)
     global.fetch = fetchMock
 
-    await createWorkspace('Blank', 'demo_workflow', {}, 'question', {}, 'blank')
+    await createWorkspace('Blank', 'blank')
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces',
@@ -213,10 +203,6 @@ describe('workspace api', () => {
         method: 'POST',
         body: JSON.stringify({
           name: 'Blank',
-          default_workflow_key: 'demo_workflow',
-          resource_config: {},
-          default_entity: 'question',
-          intake_config: {},
           workflow_mode: 'blank',
         }),
       })

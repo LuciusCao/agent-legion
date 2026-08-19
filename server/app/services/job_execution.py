@@ -15,7 +15,7 @@ from server.app.services._job_rerun_upstream_guard import raise_if_failed_upstre
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
 from server.app.services.job_staged_cleanup import commit_staged_outputs
-from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
@@ -32,7 +32,6 @@ class JobExecutionService:
         job_db: JobQueries,
         artifact_mutation: JobArtifactMutationService,
         lease_repo: ExecutorLeaseRepository,
-        workflows: WorkflowCatalogService,
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
@@ -40,7 +39,6 @@ class JobExecutionService:
         self.job_db = job_db
         self.artifact_mutation = artifact_mutation
         self.lease_repo = lease_repo
-        self.workflows = workflows
         self.clock = clock
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
@@ -72,8 +70,10 @@ class JobExecutionService:
         return self.lease_repo.has_active_for_job(job_id, self._now())
 
     def _definition(self, job: dict[str, Any]) -> WorkflowDefinition:
-        return definition_from_job_snapshot(job) or self.workflows.definition(
-            str(job["workflow_key"])
+        # Jobs without an intake-frozen snapshot fall back to their own
+        # workspace's active revision (schema v50), never a global template.
+        return definition_from_job_snapshot(job) or require_workspace_active_definition(
+            self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
         )
 
     def run_to(

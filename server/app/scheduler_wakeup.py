@@ -49,10 +49,18 @@ def notify_schedulable_work() -> None:
 def reload_scan_entries_best_effort(worker: Any) -> None:
     """Hot-reload the worker scan list; log instead of raising.
 
-    Routes call this after the catalog row commits; a transient failure must
-    not 500 the write — the poll loop's catalog reconcile converges the list.
+    Routes call this after a workspace scan target commits (workspace create,
+    re-key, first publish); a transient failure must not 500 the write — the
+    next reload or restart converges the list.
     """
     try:
         worker.reload_scan_entries()
     except Exception:
         logger.exception("workflow scan-list hot reload failed")
+
+
+def reload_worker_scan_entries(request: Any) -> None:
+    """Reload via the app-state workflow worker; no-op when none is running."""
+    worker = getattr(request.app.state, "workflow_worker", None)
+    if worker is not None:
+        reload_scan_entries_best_effort(worker)

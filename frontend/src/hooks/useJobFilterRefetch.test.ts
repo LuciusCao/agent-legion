@@ -40,6 +40,7 @@ describe('useJobFilterRefetch', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     mockFetchJobsSnapshot.mockResolvedValue({
@@ -81,6 +82,7 @@ describe('useJobFilterRefetch', () => {
           workflow_version: null,
           workflow_version_none: false,
           active_node_key: null,
+          paused: null,
         }
       )
     })

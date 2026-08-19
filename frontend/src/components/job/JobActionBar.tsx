@@ -47,6 +47,8 @@ export type JobActionBarProps = {
   onPackage: () => void | Promise<void>
   onClearPacked?: () => void | Promise<void>
   onDelete: () => void | Promise<void>
+  onPause?: () => void | Promise<void>
+  onResume?: () => void | Promise<void>
   onUpgradeWorkflow?: (jobIds?: string[]) => void | Promise<void>
   itemLabel?: string
 }

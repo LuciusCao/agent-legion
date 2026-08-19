@@ -15,6 +15,7 @@ from server.app.services._job_rerun_upstream_guard import (
     upstream_failed_error,
 )
 from server.app.services.job_operation_error import JobOperationError
+from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.workflows.workflow_branching import upstream_nodes
 
@@ -44,8 +45,8 @@ def check_rerun_eligibility(
     implementation prevents the preview count from drifting away from what
     the real rerun would do.
     """
-    definition = definition_from_job_snapshot(job) or service.workflows.definition(
-        str(job["workflow_key"])
+    definition = definition_from_job_snapshot(job) or require_workspace_active_definition(
+        service.job_db, str(job["workspace_id"]), str(job["workflow_key"])
     )
     if actual_node_key not in definition.nodes:
         return JobOperationError(

@@ -362,15 +362,12 @@ invariants:
         gate: quick
 
   - id: EXEC-VALIDATION-001
-    statement: "A node run may complete only after the node skill's deterministic scripts/validate_output.py passes against the job directory: the local Pi runner validates after process exit, and the Host re-validates Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted); validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
+    statement: "A node run may complete only after the node skill's deterministic scripts/validate_output.py passes against the job directory: the Host validates Agent Worker results server-side after unpacking the result archive (Worker-reported success is untrusted); validation failure marks the run failed with the validator message (e.g. review rejections classify as business/review_rejected)."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
         target: tests/test_agent_completion_validation.py
-        gate: quick
-      - kind: integration
-        target: tests/test_pi_runner.py
         gate: quick
 
   - id: EXEC-CODE-001
@@ -389,7 +386,7 @@ invariants:
         gate: quick
 
   - id: EXEC-CODE-002
-    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and jobs freeze the code version they started with; no runtime path may write repo workflow_nodes/ files. Codes are workspace-scoped with a global (workspace-NULL) factory-seed scope for the demo nodes (#96); dispatch resolves the frozen pin → workspace published → global published, where the frozen pin is the job workflow snapshot's node_code_pins first (refreshed by upgrade_workflow, #109) and the intake batch's node_code_versions only as the legacy fallback, and a capability with no published code at either scope fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
+    statement: "Workflow node code lives only in the DB (versioned_entities, entity_type 'node_code'), takes effect exclusively through the publish flow (draft → published → archived), versions are immutable, and no runtime path may write repo workflow_nodes/ files. Codes are workspace-scoped with a global (workspace-NULL) factory-seed scope for the demo nodes (#96). Since #115 ordinary jobs no longer freeze the code version they started with: dispatch resolves the currently published code (workspace published → global published), so a republish takes effect on the next node execution of an in-flight job — same for Agent definitions, which ordinary jobs never pinned (dispatch always resolved the workspace's currently published definition). The intake batch's node_code_versions and the revision snapshot's node_code_pins survive as audit records and as the pin source for quality replays: only a batch carrying the quality_replay marker dispatches its frozen pin (snapshot pins first, batch pins as the legacy fallback), failing closed on hash drift. A capability with no published code at either scope fails the node with a config error. The feature is gated by workflows.custom_nodes_enabled."
     owner: workspace-executor
     risk: high
     evidence:
@@ -403,13 +400,13 @@ invariants:
         target: tests/workers/test_workflow_worker_node_code.py
         gate: quick
       - kind: integration
-        target: tests/workers/test_workflow_worker_node_code.py::test_dispatch_prefers_snapshot_pin_over_stale_batch_pin
+        target: tests/workers/test_workflow_worker_node_code.py::test_dispatch_runs_latest_published_ignoring_intake_pin
         gate: quick
       - kind: integration
-        target: tests/workers/test_workflow_worker_node_code.py::test_dispatch_falls_back_to_batch_pin_when_snapshot_has_no_pins
+        target: tests/workers/test_workflow_worker_node_code.py::test_quality_replay_batch_keeps_frozen_code_version
         gate: quick
       - kind: integration
-        target: tests/workers/test_workflow_worker_node_code.py::test_code_worker_claim_prefers_snapshot_pin_over_stale_batch_pin
+        target: tests/workers/test_workflow_worker_node_code.py::test_code_worker_claim_keeps_frozen_pin_for_quality_replay
         gate: quick
       - kind: integration
         target: tests/executors/test_code_executor.py::test_execute_without_node_code_is_a_config_error
@@ -613,7 +610,7 @@ invariants:
         gate: quick
 
   - id: CONFIG-MANIFEST-001
-    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload. The schema source priority is Agent Definition → node-declared `config_schema` (workflow YAML, versioned with the revision snapshot; it must not redeclare platform-reserved keys) — the executor capability fallback retired with the executor concept (P-0.5, schema v47); code-routed nodes get the platform-reserved execution keys `timeout_seconds` (integer, default 600, >= 1) and `sandbox_network` (boolean, default false) auto-merged into their effective schema — the v47 harvest moved executor-level timeout/network values onto the revision nodes' config — so timeout/network travel the same freeze chain, and frozen batches predating the reserved keys are padded with the node's own declared values underneath at dispatch (frozen values win)."
+    statement: "Agent manifests carry only config_schema-whitelisted, non-secret config keys (keys marked `secret` never leave the server); effective node config resolves schema defaults → workflow node config → workspace override, each layer validated against the typed schema subset, and is frozen into the intake batch payload (keys declared `runtime_mutable: true` are the only exception — they are re-resolved at dispatch, CONFIG-RUNTIME-MUTABLE-001). The schema source priority is Agent Definition → node-declared `config_schema` (workflow YAML, versioned with the revision snapshot; it must not redeclare platform-reserved keys) — the executor capability fallback retired with the executor concept (P-0.5, schema v47); code-routed nodes get the platform-reserved execution keys `timeout_seconds` (integer, default 600, >= 1) and `sandbox_network` (boolean, default false) auto-merged into their effective schema — the v47 harvest moved executor-level timeout/network values onto the revision nodes' config — so timeout/network travel the same freeze chain, and frozen batches predating the reserved keys are padded with the node's own declared values underneath at dispatch (frozen values win)."
     owner: security
     risk: critical
     evidence:
@@ -629,6 +626,24 @@ invariants:
       - kind: integration
         target: tests/full/test_node_config_manifest.py
         gate: full
+
+  - id: CONFIG-RUNTIME-MUTABLE-001
+    statement: "Node config keys are intake-frozen by default (job reproducibility); a config_schema property declared `runtime_mutable: true` opts out of the freeze and is re-resolved at every dispatch along the usual chain (schema defaults → node config → workspace override), so run switches (dry_run, upload_enabled, ...) take effect on the next node execution of an already-intaken job. The platform-reserved execution keys `timeout_seconds`/`sandbox_network` always stay frozen: node config_schemas cannot redeclare them (the loader rejects that) and the marker is ignored even on hand-built schemas. The audit trail is per-attempt: the non-secret resolved config used for a run is persisted onto node_runs.config_snapshot_json (schema v49) — the local code pool carries it on the lease claim, the code-Worker/Agent paths persist the enqueue-time manifest config (secrets never leave the Host, CONFIG-MANIFEST-001; the manifest whitelist governs which keys may leave the server, runtime_mutable only governs resolution timing)."
+    owner: security
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_config_schema.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_node_config.py
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_leases.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_code_claim.py
+        gate: quick
 
   - id: VAULT-SECRET-001
     statement: "Workspace secret values are Fernet-encrypted at rest in workspace_secrets, never persisted as plaintext in node configs or intake batch snapshots (only `secret_ref` markers are stored), never returned by any API (secrets endpoints are write-only and the settings payload exposes only `secret_set` markers), and are resolved to plaintext in memory only at the server-side consumption points, with vault-resolved values covered by log redaction. Instance-scope secrets (external connection credentials and acquired connection tokens) follow the same rules in instance_secrets / connection_tokens. The code→Worker path extends the same boundary across machines: queued code manifests and bundles are stored secret-free (secret keys are stripped at enqueue; a plaintext secret value makes the node ineligible for Worker dispatch), the Host resolves vault refs and injects plaintext only into the claim/download response over the existing HTTPS channel, and the Worker holds secrets in memory only — passed to the child via stdin, never written to disk or logs, with a defensive scrub (strip_secret_config) before any persistence. The runtime settings snapshot crossing the same boundary is section-whitelisted (node_safe_settings_config in server/app/config_schema.py): only the business sections the node SDK service_config actually consumes (asr) are included — vault/auth/database/agent_workers sections never enter the manifest, the sandbox stdin payload, or the database."
@@ -891,19 +906,16 @@ invariants:
         gate: quick
 
   - id: DB-WORKFLOW-CATALOG-001
-    statement: "The set of known workflow keys lives in the DB workflow_catalog table (schema v40), not the code registry: routes, workspace default_workflow_key validation, and the workflow worker scan list all read it. Built-in rows (origin='builtin') are upserted from workflows.builtin on every startup (the repo stays the seed source of truth; seeding never touches origin='registered' rows); new keys are registered only through the admin API (POST /api/workflows, require_admin) with a strict key format and conflict rejection. A registered entry starts without a definition: workspace binding is allowed, the first workspace draft publish creates revision v1 via the existing publish channel, and the worker scans the key with a None fallback definition (jobs run off the intake-frozen revision snapshot; the scan list itself refreshes on backend restart)."
+    statement: "The global workflow catalog (workflow_catalog table, schema v40) is retired at schema v50 (issue #112): a workflow is the DAG inside one workspace, so workspaces.default_workflow_key is a plain text identifier (old job rows keep their workflow_key as text) and the workspace's ACTIVE workflow_revision is the only runtime definition source — node override validation and settings schemas (workspace_node_config / workspace_settings_schemas), snapshot-less job fallbacks (job detail, run-to, rerun, preview), package artifact curation, and the worker scan list all resolve it; the catalog list/register HTTP APIs and the studio-agent register/list tools are gone, and the built-in demo definition stays in the repo (server/app/workflows/builtin.py) as the optional sample-template seed at workspace creation. Creating a workspace no longer selects or validates a workflow: demo mode seeds the sample template (defaulting to it when no key is given), blank mode leaves the key slot empty and the first successful draft publish adopts the draft's key; the v50 migration drops the table after warning about registered keys no workspace references."
     owner: workspace-executor
     risk: high
     evidence:
       - kind: integration
-        target: tests/services/test_workflow_catalog_store.py
+        target: tests/db/test_workflow_catalog_retirement.py
         gate: quick
       - kind: integration
-        target: tests/routes/jobs/test_workflow_catalog.py
+        target: tests/workers/test_workspace_scan.py
         gate: quick
       - kind: integration
-        target: tests/db/test_workflow_catalog_migration.py
-        gate: quick
-      - kind: integration
-        target: tests/workers/test_workflow_catalog_scan.py
+        target: tests/routes/test_studio_agent_tools.py
         gate: quick

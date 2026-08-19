@@ -15,6 +15,7 @@ from server.app.services.vault import VaultService
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
+from tests.helpers import scan_entries
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import RecordingExecutor, _local_node, _make_definition
 
@@ -64,7 +65,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = (definitions, [])
+    worker._scan_entries = scan_entries(*definitions)
     return worker
 
 

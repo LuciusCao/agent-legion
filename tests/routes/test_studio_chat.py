@@ -244,7 +244,8 @@ def test_full_conversation_flow_and_token_hygiene(client, tmp_path) -> None:
     token = env["AGENT_LEGION_STUDIO_AGENT_TOKEN"]
     assert env["AGENT_LEGION_MCP_API_BASE"] == "http://127.0.0.1:8000"
     tools = client.get(
-        "/api/studio-agent/tools/workflows", headers={"Authorization": f"Bearer {token}"}
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert tools.status_code == 200
     assert token not in json.dumps(client.get(f"{url}/messages").json())
@@ -254,7 +255,8 @@ def test_full_conversation_flow_and_token_hygiene(client, tmp_path) -> None:
     assert closed.status_code == 200
     assert closed.json()["session"]["status"] == "closed"
     revoked = client.get(
-        "/api/studio-agent/tools/workflows", headers={"Authorization": f"Bearer {token}"}
+        f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/active",
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert revoked.status_code == 401
 

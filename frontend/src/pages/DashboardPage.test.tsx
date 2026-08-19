@@ -4,21 +4,17 @@ import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { DashboardPage } from './DashboardPage'
 import { EventSourceMock } from '../testing/eventSourceMock'
 import { makeWorkspace } from '../testing/workspaceFixtures'
-import { fetchWorkspaces, fetchWorkspaceStats, fetchWorkflows } from '../api'
+import { fetchWorkspaces, fetchWorkspaceStats } from '../api'
 import type { WorkspaceStats } from '../types/workspaceTypes'
 
 vi.mock('../api', () => ({
   fetchWorkspaces: vi.fn(),
   fetchWorkspaceStats: vi.fn(),
   createWorkspace: vi.fn(),
-  fetchWorkflows: vi.fn().mockResolvedValue({
-    workflows: [{ key: 'demo_workflow', label: '题目审题信息' }],
-  }),
 }))
 
 const mockFetchWorkspaces = vi.mocked(fetchWorkspaces)
 const mockFetchWorkspaceStats = vi.mocked(fetchWorkspaceStats)
-const mockFetchWorkflows = vi.mocked(fetchWorkflows)
 
 const navigate = vi.fn()
 
@@ -52,7 +48,6 @@ describe('DashboardPage', () => {
     mockFetchWorkspaceStats.mockResolvedValue({
       job_stats: {},
     } as WorkspaceStats)
-    mockFetchWorkflows.mockClear()
     navigate.mockClear()
     EventSourceMock.reset()
     authState.user = { role: 'admin' }

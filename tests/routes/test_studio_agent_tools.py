@@ -3,10 +3,9 @@
 Every tool endpoint requires a studio-agent scoped token (STUDIO-AGENT-001):
 anonymous callers get 401 and full user sessions get 403, while scoped
 tokens pass the scope guard (business errors may still apply). Draft writes
-are attributed with ``created_by=f"studio-agent:{user_id}"``; the workflow
-register endpoint triggers the chunk-1 scan hot-reload after the catalog row
-commits. The endpoint inventory in ``_tool_endpoints`` is the enumeration
-backstop: new tool endpoints must be added here.
+are attributed with ``created_by=f"studio-agent:{user_id}"``. The endpoint
+inventory in ``_tool_endpoints`` is the enumeration backstop: new tool
+endpoints must be added here.
 """
 
 from __future__ import annotations
@@ -52,9 +51,7 @@ def _tool_endpoints(workspace_id: str) -> list[tuple[str, str, dict | None]]:
             {"code": "not python"},
         ),
         ("PUT", f"{base}/agent-definitions/agent-x/draft", {}),
-        ("POST", "/api/studio-agent/tools/workflows/register", {"key": "k", "label": "K"}),
         ("GET", f"{base}/workflow/active", None),
-        ("GET", "/api/studio-agent/tools/workflows", None),
         ("GET", f"{base}/workflows/wf/nodes/node/code", None),
         ("GET", "/api/studio-agent/tools/chat-sessions/session-x/context", None),
     ]
@@ -131,11 +128,6 @@ def test_get_active_revision_empty_state_for_unpublished_workflow(client, job_db
     state (200) instead of a 404, so the agent can start the from-scratch
     authoring flow."""
     scoped, _ = _scoped_client(client, job_db)
-    registered = scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "studio_empty_flow", "label": "Studio Empty Flow"},
-    )
-    assert registered.status_code == 200, registered.text
     workspace = job_db.create_workspace("ws-empty", default_workflow_key="studio_empty_flow")
     workspace_id = str(workspace["id"])
 
@@ -164,11 +156,6 @@ def test_get_active_revision_404_for_unknown_workspace(client, job_db) -> None:
 
 def test_validate_workflow(client, job_db) -> None:
     scoped, _ = _scoped_client(client, job_db)
-    registered = scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "studio_validate_flow", "label": "Studio Validate Flow"},
-    )
-    assert registered.status_code == 200, registered.text
     workspace = job_db.create_workspace("ws-validate", default_workflow_key="studio_validate_flow")
     workspace_id = str(workspace["id"])
     url = f"/api/studio-agent/tools/workspaces/{workspace_id}/workflow/validate"
@@ -239,14 +226,6 @@ def test_compare_workflow_draft(client, job_db) -> None:
     assert malformed.status_code == 200
     assert malformed.json()["valid"] is False
     assert malformed.json()["errors"]
-
-
-def test_list_workflow_catalog(client, job_db) -> None:
-    scoped, _ = _scoped_client(client, job_db)
-    response = scoped.get("/api/studio-agent/tools/workflows")
-    assert response.status_code == 200, response.text
-    keys = {entry["key"] for entry in response.json()["workflows"]}
-    assert _WORKFLOW_KEY in keys
 
 
 def test_get_node_code_state_reads_builtin(client, job_db) -> None:
@@ -345,79 +324,6 @@ def test_save_agent_definition_draft_rejects_invalid_payload(client, job_db) -> 
     assert response.status_code == 422
 
 
-class _RecordingWorker:
-    def __init__(self) -> None:
-        self.reload_calls = 0
-
-    def reload_scan_entries(self) -> None:
-        self.reload_calls += 1
-
-
-def test_register_workflow_triggers_scan_reload_and_wakeup(client, job_db, monkeypatch) -> None:
-    scoped, _ = _scoped_client(client, job_db)
-    worker = _RecordingWorker()
-    # client is the worker-session shared app: monkeypatch restores the missing
-    # workflow_worker attribute after the test (raising=False: the default app
-    # runs with start_worker=False and has no such attribute).
-    monkeypatch.setattr(client.app.state, "workflow_worker", worker, raising=False)
-    wakeups: list[int] = []
-    monkeypatch.setattr(
-        "server.app.routes.studio_agent_tools.notify_schedulable_work",
-        lambda: wakeups.append(1),
-    )
-
-    response = scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "studio_agent_flow", "label": "Studio Agent Flow"},
-    )
-
-    assert response.status_code == 200, response.text
-    payload = response.json()
-    assert payload["key"] == "studio_agent_flow"
-    assert payload["origin"] == "registered"
-    assert worker.reload_calls == 1
-    assert wakeups
-
-    catalog = scoped.get("/api/studio-agent/tools/workflows")
-    assert "studio_agent_flow" in {entry["key"] for entry in catalog.json()["workflows"]}
-
-
-def test_register_workflow_requires_admin_scoped_token(client, job_db) -> None:
-    """Platform-global registration aligns with POST /api/workflows
-    (require_admin): a scoped token minted for a non-admin user gets 403."""
-    member_id = str(job_db.create_user("studio-member", password_hash=None)["id"])
-    member_token = scoped_tokens.mint_scoped_token(job_db, member_id)
-    member_scoped = client.__class__(client.app)
-    member_scoped.headers["authorization"] = f"Bearer {member_token}"
-
-    denied = member_scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "member_flow", "label": "Member Flow"},
-    )
-    assert denied.status_code == 403
-
-    scoped, _ = _scoped_client(client, job_db)
-    allowed = scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "member_flow", "label": "Member Flow"},
-    )
-    assert allowed.status_code == 200, allowed.text
-
-
-def test_register_workflow_conflict_and_invalid_key(client, job_db) -> None:
-    scoped, _ = _scoped_client(client, job_db)
-    url = "/api/studio-agent/tools/workflows/register"
-
-    first = scoped.post(url, json={"key": "studio_conflict_flow", "label": "First"})
-    assert first.status_code == 200, first.text
-
-    conflict = scoped.post(url, json={"key": "studio_conflict_flow", "label": "Again"})
-    assert conflict.status_code == 409
-
-    invalid = scoped.post(url, json={"key": "Bad Key", "label": "Nope"})
-    assert invalid.status_code == 400
-
-
 def test_validate_workflow_unknown_workspace_reports_binding_errors(client, job_db) -> None:
     """validate 语义与 Studio 端点一致：未知 workspace 没有 executor 绑定，
     草稿校验失败（valid=False），而不是 404。"""
@@ -448,15 +354,10 @@ def test_compare_workflow_404_for_unknown_workspace(client, job_db) -> None:
 
 
 def test_compare_workflow_without_baseline_returns_full_draft_preview(client, job_db) -> None:
-    """Tool-surface compare on a never-published workflow (registered key, no
-    revision): instead of a revision error the draft is diffed against an
+    """Tool-surface compare on a never-published workflow (workspace key set,
+    no revision): instead of a revision error the draft is diffed against an
     empty base, so the agent can preview the full from-scratch shape."""
     scoped, _ = _scoped_client(client, job_db)
-    registered = scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "studio_fresh_flow", "label": "Studio Fresh Flow"},
-    )
-    assert registered.status_code == 200, registered.text
     workspace = job_db.create_workspace("ws-fresh", default_workflow_key="studio_fresh_flow")
     workspace_id = str(workspace["id"])
 
@@ -555,11 +456,6 @@ def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> N
     """From-scratch flow: no active revision at all. expected_capability gates
     the skeleton draft; without it the historic 404 stands."""
     scoped, _ = _scoped_client(client, job_db)
-    registered = scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "studio_skeleton_flow", "label": "Studio Skeleton Flow"},
-    )
-    assert registered.status_code == 200, registered.text
     workspace = job_db.create_workspace("ws-skeleton", default_workflow_key="studio_skeleton_flow")
     workspace_id = str(workspace["id"])
     url = (
@@ -573,27 +469,3 @@ def test_save_node_code_draft_skeleton_without_any_revision(client, job_db) -> N
     saved = scoped.put(url, json={"code": _NODE_CODE, "expected_capability": "first_capability"})
     assert saved.status_code == 200, saved.text
     assert saved.json()["status"] == "draft"
-
-
-class _FailingReloadWorker:
-    def reload_scan_entries(self) -> None:
-        raise RuntimeError("catalog read failed")
-
-
-def test_register_workflow_reload_failure_keeps_committed_write(
-    client, job_db, monkeypatch
-) -> None:
-    """注册提交后热刷新失败的半应用语义：catalog 行已提交，路由不得 500，
-    由 poll loop 的周期对账收敛扫描表。"""
-    scoped, _ = _scoped_client(client, job_db)
-    monkeypatch.setattr(client.app.state, "workflow_worker", _FailingReloadWorker(), raising=False)
-
-    response = scoped.post(
-        "/api/studio-agent/tools/workflows/register",
-        json={"key": "reload_failure_flow", "label": "Reload Failure Flow"},
-    )
-
-    assert response.status_code == 200, response.text
-    assert response.json()["key"] == "reload_failure_flow"
-    catalog = scoped.get("/api/studio-agent/tools/workflows")
-    assert "reload_failure_flow" in {entry["key"] for entry in catalog.json()["workflows"]}

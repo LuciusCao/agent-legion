@@ -451,7 +451,9 @@ def compare_workflow_draft(
         )
 
     default_workflow_key = str(workspace.get("default_workflow_key") or "")
-    if draft.key != default_workflow_key:
+    # An empty default key marks a blank-canvas workspace (schema v50): its
+    # first publish adopts the draft key, so no mismatch is possible yet.
+    if default_workflow_key and draft.key != default_workflow_key:
         return _invalid_compare(
             {
                 "category": "schema",

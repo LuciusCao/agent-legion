@@ -2,7 +2,7 @@
 
 Spawns ``python -m server.app.mcp_server`` over stdio like a real MCP host
 would, pointed at a local stub HTTP backend (no platform database involved):
-handshake, tools/list discovers the 10 tools, and a tools/call round-trip
+handshake, tools/list discovers the 8 tools, and a tools/call round-trip
 proves the scoped token reaches the backend and the response comes back as
 text.
 """
@@ -41,8 +41,11 @@ class _StubHandler(BaseHTTPRequestHandler):
         if self.headers.get("authorization") != f"Bearer {_TOKEN}":
             self._reply(401, {"detail": "Not authenticated"})
             return
-        if self.path == "/api/studio-agent/tools/workflows":
-            self._reply(200, {"workflows": [{"key": "demo_workflow"}]})
+        if self.path.endswith("/workspaces/ws-1/workflow/active"):
+            self._reply(
+                200,
+                {"state": "active", "workflow_key": "demo_workflow", "revision": None},
+            )
             return
         if self.path == "/api/studio-agent/tools/chat-sessions/sess-1/context":
             self._reply(200, {"workspace_id": "ws-1", "selected_node_key": "node-a"})
@@ -96,8 +99,6 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 "get_authoring_guide",
                 "get_node_code",
                 "get_studio_context",
-                "list_workflows",
-                "register_workflow",
                 "save_agent_definition_draft",
                 "save_node_code_draft",
                 "validate_workflow",
@@ -107,8 +108,8 @@ def test_mcp_stdio_handshake_and_tool_call(stub_backend: str) -> None:
                 result = await session.call_tool(name, args)
                 return "".join(c.text for c in result.content if c.type == "text")
 
-            listed = json.loads(await call_text("list_workflows", {}))
-            assert listed["workflows"][0]["key"] == "demo_workflow"
+            active = json.loads(await call_text("get_active_workflow", {"workspace_id": "ws-1"}))
+            assert active["workflow_key"] == "demo_workflow"
 
             validated = json.loads(
                 await call_text(

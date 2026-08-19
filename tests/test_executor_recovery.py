@@ -19,6 +19,7 @@ from server.app.workflows.definition import (
     WorkflowIntake,
     WorkflowNode,
 )
+from tests.helpers import scan_entries
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -170,7 +171,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = ([_make_definition()], [])
+    worker._scan_entries = scan_entries(_make_definition())
     return worker
 
 

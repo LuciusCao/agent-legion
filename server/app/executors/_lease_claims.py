@@ -118,12 +118,20 @@ def claim_lease(
     cursor = conn.execute(
         """
         insert into node_runs(
-            job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at
+            job_id, node_key, status, command_json, log_path, run_dir, session_dir,
+            started_at, config_snapshot_json
         )
-        values (%s, %s, 'running', %s, %s, '', '', %s)
+        values (%s, %s, 'running', %s, %s, '', '', %s, %s)
         returning id
         """,
-        (request.job_id, request.node_key, json.dumps([]), log_path, now_str),
+        (
+            request.job_id,
+            request.node_key,
+            json.dumps([]),
+            log_path,
+            now_str,
+            request.config_snapshot_json,
+        ),
     )
     inserted = cursor.fetchone()
     if inserted is None:

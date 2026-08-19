@@ -1,7 +1,9 @@
-"""Dispatch-time node code resolution (EXEC-CODE-002, post-#96).
+"""Dispatch-time node code resolution (EXEC-CODE-002, post-#96/#115).
 
-Priority: job-frozen version → workspace published version → global factory
-seed. With the gate disabled nothing resolves and the node fails closed.
+Ordinary jobs resolve the currently published code: workspace published
+version → global factory seed. Only quality-replay batches honor the frozen
+intake/snapshot pins. With the gate disabled nothing resolves and the node
+fails closed.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from server.app.settings import Settings
 from server.app.workflow_worker.code_claim import try_claim_code_worker_node
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
+from tests.helpers import scan_entries
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import RecordingExecutor, _local_node, _make_definition
 
@@ -69,7 +72,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = (definitions, [])
+    worker._scan_entries = scan_entries(*definitions)
     return worker
 
 
@@ -113,7 +116,9 @@ def test_dispatch_uses_published_custom_code(tmp_path: Path) -> None:
     worker.stop()
 
 
-def test_dispatch_prefers_frozen_code_version(tmp_path: Path) -> None:
+def test_dispatch_runs_latest_published_ignoring_intake_pin(tmp_path: Path) -> None:
+    """#115: ordinary jobs no longer honor the intake freeze — publishing a
+    newer code version takes effect on the job's next node execution."""
     node = _local_node("fetch")
     codes_ws = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     seed_ws = codes_ws.create_workspace("Seed WS", default_workflow_key="test")
@@ -133,7 +138,35 @@ def test_dispatch_prefers_frozen_code_version(tmp_path: Path) -> None:
 
     _dispatch(tmp_path, worker)
 
-    # The job froze v1 at intake; publishing v2 must not affect it.
+    # The job froze v1 at intake, but #115 resolves the latest published v2.
+    assert executor.contexts[0].node_code == CUSTOM_V2
+    worker.stop()
+
+
+def test_quality_replay_batch_keeps_frozen_code_version(tmp_path: Path) -> None:
+    """#115 exception: a batch carrying the quality_replay marker still
+    dispatches its frozen pin (fail-closed), so replays stay reproducible."""
+    node = _local_node("fetch")
+    codes = NodeCodeService(TEST_DATABASE_URL)
+    frozen = {"fetch": {"version": 1, "code_hash": code_hash(CUSTOM_V1)}}
+    job_db, ws = _prepare_job(
+        tmp_path,
+        node,
+        batch_payload={
+            "quality_replay": {"replay_id": "r1"},
+            "node_code_versions": frozen,
+        },
+    )
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V1, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+    codes.save_draft(ws["id"], "test", "fetch", CUSTOM_V2, "user:u1")
+    codes.publish(ws["id"], "test", "fetch")
+    executor = RecordingExecutor("code-default")
+    worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
+    executor.block_event.set()
+
+    _dispatch(tmp_path, worker)
+
     assert executor.contexts[0].node_code == CUSTOM_V1
     worker.stop()
 
@@ -216,8 +249,9 @@ def test_workspace_published_shadows_global_seed(tmp_path: Path) -> None:
 
 
 def test_frozen_pin_resolves_global_seed_version(tmp_path: Path) -> None:
-    """Intake freeze pins the global seed version; dispatch re-reads it
-    scoped (workspace miss → global hit) and verifies the hash."""
+    """A batch pin pointing at the global seed is ignored like any other
+    ordinary-job pin (#115); dispatch resolves the global factory seed as
+    the latest published code (workspace miss → global hit)."""
     node = _local_node("fetch")
     codes = NodeCodeService(TEST_DATABASE_URL)
     assert codes.seed_global("test", "fetch", CUSTOM_V1, "test seed")
@@ -263,14 +297,14 @@ def _publish_v1_v2(ws: dict) -> None:
     codes.publish(ws["id"], "test", "fetch")
 
 
-def test_dispatch_prefers_snapshot_pin_over_stale_batch_pin(tmp_path: Path) -> None:
-    """#109: upgrade_workflow refreshed the job snapshot's node_code_pins to
-    v2 while the intake batch still pins v1; dispatch must run v2."""
+def test_dispatch_runs_latest_published_ignoring_snapshot_pin(tmp_path: Path) -> None:
+    """#115: the job snapshot's node_code_pins are audit/replay state only —
+    an ordinary job runs the latest published code, not the pinned one."""
     node = _local_node("fetch")
     batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
     job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
     _publish_v1_v2(ws)
-    _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V2, 2)})
+    _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V1, 1)})
     executor = RecordingExecutor("code-default")
     worker = _make_worker(tmp_path, job_db, executor, [_make_definition([node])])
     executor.block_event.set()
@@ -281,9 +315,9 @@ def test_dispatch_prefers_snapshot_pin_over_stale_batch_pin(tmp_path: Path) -> N
     worker.stop()
 
 
-def test_dispatch_falls_back_to_batch_pin_when_snapshot_has_no_pins(tmp_path: Path) -> None:
-    """Legacy compat: a snapshot without node_code_pins falls back to the
-    intake batch's node_code_versions."""
+def test_dispatch_ignores_legacy_batch_pin(tmp_path: Path) -> None:
+    """#115: a legacy intake batch pin no longer freezes the job — dispatch
+    resolves the latest published code."""
     node = _local_node("fetch")
     batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
     job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
@@ -295,23 +329,14 @@ def test_dispatch_falls_back_to_batch_pin_when_snapshot_has_no_pins(tmp_path: Pa
 
     _dispatch(tmp_path, worker)
 
-    assert executor.contexts[0].node_code == CUSTOM_V1
+    assert executor.contexts[0].node_code == CUSTOM_V2
     worker.stop()
 
 
-def test_code_worker_claim_prefers_snapshot_pin_over_stale_batch_pin(tmp_path: Path) -> None:
-    """#109, code-Worker claim path: same pin priority as local dispatch."""
-    node = _local_node("fetch")
-    batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
-    job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
-    _publish_v1_v2(ws)
-    fat = _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V2, 2)})
-    # Mirror what evaluate_job_ready puts on the ready candidate's lean job.
-    job = {
-        **fat,
-        "workflow_definition_snapshot_json": "",
-        "node_code_pins": node_code_pins_from_job_snapshot(fat),
-    }
+def _claim_via_code_worker(
+    tmp_path: Path, job_db: JobQueries, ws: dict, job: dict, node: WorkflowNode
+) -> MagicMock:
+    """Run try_claim_code_worker_node against a mocked dispatch; return it."""
     dispatch = MagicMock()
     dispatch.is_in_flight.return_value = False
     dispatch.broker.has_active_request.return_value = False
@@ -337,6 +362,47 @@ def test_code_worker_claim_prefers_snapshot_pin_over_stale_batch_pin(tmp_path: P
         (),
         "test",
     )
-
     assert handled is True
+    return dispatch
+
+
+def test_code_worker_claim_runs_latest_published_ignoring_snapshot_pin(
+    tmp_path: Path,
+) -> None:
+    """#115, code-Worker claim path: same latest-published semantics as local
+    dispatch — the snapshot pin is audit/replay state only."""
+    node = _local_node("fetch")
+    batch_pins = {"fetch": _pin(CUSTOM_V1, 1)}
+    job_db, ws = _prepare_job(tmp_path, node, batch_payload={"node_code_versions": batch_pins})
+    _publish_v1_v2(ws)
+    fat = _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V1, 1)})
+    # Mirror what evaluate_job_ready puts on the ready candidate's lean job.
+    job = {
+        **fat,
+        "workflow_definition_snapshot_json": "",
+        "node_code_pins": node_code_pins_from_job_snapshot(fat),
+    }
+    dispatch = _claim_via_code_worker(tmp_path, job_db, ws, job, node)
+
     assert dispatch.enqueue.call_args.kwargs["code_text"] == CUSTOM_V2
+
+
+def test_code_worker_claim_keeps_frozen_pin_for_quality_replay(tmp_path: Path) -> None:
+    """#115 exception, code-Worker claim path: a quality-replay batch keeps
+    dispatching its frozen pin."""
+    node = _local_node("fetch")
+    batch_payload = {
+        "quality_replay": {"replay_id": "r1"},
+        "node_code_versions": {"fetch": _pin(CUSTOM_V1, 1)},
+    }
+    job_db, ws = _prepare_job(tmp_path, node, batch_payload=batch_payload)
+    _publish_v1_v2(ws)
+    fat = _attach_snapshot(job_db, ws, node, {"fetch": _pin(CUSTOM_V1, 1)})
+    job = {
+        **fat,
+        "workflow_definition_snapshot_json": "",
+        "node_code_pins": node_code_pins_from_job_snapshot(fat),
+    }
+    dispatch = _claim_via_code_worker(tmp_path, job_db, ws, job, node)
+
+    assert dispatch.enqueue.call_args.kwargs["code_text"] == CUSTOM_V1
