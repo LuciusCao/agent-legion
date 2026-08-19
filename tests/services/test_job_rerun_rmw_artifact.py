@@ -7,7 +7,6 @@ import pytest
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_rerun import JobRerunService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revision_format import serialize_definition
 from server.app.storage_paths import make_data_relative, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
@@ -66,7 +65,6 @@ def rerun_service(job_db, settings):
         job_db,
         ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
         settings,
-        WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),
     )
 
