@@ -90,8 +90,14 @@
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以
-  DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变、
-  job intake 冻结代码版本（EXEC-CODE-002），禁止任何运行时 API 增删改 repo 文件。
+  DB 发布文本（`versioned_entities` entity_type `node_code`）为准，经发布流生效、版本不可变。
+  #115 起普通 job 不再冻结代码版本：dispatch 解析当前 published（workspace → 全局
+  factory seed），重新发布对进行中 job 的下一次节点执行生效；intake 的
+  `node_code_versions` 与 revision 快照的 `node_code_pins` 只作审计记录与
+  quality replay 的 pin 来源（只有带 `quality_replay` 标记的 batch 按 frozen pin
+  执行并 fail-closed，EXEC-CODE-002/003）。Agent 定义同理：普通 job 从不 pin
+  Agent 版本，dispatch 始终解析本 workspace 当前 published 定义（只有 quality
+  replay 经 `agent_versions` pin）。禁止任何运行时 API 增删改 repo 文件。
   `workflow_nodes/` 只剩示例
   workflow 的两个 git 评审种子源（启动时 seed-if-absent 发布为 global 作用域 node_code，
   `server/app/services/demo_node_seed.py`）；示例 workflow 的出厂 Agent 模板钉在

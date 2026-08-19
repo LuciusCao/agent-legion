@@ -207,7 +207,8 @@ manifest 拼装、取消检查点）：统一走 `ctx.service_config(...)` /
 ### 7.2 节点代码分发：Host 发送，放弃 git 指纹
 
 - 内置与自定义节点统一走「代码文本 + 内容哈希随任务下发」：Host 在 dispatch
-  时解析代码（内置读 repo 文件，自定义读 DB frozen 版本，解析序同
+  时解析代码（内置读 repo 文件，自定义读 DB；#115 起普通 job 解析当前
+  published 最新版本，只有 quality replay batch 按 frozen pin 执行，解析序同
   `resolve_dispatch_node_code`）。Worker 零 repo 依赖，只需 Python + velites
   二进制。原 git 指纹握手方案（Worker 本地 checkout + 漂移拒领）已放弃。
 - 前提：节点自足——只能 import `workspace_libs` + stdlib（外加 Worker 镜像预装、
