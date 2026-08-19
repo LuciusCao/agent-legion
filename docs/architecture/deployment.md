@@ -36,7 +36,7 @@ scripts/
 开发者启动后端（uvicorn 8000）+ 前端（vite 5173）
     → 前端通过 Vite proxy 访问后端 API
     → 后端通过 PostgreSQL 协调任务，并读写 data/ 目录产物
-    → 流水线产物存入 data/videos/{video_id}/
+    → Job 运行产物存入 data/jobs/<workspace>/<shard>/<job_id>/（详见 ../data-layout.md）
 ```
 
 生产构建时，前端 `npm run build` 输出到 `frontend/dist/`，由 FastAPI 静态文件中间件托管。

@@ -52,8 +52,6 @@ nodes — see `docs/architecture/`.
 - **Real-time console.** React SPA with a live DAG view (React Flow), SSE
   dashboard events, WebSocket agent status, run logs, artifacts, token-usage
   statistics, and failure-category batch rerun.
-- **Local ASR.** Subtitle transcription via whisper.cpp with automatic
-  fallback to SenseVoice when the result is missing, too short, or degenerate.
 - **Secrets vault.** Workspace secrets (`secret: true` binding fields) are
   Fernet-encrypted at rest; configs and snapshots carry only `secret_ref` —
   never plaintext. Instance-level external service credentials (e.g. CMS)
@@ -106,9 +104,7 @@ Key design rules (enforced by architecture checks, see
 
 Prerequisites: Python 3.11+, Node 18+, PostgreSQL 17 (Homebrew:
 `brew install postgresql@17`), [`uv`](https://docs.astral.sh/uv/). The Docker
-stacks and CI also pin PostgreSQL 17 (`postgres:17.5` / `postgres:17`); the
-prod database still runs 15 and its 15→17 upgrade needs a rehearsed
-dump/restore (not done yet) — see
+stacks and CI also pin PostgreSQL 17 — see
 [docs/postgresql-runbook.md](docs/postgresql-runbook.md).
 
 ```bash
@@ -152,7 +148,11 @@ make install-hooks    # install pre-commit / pre-push gates
 `make dev-up` runs the three `dev-*` targets in the background via
 `nohup`, waits for health, and prints each service URL; logs land in
 `data/logs/dev-{backend,frontend,worker}.log`. It is idempotent — re-running
-it skips components already listening on their ports.
+it skips components already listening on their ports. The dev stack binds
+`127.0.0.1:8001` (backend), `:5174` (frontend) and `:8789` (worker console)
+by default so it can coexist with a production instance on the standard
+8000/5173/8787 ports; override with `DEV_BACKEND_PORT` /
+`DEV_FRONTEND_PORT` / `AGENT_WORKER_UI_PORT`.
 
 ### Demo workflow (education_video_problems_generation)
 
@@ -270,8 +270,10 @@ browser runs).
 
 ## Documentation
 
+- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, quality gates, and
+  house rules for contributors
 - [docs/architecture/](docs/architecture/) — module-by-module architecture
-  (backend, frontend, pipeline, deployment, project structure)
+  (backend, frontend, deployment, project structure)
 - [AGENTS.md](AGENTS.md) — operating rules and boundary constraints for AI
   agents working in this repo
 - [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md) — remote
