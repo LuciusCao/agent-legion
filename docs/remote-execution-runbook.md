@@ -231,6 +231,11 @@ flipping the field:
   is missing (neither the bundled `data/bin/<binary>` copy nor PATH), so a
   fleet that claims velites without the binary fails loudly at boot instead
   of stranding claimed executions.
+- **Runtime-owned model discovery.** After binary preflight, the Worker runs
+  each selected runtime's discovery adapter. For velites this is
+  `velites models list --json` backed by `~/.velites/models.json`; only the
+  intersection with the runtime-scoped Worker allowlist is registered. A
+  provider/model absent from that registry is therefore never claimable.
 - **Changing `runtime` changes `definition_hash`.** Queued requests pinned to
   the old hash are failed as stale by the stale-definition sweeper. Migrate
   off-peak with the queue drained; re-submit staled jobs under the normal

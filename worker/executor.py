@@ -30,14 +30,13 @@ from worker.host_client import Client, WorkerAuthError
 from worker.host_status_sync import sync_host_status
 from worker.metrics_cache import WorkerMetricsCache
 from worker.registration_retry import register_from_config
-from worker.runtime_preflight import preflight_error
+from worker.runtime_setup import prepare_runtime_models
 from worker.stale_sweep import SWEEP_INTERVAL_SECONDS, sweep_stale_executions
 from worker.status import ExecutionStatusReporter
 from worker.transfer_controls import claim_availability, load_transfer_controls
 from worker.upload_queue import UploadQueue
 
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
-load_claim_controls = runtime_controls.load_claim_controls
 
 
 def main() -> int:
@@ -52,9 +51,7 @@ def main() -> int:
     config = runtime_controls.load_config(args.config)
     max_concurrency, claim_enabled = runtime_controls.load_claim_controls(args.config)
     max_code_concurrency = runtime_controls.load_code_concurrency(args.config)
-    if error := preflight_error(
-        config.get("runtimes") or [], code_concurrency=max_code_concurrency
-    ):
+    if error := prepare_runtime_models(config, code_concurrency=max_code_concurrency):
         # 退出码 2（supervisor 不自动重启）：声明了无法解析二进制的 runtime
         # （自带副本与 PATH 都没有）是部署缺口，重试无意义，必须人工修复后重启。
         print(error, flush=True)

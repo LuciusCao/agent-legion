@@ -290,7 +290,7 @@ invariants:
         gate: quick
 
   - id: EXEC-AGENTCLAIM-001
-    statement: "An Agent Node may enter running only when a Worker declaring the same node capability and provider/model pair atomically claims it under both the Workspace-level Agent capacity (workspace_agent_capacities; a workspace without a row is unlimited) and the Worker machine-wide capacity; queued requests consume neither capacity and resolve their revision's latest runtime configuration at claim time."
+    statement: "An Agent Node may enter running only when a Worker declaring the same node capability and runtime/provider/model triple atomically claims it under both the Workspace-level Agent capacity (workspace_agent_capacities; a workspace without a row is unlimited) and the Worker machine-wide capacity; queued requests consume neither capacity and resolve their revision's latest runtime configuration at claim time."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -305,7 +305,7 @@ invariants:
         gate: full
 
   - id: EXEC-AGENTDEF-001
-    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Workers separately declare the node capabilities and provider/model pairs they can execute, alongside runtimes, labels, protocol version, and machine-wide max_concurrency."
+    statement: "Agent capability, runtime, skill, tools, and resource requirements are declared by the workspace-scoped Agent Catalog (versioned_entities with workspace_id set, published via AgentService; schema v46 — exactly one published Agent per capability per workspace, no global fallback at resolution); the Host exposes that published catalog so Workflow Studio resolves Agent nodes by capability within the current workspace and edits provider/model overrides against workspace-level defaults without treating Agents as legacy executors. Workers separately declare node capabilities and runtime/provider/model triples derived from each selected runtime's local discovery intersected with its operator allowlist, alongside labels, protocol version, and machine-wide max_concurrency."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -811,7 +811,7 @@ invariants:
         gate: quick
 
   - id: EXEC-RUNTIME-DISPATCH-001
-    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workspace default, else dispatch fails fast before any manifest is frozen; unknown runtimes fail fast the same way."
+    statement: "Agent command construction is pinned by AgentDefinition.runtime: pi builds the pi argv, velites builds the velites argv (the retired workflows.pi.flavor selection layer is gone); provider/model/thinking resolve strictly from the node execution override, then the workspace default, else dispatch fails fast before any manifest is frozen; the provider identity is passed unchanged to the selected runtime, and unknown runtimes fail fast."
     owner: workspace-executor
     risk: high
     evidence:
@@ -824,6 +824,20 @@ invariants:
       - kind: integration
         target: tests/full/test_velites_harness_e2e.py::test_velites_runtime_agent_worker_chain_end_to_end
         gate: full
+
+  # Rust-side registry parsing, credential resolution and CLI output are
+  # covered by velites/tests/models_cli.rs; registry targets allow only tests//scripts/.
+  - id: EXEC-RUNTIME-MODELS-001
+    statement: "Worker model capability is runtime-owned and fail-closed: for every selected agent runtime the Worker invokes that runtime's discovery adapter, intersects the discovered models with the runtime-scoped local allowlist, and registers only effective runtime/provider/model triples (protocol v3); one runtime discovery failure advertises zero models for that runtime without disabling other runtimes or the code pool. velites discovers exclusively from ~/.velites/models.json through `velites models list --json`, and a missing provider/model or unresolved credential is never advertised or called."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: contract
+        target: tests/workers/test_runtime_models.py
+        gate: quick
+      - kind: integration
+        target: tests/services/test_agent_claim_compatibility.py
+        gate: quick
 
   - id: EXEC-PATH-STORAGE-001
     statement: "DB path columns (node_runs.log_path/run_dir/session_dir, jobs.storage_dir) store data-dir-relative paths only — absolute paths are environment-specific and break on deployment shape changes. Every write boundary canonicalizes (job intake, executor claim/finish, agent claim); legacy absolute log_path values frozen in queued manifests are healed at agent claim time without crashing the claim scan; a startup report surfaces any remaining absolute rows and runs on a background thread so lifespan startup/readiness never blocks on the scan (issue #106); reads stay fail-closed via resolve_data_path."

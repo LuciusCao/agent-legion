@@ -103,7 +103,7 @@ def validate_config(raw: dict[str, Any], *, require_identity: bool = True) -> di
         raise ValueError(f"上传并发数必须是 1 到 {MAX_DYNAMIC_CONCURRENCY} 的整数")
     normalized_labels = worker_declarations.normalize_labels(config.get("labels", {}))
     capabilities = worker_declarations.normalize_capabilities(config.get("capabilities", []))
-    models = worker_declarations.normalize_models(config.get("models", []))
+    models = worker_declarations.normalize_models(config.get("models", []), runtimes)
     for field in (
         "poll_interval_seconds",
         "heartbeat_interval_seconds",

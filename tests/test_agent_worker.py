@@ -486,7 +486,7 @@ def test_client_claim_declares_code_capacity() -> None:
     assert seen == [{"worker_id": "w1", "max_concurrency": 70, "max_code_concurrency": 4}]
 
 
-def test_client_registration_declares_protocol_v2_and_code_capacity() -> None:
+def test_client_registration_declares_protocol_v3_and_code_capacity() -> None:
     client = agent_worker.Client("http://unused")
     seen: list[dict] = []
     client.request = lambda *a, **k: (  # type: ignore[method-assign]
@@ -504,7 +504,7 @@ def test_client_registration_declares_protocol_v2_and_code_capacity() -> None:
         "management-token",
     )
 
-    assert seen[0]["protocol_version"] == 2
+    assert seen[0]["protocol_version"] == 3
     assert seen[0]["max_code_concurrency"] == 3
 
 
@@ -574,18 +574,18 @@ def test_load_claim_controls_reads_hot_fields_and_validates_types(tmp_path: Path
     config.update({"max_concurrency": 7, "claim_enabled": False})
     config_path.write_text(json.dumps(config), encoding="utf-8")
 
-    assert agent_worker.load_claim_controls(config_path) == (7, False)
+    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (7, False)
 
     config["max_concurrency"] = True
     config_path.write_text(json.dumps(config), encoding="utf-8")
     with pytest.raises(ValueError, match="最大并发数"):
-        agent_worker.load_claim_controls(config_path)
+        agent_worker.runtime_controls.load_claim_controls(config_path)
 
 
 def test_load_claim_controls_defaults_to_disabled(tmp_path: Path) -> None:
     config_path = _write_main_config(tmp_path)
 
-    assert agent_worker.load_claim_controls(config_path) == (1, False)
+    assert agent_worker.runtime_controls.load_claim_controls(config_path) == (1, False)
 
 
 def _run_main(
