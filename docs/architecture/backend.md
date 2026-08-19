@@ -485,6 +485,7 @@ server/app/
 | LockedSkillSource | BaseModel | repo: str, ref: str, commit: str | app/skills/config.py |
 | SkillsLock | BaseModel | version: str, resolved_at: str | None, skills: dict[str, LockedSkillSource] | app/skills/config.py |
 | AgentStockConfig | BaseModel | enabled: bool, window_seconds: int, horizon_seconds: int, min_stock: int, max... | app/workflow_worker/agent_stock.py |
+| CodeStockConfig | BaseModel | enabled: bool, factor: float, min_stock: int, max_stock: int, refresh_seconds... | app/workflow_worker/code_stock.py |
 
 <!-- END AUTO-GENERATED -->
 
