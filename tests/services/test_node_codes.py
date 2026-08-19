@@ -338,9 +338,13 @@ def test_seed_global_tolerates_concurrent_seed_race(service, monkeypatch) -> Non
 @pytest.mark.no_db
 def test_frozen_dispatch_pin_prefers_snapshot_pins() -> None:
     """#109: the job snapshot's node_code_pins win over the batch payload's
-    node_code_versions (upgrade refreshes only the former)."""
+    node_code_versions (upgrade refreshes only the former) — inside a
+    quality-replay batch, the only place pins still apply (#115)."""
     snapshot_pins = {"n": {"version": 2, "code_hash": "h2"}}
-    batch_payload = {"node_code_versions": {"n": {"version": 1, "code_hash": "h1"}}}
+    batch_payload = {
+        "quality_replay": {"replay_id": "r1"},
+        "node_code_versions": {"n": {"version": 1, "code_hash": "h1"}},
+    }
 
     assert frozen_dispatch_pin(snapshot_pins, batch_payload, "n") == {
         "version": 2,
@@ -350,8 +354,12 @@ def test_frozen_dispatch_pin_prefers_snapshot_pins() -> None:
 
 @pytest.mark.no_db
 def test_frozen_dispatch_pin_falls_back_to_batch_payload() -> None:
-    """Legacy rows (no snapshot pins) keep resolving the intake batch pin."""
-    batch_payload = {"node_code_versions": {"n": {"version": 1, "code_hash": "h1"}}}
+    """Legacy rows (no snapshot pins) keep resolving the intake batch pin —
+    again only within a quality-replay batch (#115)."""
+    batch_payload = {
+        "quality_replay": {"replay_id": "r1"},
+        "node_code_versions": {"n": {"version": 1, "code_hash": "h1"}},
+    }
     expected = {"version": 1, "code_hash": "h1"}
 
     assert frozen_dispatch_pin(None, batch_payload, "n") == expected
@@ -359,3 +367,16 @@ def test_frozen_dispatch_pin_falls_back_to_batch_payload() -> None:
     assert frozen_dispatch_pin({"other": {"version": 9}}, batch_payload, "n") == expected
     assert frozen_dispatch_pin({"n": None}, None, "n") is None
     assert frozen_dispatch_pin(None, None, "n") is None
+
+
+@pytest.mark.no_db
+def test_frozen_dispatch_pin_ignored_for_ordinary_jobs() -> None:
+    """#115: ordinary jobs never pin — dispatch resolves the latest published
+    code; the intake/snapshot pins survive as audit records and the replay
+    pin source only."""
+    snapshot_pins = {"n": {"version": 2, "code_hash": "h2"}}
+    batch_payload = {"node_code_versions": {"n": {"version": 1, "code_hash": "h1"}}}
+
+    assert frozen_dispatch_pin(snapshot_pins, batch_payload, "n") is None
+    assert frozen_dispatch_pin(None, batch_payload, "n") is None
+    assert frozen_dispatch_pin(snapshot_pins, {}, "n") is None

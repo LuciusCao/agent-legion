@@ -31,7 +31,9 @@ class WorkflowRevisionService:
         # time (EXEC-CODE-002, design §4): they are publish-moment state, not
         # part of the workflow definition, so they ride alongside the
         # definition inside the stored definition_json but stay out of
-        # definition_hash (computed from the pure definition above).
+        # definition_hash (computed from the pure definition above). Since
+        # #115 they are an audit record and the quality-replay pin source —
+        # ordinary jobs dispatch the latest published code instead.
         pins = freeze_node_code_versions(
             self.job_db.path,
             self.custom_nodes_enabled,

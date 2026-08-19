@@ -2,11 +2,10 @@
 
 Extracted from ``schedule.py`` to keep it within its size budget. Every
 executor-routed node is code-routed (P-0.5): the code text resolves the
-frozen pin (job snapshot ``node_code_pins`` first — upgrade-aware, #109 —
-then the intake batch's ``node_code_versions`` as the legacy fallback) →
-workspace published → global factory seed (EXEC-CODE-002; #96 retired the
-repo-file path binding), and a node without any published code fails fast as
-a configuration error.
+currently published version (workspace scope first, then the global factory
+seed; EXEC-CODE-002 — since #115 ordinary jobs no longer honor the frozen
+intake/snapshot pins, only quality-replay batches do), and a node without
+any published code fails fast as a configuration error.
 """
 
 from __future__ import annotations
@@ -31,9 +30,10 @@ def resolve_code_node_dispatch(
 ) -> str:
     """Return the node code text, or raise ValueError when unrunnable.
 
-    A frozen job pin fails closed: a hash mismatch raises, and a pinned
-    version missing at BOTH scopes is data corruption and raises too — never
-    silently substituted with the current published code (EXEC-CODE-003).
+    A frozen pin (quality-replay batches only, #115) fails closed: a hash
+    mismatch raises, and a pinned version missing at BOTH scopes is data
+    corruption and raises too — never silently substituted with the current
+    published code (EXEC-CODE-003).
     """
     node_code = resolve_dispatch_node_code(
         worker.job_db.path,
