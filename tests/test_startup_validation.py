@@ -88,10 +88,6 @@ def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch)
 
     monkeypatch.setenv("AGENT_LEGION_OPENCLAW_CWD", "/no/such/cwd")
     config = _minimal_config().format(cwd=tmp_path)
-    config += """
-cms:
-  base_url: http://cms.example.com
-"""
 
     with pytest.raises(StartupValidationError) as exc_info:
         _load_and_validate(tmp_path, monkeypatch, config)
