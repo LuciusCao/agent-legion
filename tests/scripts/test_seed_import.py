@@ -12,12 +12,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from scripts.seed.import_seed import (  # noqa: E402
     parse_workspace_spec,
-    step1_workflows,
-    step2_workspaces,
-    step3_agents,
-    step4_first_revisions,
-    step5_node_codes,
-    step6_skills,
+    step1_workspaces,
+    step2_agents,
+    step3_first_revisions,
+    step4_node_codes,
+    step5_skills,
     verify,
 )
 from scripts.seed.seed_common import sha256_text  # noqa: E402
@@ -123,14 +122,6 @@ class FakeClient:
     def __init__(self, dry_run: bool = False, with_revision: bool = True) -> None:
         self.dry_run = dry_run
         self.actions: list[str] = []
-        self.workflows: dict[str, dict] = {
-            WORKFLOW_KEY: {
-                "label": "Invoices",
-                "description": "",
-                "origin": "registered",
-                "definition": None,
-            }
-        }
         self.workspaces: dict[str, dict] = {
             WORKSPACE_ID: {
                 "id": WORKSPACE_ID,
@@ -152,18 +143,6 @@ class FakeClient:
         raise AssertionError(f"unexpected 404: GET {path}")
 
     def get(self, path: str, *, allow_404: bool = False, params: dict | None = None) -> Any:
-        if path == "/api/workflows":
-            return {
-                "workflows": [
-                    {"key": k, "label": v["label"]} for k, v in sorted(self.workflows.items())
-                ]
-            }
-        if path.startswith("/api/workflows/") and "/workspaces/" not in path:
-            key = path.rsplit("/", 1)[1]
-            row = self.workflows.get(key)
-            if row is None or row["definition"] is None:
-                return self._missing(path, allow_404)
-            return {"workflow": _api_payload(row["definition"])}
         if path == "/api/workspaces":
             return {"workspaces": list(self.workspaces.values())}
         if path.endswith("/workflow-revisions/active"):
@@ -224,14 +203,6 @@ class FakeClient:
 
     def _apply(self, method: str, path: str, body: dict | None, params: dict | None) -> Any:
         body = body or {}
-        if method == "POST" and path == "/api/workflows":
-            self.workflows[body["key"]] = {
-                "label": body["label"],
-                "description": body.get("description", ""),
-                "origin": "registered",
-                "definition": None,
-            }
-            return {"key": body["key"], "label": body["label"], "origin": "registered"}
         if method == "POST" and path == "/api/workspaces":
             workspace_id = body["name"].lower().replace(" ", "_")
             self.workspaces[workspace_id] = {"id": workspace_id, **body}
@@ -312,12 +283,11 @@ def _definition_from_yaml(text: str) -> dict:
 
 def run_all(client: FakeClient, seed: dict, specs: list[str]) -> list[str]:
     failures: list[str] = []
-    step1_workflows(client, seed, failures)
-    bound = step2_workspaces(client, seed, specs, failures)
-    step3_agents(client, seed, bound, failures)
-    step4_first_revisions(client, seed, bound, failures)
-    step5_node_codes(client, seed, bound, failures)
-    step6_skills(client, seed, failures)
+    bound = step1_workspaces(client, seed, specs, failures)
+    step2_agents(client, seed, bound, failures)
+    step3_first_revisions(client, seed, bound, failures)
+    step4_node_codes(client, seed, bound, failures)
+    step5_skills(client, seed, failures)
     return failures + verify(client, seed, bound)
 
 

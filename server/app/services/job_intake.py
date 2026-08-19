@@ -20,7 +20,6 @@ from server.app.services.job_intake_workspace import (
 )
 from server.app.services.node_code_resolution import freeze_node_code_versions
 from server.app.services.node_config import resolve_workflow_node_configs
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import workflow_definition_from_dict
@@ -33,13 +32,11 @@ class JobIntakeService:
         self,
         job_db: JobQueries,
         settings: Settings,
-        workflows: WorkflowCatalogService,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
-        self.workflows = workflows
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
 

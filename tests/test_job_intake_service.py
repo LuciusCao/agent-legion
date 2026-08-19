@@ -4,15 +4,15 @@ from server.app.jobs.storage_layout import job_storage_dir
 from server.app.services import job_intake_chunks
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from tests.helpers import load_builtin_definition
 
 
 def _create_workspace_with_revision(
     job_db, settings, workflow_key="education_video_problems_generation"
 ):
     workspace = job_db.create_workspace("default", default_workflow_key=workflow_key)
-    definition = WorkflowCatalogService(settings).definition(workflow_key)
+    definition = load_builtin_definition(workflow_key)
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     return workspace
 
@@ -20,12 +20,12 @@ def _create_workspace_with_revision(
 @pytest.fixture
 def intake_service(job_db, settings):
     _create_workspace_with_revision(job_db, settings)
-    return JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    return JobIntakeService(job_db, settings)
 
 
 def test_job_intake_creates_direct_id_jobs(job_db, settings):
     _create_workspace_with_revision(job_db, settings)
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
 
     result = service.create_batch(
         "default",
@@ -115,7 +115,7 @@ def test_job_intake_requires_at_least_one_value(intake_service):
 
 def test_job_intake_dedups_across_batches_without_full_row_load(job_db, settings, monkeypatch):
     _create_workspace_with_revision(job_db, settings)
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
 
     def fail_list_jobs(*args, **kwargs):
         raise AssertionError("intake dedup must not materialize full job rows")
@@ -148,7 +148,7 @@ def test_job_intake_dedups_across_batches_without_full_row_load(job_db, settings
 
 def test_list_job_dedup_keys_returns_only_key_columns(job_db, settings):
     _create_workspace_with_revision(job_db, settings)
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
     service.create_batch(
         "default",
         {
@@ -171,7 +171,7 @@ def test_job_intake_dedups_candidates_across_chunk_boundaries(job_db, settings, 
     from server.app.services.job_intake_resolution import candidate
 
     _create_workspace_with_revision(job_db, settings)
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
     monkeypatch.setattr(job_intake_chunks, "INTAKE_RESOLUTION_CHUNK_SIZE", 2)
 
     def fake_expand(entity, input_values, source_kind):
@@ -202,7 +202,7 @@ def test_job_intake_dedups_candidates_across_chunk_boundaries(job_db, settings, 
 
 def test_job_intake_handles_large_batch_across_default_chunks(job_db, settings):
     _create_workspace_with_revision(job_db, settings)
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
     question_ids = [f"Q{i:04d}" for i in range(1200)]
 
     result = service.create_batch(
@@ -233,7 +233,7 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
         "user:u1",
     )
     codes.publish(workspace["id"], "education_video_problems_generation", "intake_knowledge_points")
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
 
     result = service.create_batch(
         "default",
@@ -261,7 +261,7 @@ def test_job_intake_freezes_global_factory_seed_pins(job_db, settings):
     pinned like workspace-published ones (jobs freeze the code they start
     with); agent nodes are never pinned."""
     _create_workspace_with_revision(job_db, settings)
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
 
     result = service.create_batch(
         "default",

@@ -18,6 +18,31 @@ def load_builtin_definition(workflow_key: str) -> WorkflowDefinition:
     return load_builtin_workflow(workflow_key)
 
 
+def publish_builtin_revision(
+    job_db: JobQueries,
+    workspace_id: str,
+    workflow_key: str = "education_video_problems_generation",
+) -> dict[str, Any]:
+    """Publish the built-in definition as the workspace's active revision.
+
+    Mirrors the workspace-create demo seed (ensure_active_revision is
+    seed-if-absent): tests that bypass the API and create the workspace row
+    directly use this so definition resolution (workspace active revision,
+    schema v50) sees the DAG.
+    """
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+
+    return WorkflowRevisionService(job_db).ensure_active_revision(
+        workspace_id, load_builtin_workflow(workflow_key)
+    )
+
+
+def scan_entries(*definitions: WorkflowDefinition) -> list[tuple[str, str, WorkflowDefinition]]:
+    """Hand-built worker scan entries for tests (workspace id is a placeholder:
+    collect falls back to the by-key definition for unknown workspaces)."""
+    return [("test-ws", d.key, d) for d in definitions]
+
+
 def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
     """Compatibility no-op for tests that predate authoritative configuration."""
     del db_or_conn
@@ -77,7 +102,7 @@ def make_workflow_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = ([definition], [])
+    worker._scan_entries = scan_entries(definition)
     return worker, definition
 
 

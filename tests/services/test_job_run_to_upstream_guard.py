@@ -17,8 +17,8 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_execution import JobExecutionService
 from server.app.services.job_operation_error import JobOperationError
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.workflows.registry import load_registered_workflow
+from tests.helpers import publish_builtin_revision
 
 
 @pytest.fixture
@@ -27,7 +27,6 @@ def execution_service(job_db: JobQueries, settings):
         job_db,
         JobArtifactMutationService(settings.jobs_dir),
         ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
-        WorkflowCatalogService(settings),
     )
 
 
@@ -58,6 +57,7 @@ def test_run_to_with_start_rejects_failed_upstream(execution_service, job_db):
     ws = job_db.create_workspace(
         "run-to-guard", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, str(ws["id"]))
     job = _create_job(job_db, str(ws["id"]), "Q-run-to-stuck")
     job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
     job_db.update_job_node(job["id"], "write_script", status="failed")
@@ -86,6 +86,7 @@ def test_run_to_with_start_succeeds_when_upstream_healthy(execution_service, job
     ws = job_db.create_workspace(
         "run-to-guard-ok", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, str(ws["id"]))
     job = _create_job(job_db, str(ws["id"]), "Q-run-to-ok")
     job_db.update_job_node(job["id"], "intake_knowledge_points", status="completed")
     job_db.update_job_node(job["id"], "write_script", status="completed")

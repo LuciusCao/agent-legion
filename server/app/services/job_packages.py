@@ -97,7 +97,8 @@ class JobPackageService(WorkspacePackageClearPackedMixin, WorkspacePackageLifecy
         workspace_packages_dir = self.settings.packages_dir / f"workspace-{workspace_id}"
         workspace_packages_dir.mkdir(parents=True, exist_ok=True)
         artifact_names = workspace_artifact_names(
-            self.settings,
+            self.job_db,
+            workspace_id,
             {str(job.get("workflow_key", "")) for job in eligible_jobs},
             set(WORKSPACE_PACKAGE_FILES),
         )

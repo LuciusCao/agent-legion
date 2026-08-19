@@ -20,13 +20,11 @@ export function useCreateWorkspace() {
   return useMutation({
     mutationFn: ({
       name,
-      workflowKey,
-      workflowMode = 'demo',
+      workflowMode = 'blank',
     }: {
       name: string
-      workflowKey: string
       workflowMode?: 'demo' | 'blank'
-    }) => createWorkspace(name, workflowKey, {}, 'question', {}, workflowMode),
+    }) => createWorkspace(name, workflowMode),
     onSuccess: () =>
       queryClient.invalidateQueries({ queryKey: queryKeys.workspaces() }),
   })

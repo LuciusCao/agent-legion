@@ -5,7 +5,7 @@ import pytest
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_rerun import JobRerunService
-from server.app.services.workflow_catalog import WorkflowCatalogService
+from tests.helpers import publish_builtin_revision
 
 NODE_KEYS = [
     "intake_knowledge_points",
@@ -21,16 +21,17 @@ def rerun_service(job_db, settings):
         job_db,
         ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
         settings,
-        WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),
     )
 
 
 @pytest.fixture
 def workspace(job_db):
-    return job_db.create_workspace(
+    created = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, created["id"])
+    return created
 
 
 def _create_job(job_db, workspace, source_id: str) -> dict[str, Any]:

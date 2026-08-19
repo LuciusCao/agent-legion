@@ -27,12 +27,7 @@ export {
 } from './workspacePackages'
 // prettier-ignore
 export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './workflowRevisions'
-export {
-  fetchWorkflowDefinition,
-  fetchWorkflows,
-  publishWorkflowDraft,
-  validateWorkflowDraft,
-} from './workflows'
+export { publishWorkflowDraft, validateWorkflowDraft } from './workflows'
 export { fetchOpsMetrics } from './metrics'
 // prettier-ignore
 export type { MetricBucket, OpsGranularity, OpsMetricsParams, OpsMetricsResponse } from './metrics'

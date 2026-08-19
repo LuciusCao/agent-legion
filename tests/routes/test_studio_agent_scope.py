@@ -118,7 +118,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
     ("POST", "/api/users"): "require_admin",
     ("PATCH", "/api/users/{user_id}"): "require_admin",
     ("PUT", "/api/workspaces/{workspace_id}/members"): "require_admin",
-    ("POST", "/api/workflows"): "require_admin",
     ("PUT", "/api/admin/token-usage-pricing"): "require_admin",
     ("PUT", "/api/admin/instance-settings"): "require_admin",
     ("PUT", "/api/admin/skill-sources/{skill_key:path}"): "require_admin",
@@ -167,7 +166,6 @@ _EXEMPT_WRITE_ROUTES: dict[tuple[str, str], str] = {
         "PUT",
         "/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft",
     ): "scoped-only tool surface",
-    ("POST", "/api/studio-agent/tools/workflows/register"): "scoped-only tool surface",
     # SPA mount's API 404 catch-all (server/app/spa.py).
     ("POST", "/api/{path:path}"): "API 404 catch-all",
     ("PUT", "/api/{path:path}"): "API 404 catch-all",
@@ -320,25 +318,6 @@ def test_scoped_token_rejected_on_admin_endpoints(client, job_db) -> None:
     for method, url, payload in _ADMIN_ENDPOINTS[:4]:
         admin_response = client.request(method, url, json=payload)
         assert admin_response.status_code == 200, f"{method} {url}"
-
-
-def test_workflow_register_tool_requires_admin_user(client, job_db) -> None:
-    """The studio-agent register tool creates a platform-global workflow key,
-    so it aligns with the human-facing POST /api/workflows (require_admin):
-    scoped tokens minted for non-admin users get 403, admin tokens pass."""
-    member_id = str(job_db.create_user("scope-member", password_hash=None)["id"])
-    member_token = scoped_tokens.mint_scoped_token(job_db, member_id)
-    member_scoped = client.__class__(client.app)
-    member_scoped.headers["authorization"] = f"Bearer {member_token}"
-    url = "/api/studio-agent/tools/workflows/register"
-    payload = {"key": "scope_register_flow", "label": "Scope Register Flow"}
-
-    denied = member_scoped.post(url, json=payload)
-    assert denied.status_code == 403
-
-    scoped = _scoped_client(client, job_db)
-    allowed = scoped.post(url, json=payload)
-    assert allowed.status_code == 200, allowed.text
 
 
 def test_expired_scoped_token_gets_401(client, job_db) -> None:

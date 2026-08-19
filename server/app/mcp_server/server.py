@@ -46,12 +46,6 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
         return client.call("GET", f"/chat-sessions/{config.session_id}/context")
 
     @mcp.tool()
-    def list_workflows() -> str:
-        """List all workflows registered in the Agent Legion catalog (key,
-        label, status). Start here to discover which workflow keys exist."""
-        return client.call("GET", "/workflows")
-
-    @mcp.tool()
     def get_active_workflow(workspace_id: str) -> str:
         """Get the active workflow revision of a workspace, including the full
         definition YAML. Read this before drafting changes so the draft builds
@@ -137,17 +131,6 @@ def create_mcp_server(config: McpServerConfig) -> FastMCP:
                 "skill": skill,
                 "tools": tools or ["read", "write", "bash"],
             },
-        )
-
-    @mcp.tool()
-    def register_workflow(workflow_key: str, label: str, description: str = "") -> str:
-        """Register a new workflow key in the catalog. Registration alone has
-        no scheduling effect: jobs only flow once a human publishes the first
-        workflow revision."""
-        return client.call(
-            "POST",
-            "/workflows/register",
-            {"key": workflow_key, "label": label, "description": description},
         )
 
     return mcp

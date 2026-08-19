@@ -9,8 +9,7 @@ import {
 } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
 import { useCreateWorkspace } from '../hooks/useWorkspaceMutations'
-import { BlankWorkflowCheckbox } from './settings/BlankWorkflowCheckbox'
-import { WorkflowSection } from './settings/WorkflowSection'
+import { SampleTemplateCheckbox } from './settings/SampleTemplateCheckbox'
 
 type Props = {
   open: boolean
@@ -20,29 +19,26 @@ type Props = {
 export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   const createWorkspace = useCreateWorkspace()
   const [name, setName] = useState('')
-  const [workflowKey, setWorkflowKey] = useState('')
-  const [blankMode, setBlankMode] = useState(false)
+  const [fromSample, setFromSample] = useState(false)
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   function handleClose() {
     setName('')
-    setWorkflowKey('')
-    setBlankMode(false)
+    setFromSample(false)
     setError(null)
     onClose()
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!name.trim() || !workflowKey) return
+    if (!name.trim()) return
     setError(null)
     setCreating(true)
     try {
       await createWorkspace.mutateAsync({
         name: name.trim(),
-        workflowKey,
-        workflowMode: blankMode ? 'blank' : 'demo',
+        workflowMode: fromSample ? 'demo' : 'blank',
       })
       handleClose()
     } catch (err) {
@@ -67,11 +63,10 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
             onChange={(e) => setName(e.target.value)}
             required
           />
-          <WorkflowSection
-            workflowKey={workflowKey}
-            onChange={setWorkflowKey}
+          <SampleTemplateCheckbox
+            checked={fromSample}
+            onChange={setFromSample}
           />
-          <BlankWorkflowCheckbox checked={blankMode} onChange={setBlankMode} />
           {error && (
             <div style={{ color: '#ba1a1a', fontSize: 12 }}>{error}</div>
           )}
@@ -84,7 +79,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={creating || !name.trim() || !workflowKey}
+          disabled={creating || !name.trim()}
         >
           {creating ? '创建中…' : WORKSPACE_LABELS.create}
         </Button>

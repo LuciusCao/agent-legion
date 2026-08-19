@@ -72,23 +72,6 @@ def test_get_authoring_guide_is_served_locally(recorded) -> None:
         assert section in text
 
 
-def test_list_workflows_forwards_get(recorded) -> None:
-    server, calls = recorded
-    assert json.loads(_run_tool(server, "list_workflows", {})) == {"echo": True}
-    assert calls == [
-        {
-            "method": "GET",
-            "url": "http://backend.test:9000/api/studio-agent/tools/workflows",
-            "json": None,
-            "headers": {
-                "Authorization": "Bearer scoped-token-1",
-                "Content-Type": "application/json",
-            },
-            "timeout": 30,
-        }
-    ]
-
-
 def test_get_active_workflow(recorded) -> None:
     server, calls = recorded
     _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
@@ -180,14 +163,6 @@ def test_save_agent_definition_draft_default_tools(recorded) -> None:
     }
 
 
-def test_register_workflow_posts_catalog_entry(recorded) -> None:
-    server, calls = recorded
-    _run_tool(server, "register_workflow", {"workflow_key": "wf-new", "label": "New"})
-    assert calls[0]["method"] == "POST"
-    assert calls[0]["url"].endswith("/workflows/register")
-    assert calls[0]["json"] == {"key": "wf-new", "label": "New", "description": ""}
-
-
 def test_get_studio_context_uses_the_bound_session(monkeypatch) -> None:
     calls: list[dict] = []
 
@@ -220,7 +195,7 @@ def test_non_2xx_returns_http_text(monkeypatch) -> None:
 
     monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
     server = create_mcp_server(_CONFIG)
-    text = _run_tool(server, "list_workflows", {})
+    text = _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
     assert text.startswith("HTTP 403: ")
     assert "scoped token" in text
 
@@ -231,7 +206,7 @@ def test_connection_error_returns_text_not_exception(monkeypatch) -> None:
 
     monkeypatch.setattr("server.app.mcp_server.tool_client.requests.request", fake_request)
     server = create_mcp_server(_CONFIG)
-    text = _run_tool(server, "list_workflows", {})
+    text = _run_tool(server, "get_active_workflow", {"workspace_id": "ws-1"})
     assert text.startswith("request failed: ")
     assert "refused" in text
 

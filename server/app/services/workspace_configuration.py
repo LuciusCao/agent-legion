@@ -5,7 +5,10 @@ from server.app.jobs import JobQueries
 from server.app.services.agent_service import published_agent_definitions
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.vault import VaultService
-from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_definitions import (
+    builtin_definition_or_none,
+    workspace_active_definition,
+)
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
 from server.app.services.workspace_node_limit_validation import (
@@ -17,6 +20,7 @@ from server.app.services.workspace_settings_schemas import (
 )
 from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
+from server.app.workflows.builtin_demo import DEMO_WORKFLOW_KEY
 
 
 def _build_intake_config(current: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
@@ -36,12 +40,10 @@ class WorkspaceConfigurationService:
         job_db: JobQueries,
         settings: Settings,
         agent_manager: AgentStatusManager,
-        workflows: WorkflowCatalogService,
     ):
         self.job_db = job_db
         self.settings = settings
         self.agent_manager = agent_manager
-        self.workflows = workflows
 
     def _workspace(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.job_db.get_workspace(workspace_id)
@@ -54,7 +56,7 @@ class WorkspaceConfigurationService:
 
     def _payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         return workspace_settings_payload_with_schemas(
-            self.workflows,
+            self.job_db,
             published_agent_definitions(self.settings.database_url, str(workspace["id"])),
             workspace,
         )
@@ -63,22 +65,28 @@ class WorkspaceConfigurationService:
         return self.job_db.list_workspaces()
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
-        definition = self.workflows.bound_definition(payload["default_workflow_key"])
+        workflow_key = str(payload.get("default_workflow_key") or "").strip()
+        # demo (default): seed the repo-shipped sample template as the active
+        # revision (including its factory Agent templates). With no explicit
+        # key the sample workflow itself is the default. blank: the workspace
+        # starts as an empty canvas; Studio starts from an empty draft and the
+        # first publish creates revision v1 and adopts the workflow key.
+        definition = None
+        if payload.get("workflow_mode", "demo") != "blank":
+            if not workflow_key:
+                workflow_key = DEMO_WORKFLOW_KEY
+            definition = builtin_definition_or_none(workflow_key)
         try:
             workspace = self.job_db.create_workspace(
                 payload["name"],
-                default_workflow_key=payload["default_workflow_key"],
+                default_workflow_key=workflow_key,
                 default_entity=payload.get("default_entity", "question"),
                 resource_config=payload.get("resource_config", {}),
                 intake_config=payload.get("intake_config", {}),
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        # blank workspaces skip the demo seed entirely (active revision and
-        # factory Agent templates); Studio then starts from an empty draft and
-        # the first publish creates revision v1. The default_workflow_key slot
-        # is still recorded so draft/compare/publish keep using it.
-        if definition is not None and payload.get("workflow_mode", "demo") != "blank":
+        if definition is not None:
             WorkflowRevisionService(
                 self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
             ).ensure_active_revision(workspace["id"], definition)
@@ -89,8 +97,6 @@ class WorkspaceConfigurationService:
 
     def update(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._workspace(workspace_id)
-        if payload.get("default_workflow_key") is not None:
-            self.workflows.bound_definition(payload["default_workflow_key"])
         try:
             return self.job_db.update_workspace(
                 workspace_id,
@@ -116,6 +122,18 @@ class WorkspaceConfigurationService:
         workspace = self._workspace(workspace_id)
         return self._payload(workspace)
 
+    def _definition_for_seed(self, workspace_id: str, workflow_key: str):
+        """Active revision definition, falling back to the sample template.
+
+        The builtin fallback keeps the legacy re-seed path: a workspace bound
+        to the sample workflow key gets the factory DAG published on save when
+        it has no active revision yet (ensure_active_revision is
+        seed-if-absent).
+        """
+        return workspace_active_definition(
+            self.job_db, workspace_id, workflow_key
+        ) or builtin_definition_or_none(workflow_key)
+
     def replace_configuration(
         self,
         workspace_id: str,
@@ -129,11 +147,11 @@ class WorkspaceConfigurationService:
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
         if not workflow_key:
             raise InvalidOperationError("Workspace workflow is not set")
-        workflow = self.workflows.bound_definition(workflow_key)
-        # workflow is None for a registered workflow before its first publish;
-        # the validator then runs only the definition-independent checks, and
-        # publish-time validation enforces node correctness — this unblocks
-        # the first-publish chicken-and-egg.
+        workflow = self._definition_for_seed(workspace_id, workflow_key)
+        # workflow is None before the first publish; the validator then runs
+        # only the definition-independent checks, and publish-time validation
+        # enforces node correctness — this unblocks the first-publish
+        # chicken-and-egg.
         validate_workspace_node_limits(
             workflow=workflow,
             node_limits=node_limits,
@@ -208,20 +226,21 @@ class WorkspaceConfigurationService:
                 intake_config=next_intake_config,
             )
         elif section == "workflow":
-            if patch.get("workflowKey") is not None:
-                definition = self.workflows.bound_definition(patch["workflowKey"])
+            workflow_key = patch.get("workflowKey")
             workspace = self.job_db.update_workspace(
                 workspace_id,
-                default_workflow_key=patch.get("workflowKey"),
+                default_workflow_key=workflow_key,
             )
-            if patch.get("workflowKey") is not None and definition is not None:
-                WorkflowRevisionService(
-                    self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
-                ).ensure_active_revision(workspace_id, definition)
+            if workflow_key:
+                definition = self._definition_for_seed(workspace_id, str(workflow_key))
+                if definition is not None:
+                    WorkflowRevisionService(
+                        self.job_db, self.settings.executor_runtime.workflows.custom_nodes_enabled
+                    ).ensure_active_revision(workspace_id, definition)
         elif section == "nodes":
             workspace = update_workspace_node_config(
                 self.job_db,
-                self.workflows,
+                self.settings,
                 published_agent_definitions(self.settings.database_url, workspace_id),
                 workspace,
                 patch,
@@ -252,6 +271,5 @@ class WorkspaceConfigurationService:
             self._workspace(workspace_id),
             workspace_id,
             self.job_db,
-            self.workflows,
             self.settings,
         )

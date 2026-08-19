@@ -28,6 +28,10 @@ def require_draft_workflow_key_match(
     except WorkflowDefinitionError:
         return
     default_key = str(workspace.get("default_workflow_key") or "")
+    # Blank-canvas workspace (schema v50): the key slot is empty until the
+    # first successful publish adopts the draft key (publish_workflow_draft).
+    if not default_key:
+        return
     if draft_key != default_key:
         raise DraftWorkflowKeyMismatchError(
             f"Draft workflow key '{draft_key}' does not match "

@@ -18,6 +18,9 @@ from server.app.db.migrations.scoped_token_origin import migrate_scoped_token_or
 from server.app.db.migrations.studio_chat import migrate_studio_chat_tables
 from server.app.db.migrations.studio_chat_context import migrate_studio_chat_context
 from server.app.db.migrations.versioned_entities import migrate_versioned_entities
+from server.app.db.migrations.workflow_catalog_retirement import (
+    migrate_workflow_catalog_retirement,
+)
 from server.app.db.migrations.workspace_secrets import migrate_workspace_secrets
 
 __all__ = [
@@ -36,6 +39,7 @@ __all__ = [
     "migrate_studio_chat_context",
     "migrate_studio_chat_tables",
     "migrate_versioned_entities",
+    "migrate_workflow_catalog_retirement",
     "migrate_workspace_cms_config",
     "migrate_workspace_secrets",
 ]

@@ -9,9 +9,9 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_execution import JobExecutionService
 from server.app.services.job_operation_error import JobOperationError
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.registry import load_registered_workflow
+from tests.helpers import publish_builtin_revision
 
 
 @pytest.fixture
@@ -20,15 +20,16 @@ def execution_service(job_db: JobQueries, settings):
         job_db,
         JobArtifactMutationService(settings.jobs_dir),
         ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
-        WorkflowCatalogService(settings),
     )
 
 
 @pytest.fixture
 def workspace(job_db: JobQueries):
-    return job_db.create_workspace(
+    created = job_db.create_workspace(
         "exec-ws", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, created["id"])
+    return created
 
 
 def _create_job(

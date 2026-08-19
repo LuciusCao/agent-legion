@@ -16,7 +16,6 @@ from server.app.services.job_patch_queries import JobPatchQueryService
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
@@ -28,7 +27,6 @@ class JobServices:
         self,
         job_db: JobQueries,
         settings: Settings,
-        workflow_catalog: WorkflowCatalogService,
         workspace_executor_configuration: WorkspaceExecutorConfigurationService,
         job_event_manager: JobEventManager | None,
         job_event_buffer: Any | None,
@@ -44,13 +42,10 @@ class JobServices:
         self.intake = JobIntakeService(
             job_db,
             settings,
-            workflow_catalog,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
         )
-        self.queries = JobQueryService(
-            job_db, settings, workflow_catalog, workspace_executor_configuration
-        )
+        self.queries = JobQueryService(job_db, settings, workspace_executor_configuration)
         self.patch_queries = JobPatchQueryService(
             job_db, settings, job_event_buffer=job_event_buffer
         )
@@ -60,7 +55,6 @@ class JobServices:
             job_db,
             self.executor_leases,
             settings,
-            workflow_catalog,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
         )
@@ -74,7 +68,6 @@ class JobServices:
             job_db,
             JobArtifactMutationService(settings.jobs_dir),
             self.executor_leases,
-            workflow_catalog,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
         )

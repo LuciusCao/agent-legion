@@ -96,7 +96,6 @@ vi.mock('../api', () => {
     fetchWorkflowRevisions: vi.fn().mockResolvedValue({
       revisions: [activeRevisionPayload.revision],
     }),
-    fetchWorkflowDefinition: vi.fn(),
     publishWorkflowDraft: vi
       .fn()
       .mockResolvedValue({ valid: true, errors: [] }),

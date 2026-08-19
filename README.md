@@ -12,19 +12,21 @@ points into jobs that draft a teaching video script, review it, generate
 practice questions, review them, and assemble a mock publish payload. It
 runs out of the box with no external services and demonstrates the core
 mechanics (intake → code nodes → agent nodes → review → packaged artifacts).
-Real production workflows are registered into the DB-backed catalog
-(`POST /api/workflows`) and their node code published as custom nodes —
-see `docs/architecture/`.
+Real production workflows are authored per workspace in Studio (draft →
+publish as the workspace's revision) with node code published as custom
+nodes — see `docs/architecture/`.
 
 ## Features
 
-- **Workspace-scoped DAG workflows.** Built-in workflow DAGs are Python
-  constants in `server/app/workflows/builtin.py`; nodes declare only a
+- **Workspace-scoped DAG workflows.** A workflow is the DAG inside one
+  workspace: the built-in sample DAG is a Python constant in
+  `server/app/workflows/builtin.py` (the optional sample-template seed at
+  workspace creation); nodes declare only a
   business `capability` and their
-  input/output artifacts — never how to run them. Known workflow keys live in
-  the DB `workflow_catalog` table: built-ins are seeded from the code
-  constants at startup, and admins register new keys via
-  `POST /api/workflows`. Rerun a single node, run to
+  input/output artifacts — never how to run them. The authoritative
+  definition is the workspace's active `workflow_revisions` row, published
+  from Studio drafts (the global `workflow_catalog` registry was retired at
+  schema v50). Rerun a single node, run to
   a target node, or continue from a pause; downstream staleness is tracked
   automatically.
 - **Batch intake.** Create job batches through

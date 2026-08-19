@@ -42,18 +42,11 @@ describe('useWorkspaceMutations', () => {
     await act(async () => {
       await result.current.mutateAsync({
         name: '新空间',
-        workflowKey: 'question_content',
+        workflowMode: 'demo',
       })
     })
 
-    expect(mockCreateWorkspace).toHaveBeenCalledWith(
-      '新空间',
-      'question_content',
-      {},
-      'question',
-      {},
-      'demo'
-    )
+    expect(mockCreateWorkspace).toHaveBeenCalledWith('新空间', 'demo')
     expect(invalidateSpy).toHaveBeenCalledWith({
       queryKey: queryKeys.workspaces(),
     })
@@ -67,19 +60,23 @@ describe('useWorkspaceMutations', () => {
     await act(async () => {
       await result.current.mutateAsync({
         name: '空白空间',
-        workflowKey: 'question_content',
         workflowMode: 'blank',
       })
     })
 
-    expect(mockCreateWorkspace).toHaveBeenCalledWith(
-      '空白空间',
-      'question_content',
-      {},
-      'question',
-      {},
-      'blank'
-    )
+    expect(mockCreateWorkspace).toHaveBeenCalledWith('空白空间', 'blank')
+  })
+
+  it('createWorkspace defaults to the blank canvas', async () => {
+    const ws = makeWorkspace({ id: 'ws-blank', name: '空白空间' })
+    mockCreateWorkspace.mockResolvedValue(ws)
+    const { result } = renderHook(() => useCreateWorkspace(), { wrapper })
+
+    await act(async () => {
+      await result.current.mutateAsync({ name: '空白空间' })
+    })
+
+    expect(mockCreateWorkspace).toHaveBeenCalledWith('空白空间', 'blank')
   })
 
   it('createWorkspace propagates API errors', async () => {
@@ -89,7 +86,6 @@ describe('useWorkspaceMutations', () => {
     await expect(
       result.current.mutateAsync({
         name: '新空间',
-        workflowKey: 'question_content',
       })
     ).rejects.toThrow('duplicate name')
   })

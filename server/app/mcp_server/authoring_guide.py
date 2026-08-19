@@ -6,8 +6,8 @@ below mirrors real behavior: workflow schema (server/app/workflows/loader.py),
 publish validation (server/app/services/workflow_drafts.py), node-code
 contract (server/app/services/node_codes.py), agent definitions
 (server/app/agent_catalog.py), config schema subset
-(server/app/config_schema.py), catalog key rules
-(server/app/services/workflow_catalog_store.py). Update this text whenever
+(server/app/config_schema.py), workspace-first publishing
+(server/app/services/workflow_draft_publish.py). Update this text whenever
 those behaviors change.
 """
 
@@ -24,7 +24,6 @@ Studio. Nothing you do takes effect in production by itself.
 
 - `get_studio_context()` — which workspace this session is bound to and which
   node the human has selected. Call first; takes no workspace_id.
-- `list_workflows()` — the workflow catalog (key, label, status).
 - `get_active_workflow(workspace_id)` — the live revision + full definition
   YAML. Answers `{"state": "empty", ...}` (HTTP 200) when the workspace has no
   published workflow yet: that is your signal to author from scratch, not an
@@ -40,23 +39,22 @@ Studio. Nothing you do takes effect in production by itself.
   any pending draft (origin: builtin | custom | none).
 - `save_agent_definition_draft(agent_id, capability, runtime, skill, tools)` —
   draft Agent definition for an agent-backed capability.
-- `register_workflow(workflow_key, label, description)` — register a new
-  catalog key. Admin-scoped tokens only (403 otherwise); registration alone
-  schedules nothing.
 
-There is NO tool to create workspaces or to publish anything. The human
-creates the workspace in Studio (picking the default workflow key) and
-publishes workflow revisions, node code, and agent definitions.
+There is NO tool to create workspaces or to publish anything, and no workflow
+registry anymore (schema v50): a workflow is simply the DAG inside one
+workspace. The human creates the workspace in Studio (blank canvas, or
+initialized from the sample template) and publishes workflow revisions, node
+code, and agent definitions.
 
 ## 2. From-scratch flow (empty workspace)
 
 1. `get_studio_context` → learn the bound workspace; `get_active_workflow`
    → `state: "empty"` confirms there is nothing yet.
-2. If the workflow key does not exist yet, `register_workflow` it. Keys must
-   match `^[a-z][a-z0-9_]*$` (max 64 chars). If the workspace's default
-   workflow key already exists in the catalog, skip this.
-3. Draft the definition YAML (section 3). The draft's `key` MUST equal the
-   workspace's default workflow key, or compare/validate reject it.
+2. Pick the workflow key: a workspace with no published revision yet accepts
+   any snake_case key — the first publish adopts the draft's `key` as the
+   workspace default workflow key. If the workspace already has a default
+   key, the draft's `key` MUST equal it, or compare/validate reject it.
+3. Draft the definition YAML (section 3).
 4. `validate_workflow` → fix every reported error. Then `compare_workflow`
    → preview the full shape. Repeat until clean.
 5. For each code node, `save_node_code_draft` with `expected_capability` set
@@ -158,7 +156,7 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
 ## 6. Common errors and what to do
 
 - `Draft workflow key '...' does not match workspace default workflow key
-  '...'` — re-emit the YAML with the workspace's key.
+  '...'` — the workspace already has a key; re-emit the YAML with that key.
 - `no published node code for ...` — publish the node code first
   (`save_node_code_draft` with `expected_capability`, then publish).
 - `Agent capability X must resolve to exactly one published Agent` — draft
@@ -167,8 +165,6 @@ guarded) — never raw socket code. Pass `expected_capability` when saving:
   — fix the code before re-saving.
 - 404 `Unknown workflow node` / `No active workflow revision` on
   save_node_code_draft — you forgot `expected_capability` for a new node.
-- `HTTP 403` on register_workflow — your token's user is not admin; ask the
-  human to register the key.
 - `HTTP 401` — token expired/revoked; ask the human to mint a new one.
 
 Golden rule: validate first, compare second, present third — and let the
