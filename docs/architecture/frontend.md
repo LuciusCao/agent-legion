@@ -24,7 +24,6 @@ frontend/src/
 │   ├── index.ts            # barrel：纯 re-export 各领域模块
 │   ├── core.ts             # 通用请求封装
 │   ├── workspaceApi.ts / jobsApi.ts / jobApi.ts / jobBatchApi.ts / jobSnapshot.ts
-│   ├── jobVideoApi.ts      # Job Detail 视频面板 API
 │   ├── workflows.ts / workflowRevisions.ts / workflowDraftCompare.ts
 │   └── ...                 # executorApi、packages、tokenUsage 等
 ├── generated/

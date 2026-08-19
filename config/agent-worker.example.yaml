@@ -3,8 +3,8 @@
 # 生效（status 的 mounted_config_diverged 会提示分叉）；控制台与 API（除
 # /api/health 外）由状态目录下自动生成的 control_token（0600）保护。
 host_url: http://agent-legion-host:8000
-worker_id: home-mac-mini-1
-name: Home Mac mini
+worker_id: worker-1
+name: Example Worker
 # 可选值：pi / openclaw / velites。声明 velites 需先提供 velites 二进制：
 # 自带副本 <仓库根>/data/bin/velites（优先）或 PATH；Docker worker 镜像已内置。
 runtimes: [velites]
