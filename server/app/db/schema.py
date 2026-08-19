@@ -5,6 +5,7 @@ from pathlib import Path
 from server.app.db.connection import DatabaseDsn
 from server.app.db.migrations import (
     migrate_agent_catalog_cutover,
+    migrate_agent_request_kind_window,
     migrate_agent_workspace_scope,
     migrate_code_executor_bindings,
     migrate_custom_node_codes,
@@ -28,7 +29,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 50
+SCHEMA_VERSION = 51
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -74,8 +75,9 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_agent_workspace_scope(conn)
             migrate_executor_retirement(conn)
             migrate_workflow_catalog_retirement(conn)
+            migrate_agent_request_kind_window(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "workflow_catalog_retirement"),
+                (SCHEMA_VERSION, "agent_request_kind_window"),
             )

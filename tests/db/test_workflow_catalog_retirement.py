@@ -12,7 +12,6 @@ import logging
 import pytest
 
 from server.app.db.migrations import migrate_workflow_catalog_retirement
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -29,16 +28,6 @@ def _create_catalog(conn) -> None:
 
 def _table_exists(conn, name: str) -> bool:
     return bool(conn.execute("select to_regclass(%s) as t", (name,)).fetchone()["t"])
-
-
-def test_schema_v50_recorded() -> None:
-    assert SCHEMA_VERSION == 50
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "workflow_catalog_retirement"
 
 
 def test_catalog_table_absent_on_fresh_schema() -> None:

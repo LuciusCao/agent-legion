@@ -2,10 +2,10 @@
 
 Split out of ``claim.py`` for the file-size budget: the bounded candidate
 query, the fair cross-workspace ordering and the skip-reason accounting
-live here; the per-candidate evaluation lives in ``claim_evaluate.py`` and
-``claim.py`` keeps the Worker-level setup and the scan-round loop.
-Functions take the broker instance as their first argument and must run
-inside the caller's transaction.
+live here; the per-candidate evaluation lives in ``claim_evaluate.py``, the
+per-kind scan-round loop in ``claim_windows.py``, and ``claim.py`` keeps
+the Worker-level setup. Functions take the broker instance as their first
+argument and must run inside the caller's transaction.
 """
 
 from __future__ import annotations
@@ -75,13 +75,16 @@ class ScanState:
     pause_cache: dict[str, bool] = field(default_factory=dict)
 
 
-def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
+def fetch_candidates(conn: Any, per_workspace: int, window: int, kind: str) -> list[Any]:
     # Candidates are read WITHOUT row locks (a bounded per-workspace window
     # keeps small workspaces visible behind a deep queue); only the single
     # row actually being claimed is locked, by PK, in claim_evaluate.
-    # Workspace capacity is agent-only (no workspace_agent_capacities row =
-    # unlimited); kind='code' requests have no workspace-level cap in this
-    # phase, so queued code alone keeps a workspace eligible.
+    # The scan is per kind (issue #125): each kind walks its own window off
+    # the (workspace_id, kind, queued_at) queued-head index (schema v51), so
+    # a queued code flood can no longer crowd agent candidates out of the
+    # shared FIFO window. Workspace capacity is agent-only (no
+    # workspace_agent_capacities row = unlimited); kind='code' requests have
+    # no workspace-level cap in this phase.
     # Eligibility is an EXISTS probe per workspaces row — a `distinct
     # workspace_id` scan would walk the entire queued index on every claim.
     # kind='code' rows skip the versioned_entities hard join (batch 2): their
@@ -94,16 +97,12 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
           from workspaces ws
           left join workspace_agent_capacities w on w.workspace_id=ws.id
           where exists (select 1 from agent_execution_requests q
-                        where q.workspace_id=ws.id and q.state='queued'
-                          and q.kind='code')
-             or (
-               exists (select 1 from agent_execution_requests q
-                       where q.workspace_id=ws.id and q.state='queued')
-               and (select count(*) from agent_execution_requests active
-                    where active.workspace_id=ws.id and active.state='claimed'
-                      and active.kind='agent'
-                   ) < coalesce(w.max_concurrency, 2147483647)
-             )
+                        where q.workspace_id=ws.id and q.state='queued' and q.kind=%s)
+            and (%s = 'code'
+                 or (select count(*) from agent_execution_requests active
+                     where active.workspace_id=ws.id and active.state='claimed'
+                       and active.kind='agent'
+                    ) < coalesce(w.max_concurrency, 2147483647))
         )
         select r.*, wr.definition_json as revision_definition_json
         from eligible_workspaces ws
@@ -123,7 +122,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
            and ((r2.pinned_agent_version is not null
                  and d.version=r2.pinned_agent_version)
                 or (r2.pinned_agent_version is null and d.status='published'))
-          where r2.workspace_id=ws.workspace_id and r2.state='queued'
+          where r2.workspace_id=ws.workspace_id and r2.state='queued' and r2.kind=%s
             and (r2.kind='code' or d.definition_json is not null)
           order by r2.queued_at, r2.execution_id limit %s
         ) r
@@ -131,7 +130,7 @@ def fetch_candidates(conn: Any, per_workspace: int, window: int) -> list[Any]:
         left join workflow_revisions wr on wr.id=j.workflow_revision_id
         order by r.queued_at, r.execution_id limit %s
         """,
-        (per_workspace, window),
+        (kind, kind, kind, per_workspace, window),
     ).fetchall()
     return rows
 

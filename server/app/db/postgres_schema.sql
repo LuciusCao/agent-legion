@@ -300,8 +300,10 @@ create index if not exists idx_agent_requests_claim
   on agent_execution_requests(state, queued_at, execution_id);
 -- Claim candidate lookup walks only the per-workspace queued head (schema
 -- v18); a full queued scan priced every row and made claims O(queue depth).
+-- kind joined the key at schema v51 (issue #125): the claim scan is per
+-- kind, so each kind walks its own (workspace_id, kind) window.
 create index if not exists idx_agent_requests_queued_head
-  on agent_execution_requests(workspace_id, queued_at, execution_id)
+  on agent_execution_requests(workspace_id, kind, queued_at, execution_id)
   where state = 'queued';
 create index if not exists idx_agent_requests_node_active
   on agent_execution_requests(workspace_id, workflow_key, node_key, state);

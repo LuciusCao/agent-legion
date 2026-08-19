@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validat
 
 from server.app.agent_broker.dispatch_pool import AgentEnqueueConfig
 from server.app.workflow_worker.agent_stock import AgentStockConfig
+from server.app.workflow_worker.code_stock import CodeStockConfig
 
 logger = logging.getLogger(__name__)
 
@@ -108,6 +109,7 @@ class ExecutorRuntimeConfig(BaseModel):
     )
     agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
     agent_stock: AgentStockConfig = Field(default_factory=AgentStockConfig)
+    code_stock: CodeStockConfig = Field(default_factory=CodeStockConfig)
     agent_enqueue: AgentEnqueueConfig = Field(default_factory=AgentEnqueueConfig)
 
 
