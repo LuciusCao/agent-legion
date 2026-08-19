@@ -17,6 +17,7 @@ from server.app.routes.job_contracts import (
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.workspace_contracts import WorkspaceRecord
+from server.app.scheduler_wakeup import notify_schedulable_work, reload_worker_scan_entries
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.settings import Settings
@@ -43,15 +44,22 @@ def create_workspaces_router(
 
     @guarded.post("/workspaces", response_model=WorkspaceResponse)
     def create_workspace(
+        request: Request,
         payload: WorkspaceCreateRequest,
         _admin: Annotated[dict[str, Any], Depends(require_admin)],
     ) -> WorkspaceResponse:
         require_workflows_enabled(settings)
         try:
             workspace = service.create(payload.model_dump())
-            return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
         except JobServiceError as exc:
             raise_job_http_error(exc)
+        # A workspace with a workflow key is a worker scan target (schema
+        # v50): hot-reload the scan list so it is picked up without a
+        # restart, then wake the poll loop.
+        if str(workspace.get("default_workflow_key") or ""):
+            reload_worker_scan_entries(request)
+            notify_schedulable_work()
+        return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
 
     @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def get_workspace(workspace_id: str) -> WorkspaceResponse:

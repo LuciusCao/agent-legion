@@ -15,7 +15,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun import JobRerunService
-from server.app.services.workflow_catalog import WorkflowCatalogService
+from tests.helpers import publish_builtin_revision
 
 _NODE_KEYS = ["intake_knowledge_points", "write_script", "review_script"]
 
@@ -26,7 +26,6 @@ def rerun_service(job_db, settings):
         job_db,
         ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
         settings,
-        WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),
     )
 
@@ -85,6 +84,7 @@ def _seed_mixed(job_db, tag: str) -> dict[str, Any]:
     ws = job_db.create_workspace(
         "batch-eq", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, str(ws["id"]))
     ws_id = str(ws["id"])
     ok_a = _create_job(job_db, ws_id, f"{tag}-ok-a")
     ok_b = _create_job(job_db, ws_id, f"{tag}-ok-b")
@@ -95,6 +95,7 @@ def _seed_mixed(job_db, tag: str) -> dict[str, Any]:
     other = job_db.create_workspace(
         f"batch-{tag}-other", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, str(other["id"]))
     foreign = _create_job(job_db, str(other["id"]), f"{tag}-foreign")
 
     for job in (ok_a, ok_b, running, leased, failed_node):
@@ -204,6 +205,7 @@ def test_category_batch_matches_per_job_rerun_targets(rerun_service, job_db) -> 
     ws = job_db.create_workspace(
         "cat-eq", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, str(ws["id"]))
     ws_id = str(ws["id"])
     technical_job = _create_job(job_db, ws_id, "cat-tech")
     business_job = _create_job(job_db, ws_id, "cat-biz")
@@ -278,6 +280,7 @@ def test_batch_rerun_read_queries_bounded(rerun_service, job_db, monkeypatch) ->
     ws = job_db.create_workspace(
         "batch-perf", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, str(ws["id"]))
     ws_id = str(ws["id"])
     batch = job_db.create_batch(
         "education_video_problems_generation",

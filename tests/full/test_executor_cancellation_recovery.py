@@ -10,6 +10,7 @@ import pytest
 from server.app.executors.code import CodeExecutor
 from server.app.jobs import JobQueries
 from server.app.storage_paths import resolve_job_dir
+from tests.helpers import scan_entries
 from tests.helpers.executor_worker import (
     local_node,
     make_definition,
@@ -111,7 +112,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     )
 
     worker.start()
-    worker._scan_entries = ([definition], [])
+    worker._scan_entries = scan_entries(definition)
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:

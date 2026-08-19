@@ -970,40 +970,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/studio-agent/tools/workflows': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Workflow Catalog */
-    get: operations['list_workflow_catalog_api_studio_agent_tools_workflows_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/studio-agent/tools/workflows/register': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Register Workflow */
-    post: operations['register_workflow_api_studio_agent_tools_workflows_register_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/studio-agent/tools/workspaces/{workspace_id}/agent-definitions/{agent_id}/draft': {
     parameters: {
       query?: never
@@ -1201,41 +1167,6 @@ export interface paths {
     }
     /** Get Node Code Template */
     get: operations['get_node_code_template_api_workflow_node_code_template_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/workflows': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Workflows */
-    get: operations['list_workflows_api_workflows_get']
-    put?: never
-    /** Register Workflow */
-    post: operations['register_workflow_api_workflows_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/workflows/{workflow_key}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Workflow */
-    get: operations['get_workflow_api_workflows__workflow_key__get']
     put?: never
     post?: never
     delete?: never
@@ -4208,18 +4139,6 @@ export interface components {
       /** Tokens */
       tokens: components['schemas']['StudioAgentTokenEntry'][]
     }
-    /** StudioAgentWorkflowRegisterRequest */
-    StudioAgentWorkflowRegisterRequest: {
-      /**
-       * Description
-       * @default
-       */
-      description: string
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-    }
     /**
      * StudioChatAgentOption
      * @description Picker view of a registry agent: never exposes command/args.
@@ -5006,36 +4925,6 @@ export interface components {
       outputs: string[]
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
     }
-    /** WorkflowRegisterRequest */
-    WorkflowRegisterRequest: {
-      /**
-       * Description
-       * @default
-       */
-      description: string
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-    }
-    /**
-     * WorkflowRegisteredResponse
-     * @description Registration result: the full catalog entry, provenance included.
-     */
-    WorkflowRegisteredResponse: {
-      /** Description */
-      description: string
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-      /** Origin */
-      origin: string
-    }
-    /** WorkflowResponse */
-    WorkflowResponse: {
-      workflow: components['schemas']['WorkflowDefinitionResponse']
-    }
     /** WorkflowRevisionDetailResponse */
     WorkflowRevisionDetailResponse: {
       /** Definition Yaml */
@@ -5090,22 +4979,10 @@ export interface components {
        */
       severity: 'none' | 'info' | 'warning' | 'breaking'
     }
-    /** WorkflowSummaryResponse */
-    WorkflowSummaryResponse: {
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-    }
     /** WorkflowTerminalResponse */
     WorkflowTerminalResponse: {
       /** Outcome */
       outcome: string
-    }
-    /** WorkflowsListResponse */
-    WorkflowsListResponse: {
-      /** Workflows */
-      workflows: components['schemas']['WorkflowSummaryResponse'][]
     }
     /** WorkspaceAgentRouteEntry */
     WorkspaceAgentRouteEntry: {
@@ -5168,7 +5045,7 @@ export interface components {
        */
       default_entity: string
       /** Default Workflow Key */
-      default_workflow_key: string
+      default_workflow_key?: string | null
       /** Intake Config */
       intake_config?: {
         [key: string]: unknown
@@ -7427,59 +7304,6 @@ export interface operations {
       }
     }
   }
-  list_workflow_catalog_api_studio_agent_tools_workflows_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowsListResponse']
-        }
-      }
-    }
-  }
-  register_workflow_api_studio_agent_tools_workflows_register_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['StudioAgentWorkflowRegisterRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowRegisteredResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
   save_agent_definition_draft_api_studio_agent_tools_workspaces__workspace_id__agent_definitions__agent_id__draft_put: {
     parameters: {
       query?: never
@@ -7884,90 +7708,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowNodeCodeTemplateResponse']
-        }
-      }
-    }
-  }
-  list_workflows_api_workflows_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowsListResponse']
-        }
-      }
-    }
-  }
-  register_workflow_api_workflows_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WorkflowRegisterRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowRegisteredResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_workflow_api_workflows__workflow_key__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workflow_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkflowResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

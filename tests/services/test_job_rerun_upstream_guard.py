@@ -17,7 +17,7 @@ from server.app.services._job_rerun_preview import batch_rerun_preview
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun import JobRerunService
-from server.app.services.workflow_catalog import WorkflowCatalogService
+from tests.helpers import publish_builtin_revision
 
 _NODE_KEYS = ["intake_knowledge_points", "write_script", "review_script", "publish_content"]
 
@@ -28,7 +28,6 @@ def rerun_service(job_db, settings):
         job_db,
         ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
         settings,
-        WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),
     )
 
@@ -55,6 +54,7 @@ def _seed_workspace(job_db) -> str:
     ws = job_db.create_workspace(
         "upstream-guard", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, str(ws["id"]))
     return str(ws["id"])
 
 

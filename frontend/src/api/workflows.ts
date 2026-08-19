@@ -1,19 +1,5 @@
 import { api } from './core'
-import type {
-  WorkflowDraftValidationResponse,
-  WorkflowResponse,
-  WorkflowsListResponse,
-} from '../types'
-
-export async function fetchWorkflows(): Promise<WorkflowsListResponse> {
-  return api('/api/workflows')
-}
-
-export async function fetchWorkflowDefinition(
-  workflowKey: string
-): Promise<WorkflowResponse> {
-  return api(`/api/workflows/${encodeURIComponent(workflowKey)}`)
-}
+import type { WorkflowDraftValidationResponse } from '../types'
 
 export async function validateWorkflowDraft(
   workspaceId: string,

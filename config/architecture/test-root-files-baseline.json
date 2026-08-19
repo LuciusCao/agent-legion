@@ -120,7 +120,6 @@
     "tests/test_worker_host_client.py",
     "tests/test_worker_metrics_cache.py",
     "tests/test_worker_upload_queue.py",
-    "tests/test_workflow_catalog_service.py",
     "tests/test_workflow_definition.py",
     "tests/test_workflow_definition_v2.py",
     "tests/test_workflow_draft_compare.py",

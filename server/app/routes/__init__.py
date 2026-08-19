@@ -18,7 +18,6 @@ from ..services.quality_labels import QualityLabelService
 from ..services.quality_replays import QualityReplayService
 from ..services.quality_sampling import QualitySamplingService
 from ..services.quality_stats import QualityStatsService
-from ..services.workflow_catalog import WorkflowCatalogService
 from ..services.workspace_configuration import WorkspaceConfigurationService
 from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
 from ..settings import Settings
@@ -45,8 +44,6 @@ from .studio_agents_admin import create_studio_agents_admin_router
 from .studio_chat import create_studio_chat_router
 from .token_usage_pricing import create_token_usage_pricing_router
 from .worker import create_worker_router
-from .workflow_catalog import create_workflow_catalog_router
-from .workflow_catalog_admin import create_workflow_catalog_admin_router
 from .workflow_node_codes import create_workflow_node_codes_router
 from .workflow_revisions import create_workflow_revisions_router
 from .workspace_agent_routes import create_workspace_agent_routes_router
@@ -62,7 +59,6 @@ def create_router(
     agent_manager: AgentStatusManager,
     workspace_worker_control: WorkspaceWorkerControl | None = None,
     *,
-    workflow_catalog: WorkflowCatalogService,
     executor_catalog: ExecutorCatalogService,
     workspace_executor_configuration: WorkspaceExecutorConfigurationService,
     workspace_configuration: WorkspaceConfigurationService,
@@ -116,8 +112,6 @@ def create_router(
         secured(create_quality_router(quality_sampling, quality_labels, quality_stats))
     if quality_replays is not None:
         secured(create_quality_replays_router(quality_replays))
-    secured(create_workflow_catalog_router(workflow_catalog, settings))
-    secured(create_workflow_catalog_admin_router(workflow_catalog, settings))
     workspaces_router = create_workspaces_router(
         workspace_configuration, settings, job_event_manager=job_event_manager
     )
@@ -145,7 +139,6 @@ def create_router(
         job_group,
         job_db,
         settings,
-        workflow_catalog,
         workspace_executor_configuration,
         job_event_manager,
         job_event_buffer,

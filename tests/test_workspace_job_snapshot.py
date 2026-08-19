@@ -1,9 +1,13 @@
+from tests.helpers import publish_builtin_revision
+
+
 def test_workspace_jobs_snapshot_returns_jobs_stats_and_revision(client_factory):
     with client_factory(workflows_enabled=True) as client:
         job_db = client.app.state.job_db
         workspace = job_db.create_workspace(
             "snapshot-ws", default_workflow_key="education_video_problems_generation"
         )
+        publish_builtin_revision(job_db, workspace["id"])
         job_db.create_job(
             workspace_id=workspace["id"],
             workflow_key="education_video_problems_generation",
@@ -37,6 +41,7 @@ def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
         workspace = job_db.create_workspace(
             "cursor-ws", default_workflow_key="education_video_problems_generation"
         )
+        publish_builtin_revision(job_db, workspace["id"])
         created = []
         for i in range(5):
             job = job_db.create_job(
@@ -86,6 +91,7 @@ def test_workspace_jobs_snapshot_returns_newest_first(client_factory):
         workspace = job_db.create_workspace(
             "order-ws", default_workflow_key="education_video_problems_generation"
         )
+        publish_builtin_revision(job_db, workspace["id"])
         created = []
         for i in range(3):
             job = job_db.create_job(
@@ -118,6 +124,7 @@ def test_workspace_jobs_snapshot_batches_active_revision_lookup(client_factory, 
         workspace = job_db.create_workspace(
             "batch-ws", default_workflow_key="education_video_problems_generation"
         )
+        publish_builtin_revision(job_db, workspace["id"])
         for i in range(3):
             job_db.create_job(
                 workspace_id=workspace["id"],
