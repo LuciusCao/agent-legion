@@ -62,6 +62,7 @@ describe('jobStore', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
       batchRunToLoading: false,
       continueLoading: false,

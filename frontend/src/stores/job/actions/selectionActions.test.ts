@@ -38,6 +38,7 @@ function resetSelection() {
       search: '',
       workflowVersion: null,
       activeNodeKey: null,
+      paused: null,
     },
   })
 }
@@ -58,6 +59,7 @@ describe('selectionModeActions', () => {
         search: 'abc',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
 
@@ -71,6 +73,7 @@ describe('selectionModeActions', () => {
       workflow_version: null,
       workflow_version_none: false,
       active_node_key: null,
+      paused: null,
     })
     expect(state.selectionCount).toBe(42)
     expect(state.selectedIds).toEqual(new Set())
@@ -84,6 +87,7 @@ describe('selectionModeActions', () => {
         search: '',
         workflowVersion: 'none',
         activeNodeKey: null,
+        paused: null,
       },
     })
 
@@ -120,6 +124,7 @@ describe('selectionModeActions', () => {
         search: 'abc',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
 

@@ -152,6 +152,14 @@ export function JobListItem({
             totalNodes={job.total_nodes ?? 0}
           />
           {job.packed ? <span className={styles.packed}>已打包</span> : null}
+          {job.execution_control?.paused && job.status !== 'paused' ? (
+            <span
+              className={styles.pausedBadge}
+              title={job.execution_control.pause_reason || undefined}
+            >
+              已暂停
+            </span>
+          ) : null}
           <span className={`${styles.badge} ${statusClass(status)}`}>
             {JOB_STATUS_LABELS[job.status] || job.status}
           </span>

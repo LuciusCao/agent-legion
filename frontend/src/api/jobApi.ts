@@ -78,5 +78,6 @@ export {
   batchRunToJobs,
   packageJobs,
 } from './jobBatchApi'
+export { batchPauseJobs, batchResumeJobs } from './jobBatchPauseApi'
 export { previewBatchRerunJobs } from './jobRerunPreviewApi'
 export { clearJobsPackedStatus } from './jobClearPackedApi'

@@ -13,6 +13,7 @@ from server.app.services.job_execution import JobExecutionService
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.job_logs import JobLogService
 from server.app.services.job_patch_queries import JobPatchQueryService
+from server.app.services.job_pause import JobPauseService
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.job_workflow_upgrade import JobWorkflowUpgradeService
@@ -56,6 +57,11 @@ class JobServices:
         )
         self.artifacts = JobArtifactService(job_db)
         self.logs = JobLogService(settings, job_db)
+        self.pause = JobPauseService(
+            job_db,
+            job_event_manager=job_event_manager,
+            job_event_buffer=job_event_buffer,
+        )
         self.rerun = JobRerunService(
             job_db,
             self.executor_leases,

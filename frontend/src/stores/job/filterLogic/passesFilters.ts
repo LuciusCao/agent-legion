@@ -29,5 +29,11 @@ export function passesFilters(
   if (exclude !== 'search' && !matchesSearch(job, config.search)) {
     return false
   }
+  if (
+    config.paused !== null &&
+    (job.execution_control?.paused ?? false) !== config.paused
+  ) {
+    return false
+  }
   return true
 }

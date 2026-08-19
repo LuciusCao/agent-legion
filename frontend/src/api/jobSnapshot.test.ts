@@ -70,10 +70,12 @@ describe('appendFilterParams', () => {
       workflow_version: 0,
       packed: 0,
       workflow_version_none: false,
+      paused: false,
     })
 
     expect(params.get('workflow_version')).toBe('0')
     expect(params.get('packed')).toBe('0')
+    expect(params.get('paused')).toBe('false')
   })
 
   it('sets the none flag and node key only when present', () => {
