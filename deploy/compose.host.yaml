@@ -63,7 +63,7 @@ services:
     cap_add:
       - SYS_ADMIN
     volumes:
-      - ./worker.company.example.yaml:/etc/agent-legion/worker.yaml:ro
+      - ./worker.host.example.yaml:/etc/agent-legion/worker.yaml:ro
       - ${PI_CONFIG_DIR:-../pi-config}:/root/.pi/agent:ro
       - worker-data:/var/lib/agent-legion-worker
       - worker-control:/var/lib/agent-legion-worker-control
