@@ -64,6 +64,8 @@ _EFFECTING_WRITE_ROUTES: list[tuple[str, str, dict | None]] = [
     ("POST", "/api/jobs/{job_id}/continue", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-rerun", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/batch-run-to", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-pause", None),
+    ("POST", "/api/workspaces/{workspace_id}/jobs/batch-resume", None),
     ("POST", "/api/workspaces/{workspace_id}/jobs/rerun-by-failure", None),
     ("POST", "/api/workspaces/{workspace_id}/job-batches", None),
     ("POST", "/api/jobs/{job_id}/upgrade-workflow", None),

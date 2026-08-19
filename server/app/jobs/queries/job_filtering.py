@@ -40,6 +40,7 @@ class JobListFilter:
     workflow_version_none: bool = False
     active_node_key: str | None = None
     packed: int | None = None
+    paused: bool | None = None
 
 
 def _escape_like(term: str) -> str:
@@ -73,6 +74,9 @@ def filter_clauses(f: JobListFilter) -> tuple[list[str], list[Any]]:
     if f.packed is not None:
         clauses.append("packed = %s")
         params.append(f.packed)
+    if f.paused is not None:
+        clauses.append("execution_paused = %s")
+        params.append(1 if f.paused else 0)
     return clauses, params
 
 

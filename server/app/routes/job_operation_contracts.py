@@ -9,7 +9,9 @@ from server.app.routes.job_batch_filter_contracts import JobSelectionMixin
 
 class JobMutationResultResponse(BaseModel):
     job_id: str
-    operation: Literal["rerun", "run_to", "continue", "delete", "package", "upgrade_workflow"]
+    operation: Literal[
+        "rerun", "run_to", "continue", "delete", "package", "upgrade_workflow", "pause", "resume"
+    ]
     status: Literal["succeeded", "skipped", "failed"]
     node_key: str | None = None
     reason_code: str | None = None
@@ -37,6 +39,14 @@ class JobBatchRerunRequest(JobSelectionMixin):
 
 # Deletion is a distinct mutation contract and may diverge in validation rules.
 class BatchJobIdsRequest(JobSelectionMixin):
+    pass
+
+
+class BatchPauseJobsRequest(JobSelectionMixin):
+    reason: str | None = None
+
+
+class BatchResumeJobsRequest(JobSelectionMixin):
     pass
 
 

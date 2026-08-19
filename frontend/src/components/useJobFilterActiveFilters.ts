@@ -34,6 +34,10 @@ export function useJobFilterActiveFilters(
           label: `搜索: "${filterConfig.search}"`,
           onDelete: () => onChange({ search: '' }),
         },
+        filterConfig.paused !== null && {
+          label: filterConfig.paused ? '暂停: 已暂停' : '暂停: 未暂停',
+          onDelete: () => onChange({ paused: null }),
+        },
       ].filter(Boolean) as JobFilterActiveFilter[],
     [filterConfig, nodeOptions, onChange]
   )

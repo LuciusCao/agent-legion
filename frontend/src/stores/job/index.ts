@@ -9,6 +9,7 @@ import { paginationActions } from './actions/paginationActions'
 import { selectionActions } from './actions/selectionActions'
 import { selectionModeActions } from './actions/selectionModeActions'
 import { batchActions } from './actions/batchActions'
+import { pauseActions } from './actions/pauseActions'
 import { rerunByFailureActions } from './actions/rerunByFailureActions'
 import { clearPackedActions } from './actions/clearPackedActions'
 import { upgradeActions } from './actions/upgradeActions'
@@ -31,6 +32,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   ...selectionActions(set, get),
   ...selectionModeActions(set, get),
   ...batchActions(set, get),
+  ...pauseActions(set, get),
   ...rerunByFailureActions(set, get),
   ...clearPackedActions(set, get),
   ...upgradeActions(set, get),

@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from server.app.db.connection import DatabaseConnection
 from server.app.jobs.atomic_mutations import resume_job as resume_job_mutation
+from server.app.jobs.execution_pause import JobExecutionPauseMixin
 
 
 class _JobQueries(Protocol):
@@ -31,7 +32,7 @@ def _validate_execution_mode(mode: str) -> str:
     return clean
 
 
-class JobExecutionControlMixin:
+class JobExecutionControlMixin(JobExecutionPauseMixin):
     """Persistence helpers for workspace job execution-control state.
 
     This mixin is consumed by ``JobQueries``; it relies on ``self.connect()``

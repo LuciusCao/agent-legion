@@ -1434,6 +1434,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/batch-pause': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Pause Workspace Jobs */
+    post: operations['batch_pause_workspace_jobs_api_workspaces__workspace_id__jobs_batch_pause_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/batch-rerun': {
     parameters: {
       query?: never
@@ -1462,6 +1479,23 @@ export interface paths {
     put?: never
     /** Preview Batch Rerun Workspace Jobs */
     post: operations['preview_batch_rerun_workspace_jobs_api_workspaces__workspace_id__jobs_batch_rerun_preview_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/batch-resume': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Resume Workspace Jobs */
+    post: operations['batch_resume_workspace_jobs_api_workspaces__workspace_id__jobs_batch_resume_post']
     delete?: never
     options?: never
     head?: never
@@ -2639,12 +2673,30 @@ export interface components {
       /** Results */
       results: components['schemas']['JobMutationResultResponse'][]
     }
+    /** BatchPauseJobsRequest */
+    BatchPauseJobsRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
+      /** Job Ids */
+      job_ids?: string[] | null
+      /** Reason */
+      reason?: string | null
+    }
     /** BatchRerunPreviewResponse */
     BatchRerunPreviewResponse: {
       /** Eligible Count */
       eligible_count: number
       /** Total Count */
       total_count: number
+    }
+    /** BatchResumeJobsRequest */
+    BatchResumeJobsRequest: {
+      /** Exclude Ids */
+      exclude_ids?: string[]
+      filter?: components['schemas']['JobFilterPayload'] | null
+      /** Job Ids */
+      job_ids?: string[] | null
     }
     /** BatchRunToRequest */
     BatchRunToRequest: {
@@ -3084,6 +3136,8 @@ export interface components {
       active_node_key?: string | null
       /** Packed */
       packed?: number | null
+      /** Paused */
+      paused?: boolean | null
       /** Search */
       search?: string | null
       /** Status */
@@ -3128,6 +3182,8 @@ export interface components {
         | 'delete'
         | 'package'
         | 'upgrade_workflow'
+        | 'pause'
+        | 'resume'
       /** Reason Code */
       reason_code?: string | null
       /**
@@ -3233,6 +3289,8 @@ export interface components {
         | 'delete'
         | 'package'
         | 'upgrade_workflow'
+        | 'pause'
+        | 'resume'
       /** Reason Code */
       reason_code?: string | null
       /** Rerun Nodes */
@@ -8363,6 +8421,41 @@ export interface operations {
       }
     }
   }
+  batch_pause_workspace_jobs_api_workspaces__workspace_id__jobs_batch_pause_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchPauseJobsRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   batch_rerun_workspace_jobs_api_workspaces__workspace_id__jobs_batch_rerun_post: {
     parameters: {
       query?: never
@@ -8420,6 +8513,41 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['BatchRerunPreviewResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  batch_resume_workspace_jobs_api_workspaces__workspace_id__jobs_batch_resume_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['BatchResumeJobsRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
       /** @description Validation Error */
@@ -8547,6 +8675,7 @@ export interface operations {
         workflow_version_none?: boolean
         active_node_key?: string | null
         packed?: number | null
+        paused?: boolean | null
       }
       header?: never
       path: {
@@ -8657,6 +8786,7 @@ export interface operations {
         workflow_version_none?: boolean
         active_node_key?: string | null
         packed?: number | null
+        paused?: boolean | null
       }
       header?: never
       path: {

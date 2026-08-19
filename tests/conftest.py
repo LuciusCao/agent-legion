@@ -204,6 +204,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/jobs/test_failed_node_runs.py",
         "tests/routes/jobs/test_intake_modes.py",
         "tests/routes/jobs/test_job_batches.py",
+        "tests/routes/jobs/test_job_batch_pause.py",
         "tests/routes/jobs/test_job_lifecycle.py",
         "tests/routes/jobs/test_job_rerun.py",
         "tests/routes/jobs/test_job_run_to.py",

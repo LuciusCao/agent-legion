@@ -10,4 +10,5 @@ export interface JobFilterConfig {
   search: string
   workflowVersion: number | 'none' | null
   activeNodeKey: string | null
+  paused: boolean | null
 }

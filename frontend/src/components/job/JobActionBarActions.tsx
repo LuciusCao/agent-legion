@@ -3,9 +3,9 @@ import { Button, Tooltip } from '@mui/material'
 import type { JobActionBarProps } from './JobActionBar'
 import { JobRerunDialog } from '../JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
-import { JobActionBarUpgrade } from './JobActionBarUpgrade'
 import { JobAllMatchingRerunDialog } from './JobAllMatchingRerunDialog'
 import { JobAllMatchingUpgradeDialog } from './JobAllMatchingUpgradeDialog'
+import { JobActionBarBatchButtons } from './JobActionBarBatchButtons'
 import {
   canContinueJob,
   computeActionDisabled,
@@ -48,6 +48,8 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
     onPackage,
     onClearPacked,
     onDelete,
+    onPause,
+    onResume,
     onUpgradeWorkflow,
     onExitSelectMode,
     itemLabel = '任务',
@@ -75,23 +77,19 @@ export function JobActionBarActions(props: JobActionBarActionsProps) {
   return (
     <>
       <div className={styles.actions}>
-        {isBatch &&
-          (allMatching ? (
-            <Button
-              variant="outlined"
-              onClick={() => setUpgradeOpen(true)}
-              disabled={loading || allMatchingCount === 0 || !onUpgradeWorkflow}
-            >
-              升级 workflow
-            </Button>
-          ) : (
-            <JobActionBarUpgrade
-              jobs={jobs}
-              itemLabel={itemLabel}
-              loading={loading}
-              onUpgradeWorkflow={onUpgradeWorkflow}
-            />
-          ))}
+        {isBatch && (
+          <JobActionBarBatchButtons
+            allMatching={allMatching}
+            allMatchingCount={allMatchingCount ?? 0}
+            jobs={jobs}
+            itemLabel={itemLabel}
+            loading={loading}
+            onOpenUpgrade={() => setUpgradeOpen(true)}
+            onUpgradeWorkflow={onUpgradeWorkflow}
+            onPause={onPause}
+            onResume={onResume}
+          />
+        )}
         <Button
           variant="outlined"
           onClick={() => setRerunOpen(true)}
