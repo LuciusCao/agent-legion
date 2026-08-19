@@ -12,8 +12,9 @@
   `~/.agents/skills/agent-legion/education-video-problems-generation/`
   并逐个 `git init` + 打 tag `v1.0.0`（幂等，不覆盖已有改动）。
 
-示例 DAG（`server/app/workflows/builtin.py` 的
-`education_video_problems_generation`）：
+示例 DAG（`server/app/workflows/builtin_demo.py` 的
+`education_video_problems_generation`；`server/app/workflows/builtin.py`
+仅 re-export）：
 intake_knowledge_points → write_script → review_script →
 generate_questions → review_questions → publish_content（模拟入库，
 不发网络请求）。

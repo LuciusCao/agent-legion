@@ -10,7 +10,7 @@ Agent Legion 前端是 React 18 + TypeScript SPA，使用 Vite 构建。UI 基�
 - Job 列表、Job Detail（含 DAG、产物、日志、视频播放器）
 - Workflow Studio（工作流可视化编辑）
 - Token Usage 用量统计
-- Settings（Workspace / 执行器 / 全局设置）
+- Settings（Workspace / 全局设置 / Skill 源 / 外部服务连接等）
 - 通过 SSE 接收后端事件，通过 WebSocket 接收 Agent 状态
 
 ## Directory Structure
@@ -29,7 +29,10 @@ frontend/src/
 ├── generated/
 │   └── api.ts              # OpenAPI 生成的传输类型
 ├── pages/                  # 路由级页面
+│   ├── LoginPage.tsx
+│   ├── SetupPage.tsx
 │   ├── DashboardPage.tsx
+│   ├── MonitoringPage.tsx
 │   ├── WorkspaceMainPage.tsx
 │   ├── JobDetailPage.tsx
 │   ├── SettingsPage.tsx
@@ -53,8 +56,7 @@ frontend/src/
 │   ├── TimelineStrip.tsx         # 视频章节时间轴
 │   ├── RichText.tsx              # CMS 富文本（HTML + LaTeX）统一渲染
 │   └── ...
-├── stores/                 # Zustand 状态管理
-│   ├── workspaceStore.ts
+├── stores/                 # Zustand 客户端状态管理
 │   ├── jobStore.ts         # job/ 家族唯一对外入口（shim re-export）
 │   ├── job/                # Job 领域子状态
 │   ├── setting/
@@ -77,19 +79,20 @@ frontend/src/
 ## Data Flow
 
 ```
-用户交互 → Zustand Store → api/ 模块 → FastAPI 后端
+用户交互 → React Query / Zustand Store → api/ 模块 → FastAPI 后端
               ↓
         组件重新渲染 ← SSE / WebSocket 事件推送
 ```
 
+- 服务端状态（workspace、job、workflow 等）优先通过 **React Query**（`@tanstack/react-query`）获取与缓存，Zustand 保留客户端 UI 状态。
 - Workspace / Job 状态变更通过 SSE 推送。
 - Agent 状态通过 WebSocket (`/api/agents`) 推送。
 - 前端 `api/` 层负责按领域组织请求，经 `api/index.ts` barrel 统一导出。
 
 ## Key Decisions
 
-- 使用 Zustand 而非 Redux，降低样板代码。
-- 状态按领域拆分（`workspaceStore`、`jobStore`、`job/*`、`setting/*` 等），避免单文件过大。
+- 使用 Zustand 管理客户端 UI 状态，服务端状态通过 React Query 获取、缓存与失效，降低样板代码。
+- 状态按领域拆分（`jobStore`、`job/*`、`setting/*` 等），避免单文件过大。
 - 使用 MUI v6 组件库 + CSS Modules 管理局部样式。
 - 路由定义集中在 `AppRoutes.tsx`；`App.tsx` 只负责渲染 `AppRoutes`、全局 Toast 与 agents WebSocket 连接，应用级 Provider（如 ThemeProvider）在 `main.tsx`。
 - 前端传输类型必须从 `frontend/src/generated/api.ts` 派生，禁止手写重复类型。
@@ -124,6 +127,7 @@ frontend/src/
 - TypeScript 5.8
 - Vite
 - React Router v6
+- React Query (`@tanstack/react-query`)
 - Zustand
 - `@mui/material` (MUI v6)
 - `@xyflow/react` (React Flow)

@@ -39,7 +39,7 @@ node_code（`services/node_codes.py`）→ `CodeExecutor.execute`
 
 | | 内置节点 | 自定义节点 |
 |---|---|---|
-| 代码来源 | `workflow_nodes/*.py`（git，EXEC-CODE-001） | DB `workflow_node_codes`（EXEC-CODE-002） |
+| 代码来源 | `workflow_nodes/*.py`（git，EXEC-CODE-001） | DB `versioned_entities`（entity_type `node_code`，EXEC-CODE-002） |
 | 隔离 | 裸 multiprocessing 子进程 | velites `sandbox wrap`，fail-closed（EXEC-CODE-003） |
 | runtime | 含 `_job_db_path/_jobs_dir`，子进程重建 `job_db` | 剥离 DB 句柄，父进程预取 `job_batch` |
 
@@ -124,8 +124,7 @@ def run(ctx: NodeContext) -> None:
   `HttpServiceError(auth_failure=...)` 基类（节点子类化以保持业务错误类名与
   失败分类语义）、`bearer_headers` / `config_token` / `require_configured_url` /
   `fetch_json`（GET JSON，401/403 → auth_failure）/ `check_in_band_error`
-  （in-band 错误码，auth code 集合由节点传入）/ `validate_download_url`
-  （SSRF 守卫）/ `download_file`（content-type 白名单 + 流式落盘 + 半成品清理）。
+  （in-band 错误码，auth code 集合由节点传入）。
   全部按 `service` 标签与 `error_type` 参数化——框架不含任何业务语义；
   服务特定的 URL 拼规则与 payload 解析留在节点里。
 - `workspace_libs/download.py`（stdlib + requests）：`validate_download_url`
@@ -295,9 +294,9 @@ manifest 拼装、取消检查点）：统一走 `ctx.service_config(...)` /
 - 「单机全功能」部署用同机独立 Worker 进程指向 localhost 即可，是纯部署
   拓扑，由现有部署文档/runbook 覆盖，不需要开发「Host 内嵌进程管理」。
 
-终局定位：Host 本地 code executor = video 三节点专用 + 无 Worker 时的兜底。
-若将来 video 节点找到归宿（如视频处理专用 Worker），再重新评估 Host 是否
-彻底退出执行。
+终局定位：Host 本地 code executor 仅作为无可用 Worker 时的兜底路径
+（业务 video 节点已随业务剥离迁出仓库）。若将来出现必须 Host 本地执行的
+专用节点，再重新评估该路径是否保留。
 
 ## 10. Quality Impact
 

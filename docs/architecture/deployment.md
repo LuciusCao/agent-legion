@@ -33,11 +33,13 @@ scripts/
 ## Data Flow
 
 ```
-开发者启动后端（uvicorn 8000）+ 前端（vite 5173）
+开发者启动后端（uvicorn 8001）+ 前端（vite 5174）
     → 前端通过 Vite proxy 访问后端 API
     → 后端通过 PostgreSQL 协调任务，并读写 data/ 目录产物
     → Job 运行产物存入 data/jobs/<workspace>/<shard>/<job_id>/（详见 ../data-layout.md）
 ```
+
+> 生产环境使用 8000/5173；dev worktree 默认 8001/5174，避免与 prod 端口冲突。
 
 生产构建时，前端 `npm run build` 输出到 `frontend/dist/`，由 FastAPI 静态文件中间件托管。
 

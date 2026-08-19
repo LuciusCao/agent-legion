@@ -115,8 +115,9 @@ worker machine, provide the same token to the Worker container via
 deployment doc, §2) and set the pi provider's `apiKey` to
 `"$LLM_GATEWAY_TOKEN"` in the mounted `models.json` — the pi CLI interpolates
 the variable and sends it as `Authorization: Bearer`, which the gateway
-accepts. `worker/executor.py` passes the variable through to the pi subprocess
-environment unchanged.
+accepts. `worker/execution_run.py::agent_subprocess_env` takes the token from the
+worker environment; a value in the config file is ignored. The variable is
+passed through to the pi subprocess environment.
 
 Verify from a worker device (host OS first, then from inside the container per
 §3):
@@ -185,11 +186,13 @@ in:
 - declare the accepted code capabilities in the same `capabilities` list as
   Agent capabilities (no separate field; the Host matches by capability), and
 - set `max_code_concurrency > 0` (0 = never receives code claims, the
-  default). This field is **deliberately not hot-reloaded**: changing it via
-  the console / `PUT /api/config` restarts the execution process, so the
-  startup preflight re-runs — and refuses to start (exit code 2) when code
-  capacity is declared without a resolvable `velites` binary. Never bypass
-  this by editing the state-copy YAML under a running process.
+  default). Resizing this field is hot-applied by editing the state-copy YAML
+  `data/agent-worker-service/worker.yaml` directly (`worker/runtime_controls.py`);
+  opening code capacity from 0 to >0 requires a resolvable `velites` binary or
+  the hot update is rejected. Changing it via the console / `PUT /api/config`
+  restarts the execution process, re-running the startup preflight — which
+  refuses to start (exit code 2) when code capacity is declared without a
+  resolvable `velites` binary.
 
 The Worker does **not** require a preinstalled velites: binary resolution is
 shared between the startup preflight and the code runner
