@@ -154,6 +154,36 @@ by default so it can coexist with a production instance on the standard
 8000/5173/8787 ports; override with `DEV_BACKEND_PORT` /
 `DEV_FRONTEND_PORT` / `AGENT_WORKER_UI_PORT`.
 
+### Local Agent Worker (optional)
+
+`make dev-up` starts a worker only when `config/agent-worker.yaml` exists.
+The file is untracked, and `config/agent-worker.example.yaml` is
+container-oriented — for a bare-metal local worker:
+
+1. Create the registration token **before the first backend start** — the
+   backend loads it at startup, and a token file created afterwards only
+   takes effect after a backend restart:
+
+   ```bash
+   mkdir -p deploy/secrets
+   openssl rand -hex 24 > deploy/secrets/agent_worker_register_token
+   chmod 600 deploy/secrets/agent_worker_register_token
+   ```
+
+2. `cp config/agent-worker.example.yaml config/agent-worker.yaml`, then
+   adjust for local use: `host_url: http://127.0.0.1:8001` (the dev stack
+   backend port), `register_token_file: deploy/secrets/agent_worker_register_token`,
+   `work_root: data/agent-worker`, and `capabilities` / `models` matching the
+   workflows you run (the demo workflow needs `write_script`, `review_script`,
+   `generate_questions`, `review_questions`). Declaring the `velites` runtime
+   requires a velites binary on PATH or at `data/bin/velites` —
+   `scripts/ensure-velites.sh --dest data/bin` builds and installs one.
+
+3. Re-run `make dev-up` (idempotent) to start the worker, then enable
+   claiming in the worker console at `http://127.0.0.1:8789` — workers start
+   with `claim_enabled: false` by design. The console API is guarded by the
+   auto-generated `data/agent-worker-service/control_token`.
+
 ### Demo workflow (education_video_problems_generation)
 
 The repository ships a minimal demo workflow: ten generic K-12 math
