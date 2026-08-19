@@ -40,6 +40,7 @@ const emptyFilterParams = {
   workflow_version: null,
   workflow_version_none: false,
   active_node_key: null,
+  paused: null,
 }
 
 describe('useWorkspaceEvents', () => {

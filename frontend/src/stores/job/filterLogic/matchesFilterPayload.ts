@@ -33,5 +33,11 @@ export function matchesFilterPayload(
   if (payload.packed != null && (job.packed ?? 0) !== payload.packed) {
     return false
   }
+  if (
+    payload.paused != null &&
+    (job.execution_control?.paused ?? false) !== payload.paused
+  ) {
+    return false
+  }
   return true
 }

@@ -10,6 +10,7 @@ import type { WorkflowDefinitionRecord } from '../../types'
 import { WorkflowVersionFilter } from '../WorkflowVersionFilter'
 import { JobFilterBarChips } from './JobFilterBarChips'
 import { JobStatusFilter } from './JobStatusFilter'
+import { JobPausedFilter } from './JobPausedFilter'
 import { JobNodeFilter } from './JobNodeFilter'
 import { JobSearchFilter } from './JobSearchFilter'
 import { useJobFilterActiveFilters } from '../useJobFilterActiveFilters'
@@ -66,6 +67,12 @@ export function JobFilterBar({
           options={nodeOptions}
           className={styles.control}
           onChange={(activeNodeKey) => onChange({ activeNodeKey })}
+        />
+
+        <JobPausedFilter
+          value={filterConfig.paused}
+          className={styles.control}
+          onChange={(paused) => onChange({ paused })}
         />
 
         <JobSearchFilter

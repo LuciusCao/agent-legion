@@ -17,6 +17,7 @@ def _job_list_filter(
     workflow_version_none: bool,
     active_node_key: str | None,
     packed: int | None,
+    paused: bool | None,
 ) -> JobListFilter:
     if workflow_version is not None and workflow_version_none:
         raise HTTPException(
@@ -30,6 +31,7 @@ def _job_list_filter(
         workflow_version_none=workflow_version_none,
         active_node_key=active_node_key,
         packed=packed,
+        paused=paused,
     )
 
 
@@ -50,10 +52,11 @@ def create_job_list_router(
         workflow_version_none: bool = False,
         active_node_key: str | None = None,
         packed: int | None = None,
+        paused: bool | None = None,
     ) -> JobsPageResponse:
         require_workflows_enabled(settings)
         job_filter = _job_list_filter(
-            status, search, workflow_version, workflow_version_none, active_node_key, packed
+            status, search, workflow_version, workflow_version_none, active_node_key, packed, paused
         )
         try:
             safe_limit = max(1, min(limit, 500))
@@ -72,10 +75,11 @@ def create_job_list_router(
         workflow_version_none: bool = False,
         active_node_key: str | None = None,
         packed: int | None = None,
+        paused: bool | None = None,
     ) -> JobFacetsResponse:
         require_workflows_enabled(settings)
         job_filter = _job_list_filter(
-            status, search, workflow_version, workflow_version_none, active_node_key, packed
+            status, search, workflow_version, workflow_version_none, active_node_key, packed, paused
         )
         try:
             return JobFacetsResponse(**job_list_queries.facets(workspace_id, job_filter))

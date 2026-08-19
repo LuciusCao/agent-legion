@@ -20,7 +20,7 @@ export function appendFilterParams(
   filter?: JobListFilterParams
 ): void {
   if (!filter) return
-  const { status, search, active_node_key: nodeKey, packed } = filter
+  const { status, search, active_node_key: nodeKey, packed, paused } = filter
   if (status) params.set('status', status)
   if (search) params.set('search', search)
   if (filter.workflow_version != null)
@@ -28,4 +28,5 @@ export function appendFilterParams(
   if (filter.workflow_version_none) params.set('workflow_version_none', 'true')
   if (nodeKey) params.set('active_node_key', nodeKey)
   if (packed != null) params.set('packed', String(packed))
+  if (paused != null) params.set('paused', String(paused))
 }

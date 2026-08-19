@@ -231,6 +231,7 @@ describe('WorkspaceMainPage', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
       batchRerunLoading: false,
       batchPackageLoading: false,
@@ -402,6 +403,7 @@ describe('WorkspaceMainPage', () => {
       workflow_version: null,
       workflow_version_none: false,
       active_node_key: null,
+      paused: null,
     })
   })
 
@@ -436,6 +438,7 @@ describe('WorkspaceMainPage', () => {
         search: 'algebra',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
 
@@ -455,6 +458,7 @@ describe('WorkspaceMainPage', () => {
       search: '',
       workflowVersion: null,
       activeNodeKey: null,
+      paused: null,
     })
     expect(screen.getByPlaceholderText('搜索 ID / 标题 / 批次')).toHaveValue('')
   })
@@ -844,6 +848,7 @@ describe('WorkspaceMainPage', () => {
         workflow_version: null,
         workflow_version_none: false,
         active_node_key: null,
+        paused: null,
       },
       excludeIds: [],
     })
@@ -902,6 +907,7 @@ describe('WorkspaceMainPage', () => {
         workflow_version: null,
         workflow_version_none: false,
         active_node_key: null,
+        paused: null,
       },
       excludeIds: [],
     })

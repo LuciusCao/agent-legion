@@ -15,6 +15,7 @@ describe('getVisibleJobs', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j2'])
@@ -31,6 +32,7 @@ describe('getVisibleJobs', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j1'])
@@ -47,6 +49,7 @@ describe('getVisibleJobs', () => {
         search: '',
         workflowVersion: 2,
         activeNodeKey: null,
+        paused: null,
       },
     })
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j2'])
@@ -63,6 +66,7 @@ describe('getVisibleJobs', () => {
         search: '',
         workflowVersion: 'none',
         activeNodeKey: null,
+        paused: null,
       },
     })
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j2'])
@@ -79,6 +83,7 @@ describe('getVisibleJobs', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: 'review',
+        paused: null,
       },
     })
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j2'])
@@ -105,6 +110,7 @@ describe('getVisibleJobs', () => {
         search: 'B2',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['job-102'])
@@ -122,6 +128,7 @@ describe('getVisibleJobs', () => {
         search: '',
         workflowVersion: 3,
         activeNodeKey: null,
+        paused: null,
       },
     })
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j1'])
@@ -141,6 +148,7 @@ describe('getFilterCounts', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     const counts = getFilterCounts(state)
@@ -159,6 +167,7 @@ describe('getFilterCounts', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     const counts = getFilterCounts(state)
@@ -178,6 +187,7 @@ describe('getFilterCounts', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     const counts = getFilterCounts(state)
@@ -196,6 +206,7 @@ describe('getFilterCounts', () => {
         search: '',
         workflowVersion: 2,
         activeNodeKey: null,
+        paused: null,
       },
     })
     const counts = getFilterCounts(state)
@@ -214,6 +225,7 @@ describe('getFilterCounts', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: 'extract',
+        paused: null,
       },
     })
     const counts = getFilterCounts(state)
@@ -242,6 +254,7 @@ describe('getFilterCounts', () => {
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
       },
     })
     const counts = getFilterCounts(state)
