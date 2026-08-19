@@ -87,6 +87,12 @@
   路由节点一律进隐含 code 池，池容量 = 实例设置 `code_capacity`，lease 行写常量 `'code'`
   （EXEC-CODE-POOL-001）。
 - Phase 6 Job 边界：route 不做 DAG 遍历和文件系统删除。
+- Workflow 是 workspace 内部的一份 DAG：全局 workflow_catalog 已随 schema v50 退役
+  （#112，DB-WORKFLOW-CATALOG-001），`workspaces.default_workflow_key` 是普通文本标识，
+  权威定义是该 workspace 的 active revision——节点覆盖校验、settings schema、无快照 job
+  的定义回退、worker 扫描列表全部读它，不再有列表/注册 API；示例 DAG
+  （`server/app/workflows/builtin.py`）只是创建 workspace 时可选的示例模板种子，blank
+  workspace 首次成功 publish 认领草稿的 key。
 - Workflow Node 只声明 `capability`，不声明 `runner` / `agent` / `skill` / command template。
 - Job 执行服务通过 `server.app.executors.leases` 申请容量，不要直接调用 `executors.code` / `.runtime` / `.contracts`。
 - code 节点：capability 不再声明 `path`（#96 已退役该绑定）；所有节点代码以

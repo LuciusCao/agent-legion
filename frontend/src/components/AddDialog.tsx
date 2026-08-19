@@ -50,9 +50,9 @@ export function AddDialog({
     enabled: intakeEnabled,
   })
   const workspace = workspaceQuery.data?.workspace ?? null
-  // 第二段依赖第一段的 default_workflow_key（enabled 链）。
+  // active revision 定义直接按 workspaceId 取（schema v50）。
   const workflowQuery = useWorkflowDefinitionQuery(
-    intakeEnabled ? workspace?.default_workflow_key : undefined
+    intakeEnabled ? workspaceId : undefined
   )
   const workflow = workflowQuery.data ?? null
   const loadingModes =

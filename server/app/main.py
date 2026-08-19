@@ -34,7 +34,6 @@ from server.app.services.quality_labels import QualityLabelService
 from server.app.services.quality_replays import QualityReplayService
 from server.app.services.quality_sampling import QualitySamplingService
 from server.app.services.quality_stats import QualityStatsService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_executor_configuration import (
@@ -67,12 +66,11 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     # workflow_nodes/ sources (#96).
     seed_demo_node_codes(settings)
     # Agent definitions are workspace-scoped (schema v46): there is no global
-    # seed. Workspaces binding the built-in demo workflow get the factory
-    # agent templates instantiated seed-if-absent at binding time
-    # (WorkflowRevisionService.ensure_active_revision).
-    # Workflow catalog keys live in the DB (workflow_catalog, schema v40):
-    # upsert the built-in rows from the code registry; registered keys persist.
-    WorkflowCatalogService.seed_builtin(settings.database_url)
+    # seed. Workspaces initialized from the sample template get the factory
+    # agent templates instantiated seed-if-absent at creation time
+    # (WorkflowRevisionService.ensure_active_revision). The workflow catalog
+    # is retired (schema v50, #112): a workflow is the DAG inside one
+    # workspace, keyed by workspaces.default_workflow_key as plain text.
     # Skill sources/lock retired from tracked yaml into global_settings:
     # import-once the legacy files when present, else seed the built-in
     # constants; with rows present this is a no-op (DB is authoritative).
@@ -192,12 +190,9 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
     app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
     app.state.workspace_event_aggregator = workspace_event_aggregator
-    workflow_catalog = WorkflowCatalogService(settings)
     executor_catalog = ExecutorCatalogService(settings)
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db, settings)
-    workspace_configuration = WorkspaceConfigurationService(
-        job_db, settings, agent_manager, workflow_catalog
-    )
+    workspace_configuration = WorkspaceConfigurationService(job_db, settings, agent_manager)
     job_packages = JobPackageService(job_db, settings)
     app.include_router(create_auth_router(app.state.auth_service), prefix="/api")
     app.include_router(
@@ -206,7 +201,6 @@ def create_app(data_dir: Path | None = None, start_worker: bool = False) -> Fast
             settings,
             agent_manager,
             workspace_worker_control,
-            workflow_catalog=workflow_catalog,
             executor_catalog=executor_catalog,
             workspace_executor_configuration=workspace_executor_configuration,
             workspace_configuration=workspace_configuration,

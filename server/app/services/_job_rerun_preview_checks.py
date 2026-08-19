@@ -16,6 +16,7 @@ from server.app.services._job_rerun_upstream_guard import (
     upstream_failed_error,
 )
 from server.app.services.job_operation_error import JobOperationError
+from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 
 if TYPE_CHECKING:
@@ -23,14 +24,14 @@ if TYPE_CHECKING:
 
 
 class PreviewDefinitions:
-    """Workflow definitions cached by workflow_key (a selection usually spans
-    one or two workflows); per-job snapshots still win, as in the write path.
-    Snapshot payloads are cached by content: jobs of one batch carry the same
-    frozen definition, so parsing once per distinct payload is enough."""
+    """Workflow definitions cached by (workspace_id, workflow_key) (a selection
+    usually spans one workspace); per-job snapshots still win, as in the write
+    path. Snapshot payloads are cached by content: jobs of one batch carry the
+    same frozen definition, so parsing once per distinct payload is enough."""
 
     def __init__(self, service: JobRerunService) -> None:
         self._service = service
-        self._cache: dict[str, Any] = {}
+        self._cache: dict[tuple[str, str], Any] = {}
         self._snapshots: dict[str, Any] = {}
 
     def for_job(self, job: dict[str, Any]) -> Any:
@@ -41,9 +42,11 @@ class PreviewDefinitions:
             snapshot = self._snapshots[raw]
             if snapshot is not None:
                 return snapshot
-        key = str(job["workflow_key"])
+        key = (str(job["workspace_id"]), str(job["workflow_key"]))
         if key not in self._cache:
-            self._cache[key] = self._service.workflows.definition(key)
+            self._cache[key] = require_workspace_active_definition(
+                self._service.job_db, key[0], key[1]
+            )
         return self._cache[key]
 
 

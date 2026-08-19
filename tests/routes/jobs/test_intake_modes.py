@@ -254,7 +254,10 @@ def test_workflow_response_no_task_entity(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with authenticate_client(TestClient(app)) as c:
-        response = c.get("/api/workflows/education_video_problems_generation")
+        created = c.post("/api/workspaces", json={"name": "Intake Shape"})
+        assert created.status_code == 200, created.text
+        workspace_id = created.json()["workspace"]["id"]
+        response = c.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
 
     assert response.status_code == 200
     body = response.json()

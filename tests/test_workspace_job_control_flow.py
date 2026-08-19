@@ -20,11 +20,11 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
+from tests.helpers import scan_entries
 from tests.helpers.auth import authenticate_client
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -69,34 +69,18 @@ def _write_test_workflow(tmp_path: Path) -> Path:
     return path
 
 
-def _patch_workflow(monkeypatch, workflow_path: Path) -> None:
-    """Inject the synthetic test workflow into the catalog service.
+def _publish_synthetic_revision(job_db: Any, workspace_id: str, workflow_path: Path) -> Any:
+    """Publish the synthetic test workflow as the workspace's active revision.
 
-    The DB-backed catalog gates workspace binding through ``bound_definition``
-    while runtime fallbacks call ``definition``; both resolve WORKFLOW_KEY to
-    the synthetic file-backed definition here.
+    Schema v50: there is no global catalog to inject into — a workflow is the
+    workspace's published DAG, so the synthetic definition goes through the
+    same publish channel the API uses.
     """
-    _original_definition = WorkflowCatalogService.definition
-    _original_bound = WorkflowCatalogService.bound_definition
+    from server.app.services.workflow_revisions import WorkflowRevisionService
 
-    def _patched_definition(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_definition(self, workflow_key)
-
-    def _patched_bound(self, workflow_key: str):
-        if workflow_key == WORKFLOW_KEY:
-            return load_workflow_definition(workflow_path)
-        return _original_bound(self, workflow_key)
-
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
-        _patched_definition,
-    )
-    monkeypatch.setattr(
-        "server.app.services.workflow_catalog.WorkflowCatalogService.bound_definition",
-        _patched_bound,
-    )
+    definition = load_workflow_definition(workflow_path)
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace_id, definition)
+    return definition
 
 
 class _RecordingExecutor:
@@ -155,7 +139,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = ([definition], [])
+    worker._scan_entries = scan_entries(definition)
     worker._ensure_pools()
     return worker
 
@@ -191,7 +175,6 @@ def _node_statuses(detail: dict[str, Any]) -> dict[str, str]:
 
 def test_workspace_job_control_flow(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -203,6 +186,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
+        definition = _publish_synthetic_revision(app.state.job_db, workspace_id, workflow_path)
 
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
 
@@ -243,7 +227,6 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert job_summary["total_nodes"] == 4
         assert job_summary["completed_nodes"] == 0
 
-        definition = WorkflowCatalogService(app.state.settings).definition(WORKFLOW_KEY)
         leases = ExecutorLeaseRepository(
             app.state.job_db.path, data_dir=app.state.settings.data_dir
         )
@@ -329,8 +312,11 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         with zipfile.ZipFile(io.BytesIO(download_response.content)) as zf:
             names = zf.namelist()
         assert "manifest.json" in names
-        assert not any("prepare.json" in name for name in names)
-        assert not any("merge.json" in name for name in names)
+        # Declared node outputs ride along (schema v50: resolved from the
+        # workspace's active revision — the designed behavior of
+        # workspace_artifact_names).
+        assert any("prepare.json" in name for name in names)
+        assert any("merge.json" in name for name in names)
 
         # 8. delete removes database rows, storage, and logs.
         job = app.state.job_db.get_job(job_id)
@@ -355,7 +341,6 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
 def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -367,6 +352,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
         )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
+        _publish_synthetic_revision(app.state.job_db, workspace_id, workflow_path)
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
 
         # Post-#96 every code node needs published code to dispatch (P-0.5:
@@ -414,7 +400,6 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
 
 def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     workflow_path = _write_test_workflow(tmp_path)
-    _patch_workflow(monkeypatch, workflow_path)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -426,6 +411,7 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
         )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
+        _publish_synthetic_revision(app.state.job_db, workspace_id, workflow_path)
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
 
         # Post-#96 every code node needs published code to dispatch (P-0.5:

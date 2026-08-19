@@ -96,8 +96,7 @@ export function useWorkspaceSettingsQuery(
  */
 export function useWorkspaceSettingsSnapshot() {
   const workspaceId = useSettingStore((s) => s.workspaceId)
-  const workflowKey = useSettingStore((s) => s.settings.workflowKey)
-  const { data: workflowDefinition } = useWorkflowDefinitionQuery(workflowKey)
+  const { data: workflowDefinition } = useWorkflowDefinitionQuery(workspaceId)
   const { data: snapshot } = useWorkspaceSettingsQuery(workspaceId)
   return {
     workflowDefinition: workflowDefinition ?? null,

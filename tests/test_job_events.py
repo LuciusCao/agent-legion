@@ -20,11 +20,11 @@ from server.app.executors.models import ConfigurationFailureRequest, ExecutionRe
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_patch_queries import JobPatchQueryService
 from server.app.services.job_queries import JobQueryService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings
+from tests.helpers import publish_builtin_revision
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -84,7 +84,6 @@ def job_query_service(job_db, settings):
     return JobQueryService(
         job_db,
         settings,
-        WorkflowCatalogService(settings),
         WorkspaceExecutorConfigurationService(job_db),
     )
 
@@ -94,7 +93,6 @@ def job_patch_query_service(job_db, settings):
     return JobPatchQueryService(
         job_db,
         settings,
-        WorkflowCatalogService(settings),
         WorkspaceExecutorConfigurationService(job_db),
     )
 
@@ -376,7 +374,7 @@ def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
     assert queue.empty()
 
 
-def test_rerun_broadcasts_job_updated(manager):
+def test_rerun_broadcasts_job_updated(manager, monkeypatch):
     from server.app.services.job_rerun import JobRerunService
     from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
@@ -384,13 +382,19 @@ def test_rerun_broadcasts_job_updated(manager):
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock(spec=Settings)
-    workflows = MagicMock(spec=WorkflowCatalogService)
-    workflows.definition.return_value = WorkflowDefinition(
+    definition = WorkflowDefinition(
         key="p1",
         label="P1",
         intake=WorkflowIntake(),
         nodes={"n1": WorkflowNode(key="n1", label="N1", capability="c1")},
     )
+    import server.app.services._job_rerun_eligibility as _eligibility
+    import server.app.services._job_rerun_single as _single
+
+    monkeypatch.setattr(
+        _eligibility, "require_workspace_active_definition", lambda *args: definition
+    )
+    monkeypatch.setattr(_single, "require_workspace_active_definition", lambda *args: definition)
     artifact_service = MagicMock()
     staged = MagicMock()
     artifact_service.stage_outputs.return_value = staged
@@ -399,7 +403,6 @@ def test_rerun_broadcasts_job_updated(manager):
         job_db,
         lease_repo,
         settings,
-        workflows,
         artifact_service=artifact_service,
         job_event_manager=manager,
     )
@@ -419,12 +422,10 @@ def test_continue_job_broadcasts_job_updated(manager):
     job_db = FakeJobDB()
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     artifact_mutation = MagicMock(spec=JobArtifactMutationService)
-    workflows = MagicMock(spec=WorkflowCatalogService)
     service = JobExecutionService(
         job_db,
         artifact_mutation,
         lease_repo,
-        workflows,
         job_event_manager=manager,
     )
     queue = _ws1_queue(manager)
@@ -505,13 +506,11 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
     artifact_mutation = MagicMock(spec=JobArtifactMutationService)
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_job.return_value = False
-    workflows = MagicMock(spec=WorkflowCatalogService)
 
     service = JobExecutionService(
         job_db,
         artifact_mutation,
         lease_repo,
-        workflows,
         job_event_manager=manager,
     )
     simple_definition = WorkflowDefinition(
@@ -555,19 +554,24 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock()
-    workflows = MagicMock(spec=WorkflowCatalogService)
-    workflows.definition.return_value = WorkflowDefinition(
+    definition = WorkflowDefinition(
         key="p1",
         label="P1",
         intake=WorkflowIntake(),
         nodes={"node_a": WorkflowNode(key="node_a", label="A", capability="cap_a")},
     )
+    import server.app.services._job_rerun_eligibility as _eligibility
+    import server.app.services._job_rerun_single as _single
+
+    monkeypatch.setattr(
+        _eligibility, "require_workspace_active_definition", lambda *args: definition
+    )
+    monkeypatch.setattr(_single, "require_workspace_active_definition", lambda *args: definition)
 
     service = JobRerunService(
         job_db,
         lease_repo,
         settings,
-        workflows,
         artifact_service=artifact_service,
         job_event_manager=manager,
     )
@@ -657,6 +661,7 @@ def test_record_job_update_uses_event_buffer(fake_job_db):
 
 def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service, job_db):
     job_db.create_workspace("ws1", default_workflow_key="education_video_problems_generation")
+    publish_builtin_revision(job_db, "ws1")
     batch1 = job_db.create_batch(
         "education_video_problems_generation",
         "batch_by_ids",

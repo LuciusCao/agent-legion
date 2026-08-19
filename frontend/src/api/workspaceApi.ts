@@ -14,20 +14,12 @@ export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
 
 export async function createWorkspace(
   name: string,
-  workflowKey: string,
-  resourceConfig: Record<string, unknown> = {},
-  defaultEntity: string = 'question',
-  intakeConfig: Record<string, unknown> = {},
-  workflowMode: 'demo' | 'blank' = 'demo'
+  workflowMode: 'demo' | 'blank' = 'blank'
 ): Promise<WorkspaceRecord> {
   const result = await api<WorkspaceResponse>('/api/workspaces', {
     method: 'POST',
     body: JSON.stringify({
       name,
-      default_workflow_key: workflowKey,
-      resource_config: resourceConfig,
-      default_entity: defaultEntity,
-      intake_config: intakeConfig,
       workflow_mode: workflowMode,
     }),
   })

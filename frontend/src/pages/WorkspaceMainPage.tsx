@@ -58,7 +58,7 @@ export default function WorkspaceMainPage() {
 
   const workflowKey = workspaceStats?.workflow_key
   const { data: workflowDefinitionData, error: workflowQueryError } =
-    useWorkflowDefinitionQuery(workflowKey)
+    useWorkflowDefinitionQuery(workspaceId)
   const workflowDefinition = workflowDefinitionData ?? null
   const workflowError = toErrorMessage(workflowQueryError)
 

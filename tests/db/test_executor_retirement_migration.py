@@ -10,7 +10,6 @@ import pytest
 from psycopg import IntegrityError
 
 from server.app.db.migrations import migrate_executor_retirement
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -102,16 +101,6 @@ def _revision_payload(conn, revision_id: str) -> dict:
         (revision_id,),
     ).fetchone()
     return json.loads(row["definition_json"])
-
-
-def test_schema_v48_recorded() -> None:
-    assert SCHEMA_VERSION == 48
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "job_nodes_unclaimable_finished_index"
 
 
 @pytest.mark.fresh_schema

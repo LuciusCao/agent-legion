@@ -1,11 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import {
-  fetchWorkflowDefinition,
-  fetchWorkflows,
-  publishWorkflowDraft,
-  validateWorkflowDraft,
-} from './workflows'
+import { publishWorkflowDraft, validateWorkflowDraft } from './workflows'
 
 const originalFetch = global.fetch
 
@@ -24,31 +19,6 @@ function mockFetchJson(response: unknown) {
 }
 
 describe('workflows api', () => {
-  it('lists workflows', async () => {
-    const payload = { workflows: [] }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const result = await fetchWorkflows()
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith('/api/workflows', expect.anything())
-  })
-
-  it('fetches a workflow definition with an encoded key', async () => {
-    const payload = { workflow: { key: 'video knowledge' } }
-    const fetchMock = mockFetchJson(payload)
-    global.fetch = fetchMock
-
-    const result = await fetchWorkflowDefinition('video knowledge')
-
-    expect(result).toEqual(payload)
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/workflows/video%20knowledge',
-      expect.anything()
-    )
-  })
-
   it('validates a draft with a definition_yaml body', async () => {
     const payload = { valid: true, errors: [] }
     const fetchMock = mockFetchJson(payload)

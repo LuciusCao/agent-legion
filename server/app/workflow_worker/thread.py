@@ -18,6 +18,7 @@ from server.app.services.agent_service import has_published_agent_definitions
 from server.app.settings import Settings
 from server.app.workflow_worker.agent_gate import AgentPassState, prepare_agent_pass
 from server.app.workflow_worker.catalog_scan import (
+    ScanEntry,
     collect_runnable_workspace_jobs,
     load_workflow_scan_entries,
 )
@@ -59,11 +60,11 @@ class WorkflowWorkerThread:
         # Set when work finishes or arrives; the poll loop waits on this.
         self._wake_event = threading.Event()
         self._thread: threading.Thread | None = None
-        # Scan-list snapshot (definitions, definitionless_keys), swapped
+        # Scan-list snapshot (one entry per scannable workspace), swapped
         # atomically by reload_scan_entries; never mutated in place. Readers
-        # take the tuple first, then unpack, so a mid-swap pass never sees a
-        # half-applied pair.
-        self._scan_entries: tuple[list[WorkflowDefinition], list[str]] = ([], [])
+        # take the list reference first, so a mid-swap pass never sees a
+        # half-applied state.
+        self._scan_entries: list[ScanEntry] = []
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
         # execution_id -> (executor_id, lease_id) for in-flight claims.
@@ -99,11 +100,11 @@ class WorkflowWorkerThread:
         self._wake_event.set()
 
     def reload_scan_entries(self) -> None:
-        """Rebuild the scan list from the catalog, then swap it in one step.
+        """Rebuild the scan list from the workspaces table, then swap it in.
 
-        Called outside the poll thread: at start, and after a workflow
-        registration commits. The pair is fully built before the swap, so
-        a failed reload leaves the previous snapshot untouched.
+        Called outside the poll thread: at start, and after a workspace is
+        created, re-keyed, or first-published. The list is fully built before
+        the swap, so a failed reload leaves the previous snapshot untouched.
         """
         self._scan_entries = load_workflow_scan_entries(self.settings)
 
@@ -134,7 +135,7 @@ class WorkflowWorkerThread:
         self._scan_phases = {"marks": 0.0, "ws_query": 0.0, "miss_fetch": 0.0, "eval": 0.0}
         self._agent_pass.reset_pass()
         self._maintenance.maybe_cleanup()
-        if not any(self._scan_entries):
+        if not self._scan_entries:
             return False
 
         self._ensure_pools()

@@ -15,10 +15,10 @@ STUDIO_AUTHORING_BOOTSTRAP = """\
 You are an assistant embedded in Agent Legion Studio helping a human author
 and refine workflows. Rules for this session:
 1. Operate on the platform ONLY through the tools of the "agent-legion-studio"
-   MCP server (get_authoring_guide, get_studio_context, list_workflows,
+   MCP server (get_authoring_guide, get_studio_context,
    get_active_workflow, validate_workflow, compare_workflow,
-   save_node_code_draft, get_node_code, save_agent_definition_draft,
-   register_workflow). Never invent platform
+   save_node_code_draft, get_node_code, save_agent_definition_draft).
+   Never invent platform
    state you have not read through those tools.
 2. When you need workspace or selection context (which workspace this is, its
    workflow structure, the node the human has selected), call
@@ -43,14 +43,12 @@ AGENT_LEGION_MCP_TOOL_NAMES = frozenset(
     {
         "get_authoring_guide",
         "get_studio_context",
-        "list_workflows",
         "get_active_workflow",
         "validate_workflow",
         "compare_workflow",
         "save_node_code_draft",
         "get_node_code",
         "save_agent_definition_draft",
-        "register_workflow",
     }
 )
 

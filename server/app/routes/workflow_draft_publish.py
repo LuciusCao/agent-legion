@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from server.app.auth.dependencies import reject_studio_agent_scope
 from server.app.jobs import JobQueries
@@ -7,6 +7,7 @@ from server.app.routes.workflow_revisions_contracts import (
     WorkflowDraftRequest,
     WorkflowDraftValidationResponse,
 )
+from server.app.scheduler_wakeup import notify_schedulable_work, reload_worker_scan_entries
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workflow_draft_key import require_draft_workflow_key_match
 from server.app.services.workflow_draft_publish import (
@@ -46,6 +47,7 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
     def publish_draft(
         workspace_id: str,
         request: WorkflowDraftRequest,
+        http_request: Request,
     ) -> WorkflowDraftValidationResponse:
         require_workflows_enabled(settings)
         try:
@@ -58,6 +60,12 @@ def create_workflow_draft_publish_router(job_db: JobQueries, settings: Settings)
             request.definition_yaml,
             settings.executor_runtime.workflows.custom_nodes_enabled,
         )
+        if valid:
+            # The first publish of a blank-canvas workspace adopts the draft
+            # key, making the workspace a new worker scan target (schema
+            # v50): reload the scan list and wake the poll loop.
+            reload_worker_scan_entries(http_request)
+            notify_schedulable_work()
         return WorkflowDraftValidationResponse(valid=valid, errors=errors)
 
     return router

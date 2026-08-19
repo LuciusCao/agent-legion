@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from tests.helpers import load_builtin_definition
 
 WF = "education_video_problems_generation"
 NODE = "intake_knowledge_points"
@@ -17,7 +17,7 @@ CUSTOM_V2 = "def run(job, job_dir, runtime):\n    return 'v2'\n"
 @pytest.fixture
 def workspace_with_revision(client, job_db, settings):
     job_db.create_workspace("default", default_workflow_key=WF)
-    definition = WorkflowCatalogService(settings).definition(WF)
+    definition = load_builtin_definition(WF)
     WorkflowRevisionService(job_db).ensure_active_revision("default", definition)
     return client
 

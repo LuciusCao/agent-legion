@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from server.app.db.migrations import migrate_workspace_secrets
-from server.app.db.schema import SCHEMA_VERSION
 from server.app.db.transaction import read_connection, write_transaction
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -19,16 +18,6 @@ def test_workspace_secrets_table_exists() -> None:
             ).fetchall()
         }
     assert columns == {"workspace_id", "name", "ciphertext", "created_at", "updated_at"}
-
-
-def test_schema_v48_recorded() -> None:
-    assert SCHEMA_VERSION == 48
-    with read_connection(TEST_DATABASE_URL) as conn:
-        row = conn.execute(
-            "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
-        ).fetchone()
-    assert row is not None
-    assert row["name"] == "job_nodes_unclaimable_finished_index"
 
 
 def test_schema_v23_workspace_scope_objects_exist() -> None:

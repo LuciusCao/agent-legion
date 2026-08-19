@@ -11,6 +11,7 @@ from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from tests.helpers import scan_entries
 
 
 def _make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
@@ -96,7 +97,7 @@ def _make_worker(
         runtime=runtime,
         settings=settings,
     )
-    worker._scan_entries = (definitions, [])
+    worker._scan_entries = scan_entries(*definitions)
     return worker
 
 

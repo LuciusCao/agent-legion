@@ -74,22 +74,22 @@ class FakeConn:
     def __init__(
         self,
         *,
-        catalog_rows: list[dict] | None = None,
+        revision_rows: list[dict] | None = None,
         workspace_rows: list[dict] | None = None,
         agent_rows: list[dict] | None = None,
         node_code_rows: list[dict] | None = None,
         settings_rows: list[dict] | None = None,
     ) -> None:
-        self.catalog_rows = catalog_rows or []
+        self.revision_rows = revision_rows or []
         self.workspace_rows = workspace_rows or []
         self.agent_rows = agent_rows or []
         self.node_code_rows = node_code_rows or []
         self.settings_rows = settings_rows or []
 
     def execute(self, sql: str, params: tuple | None = None) -> FakeResult:
-        if "from workflow_catalog" in sql:
+        if "join workflow_revisions" in sql:
             keys = set(params[0]) if params else set()
-            return FakeResult([r for r in self.catalog_rows if r["key"] in keys])
+            return FakeResult([r for r in self.revision_rows if r["key"] in keys])
         if "from workspaces" in sql:
             wanted = set(params[0]) if params else set()
             rows = [
@@ -111,12 +111,10 @@ class FakeConn:
         raise AssertionError(f"unexpected SQL: {sql}")
 
 
-def catalog_row(key: str = WORKFLOW_KEY) -> dict:
+def revision_row(workspace_id: str = "acme", key: str = WORKFLOW_KEY) -> dict:
     return {
+        "workspace_id": workspace_id,
         "key": key,
-        "label": "Invoices",
-        "description": "",
-        "origin": "registered",
         "definition_json": json.dumps(make_definition()),
     }
 
@@ -149,7 +147,7 @@ CODE = "def run(ctx):\n    return None\n"
 
 def test_build_seed_assembles_generic_package():
     conn = FakeConn(
-        catalog_rows=[catalog_row()],
+        revision_rows=[revision_row("acme")],
         workspace_rows=[{"id": "acme", "default_workflow_key": WORKFLOW_KEY}],
         agent_rows=[
             agent_row("acme", "invoice-summarizer-v1"),
@@ -182,7 +180,7 @@ def test_export_warns_on_unknown_workflow():
     conn = FakeConn()
     seed, warnings = build_seed(conn, ["missing_pipeline"], None, {})
     assert seed["workflows"] == []
-    assert any("no catalog row" in warning for warning in warnings)
+    assert any("no workspace with an active revision" in warning for warning in warnings)
 
 
 def test_agent_conflict_across_workspaces_is_skipped():

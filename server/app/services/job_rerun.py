@@ -13,7 +13,6 @@ from server.app.services._job_rerun_batch import (
 from server.app.services._job_rerun_single import execute_rerun, resolve_rerun_node
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_operation_error import JobOperationError, JobOperationResult
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 
 
@@ -23,7 +22,6 @@ class JobRerunService:
         job_db: JobQueries,
         lease_repo: ExecutorLeaseRepository,
         settings: Settings,
-        workflows: WorkflowCatalogService,
         artifact_service: JobArtifactMutationService | None = None,
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
@@ -32,7 +30,6 @@ class JobRerunService:
         self.job_db = job_db
         self.lease_repo = lease_repo
         self.settings = settings
-        self.workflows = workflows
         self.artifact_service = artifact_service or JobArtifactMutationService(settings.jobs_dir)
         self.clock = clock
         self.job_event_manager = job_event_manager
