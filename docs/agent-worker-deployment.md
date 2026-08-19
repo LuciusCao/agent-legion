@@ -37,7 +37,7 @@ export AGENT_SKILLS_DIR="$PWD/skills"
 export PI_CONFIG_DIR="$HOME/.pi/agent"
 ```
 
-如果 Mac mini 要通过 Tailscale 访问 Host，将监听地址设为部署机的 Tailscale IP：
+如果 Worker 机器要通过 Tailscale 等 overlay 网络访问 Host，将监听地址设为部署机的 overlay 网络 IP：
 
 ```bash
 export AGENT_LEGION_HOST_BIND=192.0.2.1
@@ -61,20 +61,20 @@ curl http://192.0.2.1:8000/api/health
 
 该命令启动 PostgreSQL、Host 和部署机本地 Worker。它们使用 [compose.host.yaml](../deploy/compose.host.yaml) 编排。
 
-## 4. Mac mini 准备 Worker
+## 4. Worker 机器准备
 
-将同一版本的仓库放到 Mac mini，并准备注册密钥目录：
+将同一版本的仓库放到 Worker 机器，并准备注册密钥目录：
 
 ```bash
 mkdir -p deploy/secrets
 ```
 
-无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有 `deploy/worker.home.yaml` 的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./worker.home.yaml`，Worker Service 会在首次启动时导入它。
+无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有引导 YAML（如复制自 `deploy/worker.home.example.yaml`）的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`，Worker Service 会在首次启动时导入它。
 
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
 
-- **全局 token**：把部署机的 `deploy/secrets/agent_worker_register_token` 安全复制到 Mac mini 的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
-- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Mac mini 上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
+- **全局 token**：把部署机的 `deploy/secrets/agent_worker_register_token` 安全复制到 Worker 机器的同一路径；不要把它提交到 Git。Worker 注册后可承接全部 workspace 的任务。
+- **Scoped token（需要把 Worker 隔离到单个 workspace 时使用）**：推荐在 Host Web UI 的「设置 → Worker Token」页面签发与管理：填写标签与可选的 workspace 范围即可创建，明文只显示一次，复制后保存为 Worker 机器上的 `deploy/secrets/agent_worker_register_token`（权限 600）。该页面同时支持查看/吊销已签发 token 与吊销已注册 Worker。
 
   该 Worker 注册后只能看到并 claim 对应 workspace 的任务。
 
@@ -85,8 +85,8 @@ Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope
 ```bash
 curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens \
   -H 'Content-Type: application/json' \
-  -d '{"workspace_id": "<workspace_id>", "label": "home-mac-mini"}'
-# => {"token_id": "...", "register_token": "<明文，只返回这一次>", "workspace_id": "<workspace_id>", "label": "home-mac-mini"}
+  -d '{"workspace_id": "<workspace_id>", "label": "remote-worker"}'
+# => {"token_id": "...", "register_token": "<明文，只返回这一次>", "workspace_id": "<workspace_id>", "label": "remote-worker"}
 ```
 
 ```bash
@@ -99,7 +99,7 @@ curl -sS -X POST http://192.0.2.1:8000/api/agent-register-tokens/<token_id>/revo
 
 注意：吊销 scoped token 只影响后续注册；已注册 Worker 落库的 scope 在重新注册前不变。需要立即收缩时，吊销后让该 Worker 重新注册（换用新 token）。
 
-Mac mini 上继续挂载它自己的 Pi 配置，并在 gateway 设置了 token 时同样提供 `LLM_GATEWAY_TOKEN`（见 §2）：
+Worker 机器上继续挂载它自己的 Pi 配置，并在 gateway 设置了 token 时同样提供 `LLM_GATEWAY_TOKEN`（见 §2）：
 
 ```bash
 export PI_CONFIG_DIR="$HOME/.pi/agent"
@@ -107,7 +107,7 @@ export PI_CONFIG_DIR="$HOME/.pi/agent"
 
 容器内运行的是 Linux，因此 Worker 标签中的 `os: linux` 是有意的；`arch: arm64` 对应 Apple Silicon 容器架构。
 
-## 5. 启动 Mac mini Worker
+## 5. 启动 Worker 机器上的 Worker
 
 ```bash
 make stack-worker-up
@@ -141,7 +141,7 @@ Worker 必须声明自己支持的 `capabilities` 和 `models`。这里的 capab
 - **Docker 部署**：worker 镜像已内置 velites（`/usr/local/bin/velites`，Dockerfile 的 velites-build 阶段按目标平台构建），无需任何额外动作；
 - **裸机/开发部署**（直接跑 `worker.executor`，如 `make dev-worker`）：在**与 Worker 同 OS/架构**的机器上、仓库根执行 `./scripts/ensure-velites.sh --dest data/bin`，脚本按 velites/ 源码指纹决定是否需要 `cargo build --release`（指纹不变的重复执行直接跳过），产物原子安置到 `data/bin/velites`。打包分发时按平台分别构建：把对应平台的 `data/bin/velites` 随仓库（或 worker 代码包）一起带到目标机器即可。macOS 产物用 seatbelt、Linux 产物用 bubblewrap（Linux 主机需可用的 bwrap：setuid 或非特权 user namespace），沙箱后端不可用同样 fail-closed。
 
-**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程，任何持久化前强制剔除（`strip_secret_config`），secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`），只含节点 SDK 实际消费的业务 section（当前仅 `asr`）——vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
+**secret 边界**：节点 secret（vault 解出的连接凭据）只在 claim 响应里经既有 HTTPS 通道注入——落库的 manifest 与 bundle 都不含 secret；Worker 仅内存持有、经 stdin 传给沙箱子进程，任何持久化前强制剔除（`strip_secret_config`），secret 不接触 Worker 文件系统与日志。随 manifest 下发的 settings 快照按 section 白名单过滤（`node_safe_settings_config`）——白名单当前为空（`NODE_SETTINGS_CONFIG_SECTIONS = ()`，业务 section 已随业务节点迁出），vault/auth/database/agent_workers 等实例级 section 不落库、不下发、不进沙箱 stdin。
 
 **协议兼容**：当前协议版本为 v2（新增 `kind: "code"` claim 与 heartbeat 取消 body）。注册时声明 `max_code_concurrency > 0` 必须是 v2（v1 注册带 code 容量会被 400 拒绝；claim 评估对存量行再查一次协议版本兜底）；v1 Worker 在 v2 Host 上保持 agent-only（收不到 code claim，heartbeat 仍是空 204）；v2 Worker 对 v1 Host 自动降级为 agent-only。Host 的 `min_protocol_version` 仍为 1。
 
@@ -182,8 +182,8 @@ CLI 修改配置的示例（`configure` 是部分更新：只覆盖显式传入�
 ```bash
 docker compose -f deploy/compose.worker.yaml exec worker workerctl configure \
   --host-url http://192.0.2.1:8000 \
-  --worker-id home-mac-mini-1 \
-  --name 'Home Mac mini' \
+  --worker-id remote-worker-1 \
+  --name 'Remote Worker' \
   --runtime pi \
   --max-concurrency 10 \
   --capability subtitle_review \
@@ -223,7 +223,7 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 curl -b <登录 cookie> -H 'X-CSRF-Token: <csrf-token>' http://192.0.2.1:8000/api/agent-workers
 ```
 
-响应中应同时看到 `company-local-1` 和 `home-mac-mini-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示用全局 token 注册、可承接所有 workspace 的任务；否则列出 scoped token 授权的唯一 workspace。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
+响应中应同时看到 `host-local-1` 和 `remote-worker-1`。每个 Worker 还带 `allowed_workspaces`：为空（展示为「全部」）表示用全局 token 注册、可承接所有 workspace 的任务；否则列出 scoped token 授权的唯一 workspace。提交工作流后，Job 详情会分别显示逻辑 `agent_id` 和实际承接任务的 `worker_id`。
 
 并发只受两层约束：每个 workspace 的 Agent 并发上限，以及各 Worker 本机的 `max_concurrency`。workspace 级上限在 workspace 设置页的「Agent 并发上限」配置（随主保存按钮一起保存），对该 workspace 的全部 Agent 节点统一生效——不再按节点单独设置。例如上限 20、三个 Worker 各 10 时，该 workspace 最多并行 20 个 Agent 执行，不要求三个 Worker 都跑满。Worker 只能 claim 其 `allowed_workspaces` 范围内 workspace 的任务。控制台修改 `max_concurrency` 会热生效，无需重启；调低容量不会终止在途任务，而是在运行数降到新上限以下前停止继续 claim。关闭「任务领取」同样只阻止新 claim，不影响已经领取的任务。code 节点任务是独立的第二个池：只受 Worker 本机 `max_code_concurrency` 约束（不占 workspace 级 Agent 上限），且刻意不热更——修改后执行进程重启并经启动预检（见 §5「code 节点执行池」）。
 
@@ -231,7 +231,7 @@ curl -b <登录 cookie> -H 'X-CSRF-Token: <csrf-token>' http://192.0.2.1:8000/ap
 
 Tailscale 由宿主机管理，容器不内嵌 Tailscale。上线前必须从 **Worker 容器内部**分别验证 Host API 和 LLM gateway 的 Tailnet 地址可达——Docker Desktop 的网络命名空间不一定继承宿主机 Tailnet 路由。
 
-在 Mac mini 上执行：
+在 Worker 机器上执行：
 
 ```bash
 # Host API（Tailnet 地址）
@@ -253,7 +253,7 @@ docker compose -f deploy/compose.worker.yaml exec worker \
 make stack-host-down
 ```
 
-Mac mini：
+Worker 机器：
 
 ```bash
 make stack-worker-down

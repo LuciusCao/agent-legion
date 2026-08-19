@@ -3,13 +3,10 @@
 Operator guide for running Agent Workers on remote devices (e.g. a home Mac
 mini) with a primary machine as the only one that can reach the LLM provider.
 
-> **2026-07-21 update.** The old remote executor (`kind: remote` executors, the
-> remote broker, `/api/remote/*` routes and `scripts/remote/worker.py`) was
-> removed by the agent-definition-worker-routing change. Distributed execution
-> now uses the **Agent Worker** protocol: Workers register, claim, heartbeat
-> and report over `/api/agent-workers/*` and `/api/agent-executions/*`, with
-> Docker Compose as the standard deployment. Container setup, secrets,
-> registration and day-2 operations live in
+> Distributed execution uses the **Agent Worker** protocol: Workers register,
+> claim, heartbeat and report over `/api/agent-workers/*` and
+> `/api/agent-executions/*`, with Docker Compose as the standard deployment.
+> Container setup, secrets, registration and day-2 operations live in
 > [agent-worker-deployment.md](agent-worker-deployment.md) — this runbook keeps
 > only the cross-machine networking and LLM-gateway operations that document
 > does not repeat.
@@ -250,11 +247,8 @@ flipping the field:
   Settings「Agent 默认配置」or per-node Studio overrides (strict chain, no
   global fallback) — runtime migration never touches them.
 
-  > **Status note:** the runtime migration is complete. The 5 question-chain
-  > agents were migrated first; the 4 video-chain agents followed with the
-  > schema v27 cutover (2026-08-05), which re-published every published
-  > `runtime: pi` definition as `runtime: velites` and archived the old
-  > versions. The canary playbook above is kept as historical context.
+  > **Status note:** the runtime migration described above is complete; the
+  > canary playbook is kept as operational context for future runtime changes.
 
 ## 7. Troubleshooting
 

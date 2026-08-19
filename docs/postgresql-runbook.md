@@ -6,14 +6,14 @@ fallback.
 
 ## Versions
 
-The pinned version is **PostgreSQL 17** everywhere new: the Docker stacks run
+The pinned version is **PostgreSQL 17** everywhere: the Docker stacks run
 `postgres:17.5-bookworm` (`deploy/compose.host.yaml`) and CI test jobs run
 `postgres:17`. For local development, install the matching major via Homebrew
 (`brew install postgresql@17`) so client tools and server stay on 17.
 
-The production database still runs PostgreSQL 15. Its 15→17 upgrade requires a
-rehearsed dump/restore (`pg_dump` from 15, restore into a fresh 17 cluster) —
-**that rehearsal has not been done yet**; do not point the prod stack at a 17
+Upgrading an existing deployment from an older major requires a dump/restore
+(`pg_dump` from the old cluster, restore into a fresh 17 cluster) — rehearse it
+before the maintenance window, and never point the stack at an old-major data
 volume in place (the on-disk format is not compatible across majors).
 
 ## Local setup

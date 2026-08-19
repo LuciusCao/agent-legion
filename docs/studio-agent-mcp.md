@@ -78,7 +78,7 @@ curl -b /tmp/al-cookies.txt -X DELETE \
 }
 ```
 
-配置后新 session 里会出现 10 个 `mcp__agent-legion-studio__*` 工具。
+配置后新 session 里会出现 8 个 `mcp__agent-legion-studio__*` 工具。
 
 ## 3. 注意
 
