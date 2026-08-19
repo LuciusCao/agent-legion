@@ -19,6 +19,7 @@ from server.app.db.migrations import (
     migrate_studio_chat_context,
     migrate_studio_chat_tables,
     migrate_versioned_entities,
+    migrate_workflow_catalog_retirement,
     migrate_workspace_cms_config,
     migrate_workspace_secrets,
 )
@@ -27,7 +28,7 @@ from server.app.db.migrations.job_status_counts import (
 )
 from server.app.db.transaction import write_transaction
 
-SCHEMA_VERSION = 49
+SCHEMA_VERSION = 50
 _SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
@@ -72,8 +73,9 @@ def init_db(database_dsn: DatabaseDsn) -> None:
             migrate_studio_chat_context(conn)
             migrate_agent_workspace_scope(conn)
             migrate_executor_retirement(conn)
+            migrate_workflow_catalog_retirement(conn)
             conn.execute("alter table workspaces drop column if exists cms_config_json")
             conn.execute(
                 "insert into schema_migrations(version, name) values (%s, %s)",
-                (SCHEMA_VERSION, "node_runs_config_snapshot"),
+                (SCHEMA_VERSION, "workflow_catalog_retirement"),
             )

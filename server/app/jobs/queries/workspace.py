@@ -55,9 +55,9 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
+        # The workflow key slot may stay empty (schema v50): a blank-canvas
+        # workspace has no workflow until the first publish adopts one.
         clean_workflow_key = (default_workflow_key or "").strip()
-        if not clean_workflow_key:
-            raise ValueError("Workspace workflow is required")
         resource_config_json = json.dumps(
             resource_config or {},
             ensure_ascii=False,

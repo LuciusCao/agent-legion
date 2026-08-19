@@ -5,7 +5,9 @@ READ-ONLY: only SELECT statements run against the source database. The tool
 is generic — it exports whichever workflows ``--workflow`` names, together
 with everything those workflows need to run on another instance:
 
-- workflows[]: catalog definitions of the requested workflow keys
+- workflows[]: the ACTIVE revision definition of the requested workflow keys,
+  read from the workspaces bound to them (schema v50: the global catalog is
+  retired — a workflow is the DAG inside its workspace)
 - agents[]: published Agent definitions (workspace-scoped since schema v46)
   whose capability is referenced by an exported workflow, collected from the
   source workspaces
@@ -59,30 +61,46 @@ def _masked_dsn(dsn: str) -> str:
 
 
 def export_workflows(conn: Any, workflow_keys: list[str]) -> tuple[list[dict], list[str]]:
+    """Export each key's ACTIVE revision definition from its bound workspaces.
+
+    Several workspaces may share one key (legacy): the first workspace's
+    definition wins and diverging revisions are flagged."""
     rows = conn.execute(
-        "select key, label, description, origin, definition_json from workflow_catalog "
-        "where key = any(%s) order by key",
+        "select w.id as workspace_id, w.default_workflow_key as key, r.definition_json "
+        "from workspaces w "
+        "join workflow_revisions r "
+        "  on r.workspace_id = w.id and r.workflow_key = w.default_workflow_key "
+        " and r.status = 'active' "
+        "where w.default_workflow_key = any(%s) "
+        "order by w.default_workflow_key, w.id",
         (list(workflow_keys),),
     ).fetchall()
     warnings: list[str] = []
     workflows: list[dict] = []
+    seen: dict[str, dict] = {}
     for row in rows:
-        definition = json.loads(row["definition_json"]) if row["definition_json"] else None
-        if definition is None:
-            warnings.append(f"workflow {row['key']}: catalog row has no definition_json")
+        key = str(row["key"])
+        definition = json.loads(str(row["definition_json"]))
+        if key in seen:
+            if json.dumps(seen[key], sort_keys=True) != json.dumps(definition, sort_keys=True):
+                warnings.append(
+                    f"workflow {key}: active revisions diverge across workspaces "
+                    f"(workspace {row['workspace_id']} ignored)"
+                )
+            continue
+        seen[key] = definition
         workflows.append(
             {
-                "key": row["key"],
-                "label": row["label"],
-                "description": row["description"] or "",
-                "origin": row["origin"],
+                "key": key,
+                "label": str(definition.get("label") or key),
+                "description": str(definition.get("description") or ""),
                 "definition": definition,
+                "source_workspace": str(row["workspace_id"]),
             }
         )
-    found = {w["key"] for w in workflows}
     for key in workflow_keys:
-        if key not in found:
-            warnings.append(f"workflow {key}: no catalog row in source DB")
+        if key not in seen:
+            warnings.append(f"workflow {key}: no workspace with an active revision in source DB")
     return workflows, warnings
 
 

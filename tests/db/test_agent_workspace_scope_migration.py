@@ -239,4 +239,4 @@ def test_upgrade_from_v45_with_legacy_global_index() -> None:
         migration = conn.execute(
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
-    assert migration["name"] == "node_runs_config_snapshot"
+    assert migration["name"] == "workflow_catalog_retirement"

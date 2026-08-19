@@ -72,7 +72,7 @@ def test_v42_database_upgrades_via_init_db() -> None:
             "select name from schema_migrations where version=%s", (SCHEMA_VERSION,)
         ).fetchone()
     assert migration is not None
-    assert migration["name"] == "node_runs_config_snapshot"
+    assert migration["name"] == "workflow_catalog_retirement"
 
     # Rows written through the new tables survive a replay (init_db runs at
     # every backend startup).

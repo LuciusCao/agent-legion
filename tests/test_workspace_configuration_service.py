@@ -3,15 +3,12 @@ import pytest
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import LeaseClaimRequest
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 
 
 @pytest.fixture
 def workspace_service(job_db, settings, agent_manager):
-    return WorkspaceConfigurationService(
-        job_db, settings, agent_manager, WorkflowCatalogService(settings)
-    )
+    return WorkspaceConfigurationService(job_db, settings, agent_manager)
 
 
 @pytest.fixture

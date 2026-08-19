@@ -1,19 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { IntakeConfigSection } from './IntakeConfigSection'
 import { WorkflowSection } from './WorkflowSection'
-import { fetchWorkflows } from '../../api'
 import type { WorkspaceSettings, WorkflowDefinitionRecord } from '../../types'
-
-vi.mock('../../api', async () => {
-  const actual = await vi.importActual<typeof import('../../api')>('../../api')
-  return {
-    ...actual,
-    fetchWorkflows: vi.fn(),
-  }
-})
-
-const mockFetchWorkflows = vi.mocked(fetchWorkflows)
 
 const baseSettings: WorkspaceSettings = {
   entityType: 'question',
@@ -158,55 +147,17 @@ describe('IntakeConfigSection', () => {
 })
 
 describe('WorkflowSection', () => {
-  beforeEach(() => {
-    mockFetchWorkflows.mockReset()
-  })
-
-  it('loads workflow options and selects a value', async () => {
-    mockFetchWorkflows.mockResolvedValue({
-      workflows: [
-        { key: 'q1', label: 'Q1' },
-        { key: 'q2', label: 'Q2' },
-      ],
-    })
-
+  it('renders the current key as free text and reports edits', () => {
     const onChange = vi.fn()
-    render(<WorkflowSection workflowKey="" onChange={onChange} />)
+    render(
+      <WorkflowSection workflowKey="question_content" onChange={onChange} />
+    )
 
-    const select = screen.getByRole('combobox', { name: '工作流' })
-    await act(async () => {
-      fireEvent.mouseDown(select)
-    })
-    await waitFor(() => {
-      expect(screen.getByRole('option', { name: 'Q2' })).toBeInTheDocument()
-    })
+    const input = screen.getByRole('textbox', { name: '工作流 Key' })
+    expect(input).toHaveValue('question_content')
 
-    await act(async () => {
-      fireEvent.click(screen.getByRole('option', { name: 'Q2' }))
-    })
+    fireEvent.change(input, { target: { value: 'my_pipeline' } })
 
-    expect(onChange).toHaveBeenCalledWith('q2')
-  })
-
-  it('falls back to empty options and shows an error when fetch fails', async () => {
-    mockFetchWorkflows.mockRejectedValue(new Error('network error'))
-
-    render(<WorkflowSection workflowKey="" onChange={vi.fn()} />)
-
-    // Assert before opening the menu: MUI aria-hides the rest of the tree
-    // while the dropdown is open, which would hide the alert from queries.
-    await waitFor(() => {
-      expect(screen.getByRole('alert')).toHaveTextContent(
-        '工作流列表加载失败，请刷新重试'
-      )
-    })
-
-    const select = screen.getByRole('combobox', { name: '工作流' })
-    await act(async () => {
-      fireEvent.mouseDown(select)
-    })
-
-    expect(screen.getByRole('option', { name: '请选择' })).toBeInTheDocument()
-    expect(screen.queryByRole('option', { name: 'Q1' })).not.toBeInTheDocument()
+    expect(onChange).toHaveBeenCalledWith('my_pipeline')
   })
 })

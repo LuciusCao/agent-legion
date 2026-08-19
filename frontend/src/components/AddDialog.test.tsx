@@ -1,7 +1,7 @@
 import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { AddDialog } from './AddDialog'
-import { api, fetchWorkflowDefinition } from '../api'
+import { api, fetchActiveWorkflowRevision } from '../api'
 import { useUiStore } from '../stores/uiStore'
 import { TestQueryProvider } from '../testing/testQueryClient'
 import type { ReactElement } from 'react'
@@ -12,11 +12,30 @@ function renderWithClient(ui: ReactElement) {
 
 vi.mock('../api', () => ({
   api: vi.fn(),
-  fetchWorkflowDefinition: vi.fn(),
+  fetchActiveWorkflowRevision: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
-const mockFetchWorkflowDefinition = vi.mocked(fetchWorkflowDefinition)
+const mockFetchWorkflowDefinition = vi.mocked(fetchActiveWorkflowRevision)
+
+/** Wrap a workflow definition payload in the ActiveWorkflowRevisionResponse shape. */
+function activeRevisionOf(
+  workflow: import('../types').WorkflowDefinitionRecord
+): import('../types').ActiveWorkflowRevisionResponse {
+  return {
+    revision: {
+      id: 'ws1:demo_workflow:v1',
+      workspace_id: 'ws1',
+      workflow_key: 'demo_workflow',
+      version: 1,
+      status: 'active',
+      definition_hash: 'hash',
+      created_at: '2026-01-01T00:00:00Z',
+    },
+    workflow,
+    definition_yaml: '',
+  }
+}
 
 function enterResourceIds(value: string) {
   const input = screen.getByRole('textbox') as HTMLInputElement
@@ -67,8 +86,8 @@ describe('AddDialog', () => {
   })
 
   it('shows error toast when workspace job batch creation fails', async () => {
-    mockFetchWorkflowDefinition.mockResolvedValue({
-      workflow: {
+    mockFetchWorkflowDefinition.mockResolvedValue(
+      activeRevisionOf({
         key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
@@ -82,8 +101,8 @@ describe('AddDialog', () => {
         },
         edges: [],
         nodes: [],
-      },
-    })
+      })
+    )
     mockApi
       .mockResolvedValueOnce({
         workspace: {
@@ -123,8 +142,8 @@ describe('AddDialog', () => {
   })
 
   it('submits with the selected intake mode when multiple modes exist', async () => {
-    mockFetchWorkflowDefinition.mockResolvedValue({
-      workflow: {
+    mockFetchWorkflowDefinition.mockResolvedValue(
+      activeRevisionOf({
         key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
@@ -143,8 +162,8 @@ describe('AddDialog', () => {
         },
         edges: [],
         nodes: [],
-      },
-    })
+      })
+    )
     mockApi
       .mockResolvedValueOnce({
         workspace: {
@@ -214,8 +233,8 @@ describe('AddDialog', () => {
   })
 
   it('attaches the select change listener when the dialog opens after mount', async () => {
-    mockFetchWorkflowDefinition.mockResolvedValue({
-      workflow: {
+    mockFetchWorkflowDefinition.mockResolvedValue(
+      activeRevisionOf({
         key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
@@ -234,8 +253,8 @@ describe('AddDialog', () => {
         },
         edges: [],
         nodes: [],
-      },
-    })
+      })
+    )
     mockApi
       .mockResolvedValueOnce({
         workspace: {
@@ -308,8 +327,8 @@ describe('AddDialog', () => {
   })
 
   it('disables submit and shows hint when workspace enabled_modes is empty', async () => {
-    mockFetchWorkflowDefinition.mockResolvedValue({
-      workflow: {
+    mockFetchWorkflowDefinition.mockResolvedValue(
+      activeRevisionOf({
         key: 'demo_workflow',
         label: '题目审题信息生成 DAG',
         intake: {
@@ -323,8 +342,8 @@ describe('AddDialog', () => {
         },
         edges: [],
         nodes: [],
-      },
-    })
+      })
+    )
     mockApi.mockResolvedValueOnce({
       workspace: {
         id: 'ws1',

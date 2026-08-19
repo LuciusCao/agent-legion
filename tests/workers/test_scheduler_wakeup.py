@@ -11,8 +11,8 @@ from server.app.scheduler_wakeup import (
 )
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.job_intake_queue import JobIntakeQueue
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
+from tests.helpers import load_builtin_definition
 from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import RecordingExecutor, _make_worker
 
@@ -75,7 +75,7 @@ def _create_workspace_with_revision(job_db, settings):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
-    definition = WorkflowCatalogService(settings).definition("education_video_problems_generation")
+    definition = load_builtin_definition("education_video_problems_generation")
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     return workspace
 
@@ -86,7 +86,7 @@ def test_job_intake_create_batch_notifies(job_db, settings, monkeypatch) -> None
     monkeypatch.setattr(
         "server.app.services.job_intake.notify_schedulable_work", lambda: calls.append(1)
     )
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
 
     result = service.create_batch(
         "default",
@@ -107,7 +107,7 @@ def test_intake_queue_chunk_jobs_notify(job_db, settings, monkeypatch) -> None:
     monkeypatch.setattr(
         "server.app.services.job_intake_queue.notify_schedulable_work", lambda: calls.append(1)
     )
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
     result = service.create_batch(
         "default",
         {

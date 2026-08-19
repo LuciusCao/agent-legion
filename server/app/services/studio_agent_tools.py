@@ -19,7 +19,6 @@ from server.app.services.agent_service import AgentService
 from server.app.services.job_errors import NotFoundError
 from server.app.services.studio_agent_node_codes import StudioAgentNodeCodeTools
 from server.app.services.versioned_entities import VersionedEntity
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_draft_compare import compare_workflow_draft
 from server.app.services.workflow_draft_publish import validate_workflow_draft_for_publish
 from server.app.services.workflow_revision_format import (
@@ -95,10 +94,6 @@ class StudioAgentToolsService:
             agent_id, definition, studio_agent_created_by(user_id)
         )
 
-    def register_workflow(self, key: str, label: str, description: str) -> dict[str, Any]:
-        """Register a catalog key; the caller triggers the scan hot-reload."""
-        return WorkflowCatalogService(self._settings).register(key, label, description)
-
     # Read tools.
 
     def get_active_revision(self, workspace_id: str) -> dict[str, Any]:
@@ -121,9 +116,6 @@ class StudioAgentToolsService:
             "workflow": workflow_definition_to_response_payload(definition),
             "definition_yaml": definition_to_yaml(definition),
         }
-
-    def list_catalog(self) -> list[dict[str, Any]]:
-        return WorkflowCatalogService(self._settings).list_workflows()
 
     def get_node_code_state(
         self, workspace_id: str, workflow_key: str, node_key: str

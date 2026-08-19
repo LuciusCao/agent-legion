@@ -29,11 +29,13 @@ class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    default_workflow_key: str
-    # demo (default): bind the catalog definition and seed the active revision
-    # (including factory Agent templates for the built-in demo workflow).
-    # blank: only record the default_workflow_key slot; Studio starts from an
-    # empty draft and the first publish creates revision v1.
+    # The workflow key slot is optional (schema v50): a blank workspace starts
+    # with no key and the first publish adopts the draft key. demo (default):
+    # seed the repo-shipped sample template as the active revision (including
+    # its factory Agent templates); with no explicit key the sample workflow
+    # itself is the default. blank: empty canvas, Studio starts from an empty
+    # draft and the first publish creates revision v1.
+    default_workflow_key: str | None = None
     workflow_mode: Literal["demo", "blank"] = "demo"
     default_entity: str = "question"
     resource_config: dict[str, Any] = Field(default_factory=dict)

@@ -92,13 +92,11 @@ def test_workflow_openapi_contract_is_capability_only(tmp_path: Path) -> None:
 
     node = schemas["WorkflowNodeResponse"]["properties"]
     detail = schemas["WorkflowDefinitionResponse"]["properties"]
-    summary = schemas["WorkflowSummaryResponse"]["properties"]
 
     assert "capability" in node
     assert "runner" not in node
     assert "agent" not in node
     assert "concurrency" not in detail
-    assert "concurrency" not in summary
 
 
 def test_lists_workspace_workflow_revisions(client):
@@ -350,3 +348,127 @@ def test_workspace_settings_node_config_is_schema_validated(tmp_path):
     assert ok.json()["settings"]["nodeConfig"]["intake_knowledge_points"] == {
         "knowledge_dir": "examples/custom"
     }
+
+
+def test_node_override_validation_uses_workspace_active_revision(tmp_path):
+    """#112 incident regression: override validation must read the workspace's
+    ACTIVE revision, not a stale global template. After v2 drops a node, an
+    override for it is rejected even though the v1 DAG (and the retired
+    catalog template) still carried it."""
+    from dataclasses import replace
+
+    from server.app.services.workflow_revisions import WorkflowRevisionService
+    from tests.helpers import load_builtin_definition
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "rev_ws", "default_workflow_key": "education_video_problems_generation"},
+        )
+        assert ws.status_code == 200
+        workspace_id = ws.json()["workspace"]["id"]
+
+        # Publish v2: the demo DAG minus review_questions (and its edges).
+        definition = load_builtin_definition("education_video_problems_generation")
+        nodes = {
+            key: replace(node, after=[a for a in node.after if a != "review_questions"])
+            for key, node in definition.nodes.items()
+            if key != "review_questions"
+        }
+        edges = [
+            edge
+            for edge in definition.edges
+            if "review_questions" not in (edge.source, edge.target)
+        ]
+        v2 = replace(definition, nodes=nodes, edges=edges)
+        revision = WorkflowRevisionService(app.state.job_db).publish_workspace_revision(
+            workspace_id, v2
+        )
+        assert revision["version"] == 2
+
+        removed = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"review_questions": {}}},
+        )
+        surviving = c.patch(
+            f"/api/workspaces/{workspace_id}/settings/nodes",
+            json={"nodeConfig": {"intake_knowledge_points": {"knowledge_dir": "examples/custom"}}},
+        )
+
+    assert removed.status_code == 400
+    assert "Unknown node" in removed.json()["detail"]
+    assert surviving.status_code == 200
+
+
+def test_blank_workspace_first_publish_adopts_key_and_runs_job(tmp_path):
+    """Full catalog-free flow (#112 acceptance): create a blank workspace (no
+    workflow picked), publish a draft — the first publish adopts the draft key
+    — then intake a job."""
+    from server.app.services.node_codes import NodeCodeService
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with authenticate_client(TestClient(app)) as c:
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "blank_ws", "workflow_mode": "blank"},
+        )
+        assert ws.status_code == 200, ws.text
+        workspace = ws.json()["workspace"]
+        workspace_id = workspace["id"]
+        assert workspace["default_workflow_key"] == ""
+
+        # The code node needs published code before the first revision (the
+        # known bootstrap constraint; node code is workspace-scoped).
+        codes = NodeCodeService(app.state.job_db.path)
+        codes.save_draft(
+            workspace_id,
+            "acme_flow",
+            "fetch",
+            "def run(job, job_dir, runtime):\n    pass\n",
+            "test seed",
+        )
+        codes.publish(workspace_id, "acme_flow", "fetch")
+
+        draft_yaml = (
+            "key: acme_flow\n"
+            "label: Acme Flow\n"
+            "schema_version: 2\n"
+            "intake:\n"
+            "  modes:\n"
+            "    direct_ids:\n"
+            "      label: Direct IDs\n"
+            "      input_field: question_ids\n"
+            "nodes:\n"
+            "  fetch:\n"
+            "    label: Fetch\n"
+            "    capability: fetch\n"
+            "    outputs: [fetch.json]\n"
+            "edges: []\n"
+        )
+        published = c.post(
+            f"/api/workspaces/{workspace_id}/workflow-drafts/publish",
+            json={"definition_yaml": draft_yaml},
+        )
+        assert published.status_code == 200, published.text
+        assert published.json()["valid"] is True
+
+        fetched = c.get(f"/api/workspaces/{workspace_id}")
+        assert fetched.json()["workspace"]["default_workflow_key"] == "acme_flow"
+        active = c.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+        assert active.status_code == 200
+        assert active.json()["revision"]["version"] == 1
+
+        batch = c.post(
+            f"/api/workspaces/{workspace_id}/job-batches",
+            json={
+                "workflow_key": "acme_flow",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+            },
+        )
+
+    assert batch.status_code == 200, batch.text
+    assert batch.json()["created_count"] == 1

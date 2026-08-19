@@ -46,4 +46,9 @@ def publish_workflow_draft(
     WorkflowRevisionService(job_db, custom_nodes_enabled).save_workspace_revision(
         workspace_id, definition
     )
+    workspace = job_db.get_workspace(workspace_id)
+    if workspace is not None and not str(workspace.get("default_workflow_key") or ""):
+        # Blank-canvas adoption (schema v50): the first successful publish
+        # stamps the workspace with the draft's workflow key.
+        job_db.update_workspace(workspace_id, default_workflow_key=definition.key)
     return True, []

@@ -27,7 +27,6 @@ from server.app.events.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.agent_service import reset_published_agent_cache
 from server.app.services.skill_source_store import SkillSourceStore
-from server.app.services.workflow_catalog import seed_builtin_workflow_catalog
 from server.app.settings import load_settings
 from server.app.skills.builtin_sources import BUILTIN_SKILL_LOCK, BUILTIN_SKILL_SOURCES
 
@@ -73,14 +72,6 @@ def _seed_skill_sources() -> None:
     store = SkillSourceStore(TEST_DATABASE_URL)
     store.put_sources(BUILTIN_SKILL_SOURCES.model_copy(deep=True))
     store.put_lock(BUILTIN_SKILL_LOCK.model_copy(deep=True))
-
-
-# Test workflow catalog: the built-in workflow registry (workflow_catalog
-# table, schema v40) re-seeded after every TRUNCATE, mirroring the app startup
-# seed so catalog reads (routes, workspace binding, worker scan) see the
-# built-in demo workflow.
-def _seed_workflow_catalog() -> None:
-    seed_builtin_workflow_catalog(TEST_DATABASE_URL)
 
 
 # Deterministic pricing seeded into global_settings after every TRUNCATE (see
@@ -188,7 +179,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/db/test_postgres_runtime.py",
         "tests/db/test_quality_loop_schema.py",
         "tests/db/test_versioned_entities_migration.py",
-        "tests/db/test_workflow_catalog_migration.py",
+        "tests/db/test_workflow_catalog_retirement.py",
         "tests/db/test_workspace_cms_migration.py",
         "tests/db/test_workspace_secrets_migration.py",
         "tests/executors/leases/test_expire_race.py",
@@ -209,7 +200,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/routes/jobs/test_job_rerun.py",
         "tests/routes/jobs/test_job_run_to.py",
         "tests/routes/jobs/test_openapi_contracts.py",
-        "tests/routes/jobs/test_workflow_catalog.py",
         "tests/routes/jobs/test_workflow_upgrade.py",
         "tests/routes/test_agent_workers.py",
         "tests/routes/test_agent_worker_result_spool.py",
@@ -253,7 +243,6 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/services/test_quality_stats.py",
         "tests/services/test_scoped_tokens.py",
         "tests/services/test_skill_source_store.py",
-        "tests/services/test_workflow_catalog_store.py",
         "tests/services/test_token_usage.py",
         "tests/test_export_openapi.py",
         "tests/test_jobs_route_contracts.py",
@@ -282,14 +271,12 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_run_dir_cleanup.py",
         "tests/test_skill_catalog_service.py",
         "tests/test_worker_control_db.py",
-        "tests/test_workflow_catalog_service.py",
         "tests/test_workflow_execution_control.py",
         "tests/test_workflow_revisions.py",
         "tests/test_workflow_worker_concurrency.py",
         "tests/test_workspace_executor_queries.py",
         "tests/workers/test_scheduler_wakeup.py",
-        "tests/workers/test_scan_hot_reload.py",
-        "tests/workers/test_workflow_catalog_scan.py",
+        "tests/workers/test_workspace_scan.py",
         "tests/workers/test_workflow_worker_capacity.py",
         "tests/workers/test_workflow_worker_mark_scan.py",
         "tests/workers/test_workflow_worker_node_code.py",
@@ -363,7 +350,7 @@ def _rebuild_schema() -> None:
 # seed rows do NOT advance between tests. A test asserting a seeded row is
 # "fresh" (e.g. updated_at >= now - interval) would false-red; assert
 # presence/content, never recency, against seeded rows.
-_SEEDED_TABLES = ("job_event_seq", "global_settings", "versioned_entities", "workflow_catalog")
+_SEEDED_TABLES = ("job_event_seq", "global_settings", "versioned_entities")
 _SEED_SNAPSHOT: dict[str, tuple[list[str], list[tuple]]] | None = None
 
 
@@ -548,7 +535,6 @@ def _isolate_postgres_database(request):
         reset_published_agent_cache()
         _seed_demo_node_codes()
         _seed_skill_sources()
-        _seed_workflow_catalog()
         _capture_seed_snapshot()
     else:
         close_database_pools()
@@ -557,7 +543,6 @@ def _isolate_postgres_database(request):
         if not replayed:
             _seed_demo_node_codes()
             _seed_skill_sources()
-            _seed_workflow_catalog()
             _capture_seed_snapshot()
     yield
     if fresh:

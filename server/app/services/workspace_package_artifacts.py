@@ -1,23 +1,23 @@
 from __future__ import annotations
 
-from server.app.services.workflow_catalog import WorkflowCatalogService
-from server.app.settings import Settings
+from server.app.jobs import JobQueries
+from server.app.services.workflow_definitions import workspace_active_definition
 
 
 def workspace_artifact_names(
-    settings: Settings, workflow_keys: set[str], base_names: set[str]
+    job_db: JobQueries, workspace_id: str, workflow_keys: set[str], base_names: set[str]
 ) -> list[str]:
     """Return the curated artifact list for packaging.
 
     Every workflow goes through the generic path: ``base_names`` merged with
-    the declared node outputs from the DB-backed workflow catalog.
+    the declared node outputs from the workspace's active workflow revision
+    (schema v50).
     """
-    catalog = WorkflowCatalogService(settings)
     names = set(base_names)
     for workflow_key in workflow_keys:
         if not workflow_key:
             continue
-        definition = catalog.definition_or_none(workflow_key)
+        definition = workspace_active_definition(job_db, workspace_id, workflow_key)
         if definition is None:
             continue
         for node in definition.nodes.values():

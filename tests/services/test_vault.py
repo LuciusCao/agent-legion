@@ -17,9 +17,9 @@ from server.app.services.vault import (
     VaultMasterKeyMissingError,
     VaultService,
 )
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_node_config import update_workspace_node_config
+from tests.helpers import load_builtin_definition
 
 PLAINTEXT = "s3cr3t-cms-token"
 
@@ -173,7 +173,7 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     workspace = job_db.create_workspace(
         "vault-freeze", default_workflow_key="education_video_problems_generation"
     )
-    definition = WorkflowCatalogService(settings).definition("education_video_problems_generation")
+    definition = load_builtin_definition("education_video_problems_generation")
     # ensure_active_revision seeds the demo agents into this workspace (v46).
     WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     # The demo nodes declare no secret fields; republish the write_script
@@ -199,7 +199,7 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
     agent_service.publish("example-write-script-v1")
     update_workspace_node_config(
         job_db,
-        WorkflowCatalogService(settings),
+        settings,
         published_agent_definitions(settings.database_url, workspace["id"]),
         job_db.get_workspace(workspace["id"]),
         {
@@ -211,7 +211,7 @@ def test_intake_freeze_stores_secret_ref_not_plaintext(vault, job_db, settings):
             }
         },
     )
-    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service = JobIntakeService(job_db, settings)
 
     result = service.create_batch(
         workspace["id"],

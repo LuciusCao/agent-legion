@@ -10,9 +10,8 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
 from server.app.services.job_operation_error import JobOperationError
 from server.app.services.job_rerun import JobRerunService
-from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
-from tests.helpers import load_builtin_definition
+from tests.helpers import load_builtin_definition, publish_builtin_revision
 
 
 @pytest.fixture
@@ -21,7 +20,6 @@ def rerun_service(job_db, settings):
         job_db,
         ExecutorLeaseRepository(job_db.path, data_dir=settings.data_dir),
         settings,
-        WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),
     )
 
@@ -31,6 +29,7 @@ def job(job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_batch(
         "education_video_problems_generation",
         "batch_by_ids",
@@ -60,6 +59,7 @@ def running_job(job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_batch(
         "education_video_problems_generation",
         "batch_by_ids",
@@ -394,6 +394,7 @@ def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_batch(
         "education_video_problems_generation",
         "batch_by_ids",
@@ -426,6 +427,7 @@ def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_batch(
         "education_video_problems_generation",
         "batch_by_ids",
@@ -484,6 +486,7 @@ def test_batch_rerun_from_failed_node_per_job(rerun_service):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, workspace["id"])
     batch = job_db.create_batch(
         "education_video_problems_generation",
         "batch_by_ids",
@@ -523,6 +526,7 @@ def test_batch_rerun_mixed_workflows(rerun_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, workspace["id"])
     q_batch = job_db.create_batch(
         "education_video_problems_generation",
         "batch_by_ids",
@@ -569,6 +573,7 @@ def test_rerun_from_intake_resets_not_applicable_downstream(job_db, rerun_servic
     workspace = job_db.create_workspace(
         "ws1", default_workflow_key="education_video_problems_generation"
     )
+    publish_builtin_revision(job_db, workspace["id"])
     definition = load_builtin_definition("education_video_problems_generation")
     job = job_db.create_job(
         workflow_key="education_video_problems_generation",

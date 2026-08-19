@@ -1,10 +1,14 @@
 import pytest
 
+from tests.helpers import publish_builtin_revision
+
 WORKFLOW_KEY = "education_video_problems_generation"
 
 
 def _make_workspace(job_db, slug):
-    return job_db.create_workspace(slug, default_workflow_key=WORKFLOW_KEY)
+    workspace = job_db.create_workspace(slug, default_workflow_key=WORKFLOW_KEY)
+    publish_builtin_revision(job_db, workspace["id"])
+    return workspace
 
 
 def _make_job(job_db, workspace_id, source_id, title="", batch_id="", node_keys=("n1", "n2")):

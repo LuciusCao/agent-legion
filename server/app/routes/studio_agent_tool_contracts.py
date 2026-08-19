@@ -12,12 +12,6 @@ from server.app.routes.workflow_node_code_contracts import WorkflowNodeCodeDraft
 from server.app.routes.workflow_revisions_contracts import WorkflowRevisionSummary
 
 
-class StudioAgentWorkflowRegisterRequest(BaseModel):
-    key: str
-    label: str
-    description: str = ""
-
-
 class StudioAgentActiveWorkflowResponse(BaseModel):
     """``state="empty"`` (not 404) when no default key or no published revision."""
 

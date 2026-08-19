@@ -10,6 +10,7 @@ from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker.thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
+from tests.helpers import scan_entries
 
 
 def local_node(key: str, outputs: list[str] | None = None) -> WorkflowNode:
@@ -103,5 +104,5 @@ def make_worker(
                 "def run(job, job_dir, runtime):\n    pass\n",
                 "test seed",
             )
-    worker._scan_entries = (definitions, [])
+    worker._scan_entries = scan_entries(*definitions)
     return worker

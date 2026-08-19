@@ -40,9 +40,8 @@ export function SettingsPage() {
   // 非 dirty 时同步后台 refetch）。loadError 由 hook 写入 saveError。
   const settingsQuery = useSettingStoreHydration(workspaceId)
   const settingsSnapshot = settingsQuery.data
-  const { data: workflowDefinitionData } = useWorkflowDefinitionQuery(
-    settings.workflowKey
-  )
+  const { data: workflowDefinitionData } =
+    useWorkflowDefinitionQuery(workspaceId)
   const workflowDefinition = workflowDefinitionData ?? null
 
   // P-0.5：无 Agent 路由的节点一律进入隐含 code 池，节点级并发上限只对

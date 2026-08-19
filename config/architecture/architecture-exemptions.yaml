@@ -119,13 +119,3 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/architecture/studio-phase3-implementation-plan.md
   ceiling: 45
-- check: architecture.file_budget
-  path: server/app/main.py
-  reason: Phase 3 chunk 4 wires the StudioChatService (construction, app
-    state, lifespan shutdown, router parameter) into the application
-    composition root, the single assembly point for app services. The
-    built-in demo agent seed (P3c example workflow) adds one import and one
-    seed-if-absent call next to the executor/workflow/skill seeds.
-  owner: workspace-executor
-  remove_when: docs/architecture/studio-phase3-implementation-plan.md
-  ceiling: 206

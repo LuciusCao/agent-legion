@@ -13,7 +13,7 @@ from server.app.services.job_query_presenters import (
     node_summary,
 )
 from server.app.services.job_workflow_versions import is_workflow_outdated
-from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_definitions import require_workspace_active_definition
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.services.workspace_dag import build_workspace_dag
 from server.app.services.workspace_executor_configuration import (
@@ -31,12 +31,10 @@ class JobQueryService:
         self,
         job_db: JobQueries,
         settings: Settings,
-        workflows: WorkflowCatalogService,
         workspace_executor_config: WorkspaceExecutorConfigurationService,
     ):
         self.job_db = job_db
         self.settings = settings
-        self.workflows = workflows
         self.workspace_executor_config = workspace_executor_config
 
     def _job_or_404(self, job_id: str) -> dict[str, Any]:
@@ -46,8 +44,10 @@ class JobQueryService:
         return job
 
     def _definition_for_job(self, job: dict[str, Any]) -> WorkflowDefinition:
-        return definition_from_job_snapshot(job) or self.workflows.definition(
-            str(job["workflow_key"])
+        # Snapshot-less jobs fall back to their own workspace's active
+        # revision (schema v50), never a global template.
+        return definition_from_job_snapshot(job) or require_workspace_active_definition(
+            self.job_db, str(job["workspace_id"]), str(job["workflow_key"])
         )
 
     def _job_summary(
