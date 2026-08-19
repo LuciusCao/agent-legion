@@ -43,9 +43,11 @@ when its connection closes, so under sustained load these knobs keep long-lived
 backends from ballooning; both default tighter than psycopg-pool's built-in
 600s/3600s. Remote queue claims use `FOR UPDATE SKIP LOCKED`, so
 different workers can claim different rows concurrently; an advisory lock per
-worker prevents its concurrent polls from exceeding `slots`. Executor lease
-claims use an advisory lock per executor so capacity checks stay correct across
-multiple scheduler replicas.
+worker prevents its concurrent polls from exceeding `slots`. The local implicit
+code pool uses a single advisory lock key (`pg_advisory_xact_lock(hashtext('code-pool'))`
+in `server/app/executors/_lease_claims.py`) so capacity checks stay correct
+across multiple scheduler replicas; per-executor locks retired with executor
+definitions at schema v47 (P-0.5).
 
 Do not raise every API replica's pool to the agent count. Budget total server
 connections across all replicas below PostgreSQL `max_connections`; use

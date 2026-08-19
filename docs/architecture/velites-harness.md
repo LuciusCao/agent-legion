@@ -128,8 +128,8 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 
 ### 明确不发
 
-- `message_update` / `tool_execution_update`（delta 类）——协议层删除，worker
-  `event_filter.py` 的 delta 快路径随之成为死代码（后续清理，不在本期）。
+- `message_update` / `tool_execution_update`（delta 类）——协议层删除；pi runtime
+  长期保留，因此 worker `event_filter.py` 的 pi delta 快路径仍在服役。
 
 ### 错误语义（与 `shared/pi_model_error.py` 对齐）
 
@@ -153,8 +153,8 @@ TPS 不冗余存储：消费方按 `usage.output / (streamMs / 1000)` 自行计�
 - 事件结构在 `velites/src/events.rs` 用 serde 定义，`schemars` 导出 JSON Schema；
 - Python 侧新增契约测试：校验 Host 消费字段在 schema 中存在且类型一致
   （quick lane 必跑）；
-- full lane 增加**真二进制集成测试**（偿还当前 `tests/executors/` 全 mock 的债）：
-  用 fixture provider（本地 stub SSE server）跑完整执行，断言事件序列与 run.json；
+- full lane 已交付**真二进制集成测试**：用 fixture provider（本地 stub SSE server）
+  跑完整执行，断言事件序列与产物；
 - PoC 的 `poc/diff_events.py` 思路固化为 golden diff 测试（Node Pi 输出作参照，仅开发期）。
 
 ## 5. 可控性特性（第一特性）
@@ -300,7 +300,8 @@ fail-closed 报错，内置节点不受影响。
   cache 420k = velites 修复前 input 447k），`saturating_sub` 兜底异常网关；
 - `thinking` 参数按 provider 映射（初期只支持 gateway 现有映射，PoC 已验证）；
 - 已知边界：严格要求 SSE——gateway 上只回 `application/json` 的模型不可用
-  （PoC P2 发现），模型白名单在 `config/workflow.yaml` 侧约束并写进运维文档；
+  （PoC P2 发现）；模型接入约束由实例级外部服务连接与 gateway 运维策略控制，
+  不再通过 `config/workflow.yaml` 维护（split yaml 已退役）。
 - HTTP 层**不设整请求总超时**（总超时会掐断几分钟的长生成流；2026-08-01
   回放事故证实 gateway 会在上游失败时直接掐流）：内建 connect 超时 10s +
   chunk 间读 idle 超时 180s（思考模型的 chunk 间隔可能较长；run 级墙钟上限由
@@ -415,7 +416,7 @@ pi                      # 交互式完成认证
 
 ## 10. Quality Impact
 
-- **新 invariant 候选**（进 `config/architecture/architecture-invariants.yaml`）：
+- **已注册 invariant**（见 `config/architecture/architecture-invariants.yaml`）：
   - `EXEC-EVENT-SCHEMA-001`：velites 事件 schema 与 Host 消费字段契约一致
     （quick：schema 导出 + Python 契约测试）；
   - `EXEC-HARNESS-ISOLATION-001`：harness 无自动发现——上下文来源仅
@@ -427,8 +428,8 @@ pi                      # 交互式完成认证
     cwd/session dir/`/tmp` 之外的文件（quick：沙箱集成测试——尝试读用户 home
     敏感路径、写仓库外路径，断言 `tool_execution_end{isError: true}`）；
     沙箱不可用时 fail-closed（exit≠0），不降级；
-- **测试债偿还**：`tests/executors/` 目前对 pi 全部 fake-binary mock；本期为 velites
-  建立真二进制 + stub provider 的集成测试（full lane），pi flavor 维持 mock 至移除；
+- **测试**：velites 已交付真二进制 + stub provider 的集成测试（quick lane），
+  pi runtime 仍保留其既有测试策略；
 - **压力门禁（未实施）**：并发 RSS/启动延迟基准纳入 stress lane（对照 PoC 基线：单发 RSS
   <30 MB、冷启动 <50 ms）——截至 2026-08-04，`scripts/stress/` 与 CI stress lane
   均无 velites 基准，仍为待落地项；

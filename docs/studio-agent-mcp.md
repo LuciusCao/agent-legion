@@ -8,6 +8,8 @@
 
 token 是 **admin 用户**签发的长效 scoped token（P4 起 `POST /api/studio-agent-tokens` 及 list/DELETE 端点全部 admin-only，非 admin 403；origin='user'，默认 168h，上限 720h）：
 
+> 下文示例 base URL 默认写 `http://127.0.0.1:8000`；若使用 dev 栈，后端默认端口为 `8001`（prod 为 `8000`），请按需替换。
+
 ```bash
 # 登录拿 session cookie
 curl -c /tmp/al-cookies.txt -X POST http://127.0.0.1:8000/api/auth/login \

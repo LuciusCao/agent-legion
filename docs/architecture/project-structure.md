@@ -33,7 +33,7 @@ agent-legion/
 │       ├── services/           # 业务逻辑服务层
 │       ├── db/                 # PostgreSQL schema、连接池、事务与共享查询构造
 │       ├── jobs/               # Job 领域查询与类型
-│       ├── executors/          # Executor 配置、runtime、lease 调度
+│       ├── executors/          # Code executor、lease 调度与 capacity 控制
 │       ├── workflows/          # Agent Legion DAG 定义与执行
 │       ├── configuration/      # 配置加载与 owned-keys 校验
 │       ├── quality/            # 架构不变量与豁免运行时检查
@@ -59,12 +59,25 @@ agent-legion/
 │       ├── pages/              # 路由级页面
 │       ├── layouts/            # 布局组件
 │       ├── components/         # 可复用 UI 组件
-│       ├── stores/             # Zustand 状态管理
+│       ├── stores/             # Zustand 客户端状态管理
 │       ├── hooks/              # React 自定义 Hooks
 │       ├── lib/                # 纯工具函数
 │       ├── types/              # 类型声明
 │       ├── testing/            # 测试辅助
 │       └── styles.css          # 全局样式
+├── worker/                     # Agent Worker 协议 v2 实现
+│   ├── service.py              # Worker Service 控制面入口
+│   ├── executor.py             # claim / 执行 / 心跳 / 结果上报主循环
+│   ├── runtime_controls.py     # 状态副本 YAML 热更控制
+│   └── ...
+├── velites/                    # 自研 Rust agent harness 与 OS 沙箱
+│   ├── src/
+│   ├── tests/
+│   └── Cargo.toml
+├── shared/                     # Host 与 Worker/节点 SDK 共享的轻量契约
+│   ├── pi_events.py
+│   └── pi_model_error.py
+├── workspace_libs/             # 节点 SDK 与执行脚手架（code 节点沙箱/Worker 闭包白名单）
 ├── scripts/                    # 质量门、迁移、生成器
 │   ├── check-quick.sh          # 快速质量门
 │   ├── check.sh                # 完整质量门
@@ -84,7 +97,12 @@ agent-legion/
 │   ├── routes/                 # 路由级测试
 │   ├── full/                   # 高保真完整门测试
 │   └── ci/                     # CI 扩展压力测试
-├── workspace_libs/             # 节点 SDK 与执行脚手架（code 节点沙箱/Worker 闭包白名单）
+├── deploy/                     # Docker Compose 与部署模板
+│   ├── compose.host.yaml
+│   ├── compose.worker.yaml
+│   └── secrets/
+├── examples/                   # 示例 workflow 资源
+│   └── education-video-problems-generation/
 ├── docs/
 │   └── architecture/           # 架构文档
 └── data/                       # 运行时数据（gitignored）

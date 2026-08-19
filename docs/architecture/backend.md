@@ -45,7 +45,7 @@ server/app/
 ├── jobs/                   # Job 领域查询与类型
 │   └── queries/            # JobQueries（含 WorkspaceQueriesMixin）等
 ├── configuration/          # 配置加载与 owned-keys 校验
-├── executors/              # Executor 配置、Runtime、租赁调度、registry factory
+├── executors/              # Code executor、租赁调度与 capacity 控制
 ├── events/                 # 事件总线、Agent 发现与状态跟踪（agents.py）、WS 广播
 ├── workflow_worker/      # DAG workflow worker：thread.py 线程、ready.py 每 pass
 │                         # 一次的 ready 候选收集、schedule.py lease 认领与提交、
@@ -67,7 +67,7 @@ server/app/
                前端实时更新
 ```
 
-`WorkflowWorkerThread` 定期轮询数据库，驱动 Agent Legion DAG Job 从 `queued` 向 `completed` 状态推进；每个节点按其 capability 分发到对应 executor 执行。
+`WorkflowWorkerThread` 定期轮询数据库，驱动 Agent Legion DAG Job 从 `queued` 向 `completed` 状态推进；Agent 路由节点经 `AgentExecutionBroker` 派发到 Worker，其余路由节点进入本地隐含 code 池执行。
 
 ## Key Decisions
 
@@ -516,14 +516,16 @@ server/app/
 - `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
 - 当 `start_worker=True` 时，生命周期内启动 `WorkflowWorkerThread`：
   - 在 DB 实例设置 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
-  - 节点按 capability 分发：DB 发布的 code 节点（EXEC-CODE-002/003，demo 节点走 global 出厂种子）或 agent 节点（pi / velites runtime）。
+  - 节点按 capability 分发：DB 发布的 code 节点（EXEC-CODE-002/003，demo 节点走 global 出厂种子）进入本地 code 池或 Worker code 池；agent 节点（pi / velites runtime）经 broker 派发给 Worker。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
-- 内置示例 workflow `education_video_problems_generation` 的节点序列：
+- 内置示例 workflow `education_video_problems_generation` 的节点序列
+  （完整 DAG 定义见 `server/app/workflows/builtin_demo.py`）：
 
   1. `intake_knowledge_points` — code 节点，读取知识点目录并展开 job 输入
   2. `write_script` — agent 节点，生成教学视频脚本
   3. `review_script` — agent 节点，评审脚本
-  4. `generate_questions` — agent 节点，生成练习题
+  4. `generate_questions` — agent 节点，生成练习题（与 `write_script` /
+     `review_script` 并行，均依赖 `intake_knowledge_points`）
   5. `review_questions` — agent 节点，评审题目
   6. `publish_content` — code 节点，汇总产物为 `publish_payload.json`
 
@@ -587,9 +589,6 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `exemptions.py`: 读取 `config/architecture/architecture-exemptions.yaml` 并校验。
 - 对应脚本：`scripts/check_invariants.py`。
 
-- `contracts.py`, `response_contracts.py`: 视频详情与产物响应模型。
-- `projection.py`: 将底层 artifacts 投影为 API 响应。
-
 ### Secrets Vault
 
 `server/app/services/vault.py` 提供按 workspace 隔离的凭证保管库（VAULT-SECRET-001）。
@@ -644,8 +643,8 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 
 ## Security Considerations
 
-- 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
-- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自 DB 实例设置文档（`/api/admin/instance-settings`，仅管理员可写）；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量。
-- PostgreSQL 与文件存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的 User Authentication 章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
+- 节点代码执行统一在 `velites sandbox wrap` OS 沙箱（seatbelt / bubblewrap）内进行，网络默认拒绝，文件系统默认只放行 job_dir、`/tmp` 与显式 allow-list；沙箱后端不可用时执行 fail-closed（EXEC-CODE-003）。
+- OpenClaw runtime 当前未实现；如未来启用，其命令模板应来自 DB 实例设置文档（`/api/admin/instance-settings`，仅管理员可写），替换前经 null 字节剔除与 `shlex.quote` 清洗。
+- PostgreSQL 与文件存储部署在受信网络内；业务 API 均需登录（cookie session 或 Bearer token，见 README 的「快速开始 / 登录」章节），uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何通过鉴权的用户都可删除 job、下载产物、触发执行。
 - Workspace 凭证经 vault 加密落库（`workspace_secrets`，Fernet），API 永不返回明文，配置与 intake 快照只存 `secret_ref`；实例级外部服务连接凭据与鉴权 token 同样 Fernet 加密落 `instance_secrets` / `connection_tokens`（实例 vault），只在 dispatch 注入与连接探测时于内存解析；master key 走 env / 文件注入，不进 DB、不进日志（VAULT-SECRET-001）。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。
