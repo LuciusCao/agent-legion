@@ -1,6 +1,13 @@
 # Workflow Studio 演进：Agent  authoring + 可视化调优（设计）
 
-状态：方向已定案（2026-08-12 讨论），阶段 0 待实施；dry-run 待设计（§6）
+状态：方向已定案（2026-08-12 讨论）。**2026-08 后续演进补注**：阶段 0 的
+断点已按不同路径消解——workflow catalog 未做 DB 化而是整体退役（schema
+v50，#112，workflow 就是 workspace 内部的一份 DAG）；code capability 的
+`path` 绑定已退役（#96，节点代码统一 DB 发布）；executor 定义已退役
+（P-0.5，schema v47），其「热生效」与「新建受 is_file() 校验」问题随之消失；
+阶段 3 已按 MCP/ACP 三层分离落地（见 `studio-phase3-implementation-plan.md`
+与 `docs/studio-agent-mcp.md`）。dry-run（§6，阶段 2）仍待设计。本文 §2/§3/§5
+中基于当时代码的断点描述为历史记录。
 日期：2026-08-12
 关联：Issue #30/#82、`node-sdk-and-worker-execution-design.md`、
 `custom-workflow-nodes-design.md`、EXEC-CODE-001/002/003

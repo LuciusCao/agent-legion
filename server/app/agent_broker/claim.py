@@ -2,10 +2,11 @@
 
 Split out of ``broker.py`` so the broker module only carries the queue
 protocol; mirrors the ``executors/_lease_*.py`` layout. The candidate window
-scan lives in ``claim_scan.py`` for the file-size budget; this module keeps
-the Worker-level setup and the bounded scan-round loop. Functions take the
-broker instance as their first argument and must run inside the caller's
-transaction unless noted otherwise.
+scan lives in ``claim_scan.py`` and the per-kind scan-round loop in
+``claim_windows.py`` (file-size budget); this module keeps the Worker-level
+setup and the per-kind orchestration. Functions take the broker instance as
+their first argument and must run inside the caller's transaction unless
+noted otherwise.
 """
 
 from __future__ import annotations
@@ -16,18 +17,9 @@ from typing import TYPE_CHECKING, Any
 
 from server.app.agent_broker import agent_claim_compatibility
 from server.app.agent_broker.agent_worker_capacity import sync_declared_capacity, touch_worker
-from server.app.agent_broker.claim_evaluate import cancel_request, evaluate_candidate
-from server.app.agent_broker.claim_scan import (
-    MAX_CLAIM_ATTEMPTS,
-    SCAN_ROUNDS,
-    AgentClaim,
-    ClaimRacedError,
-    ScanState,
-    WorkerView,
-    fair_candidate_order,
-    fetch_candidates,
-    window_saturated,
-)
+from server.app.agent_broker.claim_evaluate import cancel_request
+from server.app.agent_broker.claim_scan import AgentClaim, ClaimRacedError, ScanState, WorkerView
+from server.app.agent_broker.claim_windows import needed_claim_kinds, scan_kind
 
 if TYPE_CHECKING:
     from server.app.agent_broker.broker import AgentExecutionBroker
@@ -83,26 +75,25 @@ def claim_in_transaction(
         code_active=code_active,
         protocol_version=int(worker["protocol_version"]),
     )
-    # Both pools exhausted: nothing this Worker could claim, skip the scan.
-    if agent_active >= max_concurrency and code_active >= max_code_concurrency:
+    # Nothing this Worker could claim (both pools exhausted, or only code
+    # headroom on a pre-v2 Worker): skip the scan entirely.
+    kinds = needed_claim_kinds(view)
+    if not kinds:
         touch_worker(conn, worker_id)
         return None, Counter()
     cursor = next(broker._fairness_counter)
+    # Alternate the leading kind per pass so neither kind is systemically
+    # first behind the other kind's flood.
+    if cursor % 2:
+        kinds.reverse()
     state = ScanState()
-    for per_workspace, window in SCAN_ROUNDS:
-        candidates = fetch_candidates(conn, per_workspace, window)
-        if not candidates:
-            break
-        for selected in fair_candidate_order(candidates, cursor):
-            if state.attempts >= MAX_CLAIM_ATTEMPTS:
-                break
-            claimed = evaluate_candidate(broker, conn, worker_id, selected, view, state)
-            if claimed is not None:
-                touch_worker(conn, worker_id)
-                return claimed, state.skip_reasons
-        if state.attempts >= MAX_CLAIM_ATTEMPTS or not window_saturated(
-            candidates, per_workspace, window
-        ):
-            break
+    for kind in kinds:
+        # Per-kind attempt budget (issue #125): an unclaimable flood in one
+        # kind never consumes the other kind's attempts.
+        state.attempts = 0
+        claimed = scan_kind(broker, conn, worker_id, view, state, kind, cursor)
+        if claimed is not None:
+            touch_worker(conn, worker_id)
+            return claimed, state.skip_reasons
     touch_worker(conn, worker_id)
     return None, state.skip_reasons

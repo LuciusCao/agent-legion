@@ -1,6 +1,6 @@
 # 项目结构
 
-本文件列出 Agent Legion 仓库的高层目录结构。详细的模块说明见 [backend.md](backend.md)、[frontend.md](frontend.md) 和 [pipeline.md](pipeline.md)。
+本文件列出 Agent Legion 仓库的高层目录结构。详细的模块说明见 [backend.md](backend.md) 和 [frontend.md](frontend.md)。
 
 > 具体文件清单以实际文件系统为准；本文件只记录稳定的顶层模块和关键入口。
 
@@ -36,14 +36,14 @@ agent-legion/
 │       ├── workflows/          # Agent Legion DAG 定义与执行
 │       ├── configuration/      # 配置加载与 owned-keys 校验
 │       ├── quality/            # 架构不变量与豁免运行时检查
-│       ├── skills/             # 外部 Pi skill 管理
-│       ├── agents.py           # Agent 发现与状态跟踪
+│       ├── skills/             # 外部 skill 源与锁管理
 │       ├── events/             # 事件子系统：sse.py SSE 广播、bus.py 进程内总线、
-│       │                       # buffer.py DB 持久化缓冲、aggregator.py 聚合器
+│       │                       # buffer.py DB 持久化缓冲、aggregator.py 聚合器、
+│       │                       # agents.py Agent 发现与状态跟踪
 │       ├── workflow_worker/    # DAG workflow worker：thread.py 线程与 poll 循环、
 │       │                       # ready.py 每 pass 一次的 ready 候选收集、
 │       │                       # schedule.py ready 候选的 lease 认领与提交
-│       └── worker*.py          # Worker 控制与遗留 worker 文件
+│       └── worker*.py          # Worker 控制与启动（worker_control.py / worker_startup.py）
 ├── frontend/
 │   ├── package.json
 │   ├── tsconfig.json

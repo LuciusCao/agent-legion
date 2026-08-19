@@ -1,6 +1,9 @@
 # 阶段 3 实施计划：Studio 内置 agent + workflow 调度热刷新
 
-状态：实施中（2026-08-13 启动）。chunk 1→5 顺序执行，每 chunk 质量门全绿后进入下一个。
+状态：**已落地**（2026-08-13 启动，2026-08 收口）。工具面落地为 MCP server
+（`server.app.mcp_server`，接入文档 `docs/studio-agent-mcp.md`），对话面落地为
+ACP（`server/app/studio_chat/` + Studio 右栏面板）；本文档保留为实施记录，
+`path:line` 证据反映当时代码。
 上游设计：`workflow-studio-evolution-design.md`（§1 定位、§4 已定案决策）。
 
 ## 方向修正（2026-08-14，用户拍板）

@@ -23,6 +23,7 @@ from server.app.workflow_worker.catalog_scan import (
     load_workflow_scan_entries,
 )
 from server.app.workflow_worker.claim_flush import PreparedClaim, flush_prepared_claims
+from server.app.workflow_worker.code_stock import CodeStockGate
 from server.app.workflow_worker.execution import reap_futures
 from server.app.workflow_worker.maintenance import WorkflowMaintenance
 from server.app.workflow_worker.mark_scan import MarkStore
@@ -90,6 +91,8 @@ class WorkflowWorkerThread:
         self._pass_claim_counts: dict[str, int] = {}
         self._pending_claims: list[PreparedClaim] = []
         self._agent_pass = AgentPassState()
+        # Code stockpile gate (issue #125): TTL-cached, shared across passes.
+        self.code_stock = CodeStockGate(settings.database_url, settings.executor_runtime.code_stock)
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:

@@ -164,6 +164,7 @@ _POSTGRES_TEST_FILES = frozenset(
     {
         "tests/ci/test_executor_worker_stress.py",
         "tests/db/test_agent_catalog_cutover_migration.py",
+        "tests/db/test_agent_request_kind_window.py",
         "tests/db/test_agent_workspace_scope_migration.py",
         "tests/db/test_agent_request_kind_schema.py",
         "tests/db/test_auth_scoped_tokens_migration.py",
@@ -224,6 +225,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/scripts/test_backfill_comprehension_jobdir_ids.py",
         "tests/services/test_agent_artifacts.py",
         "tests/services/test_agent_broker_claim_scan.py",
+        "tests/services/test_agent_broker_claim_windows.py",
         "tests/services/test_agent_version_pin.py",
         "tests/services/test_agent_worker_liveness.py",
         "tests/services/test_artifact_orphan_gc.py",
@@ -275,6 +277,7 @@ _POSTGRES_TEST_FILES = frozenset(
         "tests/test_workflow_revisions.py",
         "tests/test_workflow_worker_concurrency.py",
         "tests/test_workspace_executor_queries.py",
+        "tests/workers/test_code_stock_gate.py",
         "tests/workers/test_scheduler_wakeup.py",
         "tests/workers/test_workspace_scan.py",
         "tests/workers/test_workflow_worker_capacity.py",

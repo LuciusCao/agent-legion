@@ -70,6 +70,11 @@ def try_claim_code_worker_node(
         return True
     if not dispatch.online_code_worker_available(node.capability, workspace_id):
         return False
+    if not worker.code_stock.allows():
+        # Code stockpile full (issue #125): leave the node pending for the
+        # local pool instead of flooding the broker queue; a later pass
+        # re-evaluates as the stock drains.
+        return False
 
     batch_payload = cached_batch_payload(worker, job)
     # Same resolution order as the local path (#115): the currently
