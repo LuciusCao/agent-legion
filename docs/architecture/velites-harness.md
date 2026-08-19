@@ -403,6 +403,16 @@ pi_config/pi_command_builder/pi_prompt 链）已整体删除（#108）。
 探测对应二进制（缺失即拒启动）。容器部署前置：worker 镜像含 velites 二进制
 + bwrap setuid；容器 seccomp 需放行 `unshare`（见 §5 沙箱小节的运行时要求）。
 
+**Pi CLI 安装与验证**（仅 `runtime: pi` 的 agent 需要）：
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+pi                      # 交互式完成认证
+./scripts/check-pi.sh   # 验证安装与认证状态
+```
+
+之后在 Studio「Agent 管理」把对应 agent 定义的 `runtime` 设为 `pi` 即可。
+
 ## 10. Quality Impact
 
 - **新 invariant 候选**（进 `config/architecture/architecture-invariants.yaml`）：

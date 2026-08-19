@@ -2,6 +2,40 @@
 
 本目录存放 Agent Legion 的**统一架构文档**，描述当前系统的模块划分、数据流和关键设计决策。
 
+## 系统总览
+
+```
+Browser (React SPA)
+   │ REST / SSE / WebSocket
+   ▼
+FastAPI Host ─────────────────────────────────────────┐
+   │ routes → services → workflows (DAG scheduler)    │
+   │                       │ executor leases          │
+   ▼                       ▼                          ▼
+PostgreSQL          Local executors            Agent Workers (remote)
+(control plane)     pipeline nodes             claim → run → artifacts
+   │                       │                          │
+   ▼                       ▼                          ▼
+data/  (videos, logs, packages, jobs, run traces)
+        agent nodes → Pi CLI / velites → external skills (git, locked)
+```
+
+- **Backend**: Python 3.11+, FastAPI, Uvicorn, PostgreSQL
+- **Frontend**: React 18, TypeScript, Vite, Zustand, MUI v6, React Flow
+- **Agent harness**: velites (Rust, `velites/`) or Pi CLI (Node)
+- **Tooling**: `uv` + Ruff + mypy (Python), npm + ESLint + Prettier (frontend),
+  pytest + Vitest + cargo test
+
+关键设计规则（由架构检查强制，见仓库根 [AGENTS.md](../../AGENTS.md) 与
+[workspace-executor-evidence-matrix.md](workspace-executor-evidence-matrix.md)）：
+
+- Workflow 节点只声明 `capability` —— agent/skill 接线在 Agent 定义里，code
+  节点解析到已发布的 `node_code`。
+- Route 是薄 HTTP 适配层；业务逻辑在 service；executor 一律经 lease 申请容量。
+- 前端 transport 类型从后端 OpenAPI schema 生成
+  （`frontend/src/generated/api.ts`），禁止手写。
+- Secret 只进 vault 或 env —— tracked 配置 yaml 在启动时拒绝 secret 值。
+
 ## 现行文档（描述当前系统状态）
 
 | 模块 | 文档 | 职责 |
