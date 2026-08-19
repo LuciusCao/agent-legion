@@ -5,8 +5,10 @@ from __future__ import annotations
 import json
 import os
 from datetime import UTC, datetime
+from unittest.mock import patch
 
-from server.app.agent_broker import AgentExecutionBroker
+from server.app.agent_broker import AgentExecutionBroker, reaper
+from server.app.db.connection import DatabaseConnection
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -17,6 +19,7 @@ def _insert_request(
     state: str,
     bundle_name: str,
     finished_at: datetime | None = None,
+    manifest_text: str | None = None,
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
@@ -35,7 +38,14 @@ def _insert_request(
             " state, queued_at, finished_at, manifest_json)"
             " values (%s, 'test-workspace', 'job-1', 'questions', 'review',"
             " 'generator-v1', 'sha256:whatever', 1, %s, current_timestamp, %s, %s)",
-            (execution_id, state, finished_at, json.dumps({"bundle_name": bundle_name})),
+            (
+                execution_id,
+                state,
+                finished_at,
+                manifest_text
+                if manifest_text is not None
+                else json.dumps({"bundle_name": bundle_name}),
+            ),
         )
 
 
@@ -140,3 +150,58 @@ def test_reap_incremental_query_never_seq_scans(job_db, tmp_path) -> None:
 
     plan = "\n".join(str(row[0]) for row in rows)
     assert "Seq Scan on agent_execution_requests" not in plan
+
+
+def test_startup_full_scan_streams_in_chunks(job_db, tmp_path, monkeypatch) -> None:
+    """#128: the startup scan must stream through a chunked server-side cursor
+    instead of buffering every terminal manifest at once. With a chunk size
+    smaller than the row count (3 fetch batches for 5 rows), every bundle is
+    still reaped and the watermark advances with the overlap anchored at the
+    scan start."""
+    monkeypatch.setattr(reaper, "_SCAN_CHUNK_SIZE", 2)
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+    for index in range(5):
+        (bundle_dir / f"done-{index}.tar.gz").write_bytes(b"bundle")
+        _insert_request(
+            job_db, execution_id=f"exec-{index}", state="done", bundle_name=f"done-{index}.tar.gz"
+        )
+
+    with patch.object(
+        DatabaseConnection, "stream", autospec=True, wraps=DatabaseConnection.stream
+    ) as stream_spy:
+        before = datetime.now(UTC) - reaper._REAP_OVERLAP
+        reaped = broker.reap_terminal_bundles()
+        after = datetime.now(UTC) - reaper._REAP_OVERLAP
+
+    assert reaped == 5
+    assert not list(bundle_dir.glob("done-*.tar.gz"))
+    assert stream_spy.call_count == 1
+    assert stream_spy.call_args.kwargs["chunk_size"] == 2
+    assert broker._reap_watermark is not None
+    assert before <= broker._reap_watermark <= after
+
+
+def test_startup_full_scan_bad_manifest_does_not_abort_later_chunks(
+    job_db, tmp_path, monkeypatch
+) -> None:
+    """A manifest that fails JSON parsing is skipped without aborting the
+    scan: with one row per fetch batch, the valid row in a later chunk is
+    still reaped."""
+    monkeypatch.setattr(reaper, "_SCAN_CHUNK_SIZE", 1)
+    bundle_dir = tmp_path / "bundles"
+    bundle_dir.mkdir()
+    broker = AgentExecutionBroker(TEST_DATABASE_URL, bundle_dir=bundle_dir, data_dir=tmp_path)
+    # Inserted first so the poisoned row leads the scan; chunk size 1 puts it
+    # in an earlier fetch batch than the valid row.
+    _insert_request(
+        job_db, execution_id="exec-bad", state="done", bundle_name="", manifest_text="not json"
+    )
+    (bundle_dir / "good.tar.gz").write_bytes(b"bundle")
+    _insert_request(job_db, execution_id="exec-good", state="done", bundle_name="good.tar.gz")
+
+    reaped = broker.reap_terminal_bundles()
+
+    assert reaped == 1
+    assert not (bundle_dir / "good.tar.gz").exists()

@@ -12,6 +12,8 @@ from server.app.db.dialect import DatabaseDsn, postgres_sql
 from server.app.db.pools import close_database_pools as close_database_pools
 from server.app.db.pools import pool_for
 
+_Params = Sequence[Any] | Mapping[str, Any] | None
+
 
 class DatabaseConnection:
     """Small DB-API facade used by existing query modules."""
@@ -27,12 +29,19 @@ class DatabaseConnection:
         self.database_dsn = dsn
         self._closed = False
 
-    def execute(self, sql: str, params: Sequence[Any] | Mapping[str, Any] | None = None) -> Cursor:
+    def execute(self, sql: str, params: _Params = None) -> Cursor:
         return Cursor(self._raw.execute(postgres_sql(sql), params))
 
     def executemany(self, sql: str, params_seq: Iterable[Sequence[Any]]) -> Cursor:
         cursor = self._raw.cursor()
         cursor.executemany(postgres_sql(sql), params_seq)
+        return Cursor(cursor)
+
+    def stream(self, name: str, sql: str, params: _Params = None, *, chunk_size: int) -> Cursor:
+        """Server-side cursor streaming rows in chunk_size batches; name unique per transaction."""
+        cursor = self._raw.cursor(name=name)
+        cursor.itersize = chunk_size
+        cursor.execute(postgres_sql(sql), params)
         return Cursor(cursor)
 
     def commit(self) -> None:
