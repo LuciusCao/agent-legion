@@ -1,314 +1,133 @@
 # Agent Legion
 
-Agent Legion is a self-hosted console that turns AI agents into a managed
-production line for content workflows. You define a workflow as a DAG of
-**capabilities**, submit a batch of work, and Agent Legion schedules every
-node across local and remote agent executors — with a live UI to watch,
-rerun, and package the results.
+*[English README](README_EN.md)*
 
-It ships with one minimal example workflow,
-**`education_video_problems_generation`** — expand a directory of knowledge
-points into jobs that draft a teaching video script, review it, generate
-practice questions, review them, and assemble a mock publish payload. It
-runs out of the box with no external services and demonstrates the core
-mechanics (intake → code nodes → agent nodes → review → packaged artifacts).
-Real production workflows are authored per workspace in Studio (draft →
-publish as the workspace's revision) with node code published as custom
-nodes — see `docs/architecture/`.
+Agent Legion 是一个自托管控制台，把 AI agent 变成内容生产线的受管工人。
+你把工作流定义成业务**能力**（capability）组成的 DAG——「批量 intake」
+「写脚本」「评审」「生成练习题」——Agent Legion 负责把每个节点调度到你
+的机器上执行，并提供一个实时控制台，让你观察进度、重跑失败节点、收集
+打包好的产物。
 
-## Features
+它面向的不是一次性的 LLM 对话，而是可重复、可审计的生产过程。
 
-- **Workspace-scoped DAG workflows.** A workflow is the DAG inside one
-  workspace: the built-in sample DAG is a Python constant in
-  `server/app/workflows/builtin.py` (the optional sample-template seed at
-  workspace creation); nodes declare only a
-  business `capability` and their
-  input/output artifacts — never how to run them. The authoritative
-  definition is the workspace's active `workflow_revisions` row, published
-  from Studio drafts (the global `workflow_catalog` registry was retired at
-  schema v50). Rerun a single node, run to
-  a target node, or continue from a pause; downstream staleness is tracked
-  automatically.
-- **Batch intake.** Create job batches through
-  `POST /api/workspaces/{id}/job-batches` with direct ID/URL lists; external
-  resolution belongs to the workflow's own nodes, not the platform.
-- **Pluggable agent runtimes.** Agent nodes run headlessly through the Pi CLI
-  or **velites** — Agent Legion's own Rust harness (&lt;50 ms cold start vs
-  Pi's ~1.6 s, a fraction of the memory, same pi-compatible event stream).
-  Switch per agent with the `runtime` field (`pi` / `openclaw` / `velites`) in
-  the Agent definition, managed in Studio「Agent 管理」(published into the
-  `versioned_entities` table; yaml agent config is retired). Execution
-  provider/model/thinking resolve from per-node Studio overrides, then the
-  workspace Settings「Agent 默认配置」.
-- **Versioned external skills.** Each capability maps to a skill in a
-  standalone git repository, declared in the DB `global_settings`
-  `skill_sources` document and pinned by the `skill_lock` document (managed
-  via /admin/settings「Skill 源管理」or `make skills-lock`; the tracked
-  `config/skills.yaml` / `config/skills.lock` files are retired). Every run
-  restores the locked ref, so workflow output is reproducible.
-- **Local & remote executors.** Capacity is granted through executor leases;
-  remote **Agent Workers** register over HTTP, claim executions, stream
-  heartbeats, and upload artifacts — scale out by adding machines.
-- **Real-time console.** React SPA with a live DAG view (React Flow), SSE
-  dashboard events, WebSocket agent status, run logs, artifacts, token-usage
-  statistics, and failure-category batch rerun.
-- **Secrets vault.** Workspace secrets (`secret: true` binding fields) are
-  Fernet-encrypted at rest; configs and snapshots carry only `secret_ref` —
-  never plaintext. Instance-level external service credentials (e.g. CMS)
-  live on admin-managed connections (admin settings → 外部服务连接),
-  Fernet-encrypted in `instance_secrets` with acquired tokens cached in
-  `connection_tokens`.
-- **Multi-user with workspace ACL.** Cookie sessions + CSRF guard, admin user
-  management, per-workspace editor/viewer membership.
-- **PostgreSQL control plane.** One authoritative database coordinates
-  multi-process and multi-machine scheduling; artifacts and run traces live
-  under `data/`.
+## 你能得到什么
 
-## Architecture
-
-```
-Browser (React SPA)
-   │ REST / SSE / WebSocket
-   ▼
-FastAPI Host ─────────────────────────────────────────┐
-   │ routes → services → workflows (DAG scheduler)    │
-   │                       │ executor leases          │
-   ▼                       ▼                          ▼
-PostgreSQL          Local executors            Agent Workers (remote)
-(control plane)     pipeline nodes             claim → run → artifacts
-   │                       │                          │
-   ▼                       ▼                          ▼
-data/  (videos, logs, packages, jobs, run traces)
-        agent nodes → Pi CLI / velites → external skills (git, locked)
-```
-
-- **Backend**: Python 3.11+, FastAPI, Uvicorn, PostgreSQL
-- **Frontend**: React 18, TypeScript, Vite, Zustand, MUI v6, React Flow
-- **Agent harness**: velites (Rust, `velites/`) or Pi CLI (Node)
-- **Tooling**: `uv` + Ruff + mypy (Python), npm + ESLint + Prettier (frontend),
-  pytest + Vitest + cargo test
-
-Key design rules (enforced by architecture checks, see
-[AGENTS.md](AGENTS.md) and [docs/architecture/](docs/architecture/)):
-
-- Workflow nodes declare `capability` only — agent/skill wiring lives in
-  Agent definitions, and code nodes resolve to published `node_code`.
-- Routes are thin HTTP adapters; business logic lives in services; executors
-  acquire capacity exclusively through leases.
-- Frontend transport types are generated from the backend OpenAPI schema
-  (`frontend/src/generated/api.ts`), never hand-written.
-- Secrets enter the vault or env only — tracked config yaml rejects secret
-  values at startup.
+- **业务方能看懂的工作流。** 节点只声明做什么（能力 + 输入/输出产物），
+  不声明怎么跑。在内置的 Studio 里可视化编排并发布；每个 workspace
+  拥有自己的 DAG 与版本历史。
+- **批量进，结果出。** 一次 API 调用提交一批工作项，每项成为一个 job
+  流过 DAG。支持单节点重跑、跑到指定节点、从暂停处继续——下游过期
+  状态自动跟踪。
+- **实时运维控制台。** React SPA：实时 DAG 视图、SSE 仪表盘事件、
+  WebSocket agent 状态、运行日志、产物、token 用量统计、按失败类别
+  批量重跑。
+- **加机器就能扩容。** 远程 Agent Worker 经 HTTP 注册、领取执行、上传
+  产物。容量按池分配并强制隔离，廉价的 code 任务洪水永远不会饿死你的
+  agent 执行。
+- **可复现、可审计。** 外部 skill 就是普通 git 仓库，按锁定的 commit
+  固定版本；每次节点执行都留下完整痕迹（prompt、事件流、stderr），
+  事后可随时复查。
+- **秘密妥善处理。** workspace 与实例级凭据经 Fernet 加密进 vault；
+  配置与快照只携带引用，永不落明文。
+- **默认多用户。** Cookie 会话 + CSRF 防护、admin 用户管理、按
+  workspace 的 editor/viewer 成员权限。
 
 ## Quick Start
 
-Prerequisites: Python 3.11+, Node 18+, PostgreSQL 17 (Homebrew:
-`brew install postgresql@17`), [`uv`](https://docs.astral.sh/uv/). The Docker
-stacks and CI also pin PostgreSQL 17 — see
-[docs/postgresql-runbook.md](docs/postgresql-runbook.md).
+### 前置要求
+
+- Python 3.11+、Node 18+、PostgreSQL 17（Homebrew：`brew install postgresql@17`）
+- Python 依赖管理工具 [`uv`](https://docs.astral.sh/uv/)
+- Rust 工具链（`cargo`），用于构建 **velites**——所有节点代码都在它的
+  沙箱里执行
+- 一个 LLM provider 供 agent 节点使用（任何 OpenAI 兼容端点均可；
+  demo workflow 需要一个）
+
+### 1. 克隆与安装
 
 ```bash
-uv sync                                     # Python deps
+git clone https://github.com/LuciusCao/agent-legion.git
+cd agent-legion
+uv sync                                     # Python 依赖
 createdb agent_legion
-cp .env.example .env                        # fill in secrets
-export AGENT_LEGION_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
+cp .env.example .env                        # 然后编辑：设置 AGENT_LEGION_DATABASE_URL
 cd frontend && npm install && cd ..
 ```
 
-Run (two terminals):
+### 2. 一次性本地配置
 
 ```bash
-# backend (binds 127.0.0.1 only — never expose with 0.0.0.0)
-uv run uvicorn server.app.main:app --reload --reload-dir server --port 8000
+# 后端与本地 worker 共享的注册 token。
+# 必须在后端【首次启动之前】创建（后端在启动时读取它）。
+mkdir -p deploy/secrets
+openssl rand -hex 24 > deploy/secrets/agent_worker_register_token
+chmod 600 deploy/secrets/agent_worker_register_token
 
-# frontend dev server (proxies /api to the backend)
-cd frontend && npm run dev
+# 构建用于沙箱执行节点代码的 velites 二进制
+./scripts/ensure-velites.sh --dest data/bin
+
+# 本地 worker 配置（把 host_url 改为 http://127.0.0.1:8001，并设置
+# register_token_file: deploy/secrets/agent_worker_register_token、
+# work_root: data/agent-worker——详见示例文件里的注释）
+cp config/agent-worker.example.yaml config/agent-worker.yaml
 ```
 
-First start redirects to `/setup` to create the admin user. For production,
-`cd frontend && npm run build` — the backend then serves the SPA from
-`http://127.0.0.1:8000`.
-
-Common tasks have Makefile shortcuts (`make help` lists all):
+### 3. 启动
 
 ```bash
-make dev-up           # start backend + frontend + worker in the background (idempotent)
-make dev-status       # show component status and URLs
-make dev-down         # stop everything dev-up started
-make dev-backend      # backend dev server only (foreground)
-make dev-frontend     # frontend dev server only (foreground)
-make import-demo      # import the demo workflow's skills (required before running it)
-make check-quick      # quick quality gate (daily)
-make check            # full quality gate (before handoff)
-make api-generate     # regenerate frontend API types
-make skills-lock      # refresh the DB skill lock (global_settings skill_lock)
-make install-hooks    # install pre-commit / pre-push gates
+make dev-up         # 后端 :8001，控制台 :5174，worker :8789——幂等
+make dev-status     # 查看各组件状态与 URL
+make dev-down       # 全部停止
 ```
 
-`make dev-up` runs the three `dev-*` targets in the background via
-`nohup`, waits for health, and prints each service URL; logs land in
-`data/logs/dev-{backend,frontend,worker}.log`. It is idempotent — re-running
-it skips components already listening on their ports. The dev stack binds
-`127.0.0.1:8001` (backend), `:5174` (frontend) and `:8789` (worker console)
-by default so it can coexist with a production instance on the standard
-8000/5173/8787 ports; override with `DEV_BACKEND_PORT` /
-`DEV_FRONTEND_PORT` / `AGENT_WORKER_UI_PORT`.
+打开 http://127.0.0.1:5174——首次访问会跳转到 `/setup` 创建 admin 用户。
+worker 按设计默认关闭任务领取，到 worker 控制台 http://127.0.0.1:8789
+打开。
 
-### Local Agent Worker (optional)
+### 4. 跑通 demo workflow
 
-`make dev-up` starts a worker only when `config/agent-worker.yaml` exists.
-The file is untracked, and `config/agent-worker.example.yaml` is
-container-oriented — for a bare-metal local worker:
-
-1. Create the registration token **before the first backend start** — the
-   backend loads it at startup, and a token file created afterwards only
-   takes effect after a backend restart:
-
-   ```bash
-   mkdir -p deploy/secrets
-   openssl rand -hex 24 > deploy/secrets/agent_worker_register_token
-   chmod 600 deploy/secrets/agent_worker_register_token
-   ```
-
-2. `cp config/agent-worker.example.yaml config/agent-worker.yaml`, then
-   adjust for local use: `host_url: http://127.0.0.1:8001` (the dev stack
-   backend port), `register_token_file: deploy/secrets/agent_worker_register_token`,
-   `work_root: data/agent-worker`, and `capabilities` / `models` matching the
-   workflows you run (the demo workflow needs `write_script`, `review_script`,
-   `generate_questions`, `review_questions`). Declaring the `velites` runtime
-   requires a velites binary on PATH or at `data/bin/velites` —
-   `scripts/ensure-velites.sh --dest data/bin` builds and installs one.
-
-3. Re-run `make dev-up` (idempotent) to start the worker, then enable
-   claiming in the worker console at `http://127.0.0.1:8789` — workers start
-   with `claim_enabled: false` by design. The console API is guarded by the
-   auto-generated `data/agent-worker-service/control_token`.
-
-### Demo workflow (education_video_problems_generation)
-
-The repository ships a minimal demo workflow: ten generic K-12 math
-knowledge points under `examples/education-video-problems-generation/` are
-fanned out one job each, then each job writes a teaching-video script, reviews
-it, generates five exercises, reviews them, and finishes with a simulated
-(no-network) publish. To run it:
+仓库自带一个极简 demo workflow
+**`education_video_problems_generation`**：`examples/` 下 10 个通用中小学
+数学知识点各自展开为一个 job——撰写教学视频脚本、评审、生成 5 道练习题、
+评审，最后模拟发布（不发网络请求）。
 
 ```bash
-make import-demo      # copy examples/skills/* into the local skill source root,
-                      # git-init each and tag v1.0.0 (idempotent, never overwrites)
-make skills-lock      # resolve the demo skill refs into the DB skill lock
+make import-demo      # 把 demo skill 安装为本地 git 仓库（必需，只需一次）
+make skills-lock      # 把 demo skill 的 commit 锁进 DB
 ```
 
-`make import-demo` is a **required step**: the demo skill sources
-(`~/.agents/skills/agent-legion/education-video-problems-generation/*`) are
-created by it, and relocking or dispatching without it fails with a
-"local skill repo not found" error that points back to the command. Then bind
-a workspace to the `education_video_problems_generation` workflow and
-configure the workspace's default agent model
-(`default_agent_provider` / `default_agent_model` in workspace Settings) —
-agent nodes still need a real LLM. See `examples/README.md` for the layout.
+然后在控制台里：
 
-## Configuration
+1. 用 **demo** 模板创建 workspace（自动绑定示例 workflow 及其 agent
+   定义）。
+2. 在 workspace **设置 → Agent 默认配置** 里填入你的 LLM 端点提供的
+   provider/model。
+3. 提交一批任务：`POST /api/workspaces/{id}/job-batches`，body 为
+   `{"workflow_key": "education_video_problems_generation",
+   "source_kind": "direct_ids", "knowledge_point_ids": ["triangle-area"]}`
+   ——或使用 intake 界面。
+4. 看 DAG 实时点亮；每个节点完成后可以查看它的完整执行痕迹与产物。
 
-All runtime split yaml files are retired — `config/app.yaml`,
-`config/workflow.yaml`, and `config/agent_legion.yaml` fail startup with
-migration guidance when present. The effective configuration is composed from
-code defaults, env overrides, and DB documents. Remaining tracked config
-files:
+### 下一步
 
-| File | Owns |
-|------|------|
-| `server/app/workflows/builtin.py` (+ `builtin_demo.py`) | built-in workflow DAG definitions |
+- **在 Studio 里编排自己的工作流**（草稿 → 发布）并挂上自己的
+  skill——demo 的接线方式见 `examples/README.md`。
+- **加更多机器当 worker**：
+  [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md)。
+- **生产部署**（Docker stack、PostgreSQL）：
+  [docs/architecture/deployment.md](docs/architecture/deployment.md) 与
+  [docs/postgresql-runbook.md](docs/postgresql-runbook.md)。
 
-Skill sources and pinned refs are no longer tracked files: they live in the
-DB `global_settings` documents `skill_sources` / `skill_lock`, managed through
-the admin API (`GET/PUT /api/admin/skill-sources`,
-`POST /api/admin/skill-sources/relock`) and the /admin/settings「Skill 源管理」
-section; `make skills-lock` re-resolves the lock. A leftover
-`config/skills.yaml` / `config/skills.lock` is imported into the DB once at
-startup (with a warning) and never read again.
+## 文档
 
-Bootstrap/security-level keys are env-only —
-database URL comes from `AGENT_LEGION_DATABASE_URL`, the data root from
-`AGENT_LEGION_DATA_DIR`, browser CORS origins from
-`AGENT_LEGION_CORS_ALLOW_ORIGINS` / `AGENT_LEGION_CORS_ALLOW_CREDENTIALS`.
-Instance-level tunables (cleanup/monitoring policy, lease/heartbeat/sweeper
-timing, agent worker limits, `workflows.enabled`, the OpenClaw runtime block
-`openclaw.*`) live in the DB
-`global_settings` document `instance` and are edited through the admin API
-`GET/PUT /api/admin/instance-settings`; they hydrate at startup and take
-effect on restart. `AGENT_LEGION_OPENCLAW_CWD` stays as an env override that
-outranks the DB value. Executor definitions are retired (P-0.5, schema v47):
-non-Agent-routed nodes join an implicit code pool whose capacity comes from
-the instance `code_capacity` setting, and node-tunable parameters are
-declared by Agent definitions or the node's own `config_schema:` block.
+| 我想… | 看这里 |
+|-------|--------|
+| 把系统跑起来 / 跑 demo | 本文件 + `examples/README.md` |
+| 运维（部署、worker、远程执行） | [docs/](docs/README.md)——部署、worker 与 runbook 文档 |
+| 理解原理（架构、配置参考、runtime） | [docs/architecture/](docs/architecture/README.md) |
+| 贡献代码 | [CONTRIBUTING.md](CONTRIBUTING.md) 与 [AGENTS.md](AGENTS.md) |
+| 跟踪变更 | [CHANGELOG.md](CHANGELOG.md) |
 
-Secrets are never written to yaml: database URL comes from
-`AGENT_LEGION_DATABASE_URL`, the vault master key from
-`AGENT_LEGION_VAULT_MASTER_KEY[_FILE]`, the bootstrap admin password from
-`AGENT_LEGION_BOOTSTRAP_ADMIN_PASSWORD`, and external service credentials
-(e.g. CMS) live on instance-level connections (admin settings → 外部服务连接,
-Fernet-encrypted in `instance_secrets`). Full reference:
-[docs/architecture/backend.md](docs/architecture/backend.md).
+## 许可证
 
-## Agent Runtimes
-
-Agent nodes execute through external skills — standalone git repositories
-containing `SKILL.md`, an output contract, and a validator — typically checked
-out under `~/.agents/skills/agent-legion/<workflow>/<capability>/` and pinned
-by the DB `skill_lock` document (refresh with `make skills-lock`).
-
-Two harness runtimes run them:
-
-- **Pi CLI**: `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`,
-  then `pi` to authenticate and `./scripts/check-pi.sh` to verify. Enable per
-  agent with `runtime: pi` in the Agent definition (Studio「Agent 管理」). Pi
-  is an optional runtime; the production default is velites.
-- **velites** (production default): a single static Rust binary built from
-  `velites/` (`cargo build --release`), emitting the same event stream the host
-  consumes. Enable per agent with `runtime: velites` in the Agent definition.
-  `make prod-up` runs `scripts/ensure-velites.sh` before starting
-  services: it fingerprints the `velites/` source tree (git tree hash) against
-  a stamp next to the PATH binary and rebuilds + atomically reinstalls when
-  stale, so a pulled-but-never-rebuilt binary cannot drift from the code.
-  The retired `workflows.pi` yaml block (provider/model/timeout/flavor) no
-  longer exists: execution provider/model/thinking come from the workspace
-  Settings「Agent 默认配置」or per-node Studio overrides, and the manifest
-  carries them under `execution.*`. See
-  [docs/architecture/velites-harness.md](docs/architecture/velites-harness.md).
-
-Every node execution leaves a full trace under
-`{job_dir}/runs/{node_key}/{run_token}/` (prompt, event stream, stderr,
-metadata), so any agent decision can be audited after the fact.
-
-## Quality Gates
-
-- `./scripts/check-quick.sh` — daily gate: Ruff, mypy, pytest, architecture
-  invariant/contract checks, ESLint/Prettier/typecheck/Vitest, cargo
-  fmt/clippy/test.
-- `./scripts/check.sh` — full gate before handoff, with coverage floors
-  (backend 85%) and the frontend production build; also runs on GitHub
-  Actions for PRs and pushes.
-- `make install-hooks` — versioned pre-commit (fast checks) and pre-push
-  (smoke tier, lane-trimmed by pushed paths) hooks.
-
-Details and CI policy:
-[docs/architecture/local-quality-gates.md](docs/architecture/local-quality-gates.md).
-
-Load testing harnesses for large agent fleets live in `scripts/stress/` and
-`frontend/stress/` (synthetic event streams, workspace UI stress, end-to-end
-browser runs).
-
-## Documentation
-
-- [CONTRIBUTING.md](CONTRIBUTING.md) — development setup, quality gates, and
-  house rules for contributors
-- [docs/architecture/](docs/architecture/) — module-by-module architecture
-  (backend, frontend, deployment, project structure)
-- [AGENTS.md](AGENTS.md) — operating rules and boundary constraints for AI
-  agents working in this repo
-- [docs/agent-worker-deployment.md](docs/agent-worker-deployment.md) — remote
-  worker deployment
-- [docs/remote-execution-runbook.md](docs/remote-execution-runbook.md) —
-  remote execution operations
-- [docs/studio-agent-mcp.md](docs/studio-agent-mcp.md) — MCP server for
-  external agents (token minting, client setup, permission boundary)
+[MIT](LICENSE) © Lucius Cao

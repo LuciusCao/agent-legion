@@ -207,6 +207,23 @@ Host 暂时不可达或返回 5xx 时，执行进程会保持运行并在进程�
 
 默认端口只绑定宿主机 loopback；compose 网络内其它容器可达 `http://worker:8787`，但所有端点（除 `/api/health`）都要求 control token。需要从 Tailnet 上的另一台管理机访问时，显式设置 `AGENT_WORKER_UI_BIND`，并先在主机防火墙或 Tailnet ACL 中限制来源；不要把控制面暴露到公网。
 
+### 全新克隆的本地 Worker（无 init-worktree.sh）
+
+外部用户从干净克隆起步时没有 init-worktree.sh 的种子自动化，`make dev-up`
+只在 `config/agent-worker.yaml` 存在时才会启动 Worker。手工步骤（README
+Quick Start 已含命令）：
+
+1. `cp config/agent-worker.example.yaml config/agent-worker.yaml`，按本机改
+   `host_url`（dev 栈后端端口，默认 `http://127.0.0.1:8001`）、
+   `register_token_file: deploy/secrets/agent_worker_register_token`、
+   `work_root: data/agent-worker`，并按要跑的 workflow 声明
+   `capabilities` / `models`。
+2. 注册 token 文件必须在**后端首次启动之前**创建——后端在启动时读取它；
+   先起后端、后补 token 文件会导致 Worker 注册 401，此时重启一次后端即可
+   对齐。
+3. 重跑 `make dev-up`（幂等）启动 Worker，然后在 worker 控制台打开
+   `claim_enabled`（默认关闭，见下方检查单第 3 条）。
+
 ### 开发 worktree 的本地 Worker 检查单
 
 在开发 worktree 里起本地栈（`make dev-up`，或分开 `make dev-backend` + `make dev-worker`）时，job 一直停在 `queued` 或秒败，按顺序查这三处——`scripts/init-worktree.sh` 已尽量自动化，但各自有时机前提：

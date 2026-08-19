@@ -8,7 +8,8 @@
 agent-legion/
 ├── pyproject.toml              # Python project metadata, dependencies, tool config
 ├── uv.lock                     # Locked Python dependency tree
-├── README.md                   # 项目入口文档
+├── README.md                   # 项目入口文档（中文）
+├── README_EN.md                # 项目入口文档（English）
 ├── AGENTS.md                   # Agent 操作手册与开发红线
 ├── .env.example                # 运行时密钥与覆盖项模板
 ├── Makefile                    # 常用命令快捷方式
