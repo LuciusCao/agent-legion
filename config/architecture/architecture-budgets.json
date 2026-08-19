@@ -975,7 +975,7 @@
     "server/app/services/job_patch_query_summaries.py": 38,
     "server/app/services/job_path_projection.py": 27,
     "server/app/services/job_pause.py": 151,
-    "server/app/services/job_queries.py": 168,
+    "server/app/services/job_queries.py": 166,
     "server/app/services/job_query_presenters.py": 54,
     "server/app/services/job_rerun.py": 101,
     "server/app/services/job_run_dir_lookup.py": 28,
