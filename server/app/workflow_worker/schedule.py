@@ -169,11 +169,12 @@ def try_claim_and_submit(
     except (ValueError, VaultError, JobServiceError) as exc:
         return fail_node_config(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
 
-    # Node code (EXEC-CODE-002): the frozen pin wins — the job snapshot's
-    # node_code_pins first (upgrade-aware, #109), then the intake batch's
-    # node_code_versions as the legacy fallback — over the workspace
-    # published version, then the global factory seed; a frozen-pin hash
-    # mismatch fails the node (fail closed, EXEC-CODE-003).
+    # Node code (EXEC-CODE-002): since #115 ordinary jobs dispatch the
+    # currently published code — workspace published first, then the global
+    # factory seed; the frozen pins (job snapshot's node_code_pins, then the
+    # intake batch's node_code_versions) are honored only for quality-replay
+    # batches, where a hash mismatch fails the node (fail closed,
+    # EXEC-CODE-003).
     try:
         node_code = resolve_code_node_dispatch(
             worker, workspace_id, workflow_key, node, batch_payload, job.get("node_code_pins")

@@ -1,6 +1,8 @@
 """Dispatch-time node code resolution (EXEC-CODE-002, split from
-``node_codes`` for the size budget): intake freeze pins and the frozen →
-workspace-published → global-seed dispatch chain.
+``node_codes`` for the size budget): intake freeze pins and the dispatch
+chain. Since #115 ordinary jobs resolve the currently published code
+(workspace → global factory seed); the frozen pins are honored only for
+quality-replay batches (``frozen_dispatch_pin`` gates on the marker).
 """
 
 from __future__ import annotations
@@ -83,12 +85,11 @@ def resolve_dispatch_node_code(
     node_key: str,
     frozen: dict[str, Any] | None,
 ) -> str | None:
-    """Dispatch-time code text: frozen job pin → workspace published → global
-    factory seed → None (unrunnable; the caller fails the node).
-
-    A frozen pin fails closed: a hash mismatch raises, and a pinned version
-    missing at BOTH scopes is data corruption and raises too — never silently
-    substituted with the current published code.
+    """Dispatch-time code text: latest workspace published → global factory
+    seed → None (unrunnable; the caller fails the node). A *frozen* pin is
+    only ever passed for quality-replay batches (#115) and fails closed: a
+    hash mismatch raises, and a pinned version missing at BOTH scopes is data
+    corruption and raises too — never silently substituted.
 
     One DB read per dispatch, same cadence as the vault secret resolution it
     runs next to; the 30s route cache in ``routing.py`` only covers executor

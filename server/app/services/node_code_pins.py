@@ -1,6 +1,8 @@
 """Job-frozen node code pins (#109, split for the size budget): extraction
-from the job's workflow snapshot and dispatch-time selection between the
-snapshot pins and the intake batch pins.
+from the job's workflow snapshot and dispatch-time pin selection. Since
+#115 the freeze is replay-only — ordinary jobs dispatch the latest
+published code; pins survive as audit records and the quality-replay pin
+source (fail-closed on drift, EXEC-CODE-003).
 """
 
 from __future__ import annotations
@@ -33,11 +35,18 @@ def frozen_dispatch_pin(
     batch_payload: dict[str, Any] | None,
     node_key: str,
 ) -> dict[str, Any] | None:
-    """The frozen pin dispatch resolves: the job snapshot pins win; the
-    intake batch payload's ``node_code_versions`` are the fallback for jobs
-    whose snapshot carries no pins (legacy rows)."""
+    """The frozen pin dispatch resolves — quality-replay batches only (#115).
+
+    Ordinary jobs return None here so dispatch resolves the latest published
+    code; only a batch carrying the ``quality_replay`` marker pins, taking
+    the job snapshot pins first and the intake batch payload's
+    ``node_code_versions`` as the fallback for jobs whose snapshot carries
+    no pins (legacy rows).
+    """
+    if not isinstance(batch_payload, dict) or not batch_payload.get("quality_replay"):
+        return None
     pin = (snapshot_pins or {}).get(node_key)
     if pin is not None:
         return cast("dict[str, Any]", pin)
-    batch_pins: dict[str, Any] = (batch_payload or {}).get("node_code_versions") or {}
+    batch_pins: dict[str, Any] = batch_payload.get("node_code_versions") or {}
     return cast("dict[str, Any] | None", batch_pins.get(node_key))

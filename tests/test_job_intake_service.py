@@ -258,8 +258,9 @@ def test_job_intake_freezes_node_code_versions(job_db, settings):
 
 def test_job_intake_freezes_global_factory_seed_pins(job_db, settings):
     """Post-#96: the demo workflow's global factory-seeded node codes are
-    pinned like workspace-published ones (jobs freeze the code they start
-    with); agent nodes are never pinned."""
+    pinned like workspace-published ones; post-#115 the intake pins are an
+    audit record and the quality-replay pin source (ordinary jobs dispatch
+    the latest published code); agent nodes are never pinned."""
     _create_workspace_with_revision(job_db, settings)
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
