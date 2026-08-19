@@ -18,6 +18,7 @@ class JobFilterPayload(BaseModel):
     workflow_version_none: bool = False
     active_node_key: str | None = None
     packed: int | None = None
+    paused: bool | None = None
 
     def to_filter(self) -> JobListFilter:
         return JobListFilter(
@@ -27,6 +28,7 @@ class JobFilterPayload(BaseModel):
             workflow_version_none=self.workflow_version_none,
             active_node_key=self.active_node_key,
             packed=self.packed,
+            paused=self.paused,
         )
 
 

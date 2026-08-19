@@ -132,3 +132,13 @@
   background: #e0e0e0;
   color: #5f6368;
 }
+
+.pausedBadge {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  background: var(--status-partial-bg);
+  color: var(--status-partial-text);
+}

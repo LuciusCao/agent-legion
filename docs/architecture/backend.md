@@ -139,6 +139,8 @@ server/app/
 | POST | `/jobs/{job_id}/run-to` | `run_to` | routes/job_mutations.py |
 | POST | `/jobs/{job_id}/continue` | `continue_job` | routes/job_mutations.py |
 | POST | `/workspaces/{workspace_id}/jobs/batch-run-to` | `batch_run_to` | routes/job_mutations.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-pause` | `batch_pause_workspace_jobs` | routes/job_pause_batch.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-resume` | `batch_resume_workspace_jobs` | routes/job_pause_batch.py |
 | POST | `/workspaces/{workspace_id}/jobs/batch-rerun/preview` | `preview_batch_rerun_workspace_jobs` | routes/job_rerun_preview.py |
 | POST | `/workspaces/{workspace_id}/events/stress` | `record_stress_events` | routes/job_stress_events.py |
 | POST | `/jobs/{job_id}/upgrade-workflow` | `upgrade_job_workflow` | routes/job_workflow_upgrade.py |

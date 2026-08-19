@@ -15,6 +15,7 @@ const defaultFilter: JobFilterConfig = {
   search: '',
   workflowVersion: null,
   activeNodeKey: null,
+  paused: null,
 }
 
 const defaultParams = {
@@ -23,6 +24,7 @@ const defaultParams = {
   workflow_version: null,
   workflow_version_none: false,
   active_node_key: null,
+  paused: null,
 }
 
 const sampleFacets: JobFacetsResponse = {
@@ -158,6 +160,7 @@ describe('paginationActions', () => {
       workflow_version: null,
       workflow_version_none: true,
       active_node_key: 'extract',
+      paused: null,
     }
     mockFetchJobsSnapshot.mockResolvedValueOnce(
       page([createJobSummary({ id: 'j1', status: 'failed' })], {

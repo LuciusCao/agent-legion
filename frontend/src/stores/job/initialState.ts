@@ -8,6 +8,7 @@ export const initialFilterConfig = {
   search: '',
   workflowVersion: null,
   activeNodeKey: null,
+  paused: null,
 } as const
 
 export const initialJobDataState = {
@@ -26,6 +27,8 @@ export const initialJobDataState = {
   expandedId: null,
   filterConfig: { ...initialFilterConfig },
   selectMode: false,
+  batchPauseLoading: false,
+  batchResumeLoading: false,
   ...initialPaginationState,
   ...initialSelectionModeState,
 }

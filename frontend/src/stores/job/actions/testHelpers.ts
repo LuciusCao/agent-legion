@@ -32,6 +32,7 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     search: '',
     workflowVersion: null,
     activeNodeKey: null,
+    paused: null,
   }
   return {
     ...initialJobDataState,
@@ -53,6 +54,8 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     batchClearPackedLoading: false,
     batchRerunLoading: false,
     batchRunToLoading: false,
+    batchPauseLoading: false,
+    batchResumeLoading: false,
     continueLoading: false,
     batchUpgradeWorkflowLoading: false,
     resetForWorkspace: () => {},
@@ -80,6 +83,8 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     batchPackage: async () => emptyBatch,
     batchClearPacked: async () => emptyBatch,
     batchRunTo: async () => ({ results: [] }),
+    batchPause: async () => ({ results: [] }),
+    batchResume: async () => ({ results: [] }),
     batchUpgradeWorkflow: async () => ({ results: [] }),
     continueJob: async () => ({ job_id: '', operation: '', status: '' }),
     ...partial,

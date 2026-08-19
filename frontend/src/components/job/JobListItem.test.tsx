@@ -337,6 +337,68 @@ describe('JobListItem', () => {
     expect(screen.getByText('已打包')).toBeInTheDocument()
   })
 
+  it('shows paused badge when execution is paused on a non-paused status', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            execution_control: {
+              mode: 'full',
+              target_node_key: null,
+              paused: true,
+              pause_reason: 'smoke hold (user:1)',
+            },
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('已暂停')).toBeInTheDocument()
+  })
+
+  it('does not duplicate the paused badge when status is already paused', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'paused',
+            execution_control: {
+              mode: 'full',
+              target_node_key: null,
+              paused: true,
+              pause_reason: 'target_reached',
+            },
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getAllByText('已暂停')).toHaveLength(1)
+  })
+
+  it('does not show paused badge when execution is not paused', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByText('已暂停')).not.toBeInTheDocument()
+  })
+
   it('does not show packed badge when job is not packed', () => {
     render(
       <MemoryRouter>

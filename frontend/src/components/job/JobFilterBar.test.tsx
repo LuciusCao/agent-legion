@@ -52,7 +52,7 @@ const defaultJobs: JobSummary[] = [
 function renderBar(
   options: { jobs?: JobSummary[] } & Record<string, unknown> = {}
 ) {
-  const { jobs, ...props } = options
+  const { jobs, filterConfig, ...props } = options
   const onChange = vi.fn()
   const nextJobs = jobs ?? defaultJobs
   useJobStore.setState({
@@ -66,6 +66,8 @@ function renderBar(
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
+        paused: null,
+        ...(filterConfig as object | undefined),
       }}
       counts={{
         status: { all: 2, pending: 0, running: 1, completed: 1, failed: 0 },

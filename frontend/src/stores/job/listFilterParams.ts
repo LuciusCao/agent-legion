@@ -18,5 +18,6 @@ export function toJobListFilterParams(
         : null,
     workflow_version_none: config.workflowVersion === 'none',
     active_node_key: config.activeNodeKey,
+    paused: config.paused,
   }
 }
