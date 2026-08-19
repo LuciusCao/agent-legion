@@ -1,5 +1,10 @@
 # Agent 配置治理 - 详细实现计划
 
+> **状态（2026-08 补注）**：Phase 1–4 已全部完成，本文档为历史实施记录。
+> 现行语义以 [agent-config-governance.md](agent-config-governance.md) 文首
+> 状态注记、`config/architecture/architecture-invariants.yaml` 与代码为准；
+> 文中「扩展性预留」等未实施小节不代表当前路线图承诺。
+
 ## 总览
 
 **目标**：将 Agent 配置从 YAML 迁移到 DB，实现 workspace 默认 + 节点覆盖的分层配置，退役 `workflows.pi.*`。

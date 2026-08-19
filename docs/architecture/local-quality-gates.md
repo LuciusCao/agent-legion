@@ -111,8 +111,8 @@ CI environment notes:
   the built-in skill sources (`server/app/skills/builtin_sources.py`) point at
   machine-local skill repos (`~/.agents/skills/...`) that do not exist on
   runners. Local gates still run the check.
-- uv and npm caches are enabled; the first cold run is dominated by downloading
-  torch/funasr and takes substantially longer than cached runs.
+- uv and npm caches are enabled; the first cold run is dominated by dependency
+  downloads and takes substantially longer than cached runs.
 
 ## Test Telemetry
 
