@@ -29,7 +29,7 @@ class TestGuardTargetDsn:
     def test_accepts_local_dev_database(self):
         guard_target_dsn("postgresql://127.0.0.1:5432/agent_legion_develop")
         guard_target_dsn("postgresql://localhost/agent_legion_test_x")
-        guard_target_dsn("postgresql://lucius@127.0.0.1:5432/agent_legion_worktree")
+        guard_target_dsn("postgresql://dev@127.0.0.1:5432/agent_legion_worktree")
 
     def test_rejects_prod_database_name(self):
         with pytest.raises(SeedError, match="生产库同名"):
