@@ -69,7 +69,7 @@ curl http://192.0.2.1:8000/api/health
 mkdir -p deploy/secrets
 ```
 
-无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有引导 YAML（如复制自 `deploy/worker.home.example.yaml`）的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`，Worker Service 会在首次启动时导入它。
+无需先复制或编辑 Worker YAML：首次启动会导入仓库内的引导配置，随后在本机控制台填写 Host 地址、Worker ID 和能力。已有引导 YAML（如复制自 `deploy/worker.remote.example.yaml`）的机器可继续使用；启动前设置 `AGENT_WORKER_CONFIG=./<your-worker>.yaml`，Worker Service 会在首次启动时导入它。
 
 Worker 的注册 token 决定它能进入哪些 workspace——**token 即 scope**，`worker.yaml` 不需要也不允许声明 workspace。两种 token：
 

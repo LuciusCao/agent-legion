@@ -23,6 +23,8 @@ e2e-results/
 deploy/secrets/
 deploy/worker.home.yaml
 deploy/worker.company.yaml
+deploy/worker.host.yaml
+deploy/worker.remote.yaml
 deploy/compose.local.yaml
 deploy/compose.worker.local.yaml
 config/agent-worker.yaml
