@@ -128,25 +128,25 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
 
 
 def _reject_retired_cms_yaml_keys(config: dict[str, Any]) -> None:
-    """Fail fast when the yaml ``cms:`` section carries retired keys.
+    """Fail fast when the yaml still carries the retired ``cms:`` section.
 
     Config governance G2 (breaking): the CMS integration moved to
     instance-level external connections (admin settings → 外部服务连接);
-    neither yaml nor env ``CMS_*`` keys are read at runtime anymore.
+    neither yaml nor env ``CMS_*`` keys are read at runtime anymore. The
+    whole section is dead config — any presence of it (even an empty
+    ``cms:`` block) fails startup instead of being silently ignored.
     """
-    cms = config.get("cms")
-    if not isinstance(cms, dict):
+    if "cms" not in config:
         return
-    retired = [key for key in ("token", "token_gen") if key in cms]
-    if not retired:
-        return
-    keys = ", ".join(f"cms.{key}" for key in retired)
+    cms = config["cms"]
+    keys = sorted(cms) if isinstance(cms, dict) else []
+    detail = f" (keys: {', '.join(f'cms.{key}' for key in keys)})" if keys else ""
     raise ValueError(
-        f"Unsupported yaml keys under cms: {keys}. The yaml cms.token and "
-        "cms.token_gen sections were retired (config governance G2), and the "
-        "env CMS_* channel followed: CMS credentials now live on the "
-        "instance-level external connection (admin settings → 外部服务连接), "
-        "migrated automatically on first startup after upgrade."
+        f"Unsupported yaml section: cms{detail}. The yaml cms section was "
+        "retired (config governance G2), and the env CMS_* channel followed: "
+        "CMS credentials now live on the instance-level external connection "
+        "(admin settings → 外部服务连接), migrated automatically on first "
+        "startup after upgrade. Remove the cms section from the yaml."
     )
 
 

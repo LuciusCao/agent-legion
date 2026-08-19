@@ -132,6 +132,37 @@ def test_load_settings_rejects_retired_yaml_cms_token_gen(tmp_path):
     assert "外部服务连接" in message
 
 
+def test_load_settings_rejects_retired_yaml_cms_section_with_non_token_keys(tmp_path):
+    """The whole yaml ``cms:`` section is dead config: any key fails startup."""
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\ncms: {endpoint: http://yaml/cms}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"cms\.endpoint") as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    message = str(exc_info.value)
+    assert "外部服务连接" in message
+
+
+@pytest.mark.parametrize("cms_block", ["cms:\n", "cms: {}\n"])
+def test_load_settings_rejects_empty_retired_yaml_cms_section(tmp_path, cms_block):
+    """An empty ``cms:`` block (None or {}) is still the retired section."""
+    config_path = tmp_path / "explicit.yaml"
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\n" + cms_block,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match=r"Unsupported yaml section: cms") as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    message = str(exc_info.value)
+    assert "外部服务连接" in message
+
+
 def test_split_layout_rejects_retired_agent_legion_yaml(tmp_path, monkeypatch):
     """config/agent_legion.yaml is retired: its presence fails startup with guidance."""
     config_dir = tmp_path / "config"
