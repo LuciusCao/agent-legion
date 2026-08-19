@@ -216,7 +216,7 @@ def test_resume_uses_worktree_database_url_not_inherited_env(tmp_path: Path) -> 
 def test_nonbare_main_repo_is_skipped_as_base(tmp_path: Path) -> None:
     """主仓库根非 bare（普通 checkout、无 .env）时不得作为 .env 复制基准。
 
-    加固场景：2026-08-18 事故的实际路径是基准 asr-openai 缺 .env（由
+    加固场景：2026-08-18 事故的实际路径是基准 worktree 缺 .env（由
     fail-fast 兜底），本测试覆盖「主仓库根非 bare 被误选为基准」这一变体。
     """
     main, bin_dir = _setup(

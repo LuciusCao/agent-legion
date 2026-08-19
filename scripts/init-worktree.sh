@@ -31,7 +31,7 @@ BASE="${1:-}"
 if [[ -z "$BASE" ]]; then
     # 默认取第一个非 bare、非当前、非主仓库根的 worktree 作基准（主仓库根是
     # bare/无工作区配置，永不适合作基准）。注意选中的基准自身也可能缺 .env，
-    # 由下方 fail-fast 兜底（2026-08-18 事故：基准 asr-openai 缺 .env → 新
+    # 由下方 fail-fast 兜底（2026-08-18 事故：基准 worktree 缺 .env → 新
     # worktree 无 .env → 后端回落共享默认库即 prod 库）。
     BASE="$(git worktree list --porcelain | awk -v root="$ROOT" -v main="$MAIN" '
         /^worktree / {
