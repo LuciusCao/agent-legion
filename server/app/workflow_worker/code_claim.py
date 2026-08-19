@@ -72,9 +72,10 @@ def try_claim_code_worker_node(
         return False
 
     batch_payload = cached_batch_payload(worker, job)
-    # Same resolution order as the local path: the frozen pin — job snapshot
-    # node_code_pins first (upgrade-aware, #109), batch node_code_versions as
-    # the legacy fallback — then workspace published → global factory seed
+    # Same resolution order as the local path (#115): the currently
+    # published code — workspace published first, then the global factory
+    # seed; the frozen pins (job snapshot node_code_pins, then batch
+    # node_code_versions) apply only to quality-replay batches
     # (resolve_dispatch_node_code, EXEC-CODE-002).
     try:
         code_text = resolve_dispatch_node_code(

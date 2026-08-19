@@ -106,8 +106,9 @@ def evaluate_job_ready(
         ):
             statuses[node.key] = "pending"
     # The multi-KB snapshot text is dropped, but its small node_code_pins
-    # stay on the lean job: dispatch prefers them (upgrade-aware, #109) over
-    # the intake batch's node_code_versions.
+    # stay on the lean job: quality-replay batches pin them (snapshot pins
+    # win over the intake batch's node_code_versions); ordinary jobs ignore
+    # them and dispatch the latest published code (#115).
     lean_job = {
         **job,
         "workflow_definition_snapshot_json": "",
