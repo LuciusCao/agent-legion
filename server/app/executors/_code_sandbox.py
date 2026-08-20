@@ -113,7 +113,9 @@ def _read_roots(executor: CodeExecutor) -> list[str]:
     return roots
 
 
-def _read_result(result_path: Path, log_path: Path) -> ExecutionResult | None:
+def _read_result(
+    result_path: Path, log_path: Path, *, process_returncode: int
+) -> ExecutionResult | None:
     """Parse the child's JSON result with a strict schema check.
 
     Returns None for a successful run (outputs still need checking); any
@@ -130,10 +132,11 @@ def _read_result(result_path: Path, log_path: Path) -> ExecutionResult | None:
         or document["status"] not in ("ok", "error")
         or not (document["message"] is None or isinstance(document["message"], str))
     ):
+        message = f"sandboxed custom code node did not return a result (exit {process_returncode})"
         return ExecutionResult(
             status="failed",
             exit_code=1,
-            error_message="sandboxed custom code node did not return a result",
+            error_message=message,
             log_path=str(log_path),
         )
     if document["status"] == "error":
@@ -276,7 +279,11 @@ def execute_custom_sandboxed(
             if parent_token is None:
                 time.sleep(0.05)
 
-        failure = _read_result(result_path, context.log_path)
+        failure = _read_result(
+            result_path,
+            context.log_path,
+            process_returncode=process.returncode,
+        )
         if failure is not None:
             return failure
         return executor._check_outputs(context)

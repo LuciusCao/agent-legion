@@ -373,17 +373,21 @@ def test_read_result_validates_json_schema(tmp_path: Path) -> None:
     log = tmp_path / "run.log"
 
     target.write_text('{"status": "ok", "message": null}', encoding="utf-8")
-    assert _read_result(target, log) is None
+    assert _read_result(target, log, process_returncode=0) is None
 
     target.write_text('{"status": "error", "message": "boom"}', encoding="utf-8")
-    failure = _read_result(target, log)
+    failure = _read_result(target, log, process_returncode=1)
     assert failure is not None and failure.status == "failed"
     assert failure.error_message == "boom"
 
     import pickle
 
     target.write_bytes(pickle.dumps(("ok", None)))
-    assert _read_result(target, log) is not None  # pickle is rejected, not executed
+    assert _read_result(target, log, process_returncode=1) is not None
+
+    failure = _read_result(target, log, process_returncode=127)
+    assert failure is not None
+    assert failure.error_message.endswith("(exit 127)")
 
     for bad in (
         '{"status": "ok"}',
@@ -392,7 +396,7 @@ def test_read_result_validates_json_schema(tmp_path: Path) -> None:
         "not json",
     ):
         target.write_text(bad, encoding="utf-8")
-        failure = _read_result(target, log)
+        failure = _read_result(target, log, process_returncode=1)
         assert failure is not None and failure.status == "failed", bad
 
 
