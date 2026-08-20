@@ -416,16 +416,20 @@ jobs:
           sudo apt-get update && sudo apt-get install -y bubblewrap
           sudo chmod u+s "$(command -v bwrap)"
 
+      # Run the real namespace + Python-child integration before the long
+      # coverage shard. Inside the hash shard the test self-skips so it is
+      # not repeated after hundreds of coverage-instrumented tests.
+      - name: Velites sandbox integration
+        run: >-
+          uv run pytest -q
+          tests/workers/test_workflow_worker_thread_local.py::test_make_workflow_worker_runs_demo_intake_local_node
+
       - name: Backend PostgreSQL tests (shard 2/3)
         run: |
           mkdir -p coverage-data
           BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
         env:
           AGENT_LEGION_COV: "1"
-          # This shard owns the real bwrap + Python child integration test.
-          # Run it outside xdist concurrency: nested namespace setup has
-          # intermittently exited 1 without stderr on hosted Ubuntu runners.
-          AGENT_LEGION_TEST_WORKERS: "1"
           AGENT_LEGION_TEST_RESULTS_DIR: test-results
           AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-b
           COVERAGE_FILE: coverage-data/backend-postgres-b.coverage

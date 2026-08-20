@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -284,6 +285,9 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     # knowledge-point markdown under examples/education-video-problems-
     # generation/ (pure stdlib, no network) and writes knowledge_point.json
     # for the downstream agent nodes.
+    if os.environ.get("GATE_SHARD"):
+        pytest.skip("CI hash shard runs this OS sandbox integration in its isolated step")
+
     import shutil
     import subprocess
     import sys
