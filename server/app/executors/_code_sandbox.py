@@ -20,6 +20,7 @@ import json
 import os
 import pickle
 import shutil
+import site
 import subprocess
 import sys
 import threading
@@ -84,10 +85,13 @@ def _child_env() -> dict[str, str]:
         if key == "LANG" or key.startswith("LC_"):
             env[key] = value
     # server package import root (computed by the caller's interpreter).
-    python_path = os.environ.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{_SERVER_REPO_ROOT}{os.pathsep}{python_path}" if python_path else str(_SERVER_REPO_ROOT)
-    )
+    python_paths = [
+        str(_SERVER_REPO_ROOT),
+        *(str(Path(p).resolve()) for p in site.getsitepackages()),
+    ]
+    if python_path := os.environ.get("PYTHONPATH"):
+        python_paths.append(python_path)
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
     return env
 
 
@@ -113,9 +117,7 @@ def _read_roots(executor: CodeExecutor) -> list[str]:
     return roots
 
 
-def _read_result(
-    result_path: Path, log_path: Path, *, process_returncode: int
-) -> ExecutionResult | None:
+def _read_result(result_path: Path, log_path: Path) -> ExecutionResult | None:
     """Parse the child's JSON result with a strict schema check.
 
     Returns None for a successful run (outputs still need checking); any
@@ -132,11 +134,10 @@ def _read_result(
         or document["status"] not in ("ok", "error")
         or not (document["message"] is None or isinstance(document["message"], str))
     ):
-        message = f"sandboxed custom code node did not return a result (exit {process_returncode})"
         return ExecutionResult(
             status="failed",
             exit_code=1,
-            error_message=message,
+            error_message="sandboxed custom code node did not return a result",
             log_path=str(log_path),
         )
     if document["status"] == "error":
@@ -200,7 +201,7 @@ def execute_custom_sandboxed(
         command.append("--allow-network")
     command += [
         "--",
-        sys.executable,
+        str(Path(sys.executable).resolve()),
         "-m",
         "workspace_libs.code_child",
         str(result_path),
@@ -279,11 +280,7 @@ def execute_custom_sandboxed(
             if parent_token is None:
                 time.sleep(0.05)
 
-        failure = _read_result(
-            result_path,
-            context.log_path,
-            process_returncode=process.returncode,
-        )
+        failure = _read_result(result_path, context.log_path)
         if failure is not None:
             return failure
         return executor._check_outputs(context)
