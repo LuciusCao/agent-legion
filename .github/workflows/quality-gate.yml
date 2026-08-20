@@ -422,6 +422,10 @@ jobs:
           BACKEND_GATE_PHASE=test ./scripts/check-quick-backend.sh
         env:
           AGENT_LEGION_COV: "1"
+          # This shard owns the real bwrap + Python child integration test.
+          # Run it outside xdist concurrency: nested namespace setup has
+          # intermittently exited 1 without stderr on hosted Ubuntu runners.
+          AGENT_LEGION_TEST_WORKERS: "1"
           AGENT_LEGION_TEST_RESULTS_DIR: test-results
           AGENT_LEGION_TEST_RESULT_NAME: backend-postgres-b
           COVERAGE_FILE: coverage-data/backend-postgres-b.coverage
