@@ -20,6 +20,7 @@ import json
 import os
 import pickle
 import shutil
+import site
 import subprocess
 import sys
 import threading
@@ -84,10 +85,13 @@ def _child_env() -> dict[str, str]:
         if key == "LANG" or key.startswith("LC_"):
             env[key] = value
     # server package import root (computed by the caller's interpreter).
-    python_path = os.environ.get("PYTHONPATH")
-    env["PYTHONPATH"] = (
-        f"{_SERVER_REPO_ROOT}{os.pathsep}{python_path}" if python_path else str(_SERVER_REPO_ROOT)
-    )
+    python_paths = [
+        str(_SERVER_REPO_ROOT),
+        *(str(Path(p).resolve()) for p in site.getsitepackages()),
+    ]
+    if python_path := os.environ.get("PYTHONPATH"):
+        python_paths.append(python_path)
+    env["PYTHONPATH"] = os.pathsep.join(python_paths)
     return env
 
 
@@ -197,7 +201,7 @@ def execute_custom_sandboxed(
         command.append("--allow-network")
     command += [
         "--",
-        sys.executable,
+        str(Path(sys.executable).resolve()),
         "-m",
         "workspace_libs.code_child",
         str(result_path),

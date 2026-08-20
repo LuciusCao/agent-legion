@@ -133,6 +133,11 @@ pub struct Message {
     /// on successful completions — the stub provider and error events omit it.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub timing: Option<RequestTiming>,
+    /// Provider-private continuation state. It is cloned with the in-memory
+    /// conversation but never emitted to the Host or persisted in sessions.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub(crate) provider_data: Option<serde_json::Value>,
 }
 
 impl Message {
@@ -150,6 +155,7 @@ impl Message {
             tool_name: None,
             is_error: None,
             timing: None,
+            provider_data: None,
         }
     }
 

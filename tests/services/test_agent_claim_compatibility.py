@@ -10,7 +10,8 @@ import json
 
 import pytest
 
-from server.app.agent_broker.agent_claim_compatibility import live_claim_manifest
+from server.app.agent_broker.agent_claim_compatibility import live_claim_manifest, worker_can_run
+from server.app.agent_worker_declarations import normalize_models
 
 
 def _row(
@@ -102,3 +103,42 @@ def test_missing_revision_keeps_defaults_then_frozen() -> None:
 
     assert resolved["execution"]["provider"] == "ws-provider"
     assert resolved["execution"]["model"] == "ws-model"
+
+
+@pytest.mark.no_db
+def test_model_declaration_is_scoped_to_agent_runtime() -> None:
+    candidate = {"runtime": "velites", "capability": "review"}
+    manifest = {"execution": {"provider": "sqai", "model": "kimi"}}
+
+    assert not worker_can_run(
+        candidate,
+        manifest,
+        {"review"},
+        {("pi", "sqai", "kimi")},
+    )
+    assert worker_can_run(
+        candidate,
+        manifest,
+        {"review"},
+        {("velites", "sqai", "kimi")},
+    )
+
+
+@pytest.mark.no_db
+def test_legacy_unscoped_model_declaration_remains_compatible() -> None:
+    assert worker_can_run(
+        {"runtime": "velites", "capability": "review"},
+        {"execution": {"provider": "sqai", "model": "kimi"}},
+        {"review"},
+        {("*", "sqai", "kimi")},
+    )
+
+
+@pytest.mark.no_db
+def test_protocol_v3_model_declaration_requires_runtime() -> None:
+    with pytest.raises(ValueError, match="protocol v3"):
+        normalize_models(
+            [{"provider": "sqai", "model": "kimi"}],
+            ["velites"],
+            require_runtime=True,
+        )

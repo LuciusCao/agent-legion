@@ -39,13 +39,11 @@ pub struct Cli {
     #[arg(long, value_delimiter = ',', default_value = "read,write,bash")]
     pub tools: Vec<String>,
 
-    /// Provider name: `stub` (fixture-driven, no LLM) or `gateway` /
-    /// `openai_compat` (OpenAI-compatible SSE chat completions; credentials
-    /// from ~/.velites/config.json or VELITES_BASE_URL/VELITES_API_KEY).
+    /// Provider key from ~/.velites/models.json (`stub` is fixture-driven).
     #[arg(long)]
     pub provider: String,
 
-    /// Model identifier passed to the provider and reported in message events.
+    /// Model identifier; the provider/model pair must exist in models.json.
     #[arg(long)]
     pub model: Option<String>,
 
@@ -107,6 +105,15 @@ pub struct Cli {
     /// blank line.
     #[arg(required = true)]
     pub instruction: Vec<String>,
+}
+
+/// `velites models list --json`: machine-readable runtime capability probe.
+#[derive(Debug, Parser)]
+#[command(name = "velites-models-list")]
+pub struct ModelsListCli {
+    /// Emit the normalized provider/model array consumed by Agent Worker.
+    #[arg(long)]
+    pub json: bool,
 }
 
 /// Expand `@file` arguments and join instruction parts.

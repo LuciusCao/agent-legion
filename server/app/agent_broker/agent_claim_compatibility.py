@@ -9,10 +9,10 @@ from typing import Any
 from server.app.workflows.pi_protocol import render_command_spec
 
 
-def worker_declarations(row: Mapping[str, Any]) -> tuple[set[str], set[tuple[str, str]]]:
+def worker_declarations(row: Mapping[str, Any]) -> tuple[set[str], set[tuple[str, str, str]]]:
     capabilities = set(json.loads(row["capabilities_json"] or "[]"))
     models = {
-        (str(item["provider"]), str(item["model"]))
+        (str(item.get("runtime") or "*"), str(item["provider"]), str(item["model"]))
         for item in json.loads(row["models_json"] or "[]")
     }
     return capabilities, models
@@ -54,11 +54,19 @@ def worker_can_run(
     candidate: Mapping[str, Any],
     manifest: Mapping[str, Any],
     worker_capabilities: set[str],
-    worker_models: set[tuple[str, str]],
+    worker_models: set[tuple[str, str, str]],
 ) -> bool:
     capability = str(candidate["capability"])
     execution = manifest.get("execution") or {}
-    model = (str(execution.get("provider") or ""), str(execution.get("model") or ""))
+    model = (
+        str(candidate.get("runtime") or ""),
+        str(execution.get("provider") or ""),
+        str(execution.get("model") or ""),
+    )
     capability_matches = capability in worker_capabilities or "*" in worker_capabilities
-    model_matches = model in worker_models or ("*", "*") in worker_models
+    model_matches = (
+        model in worker_models
+        or ("*", model[1], model[2]) in worker_models
+        or ("*", "*", "*") in worker_models
+    )
     return capability_matches and model_matches

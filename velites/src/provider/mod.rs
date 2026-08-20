@@ -6,6 +6,7 @@
 //! happens inside the provider and never escapes as delta events (there are
 //! no delta events in velites by design).
 
+pub mod anthropic;
 pub mod openai_compat;
 pub mod retry;
 pub mod stub;

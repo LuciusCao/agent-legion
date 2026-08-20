@@ -15,7 +15,7 @@ from server.app.agent_broker import agent_claim_compatibility
 # judged per Worker — claim.py requires a single Worker to satisfy runtime,
 # capability and model together — so cross-Worker unions would report
 # "runnable" for combinations no machine can claim; unions only phrase reasons.
-WorkerDeclarations = tuple[set[str], set[str], set[tuple[str, str]]]
+WorkerDeclarations = tuple[set[str], set[str], set[tuple[str, str, str]]]
 
 
 def unmatched_reasons(
@@ -36,21 +36,21 @@ def unmatched_reasons(
     runtime = str(candidate["runtime"])
     union_runtimes: set[str] = set()
     union_capabilities: set[str] = set()
-    union_models: set[tuple[str, str]] = set()
+    union_models_any_runtime: set[tuple[str, str, str]] = set()
     for runtimes, capabilities, models in workers:
         if runtime in runtimes and can_run(candidate, manifest, capabilities, models):
             return []
         union_runtimes |= runtimes
         union_capabilities |= capabilities
-        union_models |= models
+        union_models_any_runtime |= {("*", provider, model) for _, provider, model in models}
     reasons: list[str] = []
     # A universal declaration for one dimension isolates the other: if the
     # probe still fails, the real declarations mismatch on that dimension.
     if runtime not in union_runtimes:
         reasons.append(f"runtime {runtime!r} not declared by any Worker")
-    if not can_run(candidate, manifest, union_capabilities, {("*", "*")}):
+    if not can_run(candidate, manifest, union_capabilities, {("*", "*", "*")}):
         reasons.append(f"capability {candidate['capability']!r} not declared by any Worker")
-    if not can_run(candidate, manifest, {"*"}, union_models):
+    if not can_run(candidate, manifest, {"*"}, union_models_any_runtime):
         execution = manifest.get("execution") or {}
         provider = str(execution.get("provider") or "")
         model = str(execution.get("model") or "")

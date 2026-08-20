@@ -51,7 +51,7 @@ class WorkerView:
 
     runtimes: set[str]
     capabilities: set[str]
-    models: set[tuple[str, str]]
+    models: set[tuple[str, str, str]]
     labels: dict[str, Any]
     allowed_workspaces: set[str]
     # Dual capacity pools (batch 2): agent and code claims are accounted

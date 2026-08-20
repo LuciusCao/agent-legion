@@ -9,7 +9,6 @@ calls read only rows finished within a trailing overlap window
 
 from __future__ import annotations
 
-import json
 import re
 import time
 from datetime import UTC, datetime, timedelta
@@ -27,9 +26,10 @@ _SAFE_BUNDLE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
 _REAP_OVERLAP = timedelta(seconds=60)
 
 # Startup-scan fetch batch: a plain psycopg cursor buffers the whole result
-# client-side (#128: ~1M terminal manifests ≈ 1GB OOM-killed backend startup),
-# so the scan streams through a server-side cursor instead.
+# client-side (#128), so stream only the small authoritative execution id.
 _SCAN_CHUNK_SIZE = 1000
+
+_BUNDLE_NAME_PROJECTION = "execution_id || '.tar.gz' as bundle_name"
 
 
 def reap_terminal_bundles(
@@ -44,7 +44,10 @@ def reap_terminal_bundles(
     if broker._reap_watermark is None:
         # First call after startup scans all terminal rows (including any
         # should-never-happen terminal row with finished_at NULL).
-        query = "select manifest_json from agent_execution_requests where state in ('done', 'cancelled')"
+        query = (
+            f"select {_BUNDLE_NAME_PROJECTION} from agent_execution_requests"
+            " where state in ('done', 'cancelled')"
+        )
         params: tuple[object, ...] = ()
     else:
         # One branch per terminal state so each hits its partial finished_at
@@ -52,10 +55,10 @@ def reap_terminal_bundles(
         # `state in (...) and (finished_at is null or ...)` query defeats both
         # indexes and seq-scans the whole table every sweeper pass.
         query = (
-            "select manifest_json from agent_execution_requests"
+            f"select {_BUNDLE_NAME_PROJECTION} from agent_execution_requests"
             " where state='done' and finished_at >= %s"
             " union all"
-            " select manifest_json from agent_execution_requests"
+            f" select {_BUNDLE_NAME_PROJECTION} from agent_execution_requests"
             " where state='cancelled' and finished_at >= %s"
         )
         params = (broker._reap_watermark, broker._reap_watermark)
@@ -65,11 +68,7 @@ def reap_terminal_bundles(
     next_watermark = datetime.now(UTC) - _REAP_OVERLAP
     with read_connection(broker.database_dsn) as conn:
         for row in conn.stream("reap_terminal_scan", query, params, chunk_size=_SCAN_CHUNK_SIZE):
-            try:
-                manifest = json.loads(row["manifest_json"])
-            except (TypeError, json.JSONDecodeError):
-                continue
-            bundle_name = str(manifest.get("bundle_name", ""))
+            bundle_name = str(row["bundle_name"] or "")
             if _SAFE_BUNDLE_NAME.fullmatch(bundle_name):
                 target = broker.bundle_dir / bundle_name
                 if target.is_file():

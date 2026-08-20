@@ -383,7 +383,7 @@ def test_read_result_validates_json_schema(tmp_path: Path) -> None:
     import pickle
 
     target.write_bytes(pickle.dumps(("ok", None)))
-    assert _read_result(target, log) is not None  # pickle is rejected, not executed
+    assert _read_result(target, log) is not None
 
     for bad in (
         '{"status": "ok"}',

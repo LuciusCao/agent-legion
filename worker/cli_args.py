@@ -18,11 +18,15 @@ def _labels(values: list[str]) -> dict[str, str]:
 def _models(values: list[str]) -> list[dict[str, str]]:
     models: list[dict[str, str]] = []
     for value in values:
-        provider, separator, model = value.partition("/")
+        scope, colon, remainder = value.partition(":")
+        provider, separator, model = (remainder if colon else value).partition("/")
         provider, model = provider.strip(), model.strip()
         if not separator or not provider or not model:
-            raise ValueError(f"模型必须使用 provider/model 格式: {value!r}")
-        models.append({"provider": provider, "model": model})
+            raise ValueError(f"模型必须使用 [runtime:]provider/model 格式: {value!r}")
+        item = {"provider": provider, "model": model}
+        if colon:
+            item["runtime"] = scope.strip()
+        models.append(item)
     return models
 
 

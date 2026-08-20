@@ -10,6 +10,10 @@ from collections.abc import Mapping, Sequence
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from server.app.agent_worker_declarations import (
+    normalize_labels,
+    normalize_worker_declarations,
+)
 from server.app.agent_worker_liveness import WorkerLiveness
 from server.app.db.connection import DatabaseDsn
 from server.app.db.transaction import read_connection, write_transaction
@@ -29,6 +33,7 @@ ONLINE_THRESHOLD_SECONDS = 30
 # Minimum protocol version that may hold kind='code' executions (batch 2):
 # v1 Workers keep the legacy 204 heartbeat and never receive code claims.
 CODE_PROTOCOL_VERSION = 2
+MODEL_RUNTIME_PROTOCOL_VERSION = 3
 
 
 class AgentWorkerRegistry:
@@ -72,7 +77,10 @@ class AgentWorkerRegistry:
         # None is kept as an internal compatibility mode for older direct
         # registry callers; the HTTP contract always supplies explicit lists.
         normalized_capabilities, normalized_models = normalize_worker_declarations(
-            capabilities, models
+            capabilities,
+            models,
+            normalized_runtimes,
+            require_model_runtime=protocol_version >= MODEL_RUNTIME_PROTOCOL_VERSION,
         )
         # The workspace scope is ALWAYS resolved server-side from the presented
         # registration credential (route layer), never from Worker fields:
@@ -272,60 +280,3 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "online": online,
         "revoked": row["revoked_at"] is not None,
     }
-
-
-# Bounded normalization for Worker capability and model declarations.
-def normalize_labels(labels: Mapping[str, Any]) -> dict[str, str]:
-    if len(labels) > 32:
-        raise ValueError("worker labels are capped at 32 entries")
-    normalized: dict[str, str] = {}
-    for key, value in labels.items():
-        if not isinstance(key, str) or not key or len(key) > 64:
-            raise ValueError("worker label keys must be non-empty strings up to 64 chars")
-        if not isinstance(value, (str, int, float, bool)) or len(str(value)) > 256:
-            raise ValueError(f"worker label {key!r} must have a bounded scalar value")
-        normalized[key] = str(value)
-    return normalized
-
-
-def normalize_capabilities(values: Sequence[Any]) -> list[str]:
-    if len(values) > 128:
-        raise ValueError("worker capabilities are capped at 128 entries")
-    normalized = sorted({str(value).strip() for value in values})
-    if any(not value or value == "*" or len(value) > 128 for value in normalized):
-        raise ValueError("worker capabilities must be non-empty strings up to 128 chars")
-    return normalized
-
-
-def normalize_models(values: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
-    if len(values) > 256:
-        raise ValueError("worker models are capped at 256 entries")
-    normalized: set[tuple[str, str]] = set()
-    for item in values:
-        provider = str(item.get("provider", "")).strip()
-        model = str(item.get("model", "")).strip()
-        if (
-            not provider
-            or not model
-            or provider == "*"
-            or model == "*"
-            or len(provider) > 128
-            or len(model) > 256
-        ):
-            raise ValueError("worker models require bounded provider and model strings")
-        normalized.add((provider, model))
-    return [{"provider": provider, "model": model} for provider, model in sorted(normalized)]
-
-
-def normalize_worker_declarations(
-    capabilities: Sequence[str] | None,
-    models: Sequence[Mapping[str, Any]] | None,
-) -> tuple[list[str], list[dict[str, str]]]:
-    """Normalize HTTP declarations, retaining wildcard only for legacy direct callers."""
-    normalized_capabilities = (
-        ["*"] if capabilities is None else normalize_capabilities(capabilities)
-    )
-    normalized_models = (
-        [{"provider": "*", "model": "*"}] if models is None else normalize_models(models)
-    )
-    return normalized_capabilities, normalized_models

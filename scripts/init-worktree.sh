@@ -6,8 +6,16 @@
 #   2. 把 AGENT_LEGION_DATABASE_URL 指向按 worktree 名派生的专属 Postgres 库并尝试建库
 #   3. 生成缺失的 deploy/secrets（agent_worker_register_token / vault_master_key）
 # 用法: scripts/init-worktree.sh [基准 worktree 路径]（默认取第一个非 bare 且非当前的 worktree）
-# 前提: macOS（`sed -i ''` 是 BSD 语法，GNU sed 不兼容）。
 set -euo pipefail
+
+# BSD/GNU sed 对 `-i` 的参数语法不同；带显式 backup suffix 的形式两边
+# 都支持。替换成功后删除备份，避免开发配置目录残留 `.bak`。
+replace_in_place() {
+    local expression="$1"
+    local path="$2"
+    sed -i.bak -E "$expression" "$path"
+    rm -f "${path}.bak"
+}
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
@@ -74,7 +82,7 @@ DB="agent_legion_${NAME}"
 DB_URL="postgresql://127.0.0.1:5432/${DB}"
 if [[ -f .env ]]; then
     if grep -qE '^(export )?AGENT_LEGION_DATABASE_URL=' .env; then
-        sed -i '' -E "s|^(export )?AGENT_LEGION_DATABASE_URL=.*|\1AGENT_LEGION_DATABASE_URL=${DB_URL}|" .env
+        replace_in_place "s|^(export )?AGENT_LEGION_DATABASE_URL=.*|\1AGENT_LEGION_DATABASE_URL=${DB_URL}|" .env
     else
         echo "AGENT_LEGION_DATABASE_URL=${DB_URL}" >> .env
     fi
@@ -111,10 +119,10 @@ if [[ ! -f config/agent-worker.yaml ]]; then
         # host_url 指向本实例的开发后端端口（与 make dev-backend 的 DEV_BACKEND_PORT 一致），
         # register_token_file 指向本 worktree 生成的本地密钥（基准配置里的
         # /run/secrets/... 是容器路径，宿主机 make dev-worker 读不到）。
-        sed -i '' -E "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" config/agent-worker.yaml
-        sed -i '' -E "s|^worker_id:.*|worker_id: ${NAME}|" config/agent-worker.yaml
-        sed -i '' -E "s|^name:.*|name: ${NAME} (worktree)|" config/agent-worker.yaml
-        sed -i '' -E "s|^register_token_file:.*|register_token_file: ${ROOT}/deploy/secrets/agent_worker_register_token|" config/agent-worker.yaml
+        replace_in_place "s|^host_url:.*|host_url: http://127.0.0.1:${DEV_BACKEND_PORT:-8001}|" config/agent-worker.yaml
+        replace_in_place "s|^worker_id:.*|worker_id: ${NAME}|" config/agent-worker.yaml
+        replace_in_place "s|^name:.*|name: ${NAME} (worktree)|" config/agent-worker.yaml
+        replace_in_place "s|^register_token_file:.*|register_token_file: ${ROOT}/deploy/secrets/agent_worker_register_token|" config/agent-worker.yaml
         echo "已生成 config/agent-worker.yaml <- ${BASE}（host_url/worker_id/name/register_token_file 已改写）"
     else
         echo "提示: 基准 worktree 无 config/agent-worker.yaml，跳过 worker 配置种子" >&2

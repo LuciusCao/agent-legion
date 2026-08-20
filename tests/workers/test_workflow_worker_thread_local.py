@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import threading
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -284,6 +285,9 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     # knowledge-point markdown under examples/education-video-problems-
     # generation/ (pure stdlib, no network) and writes knowledge_point.json
     # for the downstream agent nodes.
+    if os.environ.get("GATE_SHARD"):
+        pytest.skip("CI hash shard runs this OS sandbox integration in its isolated step")
+
     import shutil
     import subprocess
     import sys
@@ -341,7 +345,21 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
 
     node = queries.get_job_node(job["id"], "intake_knowledge_points")
     assert node is not None
-    assert node["status"] == "completed"
+    log_path = node.get("log_path")
+    log = (
+        Path(log_path).read_text(encoding="utf-8") if log_path and Path(log_path).is_file() else ""
+    )
+    discovered_logs = {
+        str(path.relative_to(tmp_path)): path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        for path in tmp_path.rglob("*.log")
+    }
+    if node["status"] != "completed":
+        print(f"sandbox logs: {discovered_logs}")
+    assert node["status"] == "completed", {
+        "node": node,
+        "log": log[-2000:],
+        "discovered_logs": discovered_logs,
+    }
     assert (tmp_path / job["storage_dir"] / "knowledge_point.json").exists()
 
     worker.stop()
