@@ -353,6 +353,8 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
         str(path.relative_to(tmp_path)): path.read_text(encoding="utf-8", errors="replace")[-2000:]
         for path in tmp_path.rglob("*.log")
     }
+    if node["status"] != "completed":
+        print(f"sandbox logs: {discovered_logs}")
     assert node["status"] == "completed", {
         "node": node,
         "log": log[-2000:],
