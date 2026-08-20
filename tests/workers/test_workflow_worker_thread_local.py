@@ -349,7 +349,15 @@ def test_make_workflow_worker_runs_demo_intake_local_node(tmp_path: Path, monkey
     log = (
         Path(log_path).read_text(encoding="utf-8") if log_path and Path(log_path).is_file() else ""
     )
-    assert node["status"] == "completed", {"node": node, "log": log[-2000:]}
+    discovered_logs = {
+        str(path.relative_to(tmp_path)): path.read_text(encoding="utf-8", errors="replace")[-2000:]
+        for path in tmp_path.rglob("*.log")
+    }
+    assert node["status"] == "completed", {
+        "node": node,
+        "log": log[-2000:],
+        "discovered_logs": discovered_logs,
+    }
     assert (tmp_path / job["storage_dir"] / "knowledge_point.json").exists()
 
     worker.stop()
