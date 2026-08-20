@@ -99,21 +99,21 @@ video script, review it, generate five exercises, review them, then a
 simulated (no-network) publish.
 
 ```bash
-make import-demo      # install the demo skills as local git repos (required once)
-make skills-lock      # pin the demo skill commits into the DB lock
+make import-demo      # install/lock skills and create+seed a demo workspace if absent
 ```
 
 Then in the console:
 
-1. Create a workspace with the **demo** template (it binds the sample
-   workflow and its agent definitions).
+1. Open the demo workspace printed by the command (reruns reuse it).
 2. In workspace **Settings → Agent 默认配置**, set the provider/model your
    LLM endpoint serves.
-3. Submit a batch: `POST /api/workspaces/{id}/job-batches` with
+3. Enable automatic scheduling for the workspace and claiming in the Worker
+   console.
+4. Submit a batch: `POST /api/workspaces/{id}/job-batches` with
    `{"workflow_key": "education_video_problems_generation",
    "source_kind": "direct_ids", "knowledge_point_ids": ["triangle-area"]}`
    — or use the intake UI.
-4. Watch the DAG light up in real time, and inspect each node's trace and
+5. Watch the DAG light up in real time, and inspect each node's trace and
    artifacts when it finishes.
 
 ### Where to go next

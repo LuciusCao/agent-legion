@@ -632,6 +632,7 @@
     "scripts/seed/export_seed.py": 406,
     "scripts/seed/import_seed.py": 535,
     "scripts/seed/seed_common.py": 232,
+    "scripts/seed_demo.py": 202,
     "scripts/seed_from_prod.py": 471,
     "scripts/stress/_e2e_frontend.py": 52,
     "scripts/stress/_e2e_readiness.py": 64,
